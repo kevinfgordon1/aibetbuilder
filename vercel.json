@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/fetch-odds",
+      "schedule": "*/5 8-23 * * *"
+    },
+    {
+      "path": "/api/fetch-odds",
+      "schedule": "*/30 0-7 * * *"
+    }
+  ]
+}
