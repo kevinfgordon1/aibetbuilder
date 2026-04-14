@@ -8,5 +8,6 @@
       "path": "/api/fetch-odds",
       "schedule": "*/30 0-7 * * *"
     }
+    
   ]
 }
