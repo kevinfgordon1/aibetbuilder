@@ -6,7 +6,6 @@ const supabase = createClient(
 )
 
 const SPORTS = [
-  'americanfootball_nfl',
   'basketball_nba',
   'baseball_mlb',
   'icehockey_nhl'
