@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
+const { createClient } = require('@supabase/supabase-js')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -11,7 +11,7 @@ const SPORTS = [
   'icehockey_nhl'
 ]
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   try {
     for (const sport of SPORTS) {
       const response = await fetch(
