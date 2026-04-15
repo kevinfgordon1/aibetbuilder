@@ -54,7 +54,6 @@ function transformOddsData(gamesArray) {
       return best;
     };
 
-    // Get best spread odds for a team at a SPECIFIC point line
     const getBestSpreadOddsAtLine = (teamName, targetPoint) => {
       let best = null;
       bookmakers.forEach(book => {
@@ -67,7 +66,6 @@ function transformOddsData(gamesArray) {
       return best;
     };
 
-    // Get best total odds for a side (Over/Under) at a SPECIFIC point line
     const getBestTotalOddsAtLine = (side, targetPoint) => {
       let best = null;
       bookmakers.forEach(book => {
@@ -112,7 +110,6 @@ function transformOddsData(gamesArray) {
     };
     if (ml.dk_away !== null || ml.dk_home !== null) moneylines.push(ml);
 
-    // Build spread legs per book with correct bestOpp
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
@@ -126,13 +123,13 @@ function transformOddsData(gamesArray) {
       const awayPoint = awayOutcome.point;
       const homePoint = homeOutcome.point;
 
-      // Best opp for away spread: best home spread price at exact -awayPoint
+      // bestOpp for away spread = best price on home side at exact matching line
       let bestOppForAway = getBestSpreadOddsAtLine(home, -awayPoint);
-      if (bestOppForAway === null) bestOppForAway = homeOutcome.price; // fallback: same book
+      if (bestOppForAway === null) bestOppForAway = homeOutcome.price;
 
-      // Best opp for home spread: best away spread price at exact -homePoint
+      // bestOpp for home spread = best price on away side at exact matching line
       let bestOppForHome = getBestSpreadOddsAtLine(away, -homePoint);
-      if (bestOppForHome === null) bestOppForHome = awayOutcome.price; // fallback: same book
+      if (bestOppForHome === null) bestOppForHome = awayOutcome.price;
 
       spreads.push({
         away, home, commence_time, bookOdds,
@@ -149,12 +146,12 @@ function transformOddsData(gamesArray) {
         cs_home: getOdds("williamhill_us", "spreads", home),
         mgm_away: getOdds("betmgm", "spreads", away),
         mgm_home: getOdds("betmgm", "spreads", home),
-        best_spr_away: bestOppForHome, // bestOpp when betting away spread
-        best_spr_home: bestOppForAway, // bestOpp when betting home spread
+        // bestOpp = best odds on the OPPOSING side at matching line
+        bestOpp_away: bestOppForAway, // used when betting away spread
+        bestOpp_home: bestOppForHome, // used when betting home spread
       });
     });
 
-    // Build totals per book with correct bestOpp
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
@@ -167,13 +164,13 @@ function transformOddsData(gamesArray) {
 
       const line = overOutcome.point;
 
-      // Best opp for over: best under at exact same line
+      // bestOpp for over = best under price at exact same line
       let bestOppForOver = getBestTotalOddsAtLine("Under", line);
-      if (bestOppForOver === null) bestOppForOver = underOutcome.price; // fallback: same book
+      if (bestOppForOver === null) bestOppForOver = underOutcome.price;
 
-      // Best opp for under: best over at exact same line
+      // bestOpp for under = best over price at exact same line
       let bestOppForUnder = getBestTotalOddsAtLine("Over", line);
-      if (bestOppForUnder === null) bestOppForUnder = overOutcome.price; // fallback: same book
+      if (bestOppForUnder === null) bestOppForUnder = overOutcome.price;
 
       totals.push({
         away, home, commence_time, bookOdds,
@@ -193,14 +190,13 @@ function transformOddsData(gamesArray) {
         mgm_line: getOdds("betmgm", "totals", "Over", "point"),
         mgm_over: getOdds("betmgm", "totals", "Over"),
         mgm_under: getOdds("betmgm", "totals", "Under"),
-        best_over: bestOppForUnder, // bestOpp when betting under
-        best_under: bestOppForOver, // bestOpp when betting over
+        bestOpp_over: bestOppForOver, // used when betting over
+        bestOpp_under: bestOppForUnder, // used when betting under
         match: true,
       });
     });
   });
 
-  // Deduplicate spreads and totals - keep best EV per game per line
   return { moneylines, run_lines: spreads, totals };
 }
 
@@ -220,10 +216,17 @@ function formatDateGroup(commence_time) {
   });
 }
 
+// trueProb returns the implied probability of the OPPONENT winning
+// based on the best odds available for the opponent
 function trueProb(bestOpponentOdds) {
   if (!bestOpponentOdds) return 0.5;
   if (bestOpponentOdds < 0) return Math.abs(bestOpponentOdds) / (Math.abs(bestOpponentOdds) + 100);
   return 100 / (bestOpponentOdds + 100);
+}
+
+// OUR team's true win probability = 1 - opponent's implied prob
+function ourTrueProb(bestOpponentOdds) {
+  return 1 - trueProb(bestOpponentOdds);
 }
 
 function impliedProb(odds) {
@@ -249,7 +252,8 @@ function probToAmerican(prob) {
 }
 
 function calcEV(bookOdds, bestOpponentOdds) {
-  const prob = trueProb(bestOpponentOdds);
+  // prob = OUR team's true win probability
+  const prob = ourTrueProb(bestOpponentOdds);
   const dec = dkDecimal(bookOdds);
   const profit = (dec - 1) * 100;
   const ev = (prob * profit) - ((1 - prob) * 100);
@@ -261,7 +265,7 @@ function calcParlayEV(legs, boostPct, stake) {
   let combinedProb = 1;
   legs.forEach(l => {
     parlayDec *= dkDecimal(l.dk);
-    combinedProb *= trueProb(l.bestOpp);
+    combinedProb *= ourTrueProb(l.bestOpp);
   });
   const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
   const ev = (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
@@ -276,25 +280,26 @@ function buildAllLegs(data, book = "dk") {
       const awayOdds = g[book + "_away"];
       const homeOdds = g[book + "_home"];
       if (awayOdds == null || homeOdds == null) return;
+      // bestOpp for away = best home ML odds (opponent of away)
+      // bestOpp for home = best away ML odds (opponent of home)
       legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
       legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
     });
   }
 
   if (data.run_lines) {
-    // Group by game+line to avoid duplicates - only use the selected book's spread
     const seen = new Set();
     data.run_lines.forEach(g => {
-      if (g.book !== book) return; // only use selected book's spreads
+      if (g.book !== book) return;
       const awayKey = `${g.away}@${g.home}_away_${g.dk_away_line}`;
       const homeKey = `${g.away}@${g.home}_home_${g.dk_home_line}`;
       if (!seen.has(awayKey)) {
         seen.add(awayKey);
-        legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.best_spr_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+        legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
       }
       if (!seen.has(homeKey)) {
         seen.add(homeKey);
-        legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.best_spr_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+        legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
       }
     });
   }
@@ -302,16 +307,16 @@ function buildAllLegs(data, book = "dk") {
   if (data.totals) {
     const seen = new Set();
     data.totals.forEach(g => {
-      if (g.book !== book) return; // only use selected book's totals
+      if (g.book !== book) return;
       const overKey = `${g.away}@${g.home}_over_${g.dk_line}`;
       const underKey = `${g.away}@${g.home}_under_${g.dk_line}`;
       if (!seen.has(overKey)) {
         seen.add(overKey);
-        legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.best_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+        legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
       }
       if (!seen.has(underKey)) {
         seen.add(underKey);
-        legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.best_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+        legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
       }
     });
   }
@@ -322,32 +327,31 @@ function buildAllLegs(data, book = "dk") {
 function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 5, minFinalOdds = null) {
   const results = [];
   const getGame = (leg) => leg.game;
-  const filtered = legs;
 
   if (numLegs === 1) {
-    filtered.forEach(l => {
+    legs.forEach(l => {
       const r = calcParlayEV([l], boostPct, stake);
       if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) return;
       results.push({ legs: [l], ...r });
     });
   } else if (numLegs === 2) {
-    for (let i = 0; i < filtered.length; i++) {
-      for (let j = i + 1; j < filtered.length; j++) {
-        if (getGame(filtered[i]) === getGame(filtered[j])) continue;
-        const r = calcParlayEV([filtered[i], filtered[j]], boostPct, stake);
+    for (let i = 0; i < legs.length; i++) {
+      for (let j = i + 1; j < legs.length; j++) {
+        if (getGame(legs[i]) === getGame(legs[j])) continue;
+        const r = calcParlayEV([legs[i], legs[j]], boostPct, stake);
         if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) continue;
-        results.push({ legs: [filtered[i], filtered[j]], ...r });
+        results.push({ legs: [legs[i], legs[j]], ...r });
       }
     }
   } else if (numLegs === 3) {
-    for (let i = 0; i < filtered.length; i++) {
-      for (let j = i + 1; j < filtered.length; j++) {
-        if (getGame(filtered[i]) === getGame(filtered[j])) continue;
-        for (let k = j + 1; k < filtered.length; k++) {
-          if (getGame(filtered[k]) === getGame(filtered[i]) || getGame(filtered[k]) === getGame(filtered[j])) continue;
-          const r = calcParlayEV([filtered[i], filtered[j], filtered[k]], boostPct, stake);
+    for (let i = 0; i < legs.length; i++) {
+      for (let j = i + 1; j < legs.length; j++) {
+        if (getGame(legs[i]) === getGame(legs[j])) continue;
+        for (let k = j + 1; k < legs.length; k++) {
+          if (getGame(legs[k]) === getGame(legs[i]) || getGame(legs[k]) === getGame(legs[j])) continue;
+          const r = calcParlayEV([legs[i], legs[j], legs[k]], boostPct, stake);
           if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) continue;
-          results.push({ legs: [filtered[i], filtered[j], filtered[k]], ...r });
+          results.push({ legs: [legs[i], legs[j], legs[k]], ...r });
         }
       }
     }
@@ -411,21 +415,19 @@ function OddsBoard({ oddsData }) {
 
   const getCell = (game, bookKey) => {
     if (bookKey === "best") {
+      const vals = ALL_BOOKS.filter(b => selectedBooks.has(b.key));
       if (market === "ml") {
-        const vals = ALL_BOOKS.filter(b => selectedBooks.has(b.key));
         const bestAway = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_away).filter(v => v != null));
         const bestHome = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_home).filter(v => v != null));
         return { top: isFinite(bestAway) ? bestAway : null, bot: isFinite(bestHome) ? bestHome : null, topLine: null, botLine: null };
       }
       if (market === "spr") {
-        const vals = ALL_BOOKS.filter(b => selectedBooks.has(b.key));
         const bestAway = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.spr_away).filter(v => v != null));
         const bestHome = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.spr_home).filter(v => v != null));
         const dkb = game.bookOdds?.draftkings;
         return { top: isFinite(bestAway) ? bestAway : null, bot: isFinite(bestHome) ? bestHome : null, topLine: dkb?.spr_away_line != null ? (dkb.spr_away_line > 0 ? `+${dkb.spr_away_line}` : `${dkb.spr_away_line}`) : null, botLine: dkb?.spr_home_line != null ? (dkb.spr_home_line > 0 ? `+${dkb.spr_home_line}` : `${dkb.spr_home_line}`) : null };
       }
       if (market === "tot") {
-        const vals = ALL_BOOKS.filter(b => selectedBooks.has(b.key));
         const bestOver = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.tot_over).filter(v => v != null));
         const bestUnder = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.tot_under).filter(v => v != null));
         const dkb = game.bookOdds?.draftkings;
@@ -435,11 +437,7 @@ function OddsBoard({ oddsData }) {
     const b = game.bookOdds?.[bookKey];
     if (!b) return { top: null, bot: null, topLine: null, botLine: null };
     if (market === "ml") return { top: b.ml_away, bot: b.ml_home, topLine: null, botLine: null };
-    if (market === "spr") return {
-      top: b.spr_away, bot: b.spr_home,
-      topLine: b.spr_away_line != null ? (b.spr_away_line > 0 ? `+${b.spr_away_line}` : `${b.spr_away_line}`) : null,
-      botLine: b.spr_home_line != null ? (b.spr_home_line > 0 ? `+${b.spr_home_line}` : `${b.spr_home_line}`) : null,
-    };
+    if (market === "spr") return { top: b.spr_away, bot: b.spr_home, topLine: b.spr_away_line != null ? (b.spr_away_line > 0 ? `+${b.spr_away_line}` : `${b.spr_away_line}`) : null, botLine: b.spr_home_line != null ? (b.spr_home_line > 0 ? `+${b.spr_home_line}` : `${b.spr_home_line}`) : null };
     if (market === "tot") return { top: b.tot_over, bot: b.tot_under, topLine: b.tot_line ? `o${b.tot_line}` : null, botLine: b.tot_line ? `u${b.tot_line}` : null };
     return { top: null, bot: null, topLine: null, botLine: null };
   };
@@ -472,13 +470,7 @@ function OddsBoard({ oddsData }) {
 
   return (
     <div>
-      <input
-        type="text"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="🔍 Search team or matchup..."
-        style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }}
-      />
+      <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <button style={marketTabStyle("ml")} onClick={() => setMarket("ml")}>Moneyline</button>
@@ -486,12 +478,7 @@ function OddsBoard({ oddsData }) {
         <button style={marketTabStyle("tot")} onClick={() => setMarket("tot")}>Totals</button>
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         {ALL_BOOKS.map(b => (
-          <button key={b.key} onClick={() => toggleBook(b.key)} style={{
-            padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer",
-            background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)",
-            color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563",
-            border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)",
-          }}>
+          <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
             {b.label}
           </button>
         ))}
@@ -789,7 +776,7 @@ export default function App() {
                               <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>True Win Prob</div>
                               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: "#f59e0b" }}>{(b.prob * 100).toFixed(1)}%</div>
                               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>({trueProbAm > 0 ? "+" : ""}{trueProbAm} fair odds)</div>
-                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>Best opposing odds at same line</div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>1 − opponent implied prob</div>
                             </div>
                             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
                               <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>{activeEVBook.name} Implied</div>
