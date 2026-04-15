@@ -26,14 +26,14 @@ function transformOddsData(gamesArray) {
       return outcome ? outcome[prop] : null;
     };
 
-    const getBestOdds = (marketKey, teamName, prop = "price") => {
+    const getBestOdds = (marketKey, teamName) => {
       let best = null;
       bookmakers.forEach(book => {
         const market = book.markets.find(m => m.key === marketKey);
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName);
         if (!outcome) return;
-        const val = outcome[prop];
+        const val = outcome.price;
         if (val === null || val === undefined) return;
         if (best === null || val > best) best = val;
       });
@@ -41,9 +41,7 @@ function transformOddsData(gamesArray) {
     };
 
     const ml = {
-      away,
-      home,
-      commence_time,
+      away, home, commence_time,
       dk_away: getOdds("draftkings", "h2h", away),
       dk_home: getOdds("draftkings", "h2h", home),
       fd_away: getOdds("fanduel", "h2h", away),
@@ -78,9 +76,7 @@ function transformOddsData(gamesArray) {
       };
 
       spreads.push({
-        away,
-        home,
-        commence_time,
+        away, home, commence_time,
         dk_away_line: `${dkSpreadAway.point > 0 ? "+" : ""}${dkSpreadAway.point}`,
         dk_home_line: `${dkSpreadHome.point > 0 ? "+" : ""}${dkSpreadHome.point}`,
         dk_away: dkSpreadAway.price,
@@ -122,13 +118,9 @@ function transformOddsData(gamesArray) {
       const linesMatch = allLines.every(l => l === dkLine);
 
       totals.push({
-        away,
-        home,
-        commence_time,
-        dk_line: dkLine,
-        best_line: dkLine,
-        dk_over: dkOver?.price,
-        dk_under: dkUnder?.price,
+        away, home, commence_time,
+        dk_line: dkLine, best_line: dkLine,
+        dk_over: dkOver?.price, dk_under: dkUnder?.price,
         fd_line: getOdds("fanduel", "totals", "Over", "point"),
         fd_over: getOdds("fanduel", "totals", "Over"),
         fd_under: getOdds("fanduel", "totals", "Under"),
@@ -152,23 +144,21 @@ function formatET(commence_time) {
   if (!commence_time) return "";
   return new Date(commence_time).toLocaleString('en-US', {
     timeZone: 'America/New_York',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true,
   }) + ' ET';
 }
 
 function trueProb(bestOpponentOdds) {
   if (!bestOpponentOdds) return 0.5;
-  let oppImplied;
-  if (bestOpponentOdds < 0) {
-    oppImplied = Math.abs(bestOpponentOdds) / (Math.abs(bestOpponentOdds) + 100);
-  } else {
-    oppImplied = 100 / (bestOpponentOdds + 100);
-  }
-  return 1 - oppImplied;
+  if (bestOpponentOdds < 0) return Math.abs(bestOpponentOdds) / (Math.abs(bestOpponentOdds) + 100);
+  return 100 / (bestOpponentOdds + 100);
+}
+
+function impliedProb(odds) {
+  if (!odds) return 0.5;
+  if (odds < 0) return Math.abs(odds) / (Math.abs(odds) + 100);
+  return 100 / (odds + 100);
 }
 
 function dkDecimal(odds) {
@@ -183,21 +173,13 @@ function formatOdds(odds) {
 }
 
 function probToAmerican(prob) {
-  if (prob >= 0.5) {
-    return Math.round(-100 * prob / (1 - prob));
-  } else {
-    return Math.round(100 * (1 - prob) / prob);
-  }
+  if (prob >= 0.5) return Math.round(-100 * prob / (1 - prob));
+  return Math.round(100 * (1 - prob) / prob);
 }
 
-function formatProbAmerican(prob) {
-  const am = probToAmerican(prob);
-  return am > 0 ? `+${am}` : `${am}`;
-}
-
-function calcEV(dkOdds, bestOpponentOdds) {
-  const prob = trueProb(bestOpponentOdds);
-  const dec = dkDecimal(dkOdds);
+function calcEV(bookOdds, bestOpponentOdds) {
+  const prob = 1 - trueProb(bestOpponentOdds);
+  const dec = dkDecimal(bookOdds);
   const profit = (dec - 1) * 100;
   const ev = (prob * profit) - ((1 - prob) * 100);
   return { prob, ev, profit };
@@ -208,7 +190,7 @@ function calcParlayEV(legs, boostPct, stake) {
   let combinedProb = 1;
   legs.forEach(l => {
     parlayDec *= dkDecimal(l.dk);
-    combinedProb *= trueProb(l.bestOpp);
+    combinedProb *= (1 - trueProb(l.bestOpp));
   });
   const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
   const ev = (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
@@ -251,9 +233,7 @@ function buildAllLegs(data, book = "dk") {
 function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 5, minFinalOdds = null, minLegOdds = null) {
   const results = [];
   const getGame = (leg) => leg.game;
-  const filtered = (minLegOdds !== null && numLegs >= 2)
-    ? legs.filter(l => l.dk >= minLegOdds)
-    : legs;
+  const filtered = (minLegOdds !== null && numLegs >= 2) ? legs.filter(l => l.dk >= minLegOdds) : legs;
 
   if (numLegs === 1) {
     filtered.forEach(l => {
@@ -315,9 +295,10 @@ export default function App() {
   const [stake, setStake] = useState(100);
   const [numLegs, setNumLegs] = useState(3);
   const [minFinalOdds, setMinFinalOdds] = useState("");
-  const [minLegOdds, setMinLegOdds] = useState("");
-  const [expandedCard, setExpandedCard] = useState(null);
+  const [expandedPromo, setExpandedPromo] = useState(null);
+  const [expandedEV, setExpandedEV] = useState(null);
   const [sportsbook, setSportsbook] = useState("dk");
+  const [evSportsbook, setEvSportsbook] = useState("dk");
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
@@ -337,7 +318,8 @@ export default function App() {
     { id: "mgm", name: "BetMGM", color: "#c4a962" },
   ];
 
-  const activeBook = BOOKS.find(b => b.id === sportsbook) || BOOKS[0];
+  const activePromoBook = BOOKS.find(b => b.id === sportsbook) || BOOKS[0];
+  const activeEVBook = BOOKS.find(b => b.id === evSportsbook) || BOOKS[0];
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -358,14 +340,8 @@ export default function App() {
         .select("*")
         .eq("sport", activeSport)
         .single();
-
-      if (error || !data) {
-        setDataLoading(false);
-        return;
-      }
-
-      const transformed = transformOddsData(data.data);
-      setOddsData(transformed);
+      if (error || !data) { setDataLoading(false); return; }
+      setOddsData(transformOddsData(data.data));
       setFetchedAt(data.fetched_at);
       setDataLoading(false);
     }
@@ -373,10 +349,7 @@ export default function App() {
   }, [activeSport]);
 
   const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
+    await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
   };
 
   const signOut = async () => {
@@ -384,33 +357,46 @@ export default function App() {
     setUser(null);
   };
 
-  const allLegs = buildAllLegs(oddsData, sportsbook);
-  const evBets = allLegs.map(l => {
+  // Promo legs use promo sportsbook
+  const promoLegs = buildAllLegs(oddsData, sportsbook);
+  const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
+  const topParlays = findTopParlays(promoLegs, 3, boostPct, stake, 5, parsedMinFinal, null);
+
+  // EV legs use EV sportsbook
+  const evLegs = buildAllLegs(oddsData, evSportsbook);
+  const evBets = evLegs.map(l => {
     const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
     return { ...l, prob, ev, profit };
   }).sort((a, b) => b.ev - a.ev);
-
   const positiveEV = evBets.filter(b => b.ev > 0);
-  const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
-  const parsedMinLeg = minLegOdds !== "" ? Number(minLegOdds) : null;
-  const topParlays = findTopParlays(allLegs, numLegs, boostPct, stake, 5, parsedMinFinal, parsedMinLeg);
 
   const tabStyle = (tab) => ({
-    padding: "10px 20px",
-    cursor: "pointer",
-    fontSize: 14,
-    fontWeight: 600,
+    padding: "10px 20px", cursor: "pointer", fontSize: 14, fontWeight: 600,
     color: activeTab === tab ? "#f0f0f0" : "#6b7280",
-    background: "none",
-    border: "none",
+    background: "none", border: "none",
     borderBottom: activeTab === tab ? "2px solid #3b82f6" : "2px solid transparent",
     transition: "all 0.2s",
   });
+
+  const controlBox = (children) => (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+      {children}
+    </div>
+  );
+
+  const labelStyle = { fontSize: 13, fontWeight: 600, color: "#8a8f98" };
+
+  const bookSelect = (value, onChange, color) => (
+    <select value={value} onChange={e => onChange(e.target.value)} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+      {BOOKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+    </select>
+  );
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
+      {/* Auth gate */}
       {!authLoading && !user && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(10,11,15,0.85)", backdropFilter: "blur(8px)" }}>
           <div style={{ background: "linear-gradient(135deg, rgba(30,32,44,0.98), rgba(20,22,32,0.98))", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "48px 40px", textAlign: "center", maxWidth: 420, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
@@ -452,7 +438,7 @@ export default function App() {
       {/* Sport selector */}
       <div style={{ padding: "16px 32px 0", display: "flex", gap: 8 }}>
         {SPORTS.map(s => (
-          <button key={s.key} onClick={() => { setActiveSport(s.key); setExpandedCard(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: activeSport === s.key ? "#3b82f6" : "rgba(255,255,255,0.05)", color: activeSport === s.key ? "#fff" : "#6b7280" }}>
+          <button key={s.key} onClick={() => { setActiveSport(s.key); setExpandedPromo(null); setExpandedEV(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: activeSport === s.key ? "#3b82f6" : "rgba(255,255,255,0.05)", color: activeSport === s.key ? "#fff" : "#6b7280" }}>
             {s.label}
           </button>
         ))}
@@ -460,8 +446,8 @@ export default function App() {
 
       {/* Stats */}
       <div style={{ padding: "24px 32px 0", display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <StatCard label="Total Bets Analyzed" value={dataLoading ? "..." : allLegs.length} sub="across all markets" />
-        <StatCard label="+EV Bets Found" value={dataLoading ? "..." : positiveEV.length} color="#10b981" sub={allLegs.length > 0 ? `${(positiveEV.length / allLegs.length * 100).toFixed(0)}% of total` : ""} />
+        <StatCard label="Total Bets Analyzed" value={dataLoading ? "..." : evLegs.length} sub="across all markets" />
+        <StatCard label="+EV Bets Found" value={dataLoading ? "..." : positiveEV.length} color="#10b981" sub={evLegs.length > 0 ? `${(positiveEV.length / evLegs.length * 100).toFixed(0)}% of total` : ""} />
         <StatCard label="Best Single EV" value={dataLoading ? "..." : evBets[0] ? `+$${evBets[0].ev.toFixed(2)}` : "--"} color="#3b82f6" sub={evBets[0] ? `on $100 — ${evBets[0].name}` : ""} />
       </div>
 
@@ -484,31 +470,100 @@ export default function App() {
           {/* +EV Tab */}
           {activeTab === "ev" && (
             <div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Single bets ranked by expected value on a $100 stake. True probability derived from best opposing odds across all sportsbooks.</div>
+              {/* Sportsbook selector for EV tab */}
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+                {controlBox(<>
+                  <label style={labelStyle}>Sportsbook</label>
+                  {bookSelect(evSportsbook, (val) => { setEvSportsbook(val); setExpandedEV(null); }, activeEVBook.color)}
+                </>)}
+                <div style={{ fontSize: 13, color: "#6b7280" }}>
+                  Single bets ranked by EV on a $100 stake. True probability from best opposing odds across all books.
+                </div>
+              </div>
+
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
+                {/* Table header */}
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
                   <div>Bet</div>
-                  <div style={{ textAlign: "center" }}>{activeBook.name} Odds</div>
+                  <div style={{ textAlign: "center" }}>{activeEVBook.name} Odds</div>
                   <div style={{ textAlign: "center" }}>True Prob</div>
                   <div style={{ textAlign: "center" }}>Implied</div>
                   <div style={{ textAlign: "center" }}>Edge</div>
                   <div style={{ textAlign: "center" }}>EV ($100)</div>
                 </div>
+
                 {evBets.slice(0, 20).map((b, i) => {
-                  const dkImplied = b.dk > 0 ? 100 / (b.dk + 100) : Math.abs(b.dk) / (Math.abs(b.dk) + 100);
-                  const edge = b.prob - dkImplied;
+                  const bookImplied = impliedProb(b.dk);
+                  const edge = b.prob - bookImplied;
+                  const isExpanded = expandedEV === i;
+                  const profit = (dkDecimal(b.dk) - 1) * 100;
+                  const trueProbAm = probToAmerican(b.prob);
+
                   return (
-                    <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.03)", alignItems: "center", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
-                        <div style={{ fontSize: 11, color: "#6b7280" }}>{b.market} — {b.game}</div>
-                        <div style={{ fontSize: 11, color: "#4b5563" }}>{formatET(b.commence_time)}</div>
+                    <div key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
+                      onClick={() => setExpandedEV(isExpanded ? null : i)}>
+
+                      {/* Main row */}
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>{b.market} — {b.game}</div>
+                          <div style={{ fontSize: 11, color: "#4b5563" }}>{formatET(b.commence_time)}</div>
+                          <div style={{ fontSize: 11, color: "#3b82f6", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
+                        </div>
+                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(b.dk)}</div>
+                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{(b.prob * 100).toFixed(1)}%</div>
+                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#6b7280" }}>{(bookImplied * 100).toFixed(1)}%</div>
+                        <div style={{ textAlign: "center" }}><EVBadge ev={edge * 100} /></div>
+                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: b.ev > 0 ? "#10b981" : "#ef4444" }}>{b.ev > 0 ? "+" : ""}${b.ev.toFixed(2)}</div>
                       </div>
-                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(b.dk)}</div>
-                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{(b.prob * 100).toFixed(1)}%</div>
-                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#6b7280" }}>{(dkImplied * 100).toFixed(1)}%</div>
-                      <div style={{ textAlign: "center" }}><EVBadge ev={edge * 100} /></div>
-                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: b.ev > 0 ? "#10b981" : "#ef4444" }}>{b.ev > 0 ? "+" : ""}${b.ev.toFixed(2)}</div>
+
+                      {/* Expanded breakdown */}
+                      {isExpanded && (
+                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "16px 20px", background: "rgba(0,0,0,0.2)" }}
+                          onClick={e => e.stopPropagation()}>
+
+                          {/* Prob comparison */}
+                          <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>True Win Prob</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: "#f59e0b" }}>{(b.prob * 100).toFixed(1)}%</div>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>({trueProbAm > 0 ? "+" : ""}{trueProbAm} fair odds)</div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>Derived from best opposing odds</div>
+                            </div>
+                            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>{activeEVBook.name} Implied</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: "#e8eaed" }}>{(bookImplied * 100).toFixed(1)}%</div>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>({formatOdds(b.dk)} odds)</div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>What {activeEVBook.name} thinks the prob is</div>
+                            </div>
+                            <div style={{ background: edge > 0 ? "rgba(16,185,129,0.06)" : "rgba(239,68,68,0.06)", border: `1px solid ${edge > 0 ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}`, borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Your Edge</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: edge > 0 ? "#10b981" : "#ef4444" }}>{edge > 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>True prob vs implied prob</div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{edge > 0 ? "Book is underpricing this" : "Book has the edge here"}</div>
+                            </div>
+                          </div>
+
+                          {/* Math breakdown */}
+                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 10 }}>
+                            <div>Win <strong style={{ color: "#10b981" }}>${profit.toFixed(2)}</strong> × <strong style={{ color: "#f59e0b" }}>{(b.prob * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(profit * b.prob).toFixed(2)}</strong></div>
+                            <div>Lose <strong style={{ color: "#ef4444" }}>$100</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - b.prob) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(100 * (1 - b.prob)).toFixed(2)}</strong></div>
+                            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>
+                              EV = ${(profit * b.prob).toFixed(2)} - ${(100 * (1 - b.prob)).toFixed(2)} = <strong style={{ color: b.ev > 0 ? "#10b981" : "#ef4444" }}>{b.ev > 0 ? "+" : ""}${b.ev.toFixed(2)}</strong>
+                            </div>
+                          </div>
+
+                          {/* Bottom line */}
+                          <div style={{ fontSize: 13, color: "#9ca3af", padding: "10px 16px", background: b.ev > 0 ? "rgba(16,185,129,0.04)" : "rgba(239,68,68,0.04)", borderRadius: 8, border: `1px solid ${b.ev > 0 ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)"}` }}>
+                            <strong style={{ color: b.ev > 0 ? "#10b981" : "#ef4444" }}>{b.ev > 0 ? "✓ Positive EV:" : "✗ Negative EV:"}</strong>{" "}
+                            {b.ev > 0
+                              ? `This bet wins ${(b.prob * 100).toFixed(1)}% of the time but ${activeEVBook.name} is only pricing it at ${(bookImplied * 100).toFixed(1)}%. Expected profit of +$${b.ev.toFixed(2)} per $100 bet.`
+                              : `This bet wins ${(b.prob * 100).toFixed(1)}% of the time but ${activeEVBook.name} has the edge at ${(bookImplied * 100).toFixed(1)}% implied. Avoid this bet.`
+                            }
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -521,30 +576,28 @@ export default function App() {
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value.</div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "#8a8f98" }}>Sportsbook</label>
-                  <select value={sportsbook} onChange={(e) => setSportsbook(e.target.value)} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activeBook.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
-                    {BOOKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "#8a8f98" }}>Boost %</label>
+                {controlBox(<>
+                  <label style={labelStyle}>Sportsbook</label>
+                  {bookSelect(sportsbook, (val) => { setSportsbook(val); setExpandedPromo(null); }, activePromoBook.color)}
+                </>)}
+                {controlBox(<>
+                  <label style={labelStyle}>Boost %</label>
                   <input type="number" value={boostPct} onChange={(e) => setBoostPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "#8a8f98" }}>Stake $</label>
+                </>)}
+                {controlBox(<>
+                  <label style={labelStyle}>Stake $</label>
                   <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "#8a8f98" }}>Legs</label>
+                </>)}
+                {controlBox(<>
+                  <label style={labelStyle}>Legs</label>
                   {[1, 2, 3].map(n => (
                     <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
                   ))}
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "#8a8f98" }}>Min Final Odds</label>
+                </>)}
+                {controlBox(<>
+                  <label style={labelStyle}>Min Final Odds</label>
                   <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </div>
+                </>)}
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -556,11 +609,12 @@ export default function App() {
                   </div>
                 )}
                 {topParlays.map((p, i) => {
-                  const isExpanded = expandedCard === i;
+                  const isExpanded = expandedPromo === i;
                   const trueParlayOdds = probToAmerican(p.combinedProb);
                   const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
                   return (
-                    <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }} onClick={() => setExpandedCard(isExpanded ? null : i)}>
+                    <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      onClick={() => setExpandedPromo(isExpanded ? null : i)}>
                       <div style={{ padding: "20px 24px" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -582,15 +636,16 @@ export default function App() {
                           ))}
                         </div>
                         <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
-                          <span>{activeBook.name} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
+                          <span>{activePromoBook.name} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
                           <span>With Boost: <strong style={{ color: "#10b981" }}>+{boostedOdds}</strong></span>
                           <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
                           <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                         </div>
                       </div>
                       {isExpanded && (
-                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
+                          onClick={e => e.stopPropagation()}>
+                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                             <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * p.combinedProb).toFixed(2)}</strong></div>
                             <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - p.combinedProb)).toFixed(2)}</strong></div>
                             <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong></div>
