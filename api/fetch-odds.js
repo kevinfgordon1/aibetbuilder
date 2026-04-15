@@ -21,7 +21,7 @@ module.exports = async function handler(req, res) {
 
       await supabase
         .from('odds_cache')
-        .insert({ sport, data })
+        .upsert({ sport, data, fetched_at: new Date() }, { onConflict: 'sport' })
     }
 
     res.status(200).json({ success: true, timestamp: new Date() })
