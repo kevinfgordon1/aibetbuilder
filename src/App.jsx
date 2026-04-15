@@ -6,7 +6,6 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// Transform Odds API format into app format
 function transformOddsData(gamesArray) {
   const moneylines = [];
   const spreads = [];
@@ -16,6 +15,7 @@ function transformOddsData(gamesArray) {
     const away = game.away_team;
     const home = game.home_team;
     const bookmakers = game.bookmakers || [];
+    const commence_time = game.commence_time;
 
     const getOdds = (bookKey, marketKey, teamName, prop = "price") => {
       const book = bookmakers.find(b => b.key === bookKey);
@@ -40,10 +40,10 @@ function transformOddsData(gamesArray) {
       return best;
     };
 
-    // Moneylines
     const ml = {
       away,
       home,
+      commence_time,
       dk_away: getOdds("draftkings", "h2h", away),
       dk_home: getOdds("draftkings", "h2h", home),
       fd_away: getOdds("fanduel", "h2h", away),
@@ -57,7 +57,6 @@ function transformOddsData(gamesArray) {
     };
     if (ml.dk_away !== null || ml.dk_home !== null) moneylines.push(ml);
 
-    // Spreads
     const dkSpreadAway = bookmakers.find(b => b.key === "draftkings")
       ?.markets.find(m => m.key === "spreads")
       ?.outcomes.find(o => o.name === away);
@@ -81,6 +80,7 @@ function transformOddsData(gamesArray) {
       spreads.push({
         away,
         home,
+        commence_time,
         dk_away_line: `${dkSpreadAway.point > 0 ? "+" : ""}${dkSpreadAway.point}`,
         dk_home_line: `${dkSpreadHome.point > 0 ? "+" : ""}${dkSpreadHome.point}`,
         dk_away: dkSpreadAway.price,
@@ -96,7 +96,6 @@ function transformOddsData(gamesArray) {
       });
     }
 
-    // Totals
     const dkTotals = bookmakers.find(b => b.key === "draftkings")
       ?.markets.find(m => m.key === "totals");
     if (dkTotals) {
@@ -116,7 +115,6 @@ function transformOddsData(gamesArray) {
         return best;
       };
 
-      // Check if all books have same line
       const allLines = bookmakers.map(b => {
         const m = b.markets.find(m => m.key === "totals");
         return m?.outcomes.find(o => o.name === "Over")?.point;
@@ -126,6 +124,7 @@ function transformOddsData(gamesArray) {
       totals.push({
         away,
         home,
+        commence_time,
         dk_line: dkLine,
         best_line: dkLine,
         dk_over: dkOver?.price,
@@ -147,6 +146,18 @@ function transformOddsData(gamesArray) {
   });
 
   return { moneylines, run_lines: spreads, totals };
+}
+
+function formatET(commence_time) {
+  if (!commence_time) return "";
+  return new Date(commence_time).toLocaleString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }) + ' ET';
 }
 
 function trueProb(bestOpponentOdds) {
@@ -211,8 +222,8 @@ function buildAllLegs(data, book = "dk") {
       const awayOdds = g[book + "_away"];
       const homeOdds = g[book + "_home"];
       if (awayOdds == null || homeOdds == null) return;
-      legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}` });
-      legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}` });
+      legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+      legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
     });
   }
   if (data.run_lines) {
@@ -220,8 +231,8 @@ function buildAllLegs(data, book = "dk") {
       const awayOdds = g[book + "_away"] ?? g.dk_away;
       const homeOdds = g[book + "_home"] ?? g.dk_home;
       if (awayOdds == null || homeOdds == null) return;
-      legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: awayOdds, bestOpp: g.best_home, market: "SPR", game: `${g.away} @ ${g.home}` });
-      legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: homeOdds, bestOpp: g.best_away, market: "SPR", game: `${g.away} @ ${g.home}` });
+      legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: awayOdds, bestOpp: g.best_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+      legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: homeOdds, bestOpp: g.best_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
     });
   }
   if (data.totals) {
@@ -230,8 +241,8 @@ function buildAllLegs(data, book = "dk") {
       const bookUnder = g[book + "_under"] ?? g.dk_under;
       const bookLine = g[book + "_line"] ?? g.dk_line;
       if (!g.match || bookOver == null || bookUnder == null) return;
-      legs.push({ name: `${g.away}/${g.home} o${bookLine}`, dk: bookOver, bestOpp: g.best_under, market: "TOT", game: `${g.away} @ ${g.home}` });
-      legs.push({ name: `${g.away}/${g.home} u${bookLine}`, dk: bookUnder, bestOpp: g.best_over, market: "TOT", game: `${g.away} @ ${g.home}` });
+      legs.push({ name: `${g.away}/${g.home} o${bookLine}`, dk: bookOver, bestOpp: g.best_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+      legs.push({ name: `${g.away}/${g.home} u${bookLine}`, dk: bookUnder, bestOpp: g.best_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
     });
   }
   return legs;
@@ -328,7 +339,6 @@ export default function App() {
 
   const activeBook = BOOKS.find(b => b.id === sportsbook) || BOOKS[0];
 
-  // Auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
@@ -340,7 +350,6 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch odds from Supabase
   useEffect(() => {
     async function fetchOdds() {
       setDataLoading(true);
@@ -402,7 +411,6 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-      {/* Auth gate */}
       {!authLoading && !user && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(10,11,15,0.85)", backdropFilter: "blur(8px)" }}>
           <div style={{ background: "linear-gradient(135deg, rgba(30,32,44,0.98), rgba(20,22,32,0.98))", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "48px 40px", textAlign: "center", maxWidth: 420, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
@@ -429,7 +437,7 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {fetchedAt && <div style={{ fontSize: 11, color: "#4b5563" }}>Updated {new Date(fetchedAt).toLocaleTimeString()}</div>}
+          {fetchedAt && <div style={{ fontSize: 11, color: "#4b5563" }}>Updated {new Date(fetchedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET</div>}
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <img src={user.user_metadata?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)" }} />
@@ -463,7 +471,6 @@ export default function App() {
         <button style={tabStyle("ev")} onClick={() => setActiveTab("ev")}>+EV Bets</button>
       </div>
 
-      {/* Loading state */}
       {dataLoading && (
         <div style={{ padding: "60px 32px", textAlign: "center", color: "#4b5563" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⏳</div>
@@ -471,7 +478,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Content */}
       {!dataLoading && (
         <div style={{ padding: "20px 32px" }}>
 
@@ -496,6 +502,7 @@ export default function App() {
                       <div>
                         <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
                         <div style={{ fontSize: 11, color: "#6b7280" }}>{b.market} — {b.game}</div>
+                        <div style={{ fontSize: 11, color: "#4b5563" }}>{formatET(b.commence_time)}</div>
                       </div>
                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(b.dk)}</div>
                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{(b.prob * 100).toFixed(1)}%</div>
@@ -570,6 +577,7 @@ export default function App() {
                                 <span style={{ fontSize: 12, color: "#6b7280" }}>{l.market}</span>
                                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
                               </div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}</div>
                             </div>
                           ))}
                         </div>
