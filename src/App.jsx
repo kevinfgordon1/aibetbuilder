@@ -7,25 +7,48 @@ const supabase = createClient(
 );
 
 const ALL_BOOKS = [
-  { key: "draftkings", label: "DraftKings" },
-  { key: "fanduel", label: "FanDuel" },
-  { key: "williamhill_us", label: "Caesars" },
-  { key: "betmgm", label: "BetMGM" },
-  { key: "betrivers", label: "BetRivers" },
-  { key: "fanatics", label: "Fanatics" },
-  { key: "bovada", label: "Bovada" },
-  { key: "mybookieag", label: "MyBookie" },
-  { key: "betonlineag", label: "BetOnline" },
-  { key: "lowvig", label: "LowVig" },
-  { key: "betus", label: "BetUS" },
+  { key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: "https://www.draftkings.com/favicon.ico" },
+  { key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: "https://www.fanduel.com/favicon.ico" },
+  { key: "williamhill_us", label: "Caesars", color: "#d4a843", bg: "rgba(212,168,67,0.15)", logo: "https://www.caesars.com/favicon.ico" },
+  { key: "betmgm", label: "BetMGM", color: "#c4a962", bg: "rgba(196,169,98,0.15)", logo: "https://sports.betmgm.com/favicon.ico" },
+  { key: "betrivers", label: "BetRivers", color: "#4a9eff", bg: "rgba(74,158,255,0.15)", logo: "https://www.betrivers.com/favicon.ico" },
+  { key: "fanatics", label: "Fanatics", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: "https://sportsbook.fanatics.com/favicon.ico" },
+  { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: null },
+  { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
+  { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
+  { key: "lowvig", label: "LowVig", color: "#8b5cf6", bg: "rgba(139,92,246,0.15)", logo: null },
+  { key: "betus", label: "BetUS", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", logo: null },
 ];
 
-function transformOddsData(gamesArray) {
+const SPORTS = [
+  { key: "basketball_nba", label: "NBA" },
+  { key: "baseball_mlb", label: "MLB" },
+  { key: "icehockey_nhl", label: "NHL" },
+];
+
+function BookBadge({ bookKey }) {
+  const book = ALL_BOOKS.find(b => b.key === bookKey);
+  if (!book) return null;
+  const [logoError, setLogoError] = useState(false);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", borderRadius: 6, fontSize: 12, fontWeight: 700, color: book.color, background: book.bg, whiteSpace: "nowrap" }}>
+      {book.logo && !logoError && (
+        <img src={book.logo} alt="" width={12} height={12} style={{ borderRadius: 2 }} onError={() => setLogoError(true)} />
+      )}
+      {book.label}
+    </span>
+  );
+}
+
+function transformOddsData(gamesArray, sportKey) {
   const moneylines = [];
   const spreads = [];
   const totals = [];
+  const now = new Date();
 
   gamesArray.forEach(game => {
+    if (new Date(game.commence_time) <= now) return;
+
     const away = game.away_team;
     const home = game.home_team;
     const bookmakers = game.bookmakers || [];
@@ -96,8 +119,8 @@ function transformOddsData(gamesArray) {
     const best_away = getBestOdds("h2h", away);
     const best_home = getBestOdds("h2h", home);
 
-    const ml = {
-      away, home, commence_time, bookOdds,
+    moneylines.push({
+      away, home, commence_time, bookOdds, sport: sportKey,
       best_away, best_home,
       dk_away: getOdds("draftkings", "h2h", away),
       dk_home: getOdds("draftkings", "h2h", home),
@@ -107,48 +130,32 @@ function transformOddsData(gamesArray) {
       cs_home: getOdds("williamhill_us", "h2h", home),
       mgm_away: getOdds("betmgm", "h2h", away),
       mgm_home: getOdds("betmgm", "h2h", home),
-    };
-    if (ml.dk_away !== null || ml.dk_home !== null) moneylines.push(ml);
+    });
 
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
       const sprMarket = bookData.markets.find(m => m.key === "spreads");
       if (!sprMarket) return;
-
       const awayOutcome = sprMarket.outcomes.find(o => o.name === away);
       const homeOutcome = sprMarket.outcomes.find(o => o.name === home);
       if (!awayOutcome || !homeOutcome) return;
-
       const awayPoint = awayOutcome.point;
       const homePoint = homeOutcome.point;
-
-      // bestOpp for away spread = best price on home side at exact matching line
       let bestOppForAway = getBestSpreadOddsAtLine(home, -awayPoint);
       if (bestOppForAway === null) bestOppForAway = homeOutcome.price;
-
-      // bestOpp for home spread = best price on away side at exact matching line
       let bestOppForHome = getBestSpreadOddsAtLine(away, -homePoint);
       if (bestOppForHome === null) bestOppForHome = awayOutcome.price;
-
       spreads.push({
-        away, home, commence_time, bookOdds,
-        best_away, best_home,
-        book: b.key,
-        bookLabel: b.label,
+        away, home, commence_time, bookOdds, sport: sportKey,
+        best_away, best_home, book: b.key,
         dk_away_line: `${awayPoint > 0 ? "+" : ""}${awayPoint}`,
         dk_home_line: `${homePoint > 0 ? "+" : ""}${homePoint}`,
-        dk_away: awayOutcome.price,
-        dk_home: homeOutcome.price,
-        fd_away: getOdds("fanduel", "spreads", away),
-        fd_home: getOdds("fanduel", "spreads", home),
-        cs_away: getOdds("williamhill_us", "spreads", away),
-        cs_home: getOdds("williamhill_us", "spreads", home),
-        mgm_away: getOdds("betmgm", "spreads", away),
-        mgm_home: getOdds("betmgm", "spreads", home),
-        // bestOpp = best odds on the OPPOSING side at matching line
-        bestOpp_away: bestOppForAway, // used when betting away spread
-        bestOpp_home: bestOppForHome, // used when betting home spread
+        dk_away: awayOutcome.price, dk_home: homeOutcome.price,
+        fd_away: getOdds("fanduel", "spreads", away), fd_home: getOdds("fanduel", "spreads", home),
+        cs_away: getOdds("williamhill_us", "spreads", away), cs_home: getOdds("williamhill_us", "spreads", home),
+        mgm_away: getOdds("betmgm", "spreads", away), mgm_home: getOdds("betmgm", "spreads", home),
+        bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
       });
     });
 
@@ -157,47 +164,40 @@ function transformOddsData(gamesArray) {
       if (!bookData) return;
       const totMarket = bookData.markets.find(m => m.key === "totals");
       if (!totMarket) return;
-
       const overOutcome = totMarket.outcomes.find(o => o.name === "Over");
       const underOutcome = totMarket.outcomes.find(o => o.name === "Under");
       if (!overOutcome || !underOutcome) return;
-
       const line = overOutcome.point;
-
-      // bestOpp for over = best under price at exact same line
       let bestOppForOver = getBestTotalOddsAtLine("Under", line);
       if (bestOppForOver === null) bestOppForOver = underOutcome.price;
-
-      // bestOpp for under = best over price at exact same line
       let bestOppForUnder = getBestTotalOddsAtLine("Over", line);
       if (bestOppForUnder === null) bestOppForUnder = overOutcome.price;
-
       totals.push({
-        away, home, commence_time, bookOdds,
-        best_away, best_home,
-        book: b.key,
-        bookLabel: b.label,
-        dk_line: line,
-        best_line: line,
-        dk_over: overOutcome.price,
-        dk_under: underOutcome.price,
+        away, home, commence_time, bookOdds, sport: sportKey,
+        best_away, best_home, book: b.key,
+        dk_line: line, best_line: line,
+        dk_over: overOutcome.price, dk_under: underOutcome.price,
         fd_line: getOdds("fanduel", "totals", "Over", "point"),
-        fd_over: getOdds("fanduel", "totals", "Over"),
-        fd_under: getOdds("fanduel", "totals", "Under"),
+        fd_over: getOdds("fanduel", "totals", "Over"), fd_under: getOdds("fanduel", "totals", "Under"),
         cs_line: getOdds("williamhill_us", "totals", "Over", "point"),
-        cs_over: getOdds("williamhill_us", "totals", "Over"),
-        cs_under: getOdds("williamhill_us", "totals", "Under"),
+        cs_over: getOdds("williamhill_us", "totals", "Over"), cs_under: getOdds("williamhill_us", "totals", "Under"),
         mgm_line: getOdds("betmgm", "totals", "Over", "point"),
-        mgm_over: getOdds("betmgm", "totals", "Over"),
-        mgm_under: getOdds("betmgm", "totals", "Under"),
-        bestOpp_over: bestOppForOver, // used when betting over
-        bestOpp_under: bestOppForUnder, // used when betting under
+        mgm_over: getOdds("betmgm", "totals", "Over"), mgm_under: getOdds("betmgm", "totals", "Under"),
+        bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
         match: true,
       });
     });
   });
 
   return { moneylines, run_lines: spreads, totals };
+}
+
+function mergeOddsData(allData) {
+  return {
+    moneylines: allData.flatMap(d => d.moneylines),
+    run_lines: allData.flatMap(d => d.run_lines),
+    totals: allData.flatMap(d => d.totals),
+  };
 }
 
 function formatET(commence_time) {
@@ -216,15 +216,12 @@ function formatDateGroup(commence_time) {
   });
 }
 
-// trueProb returns the implied probability of the OPPONENT winning
-// based on the best odds available for the opponent
 function trueProb(bestOpponentOdds) {
   if (!bestOpponentOdds) return 0.5;
   if (bestOpponentOdds < 0) return Math.abs(bestOpponentOdds) / (Math.abs(bestOpponentOdds) + 100);
   return 100 / (bestOpponentOdds + 100);
 }
 
-// OUR team's true win probability = 1 - opponent's implied prob
 function ourTrueProb(bestOpponentOdds) {
   return 1 - trueProb(bestOpponentOdds);
 }
@@ -252,7 +249,6 @@ function probToAmerican(prob) {
 }
 
 function calcEV(bookOdds, bestOpponentOdds) {
-  // prob = OUR team's true win probability
   const prob = ourTrueProb(bestOpponentOdds);
   const dec = dkDecimal(bookOdds);
   const profit = (dec - 1) * 100;
@@ -272,54 +268,93 @@ function calcParlayEV(legs, boostPct, stake) {
   return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
 }
 
-function buildAllLegs(data, book = "dk") {
+function buildAllLegsForBook(data, book, sportFilter = null) {
   const legs = [];
+  const now = new Date();
 
   if (data.moneylines) {
     data.moneylines.forEach(g => {
-      const awayOdds = g[book + "_away"];
-      const homeOdds = g[book + "_home"];
+      if (new Date(g.commence_time) <= now) return;
+      if (sportFilter && !sportFilter.includes(g.sport)) return;
+      const awayOdds = g.bookOdds?.[book]?.ml_away;
+      const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
-      // bestOpp for away = best home ML odds (opponent of away)
-      // bestOpp for home = best away ML odds (opponent of home)
-      legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
-      legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
+      legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book });
+      legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book });
     });
   }
 
   if (data.run_lines) {
     const seen = new Set();
     data.run_lines.forEach(g => {
+      if (new Date(g.commence_time) <= now) return;
+      if (sportFilter && !sportFilter.includes(g.sport)) return;
       if (g.book !== book) return;
-      const awayKey = `${g.away}@${g.home}_away_${g.dk_away_line}`;
-      const homeKey = `${g.away}@${g.home}_home_${g.dk_home_line}`;
-      if (!seen.has(awayKey)) {
-        seen.add(awayKey);
-        legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
-      }
-      if (!seen.has(homeKey)) {
-        seen.add(homeKey);
-        legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
-      }
+      const ak = `${g.away}@${g.home}_away_${g.dk_away_line}`;
+      const hk = `${g.away}@${g.home}_home_${g.dk_home_line}`;
+      if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book }); }
+      if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book }); }
     });
   }
 
   if (data.totals) {
     const seen = new Set();
     data.totals.forEach(g => {
+      if (new Date(g.commence_time) <= now) return;
+      if (sportFilter && !sportFilter.includes(g.sport)) return;
       if (g.book !== book) return;
-      const overKey = `${g.away}@${g.home}_over_${g.dk_line}`;
-      const underKey = `${g.away}@${g.home}_under_${g.dk_line}`;
-      if (!seen.has(overKey)) {
-        seen.add(overKey);
-        legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
-      }
-      if (!seen.has(underKey)) {
-        seen.add(underKey);
-        legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time });
-      }
+      const ok = `${g.away}@${g.home}_over_${g.dk_line}`;
+      const uk = `${g.away}@${g.home}_under_${g.dk_line}`;
+      if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book }); }
+      if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book }); }
     });
   }
+
+  return legs;
+}
+
+function buildAllLegsAllBooks(data, sportFilter = null) {
+  const now = new Date();
+  const seen = new Set();
+  const legs = [];
+
+  ALL_BOOKS.forEach(book => {
+    if (data.moneylines) {
+      data.moneylines.forEach(g => {
+        if (new Date(g.commence_time) <= now) return;
+        if (sportFilter && !sportFilter.includes(g.sport)) return;
+        const awayOdds = g.bookOdds?.[book.key]?.ml_away;
+        const homeOdds = g.bookOdds?.[book.key]?.ml_home;
+        if (awayOdds == null || homeOdds == null) return;
+        const ak = `${g.away}@${g.home}_ML_away_${book.key}`;
+        const hk = `${g.away}@${g.home}_ML_home_${book.key}`;
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key }); }
+      });
+    }
+    if (data.run_lines) {
+      data.run_lines.forEach(g => {
+        if (new Date(g.commence_time) <= now) return;
+        if (sportFilter && !sportFilter.includes(g.sport)) return;
+        if (g.book !== book.key) return;
+        const ak = `${g.away}@${g.home}_SPR_away_${g.dk_away_line}_${book.key}`;
+        const hk = `${g.away}@${g.home}_SPR_home_${g.dk_home_line}_${book.key}`;
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key }); }
+      });
+    }
+    if (data.totals) {
+      data.totals.forEach(g => {
+        if (new Date(g.commence_time) <= now) return;
+        if (sportFilter && !sportFilter.includes(g.sport)) return;
+        if (g.book !== book.key) return;
+        const ok = `${g.away}@${g.home}_TOT_over_${g.dk_line}_${book.key}`;
+        const uk = `${g.away}@${g.home}_TOT_under_${g.dk_line}_${book.key}`;
+        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key }); }
+        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key }); }
+      });
+    }
+  });
 
   return legs;
 }
@@ -381,12 +416,26 @@ function EVBadge({ ev }) {
   );
 }
 
+function SportBadge({ sport }) {
+  const s = SPORTS.find(x => x.key === sport);
+  const colors = { basketball_nba: "#f97316", baseball_mlb: "#3b82f6", icehockey_nhl: "#8b5cf6" };
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
+      {s?.label || sport}
+    </span>
+  );
+}
+
 function OddsBoard({ oddsData }) {
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(new Set(ALL_BOOKS.map(b => b.key)));
+  const [boardSport, setBoardSport] = useState("baseball_mlb");
+  const now = new Date();
 
-  const games = oddsData.moneylines || [];
+  const games = (oddsData.moneylines || []).filter(g =>
+    g.sport === boardSport && new Date(g.commence_time) > now
+  );
 
   const filteredGames = games.filter(g => {
     const q = search.toLowerCase();
@@ -453,29 +502,31 @@ function OddsBoard({ oddsData }) {
     return { bestAway, bestHome };
   };
 
-  const visibleBooks = [
-    { key: "best", label: "Best Odds" },
-    ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))
-  ];
-
-  const marketTabStyle = (m) => ({
-    padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600,
-    cursor: "pointer",
-    background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)",
-    color: market === m ? "#fff" : "#6b7280",
-  });
-
+  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
   const teamColWidth = 170;
   const oddsColWidth = 88;
 
+  const tabBtn = (val, cur, onClick) => (
+    <button onClick={onClick} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: cur === val ? "#3b82f6" : "rgba(255,255,255,0.05)", color: cur === val ? "#fff" : "#6b7280" }}>{val}</button>
+  );
+
   return (
     <div>
+      {/* Sport selector for odds board */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {SPORTS.map(s => (
+          <button key={s.key} onClick={() => setBoardSport(s.key)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.key ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.key ? "#fff" : "#6b7280" }}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <button style={marketTabStyle("ml")} onClick={() => setMarket("ml")}>Moneyline</button>
-        <button style={marketTabStyle("spr")} onClick={() => setMarket("spr")}>Spread</button>
-        <button style={marketTabStyle("tot")} onClick={() => setMarket("tot")}>Totals</button>
+        {tabBtn("ml", market, () => setMarket("ml"))}
+        {tabBtn("spr", market, () => setMarket("spr"))}
+        {tabBtn("tot", market, () => setMarket("tot"))}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         {ALL_BOOKS.map(b => (
           <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
@@ -502,8 +553,8 @@ function OddsBoard({ oddsData }) {
             )}
             {Object.entries(grouped).map(([dateKey, dateGames]) => (
               <>
-                <tr key={dateKey + "_header"} style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6", letterSpacing: 0.5 }}>{dateKey}</td>
+                <tr key={dateKey + "_h"} style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
                 </tr>
                 {dateGames.map((game, gi) => {
                   const { bestAway, bestHome } = getBestForGame(game);
@@ -550,7 +601,7 @@ function OddsBoard({ oddsData }) {
 }
 
 export default function App() {
-  const [oddsData, setOddsData] = useState({ moneylines: [], run_lines: [], totals: [] });
+  const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [] });
   const [activeTab, setActiveTab] = useState("promo");
   const [boostPct, setBoostPct] = useState(30);
   const [stake, setStake] = useState(100);
@@ -558,29 +609,12 @@ export default function App() {
   const [minFinalOdds, setMinFinalOdds] = useState("");
   const [expandedPromo, setExpandedPromo] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
-  const [sportsbook, setSportsbook] = useState("dk");
-  const [evSportsbook, setEvSportsbook] = useState("dk");
+  const [promoBook, setPromoBook] = useState("draftkings");
+  const [promoSports, setPromoSports] = useState(new Set(["basketball_nba", "baseball_mlb", "icehockey_nhl"]));
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
   const [fetchedAt, setFetchedAt] = useState(null);
-  const [activeSport, setActiveSport] = useState("basketball_nba");
-
-  const SPORTS = [
-    { key: "basketball_nba", label: "NBA" },
-    { key: "baseball_mlb", label: "MLB" },
-    { key: "icehockey_nhl", label: "NHL" },
-  ];
-
-  const BOOKS = [
-    { id: "dk", name: "DraftKings", color: "#53d769" },
-    { id: "fd", name: "FanDuel", color: "#1493ff" },
-    { id: "cs", name: "Caesars", color: "#d4a843" },
-    { id: "mgm", name: "BetMGM", color: "#c4a962" },
-  ];
-
-  const activePromoBook = BOOKS.find(b => b.id === sportsbook) || BOOKS[0];
-  const activeEVBook = BOOKS.find(b => b.id === evSportsbook) || BOOKS[0];
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -599,15 +633,15 @@ export default function App() {
       const { data, error } = await supabase
         .from("odds_cache")
         .select("*")
-        .eq("sport", activeSport)
-        .single();
+        .in("sport", ["basketball_nba", "baseball_mlb", "icehockey_nhl"]);
       if (error || !data) { setDataLoading(false); return; }
-      setOddsData(transformOddsData(data.data));
-      setFetchedAt(data.fetched_at);
+      const transformed = data.map(row => transformOddsData(row.data, row.sport));
+      setAllOddsData(mergeOddsData(transformed));
+      setFetchedAt(data[0]?.fetched_at);
       setDataLoading(false);
     }
     fetchOdds();
-  }, [activeSport]);
+  }, []);
 
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
@@ -618,16 +652,32 @@ export default function App() {
     setUser(null);
   };
 
-  const promoLegs = buildAllLegs(oddsData, sportsbook);
-  const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
-  const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 5, parsedMinFinal);
-
-  const evLegs = buildAllLegs(oddsData, evSportsbook);
-  const evBets = evLegs.map(l => {
+  // All EV bets across all books and sports
+  const allEvLegs = buildAllLegsAllBooks(allOddsData, null);
+  const evBets = allEvLegs.map(l => {
     const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
     return { ...l, prob, ev, profit };
   }).sort((a, b) => b.ev - a.ev);
   const positiveEV = evBets.filter(b => b.ev > 0);
+
+  // Promo builder legs
+  const promoSportFilter = promoSports.size === 3 ? null : [...promoSports];
+  const promoLegs = buildAllLegsForBook(allOddsData, promoBook, promoSportFilter);
+  const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
+  const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 5, parsedMinFinal);
+
+  const togglePromoSport = (sportKey) => {
+    setPromoSports(prev => {
+      const next = new Set(prev);
+      if (next.has(sportKey)) {
+        if (next.size === 1) return prev;
+        next.delete(sportKey);
+      } else {
+        next.add(sportKey);
+      }
+      return next;
+    });
+  };
 
   const tabStyle = (tab) => ({
     padding: "10px 20px", cursor: "pointer", fontSize: 14, fontWeight: 600,
@@ -645,11 +695,7 @@ export default function App() {
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: "#8a8f98" };
 
-  const bookSelect = (value, onChange, color) => (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
-      {BOOKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-    </select>
-  );
+  const activePromoBookData = ALL_BOOKS.find(b => b.key === promoBook) || ALL_BOOKS[0];
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
@@ -671,6 +717,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Header */}
       <div style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
@@ -692,20 +739,14 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ padding: "16px 32px 0", display: "flex", gap: 8 }}>
-        {SPORTS.map(s => (
-          <button key={s.key} onClick={() => { setActiveSport(s.key); setExpandedPromo(null); setExpandedEV(null); }} style={{ padding: "8px 20px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: activeSport === s.key ? "#3b82f6" : "rgba(255,255,255,0.05)", color: activeSport === s.key ? "#fff" : "#6b7280" }}>
-            {s.label}
-          </button>
-        ))}
-      </div>
-
+      {/* Stats */}
       <div style={{ padding: "24px 32px 0", display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <StatCard label="Total Bets Analyzed" value={dataLoading ? "..." : evLegs.length} sub="across all markets" />
-        <StatCard label="+EV Bets Found" value={dataLoading ? "..." : positiveEV.length} color="#10b981" sub={evLegs.length > 0 ? `${(positiveEV.length / evLegs.length * 100).toFixed(0)}% of total` : ""} />
-        <StatCard label="Best Single EV" value={dataLoading ? "..." : evBets[0] ? `+$${evBets[0].ev.toFixed(2)}` : "--"} color="#3b82f6" sub={evBets[0] ? `on $100 — ${evBets[0].name}` : ""} />
+        <StatCard label="Total Bets Analyzed" value={dataLoading ? "..." : allEvLegs.length} sub="all sports & books" />
+        <StatCard label="+EV Bets Found" value={dataLoading ? "..." : positiveEV.length} color="#10b981" />
+        <StatCard label="Best Single EV" value={dataLoading ? "..." : evBets[0] ? `+$${evBets[0].ev.toFixed(2)}` : "--"} color="#3b82f6" sub={evBets[0] ? `${evBets[0].name}` : ""} />
       </div>
 
+      {/* Tabs */}
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <button style={tabStyle("promo")} onClick={() => setActiveTab("promo")}>Promo Builder</button>
         <button style={tabStyle("ev")} onClick={() => setActiveTab("ev")}>+EV Bets</button>
@@ -722,29 +763,27 @@ export default function App() {
       {!dataLoading && (
         <div style={{ padding: "20px 32px" }}>
 
-          {activeTab === "odds" && <OddsBoard oddsData={oddsData} />}
+          {activeTab === "odds" && <OddsBoard oddsData={allOddsData} />}
 
+          {/* +EV Tab */}
           {activeTab === "ev" && (
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
-                {controlBox(<>
-                  <label style={labelStyle}>Sportsbook</label>
-                  {bookSelect(evSportsbook, (val) => { setEvSportsbook(val); setExpandedEV(null); }, activeEVBook.color)}
-                </>)}
-                <div style={{ fontSize: 13, color: "#6b7280" }}>Single bets ranked by EV on a $100 stake. True probability from best opposing odds at matching lines.</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines.
               </div>
 
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
                   <div>Bet</div>
-                  <div style={{ textAlign: "center" }}>{activeEVBook.name} Odds</div>
+                  <div style={{ textAlign: "center" }}>Sportsbook</div>
+                  <div style={{ textAlign: "center" }}>Odds</div>
                   <div style={{ textAlign: "center" }}>True Prob</div>
                   <div style={{ textAlign: "center" }}>Implied</div>
                   <div style={{ textAlign: "center" }}>Edge</div>
                   <div style={{ textAlign: "center" }}>EV ($100)</div>
                 </div>
 
-                {evBets.slice(0, 20).map((b, i) => {
+                {evBets.slice(0, 30).map((b, i) => {
                   const bookImplied = impliedProb(b.dk);
                   const edge = b.prob - bookImplied;
                   const isExpanded = expandedEV === i;
@@ -754,13 +793,17 @@ export default function App() {
                   return (
                     <div key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
                       onClick={() => setExpandedEV(isExpanded ? null : i)}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", alignItems: "center" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", alignItems: "center" }}>
                         <div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
-                          <div style={{ fontSize: 11, color: "#6b7280" }}>{b.market} — {b.game}</div>
-                          <div style={{ fontSize: 11, color: "#4b5563" }}>{formatET(b.commence_time)}</div>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 3 }}>
+                            <SportBadge sport={b.sport} />
+                            <span style={{ fontSize: 11, color: "#6b7280" }}>{b.market} — {b.game}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(b.commence_time)}</div>
                           <div style={{ fontSize: 11, color: "#3b82f6", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
                         </div>
+                        <div style={{ textAlign: "center" }}><BookBadge bookKey={b.bookKey} /></div>
                         <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(b.dk)}</div>
                         <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{(b.prob * 100).toFixed(1)}%</div>
                         <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#6b7280" }}>{(bookImplied * 100).toFixed(1)}%</div>
@@ -779,15 +822,13 @@ export default function App() {
                               <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>1 − opponent implied prob</div>
                             </div>
                             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
-                              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>{activeEVBook.name} Implied</div>
+                              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Book Implied</div>
                               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: "#e8eaed" }}>{(bookImplied * 100).toFixed(1)}%</div>
                               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>({formatOdds(b.dk)} odds)</div>
-                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>What {activeEVBook.name} thinks the prob is</div>
                             </div>
                             <div style={{ background: edge > 0 ? "rgba(16,185,129,0.06)" : "rgba(239,68,68,0.06)", border: `1px solid ${edge > 0 ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}`, borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
                               <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Your Edge</div>
                               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: edge > 0 ? "#10b981" : "#ef4444" }}>{edge > 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
-                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>True prob vs implied prob</div>
                               <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{edge > 0 ? "Book is underpricing this" : "Book has the edge here"}</div>
                             </div>
                           </div>
@@ -801,8 +842,8 @@ export default function App() {
                           <div style={{ fontSize: 13, color: "#9ca3af", padding: "10px 16px", background: b.ev > 0 ? "rgba(16,185,129,0.04)" : "rgba(239,68,68,0.04)", borderRadius: 8, border: `1px solid ${b.ev > 0 ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)"}` }}>
                             <strong style={{ color: b.ev > 0 ? "#10b981" : "#ef4444" }}>{b.ev > 0 ? "✓ Positive EV:" : "✗ Negative EV:"}</strong>{" "}
                             {b.ev > 0
-                              ? `This bet wins ${(b.prob * 100).toFixed(1)}% of the time but ${activeEVBook.name} is only pricing it at ${(bookImplied * 100).toFixed(1)}%. Expected profit of +$${b.ev.toFixed(2)} per $100 bet.`
-                              : `This bet wins ${(b.prob * 100).toFixed(1)}% of the time but ${activeEVBook.name} has the edge at ${(bookImplied * 100).toFixed(1)}% implied. Avoid this bet.`
+                              ? `This bet wins ${(b.prob * 100).toFixed(1)}% of the time but the book is only pricing it at ${(bookImplied * 100).toFixed(1)}%. Expected profit of +$${b.ev.toFixed(2)} per $100 bet.`
+                              : `This bet wins ${(b.prob * 100).toFixed(1)}% of the time but the book has the edge at ${(bookImplied * 100).toFixed(1)}% implied. Avoid this bet.`
                             }
                           </div>
                         </div>
@@ -814,13 +855,24 @@ export default function App() {
             </div>
           )}
 
+          {/* Promo Tab */}
           {activeTab === "promo" && (
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value.</div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
-                  {bookSelect(sportsbook, (val) => { setSportsbook(val); setExpandedPromo(null); }, activePromoBook.color)}
+                  <select value={promoBook} onChange={e => { setPromoBook(e.target.value); setExpandedPromo(null); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+                    {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
+                  </select>
+                </>)}
+                {controlBox(<>
+                  <label style={labelStyle}>Sports</label>
+                  {SPORTS.map(s => (
+                    <button key={s.key} onClick={() => togglePromoSport(s.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoSports.has(s.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoSports.has(s.key) ? "#3b82f6" : "#6b7280" }}>
+                      {s.label}
+                    </button>
+                  ))}
                 </>)}
                 {controlBox(<>
                   <label style={labelStyle}>Boost %</label>
@@ -847,7 +899,7 @@ export default function App() {
                   <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
                     <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                     <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
-                    <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters or switching sports.</div>
+                    <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
                   </div>
                 )}
                 {topParlays.map((p, i) => {
@@ -869,8 +921,8 @@ export default function App() {
                           {p.legs.map((l, li) => (
                             <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
                               <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
-                              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                                <span style={{ fontSize: 12, color: "#6b7280" }}>{l.market}</span>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                                <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
                                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
                               </div>
                               <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}</div>
@@ -878,7 +930,7 @@ export default function App() {
                           ))}
                         </div>
                         <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
-                          <span>{activePromoBook.name} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
+                          <span>{activePromoBookData.label} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
                           <span>With Boost: <strong style={{ color: "#10b981" }}>+{boostedOdds}</strong></span>
                           <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
                           <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
