@@ -86,45 +86,34 @@ function calcOutcomeProfit(outcome, hedgeStakes, hedgeDecs, boostedProfit, stake
   return p;
 }
 
-// Analytical exact solution — no iteration needed
 function solveHedgesAnalytical(legs, stake, boostedProfit) {
   const n = legs.length;
   const hedgeOdds = legs.map(l => getHedgeOdds(l.bestOpp));
-  const d = hedgeOdds.map(o => toDecimal(o)); // decimal odds of each hedge
-  const a = d.map(di => di - 1); // profit per $ staked on each hedge
+  const d = hedgeOdds.map(o => toDecimal(o));
+  const a = d.map(di => di - 1);
 
   let hedgeStakes;
-  let det;
   let isGuaranteed = false;
 
   if (n === 1) {
-    // Single leg: trivially solvable
-    // Need: -S + a[0]*H0 >= 0 → H0 >= S/a[0]
-    // And: B - H0 >= 0 → H0 <= B
     const H0 = stake / a[0];
     hedgeStakes = [H0];
     isGuaranteed = H0 <= boostedProfit;
 
   } else if (n === 2) {
-    // 2-leg exact solution
-    // Feasibility: a[0]*a[1] > 1
-    det = a[0] * a[1] - 1;
+    const det = a[0] * a[1] - 1;
     if (det <= 0) {
-      // Mathematically impossible regardless of boost
       return { hedgeStakes: [0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(2) };
     }
     const H1 = stake * d[1] / det;
     const H2 = stake * d[0] / det;
     hedgeStakes = [H1, H2];
-    // Boost check: B >= H1 + H2
     isGuaranteed = boostedProfit >= H1 + H2;
 
   } else if (n === 3) {
-    // 3-leg exact solution
-    // Feasibility: a[0]*a[1]*a[2] > a[0] + a[1] + a[2] + 2
     const abc = a[0] * a[1] * a[2];
     const sumA = a[0] + a[1] + a[2];
-    det = abc - sumA - 2;
+    const det = abc - sumA - 2;
     if (det <= 0) {
       return { hedgeStakes: [0, 0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(3) };
     }
@@ -132,14 +121,12 @@ function solveHedgesAnalytical(legs, stake, boostedProfit) {
     const H2 = stake * d[0] * d[2] / det;
     const H3 = stake * d[0] * d[1] / det;
     hedgeStakes = [H1, H2, H3];
-    // Boost check: B >= H1 + H2 + H3
     isGuaranteed = boostedProfit >= H1 + H2 + H3;
 
   } else {
     return { hedgeStakes: legs.map(() => 0), hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(n) };
   }
 
-  // Compute all outcome profits for display
   const outcomes = getAllOutcomes(n);
   const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, d, boostedProfit, stake));
 
@@ -182,10 +169,8 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult 
       {open && result && (
         <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
           onClick={e => e.stopPropagation()}>
-
           <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 4 }}>How to lock in guaranteed profit</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place these hedge bets at the same time as your parlay. Every possible outcome results in $0 or better.</div>
-
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Place your boosted parlay: ${stake} stake</div>
             <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 12 }}>Step 2 — Place these hedge bets simultaneously</div>
@@ -612,7 +597,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
   return legs;
 }
 
-function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 5, minFinalOdds = null) {
+function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFinalOdds = null) {
   const results = [];
   const getGame = (leg) => leg.game;
 
@@ -856,6 +841,7 @@ export default function App() {
   const [minFinalOdds, setMinFinalOdds] = useState("");
   const [minLegOdds, setMinLegOdds] = useState("");
   const [promoDateRange, setPromoDateRange] = useState("any");
+  const [promoPage, setPromoPage] = useState(5);
   const [expandedPromo, setExpandedPromo] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
   const [promoBook, setPromoBook] = useState("draftkings");
@@ -892,6 +878,12 @@ export default function App() {
     fetchOdds();
   }, []);
 
+  // Reset pagination and expanded state when any promo param changes
+  useEffect(() => {
+    setPromoPage(5);
+    setExpandedPromo(null);
+  }, [promoBook, promoSports, promoDateRange, boostPct, stake, numLegs, minFinalOdds, minLegOdds]);
+
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
   };
@@ -912,9 +904,8 @@ export default function App() {
   const parsedMinLeg = minLegOdds !== "" ? Number(minLegOdds) : null;
   const promoLegs = buildAllLegsForBook(allOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
   const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
-  const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 5, parsedMinFinal);
+  const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 10, parsedMinFinal);
 
-  // Pre-compute hedge eligibility analytically — instant, no iterations
   const topParlaysWithHedge = useMemo(() => {
     return topParlays.map(p => {
       const hedgeLegs = p.legs.map(l => ({ name: l.name, bestOpp: l.bestOpp }));
@@ -1105,7 +1096,7 @@ export default function App() {
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
-                  <select value={promoBook} onChange={e => { setPromoBook(e.target.value); setExpandedPromo(null); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+                  <select value={promoBook} onChange={e => { setPromoBook(e.target.value); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
                     {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
                   </select>
                 </>)}
@@ -1157,7 +1148,7 @@ export default function App() {
                     <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
                   </div>
                 )}
-                {topParlaysWithHedge.map((p, i) => {
+                {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
                   const isExpanded = expandedPromo === i;
                   const trueParlayOdds = probToAmerican(p.combinedProb);
                   const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
@@ -1256,6 +1247,18 @@ export default function App() {
                     </div>
                   );
                 })}
+
+                {/* Show more button */}
+                {topParlaysWithHedge.length > promoPage && (
+                  <button
+                    onClick={() => setPromoPage(prev => prev + 5)}
+                    style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
+                    onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
+                    onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
+                  >
+                    Show more ({topParlaysWithHedge.length - promoPage} remaining)
+                  </button>
+                )}
               </div>
             </div>
           )}
