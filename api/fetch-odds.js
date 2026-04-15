@@ -19,13 +19,15 @@ module.exports = async function handler(req, res) {
       )
       const data = await response.json()
 
+      // Filter out games that have already started (live games)
+      const filtered = data.filter(game => {
+        return new Date(game.commence_time) > new Date()
+      })
+
       await supabase
         .from('odds_cache')
-        .upsert({ sport, data, fetched_at: new Date() }, { onConflict: 'sport' })
+        .upsert({ sport, data: filtered, fetched_at: new Date() }, { onConflict: 'sport' })
     }
 
     res.status(200).json({ success: true, timestamp: new Date() })
-  } catch (error) {
-    res.status(500).json({ error: error.message })
-  }
-}
+  } catch (error)
