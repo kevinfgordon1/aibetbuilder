@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -86,7 +86,6 @@ function calcOutcomeProfit(outcome, hedgeStakes, hedgeDec, boostedProfit, stake)
   return p;
 }
 
-// Break-even solver: find minimum hedge stakes so ALL outcomes >= $0
 function solveHedgesBreakEven(legs, stake, boostedProfit) {
   const n = legs.length;
   const hedgeOdds = legs.map(l => getHedgeOdds(l.bestOpp));
@@ -94,23 +93,22 @@ function solveHedgesBreakEven(legs, stake, boostedProfit) {
   const outcomes = getAllOutcomes(n);
 
   let hedgeStakes = legs.map(() => 0);
-  let lr = 5.0;
+  // Scale learning rate to the boosted profit size so large boosts converge fast
+  let lr = Math.max(5.0, boostedProfit / 50);
 
-  for (let iter = 0; iter < 10000; iter++) {
+  for (let iter = 0; iter < 5000; iter++) {
     const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, hedgeDec, boostedProfit, stake));
     const minProfit = Math.min(...profits);
-
     if (minProfit >= -0.01) break;
 
-    // Find the worst outcome
     const minIdx = profits.indexOf(minProfit);
     const worstOutcome = outcomes[minIdx];
 
-    // Increase hedges on legs that LOSE in the worst outcome
-    // Winning those hedges is what rescues us in that scenario
-    hedgeStakes = hedgeStakes.map((s, i) => worstOutcome[i] ? s : Math.max(0, s + lr));
-
-    lr *= 0.9995;
+    // Increase hedge stakes on legs that LOSE in the worst outcome
+    hedgeStakes = hedgeStakes.map((s, i) =>
+      worstOutcome[i] ? s : Math.max(0, s + lr)
+    );
+    lr *= 0.999;
   }
 
   const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, hedgeDec, boostedProfit, stake));
@@ -120,12 +118,6 @@ function solveHedgesBreakEven(legs, stake, boostedProfit) {
   return { hedgeStakes, hedgeOdds, minProfit, isGuaranteed, profits, outcomes };
 }
 
-function checkGuaranteed(parlayLegs, stake, boostedProfit) {
-  if (!parlayLegs || parlayLegs.length === 0) return { isGuaranteed: false };
-  return solveHedgesBreakEven(parlayLegs, stake, boostedProfit);
-}
-
-// ── Book badge ───────────────────────────────────────────────────────────────
 function BookBadge({ bookKey }) {
   const book = ALL_BOOKS.find(b => b.key === bookKey);
   if (!book) return null;
@@ -140,11 +132,12 @@ function BookBadge({ bookKey }) {
   );
 }
 
-// ── Guaranteed profit badge + panel ─────────────────────────────────────────
-function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev }) {
+function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult }) {
   const [open, setOpen] = useState(false);
   const isRare = numLegs >= 2;
-  const hedgeResult = open ? checkGuaranteed(legs, stake, boostedProfit) : null;
+
+  // Only run solver when panel is opened, reuse pre-checked result otherwise
+  const result = open ? solveHedgesBreakEven(legs, stake, boostedProfit) : hedgeResult;
 
   return (
     <div>
@@ -160,14 +153,13 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev }) {
         </button>
       </div>
 
-      {open && hedgeResult && (
+      {open && result && (
         <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
           onClick={e => e.stopPropagation()}>
 
           <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 4 }}>How to lock in guaranteed profit</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place these hedge bets at the same time as your parlay. Every possible outcome results in $0 or better.</div>
 
-          {/* Hedge bets */}
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Place your boosted parlay: ${stake} stake</div>
             <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 12 }}>Step 2 — Place these hedge bets simultaneously</div>
@@ -176,23 +168,22 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev }) {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>Bet AGAINST {l.name}</div>
                   <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                    Fair hedge odds: {hedgeResult.hedgeOdds[i] > 0 ? "+" : ""}{hedgeResult.hedgeOdds[i]} — find best available odds on this side
+                    Fair hedge odds: {result.hedgeOdds[i] > 0 ? "+" : ""}{result.hedgeOdds[i]} — find best available odds on this side
                   </div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>
-                    ${hedgeResult.hedgeStakes[i].toFixed(2)}
+                    ${result.hedgeStakes[i].toFixed(2)}
                   </div>
                   <div style={{ fontSize: 11, color: "#6b7280" }}>stake</div>
                 </div>
               </div>
             ))}
             <div style={{ fontSize: 12, color: "#4b5563", marginTop: 8, fontStyle: "italic" }}>
-              Total hedge cost: ${hedgeResult.hedgeStakes.reduce((s, h) => s + h, 0).toFixed(2)}
+              Total hedge cost: ${result.hedgeStakes.reduce((s, h) => s + h, 0).toFixed(2)}
             </div>
           </div>
 
-          {/* Outcome matrix */}
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — worst case is $0</div>
             <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
@@ -201,11 +192,11 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev }) {
                 <div>Prob</div>
                 <div style={{ textAlign: "right" }}>P/L</div>
               </div>
-              {hedgeResult.outcomes.map((outcome, oi) => {
-                const profit = hedgeResult.profits[oi];
+              {result.outcomes.map((outcome, oi) => {
+                const profit = result.profits[oi];
                 const prob = outcome.reduce((p, win, i) => p * (win ? ourTrueProbFromOpp(legs[i].bestOpp) : 1 - ourTrueProbFromOpp(legs[i].bestOpp)), 1);
                 return (
-                  <div key={oi} style={{ display: "grid", gridTemplateColumns: `repeat(${legs.length}, 1fr) 80px 90px`, padding: "8px 12px", borderBottom: oi < hedgeResult.outcomes.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", fontSize: 12, alignItems: "center" }}>
+                  <div key={oi} style={{ display: "grid", gridTemplateColumns: `repeat(${legs.length}, 1fr) 80px 90px`, padding: "8px 12px", borderBottom: oi < result.outcomes.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", fontSize: 12, alignItems: "center" }}>
                     {outcome.map((win, i) => (
                       <span key={i} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, fontWeight: 600, background: win ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)", color: win ? "#10b981" : "#ef4444", display: "inline-block", width: "fit-content" }}>
                         {win ? "Win" : "Loss"}
@@ -221,7 +212,6 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev }) {
             </div>
           </div>
 
-          {/* EV tradeoff warning */}
           <div style={{ padding: "12px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
             <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> By hedging this parlay you are guaranteeing a minimum of <strong style={{ color: "#10b981" }}>$0</strong> on every possible outcome. However you are giving up your expected value of <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong>. Long-run, taking the +EV without hedging is the mathematically correct play. Only hedge if you prefer certainty over maximizing profit.
           </div>
@@ -905,6 +895,16 @@ export default function App() {
   const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
   const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 5, parsedMinFinal);
 
+  // ── Pre-compute hedge eligibility for all top parlays ──────────────────────
+  // useMemo ensures this only re-runs when topParlays, stake, or boostPct changes
+  const topParlaysWithHedge = useMemo(() => {
+    return topParlays.map(p => {
+      const hedgeLegs = p.legs.map(l => ({ name: l.name, bestOpp: l.bestOpp }));
+      const hedgeResult = solveHedgesBreakEven(hedgeLegs, stake, p.boostedProfit);
+      return { ...p, hedgeLegs, hedgeResult, isGuaranteed: hedgeResult.isGuaranteed };
+    });
+  }, [topParlays, stake, boostPct]);
+
   const togglePromoSport = (sportKey) => {
     setPromoSports(prev => {
       const next = new Set(prev);
@@ -1132,20 +1132,17 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {topParlays.length === 0 && (
+                {topParlaysWithHedge.length === 0 && (
                   <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
                     <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                     <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                     <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
                   </div>
                 )}
-                {topParlays.map((p, i) => {
+                {topParlaysWithHedge.map((p, i) => {
                   const isExpanded = expandedPromo === i;
                   const trueParlayOdds = probToAmerican(p.combinedProb);
                   const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
-
-                  const hedgeLegs = p.legs.map(l => ({ name: l.name, bestOpp: l.bestOpp }));
-                  const { isGuaranteed } = checkGuaranteed(hedgeLegs, stake, p.boostedProfit);
 
                   return (
                     <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
@@ -1177,14 +1174,16 @@ export default function App() {
                           <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                         </div>
 
-                        {isGuaranteed && (
+                        {/* Guaranteed badge — pre-computed, no extra work at render */}
+                        {p.isGuaranteed && (
                           <div onClick={e => e.stopPropagation()}>
                             <GuaranteedBadge
-                              legs={hedgeLegs}
+                              legs={p.hedgeLegs}
                               numLegs={p.legs.length}
                               stake={stake}
                               boostedProfit={p.boostedProfit}
                               ev={p.ev}
+                              hedgeResult={p.hedgeResult}
                             />
                           </div>
                         )}
