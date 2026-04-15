@@ -47,6 +47,91 @@ function isWithinDateRange(commence_time, range) {
   return true;
 }
 
+// ── Hedge math ──────────────────────────────────────────────────────────────
+function toDecimal(american) {
+  if (american > 0) return 1 + american / 100;
+  return 1 + 100 / Math.abs(american);
+}
+
+function impliedProbFromOdds(american) {
+  if (american < 0) return Math.abs(american) / (Math.abs(american) + 100);
+  return 100 / (american + 100);
+}
+
+function ourTrueProbFromOpp(bestOpp) {
+  return 1 - impliedProbFromOdds(bestOpp);
+}
+
+function getHedgeOdds(bestOpp) {
+  const p = ourTrueProbFromOpp(bestOpp);
+  const oppP = 1 - p;
+  if (oppP >= 0.5) return Math.round(-100 * oppP / (1 - oppP));
+  return Math.round(100 * (1 - oppP) / oppP);
+}
+
+function getAllOutcomes(n) {
+  const outcomes = [];
+  for (let mask = 0; mask < (1 << n); mask++) {
+    outcomes.push(Array.from({ length: n }, (_, i) => !!(mask & (1 << i))));
+  }
+  return outcomes;
+}
+
+function solveHedgesMinMax(legs, stake, boostedProfit) {
+  const n = legs.length;
+  const hedgeOdds = legs.map(l => getHedgeOdds(l.bestOpp));
+  const hedgeDec = hedgeOdds.map(o => toDecimal(o));
+  const outcomes = getAllOutcomes(n);
+
+  let hedgeStakes = legs.map((_, i) => boostedProfit / (hedgeDec[i] - 1 + n));
+  let lr = 1.0;
+
+  for (let iter = 0; iter < 2000; iter++) {
+    const profits = outcomes.map(outcome => {
+      const allWin = outcome.every(w => w);
+      let p = allWin ? boostedProfit : -stake;
+      outcome.forEach((win, i) => {
+        p += win ? hedgeStakes[i] * (hedgeDec[i] - 1) : -hedgeStakes[i];
+      });
+      return p;
+    });
+
+    const minProfit = Math.min(...profits);
+    const minIdx = profits.indexOf(minProfit);
+    const minOutcome = outcomes[minIdx];
+
+    if (lr < 0.001) break;
+
+    const grad = legs.map((_, i) => minOutcome[i] ? -(hedgeDec[i] - 1) : 1);
+    const gradNorm = Math.sqrt(grad.reduce((s, g) => s + g * g, 0));
+    if (gradNorm < 0.001) break;
+
+    hedgeStakes = hedgeStakes.map((s, i) => Math.max(0, s - lr * grad[i] / gradNorm));
+    lr *= 0.995;
+  }
+
+  const profits = outcomes.map(outcome => {
+    const allWin = outcome.every(w => w);
+    let p = allWin ? boostedProfit : -stake;
+    outcome.forEach((win, i) => {
+      p += win ? hedgeStakes[i] * (hedgeDec[i] - 1) : -hedgeStakes[i];
+    });
+    return p;
+  });
+
+  const minProfit = Math.min(...profits);
+  const isGuaranteed = minProfit >= -0.01;
+
+  return { hedgeStakes, hedgeOdds, minProfit, isGuaranteed, profits, outcomes };
+}
+
+function checkGuaranteed(parlayLegs, stake, boostedProfit) {
+  if (!parlayLegs || parlayLegs.length === 0) return { isGuaranteed: false };
+  const result = solveHedgesMinMax(parlayLegs, stake, boostedProfit);
+  return result;
+}
+
+// ── Book badge ───────────────────────────────────────────────────────────────
 function BookBadge({ bookKey }) {
   const book = ALL_BOOKS.find(b => b.key === bookKey);
   if (!book) return null;
@@ -58,6 +143,88 @@ function BookBadge({ bookKey }) {
       )}
       {book.label}
     </span>
+  );
+}
+
+// ── Guaranteed profit badge + panel ─────────────────────────────────────────
+function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev }) {
+  const [open, setOpen] = useState(false);
+  const isRare = numLegs >= 2;
+
+  const hedgeResult = open ? checkGuaranteed(legs, stake, boostedProfit) : null;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: 700, background: "rgba(139,92,246,0.12)", color: "#8b5cf6", border: "1px solid rgba(139,92,246,0.3)" }}>
+          🔒 {isRare ? "Rare — " : ""}Guaranteed Profit Eligible
+        </span>
+        <button
+          onClick={e => { e.stopPropagation(); setOpen(!open); }}
+          style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.06)", color: "#9ca3af", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+        >
+          ⓘ
+        </button>
+      </div>
+
+      {open && hedgeResult && (
+        <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
+          onClick={e => e.stopPropagation()}>
+
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 12 }}>How to lock in guaranteed profit</div>
+
+          {/* Hedge bets */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Place these hedge bets simultaneously</div>
+            {legs.map((l, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, marginBottom: 6, fontSize: 13 }}>
+                <div>
+                  <div style={{ fontWeight: 600, color: "#e8eaed" }}>Bet AGAINST {l.name}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>Hedge odds: {hedgeResult.hedgeOdds[i] > 0 ? "+" : ""}{hedgeResult.hedgeOdds[i]}</div>
+                </div>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 15 }}>
+                  ${hedgeResult.hedgeStakes[i].toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Outcome matrix */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix</div>
+            <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+              {hedgeResult.outcomes.map((outcome, oi) => {
+                const allWin = outcome.every(w => w);
+                const profit = hedgeResult.profits[oi];
+                const prob = outcome.reduce((p, win, i) => p * (win ? ourTrueProbFromOpp(legs[i].bestOpp) : 1 - ourTrueProbFromOpp(legs[i].bestOpp)), 1);
+                return (
+                  <div key={oi} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 12px", borderBottom: oi < hedgeResult.outcomes.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", fontSize: 12 }}>
+                    <div style={{ display: "flex", gap: 6, flex: 1 }}>
+                      {outcome.map((win, i) => (
+                        <span key={i} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, fontWeight: 600, background: win ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)", color: win ? "#10b981" : "#ef4444" }}>
+                          {legs[i].name.split(" ").slice(0, 2).join(" ")} {win ? "✓" : "✗"}
+                        </span>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                      <span style={{ color: "#6b7280" }}>{(prob * 100).toFixed(1)}%</span>
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: profit >= 0 ? "#10b981" : "#ef4444", minWidth: 70, textAlign: "right" }}>
+                        {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* EV tradeoff warning */}
+          <div style={{ padding: "10px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
+            <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> Hedging this parlay locks in a guaranteed minimum of <strong style={{ color: "#10b981" }}>+${hedgeResult.minProfit.toFixed(2)}</strong> on every outcome, but eliminates your expected value of <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong>. You are trading upside for certainty. Only hedge if you prefer guaranteed profit over higher long-run EV.
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -180,7 +347,6 @@ function transformOddsData(gamesArray, sportKey) {
       ml_opp_count_home: countMLLines(away),
     });
 
-    // Build one spread entry per book with correct bestOpp based on that book's line
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
@@ -189,12 +355,10 @@ function transformOddsData(gamesArray, sportKey) {
       const awayOutcome = sprMarket.outcomes.find(o => o.name === away);
       const homeOutcome = sprMarket.outcomes.find(o => o.name === home);
       if (!awayOutcome || !homeOutcome) return;
-
       const awayPoint = awayOutcome.point;
       const homePoint = homeOutcome.point;
       const fmtPoint = (p) => p > 0 ? `+${p}` : `${p}`;
 
-      // bestOpp must match the EXACT line this book is offering
       let bestOppForAway = getBestSpreadOddsAtLine(home, -awayPoint);
       const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
       if (bestOppForAway === null) bestOppForAway = homeOutcome.price;
@@ -205,17 +369,11 @@ function transformOddsData(gamesArray, sportKey) {
 
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
-        best_away, best_home,
-        book: b.key,
-        // Store the actual odds from THIS book for away and home
-        away_odds: awayOutcome.price,
-        home_odds: homeOutcome.price,
-        away_line: fmtPoint(awayPoint),
-        home_line: fmtPoint(homePoint),
-        away_point: awayPoint,
-        home_point: homePoint,
-        bestOpp_away: bestOppForAway,
-        bestOpp_home: bestOppForHome,
+        best_away, best_home, book: b.key,
+        away_odds: awayOutcome.price, home_odds: homeOutcome.price,
+        away_line: fmtPoint(awayPoint), home_line: fmtPoint(homePoint),
+        away_point: awayPoint, home_point: homePoint,
+        bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
         bestOppCount_away: oppCountForAway || 1,
         bestOppName_away: `${home} ${fmtPoint(-awayPoint)}`,
         bestOppCount_home: oppCountForHome || 1,
@@ -223,7 +381,6 @@ function transformOddsData(gamesArray, sportKey) {
       });
     });
 
-    // Build one totals entry per book with correct bestOpp based on that book's line
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
@@ -232,7 +389,6 @@ function transformOddsData(gamesArray, sportKey) {
       const overOutcome = totMarket.outcomes.find(o => o.name === "Over");
       const underOutcome = totMarket.outcomes.find(o => o.name === "Under");
       if (!overOutcome || !underOutcome) return;
-
       const line = overOutcome.point;
 
       let bestOppForOver = getBestTotalOddsAtLine("Under", line);
@@ -245,14 +401,9 @@ function transformOddsData(gamesArray, sportKey) {
 
       totals.push({
         away, home, commence_time, bookOdds, sport: sportKey,
-        best_away, best_home,
-        book: b.key,
-        line,
-        // Store actual odds from THIS book
-        over_odds: overOutcome.price,
-        under_odds: underOutcome.price,
-        bestOpp_over: bestOppForOver,
-        bestOpp_under: bestOppForUnder,
+        best_away, best_home, book: b.key,
+        line, over_odds: overOutcome.price, under_odds: underOutcome.price,
+        bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
         bestOppCount_over: oppCountForOver || 1,
         bestOppName_over: `u${line}`,
         bestOppCount_under: oppCountForUnder || 1,
@@ -341,8 +492,6 @@ function calcParlayEV(legs, boostPct, stake) {
   return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
 }
 
-// THE KEY FIX: spreads and totals now read odds directly from bookOdds[book]
-// instead of the stale dk_away/dk_home fields that could belong to any book
 function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any") {
   const legs = [];
   const now = new Date();
@@ -369,22 +518,13 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
       if (g.book !== book) return;
-
-      // READ FROM ACTUAL BOOK ODDS — the fix
       const awayOdds = g.away_odds;
       const homeOdds = g.home_odds;
       if (awayOdds == null || homeOdds == null) return;
-
       const ak = `${g.away}@${g.home}_away_${g.away_line}`;
       const hk = `${g.away}@${g.home}_home_${g.home_line}`;
-      if (!seen.has(ak) && (minLegOdds === null || awayOdds >= minLegOdds)) {
-        seen.add(ak);
-        legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away });
-      }
-      if (!seen.has(hk) && (minLegOdds === null || homeOdds >= minLegOdds)) {
-        seen.add(hk);
-        legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home });
-      }
+      if (!seen.has(ak) && (minLegOdds === null || awayOdds >= minLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
+      if (!seen.has(hk) && (minLegOdds === null || homeOdds >= minLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
     });
   }
 
@@ -395,22 +535,13 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
       if (g.book !== book) return;
-
-      // READ FROM ACTUAL BOOK ODDS — the fix
       const overOdds = g.over_odds;
       const underOdds = g.under_odds;
       if (overOdds == null || underOdds == null) return;
-
       const ok = `${g.away}@${g.home}_over_${g.line}`;
       const uk = `${g.away}@${g.home}_under_${g.line}`;
-      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) {
-        seen.add(ok);
-        legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over });
-      }
-      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) {
-        seen.add(uk);
-        legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under });
-      }
+      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
+      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
     });
   }
 
@@ -460,8 +591,8 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
         if (overOdds == null || underOdds == null) return;
         const ok = `${g.away}@${g.home}_TOT_over_${g.line}_${book.key}`;
         const uk = `${g.away}@${g.home}_TOT_under_${g.line}_${book.key}`;
-        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
-        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
+        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
+        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
       });
     }
   });
@@ -915,9 +1046,7 @@ export default function App() {
                               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 700, color: "#f59e0b" }}>{(b.prob * 100).toFixed(1)}%</div>
                               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>({trueProbAm > 0 ? "+" : ""}{trueProbAm} fair odds)</div>
                               {b.bestOppCount != null && b.bestOppName && (
-                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 4 }}>
-                                  {b.bestOppCount} {b.bestOppCount === 1 ? "line" : "lines"} @ {b.bestOppName}
-                                </div>
+                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 4 }}>{b.bestOppCount} {b.bestOppCount === 1 ? "line" : "lines"} @ {b.bestOppName}</div>
                               )}
                             </div>
                             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
@@ -1011,6 +1140,12 @@ export default function App() {
                   const isExpanded = expandedPromo === i;
                   const trueParlayOdds = probToAmerican(p.combinedProb);
                   const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
+
+                  // Check guaranteed profit eligibility
+                  const hedgeLegs = p.legs.map(l => ({ name: l.name, bestOpp: l.bestOpp }));
+                  const { isGuaranteed, minProfit } = checkGuaranteed(hedgeLegs, stake, p.boostedProfit);
+                  const isRare = p.legs.length >= 2;
+
                   return (
                     <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                       onClick={() => setExpandedPromo(isExpanded ? null : i)}>
@@ -1040,7 +1175,21 @@ export default function App() {
                           <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
                           <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                         </div>
+
+                        {/* Guaranteed profit badge */}
+                        {isGuaranteed && (
+                          <div onClick={e => e.stopPropagation()}>
+                            <GuaranteedBadge
+                              legs={hedgeLegs}
+                              numLegs={p.legs.length}
+                              stake={stake}
+                              boostedProfit={p.boostedProfit}
+                              ev={p.ev}
+                            />
+                          </div>
+                        )}
                       </div>
+
                       {isExpanded && (
                         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
                           onClick={e => e.stopPropagation()}>
