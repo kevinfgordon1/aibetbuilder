@@ -47,7 +47,7 @@ function isWithinDateRange(commence_time, range) {
   return true;
 }
 
-// ── Hedge math ──────────────────────────────────────────────────────────────
+// ── Exact analytical hedge solver ──────────────────────────────────────────
 function toDecimal(american) {
   if (american > 0) return 1 + american / 100;
   return 1 + 100 / Math.abs(american);
@@ -77,45 +77,73 @@ function getAllOutcomes(n) {
   return outcomes;
 }
 
-function calcOutcomeProfit(outcome, hedgeStakes, hedgeDec, boostedProfit, stake) {
+function calcOutcomeProfit(outcome, hedgeStakes, hedgeDecs, boostedProfit, stake) {
   const allWin = outcome.every(w => w);
   let p = allWin ? boostedProfit : -stake;
   outcome.forEach((win, i) => {
-    p += win ? hedgeStakes[i] * (hedgeDec[i] - 1) : -hedgeStakes[i];
+    p += win ? hedgeStakes[i] * (hedgeDecs[i] - 1) : -hedgeStakes[i];
   });
   return p;
 }
 
-function solveHedgesBreakEven(legs, stake, boostedProfit) {
+// Analytical exact solution — no iteration needed
+function solveHedgesAnalytical(legs, stake, boostedProfit) {
   const n = legs.length;
   const hedgeOdds = legs.map(l => getHedgeOdds(l.bestOpp));
-  const hedgeDec = hedgeOdds.map(o => toDecimal(o));
-  const outcomes = getAllOutcomes(n);
+  const d = hedgeOdds.map(o => toDecimal(o)); // decimal odds of each hedge
+  const a = d.map(di => di - 1); // profit per $ staked on each hedge
 
-  let hedgeStakes = legs.map(() => 0);
-  // Scale learning rate to the boosted profit size so large boosts converge fast
-  let lr = Math.max(5.0, boostedProfit / 50);
+  let hedgeStakes;
+  let det;
+  let isGuaranteed = false;
 
-  for (let iter = 0; iter < 5000; iter++) {
-    const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, hedgeDec, boostedProfit, stake));
-    const minProfit = Math.min(...profits);
-    if (minProfit >= -0.01) break;
+  if (n === 1) {
+    // Single leg: trivially solvable
+    // Need: -S + a[0]*H0 >= 0 → H0 >= S/a[0]
+    // And: B - H0 >= 0 → H0 <= B
+    const H0 = stake / a[0];
+    hedgeStakes = [H0];
+    isGuaranteed = H0 <= boostedProfit;
 
-    const minIdx = profits.indexOf(minProfit);
-    const worstOutcome = outcomes[minIdx];
+  } else if (n === 2) {
+    // 2-leg exact solution
+    // Feasibility: a[0]*a[1] > 1
+    det = a[0] * a[1] - 1;
+    if (det <= 0) {
+      // Mathematically impossible regardless of boost
+      return { hedgeStakes: [0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(2) };
+    }
+    const H1 = stake * d[1] / det;
+    const H2 = stake * d[0] / det;
+    hedgeStakes = [H1, H2];
+    // Boost check: B >= H1 + H2
+    isGuaranteed = boostedProfit >= H1 + H2;
 
-    // Increase hedge stakes on legs that LOSE in the worst outcome
-    hedgeStakes = hedgeStakes.map((s, i) =>
-      worstOutcome[i] ? s : Math.max(0, s + lr)
-    );
-    lr *= 0.999;
+  } else if (n === 3) {
+    // 3-leg exact solution
+    // Feasibility: a[0]*a[1]*a[2] > a[0] + a[1] + a[2] + 2
+    const abc = a[0] * a[1] * a[2];
+    const sumA = a[0] + a[1] + a[2];
+    det = abc - sumA - 2;
+    if (det <= 0) {
+      return { hedgeStakes: [0, 0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(3) };
+    }
+    const H1 = stake * d[1] * d[2] / det;
+    const H2 = stake * d[0] * d[2] / det;
+    const H3 = stake * d[0] * d[1] / det;
+    hedgeStakes = [H1, H2, H3];
+    // Boost check: B >= H1 + H2 + H3
+    isGuaranteed = boostedProfit >= H1 + H2 + H3;
+
+  } else {
+    return { hedgeStakes: legs.map(() => 0), hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(n) };
   }
 
-  const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, hedgeDec, boostedProfit, stake));
-  const minProfit = Math.min(...profits);
-  const isGuaranteed = minProfit >= -0.01;
+  // Compute all outcome profits for display
+  const outcomes = getAllOutcomes(n);
+  const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, d, boostedProfit, stake));
 
-  return { hedgeStakes, hedgeOdds, minProfit, isGuaranteed, profits, outcomes };
+  return { hedgeStakes, hedgeOdds, isGuaranteed, profits, outcomes };
 }
 
 function BookBadge({ bookKey }) {
@@ -135,9 +163,7 @@ function BookBadge({ bookKey }) {
 function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult }) {
   const [open, setOpen] = useState(false);
   const isRare = numLegs >= 2;
-
-  // Only run solver when panel is opened, reuse pre-checked result otherwise
-  const result = open ? solveHedgesBreakEven(legs, stake, boostedProfit) : hedgeResult;
+  const result = hedgeResult;
 
   return (
     <div>
@@ -229,7 +255,6 @@ function transformOddsData(gamesArray, sportKey) {
 
   gamesArray.forEach(game => {
     if (new Date(game.commence_time) <= now) return;
-
     const away = game.away_team;
     const home = game.home_team;
     const bookmakers = game.bookmakers || [];
@@ -351,15 +376,12 @@ function transformOddsData(gamesArray, sportKey) {
       const awayPoint = awayOutcome.point;
       const homePoint = homeOutcome.point;
       const fmtPoint = (p) => p > 0 ? `+${p}` : `${p}`;
-
       let bestOppForAway = getBestSpreadOddsAtLine(home, -awayPoint);
       const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
       if (bestOppForAway === null) bestOppForAway = homeOutcome.price;
-
       let bestOppForHome = getBestSpreadOddsAtLine(away, -homePoint);
       const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
       if (bestOppForHome === null) bestOppForHome = awayOutcome.price;
-
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
@@ -383,15 +405,12 @@ function transformOddsData(gamesArray, sportKey) {
       const underOutcome = totMarket.outcomes.find(o => o.name === "Under");
       if (!overOutcome || !underOutcome) return;
       const line = overOutcome.point;
-
       let bestOppForOver = getBestTotalOddsAtLine("Under", line);
       const oppCountForOver = countTotalLinesAtPoint("Under", line);
       if (bestOppForOver === null) bestOppForOver = underOutcome.price;
-
       let bestOppForUnder = getBestTotalOddsAtLine("Over", line);
       const oppCountForUnder = countTotalLinesAtPoint("Over", line);
       if (bestOppForUnder === null) bestOppForUnder = overOutcome.price;
-
       totals.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
@@ -895,12 +914,11 @@ export default function App() {
   const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
   const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 5, parsedMinFinal);
 
-  // ── Pre-compute hedge eligibility for all top parlays ──────────────────────
-  // useMemo ensures this only re-runs when topParlays, stake, or boostPct changes
+  // Pre-compute hedge eligibility analytically — instant, no iterations
   const topParlaysWithHedge = useMemo(() => {
     return topParlays.map(p => {
       const hedgeLegs = p.legs.map(l => ({ name: l.name, bestOpp: l.bestOpp }));
-      const hedgeResult = solveHedgesBreakEven(hedgeLegs, stake, p.boostedProfit);
+      const hedgeResult = solveHedgesAnalytical(hedgeLegs, stake, p.boostedProfit);
       return { ...p, hedgeLegs, hedgeResult, isGuaranteed: hedgeResult.isGuaranteed };
     });
   }, [topParlays, stake, boostPct]);
@@ -1174,7 +1192,6 @@ export default function App() {
                           <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                         </div>
 
-                        {/* Guaranteed badge — pre-computed, no extra work at render */}
                         {p.isGuaranteed && (
                           <div onClick={e => e.stopPropagation()}>
                             <GuaranteedBadge
