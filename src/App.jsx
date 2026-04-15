@@ -178,16 +178,9 @@ function transformOddsData(gamesArray, sportKey) {
       best_away, best_home,
       ml_opp_count_away: countMLLines(home),
       ml_opp_count_home: countMLLines(away),
-      dk_away: getOdds("draftkings", "h2h", away),
-      dk_home: getOdds("draftkings", "h2h", home),
-      fd_away: getOdds("fanduel", "h2h", away),
-      fd_home: getOdds("fanduel", "h2h", home),
-      cs_away: getOdds("williamhill_us", "h2h", away),
-      cs_home: getOdds("williamhill_us", "h2h", home),
-      mgm_away: getOdds("betmgm", "h2h", away),
-      mgm_home: getOdds("betmgm", "h2h", home),
     });
 
+    // Build one spread entry per book with correct bestOpp based on that book's line
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
@@ -196,10 +189,12 @@ function transformOddsData(gamesArray, sportKey) {
       const awayOutcome = sprMarket.outcomes.find(o => o.name === away);
       const homeOutcome = sprMarket.outcomes.find(o => o.name === home);
       if (!awayOutcome || !homeOutcome) return;
+
       const awayPoint = awayOutcome.point;
       const homePoint = homeOutcome.point;
       const fmtPoint = (p) => p > 0 ? `+${p}` : `${p}`;
 
+      // bestOpp must match the EXACT line this book is offering
       let bestOppForAway = getBestSpreadOddsAtLine(home, -awayPoint);
       const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
       if (bestOppForAway === null) bestOppForAway = homeOutcome.price;
@@ -210,14 +205,17 @@ function transformOddsData(gamesArray, sportKey) {
 
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
-        best_away, best_home, book: b.key,
-        dk_away_line: fmtPoint(awayPoint),
-        dk_home_line: fmtPoint(homePoint),
-        dk_away: awayOutcome.price, dk_home: homeOutcome.price,
-        fd_away: getOdds("fanduel", "spreads", away), fd_home: getOdds("fanduel", "spreads", home),
-        cs_away: getOdds("williamhill_us", "spreads", away), cs_home: getOdds("williamhill_us", "spreads", home),
-        mgm_away: getOdds("betmgm", "spreads", away), mgm_home: getOdds("betmgm", "spreads", home),
-        bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
+        best_away, best_home,
+        book: b.key,
+        // Store the actual odds from THIS book for away and home
+        away_odds: awayOutcome.price,
+        home_odds: homeOutcome.price,
+        away_line: fmtPoint(awayPoint),
+        home_line: fmtPoint(homePoint),
+        away_point: awayPoint,
+        home_point: homePoint,
+        bestOpp_away: bestOppForAway,
+        bestOpp_home: bestOppForHome,
         bestOppCount_away: oppCountForAway || 1,
         bestOppName_away: `${home} ${fmtPoint(-awayPoint)}`,
         bestOppCount_home: oppCountForHome || 1,
@@ -225,6 +223,7 @@ function transformOddsData(gamesArray, sportKey) {
       });
     });
 
+    // Build one totals entry per book with correct bestOpp based on that book's line
     ALL_BOOKS.forEach(b => {
       const bookData = bookmakers.find(bm => bm.key === b.key);
       if (!bookData) return;
@@ -233,6 +232,7 @@ function transformOddsData(gamesArray, sportKey) {
       const overOutcome = totMarket.outcomes.find(o => o.name === "Over");
       const underOutcome = totMarket.outcomes.find(o => o.name === "Under");
       if (!overOutcome || !underOutcome) return;
+
       const line = overOutcome.point;
 
       let bestOppForOver = getBestTotalOddsAtLine("Under", line);
@@ -245,16 +245,14 @@ function transformOddsData(gamesArray, sportKey) {
 
       totals.push({
         away, home, commence_time, bookOdds, sport: sportKey,
-        best_away, best_home, book: b.key,
-        dk_line: line, best_line: line,
-        dk_over: overOutcome.price, dk_under: underOutcome.price,
-        fd_line: getOdds("fanduel", "totals", "Over", "point"),
-        fd_over: getOdds("fanduel", "totals", "Over"), fd_under: getOdds("fanduel", "totals", "Under"),
-        cs_line: getOdds("williamhill_us", "totals", "Over", "point"),
-        cs_over: getOdds("williamhill_us", "totals", "Over"), cs_under: getOdds("williamhill_us", "totals", "Under"),
-        mgm_line: getOdds("betmgm", "totals", "Over", "point"),
-        mgm_over: getOdds("betmgm", "totals", "Over"), mgm_under: getOdds("betmgm", "totals", "Under"),
-        bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
+        best_away, best_home,
+        book: b.key,
+        line,
+        // Store actual odds from THIS book
+        over_odds: overOutcome.price,
+        under_odds: underOutcome.price,
+        bestOpp_over: bestOppForOver,
+        bestOpp_under: bestOppForUnder,
         bestOppCount_over: oppCountForOver || 1,
         bestOppName_over: `u${line}`,
         bestOppCount_under: oppCountForUnder || 1,
@@ -343,6 +341,8 @@ function calcParlayEV(legs, boostPct, stake) {
   return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
 }
 
+// THE KEY FIX: spreads and totals now read odds directly from bookOdds[book]
+// instead of the stale dk_away/dk_home fields that could belong to any book
 function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any") {
   const legs = [];
   const now = new Date();
@@ -369,10 +369,22 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
       if (g.book !== book) return;
-      const ak = `${g.away}@${g.home}_away_${g.dk_away_line}`;
-      const hk = `${g.away}@${g.home}_home_${g.dk_home_line}`;
-      if (!seen.has(ak) && (minLegOdds === null || g.dk_away >= minLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
-      if (!seen.has(hk) && (minLegOdds === null || g.dk_home >= minLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
+
+      // READ FROM ACTUAL BOOK ODDS — the fix
+      const awayOdds = g.away_odds;
+      const homeOdds = g.home_odds;
+      if (awayOdds == null || homeOdds == null) return;
+
+      const ak = `${g.away}@${g.home}_away_${g.away_line}`;
+      const hk = `${g.away}@${g.home}_home_${g.home_line}`;
+      if (!seen.has(ak) && (minLegOdds === null || awayOdds >= minLegOdds)) {
+        seen.add(ak);
+        legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away });
+      }
+      if (!seen.has(hk) && (minLegOdds === null || homeOdds >= minLegOdds)) {
+        seen.add(hk);
+        legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home });
+      }
     });
   }
 
@@ -383,10 +395,22 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
       if (g.book !== book) return;
-      const ok = `${g.away}@${g.home}_over_${g.dk_line}`;
-      const uk = `${g.away}@${g.home}_under_${g.dk_line}`;
-      if (!seen.has(ok) && (minLegOdds === null || g.dk_over >= minLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
-      if (!seen.has(uk) && (minLegOdds === null || g.dk_under >= minLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
+
+      // READ FROM ACTUAL BOOK ODDS — the fix
+      const overOdds = g.over_odds;
+      const underOdds = g.under_odds;
+      if (overOdds == null || underOdds == null) return;
+
+      const ok = `${g.away}@${g.home}_over_${g.line}`;
+      const uk = `${g.away}@${g.home}_under_${g.line}`;
+      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) {
+        seen.add(ok);
+        legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over });
+      }
+      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) {
+        seen.add(uk);
+        legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under });
+      }
     });
   }
 
@@ -417,10 +441,13 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
         if (new Date(g.commence_time) <= now) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
         if (g.book !== book.key) return;
-        const ak = `${g.away}@${g.home}_SPR_away_${g.dk_away_line}_${book.key}`;
-        const hk = `${g.away}@${g.home}_SPR_home_${g.dk_home_line}_${book.key}`;
-        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.dk_away_line}`, dk: g.dk_away, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
-        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.dk_home_line}`, dk: g.dk_home, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
+        const awayOdds = g.away_odds;
+        const homeOdds = g.home_odds;
+        if (awayOdds == null || homeOdds == null) return;
+        const ak = `${g.away}@${g.home}_SPR_away_${g.away_line}_${book.key}`;
+        const hk = `${g.away}@${g.home}_SPR_home_${g.home_line}_${book.key}`;
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
       });
     }
     if (data.totals) {
@@ -428,10 +455,13 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
         if (new Date(g.commence_time) <= now) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
         if (g.book !== book.key) return;
-        const ok = `${g.away}@${g.home}_TOT_over_${g.dk_line}_${book.key}`;
-        const uk = `${g.away}@${g.home}_TOT_under_${g.dk_line}_${book.key}`;
-        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.dk_line}`, dk: g.dk_over, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
-        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.dk_line}`, dk: g.dk_under, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
+        const overOdds = g.over_odds;
+        const underOdds = g.under_odds;
+        if (overOdds == null || underOdds == null) return;
+        const ok = `${g.away}@${g.home}_TOT_over_${g.line}_${book.key}`;
+        const uk = `${g.away}@${g.home}_TOT_under_${g.line}_${book.key}`;
+        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
+        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
       });
     }
   });
