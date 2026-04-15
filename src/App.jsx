@@ -997,3 +997,79 @@ export default function App() {
                             <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
                               <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                                <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
+                                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+                              </div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
+                          <span>{activePromoBookData.label} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
+                          <span>With Boost: <strong style={{ color: "#10b981" }}>+{boostedOdds}</strong></span>
+                          <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
+                          <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
+                        </div>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
+                          onClick={e => e.stopPropagation()}>
+                          <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
+                              <div>Leg</div>
+                              <div style={{ textAlign: "center" }}>True Win Prob</div>
+                              <div style={{ textAlign: "center" }}>{activePromoBookData.label} Odds</div>
+                              <div style={{ textAlign: "center" }}>Edge</div>
+                            </div>
+                            {p.legs.map((l, li) => {
+                              const tp = ourTrueProb(l.bestOpp);
+                              const bookImpl = impliedProb(l.dk);
+                              const edge = tp - bookImpl;
+                              const tpAm = probToAmerican(tp);
+                              return (
+                                <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
+                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
+                                    {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
+                                  </div>
+                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
+                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: edge >= 0 ? "#10b981" : "#ef4444" }}>{edge >= 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
+                                </div>
+                              );
+                            })}
+                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
+                                Parlay Total <span style={{ color: "#10b981", marginLeft: 6 }}>(+{boostedOdds} w/ boost)</span>
+                              </div>
+                              <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
+                                {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                              </div>
+                              <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>+{p.parlayOdds}</div>
+                              <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</div>
+                            </div>
+                          </div>
+                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
+                            <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * p.combinedProb).toFixed(2)}</strong></div>
+                            <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - p.combinedProb)).toFixed(2)}</strong></div>
+                            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong></div>
+                          </div>
+                          <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
+                            <strong style={{ color: "#10b981" }}>Bottom line:</strong> This parlay has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{ padding: "20px 32px", borderTop: "1px solid rgba(255,255,255,0.06)", textAlign: "center", fontSize: 11, color: "#4b5563" }}>
+        AI Bet Builder — aibetbuilder.io — For informational purposes only. Not financial advice. Please gamble responsibly.
+      </div>
+    </div>
+  );
+}
