@@ -10,27 +10,9 @@ const SPORTS = [
   'icehockey_nhl',
 ];
 
-// =============================================================================
-// Kalshi fee adjustment
-// -----------------------------------------------------------------------------
-// Kalshi shows raw order book prices, but actually takes a fee on every trade.
-// Formula (from Kalshi's published fee schedule):
-//   fee_cents = ceil(0.07 × contracts × P × (1 - P) × 100)
-// For $100 stake at price P cents, net payout is:
-//   net_payout_cents = (1,000,000 - 700 × (100 - P)) / P
-//
-// We apply a 50-cent safety buffer to absorb Kalshi's internal rounding.
-//
-// This function takes raw American odds, back-calculates the implied cent
-// price, applies the fee, and returns fee-adjusted American odds that match
-// what Kalshi actually shows in their Dollars mode UI.
-// =============================================================================
 function applyKalshiFee(rawAmericanOdds) {
   if (rawAmericanOdds === null || rawAmericanOdds === undefined) return rawAmericanOdds;
 
-  // Convert American odds to implied probability (cent price)
-  // +150 → 100 / (150+100) = 0.40 → 40¢
-  // -150 → 150 / (150+100) = 0.60 → 60¢
   let centPrice;
   if (rawAmericanOdds > 0) {
     centPrice = (100 / (rawAmericanOdds + 100)) * 100;
@@ -38,20 +20,16 @@ function applyKalshiFee(rawAmericanOdds) {
     centPrice = (Math.abs(rawAmericanOdds) / (Math.abs(rawAmericanOdds) + 100)) * 100;
   }
 
-  // Kalshi only trades at whole-cent prices
   centPrice = Math.round(centPrice);
-  if (centPrice < 1 || centPrice > 99) return rawAmericanOdds; // edge case, bail
+  if (centPrice < 1 || centPrice > 99) return rawAmericanOdds;
 
-  // Apply fee formula for $100 stake
-  // net_payout_cents = (1,000,000 - 700 × (100 - P)) / P
+  // Net payout in cents for $100 (= 10,000 cents) stake
   const netPayoutCents = (1000000 - 700 * (100 - centPrice)) / centPrice;
-  const netPayoutWithBuffer = netPayoutCents - 50; // 50¢ safety buffer
+  const netPayoutWithBuffer = netPayoutCents - 50;
 
-  // Convert net payout to American odds
-  // decimal_odds = net_payout / 100
-  // American odds: if decimal >= 2, +((decimal-1) × 100); else -(100 / (decimal-1))
-  const decimalOdds = netPayoutWithBuffer / 100;
-  if (decimalOdds < 1) return rawAmericanOdds; // safety check
+  // Decimal odds = net_payout_cents / stake_cents = netPayoutCents / 10000
+  const decimalOdds = netPayoutWithBuffer / 10000;
+  if (decimalOdds < 1) return rawAmericanOdds;
 
   let adjustedAmerican;
   if (decimalOdds >= 2) {
@@ -63,7 +41,6 @@ function applyKalshiFee(rawAmericanOdds) {
   return adjustedAmerican;
 }
 
-// Transform a The Odds API response, fee-adjusting any Kalshi outcomes
 function feeAdjustKalshiOdds(sportData) {
   if (!Array.isArray(sportData)) return sportData;
 
@@ -101,8 +78,6 @@ module.exports = async (req, res) => {
         continue;
       }
       const rawData = await response.json();
-
-      // Fee-adjust any Kalshi odds before storing
       const data = feeAdjustKalshiOdds(rawData);
 
       const { error } = await supabase
