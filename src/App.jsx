@@ -370,6 +370,36 @@ function transformOddsData(gamesArray, sportKey) {
       let bestOppForHome = getBestSpreadOddsAtLine(away, -homePoint);
       const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
       if (bestOppForHome === null) bestOppForHome = awayOutcome.price;
+
+      // ── TEMP DEBUG: log spread opp lookup for every DK leg ──
+      if (b.key === "draftkings") {
+        const oppPricesAway = bookmakers.map(bm => {
+          const m = bm.markets.find(mk => mk.key === "spreads");
+          if (!m) return null;
+          const o = m.outcomes.find(oc => oc.name === home && oc.point === -awayPoint);
+          return o ? { book: bm.key, point: o.point, price: o.price } : null;
+        }).filter(Boolean);
+        const oppPricesHome = bookmakers.map(bm => {
+          const m = bm.markets.find(mk => mk.key === "spreads");
+          if (!m) return null;
+          const o = m.outcomes.find(oc => oc.name === away && oc.point === -homePoint);
+          return o ? { book: bm.key, point: o.point, price: o.price } : null;
+        }).filter(Boolean);
+        console.log("[DEBUG spread]", `${away} ${fmtPoint(awayPoint)} / ${home} ${fmtPoint(homePoint)}`, {
+          dkAwayPrice: awayOutcome.price,
+          dkHomePrice: homeOutcome.price,
+          dkAwayPoint: awayPoint,
+          dkHomePoint: homePoint,
+          searching_for_opp_away: `${home} @ point=${-awayPoint}`,
+          bestOppForAway,
+          allOpposingPricesForAway: oppPricesAway,
+          searching_for_opp_home: `${away} @ point=${-homePoint}`,
+          bestOppForHome,
+          allOpposingPricesForHome: oppPricesHome,
+        });
+      }
+      // ── END TEMP DEBUG ──
+
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
