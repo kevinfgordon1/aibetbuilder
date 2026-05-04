@@ -23,6 +23,22 @@ const ALL_BOOKS = [
   { key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
 ];
 
+// ── Books used to compute "best opposing odds" for true probability ──
+// Exchanges and major US-licensed books only. Offshore books (Bovada, MyBookie,
+// BetOnline, LowVig, BetUS) are excluded because they often post stale or
+// outlier lines that produce phantom edges.
+const TRUSTED_BOOK_KEYS = new Set([
+  "draftkings",
+  "fanduel",
+  "williamhill_us", // Caesars
+  "betmgm",
+  "betrivers",
+  "fanatics",
+  "kalshi",
+  "novig",
+  "prophetx",
+]);
+
 const SPORTS = [
   { key: "basketball_nba", label: "NBA" },
   { key: "baseball_mlb", label: "MLB" },
@@ -257,35 +273,42 @@ function transformOddsData(gamesArray, sportKey) {
       return outcome ? outcome[prop] : null;
     };
 
+    // ── Best-opposing-odds lookups: TRUSTED BOOKS ONLY ──
+    // Returns the best price across trusted books, plus the book it came from.
     const getBestOdds = (marketKey, teamName) => {
       let best = null;
+      let bestBook = null;
       bookmakers.forEach(book => {
+        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === marketKey);
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName);
         if (!outcome) return;
         const val = outcome.price;
         if (val === null || val === undefined) return;
-        if (best === null || val > best) best = val;
+        if (best === null || val > best) { best = val; bestBook = book.key; }
       });
-      return best;
+      return { best, bestBook };
     };
 
     const getBestSpreadOddsAtLine = (teamName, targetPoint) => {
       let best = null;
+      let bestBook = null;
       bookmakers.forEach(book => {
+        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "spreads");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName && o.point === targetPoint);
         if (!outcome) return;
-        if (best === null || outcome.price > best) best = outcome.price;
+        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; }
       });
-      return best;
+      return { best, bestBook };
     };
 
     const countSpreadLinesAtPoint = (teamName, targetPoint) => {
       let count = 0;
       bookmakers.forEach(book => {
+        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "spreads");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName && o.point === targetPoint);
@@ -296,19 +319,22 @@ function transformOddsData(gamesArray, sportKey) {
 
     const getBestTotalOddsAtLine = (side, targetPoint) => {
       let best = null;
+      let bestBook = null;
       bookmakers.forEach(book => {
+        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "totals");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === side && o.point === targetPoint);
         if (!outcome) return;
-        if (best === null || outcome.price > best) best = outcome.price;
+        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; }
       });
-      return best;
+      return { best, bestBook };
     };
 
     const countTotalLinesAtPoint = (side, targetPoint) => {
       let count = 0;
       bookmakers.forEach(book => {
+        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "totals");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === side && o.point === targetPoint);
@@ -320,6 +346,7 @@ function transformOddsData(gamesArray, sportKey) {
     const countMLLines = (teamName) => {
       let count = 0;
       bookmakers.forEach(book => {
+        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "h2h");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName);
@@ -328,6 +355,7 @@ function transformOddsData(gamesArray, sportKey) {
       return count;
     };
 
+    // bookOdds — used by Odds Board display, keep ALL books visible there
     const bookOdds = {};
     ALL_BOOKS.forEach(b => {
       bookOdds[b.key] = {
@@ -343,12 +371,16 @@ function transformOddsData(gamesArray, sportKey) {
       };
     });
 
-    const best_away = getBestOdds("h2h", away);
-    const best_home = getBestOdds("h2h", home);
+    const bestAwayML = getBestOdds("h2h", away);
+    const bestHomeML = getBestOdds("h2h", home);
+    const best_away = bestAwayML.best;
+    const best_home = bestHomeML.best;
 
     moneylines.push({
       away, home, commence_time, bookOdds, sport: sportKey,
       best_away, best_home,
+      best_away_book: bestAwayML.bestBook,
+      best_home_book: bestHomeML.bestBook,
       ml_opp_count_away: countMLLines(home),
       ml_opp_count_home: countMLLines(away),
     });
@@ -364,41 +396,24 @@ function transformOddsData(gamesArray, sportKey) {
       const awayPoint = awayOutcome.point;
       const homePoint = homeOutcome.point;
       const fmtPoint = (p) => p > 0 ? `+${p}` : `${p}`;
-      let bestOppForAway = getBestSpreadOddsAtLine(home, -awayPoint);
-      const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
-      if (bestOppForAway === null) bestOppForAway = homeOutcome.price;
-      let bestOppForHome = getBestSpreadOddsAtLine(away, -homePoint);
-      const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
-      if (bestOppForHome === null) bestOppForHome = awayOutcome.price;
 
-      // ── TEMP DEBUG: log spread opp lookup for every DK leg ──
-      if (b.key === "draftkings") {
-        const oppPricesAway = bookmakers.map(bm => {
-          const m = bm.markets.find(mk => mk.key === "spreads");
-          if (!m) return null;
-          const o = m.outcomes.find(oc => oc.name === home && oc.point === -awayPoint);
-          return o ? { book: bm.key, point: o.point, price: o.price } : null;
-        }).filter(Boolean);
-        const oppPricesHome = bookmakers.map(bm => {
-          const m = bm.markets.find(mk => mk.key === "spreads");
-          if (!m) return null;
-          const o = m.outcomes.find(oc => oc.name === away && oc.point === -homePoint);
-          return o ? { book: bm.key, point: o.point, price: o.price } : null;
-        }).filter(Boolean);
-        console.log("[DEBUG spread]", `${away} ${fmtPoint(awayPoint)} / ${home} ${fmtPoint(homePoint)}`, {
-          dkAwayPrice: awayOutcome.price,
-          dkHomePrice: homeOutcome.price,
-          dkAwayPoint: awayPoint,
-          dkHomePoint: homePoint,
-          searching_for_opp_away: `${home} @ point=${-awayPoint}`,
-          bestOppForAway,
-          allOpposingPricesForAway: oppPricesAway,
-          searching_for_opp_home: `${away} @ point=${-homePoint}`,
-          bestOppForHome,
-          allOpposingPricesForHome: oppPricesHome,
-        });
+      const oppAwayLookup = getBestSpreadOddsAtLine(home, -awayPoint);
+      let bestOppForAway = oppAwayLookup.best;
+      let bestOppForAwayBook = oppAwayLookup.bestBook;
+      const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
+      if (bestOppForAway === null) {
+        bestOppForAway = homeOutcome.price;
+        bestOppForAwayBook = b.key; // fallback to same book
       }
-      // ── END TEMP DEBUG ──
+
+      const oppHomeLookup = getBestSpreadOddsAtLine(away, -homePoint);
+      let bestOppForHome = oppHomeLookup.best;
+      let bestOppForHomeBook = oppHomeLookup.bestBook;
+      const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
+      if (bestOppForHome === null) {
+        bestOppForHome = awayOutcome.price;
+        bestOppForHomeBook = b.key;
+      }
 
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
@@ -407,6 +422,8 @@ function transformOddsData(gamesArray, sportKey) {
         away_line: fmtPoint(awayPoint), home_line: fmtPoint(homePoint),
         away_point: awayPoint, home_point: homePoint,
         bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
+        bestOpp_away_book: bestOppForAwayBook,
+        bestOpp_home_book: bestOppForHomeBook,
         bestOppCount_away: oppCountForAway || 1,
         bestOppName_away: `${home} ${fmtPoint(-awayPoint)}`,
         bestOppCount_home: oppCountForHome || 1,
@@ -423,17 +440,32 @@ function transformOddsData(gamesArray, sportKey) {
       const underOutcome = totMarket.outcomes.find(o => o.name === "Under");
       if (!overOutcome || !underOutcome) return;
       const line = overOutcome.point;
-      let bestOppForOver = getBestTotalOddsAtLine("Under", line);
+
+      const oppOverLookup = getBestTotalOddsAtLine("Under", line);
+      let bestOppForOver = oppOverLookup.best;
+      let bestOppForOverBook = oppOverLookup.bestBook;
       const oppCountForOver = countTotalLinesAtPoint("Under", line);
-      if (bestOppForOver === null) bestOppForOver = underOutcome.price;
-      let bestOppForUnder = getBestTotalOddsAtLine("Over", line);
+      if (bestOppForOver === null) {
+        bestOppForOver = underOutcome.price;
+        bestOppForOverBook = b.key;
+      }
+
+      const oppUnderLookup = getBestTotalOddsAtLine("Over", line);
+      let bestOppForUnder = oppUnderLookup.best;
+      let bestOppForUnderBook = oppUnderLookup.bestBook;
       const oppCountForUnder = countTotalLinesAtPoint("Over", line);
-      if (bestOppForUnder === null) bestOppForUnder = overOutcome.price;
+      if (bestOppForUnder === null) {
+        bestOppForUnder = overOutcome.price;
+        bestOppForUnderBook = b.key;
+      }
+
       totals.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
         line, over_odds: overOutcome.price, under_odds: underOutcome.price,
         bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
+        bestOpp_over_book: bestOppForOverBook,
+        bestOpp_under_book: bestOppForUnderBook,
         bestOppCount_over: oppCountForOver || 1,
         bestOppName_over: `u${line}`,
         bestOppCount_under: oppCountForUnder || 1,
@@ -535,9 +567,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
       if (minLegOdds === null || awayOdds >= minLegOdds)
-        legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.ml_opp_count_away, bestOppName: `${g.home} ML` });
+        legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, bestOppBook: g.best_home_book, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.ml_opp_count_away, bestOppName: `${g.home} ML` });
       if (minLegOdds === null || homeOdds >= minLegOdds)
-        legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.ml_opp_count_home, bestOppName: `${g.away} ML` });
+        legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, bestOppBook: g.best_away_book, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.ml_opp_count_home, bestOppName: `${g.away} ML` });
     });
   }
 
@@ -553,8 +585,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (awayOdds == null || homeOdds == null) return;
       const ak = `${g.away}@${g.home}_away_${g.away_line}`;
       const hk = `${g.away}@${g.home}_home_${g.home_line}`;
-      if (!seen.has(ak) && (minLegOdds === null || awayOdds >= minLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
-      if (!seen.has(hk) && (minLegOdds === null || homeOdds >= minLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
+      if (!seen.has(ak) && (minLegOdds === null || awayOdds >= minLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, bestOppBook: g.bestOpp_away_book, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
+      if (!seen.has(hk) && (minLegOdds === null || homeOdds >= minLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, bestOppBook: g.bestOpp_home_book, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
     });
   }
 
@@ -570,8 +602,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_over_${g.line}`;
       const uk = `${g.away}@${g.home}_under_${g.line}`;
-      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
-      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
+      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, bestOppBook: g.bestOpp_over_book, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
+      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, bestOppBook: g.bestOpp_under_book, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
     });
   }
 
@@ -593,8 +625,8 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
         if (awayOdds == null || homeOdds == null) return;
         const ak = `${g.away}@${g.home}_ML_away_${book.key}`;
         const hk = `${g.away}@${g.home}_ML_home_${book.key}`;
-        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.ml_opp_count_away, bestOppName: `${g.home} ML` }); }
-        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.ml_opp_count_home, bestOppName: `${g.away} ML` }); }
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ML`, dk: awayOdds, bestOpp: g.best_home, bestOppBook: g.best_home_book, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.ml_opp_count_away, bestOppName: `${g.home} ML` }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ML`, dk: homeOdds, bestOpp: g.best_away, bestOppBook: g.best_away_book, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.ml_opp_count_home, bestOppName: `${g.away} ML` }); }
       });
     }
     if (data.run_lines) {
@@ -607,8 +639,8 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
         if (awayOdds == null || homeOdds == null) return;
         const ak = `${g.away}@${g.home}_SPR_away_${g.away_line}_${book.key}`;
         const hk = `${g.away}@${g.home}_SPR_home_${g.home_line}_${book.key}`;
-        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
-        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, bestOpp: g.bestOpp_away, bestOppBook: g.bestOpp_away_book, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_away, bestOppName: g.bestOppName_away }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, bestOpp: g.bestOpp_home, bestOppBook: g.bestOpp_home_book, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_home, bestOppName: g.bestOppName_home }); }
       });
     }
     if (data.totals) {
@@ -621,8 +653,8 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
         if (overOdds == null || underOdds == null) return;
         const ok = `${g.away}@${g.home}_TOT_over_${g.line}_${book.key}`;
         const uk = `${g.away}@${g.home}_TOT_under_${g.line}_${book.key}`;
-        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
-        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
+        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, bestOpp: g.bestOpp_over, bestOppBook: g.bestOpp_over_book, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_over, bestOppName: g.bestOppName_over }); }
+        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, bestOpp: g.bestOpp_under, bestOppBook: g.bestOpp_under_book, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppCount: g.bestOppCount_under, bestOppName: g.bestOppName_under }); }
       });
     }
   });
@@ -977,6 +1009,8 @@ export default function App() {
   const labelStyle = { fontSize: 13, fontWeight: 600, color: "#8a8f98" };
   const activePromoBookData = ALL_BOOKS.find(b => b.key === promoBook) || ALL_BOOKS[0];
 
+  const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || key;
+
   return (
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -1045,7 +1079,7 @@ export default function App() {
           {activeTab === "ev" && (
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines.
+                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX).
               </div>
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -1093,6 +1127,9 @@ export default function App() {
                               {b.bestOppCount != null && b.bestOppName && (
                                 <div style={{ fontSize: 11, color: "#4b5563", marginTop: 4 }}>{b.bestOppCount} {b.bestOppCount === 1 ? "line" : "lines"} @ {b.bestOppName}</div>
                               )}
+                              {b.bestOppBook && (
+                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>Best opp on: {getBookLabel(b.bestOppBook)} @ {formatOdds(b.bestOpp)}</div>
+                              )}
                             </div>
                             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
                               <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>Book Implied</div>
@@ -1125,7 +1162,7 @@ export default function App() {
 
           {activeTab === "promo" && (
             <div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value.</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX).</div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
@@ -1234,9 +1271,9 @@ export default function App() {
                         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
                           onClick={e => e.stopPropagation()}>
                           <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
                               <div>Leg</div>
-                              <div style={{ textAlign: "center" }}>True Win Prob</div>
+                              <div style={{ textAlign: "center" }}>True Win Prob (best opp)</div>
                               <div style={{ textAlign: "center" }}>{activePromoBookData.label} Odds</div>
                               <div style={{ textAlign: "center" }}>Edge</div>
                             </div>
@@ -1246,17 +1283,24 @@ export default function App() {
                               const edge = tp - bookImpl;
                               const tpAm = probToAmerican(tp);
                               return (
-                                <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
+                                <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
-                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
-                                    {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
+                                  <div style={{ textAlign: "center" }}>
+                                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
+                                      {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
+                                    </div>
+                                    {l.bestOppBook && (
+                                      <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                                        {formatOdds(l.bestOpp)} on {getBookLabel(l.bestOppBook)}
+                                      </div>
+                                    )}
                                   </div>
                                   <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
                                   <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: edge >= 0 ? "#10b981" : "#ef4444" }}>{edge >= 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
                                 </div>
                               );
                             })}
-                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.2fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                               <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
                                 Parlay Total <span style={{ color: "#10b981", marginLeft: 6 }}>(+{boostedOdds} w/ boost)</span>
                               </div>
