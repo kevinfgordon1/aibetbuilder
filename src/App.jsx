@@ -39,6 +39,14 @@ const TRUSTED_BOOK_KEYS = new Set([
   "prophetx",
 ]);
 
+// ── Books with fees/commissions applied at the data ingestion layer ──
+// Used to display a transparency note in the breakdown ("after Kalshi fee",
+// "after 2% commission") so user can sanity check the adjustment.
+const ADJUSTED_BOOK_NOTES = {
+  kalshi: "after Kalshi fee",
+  prophetx: "after 2% commission",
+};
+
 const SPORTS = [
   { key: "basketball_nba", label: "NBA" },
   { key: "baseball_mlb", label: "MLB" },
@@ -1010,6 +1018,7 @@ export default function App() {
   const activePromoBookData = ALL_BOOKS.find(b => b.key === promoBook) || ALL_BOOKS[0];
 
   const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || key;
+  const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
@@ -1079,7 +1088,7 @@ export default function App() {
           {activeTab === "ev" && (
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX).
+                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.
               </div>
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -1097,6 +1106,7 @@ export default function App() {
                   const isExpanded = expandedEV === i;
                   const profit = (dkDecimal(b.dk) - 1) * 100;
                   const trueProbAm = probToAmerican(b.prob);
+                  const adjustmentNote = getAdjustmentNote(b.bestOppBook);
                   return (
                     <div key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
                       onClick={() => setExpandedEV(isExpanded ? null : i)}>
@@ -1128,7 +1138,10 @@ export default function App() {
                                 <div style={{ fontSize: 11, color: "#4b5563", marginTop: 4 }}>{b.bestOppCount} {b.bestOppCount === 1 ? "line" : "lines"} @ {b.bestOppName}</div>
                               )}
                               {b.bestOppBook && (
-                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>Best opp on: {getBookLabel(b.bestOppBook)} @ {formatOdds(b.bestOpp)}</div>
+                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>
+                                  Best opp on: {getBookLabel(b.bestOppBook)} @ {formatOdds(b.bestOpp)}
+                                  {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
+                                </div>
                               )}
                             </div>
                             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "12px 16px", flex: 1, minWidth: 140 }}>
@@ -1162,7 +1175,7 @@ export default function App() {
 
           {activeTab === "promo" && (
             <div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX).</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.</div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
@@ -1282,6 +1295,7 @@ export default function App() {
                               const bookImpl = impliedProb(l.dk);
                               const edge = tp - bookImpl;
                               const tpAm = probToAmerican(tp);
+                              const adjustmentNote = getAdjustmentNote(l.bestOppBook);
                               return (
                                 <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
@@ -1292,6 +1306,7 @@ export default function App() {
                                     {l.bestOppBook && (
                                       <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
                                         {formatOdds(l.bestOpp)} on {getBookLabel(l.bestOppBook)}
+                                        {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
                                       </div>
                                     )}
                                   </div>
