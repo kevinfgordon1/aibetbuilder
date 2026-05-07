@@ -11,7 +11,7 @@ const SPORTS = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
-// Kalshi fee adjustment (unchanged from existing)
+// Kalshi fee adjustment
 // ─────────────────────────────────────────────────────────────────────────
 function applyKalshiFee(rawAmericanOdds) {
   if (rawAmericanOdds === null || rawAmericanOdds === undefined) return rawAmericanOdds;
@@ -39,9 +39,8 @@ function applyKalshiFee(rawAmericanOdds) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// ProphetX commission adjustment (NEW)
-// ProphetX takes 2% on net winnings only. So a raw +128 actually pays
-// out as if it were +125 because winnings are reduced by 2%.
+// ProphetX commission adjustment
+// ProphetX takes 2% on net winnings only.
 // ─────────────────────────────────────────────────────────────────────────
 const PROPHETX_COMMISSION_RATE = 0.02; // 2%
 
@@ -102,14 +101,20 @@ function applyBookAdjustments(sportData) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Main handler — unchanged structure, only the adjustment function name
-// changed from feeAdjustKalshiOdds to applyBookAdjustments
+// Main handler
+// Regions:
+//   us  — DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Bovada, MyBookie,
+//          BetOnline, LowVig, BetUS
+//   us2 — Hard Rock Bet, theScore Bet (formerly ESPN Bet), Bally Bet,
+//          BetAnything, betPARX, Fliff
+//   us_ex — Kalshi, Novig, ProphetX, BetOpenly, Polymarket
+// Cost per invocation: 3 regions × 3 markets × 3 sports = 27 credits
 // ─────────────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   try {
     const results = [];
     for (const sport of SPORTS) {
-      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us_ex&markets=h2h,spreads,totals&oddsFormat=american`;
+      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=h2h,spreads,totals&oddsFormat=american`;
       const response = await fetch(url);
       if (!response.ok) {
         console.error(`Failed to fetch ${sport}: ${response.status}`);
