@@ -13,6 +13,8 @@ const ALL_BOOKS = [
   { key: "betmgm", label: "BetMGM", color: "#c4a962", bg: "rgba(196,169,98,0.15)", logo: "https://sports.betmgm.com/favicon.ico" },
   { key: "betrivers", label: "BetRivers", color: "#4a9eff", bg: "rgba(74,158,255,0.15)", logo: "https://www.betrivers.com/favicon.ico" },
   { key: "fanatics", label: "Fanatics", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: "https://sportsbook.fanatics.com/favicon.ico" },
+  { key: "hardrockbet", label: "Hard Rock", color: "#d4af37", bg: "rgba(212,175,55,0.15)", logo: "https://app.hardrock.bet/favicon.ico" },
+  { key: "espnbet", label: "theScore Bet", color: "#ff6600", bg: "rgba(255,102,0,0.15)", logo: "https://sportsbook.thescore.bet/favicon.ico" },
   { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: null },
   { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
   { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
@@ -24,9 +26,9 @@ const ALL_BOOKS = [
 ];
 
 // ── Books used to compute "best opposing odds" for true probability ──
-// Exchanges and major US-licensed books only. Offshore books (Bovada, MyBookie,
-// BetOnline, LowVig, BetUS) are excluded because they often post stale or
-// outlier lines that produce phantom edges.
+// US-licensed major books + sharp exchanges only. Offshore books (Bovada,
+// MyBookie, BetOnline, LowVig, BetUS) are excluded because they often post
+// stale or outlier lines that produce phantom edges.
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings",
   "fanduel",
@@ -34,6 +36,8 @@ const TRUSTED_BOOK_KEYS = new Set([
   "betmgm",
   "betrivers",
   "fanatics",
+  "hardrockbet",
+  "espnbet", // theScore Bet
   "kalshi",
   "novig",
   "prophetx",
@@ -1088,7 +1092,7 @@ export default function App() {
           {activeTab === "ev" && (
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.
+                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.
               </div>
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -1175,7 +1179,7 @@ export default function App() {
 
           {activeTab === "promo" && (
             <div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.</div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
