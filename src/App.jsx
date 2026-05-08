@@ -1085,6 +1085,9 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
 
       {!authLoading && !user && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(10,11,15,0.85)", backdropFilter: "blur(8px)" }}>
@@ -1111,7 +1114,38 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {fetchedAt && <div style={{ fontSize: 11, color: "#4b5563" }}>Updated {new Date(fetchedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET</div>}
+          {fetchedAt && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 11, color: "#4b5563" }}>
+                Updated {new Date(fetchedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET
+              </div>
+              <button
+                onClick={fetchOdds}
+                disabled={dataLoading}
+                title="Refresh odds data (your settings stay the same)"
+                style={{
+                  background: "rgba(59,130,246,0.1)",
+                  border: "1px solid rgba(59,130,246,0.3)",
+                  borderRadius: 6,
+                  color: "#3b82f6",
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: dataLoading ? "wait" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  opacity: dataLoading ? 0.6 : 1,
+                  transition: "all 0.2s",
+                }}
+                onMouseEnter={e => { if (!dataLoading) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
+                onMouseLeave={e => { if (!dataLoading) e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
+              >
+                <span style={{ display: "inline-block", animation: dataLoading ? "spin 1s linear infinite" : "none" }}>↻</span>
+                {dataLoading ? "Refreshing" : "Refresh"}
+              </button>
+            </div>
+          )}
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <img src={user.user_metadata?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)" }} />
