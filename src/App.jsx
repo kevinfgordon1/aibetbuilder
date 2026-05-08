@@ -993,19 +993,20 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const fetchOdds = async () => {
+    setDataLoading(true);
+    const { data, error } = await supabase
+      .from("odds_cache")
+      .select("*")
+      .in("sport", ["basketball_nba", "baseball_mlb", "icehockey_nhl"]);
+    if (error || !data) { setDataLoading(false); return; }
+    const transformed = data.map(row => transformOddsData(row.data, row.sport));
+    setAllOddsData(mergeOddsData(transformed));
+    setFetchedAt(data[0]?.fetched_at);
+    setDataLoading(false);
+  };
+
   useEffect(() => {
-    async function fetchOdds() {
-      setDataLoading(true);
-      const { data, error } = await supabase
-        .from("odds_cache")
-        .select("*")
-        .in("sport", ["basketball_nba", "baseball_mlb", "icehockey_nhl"]);
-      if (error || !data) { setDataLoading(false); return; }
-      const transformed = data.map(row => transformOddsData(row.data, row.sport));
-      setAllOddsData(mergeOddsData(transformed));
-      setFetchedAt(data[0]?.fetched_at);
-      setDataLoading(false);
-    }
     fetchOdds();
   }, []);
 
