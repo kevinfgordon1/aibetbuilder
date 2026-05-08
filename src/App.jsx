@@ -26,9 +26,6 @@ const ALL_BOOKS = [
 ];
 
 // ── Books used to compute "best opposing odds" for true probability ──
-// US-licensed major books + sharp exchanges only. Offshore books (Bovada,
-// MyBookie, BetOnline, LowVig, BetUS) are excluded because they often post
-// stale or outlier lines that produce phantom edges.
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings",
   "fanduel",
@@ -43,9 +40,6 @@ const TRUSTED_BOOK_KEYS = new Set([
   "prophetx",
 ]);
 
-// ── Books with fees/commissions applied at the data ingestion layer ──
-// Used to display a transparency note in the breakdown ("after Kalshi fee",
-// "after 2% commission") so user can sanity check the adjustment.
 const ADJUSTED_BOOK_NOTES = {
   kalshi: "after Kalshi fee",
   prophetx: "after 2% commission",
@@ -62,6 +56,11 @@ const DATE_RANGES = [
   { val: "24h", label: "Next 24h" },
   { val: "7d", label: "7 Days" },
   { val: "any", label: "Any" },
+];
+
+const PROMO_TYPES = [
+  { val: "boost", label: "Profit Boost" },
+  { val: "freebet", label: "Free Bet" },
 ];
 
 function isWithinDateRange(commence_time, range) {
@@ -285,8 +284,6 @@ function transformOddsData(gamesArray, sportKey) {
       return outcome ? outcome[prop] : null;
     };
 
-    // ── Best-opposing-odds lookups: TRUSTED BOOKS ONLY ──
-    // Returns the best price across trusted books, plus the book it came from.
     const getBestOdds = (marketKey, teamName) => {
       let best = null;
       let bestBook = null;
@@ -367,7 +364,6 @@ function transformOddsData(gamesArray, sportKey) {
       return count;
     };
 
-    // bookOdds — used by Odds Board display, keep ALL books visible there
     const bookOdds = {};
     ALL_BOOKS.forEach(b => {
       bookOdds[b.key] = {
@@ -415,7 +411,7 @@ function transformOddsData(gamesArray, sportKey) {
       const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
       if (bestOppForAway === null) {
         bestOppForAway = homeOutcome.price;
-        bestOppForAwayBook = b.key; // fallback to same book
+        bestOppForAwayBook = b.key;
       }
 
       const oppHomeLookup = getBestSpreadOddsAtLine(away, -homePoint);
@@ -566,6 +562,37 @@ function calcParlayEV(legs, boostPct, stake) {
   return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
 }
 
+// ─── FREE BET CONVERSION MATH ────────────────────────────────────────────
+// User holds free bet of face value $X on a sportsbook.
+// User picks a leg with odds d_fb (decimal) on that book.
+// User hedges $H on opposing side at d_h (decimal) on best trusted book.
+//
+// If free bet wins (prob p_fb):  cash = (d_fb - 1) * X   (free bet pays profit only)
+// If hedge wins (prob 1 - p_fb): cash = H * d_h
+//
+// Solve for hedge stake H that equalizes both outcomes (zero variance):
+//   (d_fb - 1) * X - H = H * d_h - H
+//   (d_fb - 1) * X = H * d_h
+//   H = (d_fb - 1) * X / d_h
+//
+// Guaranteed cash = (d_fb - 1) * X - H = H * (d_h - 1)
+// Conversion rate = guaranteed cash / X
+// ─────────────────────────────────────────────────────────────────────────
+function calcFreeBetConversion(fbOddsAmerican, hedgeOddsAmerican, freeBetAmount) {
+  if (!fbOddsAmerican || !hedgeOddsAmerican || !freeBetAmount) {
+    return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };
+  }
+  const d_fb = dkDecimal(fbOddsAmerican);
+  const d_h = dkDecimal(hedgeOddsAmerican);
+  if (d_fb <= 1 || d_h <= 1) {
+    return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };
+  }
+  const hedgeStake = (d_fb - 1) * freeBetAmount / d_h;
+  const guaranteedCash = hedgeStake * (d_h - 1);
+  const conversionRate = guaranteedCash / freeBetAmount;
+  return { hedgeStake, guaranteedCash, conversionRate, valid: true, d_fb, d_h };
+}
+
 function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any") {
   const legs = [];
   const now = new Date();
@@ -708,6 +735,31 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   }
 
   results.sort((a, b) => b.ev - a.ev);
+  return results.slice(0, maxResults);
+}
+
+// ─── Find top free bet conversions ───────────────────────────────────────
+// Each leg on the chosen sportsbook becomes a candidate. For each one we
+// look up the best opposing-side hedge at the matching line among trusted
+// books, then compute conversion. Sort by conversion rate descending.
+function findTopFreeBetConversions(legs, freeBetAmount, maxResults = 10) {
+  const results = [];
+  legs.forEach(l => {
+    if (l.bestOpp == null) return;
+    const conv = calcFreeBetConversion(l.dk, l.bestOpp, freeBetAmount);
+    if (!conv.valid) return;
+    if (conv.conversionRate <= 0) return;
+    results.push({
+      leg: l,
+      hedgeStake: conv.hedgeStake,
+      guaranteedCash: conv.guaranteedCash,
+      conversionRate: conv.conversionRate,
+      hedgeOddsAmerican: l.bestOpp,
+      hedgeBookKey: l.bestOppBook,
+      hedgeName: l.bestOppName,
+    });
+  });
+  results.sort((a, b) => b.conversionRate - a.conversionRate);
   return results.slice(0, maxResults);
 }
 
@@ -912,6 +964,7 @@ function OddsBoard({ oddsData }) {
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [] });
   const [activeTab, setActiveTab] = useState("promo");
+  const [promoType, setPromoType] = useState("boost"); // "boost" or "freebet"
   const [boostPct, setBoostPct] = useState(30);
   const [stake, setStake] = useState(100);
   const [numLegs, setNumLegs] = useState(3);
@@ -920,6 +973,7 @@ export default function App() {
   const [promoDateRange, setPromoDateRange] = useState("any");
   const [promoPage, setPromoPage] = useState(5);
   const [expandedPromo, setExpandedPromo] = useState(null);
+  const [expandedFreeBet, setExpandedFreeBet] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(["basketball_nba", "baseball_mlb", "icehockey_nhl"]));
@@ -959,7 +1013,8 @@ export default function App() {
   useEffect(() => {
     setPromoPage(5);
     setExpandedPromo(null);
-  }, [promoBook, promoSports, promoDateRange, boostPct, stake, numLegs, minFinalOdds, minLegOdds]);
+    setExpandedFreeBet(null);
+  }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, numLegs, minFinalOdds, minLegOdds]);
 
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
@@ -978,10 +1033,10 @@ export default function App() {
   const positiveEV = evBets.filter(b => b.ev > 0);
 
   const promoSportFilter = promoSports.size === 3 ? null : [...promoSports];
-  const parsedMinLeg = minLegOdds !== "" ? Number(minLegOdds) : null;
+  const parsedMinLeg = (promoType === "boost" && minLegOdds !== "") ? Number(minLegOdds) : null;
   const promoLegs = buildAllLegsForBook(allOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
-  const parsedMinFinal = minFinalOdds !== "" ? Number(minFinalOdds) : null;
-  const topParlays = findTopParlays(promoLegs, numLegs, boostPct, stake, 10, parsedMinFinal);
+  const parsedMinFinal = (promoType === "boost" && minFinalOdds !== "") ? Number(minFinalOdds) : null;
+  const topParlays = promoType === "boost" ? findTopParlays(promoLegs, numLegs, boostPct, stake, 50, parsedMinFinal) : [];
 
   const topParlaysWithHedge = useMemo(() => {
     return topParlays.map(p => {
@@ -990,6 +1045,8 @@ export default function App() {
       return { ...p, hedgeLegs, hedgeResult, isGuaranteed: hedgeResult.isGuaranteed };
     });
   }, [topParlays, stake, boostPct]);
+
+  const topFreeBetConversions = promoType === "freebet" ? findTopFreeBetConversions(promoLegs, stake, 50) : [];
 
   const togglePromoSport = (sportKey) => {
     setPromoSports(prev => {
@@ -1179,8 +1236,20 @@ export default function App() {
 
           {activeTab === "promo" && (
             <div>
-              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.</div>
+              <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+                {promoType === "boost"
+                  ? "Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted."
+                  : "Convert your free bet into guaranteed cash. Pick the leg you'll place the free bet on, hedge at the best opposing odds across trusted books, lock in real money. Higher conversion rates are better. Kalshi and ProphetX prices are fee-adjusted."}
+              </div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
+                {controlBox(<>
+                  <label style={labelStyle}>Promo Type</label>
+                  {PROMO_TYPES.map(opt => (
+                    <button key={opt.val} onClick={() => setPromoType(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </>)}
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
                   <select value={promoBook} onChange={e => { setPromoBook(e.target.value); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
@@ -1203,159 +1272,306 @@ export default function App() {
                     </button>
                   ))}
                 </>)}
-                {controlBox(<>
+                {/* Boost-only fields */}
+                {promoType === "boost" && controlBox(<>
                   <label style={labelStyle}>Boost %</label>
                   <input type="number" value={boostPct} onChange={(e) => setBoostPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                 </>)}
+                {/* Stake / Free Bet Amount — present in both modes, label changes */}
                 {controlBox(<>
-                  <label style={labelStyle}>Stake $</label>
+                  <label style={labelStyle}>{promoType === "freebet" ? "Free Bet $" : "Stake $"}</label>
                   <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                 </>)}
-                {controlBox(<>
+                {/* Boost-only fields continued */}
+                {promoType === "boost" && controlBox(<>
                   <label style={labelStyle}>Legs</label>
                   {[1, 2, 3].map(n => (
                     <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
                   ))}
                 </>)}
-                {controlBox(<>
+                {promoType === "boost" && controlBox(<>
                   <label style={labelStyle}>Min Final Odds</label>
                   <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                 </>)}
-                {numLegs >= 2 && controlBox(<>
+                {promoType === "boost" && numLegs >= 2 && controlBox(<>
                   <label style={labelStyle}>Min Leg Odds</label>
                   <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                 </>)}
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {topParlaysWithHedge.length === 0 && (
-                  <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
-                    <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
-                    <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
-                  </div>
-                )}
-                {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
-                  const isExpanded = expandedPromo === i;
-                  const trueParlayOdds = probToAmerican(p.combinedProb);
-                  const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
+              {/* ─── PROFIT BOOST RESULTS ─── */}
+              {promoType === "boost" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {topParlaysWithHedge.length === 0 && (
+                    <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
+                      <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
+                    </div>
+                  )}
+                  {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
+                    const isExpanded = expandedPromo === i;
+                    const trueParlayOdds = probToAmerican(p.combinedProb);
+                    const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
 
-                  return (
-                    <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
-                      onClick={() => setExpandedPromo(isExpanded ? null : i)}>
-                      <div style={{ padding: "20px 24px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
-                            <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
-                          </div>
-                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: p.ev > 0 ? "#10b981" : "#ef4444" }}>+${p.ev.toFixed(2)} EV</div>
-                        </div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                          {p.legs.map((l, li) => (
-                            <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                                <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
-                                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
-                              </div>
-                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}</div>
+                    return (
+                      <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                        onClick={() => setExpandedPromo(isExpanded ? null : i)}>
+                        <div style={{ padding: "20px 24px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                             </div>
-                          ))}
-                        </div>
-                        <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
-                          <span>{activePromoBookData.label} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
-                          <span>With Boost: <strong style={{ color: "#10b981" }}>+{boostedOdds}</strong></span>
-                          <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
-                          <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: p.ev > 0 ? "#10b981" : "#ef4444" }}>+${p.ev.toFixed(2)} EV</div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                            {p.legs.map((l, li) => (
+                              <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                                  <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
+                                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
+                            <span>{activePromoBookData.label} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
+                            <span>With Boost: <strong style={{ color: "#10b981" }}>+{boostedOdds}</strong></span>
+                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
+                            <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
+                          </div>
+
+                          {p.isGuaranteed && (
+                            <div onClick={e => e.stopPropagation()}>
+                              <GuaranteedBadge
+                                legs={p.hedgeLegs}
+                                numLegs={p.legs.length}
+                                stake={stake}
+                                boostedProfit={p.boostedProfit}
+                                ev={p.ev}
+                                hedgeResult={p.hedgeResult}
+                              />
+                            </div>
+                          )}
                         </div>
 
-                        {p.isGuaranteed && (
-                          <div onClick={e => e.stopPropagation()}>
-                            <GuaranteedBadge
-                              legs={p.hedgeLegs}
-                              numLegs={p.legs.length}
-                              stake={stake}
-                              boostedProfit={p.boostedProfit}
-                              ev={p.ev}
-                              hedgeResult={p.hedgeResult}
-                            />
+                        {isExpanded && (
+                          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
+                            onClick={e => e.stopPropagation()}>
+                            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
+                                <div>Leg</div>
+                                <div style={{ textAlign: "center" }}>True Win Prob (best opp)</div>
+                                <div style={{ textAlign: "center" }}>{activePromoBookData.label} Odds</div>
+                                <div style={{ textAlign: "center" }}>Edge</div>
+                              </div>
+                              {p.legs.map((l, li) => {
+                                const tp = ourTrueProb(l.bestOpp);
+                                const bookImpl = impliedProb(l.dk);
+                                const edge = tp - bookImpl;
+                                const tpAm = probToAmerican(tp);
+                                const adjustmentNote = getAdjustmentNote(l.bestOppBook);
+                                return (
+                                  <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
+                                    <div style={{ textAlign: "center" }}>
+                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
+                                        {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
+                                      </div>
+                                      {l.bestOppBook && (
+                                        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                                          {formatOdds(l.bestOpp)} on {getBookLabel(l.bestOppBook)}
+                                          {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
+                                    <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: edge >= 0 ? "#10b981" : "#ef4444" }}>{edge >= 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
+                                  </div>
+                                );
+                              })}
+                              <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
+                                  Parlay Total <span style={{ color: "#10b981", marginLeft: 6 }}>(+{boostedOdds} w/ boost)</span>
+                                </div>
+                                <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
+                                  {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                                </div>
+                                <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>+{p.parlayOdds}</div>
+                                <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</div>
+                              </div>
+                            </div>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
+                              <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * p.combinedProb).toFixed(2)}</strong></div>
+                              <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - p.combinedProb)).toFixed(2)}</strong></div>
+                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong></div>
+                            </div>
+                            <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
+                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This parlay has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
+                            </div>
                           </div>
                         )}
                       </div>
+                    );
+                  })}
 
-                      {isExpanded && (
-                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
-                          onClick={e => e.stopPropagation()}>
-                          <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
-                              <div>Leg</div>
-                              <div style={{ textAlign: "center" }}>True Win Prob (best opp)</div>
-                              <div style={{ textAlign: "center" }}>{activePromoBookData.label} Odds</div>
-                              <div style={{ textAlign: "center" }}>Edge</div>
+                  {topParlaysWithHedge.length > promoPage && (
+                    <button
+                      onClick={() => setPromoPage(prev => prev + 5)}
+                      style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
+                      onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
+                      onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
+                    >
+                      Show more ({topParlaysWithHedge.length - promoPage} remaining)
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ─── FREE BET CONVERSION RESULTS ─── */}
+              {promoType === "freebet" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {topFreeBetConversions.length === 0 && (
+                    <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Conversion Opportunities</div>
+                      <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters or selecting a different sportsbook.</div>
+                    </div>
+                  )}
+                  {topFreeBetConversions.slice(0, promoPage).map((c, i) => {
+                    const isExpanded = expandedFreeBet === i;
+                    const adjustmentNote = getAdjustmentNote(c.hedgeBookKey);
+                    const fbAmount = stake;
+
+                    return (
+                      <div key={i} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                        onClick={() => setExpandedFreeBet(isExpanded ? null : i)}>
+                        <div style={{ padding: "20px 24px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#8b5cf6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Conversion" : `Option ${i + 1}`}</div>
                             </div>
-                            {p.legs.map((l, li) => {
-                              const tp = ourTrueProb(l.bestOpp);
-                              const bookImpl = impliedProb(l.dk);
-                              const edge = tp - bookImpl;
-                              const tpAm = probToAmerican(tp);
-                              const adjustmentNote = getAdjustmentNote(l.bestOppBook);
-                              return (
-                                <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
-                                  <div style={{ textAlign: "center" }}>
-                                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
-                                      {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
-                                    </div>
-                                    {l.bestOppBook && (
-                                      <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
-                                        {formatOdds(l.bestOpp)} on {getBookLabel(l.bestOppBook)}
-                                        {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
-                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: edge >= 0 ? "#10b981" : "#ef4444" }}>{edge >= 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
-                                </div>
-                              );
-                            })}
-                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
-                                Parlay Total <span style={{ color: "#10b981", marginLeft: 6 }}>(+{boostedOdds} w/ boost)</span>
-                              </div>
-                              <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
-                              </div>
-                              <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>+{p.parlayOdds}</div>
-                              <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</div>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: "#10b981" }}>${c.guaranteedCash.toFixed(2)}</div>
+                              <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>guaranteed cash · {(c.conversionRate * 100).toFixed(1)}%</div>
                             </div>
                           </div>
-                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-                            <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * p.combinedProb).toFixed(2)}</strong></div>
-                            <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - p.combinedProb)).toFixed(2)}</strong></div>
-                            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong></div>
+
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+                            <div style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 8, padding: "10px 14px" }}>
+                              <div style={{ fontSize: 11, color: "#8b5cf6", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Free Bet On</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.leg.name}</div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                                <span style={{ fontSize: 11, color: "#6b7280" }}>{c.leg.market} — {activePromoBookData.label}</span>
+                                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: c.leg.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(c.leg.dk)}</span>
+                              </div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${fbAmount} free bet</div>
+                            </div>
+                            <div style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "10px 14px" }}>
+                              <div style={{ fontSize: 11, color: "#10b981", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Hedge With Cash</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.hedgeName}</div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                                <span style={{ fontSize: 11, color: "#6b7280" }}>{getBookLabel(c.hedgeBookKey)}</span>
+                                <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: c.hedgeOddsAmerican > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(c.hedgeOddsAmerican)}</span>
+                              </div>
+                              <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${c.hedgeStake.toFixed(2)} hedge stake</div>
+                              {adjustmentNote && <div style={{ fontSize: 10, color: "#06b6d4", marginTop: 2 }}>({adjustmentNote})</div>}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                            <strong style={{ color: "#10b981" }}>Bottom line:</strong> This parlay has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
+
+                          <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
+                            <span>Game: <strong style={{ color: "#e8eaed" }}>{c.leg.game}</strong></span>
+                            <span>Sport: <strong style={{ color: "#e8eaed" }}>{c.leg.sport.replace("_", " ").toUpperCase()}</strong></span>
+                            <span>Conversion: <strong style={{ color: "#10b981" }}>{(c.conversionRate * 100).toFixed(1)}%</strong></span>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
 
-                {/* Show more button */}
-                {topParlaysWithHedge.length > promoPage && (
-                  <button
-                    onClick={() => setPromoPage(prev => prev + 5)}
-                    style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
-                    onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
-                    onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
-                  >
-                    Show more ({topParlaysWithHedge.length - promoPage} remaining)
-                  </button>
-                )}
-              </div>
+                        {isExpanded && (
+                          <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 8 }}>How to lock in the conversion</div>
+                            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place both bets at the same time. Whatever happens in the game, you keep ${c.guaranteedCash.toFixed(2)}.</div>
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Use your free bet on {activePromoBookData.label}</div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.leg.name}</div>
+                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{c.leg.market} · {formatOdds(c.leg.dk)} · {formatET(c.leg.commence_time)}</div>
+                                </div>
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${fbAmount.toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, color: "#6b7280" }}>free bet</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 2 — Hedge with real cash on {getBookLabel(c.hedgeBookKey)}</div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.hedgeName}</div>
+                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatOdds(c.hedgeOddsAmerican)} on {getBookLabel(c.hedgeBookKey)}{adjustmentNote && <span style={{ color: "#06b6d4" }}> ({adjustmentNote})</span>}</div>
+                                </div>
+                                <div style={{ textAlign: "right" }}>
+                                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${c.hedgeStake.toFixed(2)}</div>
+                                  <div style={{ fontSize: 11, color: "#6b7280" }}>cash stake</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={{ marginBottom: 14 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — both paths return ${c.guaranteedCash.toFixed(2)}</div>
+                              <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                  <div>Outcome</div>
+                                  <div style={{ textAlign: "right" }}>Free Bet</div>
+                                  <div style={{ textAlign: "right" }}>Net Cash</div>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 12, alignItems: "center" }}>
+                                  <div style={{ color: "#e8eaed" }}>Free bet WINS, hedge LOSES</div>
+                                  <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#10b981" }}>+${((c.leg.dk > 0 ? c.leg.dk / 100 : 100 / Math.abs(c.leg.dk)) * fbAmount).toFixed(2)}</div>
+                                  <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${c.guaranteedCash.toFixed(2)}</div>
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", fontSize: 12, alignItems: "center" }}>
+                                  <div style={{ color: "#e8eaed" }}>Free bet LOSES, hedge WINS</div>
+                                  <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#6b7280" }}>$0 (no stake)</div>
+                                  <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${c.guaranteedCash.toFixed(2)}</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
+                              <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
+                              <div>Hedge stake = (free bet decimal − 1) × free bet $ ÷ hedge decimal</div>
+                              <div>= ({dkDecimal(c.leg.dk).toFixed(3)} − 1) × ${fbAmount} ÷ {dkDecimal(c.hedgeOddsAmerican).toFixed(3)}</div>
+                              <div>= <strong style={{ color: "#10b981" }}>${c.hedgeStake.toFixed(2)}</strong></div>
+                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Guaranteed cash = ${c.hedgeStake.toFixed(2)} × ({dkDecimal(c.hedgeOddsAmerican).toFixed(3)} − 1) = <strong style={{ color: "#10b981" }}>${c.guaranteedCash.toFixed(2)}</strong></div>
+                              <div>Conversion rate = ${c.guaranteedCash.toFixed(2)} ÷ ${fbAmount} = <strong style={{ color: "#10b981" }}>{(c.conversionRate * 100).toFixed(1)}%</strong></div>
+                            </div>
+
+                            <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.04)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.1)" }}>
+                              <strong style={{ color: "#8b5cf6" }}>Bottom line:</strong> Place a ${fbAmount} free bet on <strong style={{ color: "#e8eaed" }}>{c.leg.name}</strong> and ${c.hedgeStake.toFixed(2)} cash on <strong style={{ color: "#e8eaed" }}>{c.hedgeName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>${c.guaranteedCash.toFixed(2)}</strong> guaranteed — that's a {(c.conversionRate * 100).toFixed(1)}% conversion of the free bet's face value into real cash.
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {topFreeBetConversions.length > promoPage && (
+                    <button
+                      onClick={() => setPromoPage(prev => prev + 5)}
+                      style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
+                      onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
+                      onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
+                    >
+                      Show more ({topFreeBetConversions.length - promoPage} remaining)
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
