@@ -1004,6 +1004,7 @@ export default function App() {
     setAllOddsData(mergeOddsData(transformed));
     setFetchedAt(data[0]?.fetched_at);
     setDataLoading(false);
+    window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
   };
 
   useEffect(() => {
@@ -1018,10 +1019,12 @@ export default function App() {
   }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, numLegs, minFinalOdds, minLegOdds]);
 
   const signInWithGoogle = async () => {
+    window.gtag?.('event', 'sign_in_started', { method: 'google' });
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
   };
 
   const signOut = async () => {
+    window.gtag?.('event', 'sign_out');
     await supabase.auth.signOut();
     setUser(null);
   };
@@ -1164,9 +1167,9 @@ export default function App() {
       </div>
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <button style={tabStyle("promo")} onClick={() => setActiveTab("promo")}>Promo Builder</button>
-        <button style={tabStyle("ev")} onClick={() => setActiveTab("ev")}>+EV Bets</button>
-        <button style={tabStyle("odds")} onClick={() => setActiveTab("odds")}>Odds Board</button>
+        <button style={tabStyle("promo")} onClick={() => { setActiveTab("promo"); window.gtag?.('event', 'tab_switched', { tab: 'promo_builder' }); }}>Promo Builder</button>
+        <button style={tabStyle("ev")} onClick={() => { setActiveTab("ev"); window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' }); }}>+EV Bets</button>
+        <button style={tabStyle("odds")} onClick={() => { setActiveTab("odds"); window.gtag?.('event', 'tab_switched', { tab: 'odds_board' }); }}>Odds Board</button>
       </div>
 
       {dataLoading && (
@@ -1280,14 +1283,14 @@ export default function App() {
                 {controlBox(<>
                   <label style={labelStyle}>Promo Type</label>
                   {PROMO_TYPES.map(opt => (
-                    <button key={opt.val} onClick={() => setPromoType(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
+                    <button key={opt.val} onClick={() => { setPromoType(opt.val); window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val }); }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
                       {opt.label}
                     </button>
                   ))}
                 </>)}
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
-                  <select value={promoBook} onChange={e => { setPromoBook(e.target.value); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+                  <select value={promoBook} onChange={e => { setPromoBook(e.target.value); window.gtag?.('event', 'sportsbook_selected', { book: e.target.value }); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
                     {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
                   </select>
                 </>)}
@@ -1351,7 +1354,7 @@ export default function App() {
 
                     return (
                       <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
-                        onClick={() => setExpandedPromo(isExpanded ? null : i)}>
+                        onClick={() => { setExpandedPromo(isExpanded ? null : i); if (!isExpanded) window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' }); }}>
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1483,7 +1486,7 @@ export default function App() {
 
                     return (
                       <div key={i} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
-                        onClick={() => setExpandedFreeBet(isExpanded ? null : i)}>
+                        onClick={() => { setExpandedFreeBet(isExpanded ? null : i); if (!isExpanded) window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet' }); }}>
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
