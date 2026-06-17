@@ -502,9 +502,12 @@ function transformOddsData(gamesArray, sportKey) {
 // ── Transform per-event ADDITIONAL markets (event_odds_cache) ──────────────
 // Produces extra spread/total legs (from alternate_spreads / alternate_totals)
 // and a new team-total leg type (from team_totals / alternate_team_totals).
-// HALF-POINT LINES ONLY: integer baseball lines (e.g. -1, Over 10) push on the
-// exact margin/total, so they aren't a clean 2-way — we drop them to keep the
-// inverse method exact. Kalshi/ProphetX prices are already fee-adjusted at
+// EXACT HALF-LINES ONLY (x.5): integer lines (run line -1, Over 10, goal handicap
+// 0/-1) push on the exact margin/total, and Asian quarter handicaps (-0.25, -0.75)
+// split the stake into a half-win/half-push — neither is a clean 2-way, so we drop
+// both and keep only true x.5 lines, which keeps the inverse method exact. (Baseball
+// never posts quarter lines, so this is identical to the old filter there; it only
+// matters for soccer handicaps.) Kalshi/ProphetX prices are already fee-adjusted at
 // ingestion, so they're read as-is here, same as featured markets.
 function transformEventOddsData(game, sportKey) {
   const run_lines = [];
@@ -518,7 +521,7 @@ function transformEventOddsData(game, sportKey) {
   const home = game.home_team;
   const commence_time = game.commence_time;
   const bookmakers = game.bookmakers;
-  const isHalf = (p) => p != null && !Number.isInteger(p);
+  const isHalf = (p) => p != null && Math.abs(p % 1) === 0.5;
   const fmtPoint = (p) => (p > 0 ? `+${p}` : `${p}`);
 
   // best opposing odds across TRUSTED books at an exact line
@@ -1208,7 +1211,7 @@ export default function App() {
     setDataLoading(true);
     const [featuredRes, eventRes] = await Promise.all([
       supabase.from("odds_cache").select("*").in("sport", ["baseball_mlb", "soccer_fifa_world_cup"]),
-      supabase.from("event_odds_cache").select("*").in("sport", ["baseball_mlb"]),
+      supabase.from("event_odds_cache").select("*").in("sport", ["baseball_mlb", "soccer_fifa_world_cup"]),
     ]);
     const featuredRows = featuredRes.data;
     if (featuredRes.error || !featuredRows) { setDataLoading(false); return; }
