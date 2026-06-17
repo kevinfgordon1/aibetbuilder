@@ -15,7 +15,7 @@ const SPORTS = [
 // World Cup alt-market coverage with a live pull.
 const EVENT_MARKETS = {
   baseball_mlb: ['alternate_spreads', 'alternate_totals', 'team_totals', 'alternate_team_totals'],
-  // soccer_fifa_world_cup: ['alternate_spreads', 'alternate_totals', 'btts'],
+  soccer_fifa_world_cup: ['alternate_spreads', 'alternate_totals', 'team_totals', 'alternate_team_totals'],
 };
 
 // Only pull per-event markets for games starting within this window. Far-out games
