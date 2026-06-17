@@ -5,9 +5,8 @@ const supabase = createClient(
 );
 
 const SPORTS = [
-  'basketball_nba',
   'baseball_mlb',
-  'icehockey_nhl',
+  'soccer_fifa_world_cup',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -108,7 +107,11 @@ function applyBookAdjustments(sportData) {
 //   us2 — Hard Rock Bet, theScore Bet (formerly ESPN Bet), Bally Bet,
 //          BetAnything, betPARX, Fliff
 //   us_ex — Kalshi, Novig, ProphetX, BetOpenly, Polymarket
-// Cost per invocation: 3 regions × 3 markets × 3 sports = 27 credits
+// Cost per invocation: 3 regions × 3 markets × 2 sports = 18 credits
+//
+// NOTE (soccer_fifa_world_cup): h2h is 3-way (Home / Draw / Away). The draw
+// outcome must be handled downstream before moneyline EV is valid. spreads
+// (Asian handicap) and totals are 2-way and compute normally.
 // ─────────────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   try {
