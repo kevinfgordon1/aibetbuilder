@@ -9,6 +9,20 @@ const SPORTS = [
   'soccer_fifa_world_cup',
 ];
 
+// Per-event additional markets (alt lines + team totals), pulled one game at a time
+// from the /events/{id}/odds endpoint. Sport-aware: ONLY sports listed here get a
+// per-event pull. Starting with MLB; soccer stays off until we verify US-book
+// World Cup alt-market coverage with a live pull.
+const EVENT_MARKETS = {
+  baseball_mlb: ['alternate_spreads', 'alternate_totals', 'team_totals', 'alternate_team_totals'],
+  // soccer_fifa_world_cup: ['alternate_spreads', 'alternate_totals', 'btts'],
+};
+
+// Only pull per-event markets for games starting within this window. Far-out games
+// rarely have alt lines posted yet, and this caps job runtime. Featured lines still
+// cover the full slate; only the alt/team-total layer is gated.
+const EVENT_HORIZON_MS = 24 * 60 * 60 * 1000;
+
 // ─────────────────────────────────────────────────────────────────────────
 // Kalshi fee adjustment
 // ─────────────────────────────────────────────────────────────────────────
@@ -107,7 +121,11 @@ function applyBookAdjustments(sportData) {
 //   us2 — Hard Rock Bet, theScore Bet (formerly ESPN Bet), Bally Bet,
 //          BetAnything, betPARX, Fliff
 //   us_ex — Kalshi, Novig, ProphetX, BetOpenly, Polymarket
-// Cost per invocation: 3 regions × 3 markets × 2 sports = 18 credits
+// Cost per invocation:
+//   Featured (bulk /odds): 3 regions × 3 markets × 2 sports = 18 credits
+//   Per-event (MLB only):  ~15 games × 4 markets × 3 regions ≈ 180 credits
+//   → ~200 credits/invocation when MLB's slate is full. Trivial on the 5M plan;
+//     would have blown the old 100K plan, which is why this waited for the upgrade.
 //
 // NOTE (soccer_fifa_world_cup): h2h is 3-way (Home / Draw / Away). The draw
 // outcome must be handled downstream before moneyline EV is valid. spreads
@@ -132,6 +150,64 @@ module.exports = async (req, res) => {
         console.error(`Supabase upsert error for ${sport}:`, error);
       } else {
         results.push({ sport, games: data.length });
+      }
+
+      // ── Per-event additional markets: alt spreads/totals + team totals ──
+      // Reuses the event ids/commence times from the featured pull above (no extra
+      // /events call needed), gated to games starting within EVENT_HORIZON_MS.
+      const eventMarkets = EVENT_MARKETS[sport];
+      if (eventMarkets && Array.isArray(data)) {
+        const nowMs = Date.now();
+        const horizon = nowMs + EVENT_HORIZON_MS;
+        const eventsInWindow = data.filter(g => {
+          const t = new Date(g.commence_time).getTime();
+          return t > nowMs && t <= horizon;
+        });
+        const marketsParam = eventMarkets.join(',');
+        let eventCount = 0;
+        // Sequential to stay under rate limits; ~15 MLB games ≈ a few seconds.
+        for (const game of eventsInWindow) {
+          try {
+            const evUrl = `https://api.the-odds-api.com/v4/sports/${sport}/events/${game.id}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=${marketsParam}&oddsFormat=american`;
+            const evResp = await fetch(evUrl);
+            if (!evResp.ok) {
+              console.error(`Failed event odds ${sport}/${game.id}: ${evResp.status}`);
+              continue;
+            }
+            const evRaw = await evResp.json();
+            if (!evRaw?.bookmakers?.length) continue; // no alt markets posted yet
+            const evData = applyBookAdjustments([evRaw])[0];
+            const nowIso = new Date().toISOString();
+            const { error: evError } = await supabase
+              .from('event_odds_cache')
+              .upsert({
+                event_id: evData.id,
+                sport,
+                commence_time: evData.commence_time,
+                home_team: evData.home_team,
+                away_team: evData.away_team,
+                data: evData,
+                markets: eventMarkets,
+                fetched_at: nowIso,
+                updated_at: nowIso,
+              }, { onConflict: 'event_id' });
+            if (evError) {
+              console.error(`event_odds_cache upsert error ${sport}/${game.id}:`, evError);
+            } else {
+              eventCount++;
+            }
+          } catch (evErr) {
+            console.error(`event odds exception ${sport}/${game.id}:`, evErr.message);
+          }
+        }
+        // Self-clean: drop finished games (they stop appearing in the feed, so they'd
+        // otherwise linger forever). Keeps the table at just the live/upcoming slate.
+        await supabase
+          .from('event_odds_cache')
+          .delete()
+          .eq('sport', sport)
+          .lt('commence_time', new Date(nowMs - 6 * 60 * 60 * 1000).toISOString());
+        results.push({ sport, event_markets: eventCount });
       }
     }
     res.status(200).json({ success: true, results });
