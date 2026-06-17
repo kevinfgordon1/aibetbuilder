@@ -46,9 +46,8 @@ const ADJUSTED_BOOK_NOTES = {
 };
 
 const SPORTS = [
-  { key: "basketball_nba", label: "NBA" },
   { key: "baseball_mlb", label: "MLB" },
-  { key: "icehockey_nhl", label: "NHL" },
+  { key: "soccer_fifa_world_cup", label: "World Cup" },
 ];
 
 const DATE_RANGES = [
@@ -384,9 +383,17 @@ function transformOddsData(gamesArray, sportKey) {
     const best_away = bestAwayML.best;
     const best_home = bestHomeML.best;
 
+    // 3-way markets (soccer 1X2 with a Draw outcome) break the 2-way inverse
+    // true-prob method, so flag them and exclude their moneylines from EV/parlay legs.
+    const isThreeWay = bookmakers.some(b => {
+      const m = (b.markets || []).find(mk => mk.key === "h2h");
+      return m && m.outcomes.some(o => o.name === "Draw");
+    });
+
     moneylines.push({
       away, home, commence_time, bookOdds, sport: sportKey,
       best_away, best_home,
+      is_three_way: isThreeWay,
       best_away_book: bestAwayML.bestBook,
       best_home_book: bestHomeML.bestBook,
       ml_opp_count_away: countMLLines(home),
@@ -602,6 +609,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (new Date(g.commence_time) <= now) return;
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
+      if (g.is_three_way) return; // skip 3-way moneylines (soccer 1X2) — 2-way method doesn't apply
       const awayOdds = g.bookOdds?.[book]?.ml_away;
       const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
@@ -659,6 +667,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
       data.moneylines.forEach(g => {
         if (new Date(g.commence_time) <= now) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
+        if (g.is_three_way) return; // skip 3-way moneylines (soccer 1X2) — 2-way method doesn't apply
         const awayOdds = g.bookOdds?.[book.key]?.ml_away;
         const homeOdds = g.bookOdds?.[book.key]?.ml_home;
         if (awayOdds == null || homeOdds == null) return;
@@ -785,7 +794,7 @@ function EVBadge({ ev }) {
 
 function SportBadge({ sport }) {
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { basketball_nba: "#f97316", baseball_mlb: "#3b82f6", icehockey_nhl: "#8b5cf6" };
+  const colors = { baseball_mlb: "#3b82f6", soccer_fifa_world_cup: "#10b981" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
       {s?.label || sport}
@@ -976,7 +985,7 @@ export default function App() {
   const [expandedFreeBet, setExpandedFreeBet] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
   const [promoBook, setPromoBook] = useState("draftkings");
-  const [promoSports, setPromoSports] = useState(new Set(["basketball_nba", "baseball_mlb", "icehockey_nhl"]));
+  const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb", "soccer_fifa_world_cup"]));
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
@@ -998,7 +1007,7 @@ export default function App() {
     const { data, error } = await supabase
       .from("odds_cache")
       .select("*")
-      .in("sport", ["basketball_nba", "baseball_mlb", "icehockey_nhl"]);
+      .in("sport", ["baseball_mlb", "soccer_fifa_world_cup"]);
     if (error || !data) { setDataLoading(false); return; }
     const transformed = data.map(row => transformOddsData(row.data, row.sport));
     setAllOddsData(mergeOddsData(transformed));
@@ -1036,7 +1045,7 @@ export default function App() {
   }).sort((a, b) => b.ev - a.ev);
   const positiveEV = evBets.filter(b => b.ev > 0);
 
-  const promoSportFilter = promoSports.size === 3 ? null : [...promoSports];
+  const promoSportFilter = promoSports.size === SPORTS.length ? null : [...promoSports];
   const parsedMinLeg = (promoType === "boost" && minLegOdds !== "") ? Number(minLegOdds) : null;
   const promoLegs = buildAllLegsForBook(allOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
   const parsedMinFinal = (promoType === "boost" && minFinalOdds !== "") ? Number(minFinalOdds) : null;
