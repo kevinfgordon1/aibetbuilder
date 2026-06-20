@@ -23,6 +23,7 @@ const ALL_BOOKS = [
   { key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: "https://kalshi.com/favicon.ico", exchange: true },
   { key: "novig", label: "Novig", color: "#a855f7", bg: "rgba(168,85,247,0.15)", logo: null, exchange: true },
   { key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
+  { key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
 ];
 
 // ── Books used to compute "best opposing odds" for true probability ──
@@ -38,11 +39,13 @@ const TRUSTED_BOOK_KEYS = new Set([
   "kalshi",
   "novig",
   "prophetx",
+  "polymarket",
 ]);
 
 const ADJUSTED_BOOK_NOTES = {
   kalshi: "after Kalshi fee",
   prophetx: "after 2% commission",
+  polymarket: "after Polymarket taker fee",
 };
 
 const SPORTS = [
