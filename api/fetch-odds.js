@@ -24,34 +24,43 @@ const EVENT_MARKETS = {
 const EVENT_HORIZON_MS = 24 * 60 * 60 * 1000;
 
 // ─────────────────────────────────────────────────────────────────────────
-// Kalshi fee adjustment
+// Prediction-market taker-fee adjustment (Kalshi + Polymarket)
+//
+// Both venues charge a taker fee of  θ · C · p · (1−p)  per fill, where p is the
+// contract price in dollars (0–1) and C the number of contracts. Crucially the
+// fee is paid UP FRONT — added to your cost — not netted out of the payout. So
+// for $1 of payout the effective cost per contract is:
+//     p_eff = p · (1 + θ·(1−p))
+// and the effective decimal odds are 1 / p_eff. This reproduces the venue's own
+// "stake → to-win" math exactly (verified against Polymarket US: a 37¢ ask shows
+// +170 raw but pays +162 after the $3.05 taker fee on a ~$100 / 262-contract order).
+//
+// The Odds API serves the raw price with no fee baked in, so we bake it in here.
+// θ: Kalshi 0.07, Polymarket US regulated exchange 0.05 (uniform taker).
 // ─────────────────────────────────────────────────────────────────────────
-function applyKalshiFee(rawAmericanOdds) {
+const KALSHI_FEE_COEFF = 0.07;
+const POLYMARKET_FEE_COEFF = 0.05;
+
+function applyTakerFee(rawAmericanOdds, theta) {
   if (rawAmericanOdds === null || rawAmericanOdds === undefined) return rawAmericanOdds;
-  let centPrice;
+  // Implied price (probability) of the quoted odds.
+  let p;
   if (rawAmericanOdds > 0) {
-    centPrice = (100 / (rawAmericanOdds + 100)) * 100;
+    p = 100 / (rawAmericanOdds + 100);
   } else {
-    centPrice = (Math.abs(rawAmericanOdds) / (Math.abs(rawAmericanOdds) + 100)) * 100;
+    p = Math.abs(rawAmericanOdds) / (Math.abs(rawAmericanOdds) + 100);
   }
-  centPrice = Math.round(centPrice);
-  if (centPrice < 1 || centPrice > 99) return rawAmericanOdds;
-  // Net payout in cents for $100 (= 10,000 cents) stake.
-  // Fee = 0.07 × C × p × (1−p): the price factor must be centPrice (not a
-  // hardcoded 100), so the fee stays symmetric and peaks at 50¢. In the
-  // single-expression form the fee numerator is 7 × centPrice × (100 − centPrice).
-  const netPayoutCents = (1000000 - 7 * centPrice * (100 - centPrice)) / centPrice;
-  const netPayoutWithBuffer = netPayoutCents - 50;
-  // Decimal odds = net_payout_cents / stake_cents = netPayoutCents / 10000
-  const decimalOdds = netPayoutWithBuffer / 10000;
-  if (decimalOdds < 1) return rawAmericanOdds;
-  let adjustedAmerican;
-  if (decimalOdds >= 2) {
-    adjustedAmerican = Math.round((decimalOdds - 1) * 100);
-  } else {
-    adjustedAmerican = -Math.round(100 / (decimalOdds - 1));
-  }
-  return adjustedAmerican;
+  if (p <= 0 || p >= 1) return rawAmericanOdds;
+  // Taker fee is added to cost → effective price, then convert back to odds.
+  const effPrice = p * (1 + theta * (1 - p));
+  const decimalOdds = 1 / effPrice;
+  if (decimalOdds <= 1) return rawAmericanOdds;
+  if (decimalOdds >= 2) return Math.round((decimalOdds - 1) * 100);
+  return -Math.round(100 / (decimalOdds - 1));
+}
+
+function applyKalshiFee(rawAmericanOdds) {
+  return applyTakerFee(rawAmericanOdds, KALSHI_FEE_COEFF);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -82,45 +91,8 @@ function applyProphetXCommission(rawAmericanOdds) {
   return adjustedAmerican;
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Polymarket fee adjustment
-// US regulated exchange (NJ): uniform TAKER fee, coefficient 0.05.
-// Per-contract taker fee = 0.05 × P × (1−P) (P in dollars), deducted from
-// matched shares. Peaks at the 50/50 price (~$1.25 per 100 contracts) and
-// falls toward ~0 at the extremes. Makers pay 0, but we conservatively model
-// every fill as a taker since we take liquidity to hedge. The Odds API serves
-// raw Polymarket prices that do NOT include this fee, so we bake it in here.
-// ─────────────────────────────────────────────────────────────────────────
-const POLYMARKET_FEE_COEFF = 0.05; // US regulated exchange uniform taker coefficient
-
 function applyPolymarketFee(rawAmericanOdds) {
-  if (rawAmericanOdds === null || rawAmericanOdds === undefined) return rawAmericanOdds;
-  let centPrice;
-  if (rawAmericanOdds > 0) {
-    centPrice = (100 / (rawAmericanOdds + 100)) * 100;
-  } else {
-    centPrice = (Math.abs(rawAmericanOdds) / (Math.abs(rawAmericanOdds) + 100)) * 100;
-  }
-  centPrice = Math.round(centPrice);
-  if (centPrice < 1 || centPrice > 99) return rawAmericanOdds;
-  // For a $100 (10,000-cent) stake at centPrice per contract:
-  //   gross payout cents          = 1,000,000 / centPrice
-  //   taker fee cents             = 100 × coeff × (100 − centPrice)
-  // Combined into one expression (fee numerator carries the extra centPrice so
-  // the division nets correctly — note this keeps the proper P×(1−P) shape):
-  //   netPayoutCents = (1,000,000 − 100×coeff×centPrice×(100−centPrice)) / centPrice
-  const feeNumerator = 100 * POLYMARKET_FEE_COEFF * centPrice * (100 - centPrice);
-  const netPayoutCents = (1000000 - feeNumerator) / centPrice;
-  const netPayoutWithBuffer = netPayoutCents - 50; // same conservative half-dollar buffer as Kalshi
-  const decimalOdds = netPayoutWithBuffer / 10000;
-  if (decimalOdds < 1) return rawAmericanOdds;
-  let adjustedAmerican;
-  if (decimalOdds >= 2) {
-    adjustedAmerican = Math.round((decimalOdds - 1) * 100);
-  } else {
-    adjustedAmerican = -Math.round(100 / (decimalOdds - 1));
-  }
-  return adjustedAmerican;
+  return applyTakerFee(rawAmericanOdds, POLYMARKET_FEE_COEFF);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
