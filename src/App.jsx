@@ -6,6 +6,17 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+// ── Activity logging helper ──────────────────────────────────────────────
+const logEvent = (user, event, metadata = {}) => {
+  if (!user) return;
+  supabase.from('activity_log').insert({
+    user_id: user.id,
+    email: user.email,
+    event,
+    metadata,
+  });
+};
+
 const ALL_BOOKS = [
   { key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: "https://www.draftkings.com/favicon.ico" },
   { key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: "https://www.fanduel.com/favicon.ico" },
@@ -26,20 +37,9 @@ const ALL_BOOKS = [
   { key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
 ];
 
-// ── Books used to compute "best opposing odds" for true probability ──
 const TRUSTED_BOOK_KEYS = new Set([
-  "draftkings",
-  "fanduel",
-  "williamhill_us", // Caesars
-  "betmgm",
-  "betrivers",
-  "fanatics",
-  "hardrockbet",
-  "espnbet", // theScore Bet
-  "kalshi",
-  "novig",
-  "prophetx",
-  "polymarket",
+  "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
+  "fanatics", "hardrockbet", "espnbet", "kalshi", "novig", "prophetx", "polymarket",
 ]);
 
 const ADJUSTED_BOOK_NOTES = {
@@ -85,7 +85,6 @@ function isWithinDateRange(commence_time, range) {
   return true;
 }
 
-// ── Exact analytical hedge solver ──────────────────────────────────────────
 function toDecimal(american) {
   if (american > 0) return 1 + american / 100;
   return 1 + 100 / Math.abs(american);
@@ -137,37 +136,29 @@ function solveHedgesAnalytical(legs, stake, boostedProfit) {
     const H0 = stake / a[0];
     hedgeStakes = [H0];
     isGuaranteed = H0 <= boostedProfit;
-
   } else if (n === 2) {
     const det = a[0] * a[1] - 1;
-    if (det <= 0) {
-      return { hedgeStakes: [0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(2) };
-    }
+    if (det <= 0) return { hedgeStakes: [0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(2) };
     const H1 = stake * d[1] / det;
     const H2 = stake * d[0] / det;
     hedgeStakes = [H1, H2];
     isGuaranteed = boostedProfit >= H1 + H2;
-
   } else if (n === 3) {
     const abc = a[0] * a[1] * a[2];
     const sumA = a[0] + a[1] + a[2];
     const det = abc - sumA - 2;
-    if (det <= 0) {
-      return { hedgeStakes: [0, 0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(3) };
-    }
+    if (det <= 0) return { hedgeStakes: [0, 0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(3) };
     const H1 = stake * d[1] * d[2] / det;
     const H2 = stake * d[0] * d[2] / det;
     const H3 = stake * d[0] * d[1] / det;
     hedgeStakes = [H1, H2, H3];
     isGuaranteed = boostedProfit >= H1 + H2 + H3;
-
   } else {
     return { hedgeStakes: legs.map(() => 0), hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(n) };
   }
 
   const outcomes = getAllOutcomes(n);
   const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, d, boostedProfit, stake));
-
   return { hedgeStakes, hedgeOdds, isGuaranteed, profits, outcomes };
 }
 
@@ -221,9 +212,7 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult 
                   </div>
                 </div>
                 <div style={{ textAlign: "right" }}>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>
-                    ${result.hedgeStakes[i].toFixed(2)}
-                  </div>
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${result.hedgeStakes[i].toFixed(2)}</div>
                   <div style={{ fontSize: 11, color: "#6b7280" }}>stake</div>
                 </div>
               </div>
@@ -232,7 +221,6 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult 
               Total hedge cost: ${result.hedgeStakes.reduce((s, h) => s + h, 0).toFixed(2)}
             </div>
           </div>
-
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — worst case is $0</div>
             <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
@@ -260,7 +248,6 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult 
               })}
             </div>
           </div>
-
           <div style={{ padding: "12px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
             <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> By hedging this parlay you are guaranteeing a minimum of <strong style={{ color: "#10b981" }}>$0</strong> on every possible outcome. However you are giving up your expected value of <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong>. Long-run, taking the +EV without hedging is the mathematically correct play. Only hedge if you prefer certainty over maximizing profit.
           </div>
@@ -293,8 +280,7 @@ function transformOddsData(gamesArray, sportKey) {
     };
 
     const getBestOdds = (marketKey, teamName) => {
-      let best = null;
-      let bestBook = null;
+      let best = null, bestBook = null;
       bookmakers.forEach(book => {
         if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === marketKey);
@@ -309,8 +295,7 @@ function transformOddsData(gamesArray, sportKey) {
     };
 
     const getBestSpreadOddsAtLine = (teamName, targetPoint) => {
-      let best = null;
-      let bestBook = null;
+      let best = null, bestBook = null;
       bookmakers.forEach(book => {
         if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "spreads");
@@ -335,8 +320,7 @@ function transformOddsData(gamesArray, sportKey) {
     };
 
     const getBestTotalOddsAtLine = (side, targetPoint) => {
-      let best = null;
-      let bestBook = null;
+      let best = null, bestBook = null;
       bookmakers.forEach(book => {
         if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
         const market = book.markets.find(m => m.key === "totals");
@@ -392,8 +376,6 @@ function transformOddsData(gamesArray, sportKey) {
     const best_away = bestAwayML.best;
     const best_home = bestHomeML.best;
 
-    // 3-way markets (soccer 1X2 with a Draw outcome) break the 2-way inverse
-    // true-prob method, so flag them and exclude their moneylines from EV/parlay legs.
     const isThreeWay = bookmakers.some(b => {
       const m = (b.markets || []).find(mk => mk.key === "h2h");
       return m && m.outcomes.some(o => o.name === "Draw");
@@ -425,19 +407,13 @@ function transformOddsData(gamesArray, sportKey) {
       let bestOppForAway = oppAwayLookup.best;
       let bestOppForAwayBook = oppAwayLookup.bestBook;
       const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
-      if (bestOppForAway === null) {
-        bestOppForAway = homeOutcome.price;
-        bestOppForAwayBook = b.key;
-      }
+      if (bestOppForAway === null) { bestOppForAway = homeOutcome.price; bestOppForAwayBook = b.key; }
 
       const oppHomeLookup = getBestSpreadOddsAtLine(away, -homePoint);
       let bestOppForHome = oppHomeLookup.best;
       let bestOppForHomeBook = oppHomeLookup.bestBook;
       const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
-      if (bestOppForHome === null) {
-        bestOppForHome = awayOutcome.price;
-        bestOppForHomeBook = b.key;
-      }
+      if (bestOppForHome === null) { bestOppForHome = awayOutcome.price; bestOppForHomeBook = b.key; }
 
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
@@ -446,8 +422,7 @@ function transformOddsData(gamesArray, sportKey) {
         away_line: fmtPoint(awayPoint), home_line: fmtPoint(homePoint),
         away_point: awayPoint, home_point: homePoint,
         bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
-        bestOpp_away_book: bestOppForAwayBook,
-        bestOpp_home_book: bestOppForHomeBook,
+        bestOpp_away_book: bestOppForAwayBook, bestOpp_home_book: bestOppForHomeBook,
         bestOppCount_away: oppCountForAway || 1,
         bestOppName_away: `${home} ${fmtPoint(-awayPoint)}`,
         bestOppCount_home: oppCountForHome || 1,
@@ -469,27 +444,20 @@ function transformOddsData(gamesArray, sportKey) {
       let bestOppForOver = oppOverLookup.best;
       let bestOppForOverBook = oppOverLookup.bestBook;
       const oppCountForOver = countTotalLinesAtPoint("Under", line);
-      if (bestOppForOver === null) {
-        bestOppForOver = underOutcome.price;
-        bestOppForOverBook = b.key;
-      }
+      if (bestOppForOver === null) { bestOppForOver = underOutcome.price; bestOppForOverBook = b.key; }
 
       const oppUnderLookup = getBestTotalOddsAtLine("Over", line);
       let bestOppForUnder = oppUnderLookup.best;
       let bestOppForUnderBook = oppUnderLookup.bestBook;
       const oppCountForUnder = countTotalLinesAtPoint("Over", line);
-      if (bestOppForUnder === null) {
-        bestOppForUnder = overOutcome.price;
-        bestOppForUnderBook = b.key;
-      }
+      if (bestOppForUnder === null) { bestOppForUnder = overOutcome.price; bestOppForUnderBook = b.key; }
 
       totals.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
         line, over_odds: overOutcome.price, under_odds: underOutcome.price,
         bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
-        bestOpp_over_book: bestOppForOverBook,
-        bestOpp_under_book: bestOppForUnderBook,
+        bestOpp_over_book: bestOppForOverBook, bestOpp_under_book: bestOppForUnderBook,
         bestOppCount_over: oppCountForOver || 1,
         bestOppName_over: `u${line}`,
         bestOppCount_under: oppCountForUnder || 1,
@@ -502,16 +470,6 @@ function transformOddsData(gamesArray, sportKey) {
   return { moneylines, run_lines: spreads, totals, team_totals: [] };
 }
 
-// ── Transform per-event ADDITIONAL markets (event_odds_cache) ──────────────
-// Produces extra spread/total legs (from alternate_spreads / alternate_totals)
-// and a new team-total leg type (from team_totals / alternate_team_totals).
-// EXACT HALF-LINES ONLY (x.5): integer lines (run line -1, Over 10, goal handicap
-// 0/-1) push on the exact margin/total, and Asian quarter handicaps (-0.25, -0.75)
-// split the stake into a half-win/half-push — neither is a clean 2-way, so we drop
-// both and keep only true x.5 lines, which keeps the inverse method exact. (Baseball
-// never posts quarter lines, so this is identical to the old filter there; it only
-// matters for soccer handicaps.) Kalshi/ProphetX prices are already fee-adjusted at
-// ingestion, so they're read as-is here, same as featured markets.
 function transformEventOddsData(game, sportKey) {
   const run_lines = [];
   const totals = [];
@@ -527,7 +485,6 @@ function transformEventOddsData(game, sportKey) {
   const isHalf = (p) => p != null && Math.abs(p % 1) === 0.5;
   const fmtPoint = (p) => (p > 0 ? `+${p}` : `${p}`);
 
-  // best opposing odds across TRUSTED books at an exact line
   const bestSpreadAt = (teamName, point) => {
     let best = null, bestBook = null, count = 0;
     bookmakers.forEach(b => {
@@ -541,6 +498,7 @@ function transformEventOddsData(game, sportKey) {
     });
     return { best, bestBook, count };
   };
+
   const bestTotalAt = (side, point) => {
     let best = null, bestBook = null, count = 0;
     bookmakers.forEach(b => {
@@ -554,6 +512,7 @@ function transformEventOddsData(game, sportKey) {
     });
     return { best, bestBook, count };
   };
+
   const bestTeamTotalAt = (team, side, point) => {
     let best = null, bestBook = null, count = 0;
     bookmakers.forEach(b => {
@@ -574,7 +533,6 @@ function transformEventOddsData(game, sportKey) {
     if (!bm) return;
     const markets = bm.markets || [];
 
-    // alternate spreads → run_lines rows (mirrored away/home line per book)
     const sprM = markets.find(m => m.key === "alternate_spreads");
     if (sprM) {
       const awayPts = new Map();
@@ -604,7 +562,6 @@ function transformEventOddsData(game, sportKey) {
       });
     }
 
-    // alternate totals → totals rows
     const totM = markets.find(m => m.key === "alternate_totals");
     if (totM) {
       const byLine = new Map();
@@ -633,7 +590,6 @@ function transformEventOddsData(game, sportKey) {
       });
     }
 
-    // team totals (+ alternate) → team_totals rows (per team, Over↔Under 2-way)
     const ttMarkets = markets.filter(m => m.key === "team_totals" || m.key === "alternate_team_totals");
     if (ttMarkets.length) {
       const byTeamLine = new Map();
@@ -699,9 +655,7 @@ function trueProb(bestOpponentOdds) {
   return 100 / (bestOpponentOdds + 100);
 }
 
-function ourTrueProb(bestOpponentOdds) {
-  return 1 - trueProb(bestOpponentOdds);
-}
+function ourTrueProb(bestOpponentOdds) { return 1 - trueProb(bestOpponentOdds); }
 
 function impliedProb(odds) {
   if (!odds) return 0.5;
@@ -745,31 +699,11 @@ function calcParlayEV(legs, boostPct, stake) {
   return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
 }
 
-// ─── FREE BET CONVERSION MATH ────────────────────────────────────────────
-// User holds free bet of face value $X on a sportsbook.
-// User picks a leg with odds d_fb (decimal) on that book.
-// User hedges $H on opposing side at d_h (decimal) on best trusted book.
-//
-// If free bet wins (prob p_fb):  cash = (d_fb - 1) * X   (free bet pays profit only)
-// If hedge wins (prob 1 - p_fb): cash = H * d_h
-//
-// Solve for hedge stake H that equalizes both outcomes (zero variance):
-//   (d_fb - 1) * X - H = H * d_h - H
-//   (d_fb - 1) * X = H * d_h
-//   H = (d_fb - 1) * X / d_h
-//
-// Guaranteed cash = (d_fb - 1) * X - H = H * (d_h - 1)
-// Conversion rate = guaranteed cash / X
-// ─────────────────────────────────────────────────────────────────────────
 function calcFreeBetConversion(fbOddsAmerican, hedgeOddsAmerican, freeBetAmount) {
-  if (!fbOddsAmerican || !hedgeOddsAmerican || !freeBetAmount) {
-    return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };
-  }
+  if (!fbOddsAmerican || !hedgeOddsAmerican || !freeBetAmount) return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };
   const d_fb = dkDecimal(fbOddsAmerican);
   const d_h = dkDecimal(hedgeOddsAmerican);
-  if (d_fb <= 1 || d_h <= 1) {
-    return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };
-  }
+  if (d_fb <= 1 || d_h <= 1) return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };
   const hedgeStake = (d_fb - 1) * freeBetAmount / d_h;
   const guaranteedCash = hedgeStake * (d_h - 1);
   const conversionRate = guaranteedCash / freeBetAmount;
@@ -785,7 +719,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (new Date(g.commence_time) <= now) return;
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
-      if (g.is_three_way) return; // skip 3-way moneylines (soccer 1X2) — 2-way method doesn't apply
+      if (g.is_three_way) return;
       const awayOdds = g.bookOdds?.[book]?.ml_away;
       const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
@@ -860,7 +794,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
       data.moneylines.forEach(g => {
         if (new Date(g.commence_time) <= now) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
-        if (g.is_three_way) return; // skip 3-way moneylines (soccer 1X2) — 2-way method doesn't apply
+        if (g.is_three_way) return;
         const awayOdds = g.bookOdds?.[book.key]?.ml_away;
         const homeOdds = g.bookOdds?.[book.key]?.ml_home;
         if (awayOdds == null || homeOdds == null) return;
@@ -954,17 +888,12 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   return results.slice(0, maxResults);
 }
 
-// ─── Find top free bet conversions ───────────────────────────────────────
-// Each leg on the chosen sportsbook becomes a candidate. For each one we
-// look up the best opposing-side hedge at the matching line among trusted
-// books, then compute conversion. Sort by conversion rate descending.
 function findTopFreeBetConversions(legs, freeBetAmount, maxResults = 10) {
   const results = [];
   legs.forEach(l => {
     if (l.bestOpp == null) return;
     const conv = calcFreeBetConversion(l.dk, l.bestOpp, freeBetAmount);
-    if (!conv.valid) return;
-    if (conv.conversionRate <= 0) return;
+    if (!conv.valid || conv.conversionRate <= 0) return;
     results.push({
       leg: l,
       hedgeStake: conv.hedgeStake,
@@ -1035,12 +964,8 @@ function OddsBoard({ oddsData }) {
   const toggleBook = (bookKey) => {
     setSelectedBooks(prev => {
       const next = new Set(prev);
-      if (next.has(bookKey)) {
-        if (next.size === 1) return prev;
-        next.delete(bookKey);
-      } else {
-        next.add(bookKey);
-      }
+      if (next.has(bookKey)) { if (next.size === 1) return prev; next.delete(bookKey); }
+      else next.add(bookKey);
       return next;
     });
   };
@@ -1180,7 +1105,7 @@ function OddsBoard({ oddsData }) {
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [activeTab, setActiveTab] = useState("promo");
-  const [promoType, setPromoType] = useState("boost"); // "boost" or "freebet"
+  const [promoType, setPromoType] = useState("boost");
   const [boostPct, setBoostPct] = useState(30);
   const [stake, setStake] = useState(100);
   const [numLegs, setNumLegs] = useState(3);
@@ -1206,7 +1131,7 @@ export default function App() {
       setAuthLoading(false);
 
       if (u) {
-        // Part 1 — Supabase activity log
+        // Supabase activity log — session start
         supabase.from('activity_log').insert({
           user_id: u.id,
           email: u.email,
@@ -1217,15 +1142,12 @@ export default function App() {
           }
         });
 
-        // Part 2 — GA User-ID tracking
-        window.gtag?.('config', 'G-H61PXF1WNS', {
-          user_id: u.id,
-        });
+        // GA User-ID tracking
+        window.gtag?.('config', 'G-H61PXF1WNS', { user_id: u.id });
       }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const u = session?.user ?? null;
-      setUser(u);
+      setUser(session?.user ?? null);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -1239,8 +1161,6 @@ export default function App() {
     const featuredRows = featuredRes.data;
     if (featuredRes.error || !featuredRows) { setDataLoading(false); return; }
     const featured = featuredRows.map(row => transformOddsData(row.data, row.sport));
-    // Alternate spreads/totals + team totals from the per-event endpoint.
-    // A failure here is non-fatal — featured markets still render.
     const eventRows = eventRes.data || [];
     const eventTransformed = eventRows.map(row => transformEventOddsData(row.data, row.sport));
     setAllOddsData(mergeOddsData([...featured, ...eventTransformed]));
@@ -1249,11 +1169,8 @@ export default function App() {
     window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
   };
 
-  useEffect(() => {
-    fetchOdds();
-  }, []);
+  useEffect(() => { fetchOdds(); }, []);
 
-  // Reset pagination and expanded state when any promo param changes
   useEffect(() => {
     setPromoPage(5);
     setExpandedPromo(null);
@@ -1267,6 +1184,7 @@ export default function App() {
 
   const signOut = async () => {
     window.gtag?.('event', 'sign_out');
+    logEvent(user, 'sign_out');
     await supabase.auth.signOut();
     setUser(null);
   };
@@ -1285,9 +1203,6 @@ export default function App() {
     : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
     : promoLegsAll;
   const parsedMinFinal = (promoType === "boost" && minFinalOdds !== "") ? Number(minFinalOdds) : null;
-  // Alt markets explode the leg count (hundreds per book), and the multi-leg
-  // parlay search is O(n^3). Cap the parlay input to the highest-edge legs so the
-  // 2-/3-leg search stays fast. Free-bet conversion (O(n)) uses the full set.
   const PARLAY_LEG_CAP = 200;
   const parlayLegPool = promoType === "boost"
     ? [...promoLegs]
@@ -1309,12 +1224,8 @@ export default function App() {
   const togglePromoSport = (sportKey) => {
     setPromoSports(prev => {
       const next = new Set(prev);
-      if (next.has(sportKey)) {
-        if (next.size === 1) return prev;
-        next.delete(sportKey);
-      } else {
-        next.add(sportKey);
-      }
+      if (next.has(sportKey)) { if (next.size === 1) return prev; next.delete(sportKey); }
+      else next.add(sportKey);
       return next;
     });
   };
@@ -1335,16 +1246,13 @@ export default function App() {
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: "#8a8f98" };
   const activePromoBookData = ALL_BOOKS.find(b => b.key === promoBook) || ALL_BOOKS[0];
-
   const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || key;
   const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      `}</style>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       {!authLoading && !user && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(10,11,15,0.85)", backdropFilter: "blur(8px)" }}>
@@ -1377,24 +1285,10 @@ export default function App() {
                 Updated {new Date(fetchedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET
               </div>
               <button
-                onClick={fetchOdds}
+                onClick={() => { fetchOdds(); logEvent(user, 'odds_refreshed', { trigger: 'manual' }); }}
                 disabled={dataLoading}
-                title="Refresh odds data (your settings stay the same)"
-                style={{
-                  background: "rgba(59,130,246,0.1)",
-                  border: "1px solid rgba(59,130,246,0.3)",
-                  borderRadius: 6,
-                  color: "#3b82f6",
-                  padding: "4px 10px",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: dataLoading ? "wait" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  opacity: dataLoading ? 0.6 : 1,
-                  transition: "all 0.2s",
-                }}
+                title="Refresh odds data"
+                style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: dataLoading ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: dataLoading ? 0.6 : 1, transition: "all 0.2s" }}
                 onMouseEnter={e => { if (!dataLoading) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
                 onMouseLeave={e => { if (!dataLoading) e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
               >
@@ -1421,9 +1315,21 @@ export default function App() {
       </div>
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <button style={tabStyle("promo")} onClick={() => { setActiveTab("promo"); window.gtag?.('event', 'tab_switched', { tab: 'promo_builder' }); }}>Promo Builder</button>
-        <button style={tabStyle("ev")} onClick={() => { setActiveTab("ev"); window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' }); }}>+EV Bets</button>
-        <button style={tabStyle("odds")} onClick={() => { setActiveTab("odds"); window.gtag?.('event', 'tab_switched', { tab: 'odds_board' }); }}>Odds Board</button>
+        <button style={tabStyle("promo")} onClick={() => {
+          setActiveTab("promo");
+          window.gtag?.('event', 'tab_switched', { tab: 'promo_builder' });
+          logEvent(user, 'tab_switched', { tab: 'promo_builder' });
+        }}>Promo Builder</button>
+        <button style={tabStyle("ev")} onClick={() => {
+          setActiveTab("ev");
+          window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' });
+          logEvent(user, 'tab_switched', { tab: 'ev_bets' });
+        }}>+EV Bets</button>
+        <button style={tabStyle("odds")} onClick={() => {
+          setActiveTab("odds");
+          window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
+          logEvent(user, 'tab_switched', { tab: 'odds_board' });
+        }}>Odds Board</button>
       </div>
 
       {dataLoading && (
@@ -1462,7 +1368,13 @@ export default function App() {
                   const adjustmentNote = getAdjustmentNote(b.bestOppBook);
                   return (
                     <div key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
-                      onClick={() => setExpandedEV(isExpanded ? null : i)}>
+                      onClick={() => {
+                        setExpandedEV(isExpanded ? null : i);
+                        if (!isExpanded) {
+                          window.gtag?.('event', 'ev_bet_expanded', { rank: i + 1 });
+                          logEvent(user, 'ev_bet_expanded', { rank: i + 1, bet: b.name, book: b.bookKey });
+                        }
+                      }}>
                       <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", alignItems: "center" }}>
                         <div>
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
@@ -1530,21 +1442,29 @@ export default function App() {
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
                 {promoType === "boost"
-                  ? "Configure your boost and find the optimal parlay legs ranked by expected value. True probabilities use trusted books only (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted."
-                  : "Convert your free bet into guaranteed cash. Pick the leg you'll place the free bet on, hedge at the best opposing odds across trusted books, lock in real money. Higher conversion rates are better. Kalshi and ProphetX prices are fee-adjusted."}
+                  ? "Configure your boost and find the optimal parlay legs ranked by expected value."
+                  : "Convert your free bet into guaranteed cash. Pick the leg you'll place the free bet on, hedge at the best opposing odds across trusted books, lock in real money."}
               </div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
                 {controlBox(<>
                   <label style={labelStyle}>Promo Type</label>
                   {PROMO_TYPES.map(opt => (
-                    <button key={opt.val} onClick={() => { setPromoType(opt.val); window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val }); }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
+                    <button key={opt.val} onClick={() => {
+                      setPromoType(opt.val);
+                      window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val });
+                      logEvent(user, 'promo_type_changed', { promo_type: opt.val });
+                    }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
                       {opt.label}
                     </button>
                   ))}
                 </>)}
                 {controlBox(<>
                   <label style={labelStyle}>Sportsbook</label>
-                  <select value={promoBook} onChange={e => { setPromoBook(e.target.value); window.gtag?.('event', 'sportsbook_selected', { book: e.target.value }); }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+                  <select value={promoBook} onChange={e => {
+                    setPromoBook(e.target.value);
+                    window.gtag?.('event', 'sportsbook_selected', { book: e.target.value });
+                    logEvent(user, 'sportsbook_selected', { book: e.target.value });
+                  }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
                     {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
                   </select>
                 </>)}
@@ -1572,17 +1492,14 @@ export default function App() {
                     </button>
                   ))}
                 </>)}
-                {/* Boost-only fields */}
                 {promoType === "boost" && controlBox(<>
                   <label style={labelStyle}>Boost %</label>
                   <input type="number" value={boostPct} onChange={(e) => setBoostPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                 </>)}
-                {/* Stake / Free Bet Amount — present in both modes, label changes */}
                 {controlBox(<>
                   <label style={labelStyle}>{promoType === "freebet" ? "Free Bet $" : "Stake $"}</label>
                   <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                 </>)}
-                {/* Boost-only fields continued */}
                 {promoType === "boost" && controlBox(<>
                   <label style={labelStyle}>Legs</label>
                   {[1, 2, 3].map(n => (
@@ -1616,7 +1533,13 @@ export default function App() {
 
                     return (
                       <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
-                        onClick={() => { setExpandedPromo(isExpanded ? null : i); if (!isExpanded) window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' }); }}>
+                        onClick={() => {
+                          setExpandedPromo(isExpanded ? null : i);
+                          if (!isExpanded) {
+                            window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' });
+                            logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'boost', book: promoBook, legs: p.legs.map(l => l.name) });
+                          }
+                        }}>
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1748,7 +1671,13 @@ export default function App() {
 
                     return (
                       <div key={i} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
-                        onClick={() => { setExpandedFreeBet(isExpanded ? null : i); if (!isExpanded) window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet' }); }}>
+                        onClick={() => {
+                          setExpandedFreeBet(isExpanded ? null : i);
+                          if (!isExpanded) {
+                            window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet' });
+                            logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet', book: promoBook, bet: c.leg.name });
+                          }
+                        }}>
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1785,7 +1714,6 @@ export default function App() {
 
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>Game: <strong style={{ color: "#e8eaed" }}>{c.leg.game}</strong></span>
-                            <span>Sport: <strong style={{ color: "#e8eaed" }}>{c.leg.sport.replace("_", " ").toUpperCase()}</strong></span>
                             <span>Conversion: <strong style={{ color: "#10b981" }}>{(c.conversionRate * 100).toFixed(1)}%</strong></span>
                           </div>
                         </div>
@@ -1820,7 +1748,6 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
-
                             <div style={{ marginBottom: 14 }}>
                               <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — both paths return ${c.guaranteedCash.toFixed(2)}</div>
                               <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
@@ -1841,7 +1768,6 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
-
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                               <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
                               <div>Hedge stake = (free bet decimal − 1) × free bet $ ÷ hedge decimal</div>
@@ -1850,7 +1776,6 @@ export default function App() {
                               <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Guaranteed cash = ${c.hedgeStake.toFixed(2)} × ({dkDecimal(c.hedgeOddsAmerican).toFixed(3)} − 1) = <strong style={{ color: "#10b981" }}>${c.guaranteedCash.toFixed(2)}</strong></div>
                               <div>Conversion rate = ${c.guaranteedCash.toFixed(2)} ÷ ${fbAmount} = <strong style={{ color: "#10b981" }}>{(c.conversionRate * 100).toFixed(1)}%</strong></div>
                             </div>
-
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.04)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.1)" }}>
                               <strong style={{ color: "#8b5cf6" }}>Bottom line:</strong> Place a ${fbAmount} free bet on <strong style={{ color: "#e8eaed" }}>{c.leg.name}</strong> and ${c.hedgeStake.toFixed(2)} cash on <strong style={{ color: "#e8eaed" }}>{c.hedgeName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>${c.guaranteedCash.toFixed(2)}</strong> guaranteed — that's a {(c.conversionRate * 100).toFixed(1)}% conversion of the free bet's face value into real cash.
                             </div>
