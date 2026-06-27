@@ -1201,11 +1201,31 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
       setAuthLoading(false);
+
+      if (u) {
+        // Part 1 — Supabase activity log
+        supabase.from('activity_log').insert({
+          user_id: u.id,
+          email: u.email,
+          event: 'session_start',
+          metadata: {
+            provider: u.app_metadata?.provider,
+            user_agent: navigator.userAgent,
+          }
+        });
+
+        // Part 2 — GA User-ID tracking
+        window.gtag?.('config', 'G-H61PXF1WNS', {
+          user_id: u.id,
+        });
+      }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const u = session?.user ?? null;
+      setUser(u);
     });
     return () => subscription.unsubscribe();
   }, []);
