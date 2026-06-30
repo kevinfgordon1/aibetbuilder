@@ -17,7 +17,8 @@ const supabase = createClient(
 //     bet_description: "Yankees ML -120",
 //     risk: 100,
 //     profit: 83.33,
-//     placed_at: "2026-06-29T18:30:00Z"   // ISO 8601
+//     placed_at: "2026-06-29T18:30:00Z",  // ISO 8601
+//     notes: "Lock of the day"             // optional
 //   }
 //
 // Returns 200 { success: true, telegram_message_id } on success.
@@ -40,7 +41,7 @@ module.exports = async (req, res) => {
   }
 
   // ── Validate body ────────────────────────────────────────────────────
-  const { telegram_user_id, bet_description, risk, profit, placed_at } = req.body || {};
+  const { telegram_user_id, bet_description, risk, profit, placed_at, notes } = req.body || {};
   if (!telegram_user_id || !bet_description || risk == null || profit == null || !placed_at) {
     return res.status(400).json({
       error: 'Missing required fields',
@@ -76,13 +77,18 @@ module.exports = async (req, res) => {
     const riskFmt = Number(risk).toFixed(2);
     const profitFmt = Number(profit).toFixed(2);
 
-    const text =
+    let text =
       `✅ Bet Placed for ${user.customer_name}\n\n` +
       `Wager: ${bet_description}\n` +
       `Risk: $${riskFmt}\n` +
       `To Win: $${profitFmt}\n` +
-      `Placed: ${placedFormatted} ET\n\n` +
-      `— KayGo Sports`;
+      `Placed: ${placedFormatted} ET`;
+
+    // Append optional notes with prefix label
+    const trimmedNotes = (notes || '').trim();
+    if (trimmedNotes) {
+      text += `\n\n📝 Note: ${trimmedNotes}`;
+    }
 
     // ── Send to Telegram ──────────────────────────────────────────────
     const tgUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
