@@ -1355,19 +1355,20 @@ export default function App() {
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
                 All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX, Polymarket). Kalshi, ProphetX, and Polymarket prices are fee-adjusted. Use the filter below to narrow to a single sportsbook.
               </div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginRight: 2 }}>Sportsbook:</span>
-                <button onClick={() => { setEvBookFilter("all"); setExpandedEV(null); window.gtag?.('event', 'ev_book_filter', { book: 'all' }); logEvent(user, 'ev_book_filter', { book: 'all' }); }}
-                  style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: evBookFilter === "all" ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: evBookFilter === "all" ? "#3b82f6" : "#4b5563", border: evBookFilter === "all" ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
-                  All Books
-                </button>
-                {evFilterBooks.map(fb => (
-                  <button key={fb.key} onClick={() => { setEvBookFilter(fb.key); setExpandedEV(null); window.gtag?.('event', 'ev_book_filter', { book: fb.key }); logEvent(user, 'ev_book_filter', { book: fb.key }); }}
-                    style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: evBookFilter === fb.key ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: evBookFilter === fb.key ? "#3b82f6" : "#4b5563", border: evBookFilter === fb.key ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
-                    {fb.label}
-                  </button>
-                ))}
-                <span style={{ fontSize: 12, color: "#4b5563", marginLeft: "auto" }}>
+              <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+                {controlBox(<>
+                  <label style={labelStyle}>Sportsbook</label>
+                  <select value={evBookFilter} onChange={e => {
+                    setEvBookFilter(e.target.value);
+                    setExpandedEV(null);
+                    window.gtag?.('event', 'ev_book_filter', { book: e.target.value });
+                    logEvent(user, 'ev_book_filter', { book: e.target.value });
+                  }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: (ALL_BOOKS.find(b => b.key === evBookFilter)?.color) || "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+                    <option value="all">All Books</option>
+                    {evFilterBooks.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
+                  </select>
+                </>)}
+                <span style={{ fontSize: 12, color: "#4b5563" }}>
                   {filteredEvBets.length} {filteredEvBets.length === 1 ? "bet" : "bets"} · {filteredEvBets.filter(b => b.ev > 0).length} +EV
                 </span>
               </div>
