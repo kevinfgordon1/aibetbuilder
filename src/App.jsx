@@ -1116,6 +1116,7 @@ export default function App() {
   const [expandedPromo, setExpandedPromo] = useState(null);
   const [expandedFreeBet, setExpandedFreeBet] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
+  const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb", "soccer_fifa_world_cup"]));
   const [marketScope, setMarketScope] = useState("all");
@@ -1195,6 +1196,11 @@ export default function App() {
     return { ...l, prob, ev, profit };
   }).sort((a, b) => b.ev - a.ev);
   const positiveEV = evBets.filter(b => b.ev > 0);
+
+  // +EV Bets tab — single-book filter
+  const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
+  const evFilterBooks = ALL_BOOKS.filter(b => evBooksAvailable.has(b.key) || b.key === evBookFilter);
+  const filteredEvBets = evBookFilter === "all" ? evBets : evBets.filter(b => b.bookKey === evBookFilter);
 
   const promoSportFilter = promoSports.size === SPORTS.length ? null : [...promoSports];
   const parsedMinLeg = (promoType === "boost" && minLegOdds !== "") ? Number(minLegOdds) : null;
@@ -1347,7 +1353,23 @@ export default function App() {
           {activeTab === "ev" && (
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX). Kalshi and ProphetX prices are fee-adjusted.
+                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX, Polymarket). Kalshi, ProphetX, and Polymarket prices are fee-adjusted. Use the filter below to narrow to a single sportsbook.
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginRight: 2 }}>Sportsbook:</span>
+                <button onClick={() => { setEvBookFilter("all"); setExpandedEV(null); window.gtag?.('event', 'ev_book_filter', { book: 'all' }); logEvent(user, 'ev_book_filter', { book: 'all' }); }}
+                  style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: evBookFilter === "all" ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: evBookFilter === "all" ? "#3b82f6" : "#4b5563", border: evBookFilter === "all" ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
+                  All Books
+                </button>
+                {evFilterBooks.map(fb => (
+                  <button key={fb.key} onClick={() => { setEvBookFilter(fb.key); setExpandedEV(null); window.gtag?.('event', 'ev_book_filter', { book: fb.key }); logEvent(user, 'ev_book_filter', { book: fb.key }); }}
+                    style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: evBookFilter === fb.key ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: evBookFilter === fb.key ? "#3b82f6" : "#4b5563", border: evBookFilter === fb.key ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
+                    {fb.label}
+                  </button>
+                ))}
+                <span style={{ fontSize: 12, color: "#4b5563", marginLeft: "auto" }}>
+                  {filteredEvBets.length} {filteredEvBets.length === 1 ? "bet" : "bets"} · {filteredEvBets.filter(b => b.ev > 0).length} +EV
+                </span>
               </div>
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
                 <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -1359,7 +1381,12 @@ export default function App() {
                   <div style={{ textAlign: "center" }}>Edge</div>
                   <div style={{ textAlign: "center" }}>EV ($100)</div>
                 </div>
-                {evBets.slice(0, 30).map((b, i) => {
+                {filteredEvBets.length === 0 && (
+                  <div style={{ padding: "40px 20px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
+                    {evBookFilter === "all" ? "No bets available right now." : `No bets found for ${getBookLabel(evBookFilter)} right now.`}
+                  </div>
+                )}
+                {filteredEvBets.slice(0, 30).map((b, i) => {
                   const bookImplied = impliedProb(b.dk);
                   const edge = b.prob - bookImplied;
                   const isExpanded = expandedEV === i;
