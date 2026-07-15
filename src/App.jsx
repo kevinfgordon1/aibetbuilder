@@ -7,14 +7,17 @@ const supabase = createClient(
 );
 
 // ── Activity logging helper ──────────────────────────────────────────────
-const logEvent = (user, event, metadata = {}) => {
+// NOTE: supabase-js v2 query builders are lazy thenables — the HTTP request
+// only fires when the builder is awaited/.then()'d. Do not remove the await.
+const logEvent = async (user, event, metadata = {}) => {
   if (!user) return;
-  supabase.from('activity_log').insert({
+  const { error } = await supabase.from('activity_log').insert({
     user_id: user.id,
     email: user.email,
     event,
     metadata,
   });
+  if (error) console.error('[logEvent] insert failed:', event, error.message);
 };
 
 const ALL_BOOKS = [
@@ -1133,14 +1136,9 @@ export default function App() {
 
       if (u) {
         // Supabase activity log — session start
-        supabase.from('activity_log').insert({
-          user_id: u.id,
-          email: u.email,
-          event: 'session_start',
-          metadata: {
-            provider: u.app_metadata?.provider,
-            user_agent: navigator.userAgent,
-          }
+        logEvent(u, 'session_start', {
+          provider: u.app_metadata?.provider,
+          user_agent: navigator.userAgent,
         });
 
         // GA User-ID tracking
