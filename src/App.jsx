@@ -109,7 +109,7 @@ function BookBadge({ bookKey }) {
   );
 }
 
-function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
+function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel }) {
   const [open, setOpen] = useState(false);
   if (!lock || !lock.valid) return null;
 
@@ -117,8 +117,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
   const adjustmentNote = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
 
   // boosted price expressed as American odds
-  const boostedDec = 1 + boostedProfit / stake;
-  const boostedAm = boostedDec >= 2 ? Math.round((boostedDec - 1) * 100) : -Math.round(100 / (boostedDec - 1));
+  const boostedAm = decimalToAmerican(1 + boostedProfit / stake);
 
   const hedgeProfit = lock.hedgeStake * (lock.d_h - 1);
   const winSide = boostedProfit - lock.hedgeStake;   // boosted bet wins, hedge loses
@@ -189,7 +188,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
           </div>
 
           <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
-            <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> Locks <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong> but gives up <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong> EV. Long-run, taking the boost unhedged is correct — hedge only if you want certainty.
+            <strong style={{ color: "#f59e0b" }}>⚠</strong> Long-run, taking the boost unhedged is correct — hedge only if you want certainty.
           </div>
         </div>
       )}
@@ -614,6 +613,13 @@ function formatOdds(odds) {
   return odds > 0 ? `+${odds}` : `${odds}`;
 }
 
+// Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
+// (dec-1)*100 alone silently prints favorites as plus-money, e.g. 1.87 -> "+87" not "-115".
+function decimalToAmerican(dec) {
+  if (!isFinite(dec) || dec <= 1) return 0;
+  return dec >= 2 ? Math.round((dec - 1) * 100) : -Math.round(100 / (dec - 1));
+}
+
 function probToAmerican(prob) {
   if (prob >= 0.5) return Math.round(-100 * prob / (1 - prob));
   return Math.round(100 * (1 - prob) / prob);
@@ -636,7 +642,7 @@ function calcParlayEV(legs, boostPct, stake) {
   });
   const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
   const ev = (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
-  return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
+  return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: decimalToAmerican(parlayDec) };
 }
 
 // Single-leg boost lock: hedge the opposite side so BOTH outcomes return the same cash.
@@ -1511,12 +1517,7 @@ export default function App() {
                     const isExpanded = expandedPromo === i;
                     const trueParlayOdds = probToAmerican(p.combinedProb);
                     const isSingle = p.legs.length === 1;
-                    // boosted price as proper American odds (a small boost on a heavy
-                    // favorite can land under even money, where a hardcoded "+" would lie)
-                    const boostedDec = 1 + p.boostedProfit / stake;
-                    const boostedOdds = boostedDec >= 2
-                      ? Math.round((boostedDec - 1) * 100)
-                      : -Math.round(100 / (boostedDec - 1));
+                    const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
 
                     return (
                       <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
@@ -1560,7 +1561,6 @@ export default function App() {
                                 leg={p.legs[0]}
                                 stake={stake}
                                 boostedProfit={p.boostedProfit}
-                                ev={p.ev}
                                 lock={p.lock}
                                 bookLabel={activePromoBookData.label}
                               />
