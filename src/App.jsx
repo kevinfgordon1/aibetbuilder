@@ -123,7 +123,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel }) {
   const winSide = boostedProfit - lock.hedgeStake;   // boosted bet wins, hedge loses
   const loseSide = hedgeProfit - stake;              // hedge wins, boosted bet loses
 
-  const cols = "2.3fr 0.75fr 0.85fr 0.9fr 1.35fr";
+  const cols = "2.2fr 0.9fr 0.85fr 0.9fr 1.35fr";
   const cell = { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, textAlign: "right" };
 
   const row = (betName, bookName, odds, risk, profit, otherStake, net, isBoost) => (
@@ -131,11 +131,16 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel }) {
       <div>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{betName}</div>
         <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-          {bookName}{isBoost ? " · boosted" : ""}
+          {bookName}
           {!isBoost && adjustmentNote && <span style={{ color: "#06b6d4" }}> ({adjustmentNote})</span>}
         </div>
       </div>
-      <div style={{ ...cell, fontWeight: 700, color: isBoost ? "#8b5cf6" : "#e8eaed" }}>{formatOdds(odds)}</div>
+      <div style={{ ...cell, fontWeight: 700, color: isBoost ? "#8b5cf6" : "#e8eaed" }}>
+        {formatOdds(odds)}
+        {isBoost && (
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, color: "#8b5cf6", opacity: 0.8, marginTop: 2 }}>(with boost)</div>
+        )}
+      </div>
       <div style={{ ...cell, color: "#9ca3af" }}>${risk.toFixed(2)}</div>
       <div style={{ ...cell, color: "#9ca3af" }}>${profit.toFixed(2)}</div>
       <div style={{ ...cell }}>
