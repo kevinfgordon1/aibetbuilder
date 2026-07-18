@@ -115,9 +115,36 @@ function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
 
   const hedgeBookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || leg.bestOppBook;
   const adjustmentNote = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
-  const winSide = boostedProfit - lock.hedgeStake;
-  const loseSide = -stake + lock.hedgeStake * (lock.d_h - 1);
-  const returnPct = (lock.lockedProfit / stake) * 100;
+
+  // boosted price expressed as American odds
+  const boostedDec = 1 + boostedProfit / stake;
+  const boostedAm = boostedDec >= 2 ? Math.round((boostedDec - 1) * 100) : -Math.round(100 / (boostedDec - 1));
+
+  const hedgeProfit = lock.hedgeStake * (lock.d_h - 1);
+  const winSide = boostedProfit - lock.hedgeStake;   // boosted bet wins, hedge loses
+  const loseSide = hedgeProfit - stake;              // hedge wins, boosted bet loses
+
+  const cols = "2.3fr 0.75fr 0.85fr 0.9fr 1.35fr";
+  const cell = { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, textAlign: "right" };
+
+  const row = (betName, bookName, odds, risk, profit, otherStake, net, isBoost) => (
+    <div style={{ display: "grid", gridTemplateColumns: cols, padding: "12px 14px", alignItems: "center", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{betName}</div>
+        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+          {bookName}{isBoost ? " · boosted" : ""}
+          {!isBoost && adjustmentNote && <span style={{ color: "#06b6d4" }}> ({adjustmentNote})</span>}
+        </div>
+      </div>
+      <div style={{ ...cell, fontWeight: 700, color: isBoost ? "#8b5cf6" : "#e8eaed" }}>{formatOdds(odds)}</div>
+      <div style={{ ...cell, color: "#9ca3af" }}>${risk.toFixed(2)}</div>
+      <div style={{ ...cell, color: "#9ca3af" }}>${profit.toFixed(2)}</div>
+      <div style={{ ...cell }}>
+        <div style={{ fontWeight: 700, color: "#10b981", fontSize: 14 }}>+${net.toFixed(2)}</div>
+        <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>${profit.toFixed(2)} − ${otherStake.toFixed(2)}</div>
+      </div>
+    </div>
+  );
 
   return (
     <div>
@@ -136,69 +163,28 @@ function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
       {open && (
         <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
           onClick={e => e.stopPropagation()}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 4 }}>How to lock in guaranteed profit</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place both bets at the same time. Whatever happens in the game, you keep ${lock.lockedProfit.toFixed(2)}.</div>
+          <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
+            Place both bets now. Either side wins → you keep <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong>.
+          </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Place your boosted bet on {bookLabel}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg.name}</div>
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{leg.market} · {formatOdds(leg.dk)} · {formatET(leg.commence_time)}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${stake.toFixed(2)}</div>
-                <div style={{ fontSize: 11, color: "#6b7280" }}>boosted stake</div>
-              </div>
+          <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 14px", fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <div>Bet</div>
+              <div style={{ textAlign: "right" }}>Odds</div>
+              <div style={{ textAlign: "right" }}>Risk</div>
+              <div style={{ textAlign: "right" }}>To Profit</div>
+              <div style={{ textAlign: "right" }}>If it wins</div>
             </div>
+            {row(leg.name, bookLabel, boostedAm, stake, boostedProfit, lock.hedgeStake, winSide, true)}
+            {row(leg.bestOppName, hedgeBookLabel, leg.bestOpp, lock.hedgeStake, hedgeProfit, stake, loseSide, false)}
           </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 2 — Hedge with real cash on {hedgeBookLabel}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg.bestOppName}</div>
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatOdds(leg.bestOpp)} on {hedgeBookLabel}{adjustmentNote && <span style={{ color: "#06b6d4" }}> ({adjustmentNote})</span>}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${lock.hedgeStake.toFixed(2)}</div>
-                <div style={{ fontSize: 11, color: "#6b7280" }}>cash stake</div>
-              </div>
-            </div>
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#4b5563", marginTop: 8 }}>
+            Hedge stake = (${boostedProfit.toFixed(2)} + ${stake.toFixed(2)}) ÷ {lock.d_h.toFixed(3)} = ${lock.hedgeStake.toFixed(2)} · locks {((lock.lockedProfit / stake) * 100).toFixed(1)}% of stake
           </div>
 
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — both paths return ${lock.lockedProfit.toFixed(2)}</div>
-            <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                <div>Outcome</div>
-                <div style={{ textAlign: "right" }}>Boosted Bet</div>
-                <div style={{ textAlign: "right" }}>Net Cash</div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 12, alignItems: "center" }}>
-                <div style={{ color: "#e8eaed" }}>Boosted bet WINS, hedge LOSES</div>
-                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#10b981" }}>+${boostedProfit.toFixed(2)}</div>
-                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${winSide.toFixed(2)}</div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", fontSize: 12, alignItems: "center" }}>
-                <div style={{ color: "#e8eaed" }}>Boosted bet LOSES, hedge WINS</div>
-                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#6b7280" }}>-${stake.toFixed(2)}</div>
-                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${loseSide.toFixed(2)}</div>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
-            <div>Hedge stake = (boosted profit + stake) ÷ hedge decimal</div>
-            <div>= (${boostedProfit.toFixed(2)} + ${stake.toFixed(2)}) ÷ {lock.d_h.toFixed(3)}</div>
-            <div>= <strong style={{ color: "#10b981" }}>${lock.hedgeStake.toFixed(2)}</strong></div>
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Locked profit = ${boostedProfit.toFixed(2)} − ${lock.hedgeStake.toFixed(2)} = <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong></div>
-            <div>Return on stake = ${lock.lockedProfit.toFixed(2)} ÷ ${stake.toFixed(2)} = <strong style={{ color: "#10b981" }}>{returnPct.toFixed(1)}%</strong></div>
-          </div>
-
-          <div style={{ padding: "12px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
-            <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> Hedging locks <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong> on every outcome, but gives up your expected value of <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong>. Long-run, taking the boost unhedged is the mathematically correct play. Only hedge if you prefer certainty over maximizing profit.
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
+            <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> Locks <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong> but gives up <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong> EV. Long-run, taking the boost unhedged is correct — hedge only if you want certainty.
           </div>
         </div>
       )}
@@ -408,9 +394,9 @@ function transformOddsData(gamesArray, sportKey) {
         bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
         bestOpp_over_book: bestOppForOverBook, bestOpp_under_book: bestOppForUnderBook,
         bestOppCount_over: oppCountForOver || 1,
-        bestOppName_over: `u${line}`,
+        bestOppName_over: `${away}/${home} u${line}`,
         bestOppCount_under: oppCountForUnder || 1,
-        bestOppName_under: `o${line}`,
+        bestOppName_under: `${away}/${home} o${line}`,
         match: true,
       });
     });
@@ -532,8 +518,8 @@ function transformEventOddsData(game, sportKey) {
           bestOpp_over_book: oppO.best != null ? oppO.bestBook : b.key,
           bestOpp_under: oppU.best != null ? oppU.best : over,
           bestOpp_under_book: oppU.best != null ? oppU.bestBook : b.key,
-          bestOppCount_over: oppO.count || 1, bestOppName_over: `u${line}`,
-          bestOppCount_under: oppU.count || 1, bestOppName_under: `o${line}`,
+          bestOppCount_over: oppO.count || 1, bestOppName_over: `${away}/${home} u${line}`,
+          bestOppCount_under: oppU.count || 1, bestOppName_under: `${away}/${home} o${line}`,
           match: true,
         });
       });
