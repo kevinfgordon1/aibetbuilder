@@ -88,82 +88,12 @@ function isWithinDateRange(commence_time, range) {
   return true;
 }
 
-function toDecimal(american) {
-  if (american > 0) return 1 + american / 100;
-  return 1 + 100 / Math.abs(american);
-}
 
-function impliedProbFromOdds(american) {
-  if (american < 0) return Math.abs(american) / (Math.abs(american) + 100);
-  return 100 / (american + 100);
-}
 
-function ourTrueProbFromOpp(bestOpp) {
-  return 1 - impliedProbFromOdds(bestOpp);
-}
 
-function getHedgeOdds(bestOpp) {
-  const p = ourTrueProbFromOpp(bestOpp);
-  const oppP = 1 - p;
-  if (oppP >= 0.5) return Math.round(-100 * oppP / (1 - oppP));
-  return Math.round(100 * (1 - oppP) / oppP);
-}
 
-function getAllOutcomes(n) {
-  const outcomes = [];
-  for (let mask = 0; mask < (1 << n); mask++) {
-    outcomes.push(Array.from({ length: n }, (_, i) => !!(mask & (1 << i))));
-  }
-  return outcomes;
-}
 
-function calcOutcomeProfit(outcome, hedgeStakes, hedgeDecs, boostedProfit, stake) {
-  const allWin = outcome.every(w => w);
-  let p = allWin ? boostedProfit : -stake;
-  outcome.forEach((win, i) => {
-    p += win ? hedgeStakes[i] * (hedgeDecs[i] - 1) : -hedgeStakes[i];
-  });
-  return p;
-}
 
-function solveHedgesAnalytical(legs, stake, boostedProfit) {
-  const n = legs.length;
-  const hedgeOdds = legs.map(l => getHedgeOdds(l.bestOpp));
-  const d = hedgeOdds.map(o => toDecimal(o));
-  const a = d.map(di => di - 1);
-
-  let hedgeStakes;
-  let isGuaranteed = false;
-
-  if (n === 1) {
-    const H0 = stake / a[0];
-    hedgeStakes = [H0];
-    isGuaranteed = H0 <= boostedProfit;
-  } else if (n === 2) {
-    const det = a[0] * a[1] - 1;
-    if (det <= 0) return { hedgeStakes: [0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(2) };
-    const H1 = stake * d[1] / det;
-    const H2 = stake * d[0] / det;
-    hedgeStakes = [H1, H2];
-    isGuaranteed = boostedProfit >= H1 + H2;
-  } else if (n === 3) {
-    const abc = a[0] * a[1] * a[2];
-    const sumA = a[0] + a[1] + a[2];
-    const det = abc - sumA - 2;
-    if (det <= 0) return { hedgeStakes: [0, 0, 0], hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(3) };
-    const H1 = stake * d[1] * d[2] / det;
-    const H2 = stake * d[0] * d[2] / det;
-    const H3 = stake * d[0] * d[1] / det;
-    hedgeStakes = [H1, H2, H3];
-    isGuaranteed = boostedProfit >= H1 + H2 + H3;
-  } else {
-    return { hedgeStakes: legs.map(() => 0), hedgeOdds, isGuaranteed: false, profits: [], outcomes: getAllOutcomes(n) };
-  }
-
-  const outcomes = getAllOutcomes(n);
-  const profits = outcomes.map(o => calcOutcomeProfit(o, hedgeStakes, d, boostedProfit, stake));
-  return { hedgeStakes, hedgeOdds, isGuaranteed, profits, outcomes };
-}
 
 function BookBadge({ bookKey }) {
   const book = ALL_BOOKS.find(b => b.key === bookKey);
@@ -179,16 +109,21 @@ function BookBadge({ bookKey }) {
   );
 }
 
-function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult }) {
+function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
   const [open, setOpen] = useState(false);
-  const isRare = numLegs >= 2;
-  const result = hedgeResult;
+  if (!lock || !lock.valid) return null;
+
+  const hedgeBookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || leg.bestOppBook;
+  const adjustmentNote = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
+  const winSide = boostedProfit - lock.hedgeStake;
+  const loseSide = -stake + lock.hedgeStake * (lock.d_h - 1);
+  const returnPct = (lock.lockedProfit / stake) * 100;
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: 700, background: "rgba(139,92,246,0.12)", color: "#8b5cf6", border: "1px solid rgba(139,92,246,0.3)" }}>
-          🔒 {isRare ? "Rare — " : ""}Guaranteed Profit Eligible
+          🔒 Guaranteed Profit — lock ${lock.lockedProfit.toFixed(2)}
         </span>
         <button
           onClick={e => { e.stopPropagation(); setOpen(!open); }}
@@ -198,61 +133,72 @@ function GuaranteedBadge({ legs, numLegs, stake, boostedProfit, ev, hedgeResult 
         </button>
       </div>
 
-      {open && result && (
+      {open && (
         <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
           onClick={e => e.stopPropagation()}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 4 }}>How to lock in guaranteed profit</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place these hedge bets at the same time as your parlay. Every possible outcome results in $0 or better.</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place both bets at the same time. Whatever happens in the game, you keep ${lock.lockedProfit.toFixed(2)}.</div>
+
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Place your boosted parlay: ${stake} stake</div>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 12 }}>Step 2 — Place these hedge bets simultaneously</div>
-            {legs.map((l, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(255,255,255,0.03)", borderRadius: 8, marginBottom: 6, border: "1px solid rgba(255,255,255,0.06)" }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>Bet AGAINST {l.name}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                    Fair hedge odds: {result.hedgeOdds[i] > 0 ? "+" : ""}{result.hedgeOdds[i]} — find best available odds on this side
-                  </div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${result.hedgeStakes[i].toFixed(2)}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>stake</div>
-                </div>
+            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Place your boosted bet on {bookLabel}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg.name}</div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{leg.market} · {formatOdds(leg.dk)} · {formatET(leg.commence_time)}</div>
               </div>
-            ))}
-            <div style={{ fontSize: 12, color: "#4b5563", marginTop: 8, fontStyle: "italic" }}>
-              Total hedge cost: ${result.hedgeStakes.reduce((s, h) => s + h, 0).toFixed(2)}
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${stake.toFixed(2)}</div>
+                <div style={{ fontSize: 11, color: "#6b7280" }}>boosted stake</div>
+              </div>
             </div>
           </div>
+
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — worst case is $0</div>
+            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 2 — Hedge with real cash on {hedgeBookLabel}</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg.bestOppName}</div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{formatOdds(leg.bestOpp)} on {hedgeBookLabel}{adjustmentNote && <span style={{ color: "#06b6d4" }}> ({adjustmentNote})</span>}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${lock.hedgeStake.toFixed(2)}</div>
+                <div style={{ fontSize: 11, color: "#6b7280" }}>cash stake</div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — both paths return ${lock.lockedProfit.toFixed(2)}</div>
             <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: `repeat(${legs.length}, 1fr) 80px 90px`, padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                {legs.map((l, i) => <div key={i}>{l.name.split(" ").slice(0, 2).join(" ")}</div>)}
-                <div>Prob</div>
-                <div style={{ textAlign: "right" }}>P/L</div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                <div>Outcome</div>
+                <div style={{ textAlign: "right" }}>Boosted Bet</div>
+                <div style={{ textAlign: "right" }}>Net Cash</div>
               </div>
-              {result.outcomes.map((outcome, oi) => {
-                const profit = result.profits[oi];
-                const prob = outcome.reduce((p, win, i) => p * (win ? ourTrueProbFromOpp(legs[i].bestOpp) : 1 - ourTrueProbFromOpp(legs[i].bestOpp)), 1);
-                return (
-                  <div key={oi} style={{ display: "grid", gridTemplateColumns: `repeat(${legs.length}, 1fr) 80px 90px`, padding: "8px 12px", borderBottom: oi < result.outcomes.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", fontSize: 12, alignItems: "center" }}>
-                    {outcome.map((win, i) => (
-                      <span key={i} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, fontWeight: 600, background: win ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)", color: win ? "#10b981" : "#ef4444", display: "inline-block", width: "fit-content" }}>
-                        {win ? "Win" : "Loss"}
-                      </span>
-                    ))}
-                    <div style={{ color: "#6b7280" }}>{(prob * 100).toFixed(1)}%</div>
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: profit >= -0.01 ? "#10b981" : "#ef4444", textAlign: "right" }}>
-                      {profit >= -0.01 ? "+" : ""}${Math.max(0, profit).toFixed(2)}
-                    </div>
-                  </div>
-                );
-              })}
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 12, alignItems: "center" }}>
+                <div style={{ color: "#e8eaed" }}>Boosted bet WINS, hedge LOSES</div>
+                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#10b981" }}>+${boostedProfit.toFixed(2)}</div>
+                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${winSide.toFixed(2)}</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", fontSize: 12, alignItems: "center" }}>
+                <div style={{ color: "#e8eaed" }}>Boosted bet LOSES, hedge WINS</div>
+                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#6b7280" }}>-${stake.toFixed(2)}</div>
+                <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${loseSide.toFixed(2)}</div>
+              </div>
             </div>
           </div>
+
+          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
+            <div>Hedge stake = (boosted profit + stake) ÷ hedge decimal</div>
+            <div>= (${boostedProfit.toFixed(2)} + ${stake.toFixed(2)}) ÷ {lock.d_h.toFixed(3)}</div>
+            <div>= <strong style={{ color: "#10b981" }}>${lock.hedgeStake.toFixed(2)}</strong></div>
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Locked profit = ${boostedProfit.toFixed(2)} − ${lock.hedgeStake.toFixed(2)} = <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong></div>
+            <div>Return on stake = ${lock.lockedProfit.toFixed(2)} ÷ ${stake.toFixed(2)} = <strong style={{ color: "#10b981" }}>{returnPct.toFixed(1)}%</strong></div>
+          </div>
+
           <div style={{ padding: "12px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.7 }}>
-            <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> By hedging this parlay you are guaranteeing a minimum of <strong style={{ color: "#10b981" }}>$0</strong> on every possible outcome. However you are giving up your expected value of <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong>. Long-run, taking the +EV without hedging is the mathematically correct play. Only hedge if you prefer certainty over maximizing profit.
+            <strong style={{ color: "#f59e0b" }}>⚠ EV tradeoff:</strong> Hedging locks <strong style={{ color: "#10b981" }}>${lock.lockedProfit.toFixed(2)}</strong> on every outcome, but gives up your expected value of <strong style={{ color: "#3b82f6" }}>+${ev.toFixed(2)}</strong>. Long-run, taking the boost unhedged is the mathematically correct play. Only hedge if you prefer certainty over maximizing profit.
           </div>
         </div>
       )}
@@ -700,6 +646,19 @@ function calcParlayEV(legs, boostPct, stake) {
   const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
   const ev = (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
   return { parlayDec, combinedProb, boostedProfit, ev, parlayOdds: Math.round((parlayDec - 1) * 100) };
+}
+
+// Single-leg boost lock: hedge the opposite side so BOTH outcomes return the same cash.
+// Equalizing stake H solves  boostedProfit - H  =  -stake + H*(d_h - 1)  =>  H = (boostedProfit + stake)/d_h
+// NOTE: only valid for 1-leg boosts. With n legs there are n hedge stakes but 2^n outcomes,
+// which cannot all be equalized simultaneously — no true simultaneous lock exists.
+function calcBoostLock(bestOppAmerican, stake, boostedProfit) {
+  if (!bestOppAmerican || !stake || !boostedProfit) return { valid: false, hedgeStake: 0, lockedProfit: 0 };
+  const d_h = dkDecimal(bestOppAmerican);
+  if (d_h <= 1) return { valid: false, hedgeStake: 0, lockedProfit: 0 };
+  const hedgeStake = (boostedProfit + stake) / d_h;
+  const lockedProfit = boostedProfit - hedgeStake;
+  return { valid: lockedProfit > 0, hedgeStake, lockedProfit, d_h };
 }
 
 function calcFreeBetConversion(fbOddsAmerican, hedgeOddsAmerican, freeBetAmount) {
@@ -1217,9 +1176,12 @@ export default function App() {
 
   const topParlaysWithHedge = useMemo(() => {
     return topParlays.map(p => {
-      const hedgeLegs = p.legs.map(l => ({ name: l.name, bestOpp: l.bestOpp }));
-      const hedgeResult = solveHedgesAnalytical(hedgeLegs, stake, p.boostedProfit);
-      return { ...p, hedgeLegs, hedgeResult, isGuaranteed: hedgeResult.isGuaranteed };
+      // A true simultaneous lock only exists for single-leg boosts. With n legs there are
+      // n hedge stakes but 2^n outcomes, which cannot all be equalized at once — so the
+      // Guaranteed Profit badge is restricted to 1-leg boosts.
+      if (p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
+      const lock = calcBoostLock(p.legs[0].bestOpp, stake, p.boostedProfit);
+      return { ...p, lock, isGuaranteed: lock.valid };
     });
   }, [topParlays, stake, boostPct]);
 
@@ -1596,12 +1558,12 @@ export default function App() {
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
                               <GuaranteedBadge
-                                legs={p.hedgeLegs}
-                                numLegs={p.legs.length}
+                                leg={p.legs[0]}
                                 stake={stake}
                                 boostedProfit={p.boostedProfit}
                                 ev={p.ev}
-                                hedgeResult={p.hedgeResult}
+                                lock={p.lock}
+                                bookLabel={activePromoBookData.label}
                               />
                             </div>
                           )}
