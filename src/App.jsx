@@ -149,14 +149,19 @@ function GuaranteedBadge({ leg, stake, boostedProfit, ev, lock, bookLabel }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 6, fontSize: 12, fontWeight: 700, background: "rgba(139,92,246,0.12)", color: "#8b5cf6", border: "1px solid rgba(139,92,246,0.3)" }}>
-          🔒 Guaranteed Profit — lock ${lock.lockedProfit.toFixed(2)}
-        </span>
         <button
           onClick={e => { e.stopPropagation(); setOpen(!open); }}
-          style={{ width: 22, height: 22, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.06)", color: "#9ca3af", fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.45)", cursor: "pointer", transition: "all 0.15s", boxShadow: open ? "none" : "0 0 0 0 rgba(139,92,246,0.4)" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(139,92,246,0.3)"; e.currentTarget.style.color = "#c4b5fd"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)"; e.currentTarget.style.color = "#a78bfa"; }}
         >
-          ⓘ
+          <span>🔒</span>
+          <span>
+            {open
+              ? `Guaranteed Profit — locking $${lock.lockedProfit.toFixed(2)}`
+              : `Guaranteed Profit — click to see how to lock in $${lock.lockedProfit.toFixed(2)}`}
+          </span>
+          <span style={{ fontSize: 10, opacity: 0.9 }}>{open ? "▲" : "▼"}</span>
         </button>
       </div>
 
@@ -1416,7 +1421,9 @@ export default function App() {
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
                 {promoType === "boost"
-                  ? "Configure your boost and find the optimal parlay legs ranked by expected value."
+                  ? (numLegs === 1
+                      ? "Configure your boost and find the single bets with the most expected value."
+                      : "Configure your boost and find the optimal parlay legs ranked by expected value.")
                   : "Convert your free bet into guaranteed cash. Pick the leg you'll place the free bet on, hedge at the best opposing odds across trusted books, lock in real money."}
               </div>
               <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
@@ -1503,7 +1510,13 @@ export default function App() {
                   {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
                     const isExpanded = expandedPromo === i;
                     const trueParlayOdds = probToAmerican(p.combinedProb);
-                    const boostedOdds = Math.round((p.boostedProfit / stake) * 100);
+                    const isSingle = p.legs.length === 1;
+                    // boosted price as proper American odds (a small boost on a heavy
+                    // favorite can land under even money, where a hardcoded "+" would lie)
+                    const boostedDec = 1 + p.boostedProfit / stake;
+                    const boostedOdds = boostedDec >= 2
+                      ? Math.round((boostedDec - 1) * 100)
+                      : -Math.round(100 / (boostedDec - 1));
 
                     return (
                       <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
@@ -1535,8 +1548,8 @@ export default function App() {
                             ))}
                           </div>
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
-                            <span>{activePromoBookData.label} Parlay: <strong style={{ color: "#e8eaed" }}>+{p.parlayOdds}</strong></span>
-                            <span>With Boost: <strong style={{ color: "#10b981" }}>+{boostedOdds}</strong></span>
+                            <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
+                            <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
                             <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
@@ -1592,7 +1605,7 @@ export default function App() {
                               })}
                               <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                                 <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
-                                  Parlay Total <span style={{ color: "#10b981", marginLeft: 6 }}>(+{boostedOdds} w/ boost)</span>
+                                  {isSingle ? "Total" : "Parlay Total"} <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>
                                 </div>
                                 <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
                                   {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
@@ -1607,7 +1620,7 @@ export default function App() {
                               <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong></div>
                             </div>
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This parlay has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
+                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
                             </div>
                           </div>
                         )}
