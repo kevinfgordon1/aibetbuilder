@@ -635,6 +635,19 @@ function formatOdds(odds) {
   return odds > 0 ? `+${odds}` : `${odds}`;
 }
 
+// Whole days between now and a game's start (floored). Used to flag far-off promo bets.
+function daysAway(commence_time) {
+  const diff = new Date(commence_time).getTime() - Date.now();
+  return Math.floor(diff / (24 * 60 * 60 * 1000));
+}
+
+// Red inline flag appended after a promo bet's date when its game is >= 3 days out.
+function DaysAwayWarning({ commence_time }) {
+  const d = daysAway(commence_time);
+  if (d < 3) return null;
+  return <span style={{ color: "#ef4444", fontWeight: 700 }}> - {d} {d === 1 ? "day" : "days"} away</span>;
+}
+
 // Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
 // (dec-1)*100 alone silently prints favorites as plus-money, e.g. 1.87 -> "+87" not "-115".
 function decimalToAmerican(dec) {
@@ -1660,7 +1673,7 @@ export default function App() {
                                   <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
                                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
                                 </div>
-                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}</div>
+                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}<DaysAwayWarning commence_time={l.commence_time} /></div>
                               </div>
                             ))}
                           </div>
@@ -1836,7 +1849,7 @@ export default function App() {
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
                                 <div>
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.leg.name}</div>
-                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{c.leg.market} · {formatOdds(c.leg.dk)} · {formatET(c.leg.commence_time)}</div>
+                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{c.leg.market} · {formatOdds(c.leg.dk)} · {formatET(c.leg.commence_time)}<DaysAwayWarning commence_time={c.leg.commence_time} /></div>
                                 </div>
                                 <div style={{ textAlign: "right" }}>
                                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${fbAmount.toFixed(2)}</div>
