@@ -645,7 +645,7 @@ function daysAway(commence_time) {
 function DaysAwayWarning({ commence_time }) {
   const d = daysAway(commence_time);
   if (d < 3) return null;
-  return <span style={{ color: "#ef4444", fontWeight: 700 }}> - {d} {d === 1 ? "day" : "days"} away</span>;
+  return <span style={{ color: "#ef4444", fontWeight: 700 }}> — {d} {d === 1 ? "day" : "days"} away</span>;
 }
 
 // Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
