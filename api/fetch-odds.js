@@ -14,7 +14,7 @@ const SPORTS = [
 ];
 
 // Futures / outrights (championship winners). Each key is a single "event" with a
-// long list of team outcomes, pulled with markets=outrights. Stored in the same
+// long list of team outcomes, pulled with markets=outrights,outrights_lay. Stored in the same
 // odds_cache table under the futures key; the frontend reads these separately from
 // the game boards. The Odds API only carries the championship winner per league
 // (no MVP/award/pennant markets). Exchange "No"/lay side (outrights_lay) is a
@@ -259,13 +259,15 @@ module.exports = async (req, res) => {
     }
 
     // ── Futures / outrights (championship winners) ──
-    // Bulk /odds pull with markets=outrights for each futures key. Same fee/commission
+    // Bulk /odds pull with markets=outrights,outrights_lay for each futures key.
+    // outrights = back/Yes side (all books); outrights_lay = exchange against/No side
+    // (Kalshi/Polymarket/Novig/ProphetX). Same fee/commission
     // adjustments apply to any exchange (Kalshi/Polymarket/ProphetX) outright prices.
     // Upserted into odds_cache under the futures key so the frontend can query them
     // apart from the game boards. Only 6 keys, 1 credit-cheap call each.
     for (const sport of FUTURES_SPORTS) {
       try {
-        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=outrights&oddsFormat=american`;
+        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=outrights,outrights_lay&oddsFormat=american`;
         const response = await fetch(url);
         if (!response.ok) {
           console.error(`Failed to fetch futures ${sport}: ${response.status}`);

@@ -947,19 +947,23 @@ function SportBadge({ sport }) {
 
 function transformFuturesData(dataArray, futuresKey) {
   // The Odds API outrights payload: array of events (usually one) → bookmakers →
-  // markets(key "outrights") → outcomes[{name: team, price}]. Collapse to one row
-  // per team with a price map keyed by book. Best-across-books is computed in the
-  // component since it depends on which books are selected.
+  // markets → outcomes[{name: team, price}]. `outrights` is the back/Yes side (win the
+  // title); `outrights_lay` is the exchange against/No side (will NOT win). Collapse to
+  // one row per team: `books` = Yes price by book, `noBooks` = No price by book.
+  // Best-across-books is computed in the component (depends on selected books).
   const teams = {};
+  const ensure = (name) => (teams[name] || (teams[name] = { name, books: {}, noBooks: {} }));
   (Array.isArray(dataArray) ? dataArray : []).forEach(event => {
     (event.bookmakers || []).forEach(bm => {
-      const mkt = (bm.markets || []).find(m => m.key === "outrights");
-      if (!mkt) return;
-      (mkt.outcomes || []).forEach(o => {
-        if (o.price == null) return;
-        if (!teams[o.name]) teams[o.name] = { name: o.name, books: {} };
-        const cur = teams[o.name].books[bm.key];
-        if (cur == null || o.price > cur) teams[o.name].books[bm.key] = o.price;
+      (bm.markets || []).forEach(mkt => {
+        const bucket = mkt.key === "outrights" ? "books" : mkt.key === "outrights_lay" ? "noBooks" : null;
+        if (!bucket) return;
+        (mkt.outcomes || []).forEach(o => {
+          if (o.price == null || !o.name) return;
+          const t = ensure(o.name);
+          const cur = t[bucket][bm.key];
+          if (cur == null || o.price > cur) t[bucket][bm.key] = o.price;
+        });
       });
     });
   });
@@ -1046,19 +1050,43 @@ function OddsBoard({ oddsData, futuresData }) {
   const champMeta = FUTURES.find(f => f.sport === boardSport);
   const champEntry = (futuresData || []).find(f => f.key === champMeta?.key);
   const champBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
+  const champBestOf = (priceMap) => {
+    let best = null, bestBook = null;
+    ALL_BOOKS.forEach(b => {
+      if (!selectedBooks.has(b.key)) return;
+      const p = priceMap?.[b.key];
+      if (p != null && (best === null || p > best)) { best = p; bestBook = b.key; }
+    });
+    return { best, bestBook };
+  };
   const champTeams = (champEntry?.teams || [])
     .filter(t => t.name.toLowerCase().includes(search.toLowerCase()))
     .map(t => {
-      let best = null, bestBook = null;
-      ALL_BOOKS.forEach(b => {
-        if (!selectedBooks.has(b.key)) return;
-        const p = t.books[b.key];
-        if (p != null && (best === null || p > best)) { best = p; bestBook = b.key; }
-      });
-      return { ...t, best, bestBook };
+      const yes = champBestOf(t.books);
+      const no = champBestOf(t.noBooks);
+      return { ...t, best: yes.best, bestBook: yes.bestBook, noBest: no.best, noBestBook: no.bestBook, hasNo: no.best !== null };
     })
-    .filter(t => t.best !== null)
+    .filter(t => t.best !== null || t.hasNo)
     .sort((a, b) => impliedProb(b.best) - impliedProb(a.best));
+
+  // Render one odds row (Yes or No lay side) for a championship team.
+  const champRow = (key, name, isNo, priceMap, rowBest) => (
+    <tr key={key} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: isNo ? "rgba(239,68,68,0.05)" : "transparent" }}>
+      <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: isNo ? "#0f0a0b" : "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: isNo ? "#9ca3af" : "#e8eaed" }}>
+        {name}{isNo && <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 8, fontSize: 11 }}>NO</span>}
+      </td>
+      {champBooks.map(b => {
+        const price = b.key === "best" ? rowBest : priceMap?.[b.key];
+        const isBestCol = b.key === "best";
+        const isBestCell = b.key !== "best" && price != null && price === rowBest;
+        return (
+          <td key={b.key} style={{ padding: "10px 6px", textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: price == null ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed", background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+            {price == null ? "—" : formatOdds(price)}
+          </td>
+        );
+      })}
+    </tr>
+  );
 
   return (
     <div>
@@ -1098,21 +1126,12 @@ function OddsBoard({ oddsData, futuresData }) {
             {champTeams.length === 0 && (
               <tr><td colSpan={champBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>No championship odds posted yet{search ? ` for "${search}"` : ""}.</td></tr>
             )}
-            {champTeams.map((t, ti) => (
-              <tr key={ti} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{t.name}</td>
-                {champBooks.map(b => {
-                  const price = b.key === "best" ? t.best : t.books[b.key];
-                  const isBestCol = b.key === "best";
-                  const isBestCell = b.key !== "best" && price != null && price === t.best;
-                  return (
-                    <td key={b.key} style={{ padding: "10px 6px", textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: price == null ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed", background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                      {price == null ? "—" : formatOdds(price)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {champTeams.flatMap((t, ti) => {
+              const rows = [];
+              if (t.best !== null) rows.push(champRow(`${ti}-yes`, t.name, false, t.books, t.best));
+              if (t.hasNo) rows.push(champRow(`${ti}-no`, t.name, true, t.noBooks, t.noBest));
+              return rows;
+            })}
           </tbody>
         </table>
       </div>
@@ -1179,7 +1198,7 @@ function OddsBoard({ oddsData, futuresData }) {
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · futures shown as each team's price to win the title" : " for that side"}</div>
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side" : " for that side"}</div>
     </div>
   );
 }
