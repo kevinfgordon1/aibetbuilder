@@ -53,8 +53,13 @@ const ADJUSTED_BOOK_NOTES = {
 
 const SPORTS = [
   { key: "baseball_mlb", label: "MLB" },
-  { key: "soccer_fifa_world_cup", label: "World Cup" },
+  { key: "americanfootball_nfl", label: "NFL" },
+  { key: "americanfootball_ncaaf", label: "NCAAF" },
+  { key: "basketball_nba", label: "NBA" },
+  { key: "basketball_ncaab", label: "NCAAB" },
+  { key: "icehockey_nhl", label: "NHL" },
 ];
+const SPORT_KEYS = SPORTS.map(s => s.key);
 
 const DATE_RANGES = [
   { val: "today", label: "Today" },
@@ -894,7 +899,7 @@ function EVBadge({ ev }) {
 
 function SportBadge({ sport }) {
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { baseball_mlb: "#3b82f6", soccer_fifa_world_cup: "#10b981" };
+  const colors = { baseball_mlb: "#3b82f6", americanfootball_nfl: "#8b5cf6", americanfootball_ncaaf: "#a78bfa", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
       {s?.label || sport}
@@ -1082,7 +1087,7 @@ export default function App() {
   const [expandedEV, setExpandedEV] = useState(null);
   const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
   const [promoBook, setPromoBook] = useState("draftkings");
-  const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb", "soccer_fifa_world_cup"]));
+  const [promoSports, setPromoSports] = useState(new Set(SPORT_KEYS));
   const [marketScope, setMarketScope] = useState("all");
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1115,8 +1120,8 @@ export default function App() {
   const fetchOdds = async () => {
     setDataLoading(true);
     const [featuredRes, eventRes] = await Promise.all([
-      supabase.from("odds_cache").select("*").in("sport", ["baseball_mlb", "soccer_fifa_world_cup"]),
-      supabase.from("event_odds_cache").select("*").in("sport", ["baseball_mlb", "soccer_fifa_world_cup"]),
+      supabase.from("odds_cache").select("*").in("sport", SPORT_KEYS),
+      supabase.from("event_odds_cache").select("*").in("sport", SPORT_KEYS),
     ]);
     const featuredRows = featuredRes.data;
     if (featuredRes.error || !featuredRows) { setDataLoading(false); return; }

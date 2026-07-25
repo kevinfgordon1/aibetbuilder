@@ -6,16 +6,26 @@ const supabase = createClient(
 
 const SPORTS = [
   'baseball_mlb',
-  'soccer_fifa_world_cup',
+  'americanfootball_nfl',
+  'americanfootball_ncaaf',
+  'basketball_nba',
+  'basketball_ncaab',
+  'icehockey_nhl',
 ];
 
 // Per-event additional markets (alt lines + team totals), pulled one game at a time
 // from the /events/{id}/odds endpoint. Sport-aware: ONLY sports listed here get a
-// per-event pull. Starting with MLB; soccer stays off until we verify US-book
-// World Cup alt-market coverage with a live pull.
+// per-event pull. All six leagues get the full alt-line + team-total layer, matching
+// MLB. Only games starting within EVENT_HORIZON_MS are pulled, so offseason leagues
+// cost nothing until their slate fills in.
+const ALT_MARKETS = ['alternate_spreads', 'alternate_totals', 'team_totals', 'alternate_team_totals'];
 const EVENT_MARKETS = {
-  baseball_mlb: ['alternate_spreads', 'alternate_totals', 'team_totals', 'alternate_team_totals'],
-  soccer_fifa_world_cup: ['alternate_spreads', 'alternate_totals', 'team_totals', 'alternate_team_totals'],
+  baseball_mlb: ALT_MARKETS,
+  americanfootball_nfl: ALT_MARKETS,
+  americanfootball_ncaaf: ALT_MARKETS,
+  basketball_nba: ALT_MARKETS,
+  basketball_ncaab: ALT_MARKETS,
+  icehockey_nhl: ALT_MARKETS,
 };
 
 // Only pull per-event markets for games starting within this window. Far-out games
@@ -141,14 +151,17 @@ function applyBookAdjustments(sportData) {
 //          BetAnything, betPARX, Fliff
 //   us_ex — Kalshi, Novig, ProphetX, BetOpenly, Polymarket
 // Cost per invocation:
-//   Featured (bulk /odds): 3 regions × 3 markets × 2 sports = 18 credits
-//   Per-event (MLB only):  ~15 games × 4 markets × 3 regions ≈ 180 credits
-//   → ~200 credits/invocation when MLB's slate is full. Trivial on the 5M plan;
-//     would have blown the old 100K plan, which is why this waited for the upgrade.
+//   Featured (bulk /odds): 3 regions × 3 markets × 6 sports = 54 credits
+//   Per-event (all sports): ~N games in the 24h window × 4 markets × 3 regions.
+//     MLB full slate ≈ 180 credits; each in-season league adds a similar chunk when
+//     its games fall inside EVENT_HORIZON_MS. Peak overlap (e.g. NFL + NBA + NHL +
+//     college nights in winter) is the high-water mark — still trivial on the 5M plan.
+//   Note: per-event is gated to the 24h horizon, so offseason leagues cost nothing
+//   until their slate fills in; featured is billed per sport regardless of slate size.
 //
-// NOTE (soccer_fifa_world_cup): h2h is 3-way (Home / Draw / Away). The draw
-// outcome must be handled downstream before moneyline EV is valid. spreads
-// (Asian handicap) and totals are 2-way and compute normally.
+// All six current leagues use 2-way h2h (no Draw), so moneyline EV computes
+// directly. The is_three_way detection downstream stays as defensive cover for
+// any future 3-way sport (e.g. soccer) but is inert for this set.
 // ─────────────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   try {
