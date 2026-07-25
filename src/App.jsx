@@ -1087,7 +1087,7 @@ export default function App() {
   const [expandedEV, setExpandedEV] = useState(null);
   const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
   const [promoBook, setPromoBook] = useState("draftkings");
-  const [promoSports, setPromoSports] = useState(new Set(SPORT_KEYS));
+  const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb"]));
   const [marketScope, setMarketScope] = useState("all");
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
