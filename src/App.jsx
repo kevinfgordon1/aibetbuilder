@@ -61,6 +61,18 @@ const SPORTS = [
 ];
 const SPORT_KEYS = SPORTS.map(s => s.key);
 
+// Futures / outrights (championship winners). `sport` links each to its parent league
+// for badge coloring. These are pulled/stored separately from the game boards.
+const FUTURES = [
+  { key: "baseball_mlb_world_series_winner", label: "World Series", sport: "baseball_mlb" },
+  { key: "americanfootball_nfl_super_bowl_winner", label: "Super Bowl", sport: "americanfootball_nfl" },
+  { key: "americanfootball_ncaaf_championship_winner", label: "CFP Champion", sport: "americanfootball_ncaaf" },
+  { key: "basketball_nba_championship_winner", label: "NBA Finals", sport: "basketball_nba" },
+  { key: "basketball_ncaab_championship_winner", label: "NCAAB Champion", sport: "basketball_ncaab" },
+  { key: "icehockey_nhl_championship_winner", label: "Stanley Cup", sport: "icehockey_nhl" },
+];
+const FUTURES_KEYS = FUTURES.map(f => f.key);
+
 const DATE_RANGES = [
   { val: "today", label: "Today" },
   { val: "24h", label: "Next 24h" },
@@ -907,7 +919,28 @@ function SportBadge({ sport }) {
   );
 }
 
-function OddsBoard({ oddsData }) {
+function transformFuturesData(dataArray, futuresKey) {
+  // The Odds API outrights payload: array of events (usually one) → bookmakers →
+  // markets(key "outrights") → outcomes[{name: team, price}]. Collapse to one row
+  // per team with a price map keyed by book. Best-across-books is computed in the
+  // component since it depends on which books are selected.
+  const teams = {};
+  (Array.isArray(dataArray) ? dataArray : []).forEach(event => {
+    (event.bookmakers || []).forEach(bm => {
+      const mkt = (bm.markets || []).find(m => m.key === "outrights");
+      if (!mkt) return;
+      (mkt.outcomes || []).forEach(o => {
+        if (o.price == null) return;
+        if (!teams[o.name]) teams[o.name] = { name: o.name, books: {} };
+        const cur = teams[o.name].books[bm.key];
+        if (cur == null || o.price > cur) teams[o.name].books[bm.key] = o.price;
+      });
+    });
+  });
+  return { key: futuresKey, teams: Object.values(teams) };
+}
+
+function OddsBoard({ oddsData, futuresData }) {
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(new Set(ALL_BOOKS.map(b => b.key)));
@@ -983,6 +1016,24 @@ function OddsBoard({ oddsData }) {
   const teamColWidth = 170;
   const oddsColWidth = 88;
 
+  // Championship (futures) view — one price per team, best across selected books.
+  const champMeta = FUTURES.find(f => f.sport === boardSport);
+  const champEntry = (futuresData || []).find(f => f.key === champMeta?.key);
+  const champBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
+  const champTeams = (champEntry?.teams || [])
+    .filter(t => t.name.toLowerCase().includes(search.toLowerCase()))
+    .map(t => {
+      let best = null, bestBook = null;
+      ALL_BOOKS.forEach(b => {
+        if (!selectedBooks.has(b.key)) return;
+        const p = t.books[b.key];
+        if (p != null && (best === null || p > best)) { best = p; bestBook = b.key; }
+      });
+      return { ...t, best, bestBook };
+    })
+    .filter(t => t.best !== null)
+    .sort((a, b) => impliedProb(b.best) - impliedProb(a.best));
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -994,9 +1045,9 @@ function OddsBoard({ oddsData }) {
       </div>
       <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {["ml", "spr", "tot"].map(m => (
+        {["ml", "spr", "tot", "champ"].map(m => (
           <button key={m} onClick={() => setMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
-            {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : "Totals"}
+            {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : m === "tot" ? "Totals" : "Championship"}
           </button>
         ))}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
@@ -1006,6 +1057,41 @@ function OddsBoard({ oddsData }) {
           </button>
         ))}
       </div>
+      {market === "champ" && (
+      <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + champBooks.length * oddsColWidth }}>
+          <thead>
+            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>{champMeta?.label || "Champion"}</th>
+              {champBooks.map(b => (
+                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>{b.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {champTeams.length === 0 && (
+              <tr><td colSpan={champBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>No championship odds posted yet{search ? ` for "${search}"` : ""}.</td></tr>
+            )}
+            {champTeams.map((t, ti) => (
+              <tr key={ti} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{t.name}</td>
+                {champBooks.map(b => {
+                  const price = b.key === "best" ? t.best : t.books[b.key];
+                  const isBestCol = b.key === "best";
+                  const isBestCell = b.key !== "best" && price != null && price === t.best;
+                  return (
+                    <td key={b.key} style={{ padding: "10px 6px", textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: price == null ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed", background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                      {price == null ? "—" : formatOdds(price)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      )}
+      {market !== "champ" && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
           <thead>
@@ -1066,13 +1152,15 @@ function OddsBoard({ oddsData }) {
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds for that side across selected books</div>
+      )}
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · futures shown as each team's price to win the title" : " for that side"}</div>
     </div>
   );
 }
 
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
+  const [futuresData, setFuturesData] = useState([]);
   const [activeTab, setActiveTab] = useState("promo");
   const [promoType, setPromoType] = useState("boost");
   const [boostPct, setBoostPct] = useState(30);
@@ -1119,9 +1207,10 @@ export default function App() {
 
   const fetchOdds = async () => {
     setDataLoading(true);
-    const [featuredRes, eventRes] = await Promise.all([
+    const [featuredRes, eventRes, futuresRes] = await Promise.all([
       supabase.from("odds_cache").select("*").in("sport", SPORT_KEYS),
       supabase.from("event_odds_cache").select("*").in("sport", SPORT_KEYS),
+      supabase.from("odds_cache").select("*").in("sport", FUTURES_KEYS),
     ]);
     const featuredRows = featuredRes.data;
     if (featuredRes.error || !featuredRows) { setDataLoading(false); return; }
@@ -1129,6 +1218,7 @@ export default function App() {
     const eventRows = eventRes.data || [];
     const eventTransformed = eventRows.map(row => transformEventOddsData(row.data, row.sport));
     setAllOddsData(mergeOddsData([...featured, ...eventTransformed]));
+    setFuturesData((futuresRes.data || []).map(row => transformFuturesData(row.data, row.sport)));
     setFetchedAt(featuredRows[0]?.fetched_at);
     setDataLoading(false);
     window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
@@ -1315,7 +1405,7 @@ export default function App() {
       {!dataLoading && (
         <div style={{ padding: "20px 32px" }}>
 
-          {activeTab === "odds" && <OddsBoard oddsData={allOddsData} />}
+          {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
 
           {activeTab === "ev" && (
             <div>

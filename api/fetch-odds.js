@@ -13,6 +13,21 @@ const SPORTS = [
   'icehockey_nhl',
 ];
 
+// Futures / outrights (championship winners). Each key is a single "event" with a
+// long list of team outcomes, pulled with markets=outrights. Stored in the same
+// odds_cache table under the futures key; the frontend reads these separately from
+// the game boards. The Odds API only carries the championship winner per league
+// (no MVP/award/pennant markets). Exchange "No"/lay side (outrights_lay) is a
+// future Phase 2 add for Kalshi/Polymarket two-sided EV.
+const FUTURES_SPORTS = [
+  'baseball_mlb_world_series_winner',
+  'americanfootball_nfl_super_bowl_winner',
+  'americanfootball_ncaaf_championship_winner',
+  'basketball_nba_championship_winner',
+  'basketball_ncaab_championship_winner',
+  'icehockey_nhl_championship_winner',
+];
+
 // Per-event additional markets (alt lines + team totals), pulled one game at a time
 // from the /events/{id}/odds endpoint. Sport-aware: ONLY sports listed here get a
 // per-event pull. All six leagues get the full alt-line + team-total layer, matching
@@ -242,6 +257,35 @@ module.exports = async (req, res) => {
         results.push({ sport, event_markets: eventCount });
       }
     }
+
+    // ── Futures / outrights (championship winners) ──
+    // Bulk /odds pull with markets=outrights for each futures key. Same fee/commission
+    // adjustments apply to any exchange (Kalshi/Polymarket/ProphetX) outright prices.
+    // Upserted into odds_cache under the futures key so the frontend can query them
+    // apart from the game boards. Only 6 keys, 1 credit-cheap call each.
+    for (const sport of FUTURES_SPORTS) {
+      try {
+        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=outrights&oddsFormat=american`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          console.error(`Failed to fetch futures ${sport}: ${response.status}`);
+          continue;
+        }
+        const rawData = await response.json();
+        const data = applyBookAdjustments(rawData);
+        const { error } = await supabase
+          .from('odds_cache')
+          .upsert({ sport, data, fetched_at: new Date().toISOString() }, { onConflict: 'sport' });
+        if (error) {
+          console.error(`Supabase upsert error for futures ${sport}:`, error);
+        } else {
+          results.push({ sport, futures: Array.isArray(data) ? data.length : 0 });
+        }
+      } catch (futErr) {
+        console.error(`futures exception ${sport}:`, futErr.message);
+      }
+    }
+
     res.status(200).json({ success: true, results });
   } catch (error) {
     res.status(500).json({ error: error.message });
