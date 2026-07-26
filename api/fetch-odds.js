@@ -173,13 +173,17 @@ function applyBookAdjustments(sportData) {
 
 // Per futures key: Polymarket search query + title keywords used to locate the
 // right event/series on each exchange (matched against slug/title, case-insensitive).
+// pmQuery/keywords → Polymarket event discovery. kalshiSeries → Kalshi series
+// ticker (its current open event holds one market per team). KXMLB confirmed;
+// the others are filled once we confirm each league's series ticker (null =
+// Kalshi skipped for that league, so we never inject the wrong market).
 const EXCHANGE_FUTURES = {
-  baseball_mlb_world_series_winner:        { pmQuery: 'World Series',            keywords: ['world series'] },
-  americanfootball_nfl_super_bowl_winner:  { pmQuery: 'Super Bowl',             keywords: ['super bowl'] },
-  americanfootball_ncaaf_championship_winner: { pmQuery: 'College Football Playoff', keywords: ['college football playoff', 'cfp', 'national championship'] },
-  basketball_nba_championship_winner:      { pmQuery: 'NBA Champion',           keywords: ['nba champion', 'nba finals'] },
-  basketball_ncaab_championship_winner:    { pmQuery: 'March Madness',          keywords: ['march madness', 'ncaa', 'college basketball champion'] },
-  icehockey_nhl_championship_winner:       { pmQuery: 'Stanley Cup',            keywords: ['stanley cup'] },
+  baseball_mlb_world_series_winner:        { pmQuery: 'World Series',            keywords: ['world series'],        kalshiSeries: 'KXMLB' },
+  americanfootball_nfl_super_bowl_winner:  { pmQuery: 'Super Bowl',             keywords: ['super bowl'],          kalshiSeries: null },
+  americanfootball_ncaaf_championship_winner: { pmQuery: 'College Football Playoff', keywords: ['college football playoff', 'cfp', 'national championship'], kalshiSeries: null },
+  basketball_nba_championship_winner:      { pmQuery: 'NBA Champion',           keywords: ['nba champion', 'nba finals'], kalshiSeries: null },
+  basketball_ncaab_championship_winner:    { pmQuery: 'March Madness',          keywords: ['march madness', 'ncaa', 'college basketball champion'], kalshiSeries: null },
+  icehockey_nhl_championship_winner:       { pmQuery: 'Stanley Cup',            keywords: ['stanley cup'],         kalshiSeries: null },
 };
 
 function probToAmerican(p) {
@@ -212,7 +216,7 @@ async function fetchJson(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json', 'User-Agent': 'aibetbuilder/1.0 (+https://aibetbuilder.io)' } });
     if (!r.ok) { console.error(`exchange fetch ${r.status}: ${url}`); return null; }
     return await r.json();
   } catch (e) {
@@ -256,38 +260,32 @@ async function fetchPolymarketFutures(cfg) {
 }
 
 // ── Kalshi (public trade-api v2) ──
-let _kalshiSeries; // in-invocation cache of the Sports series list
-async function getKalshiSeries() {
-  if (_kalshiSeries !== undefined) return _kalshiSeries;
-  const base = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
-  const all = [];
-  let cursor = '';
-  for (let i = 0; i < 8; i++) {
-    const resp = await fetchJson(`${base}/series?category=Sports&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
-    if (!resp || !Array.isArray(resp.series)) break;
-    all.push(...resp.series);
-    cursor = resp.cursor;
-    if (!cursor || resp.series.length === 0) break;
-  }
-  _kalshiSeries = all;
-  return _kalshiSeries;
+// Kalshi models a "who wins the championship" market as ONE event (e.g. KXMLB-26)
+// under a league series (e.g. KXMLB), with one nested market per team. Discover
+// via series ticker → current open event(s) → nested markets. Team is in
+// `yes_sub_title` (often abbreviated, e.g. "Los Angeles D", "New York Y"); prices
+// in `yes_ask_dollars`/`no_ask_dollars` (0–1), falling back to integer-cent fields.
+function parseKalshiPrice(dollarStr, centsInt) {
+  if (dollarStr != null && dollarStr !== '') { const d = parseFloat(dollarStr); if (isFinite(d)) return d; }
+  if (centsInt != null && isFinite(centsInt)) return centsInt / 100;
+  return null;
 }
 
 async function fetchKalshiFutures(cfg) {
+  if (!cfg.kalshiSeries) return [];
   const base = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
-  const series = await getKalshiSeries();
-  const kw = cfg.keywords.map(k => k.toLowerCase());
-  const match = series.find(s => kw.some(k => `${s.title || ''}`.toLowerCase().includes(k)));
-  if (!match || !match.ticker) return [];
-  const mResp = await fetchJson(`${base}/markets?series_ticker=${encodeURIComponent(match.ticker)}&status=open&limit=1000`);
-  const markets = (mResp && mResp.markets) || [];
+  const resp = await fetchJson(`${base}/events?series_ticker=${encodeURIComponent(cfg.kalshiSeries)}&status=open&with_nested_markets=true`);
+  const markets = ((resp && resp.events) || []).flatMap(e => e.markets || []);
   const out = [];
   for (const m of markets) {
+    if (m.status && m.status !== 'active' && m.status !== 'open') continue;
     const team = m.yes_sub_title || m.subtitle || m.title;
-    const yesCents = (m.yes_ask != null && m.yes_ask > 0) ? m.yes_ask : m.last_price;
-    const noCents = (m.no_ask != null && m.no_ask > 0) ? m.no_ask : (m.last_price != null ? 100 - m.last_price : null);
-    if (!team || yesCents == null || noCents == null) continue;
-    out.push({ team, yes: probToAmerican(yesCents / 100), no: probToAmerican(noCents / 100) });
+    const yesP = parseKalshiPrice(m.yes_ask_dollars, m.yes_ask);
+    const noP = parseKalshiPrice(m.no_ask_dollars, m.no_ask);
+    const yes = (yesP != null && yesP > 0 && yesP < 1) ? probToAmerican(yesP) : null;
+    const no = (noP != null && noP > 0 && noP < 1) ? probToAmerican(noP) : null;
+    if (!team || (yes == null && no == null)) continue;
+    out.push({ team, yes, no });
   }
   return out;
 }
