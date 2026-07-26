@@ -635,6 +635,14 @@ function formatOdds(odds) {
   return odds > 0 ? `+${odds}` : `${odds}`;
 }
 
+// Compact dollar formatter for exchange top-of-book size ($595, $2.0k, $1.2M).
+function fmtSize(v) {
+  if (v == null || !isFinite(v)) return null;
+  if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
+  if (v >= 1000) return `$${(v / 1000).toFixed(1)}k`;
+  return `$${Math.round(v)}`;
+}
+
 // Whole days between now and a game's start (floored). Used to flag far-off promo bets.
 function daysAway(commence_time) {
   const diff = new Date(commence_time).getTime() - Date.now();
@@ -952,17 +960,21 @@ function transformFuturesData(dataArray, futuresKey) {
   // one row per team: `books` = Yes price by book, `noBooks` = No price by book.
   // Best-across-books is computed in the component (depends on selected books).
   const teams = {};
-  const ensure = (name) => (teams[name] || (teams[name] = { name, books: {}, noBooks: {} }));
+  const ensure = (name) => (teams[name] || (teams[name] = { name, books: {}, noBooks: {}, bookSizes: {}, noBookSizes: {} }));
   (Array.isArray(dataArray) ? dataArray : []).forEach(event => {
     (event.bookmakers || []).forEach(bm => {
       (bm.markets || []).forEach(mkt => {
         const bucket = mkt.key === "outrights" ? "books" : mkt.key === "outrights_lay" ? "noBooks" : null;
         if (!bucket) return;
+        const sizeBucket = bucket === "books" ? "bookSizes" : "noBookSizes";
         (mkt.outcomes || []).forEach(o => {
           if (o.price == null || !o.name) return;
           const t = ensure(o.name);
           const cur = t[bucket][bm.key];
-          if (cur == null || o.price > cur) t[bucket][bm.key] = o.price;
+          if (cur == null || o.price > cur) {
+            t[bucket][bm.key] = o.price;
+            if (o.size != null) t[sizeBucket][bm.key] = o.size;
+          }
         });
       });
     });
@@ -1070,18 +1082,20 @@ function OddsBoard({ oddsData, futuresData }) {
     .sort((a, b) => impliedProb(b.best) - impliedProb(a.best));
 
   // Render one odds row (Yes or No lay side) for a championship team.
-  const champRow = (key, name, isNo, priceMap, rowBest, hideNameBorder) => (
+  const champRow = (key, name, isNo, priceMap, rowBest, hideNameBorder, sizeMap) => (
     <tr key={key} style={{ background: isNo ? "rgba(239,68,68,0.05)" : "transparent" }}>
       <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: isNo ? "#0f0a0b" : "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", borderBottom: hideNameBorder ? "none" : "1px solid rgba(255,255,255,0.03)", fontSize: 13, fontWeight: 600, color: isNo ? "#9ca3af" : "#e8eaed" }}>
         {name}{isNo && <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 8, fontSize: 11 }}>NO</span>}
       </td>
       {champBooks.map(b => {
         const price = b.key === "best" ? rowBest : priceMap?.[b.key];
+        const size = b.key === "best" ? null : sizeMap?.[b.key];
         const isBestCol = b.key === "best";
         const isBestCell = b.key !== "best" && price != null && price === rowBest;
         return (
           <td key={b.key} style={{ padding: "10px 6px", textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,0.03)", color: price == null ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed", background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
             {price == null ? "—" : formatOdds(price)}
+            {size != null && <div style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, marginTop: 1 }}>{fmtSize(size)}</div>}
           </td>
         );
       })}
@@ -1128,8 +1142,8 @@ function OddsBoard({ oddsData, futuresData }) {
             )}
             {champTeams.flatMap((t, ti) => {
               const rows = [];
-              if (t.best !== null) rows.push(champRow(`${ti}-yes`, t.name, false, t.books, t.best, t.hasNo));
-              if (t.hasNo) rows.push(champRow(`${ti}-no`, t.name, true, t.noBooks, t.noBest, false));
+              if (t.best !== null) rows.push(champRow(`${ti}-yes`, t.name, false, t.books, t.best, t.hasNo, t.bookSizes));
+              if (t.hasNo) rows.push(champRow(`${ti}-no`, t.name, true, t.noBooks, t.noBest, false, t.noBookSizes));
               return rows;
             })}
           </tbody>
@@ -1198,7 +1212,7 @@ function OddsBoard({ oddsData, futuresData }) {
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side" : " for that side"}</div>
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : " for that side"}</div>
     </div>
   );
 }

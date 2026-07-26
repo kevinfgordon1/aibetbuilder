@@ -81,6 +81,42 @@ async function fetchJson(url) {
   }
 }
 
+// Batch top-of-book: POST the CLOB /books endpoint with all token ids, return a
+// map token_id → best-ask size (shares ≈ notional $). One call for a whole league.
+// Best ask = the lowest-priced entry in the asks array.
+async function fetchPolymarketBookSizes(tokenIds) {
+  const map = {};
+  if (!tokenIds.length) return map;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch('https://clob.polymarket.com/books', {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'aibetbuilder/1.0 (+https://aibetbuilder.io)' },
+      body: JSON.stringify(tokenIds.map((id) => ({ token_id: id }))),
+    });
+    if (!res.ok) { console.error(`polymarket /books ${res.status}`); return map; }
+    const books = await res.json();
+    if (!Array.isArray(books)) return map;
+    for (const b of books) {
+      const id = b && (b.asset_id || b.token_id);
+      let best = null;
+      for (const a of (b && b.asks) || []) {
+        const p = parseFloat(a.price), s = parseFloat(a.size);
+        if (!isFinite(p) || !isFinite(s)) continue;
+        if (best === null || p < best.p) best = { p, s };
+      }
+      if (id && best) map[id] = best.s;
+    }
+  } catch (e) {
+    console.error(`polymarket books error: ${e.message}`);
+  } finally {
+    clearTimeout(t);
+  }
+  return map;
+}
+
 // ── Polymarket (Gamma API) ──
 async function fetchPolymarketFutures(cfg) {
   const search = await fetchJson(`https://gamma-api.polymarket.com/public-search?q=${encodeURIComponent(cfg.pmQuery)}`);
@@ -100,15 +136,29 @@ async function fetchPolymarketFutures(cfg) {
   for (const m of markets) {
     if (m.closed) continue;
     const team = m.groupItemTitle || m.title;
-    let prices, outcomes;
+    let prices, outcomes, tokens;
     try { prices = JSON.parse(m.outcomePrices); } catch { prices = null; }
     try { outcomes = JSON.parse(m.outcomes); } catch { outcomes = ['Yes', 'No']; }
+    try { tokens = JSON.parse(m.clobTokenIds); } catch { tokens = null; }
     if (!team || !Array.isArray(prices) || prices.length < 2) continue;
     let yi = outcomes.findIndex(o => String(o).toLowerCase() === 'yes');
     let ni = outcomes.findIndex(o => String(o).toLowerCase() === 'no');
     if (yi < 0) yi = 0;
     if (ni < 0) ni = 1;
-    out.push({ team, yes: probToAmerican(parseFloat(prices[yi])), no: probToAmerican(parseFloat(prices[ni])) });
+    const rec = { team, yes: probToAmerican(parseFloat(prices[yi])), no: probToAmerican(parseFloat(prices[ni])), yesSize: null, noSize: null };
+    if (Array.isArray(tokens) && tokens.length >= 2) { rec._yesToken = tokens[yi]; rec._noToken = tokens[ni]; }
+    out.push(rec);
+  }
+  // Attach exact top-of-book size per side from the CLOB order book (one batched call).
+  const allTokens = [];
+  out.forEach((r) => { if (r._yesToken) allTokens.push(r._yesToken); if (r._noToken) allTokens.push(r._noToken); });
+  if (allTokens.length) {
+    const sizeByToken = await fetchPolymarketBookSizes(allTokens);
+    out.forEach((r) => {
+      if (r._yesToken && sizeByToken[r._yesToken] != null) r.yesSize = sizeByToken[r._yesToken];
+      if (r._noToken && sizeByToken[r._noToken] != null) r.noSize = sizeByToken[r._noToken];
+      delete r._yesToken; delete r._noToken;
+    });
   }
   return out;
 }
@@ -139,7 +189,11 @@ async function fetchKalshiFutures(cfg) {
     const yes = (yesP != null && yesP > 0 && yesP < 1) ? probToAmerican(yesP) : null;
     const no = (noP != null && noP > 0 && noP < 1) ? probToAmerican(noP) : null;
     if (!team || (yes == null && no == null)) continue;
-    out.push({ team, yes, no });
+    // Dollar size available at each side's ask. Buying No matches Yes bids, so
+    // no_ask_size falls back to yes_bid_size when the direct field is absent.
+    const yesSizeK = parseFloat(m.yes_ask_size_fp);
+    const noSizeK = parseFloat(m.no_ask_size_fp != null ? m.no_ask_size_fp : m.yes_bid_size_fp);
+    out.push({ team, yes, no, yesSize: isFinite(yesSizeK) ? yesSizeK : null, noSize: isFinite(noSizeK) ? noSizeK : null });
   }
   return out;
 }
@@ -170,8 +224,8 @@ async function buildExchangeBookmakers(sport, rawData) {
     for (const r of raw) {
       const name = resolveName(r.team);
       if (!name) continue;
-      if (r.yes != null) yesOut.push({ name, price: r.yes });
-      if (r.no != null) noOut.push({ name, price: r.no });
+      if (r.yes != null) yesOut.push({ name, price: r.yes, size: r.yesSize != null ? r.yesSize : null });
+      if (r.no != null) noOut.push({ name, price: r.no, size: r.noSize != null ? r.noSize : null });
     }
     return { key, title, yesOut, noOut };
   }));
