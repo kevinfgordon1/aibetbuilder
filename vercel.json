@@ -12,5 +12,10 @@
       "path": "/api/fetch-odds",
       "schedule": "0 4,8 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/fetch-odds.js": {
+      "maxDuration": 60
+    }
+  }
 }

@@ -364,12 +364,14 @@ async function buildExchangeBookmakers(sport, rawData) {
 module.exports = async (req, res) => {
   try {
     const results = [];
-    for (const sport of SPORTS) {
+    // Leagues run concurrently (independent). MLB's per-event alt-line loop below
+    // stays sequential to respect The Odds API rate limits.
+    await Promise.all(SPORTS.map(async (sport) => {
       const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=h2h,spreads,totals&oddsFormat=american`;
       const response = await fetch(url);
       if (!response.ok) {
         console.error(`Failed to fetch ${sport}: ${response.status}`);
-        continue;
+        return;
       }
       const rawData = await response.json();
       const data = applyBookAdjustments(rawData);
@@ -439,7 +441,7 @@ module.exports = async (req, res) => {
           .lt('commence_time', new Date(nowMs - 6 * 60 * 60 * 1000).toISOString());
         results.push({ sport, event_markets: eventCount });
       }
-    }
+    }));
 
     // ── Futures / outrights (championship winners) ──
     // Bulk /odds pull with markets=outrights,outrights_lay for each futures key.
@@ -448,13 +450,13 @@ module.exports = async (req, res) => {
     // adjustments apply to any exchange (Kalshi/Polymarket/ProphetX) outright prices.
     // Upserted into odds_cache under the futures key so the frontend can query them
     // apart from the game boards. Only 6 keys, 1 credit-cheap call each.
-    for (const sport of FUTURES_SPORTS) {
+    await Promise.all(FUTURES_SPORTS.map(async (sport) => {
       try {
         const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=outrights,outrights_lay&oddsFormat=american`;
         const response = await fetch(url);
         if (!response.ok) {
           console.error(`Failed to fetch futures ${sport}: ${response.status}`);
-          continue;
+          return;
         }
         const rawData = await response.json();
         // Inject direct Kalshi/Polymarket exchange futures (Yes + No) before fee adjustment.
@@ -480,7 +482,7 @@ module.exports = async (req, res) => {
       } catch (futErr) {
         console.error(`futures exception ${sport}:`, futErr.message);
       }
-    }
+    }));
 
     res.status(200).json({ success: true, results });
   } catch (error) {
