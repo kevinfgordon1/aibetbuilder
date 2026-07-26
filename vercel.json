@@ -11,11 +11,18 @@
     {
       "path": "/api/fetch-odds",
       "schedule": "0 4,8 * * *"
+    },
+    {
+      "path": "/api/fetch-futures",
+      "schedule": "5-55/10 12-23 * * *"
+    },
+    {
+      "path": "/api/fetch-futures",
+      "schedule": "5-55/10 0-3 * * *"
+    },
+    {
+      "path": "/api/fetch-futures",
+      "schedule": "5 4,8 * * *"
     }
-  ],
-  "functions": {
-    "api/fetch-odds.js": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }
