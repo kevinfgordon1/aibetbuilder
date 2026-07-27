@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -1363,6 +1363,7 @@ export default function App() {
   const [futuresData, setFuturesData] = useState([]);
   const [activeTab, setActiveTab] = useState("promo");
   const [showLanding, setShowLanding] = useState(false);
+  const hintRef = useRef(null);
   const [promoType, setPromoType] = useState("boost");
   const [boostPct, setBoostPct] = useState(30);
   const [stake, setStake] = useState(100);
@@ -1523,14 +1524,30 @@ export default function App() {
     if (!showLanding) { setShowLanding(true); window.gtag?.('event', 'signup_gate_shown'); }
   };
 
+  // Cursor-following "sign in to use" hint over gated controls. Positioned via a ref
+  // (direct DOM writes) so mousemove doesn't re-render the board.
+  const handleHint = (e) => {
+    if (authLoading || user || !hintRef.current) return;
+    const el = hintRef.current;
+    if (e.target.closest && e.target.closest('[data-guard-allow]')) { el.style.opacity = "0"; return; }
+    el.style.left = (e.clientX + 14) + "px";
+    el.style.top = (e.clientY + 16) + "px";
+    el.style.opacity = "1";
+  };
+  const hideHint = () => { if (hintRef.current) hintRef.current.style.opacity = "0"; };
+
   if (!authLoading && !user && showLanding) {
     return <LandingFull onSignIn={signInWithGoogle} onBack={() => setShowLanding(false)} />;
   }
 
   return (
-    <div onClickCapture={guardClick} onMouseDownCapture={guardClick} style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
+    <div onClickCapture={guardClick} onMouseDownCapture={guardClick} onMouseMove={handleHint} onMouseLeave={hideHint} style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
+      {!authLoading && !user && (
+        <div ref={hintRef} style={{ position: "fixed", left: 0, top: 0, opacity: 0, transition: "opacity 0.12s", pointerEvents: "none", zIndex: 900, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "#fff", fontSize: 12, fontWeight: 700, padding: "6px 12px", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.45)", whiteSpace: "nowrap" }}>🔒 Sign in free to use</div>
+      )}
 
       <div data-guard-allow="true" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
