@@ -1220,6 +1220,7 @@ function OddsBoard({ oddsData, futuresData }) {
 // Full signed-out landing page. Shown when a logged-out visitor tries to interact
 // with the app (soft gate). onSignIn → Google auth; onBack → return to the preview.
 function LandingFull({ onSignIn, onBack }) {
+  const [barOpen, setBarOpen] = useState(true);
   const GoogleIcon = () => (
     <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#34A853" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#EA4335" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
   );
@@ -1228,6 +1229,10 @@ function LandingFull({ onSignIn, onBack }) {
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
       <style>{`
         .lf-root { font-family: 'DM Sans', sans-serif; background: #0a0b0f; color: #e8eaed; overflow-x: hidden; min-height: 100vh; }
+        .lf-bar { position: relative; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 11px 46px; font-size: 13px; color: #dbeafe; text-align: center; background: linear-gradient(90deg, rgba(59,130,246,0.22), rgba(139,92,246,0.22)); border-bottom: 1px solid rgba(99,102,241,0.35); }
+        .lf-bar strong { color: #fff; font-weight: 700; }
+        .lf-bar-cta { background: #fff; color: #1f2937; border: none; border-radius: 7px; padding: 5px 13px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+        .lf-bar-x { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #a5b4fc; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
         .lf-root .wrap { max-width: 1120px; margin: 0 auto; padding: 0 40px; }
         .lf-root section { position: relative; z-index: 1; }
         .lf-nav { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 16px 40px; background: rgba(10,11,15,0.7); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); }
@@ -1285,6 +1290,14 @@ function LandingFull({ onSignIn, onBack }) {
           .lf-steps { grid-template-columns: 1fr; }
         }
       `}</style>
+
+      {barOpen && (
+        <div className="lf-bar">
+          <span>🔒 You were viewing a live preview — <strong>sign in free</strong> (one click, no card) to use the boards.</span>
+          <button className="lf-bar-cta" onClick={onSignIn}>Sign in →</button>
+          <button className="lf-bar-x" onClick={() => setBarOpen(false)} aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       <div className="lf-nav">
         <div className="lf-brand" onClick={onBack} title="Back to preview">
