@@ -1251,7 +1251,7 @@ function LandingFull({ onSignIn, onBack }) {
         .lf-ctarow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center; }
         .lf-google { background: #fff; color: #1f2937; border: none; border-radius: 12px; padding: 15px 28px; font-size: 15px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 11px; font-family: inherit; box-shadow: 0 10px 40px rgba(59,130,246,0.15); }
         .lf-trust { font-size: 13px; color: #6b7280; }
-        .lf-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; overflow: hidden; margin: 44px auto 0; max-width: 760px; }
+        .lf-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; overflow: hidden; margin: 44px auto 0; max-width: 900px; }
         .lf-stat { background: #0c0d12; padding: 22px 16px; text-align: center; }
         .lf-stat .n { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
         .lf-stat .n.g { color: #10b981; } .lf-stat .n.b { color: #60a5fa; } .lf-stat .n.p { color: #a78bfa; }
@@ -1293,7 +1293,7 @@ function LandingFull({ onSignIn, onBack }) {
 
       {barOpen && (
         <div className="lf-bar">
-          <span>🔒 You were viewing a live preview — <strong>sign in free</strong> (one click, no card) to use the boards.</span>
+          <span>🔒 You were viewing a live preview — <strong>sign in for free</strong> to use aibetbuilder.io.</span>
           <button className="lf-bar-cta" onClick={onSignIn}>Sign in →</button>
           <button className="lf-bar-x" onClick={() => setBarOpen(false)} aria-label="Dismiss">×</button>
         </div>
@@ -1313,12 +1313,13 @@ function LandingFull({ onSignIn, onBack }) {
         <p className="lf-sub">AI Bet Builder finds the highest-EV boosts, builds the optimal parlay to hit them, and turns free bets into locked, guaranteed cash — all from real-time odds across every major book.</p>
         <div className="lf-ctarow">
           <button className="lf-google" onClick={onSignIn}><GoogleIcon /> Sign in with Google — It's Free</button>
-          <span className="lf-trust">No credit card · Real-time odds</span>
+          <span className="lf-trust">No credit card · No bank account linking</span>
         </div>
         <div className="lf-stats">
           <div className="lf-stat"><div className="n b">15+</div><div className="l">Books &amp; exchanges</div></div>
           <div className="lf-stat"><div className="n g">14,000+</div><div className="l">Bets analyzed daily</div></div>
           <div className="lf-stat"><div className="n p">6</div><div className="l">Leagues &amp; futures</div></div>
+          <div className="lf-stat"><div className="n">Live</div><div className="l">Real-time odds</div></div>
         </div>
       </div></section>
 
@@ -1340,7 +1341,7 @@ function LandingFull({ onSignIn, onBack }) {
       <section className="lf-sec" style={{ background: "rgba(255,255,255,0.015)", borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}><div className="wrap">
         <div className="lf-sechead"><div className="k">How it works</div><h2>Three steps to your edge</h2></div>
         <div className="lf-steps">
-          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>One click with Google. No card, no account linking, no setup.</p></div>
+          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>One click with Google. No card, no bank account linking, no setup.</p></div>
           <div className="lf-step"><div className="num">2</div><h3>Pick your book &amp; promo</h3><p>Choose your sportsbook and the boost or free bet you're working with.</p></div>
           <div className="lf-step"><div className="num">3</div><h3>Get the optimal play</h3><p>Get the highest-EV parlay or hedge, ranked and ready, from live odds.</p></div>
         </div>
