@@ -1319,7 +1319,7 @@ function LandingFull({ onSignIn, onBack }) {
           <div className="lf-stat"><div className="n b">15+</div><div className="l">Books &amp; exchanges</div></div>
           <div className="lf-stat"><div className="n g">14,000+</div><div className="l">Bets analyzed daily</div></div>
           <div className="lf-stat"><div className="n p">6</div><div className="l">Leagues &amp; futures</div></div>
-          <div className="lf-stat"><div className="n">10 min</div><div className="l">Odds update cycle</div></div>
+          <div className="lf-stat"><div className="n">10 min</div><div className="l">How often odds update</div></div>
         </div>
       </div></section>
 
