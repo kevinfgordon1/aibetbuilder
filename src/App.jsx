@@ -1217,10 +1217,152 @@ function OddsBoard({ oddsData, futuresData }) {
   );
 }
 
+// Full signed-out landing page. Shown when a logged-out visitor tries to interact
+// with the app (soft gate). onSignIn → Google auth; onBack → return to the preview.
+function LandingFull({ onSignIn, onBack }) {
+  const GoogleIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#34A853" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#EA4335" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+  );
+  return (
+    <div className="lf-root">
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+      <style>{`
+        .lf-root { font-family: 'DM Sans', sans-serif; background: #0a0b0f; color: #e8eaed; overflow-x: hidden; min-height: 100vh; }
+        .lf-root .wrap { max-width: 1120px; margin: 0 auto; padding: 0 40px; }
+        .lf-root section { position: relative; z-index: 1; }
+        .lf-nav { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 16px 40px; background: rgba(10,11,15,0.7); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); }
+        .lf-brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+        .lf-logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg,#3b82f6,#8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 800; }
+        .lf-bn { font-size: 17px; font-weight: 700; letter-spacing: -0.4px; }
+        .lf-bs { font-size: 11px; color: #6b7280; }
+        .lf-navcta { background: #fff; color: #111; border: none; border-radius: 9px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+        .lf-hero { text-align: center; padding: 84px 24px 60px; }
+        .lf-hero::before { content: ""; position: absolute; top: -10%; left: 50%; transform: translateX(-50%); width: 900px; height: 600px; background: radial-gradient(closest-side, rgba(59,130,246,0.18), rgba(139,92,246,0.10) 45%, transparent 70%); filter: blur(20px); z-index: -1; }
+        .lf-eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #a5b4fc; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); border-radius: 999px; padding: 6px 14px; margin-bottom: 24px; }
+        .lf-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981; }
+        .lf-root h1 { font-size: 60px; line-height: 1.03; font-weight: 800; letter-spacing: -1.9px; }
+        .lf-grad { background: linear-gradient(135deg,#60a5fa,#a78bfa); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .lf-sub { font-size: 19px; line-height: 1.55; color: #9ca3af; max-width: 660px; margin: 22px auto 34px; }
+        .lf-ctarow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center; }
+        .lf-google { background: #fff; color: #1f2937; border: none; border-radius: 12px; padding: 15px 28px; font-size: 15px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 11px; font-family: inherit; box-shadow: 0 10px 40px rgba(59,130,246,0.15); }
+        .lf-trust { font-size: 13px; color: #6b7280; }
+        .lf-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; overflow: hidden; margin: 44px auto 0; max-width: 760px; }
+        .lf-stat { background: #0c0d12; padding: 22px 16px; text-align: center; }
+        .lf-stat .n { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+        .lf-stat .n.g { color: #10b981; } .lf-stat .n.b { color: #60a5fa; } .lf-stat .n.p { color: #a78bfa; }
+        .lf-stat .l { font-size: 12px; color: #6b7280; margin-top: 4px; }
+        .lf-sec { padding: 76px 0; }
+        .lf-sechead { text-align: center; margin-bottom: 48px; }
+        .lf-sechead .k { font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: #6b7280; margin-bottom: 12px; }
+        .lf-root h2 { font-size: 38px; font-weight: 800; letter-spacing: -1px; }
+        .lf-sechead p { font-size: 16px; color: #9ca3af; margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto; }
+        .lf-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }
+        .lf-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; }
+        .lf-card .ic { width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 21px; margin-bottom: 16px; background: rgba(59,130,246,0.12); }
+        .lf-card h3 { font-size: 19px; font-weight: 700; margin-bottom: 9px; }
+        .lf-card p { font-size: 14px; color: #8a8f98; line-height: 1.6; }
+        .lf-green { background: rgba(16,185,129,0.12) !important; }
+        .lf-purple { background: rgba(139,92,246,0.14) !important; }
+        .lf-amber { background: rgba(245,158,11,0.14) !important; }
+        .lf-steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
+        .lf-step { text-align: center; padding: 8px; }
+        .lf-step .num { width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; background: linear-gradient(135deg,#3b82f6,#8b5cf6); }
+        .lf-step h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+        .lf-step p { font-size: 14px; color: #8a8f98; line-height: 1.55; }
+        .lf-faq { max-width: 760px; margin: 0 auto; }
+        .lf-qa { border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px 22px; margin-bottom: 12px; background: rgba(255,255,255,0.02); }
+        .lf-qa h4 { font-size: 15px; font-weight: 700; margin-bottom: 7px; }
+        .lf-qa p { font-size: 14px; color: #8a8f98; line-height: 1.55; }
+        .lf-closing { text-align: center; padding: 80px 24px; }
+        .lf-closingbox { max-width: 720px; margin: 0 auto; background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(139,92,246,0.10)); border: 1px solid rgba(99,102,241,0.25); border-radius: 24px; padding: 56px 40px; }
+        .lf-closing h2 { font-size: 36px; font-weight: 800; letter-spacing: -0.8px; margin-bottom: 14px; }
+        .lf-closing p { font-size: 16px; color: #9ca3af; margin-bottom: 30px; }
+        .lf-footer { border-top: 1px solid rgba(255,255,255,0.06); padding: 28px 40px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .lf-footer .muted { font-size: 12px; color: #4b5563; }
+        @media (max-width: 900px) {
+          .lf-root h1 { font-size: 40px; } .lf-root h2 { font-size: 30px; }
+          .lf-stats, .lf-grid { grid-template-columns: 1fr 1fr; }
+          .lf-steps { grid-template-columns: 1fr; }
+        }
+      `}</style>
+
+      <div className="lf-nav">
+        <div className="lf-brand" onClick={onBack} title="Back to preview">
+          <div className="lf-logo">B</div>
+          <div><div className="lf-bn">AI Bet Builder</div><div className="lf-bs">Powered by Claude</div></div>
+        </div>
+        <button className="lf-navcta" onClick={onSignIn}>Sign in</button>
+      </div>
+
+      <section className="lf-hero"><div className="wrap">
+        <div className="lf-eyebrow"><span className="lf-dot"></span> Live odds from 15+ books &amp; exchanges</div>
+        <h1>Make your sportsbook<br /><span className="lf-grad">promos actually pay.</span></h1>
+        <p className="lf-sub">AI Bet Builder finds the highest-EV boosts, builds the optimal parlay to hit them, and turns free bets into locked, guaranteed cash — all from real-time odds across every major book.</p>
+        <div className="lf-ctarow">
+          <button className="lf-google" onClick={onSignIn}><GoogleIcon /> Sign in with Google — It's Free</button>
+          <span className="lf-trust">No credit card · Real-time odds</span>
+        </div>
+        <div className="lf-stats">
+          <div className="lf-stat"><div className="n b">15+</div><div className="l">Books &amp; exchanges</div></div>
+          <div className="lf-stat"><div className="n g">14,000+</div><div className="l">Bets analyzed daily</div></div>
+          <div className="lf-stat"><div className="n p">6</div><div className="l">Leagues &amp; futures</div></div>
+        </div>
+      </div></section>
+
+      <section className="lf-sec"><div className="wrap">
+        <div className="lf-sechead"><div className="k">What's inside</div><h2>Everything you need to beat the promo</h2>
+          <p>Built for people who actually work their sportsbook offers — not casual bettors.</p></div>
+        <div className="lf-grid">
+          <div className="lf-card"><div className="ic lf-green">🎯</div><h3>Promo Builder</h3>
+            <p>Set your boost and constraints — it searches thousands of leg combinations and returns the parlay with the highest expected value, with the boosted and true odds side by side.</p></div>
+          <div className="lf-card"><div className="ic lf-amber">🔒</div><h3>Free-Bet Converter</h3>
+            <p>Enter a free bet and it computes the exact hedge and stake to lock in guaranteed cash, plus the conversion rate so you know your real return before you place a thing.</p></div>
+          <div className="lf-card"><div className="ic">📈</div><h3>+EV Bets</h3>
+            <p>Every available bet ranked by expected value, with true win probability derived from the sharpest opposing prices across trusted books. See your edge, in dollars, instantly.</p></div>
+          <div className="lf-card"><div className="ic lf-purple">📊</div><h3>Odds &amp; Futures Board</h3>
+            <p>Compare moneyline, spreads, and totals across 15+ books — plus championship futures with real two-sided Yes/No pricing from Kalshi and Polymarket.</p></div>
+        </div>
+      </div></section>
+
+      <section className="lf-sec" style={{ background: "rgba(255,255,255,0.015)", borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}><div className="wrap">
+        <div className="lf-sechead"><div className="k">How it works</div><h2>Three steps to your edge</h2></div>
+        <div className="lf-steps">
+          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>One click with Google. No card, no account linking, no setup.</p></div>
+          <div className="lf-step"><div className="num">2</div><h3>Pick your book &amp; promo</h3><p>Choose your sportsbook and the boost or free bet you're working with.</p></div>
+          <div className="lf-step"><div className="num">3</div><h3>Get the optimal play</h3><p>Get the highest-EV parlay or hedge, ranked and ready, from live odds.</p></div>
+        </div>
+      </div></section>
+
+      <section className="lf-sec"><div className="wrap">
+        <div className="lf-sechead"><div className="k">FAQ</div><h2>Good questions</h2></div>
+        <div className="lf-faq">
+          <div className="lf-qa"><h4>Is it really free?</h4><p>Yes. Sign in with Google and everything's available — no credit card, no trial timer.</p></div>
+          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, and college football &amp; basketball — plus championship futures for each.</p></div>
+          <div className="lf-qa"><h4>Do I have to link my sportsbook accounts?</h4><p>No. It reads public odds; you place bets yourself at whichever book has the edge.</p></div>
+          <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 15+ US sportsbooks plus the Kalshi and Polymarket exchanges, refreshed continuously.</p></div>
+        </div>
+      </div></section>
+
+      <section className="lf-closing"><div className="lf-closingbox">
+        <h2>Stop leaving value on the table.</h2>
+        <p>Your next boost is worth more than you think. Let's find out how much.</p>
+        <button className="lf-google" onClick={onSignIn}><GoogleIcon /> Sign in with Google — It's Free</button>
+      </div></section>
+
+      <div className="lf-footer">
+        <div className="lf-brand" onClick={onBack}><div className="lf-logo" style={{ width: 30, height: 30, fontSize: 16, borderRadius: 8 }}>B</div>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>AI Bet Builder</span></div>
+        <span className="muted">Powered by Claude · An analytics tool, not betting advice · 21+</span>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
   const [activeTab, setActiveTab] = useState("promo");
+  const [showLanding, setShowLanding] = useState(false);
   const [promoType, setPromoType] = useState("boost");
   const [boostPct, setBoostPct] = useState(30);
   const [stake, setStake] = useState(100);
@@ -1371,28 +1513,26 @@ export default function App() {
   const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || key;
   const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
+  // Soft gate: logged-out visitors can browse the live app, but the first time they
+  // interact with any control (outside the header) they're bounced to the full landing.
+  const guardClick = (e) => {
+    if (authLoading || user) return;
+    if (e.target.closest && e.target.closest('[data-guard-allow]')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!showLanding) { setShowLanding(true); window.gtag?.('event', 'signup_gate_shown'); }
+  };
+
+  if (!authLoading && !user && showLanding) {
+    return <LandingFull onSignIn={signInWithGoogle} onBack={() => setShowLanding(false)} />;
+  }
+
   return (
-    <div style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
+    <div onClickCapture={guardClick} onMouseDownCapture={guardClick} style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-      {!authLoading && !user && (
-        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(10,11,15,0.85)", backdropFilter: "blur(8px)" }}>
-          <div style={{ background: "linear-gradient(135deg, rgba(30,32,44,0.98), rgba(20,22,32,0.98))", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20, padding: "48px 40px", textAlign: "center", maxWidth: 420, width: "90%", boxShadow: "0 24px 80px rgba(0,0,0,0.5)" }}>
-            <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, margin: "0 auto 20px" }}>B</div>
-            <h1 style={{ fontSize: 28, fontWeight: 800, margin: "0 0 8px", letterSpacing: -0.5 }}>AI Bet Builder</h1>
-            <p style={{ fontSize: 14, color: "#6b7280", margin: "0 0 8px" }}>Powered by Claude</p>
-            <p style={{ fontSize: 15, color: "#9ca3af", margin: "0 0 28px", lineHeight: 1.6 }}>Find the best +EV plays for your sportsbook promotions. Analyze boosts, build optimal parlays, and maximize your edge.</p>
-            <button onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 12, padding: "14px 32px", fontSize: 15, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, width: "100%" }}>
-              <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#34A853" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#EA4335" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-              Sign in with Google — It's Free
-            </button>
-            <p style={{ fontSize: 12, color: "#4b5563", margin: "16px 0 0" }}>No credit card required.</p>
-          </div>
-        </div>
-      )}
-
-      <div style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div data-guard-allow="true" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
           <div>
