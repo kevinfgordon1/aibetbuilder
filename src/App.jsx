@@ -799,7 +799,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   return legs;
 }
 
-function buildAllLegsAllBooks(data, sportFilter = null) {
+function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
   const now = new Date();
   const seen = new Set();
   const legs = [];
@@ -808,6 +808,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
     if (data.moneylines) {
       data.moneylines.forEach(g => {
         if (new Date(g.commence_time) <= now) return;
+        if (!isWithinDateRange(g.commence_time, dateRange)) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
         if (g.is_three_way) return;
         const awayOdds = g.bookOdds?.[book.key]?.ml_away;
@@ -822,6 +823,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
     if (data.run_lines) {
       data.run_lines.forEach(g => {
         if (new Date(g.commence_time) <= now) return;
+        if (!isWithinDateRange(g.commence_time, dateRange)) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
         if (g.book !== book.key) return;
         const awayOdds = g.away_odds;
@@ -836,6 +838,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
     if (data.totals) {
       data.totals.forEach(g => {
         if (new Date(g.commence_time) <= now) return;
+        if (!isWithinDateRange(g.commence_time, dateRange)) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
         if (g.book !== book.key) return;
         const overOdds = g.over_odds;
@@ -850,6 +853,7 @@ function buildAllLegsAllBooks(data, sportFilter = null) {
     if (data.team_totals) {
       data.team_totals.forEach(g => {
         if (new Date(g.commence_time) <= now) return;
+        if (!isWithinDateRange(g.commence_time, dateRange)) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
         if (g.book !== book.key) return;
         const overOdds = g.over_odds;
@@ -1389,6 +1393,7 @@ export default function App() {
   const [expandedFreeBet, setExpandedFreeBet] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
   const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
+  const [evDateRange, setEvDateRange] = useState("any");
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb"]));
   const [marketScope, setMarketScope] = useState("all");
@@ -1459,7 +1464,7 @@ export default function App() {
     setUser(null);
   };
 
-  const allEvLegs = buildAllLegsAllBooks(allOddsData, null);
+  const allEvLegs = buildAllLegsAllBooks(allOddsData, null, evDateRange);
   const evBets = allEvLegs.map(l => {
     const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
     return { ...l, prob, ev, profit };
@@ -1637,6 +1642,14 @@ export default function App() {
                     <option value="all">All Books</option>
                     {evFilterBooks.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
                   </select>
+                </>)}
+                {controlBox(<>
+                  <label style={labelStyle}>Date</label>
+                  {DATE_RANGES.map(opt => (
+                    <button key={opt.val} onClick={() => { setEvDateRange(opt.val); setExpandedEV(null); }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: evDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: evDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
+                      {opt.label}
+                    </button>
+                  ))}
                 </>)}
                 <span style={{ fontSize: 12, color: "#4b5563" }}>
                   {filteredEvBets.length} {filteredEvBets.length === 1 ? "bet" : "bets"} · {filteredEvBets.filter(b => b.ev > 0).length} +EV
