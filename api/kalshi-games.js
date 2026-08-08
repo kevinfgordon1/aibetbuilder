@@ -36,6 +36,26 @@ async function fetchJson(url) {
 const gameKeyOf = (t) => { const i = String(t || '').indexOf('-'); return i === -1 ? t : t.slice(i + 1); };
 const marketLabel = (m) => m.yes_sub_title || m.subtitle || m.title || m.ticker;
 
+// First pitch (UTC ms) parsed from the game key's leading YYMONDDHHMM, interpreted as
+// US Eastern — Kalshi tickers + market rules_primary use ET (e.g. "...071840..." = the
+// game "scheduled for Aug 7 at 6:40 PM EDT"). NOTE: occurrence_datetime / expected_
+// expiration_time are the game END/settlement (~3h later), NOT first pitch — do not use
+// them for a "has it started" test. Returns NaN if unparseable.
+const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
+function firstPitchUtcMs(gameKey) {
+  const m = /^(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})/.exec(gameKey || '');
+  if (!m) return NaN;
+  const y = 2000 + Number(m[1]), mon = MONTHS[m[2]], d = Number(m[3]), hh = Number(m[4]), mm = Number(m[5]);
+  if (mon == null) return NaN;
+  const asUTC = Date.UTC(y, mon, d, hh, mm);
+  // Shift the ET wall-clock time to true UTC using the America/New_York offset at that instant (handles EDT/EST).
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(asUTC));
+  const p = {}; parts.forEach((x) => (p[x.type] = x.value));
+  const etAsIfUTC = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute));
+  return asUTC + (asUTC - etAsIfUTC);
+}
+
 // ── label parsers (validated against Kalshi's real strings in the test) ──
 function parseTotal(label) {
   const m = /over\s+([\d.]+)/i.exec(label || '');
@@ -88,25 +108,22 @@ async function fetchSportGames(seriesByType) {
     for (const ev of await fetchSeriesEvents(series)) {
       const key = gameKeyOf(ev.event_ticker || ev.ticker); if (!key) continue;
       let g = byKey.get(key);
-      if (!g) { g = { key, title: null, date: null, startTime: null, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
+      if (!g) { g = { key, title: null, date: null, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
       if (type === 'side' || !g.title) { g.title = ev.title || g.title; g.date = ev.sub_title || g.date; }
-      (ev.markets || []).forEach(m => {
-        if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: marketLabel(m) });
-        // occurrence_datetime = scheduled first pitch (UTC). Same for every market in a game.
-        if (!g.startTime && (m.occurrence_datetime || m.expected_expiration_time)) g.startTime = m.occurrence_datetime || m.expected_expiration_time;
-      });
+      (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: marketLabel(m) }); });
     }
   }
   const games = [];
   const nowMs = Date.now();
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
-    // PRE-GAME ONLY: drop any game already started / in-play, or with no known start time.
-    const startMs = g.startTime ? Date.parse(g.startTime) : NaN;
+    // PRE-GAME ONLY: drop any game whose FIRST PITCH is now or in the past (in-play/done),
+    // or whose start time can't be parsed.
+    const startMs = firstPitchUtcMs(g.key);
     if (!Number.isFinite(startMs) || startMs <= nowMs) continue;
     const teamNames = g.raw.side.map(m => m.label);
     games.push({
-      key: g.key, title: g.title, date: g.date, startTime: g.startTime,
+      key: g.key, title: g.title, date: g.date, startTime: new Date(startMs).toISOString(),
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
         spread: expandSpreads(g.raw.spread, teamNames),
