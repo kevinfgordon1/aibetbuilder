@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
-export const OWNER_EMAIL = "kaygosports@gmail.com";
+export const OWNER_EMAIL = "kev120909@gmail.com";
 
 /* ── engine (mirrors lib/combo-lock decideAtFill) ── */
 const KFEE = 0.07;
