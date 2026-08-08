@@ -280,7 +280,7 @@ export default function ComboLocks({ user }) {
             </div>
             {+form.fill ? (() => { const e = effectiveOdds(+form.fill); return (
               <div style={{ fontSize: 12.5, color: "#8a8f98", margin: "-2px 2px 12px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} className="num">
-                <span>Fills at <b style={{ color: "#e8eaed" }}>{fmtAm(+form.fill)}</b> after maker fees — you'll officially be laying <b style={{ color: "#93c5fd" }}>{fmtAm(e.effMaker)}</b> with the maker fee baked in</span>
+                <span>You'll lay at <b style={{ color: "#93c5fd" }}>{fmtAm(e.effMaker)}</b> after maker fees</span>
                 <span className="info" tabIndex={0} data-tip={`The matching odds for takers are ${fmtAm(e.effTaker)} — because their fees are higher. The taker pays a 7% taker fee (4× your 1.75% maker fee), so ${fmtAm(e.effTaker)} is what they actually net, and what they compare against other makers.`}>i</span>
               </div>); })() : null}
             <div className="row c2">
