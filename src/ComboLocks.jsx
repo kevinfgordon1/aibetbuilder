@@ -216,6 +216,7 @@ export default function ComboLocks({ user }) {
         .cl td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.06);font-variant-numeric:tabular-nums}
         .cl .st{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
         .cl .st.shadow{background:rgba(255,255,255,.08);color:#9aa3b2}.cl .st.filled{background:rgba(16,185,129,.15);color:#6ee7b7}.cl .st.unfilled{background:rgba(245,158,11,.12);color:#fcd34d}.cl .st.declined{background:rgba(248,113,113,.12);color:#fca5a5}
+        .cl .st.real{background:rgba(139,92,246,.22);color:#c4b5fd}.cl .st.test{background:rgba(255,255,255,.06);color:#8a8f98}
         .cl .switch{position:relative;width:46px;height:26px;border-radius:999px;background:#3a3d46;cursor:pointer;border:none}
         .cl .switch .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
         .cl .switch.on{background:#ef4444}.cl .switch.on .knob{left:23px}
@@ -362,12 +363,12 @@ export default function ComboLocks({ user }) {
 
       <h3>Submitted bets — history</h3>
       <div className="card">
-        {history.length === 0 ? <div className="empty">No submissions yet. Shadow quotes you run land here; once the worker is live, real fills and no-fills show with a Filled / Unfilled status.</div> : (
-          <table><thead><tr><th>When</th><th>Parlay</th><th>Fill</th><th>Contracts</th><th>Worst lock</th><th>Status</th></tr></thead>
-            <tbody>{history.map((h) => (
-              <tr key={h.id}><td>{new Date(h.created_at).toLocaleString()}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
-                <td><span className={"st " + h.status}>{h.status === "shadow" ? "shadow · would post" : h.status}</span></td></tr>
-            ))}</tbody></table>
+        {history.length === 0 ? <div className="empty">No submissions yet. Shadow quotes you run land here; once the worker is live, real fills and no-fills show as REAL with a Filled / Unfilled status.</div> : (
+          <table><thead><tr><th>Type</th><th>When</th><th>Parlay</th><th>Fill</th><th>Contracts</th><th>Worst lock</th><th>Status</th></tr></thead>
+            <tbody>{history.map((h) => { const isReal = h.is_live || h.status === "filled" || h.status === "unfilled"; return (
+              <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "REAL" : "SHADOW"}</span></td><td>{new Date(h.created_at).toLocaleString()}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
+                <td><span className={"st " + h.status}>{h.status === "shadow" ? "would post" : h.status}</span></td></tr>
+            ); })}</tbody></table>
         )}
       </div>
     </div>
