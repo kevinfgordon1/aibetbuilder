@@ -9,33 +9,33 @@ import { createClient } from "@supabase/supabase-js";
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const OWNER_EMAIL = "kev120909@gmail.com";
 
-/* ── engine (mirrors worker engine.js decideAtFill / hedgeCap exactly) ── */
-// MAKER fee: you are the accepted quoter on combo (KXMVE) RFQs → 0.0175 × C × P × (1−P),
-// one quarter of the 0.07 taker fee (Kalshi fee schedule + RFQ fee filing eff. 2026-07-24).
+/* ── engine (mirrors worker engine.js exactly) ── */
+// The fill odds you enter are the odds you SELL at AFTER your maker fee — already baked in.
+// The lock math uses them directly (no separate fee term). Fees below only recover the nominal
+// exchange price and the taker's matched odds (they pay a 7% taker fee, 4× your 1.75% maker fee).
 const KFEE = 0.0175;
+const TAKER_FEE = 0.07;
 const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
-const TAKER_FEE = 0.07; // the RFQ taker (person taking your combo) pays this
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
-const feePer = (p, th = KFEE) => th * p * (1 - p);
-const r2 = (x) => Math.round(x * 100) / 100;
 const americanFromProb = (p) => (!(p > 0 && p < 1) ? null : p < 0.5 ? Math.round((100 * (1 - p)) / p) : -Math.round((100 * p) / (1 - p)));
-// Fill odds with fees baked in: effMaker = what YOU truly lay at (your 1.75% fee in);
-// effTaker = what the TAKER actually receives after their 7% fee.
-function effectiveOdds(fillAmerican) {
-  const P = impliedProb(fillAmerican);
-  return { effMaker: americanFromProb(P - feePer(P, KFEE)), effTaker: americanFromProb(P + feePer(P, TAKER_FEE)) };
+const r2 = (x) => Math.round(x * 100) / 100;
+function nominalProbFromEff(sEff) {
+  const b = 1 - KFEE; // solve KFEE*sNom^2 + (1-KFEE)*sNom - sEff = 0
+  return (-b + Math.sqrt(b * b + 4 * KFEE * sEff)) / (2 * KFEE);
 }
-
-// Auto contracts cap for a hedge mode — from stake + boosted odds + fill odds.
-//   riskfree : fewest contracts so the losing (miss) side breaks even (~$0 floor), keeps hit upside
-//   1x       : pure hedge — equal payoff whether the combo hits or misses (= stake × decimal boost)
-//   2x / 3x  : multiples of the pure hedge — these OVERSHOOT into a directional short (big loss on hit)
+// Your fill is net of your maker fee. effTaker = the odds the taker is matched at (nominal + their fee).
+function fillView(fillAfterFeeAmerican) {
+  const sEff = impliedProb(fillAfterFeeAmerican);
+  const sNom = nominalProbFromEff(sEff);
+  const takerProb = sNom + TAKER_FEE * sNom * (1 - sNom);
+  return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: r2(1 - sNom).toFixed(2) };
+}
+// Auto contracts cap for a hedge mode. Fill odds already include your maker fee, so no fee term.
 function hedgeCap({ stake, boostAmerican, fillAmerican, mode = "1x" }) {
   if (!(stake > 0) || !boostAmerican || !fillAmerican) return 0;
   const winReturn = stake * aToDec(boostAmerican);
   const s = impliedProb(fillAmerican);
-  const denom = s * (1 - KFEE * (1 - s));
-  const riskfree = denom > 0 ? Math.ceil(stake / denom) : 0;
+  const riskfree = s > 0 ? Math.ceil(stake / s) : 0;
   switch (String(mode)) {
     case "riskfree": return riskfree;
     case "2x": return Math.round(2 * winReturn);
@@ -50,12 +50,14 @@ function decideAtFill({ parlayStake, parlayAmerican, fillAmerican, fairAmerican 
   const cap = hedgeCap({ stake: parlayStake, boostAmerican: parlayAmerican, fillAmerican, mode: hedgeMode });
   const N = Math.min(rfqContracts, cap); // partial fill up to the cap — bigger RFQs fill to the cap
   if (!(N > 0)) return { ok: false, reason: "zero_cap", cap };
-  const s = impliedProb(fillAmerican), fee = N * feePer(s);
-  const hit = bookHit + N * s - N - fee, miss = bookMiss + N * s - fee, worst = Math.min(hit, miss);
+  const s = impliedProb(fillAmerican); // already net of your maker fee
+  const hit = bookHit + N * s - N, miss = bookMiss + N * s, worst = Math.min(hit, miss);
+  const v = fillView(fillAmerican);
   return { ok: true, locks: worst >= 0, hit: r2(hit), miss: r2(miss), worst: r2(worst),
     partial: rfqContracts > cap, cap, hedgeMode,
     competitive: fairAmerican == null ? null : fillAmerican >= fairAmerican, fillAmerican,
-    quote: { yes_bid: "0.00", no_bid: r2(1 - s).toFixed(2), rest_remainder: false }, contracts: N };
+    effTakerOdds: v.effTaker,
+    quote: { yes_bid: "0.00", no_bid: v.noBid, rest_remainder: false }, contracts: N };
 }
 const MODE_LABEL = { riskfree: "Risk-free", "1x": "1× pure hedge", "2x": "2× (directional)", "3x": "3× (directional)" };
 
@@ -241,8 +243,8 @@ export default function ComboLocks({ user }) {
               <span style={{ fontWeight: 700 }}>{p.label}</span>
               <span className="chip num">have {fmtAm(p.parlay_american)} · ${p.parlay_stake}</span>
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
-              {(() => { const eff = effectiveOdds(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
-                return <span className="chip num" title="What the taker nets after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
+              {(() => { const eff = fillView(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
+                return <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
               {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
               <span style={{ flex: 1 }} />
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
@@ -276,13 +278,10 @@ export default function ComboLocks({ user }) {
             <div className="row c3" style={{ marginTop: 14 }}>
               <div><label>Stake ($) — your bet</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
               <div><label>Boosted odds — you have</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
-              <div><label>Fill odds — you offer</label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} /></div>
+              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Fill odds — you sell at (after maker fees)
+                {+form.fill ? <span className="info" tabIndex={0} data-tip={`The taker is matched at ${fmtAm(fillView(+form.fill).effTaker)} — worse than your ${fmtAm(+form.fill)}, because their taker fee (7%) is 4× your maker fee. That's what the taker actually sees and nets.`}>i</span> : null}
+              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} /></div>
             </div>
-            {+form.fill ? (() => { const e = effectiveOdds(+form.fill); return (
-              <div style={{ fontSize: 12.5, color: "#8a8f98", margin: "-2px 2px 12px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} className="num">
-                <span>You'll lay at <b style={{ color: "#93c5fd" }}>{fmtAm(e.effMaker)}</b> after maker fees</span>
-                <span className="info" tabIndex={0} data-tip={`The matching odds for takers are ${fmtAm(e.effTaker)} — because their fees are higher. The taker pays a 7% taker fee (4× your 1.75% maker fee), so ${fmtAm(e.effTaker)} is what they actually net, and what they compare against other makers.`}>i</span>
-              </div>); })() : null}
             <div className="row c2">
               <div><label>Fair odds — optional</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
               <div><label>Hedge mode — sets contracts automatically</label>
@@ -348,9 +347,8 @@ export default function ComboLocks({ user }) {
                     <div className="tile"><div className="k">You profit if parlay loses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
                     <div className="tile"><div className="k">Worst case</div><div className={"v " + (res.worst >= 0 ? "pos" : "neg")}>{money(res.worst)}</div></div>
                   </div>
-                  <div className="kv"><span>You fill buyers at (nominal)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
-                  <div className="kv"><span>Your effective lay (maker fee in)</span><span className="num">{fmtAm(res.effMakerFill)}</span></div>
-                  <div className="kv"><span>Taker effectively gets</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
+                  <div className="kv"><span>You sell at (after your maker fee)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
+                  <div className="kv"><span>Taker is matched at</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
                   <div className="kv"><span>Contracts</span><span className="num">{res.contracts}</span></div>
                   {res.competitive != null && <div className={"note " + (res.competitive ? "ok" : "warn")}>{res.competitive ? `✓ Your fill ${fmtAm(res.fillAmerican)} beats fair ${fmtAm(res.parlay.fair_american)} — competitive.` : `⚠ Your fill ${fmtAm(res.fillAmerican)} is stingier than fair ${fmtAm(res.parlay.fair_american)} — probably won't fill.`}</div>}
                   {res.locks && <><label style={{ marginTop: 12 }}>Quote it would post to Kalshi</label><div className="post">POST /communications/quotes{"\n"}{JSON.stringify(res.quote, null, 2)}</div></>}
