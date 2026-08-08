@@ -218,6 +218,10 @@ export default function ComboLocks({ user }) {
         .cl .switch .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
         .cl .switch.on{background:#ef4444}.cl .switch.on .knob{left:23px}
         .cl .empty{color:#6b7280;font-size:14px;padding:8px 2px}
+        .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
+        .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+        .cl .info::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);border:6px solid transparent;border-top-color:#0c1016;opacity:0;transition:opacity .12s;z-index:31}
+        .cl .info:hover::after,.cl .info:focus::after,.cl .info:hover::before,.cl .info:focus::before{opacity:1}
       `}</style>
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
@@ -275,8 +279,9 @@ export default function ComboLocks({ user }) {
               <div><label>Fill odds — you offer</label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} /></div>
             </div>
             {+form.fill ? (() => { const e = effectiveOdds(+form.fill); return (
-              <div style={{ fontSize: 12, color: "#8a8f98", margin: "-2px 2px 12px" }} className="num">
-                Fill {fmtAm(+form.fill)} → you lay at <b style={{ color: "#93c5fd" }}>{fmtAm(e.effMaker)}</b> with your maker fee baked in · taker effectively gets <b style={{ color: "#e8eaed" }}>{fmtAm(e.effTaker)}</b> after their 7% fee
+              <div style={{ fontSize: 12.5, color: "#8a8f98", margin: "-2px 2px 12px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} className="num">
+                <span>Fills at <b style={{ color: "#e8eaed" }}>{fmtAm(+form.fill)}</b> after maker fees — you'll officially be laying <b style={{ color: "#93c5fd" }}>{fmtAm(e.effMaker)}</b> with the maker fee baked in</span>
+                <span className="info" tabIndex={0} data-tip={`The matching odds for takers are ${fmtAm(e.effTaker)} — because their fees are higher. The taker pays a 7% taker fee (4× your 1.75% maker fee), so ${fmtAm(e.effTaker)} is what they actually net, and what they compare against other makers.`}>i</span>
               </div>); })() : null}
             <div className="row c2">
               <div><label>Fair odds — optional</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
@@ -291,7 +296,12 @@ export default function ComboLocks({ user }) {
             {preview && (
               <div className="tiles" style={{ marginTop: 2 }}>
                 <div className="tile"><div className="k">Auto contracts (cap)</div><div className="v num">{preview.cap}</div></div>
-                <div className="tile"><div className="k">If hits · misses</div><div className="v num" style={{ fontSize: 15 }}>{money(preview.d.hit)} · {money(preview.d.miss)}</div></div>
+                <div className="tile"><div className="k">You profit</div>
+                  <div className="num" style={{ marginTop: 4, fontSize: 15, fontWeight: 700, lineHeight: 1.45 }}>
+                    <div className={preview.d.hit >= 0 ? "pos" : "neg"}>{money(preview.d.hit)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay wins</span></div>
+                    <div className={preview.d.miss >= 0 ? "pos" : "neg"}>{money(preview.d.miss)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay loses</span></div>
+                  </div>
+                </div>
                 <div className="tile"><div className="k">Worst case at cap</div><div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>{money(preview.d.worst)}</div></div>
               </div>
             )}
@@ -334,8 +344,8 @@ export default function ComboLocks({ user }) {
                     {res.locks ? "✓ Would quote — profit locked either way" : "! Does NOT lock at this size — this would be a bet, not an arb"}
                   </div>
                   <div className="tiles">
-                    <div className="tile"><div className="k">If parlay hits</div><div className={"v " + (res.hit >= 0 ? "pos" : "neg")}>{money(res.hit)}</div></div>
-                    <div className="tile"><div className="k">If it misses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
+                    <div className="tile"><div className="k">You profit if parlay wins</div><div className={"v " + (res.hit >= 0 ? "pos" : "neg")}>{money(res.hit)}</div></div>
+                    <div className="tile"><div className="k">You profit if parlay loses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
                     <div className="tile"><div className="k">Worst case</div><div className={"v " + (res.worst >= 0 ? "pos" : "neg")}>{money(res.worst)}</div></div>
                   </div>
                   <div className="kv"><span>You fill buyers at (nominal)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
