@@ -237,6 +237,8 @@ export default function ComboLocks({ user }) {
               <span style={{ fontWeight: 700 }}>{p.label}</span>
               <span className="chip num">have {fmtAm(p.parlay_american)} · ${p.parlay_stake}</span>
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
+              {(() => { const eff = effectiveOdds(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
+                return <span className="chip num" title="What the taker nets after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
               {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
               <span style={{ flex: 1 }} />
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
