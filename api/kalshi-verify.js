@@ -75,7 +75,11 @@ async function probe(pem, endpoint) {
     const t = setTimeout(() => ctrl.abort(), 8000);
     const res = await fetch(BASE + endpoint, { method: 'GET', headers, signal: ctrl.signal });
     clearTimeout(t);
-    return { endpoint, status: res.status, ok: res.ok }; // status only — no body/balance
+    // On success return status only (no account data). On error, capture the API's
+    // error message (not sensitive) so we know WHY — e.g. permission vs missing param.
+    let errorBody = null;
+    if (!res.ok) { try { errorBody = (await res.text()).slice(0, 300); } catch (_) {} }
+    return { endpoint, status: res.status, ok: res.ok, errorBody };
   } catch (e) { return { endpoint, error: 'request_failed: ' + (e && e.message || e) }; }
 }
 
