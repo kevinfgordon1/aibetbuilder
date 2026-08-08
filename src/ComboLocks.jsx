@@ -14,9 +14,17 @@ export const OWNER_EMAIL = "kev120909@gmail.com";
 // one quarter of the 0.07 taker fee (Kalshi fee schedule + RFQ fee filing eff. 2026-07-24).
 const KFEE = 0.0175;
 const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
+const TAKER_FEE = 0.07; // the RFQ taker (person taking your combo) pays this
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
 const feePer = (p, th = KFEE) => th * p * (1 - p);
 const r2 = (x) => Math.round(x * 100) / 100;
+const americanFromProb = (p) => (!(p > 0 && p < 1) ? null : p < 0.5 ? Math.round((100 * (1 - p)) / p) : -Math.round((100 * p) / (1 - p)));
+// Fill odds with fees baked in: effMaker = what YOU truly lay at (your 1.75% fee in);
+// effTaker = what the TAKER actually receives after their 7% fee.
+function effectiveOdds(fillAmerican) {
+  const P = impliedProb(fillAmerican);
+  return { effMaker: americanFromProb(P - feePer(P, KFEE)), effTaker: americanFromProb(P + feePer(P, TAKER_FEE)) };
+}
 
 // Auto contracts cap for a hedge mode — from stake + boosted odds + fill odds.
 //   riskfree : fewest contracts so the losing (miss) side breaks even (~$0 floor), keeps hit upside
@@ -264,6 +272,10 @@ export default function ComboLocks({ user }) {
               <div><label>Boosted odds — you have</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
               <div><label>Fill odds — you offer</label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} /></div>
             </div>
+            {+form.fill ? (() => { const e = effectiveOdds(+form.fill); return (
+              <div style={{ fontSize: 12, color: "#8a8f98", margin: "-2px 2px 12px" }} className="num">
+                Fill {fmtAm(+form.fill)} → you lay at <b style={{ color: "#93c5fd" }}>{fmtAm(e.effMaker)}</b> with your maker fee baked in · taker effectively gets <b style={{ color: "#e8eaed" }}>{fmtAm(e.effTaker)}</b> after their 7% fee
+              </div>); })() : null}
             <div className="row c2">
               <div><label>Fair odds — optional</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
               <div><label>Hedge mode — sets contracts automatically</label>
@@ -324,7 +336,9 @@ export default function ComboLocks({ user }) {
                     <div className="tile"><div className="k">If it misses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
                     <div className="tile"><div className="k">Worst case</div><div className={"v " + (res.worst >= 0 ? "pos" : "neg")}>{money(res.worst)}</div></div>
                   </div>
-                  <div className="kv"><span>You fill buyers at</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
+                  <div className="kv"><span>You fill buyers at (nominal)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
+                  <div className="kv"><span>Your effective lay (maker fee in)</span><span className="num">{fmtAm(res.effMakerFill)}</span></div>
+                  <div className="kv"><span>Taker effectively gets</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
                   <div className="kv"><span>Contracts</span><span className="num">{res.contracts}</span></div>
                   {res.competitive != null && <div className={"note " + (res.competitive ? "ok" : "warn")}>{res.competitive ? `✓ Your fill ${fmtAm(res.fillAmerican)} beats fair ${fmtAm(res.parlay.fair_american)} — competitive.` : `⚠ Your fill ${fmtAm(res.fillAmerican)} is stingier than fair ${fmtAm(res.parlay.fair_american)} — probably won't fill.`}</div>}
                   {res.locks && <><label style={{ marginTop: 12 }}>Quote it would post to Kalshi</label><div className="post">POST /communications/quotes{"\n"}{JSON.stringify(res.quote, null, 2)}</div></>}
