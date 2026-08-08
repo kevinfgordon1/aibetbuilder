@@ -1,4 +1,4 @@
-// ──────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
 // api/kalshi-games.js — same-origin feed of Kalshi single-game markets for the
 // Combo Locks tab. Proxies Kalshi (public, keyless) so the browser avoids CORS.
 //
@@ -88,17 +88,25 @@ async function fetchSportGames(seriesByType) {
     for (const ev of await fetchSeriesEvents(series)) {
       const key = gameKeyOf(ev.event_ticker || ev.ticker); if (!key) continue;
       let g = byKey.get(key);
-      if (!g) { g = { key, title: null, date: null, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
+      if (!g) { g = { key, title: null, date: null, startTime: null, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
       if (type === 'side' || !g.title) { g.title = ev.title || g.title; g.date = ev.sub_title || g.date; }
-      (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: marketLabel(m) }); });
+      (ev.markets || []).forEach(m => {
+        if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: marketLabel(m) });
+        // occurrence_datetime = scheduled first pitch (UTC). Same for every market in a game.
+        if (!g.startTime && (m.occurrence_datetime || m.expected_expiration_time)) g.startTime = m.occurrence_datetime || m.expected_expiration_time;
+      });
     }
   }
   const games = [];
+  const nowMs = Date.now();
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
+    // PRE-GAME ONLY: drop any game already started / in-play, or with no known start time.
+    const startMs = g.startTime ? Date.parse(g.startTime) : NaN;
+    if (!Number.isFinite(startMs) || startMs <= nowMs) continue;
     const teamNames = g.raw.side.map(m => m.label);
     games.push({
-      key: g.key, title: g.title, date: g.date,
+      key: g.key, title: g.title, date: g.date, startTime: g.startTime,
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
         spread: expandSpreads(g.raw.spread, teamNames),
@@ -124,4 +132,3 @@ async function handler(req, res) {
 
 module.exports = handler;
 module.exports._helpers = { parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf };
-
