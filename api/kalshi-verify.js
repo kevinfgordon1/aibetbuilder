@@ -18,13 +18,23 @@ const crypto = require('crypto');
 
 const BASE = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
 const PREFIX = '/trade-api/v2';
-const KEY_ID = process.env.KALSHI_KEY_ID || '78b2dafe-3b8b-46b4-b416-456376016448'; // public
+const KEY_ID = process.env.KALSHI_KEY_ID || '59cff599-0202-4c60-90ae-f6264495eac9'; // public Key ID
 
+// Accept the private key however it was pasted: full PEM, or just the base64 body
+// with the -----BEGIN/END----- armor lines missing (a common copy/paste slip).
+function normalizePem(raw) {
+  let v = raw.includes('\\n') ? raw.replace(/\\n/g, '\n') : raw;
+  const t = v.trim();
+  if (t.startsWith('-----BEGIN')) return t.endsWith('-----') ? t + '\n' : t;
+  const body = t.replace(/[^A-Za-z0-9+/=]/g, '');            // keep only base64 chars
+  const wrapped = (body.match(/.{1,64}/g) || []).join('\n'); // 64-char PEM lines
+  return `-----BEGIN RSA PRIVATE KEY-----\n${wrapped}\n-----END RSA PRIVATE KEY-----\n`;
+}
 function getPem() {
   const names = ['Kalshi_combo_key', 'KALSHI_PRIVATE_KEY', 'KALSHI_COMBO_API_KEY', 'KALSHI_COMBO_KEY'];
   for (const n of names) {
     const raw = process.env[n];
-    if (raw) { const pem = raw.includes('\\n') ? raw.replace(/\\n/g, '\n') : raw; return { pem, raw, name: n }; }
+    if (raw) return { pem: normalizePem(raw), raw, name: n };
   }
   return { pem: '', raw: '', name: null };
 }
