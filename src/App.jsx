@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
+import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1611,6 +1612,9 @@ export default function App() {
           window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
           logEvent(user, 'tab_switched', { tab: 'odds_board' });
         }}>Odds Board</button>
+        {user?.email === OWNER_EMAIL && (
+          <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
+        )}
       </div>
 
       {dataLoading && (
@@ -1624,6 +1628,8 @@ export default function App() {
         <div style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
+
+          {activeTab === "combo" && user?.email === OWNER_EMAIL && <ComboLocks user={user} />}
 
           {activeTab === "ev" && (
             <div>
