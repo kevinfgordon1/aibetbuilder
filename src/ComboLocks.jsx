@@ -9,23 +9,45 @@ import { createClient } from "@supabase/supabase-js";
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const OWNER_EMAIL = "kev120909@gmail.com";
 
-/* ── engine (mirrors lib/combo-lock decideAtFill) ── */
+/* ── engine (mirrors worker engine.js decideAtFill / hedgeCap exactly) ── */
 const KFEE = 0.07;
 const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
 const feePer = (p, th = KFEE) => th * p * (1 - p);
 const r2 = (x) => Math.round(x * 100) / 100;
-function decideAtFill({ parlayStake, parlayAmerican, fillAmerican, fairAmerican = null, rfqContracts, maxContracts, scaleFactor = 1 }) {
+
+// Auto contracts cap for a hedge mode — from stake + boosted odds + fill odds.
+//   riskfree : fewest contracts so the losing (miss) side breaks even (~$0 floor), keeps hit upside
+//   1x       : pure hedge — equal payoff whether the combo hits or misses (= stake × decimal boost)
+//   2x / 3x  : multiples of the pure hedge — these OVERSHOOT into a directional short (big loss on hit)
+function hedgeCap({ stake, boostAmerican, fillAmerican, mode = "1x" }) {
+  if (!(stake > 0) || !boostAmerican || !fillAmerican) return 0;
+  const winReturn = stake * aToDec(boostAmerican);
+  const s = impliedProb(fillAmerican);
+  const denom = s * (1 - KFEE * (1 - s));
+  const riskfree = denom > 0 ? Math.ceil(stake / denom) : 0;
+  switch (String(mode)) {
+    case "riskfree": return riskfree;
+    case "2x": return Math.round(2 * winReturn);
+    case "3x": return Math.round(3 * winReturn);
+    case "1x":
+    default: return Math.round(winReturn);
+  }
+}
+function decideAtFill({ parlayStake, parlayAmerican, fillAmerican, fairAmerican = null, rfqContracts, hedgeMode = "1x" }) {
   if (!(parlayStake > 0) || !parlayAmerican || !fillAmerican || !(rfqContracts > 0)) return { ok: false, reason: "bad_inputs" };
   const dec = aToDec(parlayAmerican), winReturn = parlayStake * dec, bookHit = winReturn - parlayStake, bookMiss = -parlayStake;
-  const cap = (maxContracts != null ? maxContracts : winReturn) * scaleFactor;
-  if (rfqContracts > cap + 1e-9) return { ok: false, reason: "over_limit", cap };
-  const N = rfqContracts, s = impliedProb(fillAmerican), fee = N * feePer(s);
+  const cap = hedgeCap({ stake: parlayStake, boostAmerican: parlayAmerican, fillAmerican, mode: hedgeMode });
+  const N = Math.min(rfqContracts, cap); // partial fill up to the cap — bigger RFQs fill to the cap
+  if (!(N > 0)) return { ok: false, reason: "zero_cap", cap };
+  const s = impliedProb(fillAmerican), fee = N * feePer(s);
   const hit = bookHit + N * s - N - fee, miss = bookMiss + N * s - fee, worst = Math.min(hit, miss);
   return { ok: true, locks: worst >= 0, hit: r2(hit), miss: r2(miss), worst: r2(worst),
+    partial: rfqContracts > cap, cap, hedgeMode,
     competitive: fairAmerican == null ? null : fillAmerican >= fairAmerican, fillAmerican,
     quote: { yes_bid: "0.00", no_bid: r2(1 - s).toFixed(2), rest_remainder: false }, contracts: N };
 }
+const MODE_LABEL = { riskfree: "Risk-free", "1x": "1× pure hedge", "2x": "2× (directional)", "3x": "3× (directional)" };
 
 /* ── sample games fallback (same shape the /api/kalshi-games feed returns) ── */
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
@@ -52,7 +74,7 @@ export default function ComboLocks({ user }) {
   const [kill, setKill] = useState(true); // safe default until settings load
   const [history, setHistory] = useState([]);
   const [legRows, setLegRows] = useState([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
-  const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, maxc: 2100, scale: 1, label: "", labelEdited: false });
+  const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", label: "", labelEdited: false });
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
 
   const gameIdx = useMemo(() => { const m = {}; (games.sports.mlb || []).forEach((g) => (m[g.key] = g)); return m; }, [games]);
@@ -87,6 +109,17 @@ export default function ComboLocks({ user }) {
   // keep label synced from legs unless the user has edited it
   useEffect(() => { setForm((f) => (f.labelEdited ? f : { ...f, label: readLegs().map((l) => l.label).join(" + ") })); }, [legRows, readLegs]);
 
+  // live preview: auto contracts cap for the chosen mode + the outcome if filled to that cap
+  const preview = useMemo(() => {
+    const stake = +form.stake, boost = +form.boost, fill = +form.fill;
+    if (!(stake > 0) || !boost || !fill) return null;
+    const cap = hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: form.mode });
+    if (!(cap > 0)) return null;
+    const d = decideAtFill({ parlayStake: stake, parlayAmerican: boost, fillAmerican: fill,
+      fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode });
+    return { cap, d };
+  }, [form.stake, form.boost, form.fill, form.fair, form.mode]);
+
   const setLeg = (id, patch) => setLegRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addLeg = () => setLegRows((rows) => [...rows, { id: (rows.at(-1)?.id || 0) + 1, gameKey: "", marketVal: "" }]);
   const removeLeg = (id) => setLegRows((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
@@ -95,10 +128,11 @@ export default function ComboLocks({ user }) {
     const legs = readLegs();
     if (legs.length < 2) return alert("Pick at least 2 legs (game + market each).");
     if (!(+form.stake > 0) || !+form.boost || !+form.fill) return alert("Enter stake, boosted odds, and fill odds.");
+    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: +form.fill, mode: form.mode });
     const row = { user_id: user.id, label: form.label.trim() || legs.map((l) => l.label).join(" + "),
       legs, mve_collection: games.comboCollection, leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
       parlay_stake: +form.stake, parlay_american: +form.boost, fill_american: +form.fill,
-      fair_american: form.fair === "" ? null : +form.fair, max_contracts: +form.maxc, scale_factor: +form.scale };
+      fair_american: form.fair === "" ? null : +form.fair, hedge_mode: form.mode, max_contracts: cap, scale_factor: 1 };
     const { error } = await supabase.from("combo_parlays").insert(row);
     if (error) return alert("Save failed: " + error.message);
     setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
@@ -112,7 +146,7 @@ export default function ComboLocks({ user }) {
     const p = parlays.find((x) => x.id === sim.parlayId);
     if (!p) return setSim((s) => ({ ...s, result: { kind: "empty" } }));
     const d = decideAtFill({ parlayStake: p.parlay_stake, parlayAmerican: p.parlay_american, fillAmerican: p.fill_american,
-      fairAmerican: p.fair_american, rfqContracts: +sim.size, maxContracts: p.max_contracts, scaleFactor: p.scale_factor });
+      fairAmerican: p.fair_american, rfqContracts: +sim.size, hedgeMode: p.hedge_mode || "1x" });
     setSim((s) => ({ ...s, result: { ...d, parlay: p, kill } }));
     if (d.ok && d.locks) {
       const sub = { user_id: user.id, parlay_id: p.id, label: p.label, fill_american: d.fillAmerican, contracts: d.contracts, worst_lock: d.worst, status: "shadow" };
@@ -126,7 +160,7 @@ export default function ComboLocks({ user }) {
       { id: 2, gameKey: g[1]?.key || "", marketVal: g[1] ? encVal(g[1].markets.total[0].ticker, g[1].markets.total[0].side) : "" },
       { id: 3, gameKey: g[2]?.key || "", marketVal: g[2] ? encVal(g[2].markets.spread[0].ticker, g[2].markets.spread[0].side) : "" },
     ]);
-    setForm({ stake: 100, boost: 2000, fill: 1200, fair: 1000, maxc: 2100, scale: 1, label: "", labelEdited: false });
+    setForm({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", label: "", labelEdited: false });
   };
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
@@ -198,7 +232,7 @@ export default function ComboLocks({ user }) {
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · max {p.max_contracts} · {p.scale_factor}× scale</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts</div>
           </div>
         ))}
       </div>
@@ -228,11 +262,29 @@ export default function ComboLocks({ user }) {
               <div><label>Boosted odds — you have</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
               <div><label>Fill odds — you offer</label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} /></div>
             </div>
-            <div className="row c3">
+            <div className="row c2">
               <div><label>Fair odds — optional</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
-              <div><label>Max contracts</label><input className="num" type="number" value={form.maxc} onChange={(e) => setForm({ ...form, maxc: e.target.value })} /></div>
-              <div><label>Scale</label><select value={form.scale} onChange={(e) => setForm({ ...form, scale: e.target.value })}><option value="1">1× (pure hedge)</option><option value="2">2×</option><option value="3">3×</option></select></div>
+              <div><label>Hedge mode — sets contracts automatically</label>
+                <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
+                  <option value="riskfree">Risk-free — floor $0, keep upside</option>
+                  <option value="1x">1× pure hedge — equal both sides (default)</option>
+                  <option value="2x">2× — directional short (can lose big)</option>
+                  <option value="3x">3× — directional short (can lose big)</option>
+                </select></div>
             </div>
+            {preview && (
+              <div className="tiles" style={{ marginTop: 2 }}>
+                <div className="tile"><div className="k">Auto contracts (cap)</div><div className="v num">{preview.cap}</div></div>
+                <div className="tile"><div className="k">If hits · misses</div><div className="v num" style={{ fontSize: 15 }}>{money(preview.d.hit)} · {money(preview.d.miss)}</div></div>
+                <div className="tile"><div className="k">Worst case at cap</div><div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>{money(preview.d.worst)}</div></div>
+              </div>
+            )}
+            {preview && !preview.d.locks && form.mode !== "2x" && form.mode !== "3x" && (
+              <div className="note warn">⚠ This won't fully lock — your boosted odds and fill odds are too close. Widen the gap (bigger boost, or offer stingier fill odds).</div>
+            )}
+            {preview && (form.mode === "2x" || form.mode === "3x") && (
+              <div className="note warn">⚠ Directional: {MODE_LABEL[form.mode]} sells past the hedge. You profit if the combo misses but take the loss shown above if it hits.</div>
+            )}
             <label>Label — auto-filled from your legs, edit if you like</label>
             <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value, labelEdited: true })} placeholder="pick legs above…" />
             <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
