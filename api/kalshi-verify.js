@@ -23,10 +23,23 @@ const KEY_ID = process.env.KALSHI_KEY_ID || '78b2dafe-3b8b-46b4-b416-45637601644
 function getPem() {
   const names = ['Kalshi_combo_key', 'KALSHI_PRIVATE_KEY', 'KALSHI_COMBO_API_KEY', 'KALSHI_COMBO_KEY'];
   for (const n of names) {
-    let v = process.env[n];
-    if (v) { if (v.includes('\\n')) v = v.replace(/\\n/g, '\n'); return { pem: v, name: n }; }
+    const raw = process.env[n];
+    if (raw) { const pem = raw.includes('\\n') ? raw.replace(/\\n/g, '\n') : raw; return { pem, raw, name: n }; }
   }
-  return { pem: '', name: null };
+  return { pem: '', raw: '', name: null };
+}
+// Safe diagnostics only — NEVER exposes key material (header lines + shape only).
+function diag(raw) {
+  const t = (raw || '').trim();
+  return {
+    length: raw ? raw.length : 0,
+    startsWithBegin: t.startsWith('-----BEGIN'),
+    endsWithEnd: t.endsWith('KEY-----'),
+    looksLikeUuid: /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F-]+$/.test(t),
+    hasRealNewlines: (raw || '').includes('\n'),
+    hasEscapedNewlines: (raw || '').includes('\\n'),
+    firstChars: t.slice(0, 11),   // e.g. "-----BEGIN " (public header) or start of a UUID
+  };
 }
 
 function sign(pem, tsMs, method, signPath) {
@@ -63,8 +76,8 @@ module.exports = async function handler(req, res) {
     const token = (req.query && req.query.token) || '';
     if (token !== process.env.KALSHI_VERIFY_TOKEN) { res.status(401).json({ error: 'bad_token' }); return; }
   }
-  const { pem, name } = getPem();
-  const config = { keyIdPresent: !!KEY_ID, privateKeyEnvVar: name, privateKeyLooksPem: /BEGIN [A-Z ]*PRIVATE KEY/.test(pem) };
+  const { pem, raw, name } = getPem();
+  const config = { keyIdPresent: !!KEY_ID, privateKeyEnvVar: name, privateKeyLooksPem: /BEGIN [A-Z ]*PRIVATE KEY/.test(pem), diagnostics: diag(raw) };
   if (!pem) { res.status(200).json({ config, error: 'no_private_key_env', note: 'set your private key in a Vercel env var (e.g. Kalshi_combo_key)' }); return; }
 
   const endpoints = ['/portfolio/balance', '/communications/rfqs', '/communications/quotes', '/portfolio/fills'];
