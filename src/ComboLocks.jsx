@@ -10,7 +10,9 @@ const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env
 export const OWNER_EMAIL = "kev120909@gmail.com";
 
 /* ── engine (mirrors worker engine.js decideAtFill / hedgeCap exactly) ── */
-const KFEE = 0.07;
+// MAKER fee: you are the accepted quoter on combo (KXMVE) RFQs → 0.0175 × C × P × (1−P),
+// one quarter of the 0.07 taker fee (Kalshi fee schedule + RFQ fee filing eff. 2026-07-24).
+const KFEE = 0.0175;
 const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
 const feePer = (p, th = KFEE) => th * p * (1 - p);
