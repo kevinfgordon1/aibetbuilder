@@ -85,8 +85,9 @@ export default function ComboLocks({ user }) {
   const [parlays, setParlays] = useState([]);
   const [kill, setKill] = useState(true); // safe default until settings load
   const [history, setHistory] = useState([]);
+  const [archived, setArchived] = useState([]);
   const [legRows, setLegRows] = useState([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
-  const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", label: "", labelEdited: false });
+  const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
 
   const gameIdx = useMemo(() => { const m = {}; (games.sports.mlb || []).forEach((g) => (m[g.key] = g)); return m; }, [games]);
@@ -101,12 +102,13 @@ export default function ComboLocks({ user }) {
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
-    const [{ data: p }, { data: s }, { data: h }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: h }, { data: ar }] = await Promise.all([
       supabase.from("combo_parlays").select("*").eq("active", true).order("created_at", { ascending: false }),
       supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
       supabase.from("combo_submissions").select("*").order("created_at", { ascending: false }).limit(50),
+      supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
     ]);
-    setParlays(p || []); if (s) setKill(!!s.kill_switch); setHistory(h || []);
+    setParlays(p || []); if (s) setKill(!!s.kill_switch); setHistory(h || []); setArchived(ar || []);
   }, [owner, user]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
@@ -144,13 +146,16 @@ export default function ComboLocks({ user }) {
     const row = { user_id: user.id, label: form.label.trim() || legs.map((l) => l.label).join(" + "),
       legs, mve_collection: games.comboCollection, leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
       parlay_stake: +form.stake, parlay_american: +form.boost, fill_american: +form.fill,
-      fair_american: form.fair === "" ? null : +form.fair, hedge_mode: form.mode, max_contracts: cap, scale_factor: 1 };
+      fair_american: form.fair === "" ? null : +form.fair, hedge_mode: form.mode, max_contracts: cap, scale_factor: 1,
+      starts_at: form.starts ? new Date(form.starts).toISOString() : null };
     const { error } = await supabase.from("combo_parlays").insert(row);
     if (error) return alert("Save failed: " + error.message);
     setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
-    setForm((f) => ({ ...f, label: "", labelEdited: false })); reload();
+    setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "" })); reload();
   };
   const removeParlay = async (id) => { await supabase.from("combo_parlays").delete().eq("id", id); reload(); };
+  // Move a parlay to History: deactivate it (worker stops watching) and stamp archived_at.
+  const archiveParlay = async (id) => { await supabase.from("combo_parlays").update({ active: false, archived_at: new Date().toISOString() }).eq("id", id); reload(); };
   const toggleKill = async () => { const next = !kill; setKill(next);
     await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() }); };
 
@@ -172,7 +177,7 @@ export default function ComboLocks({ user }) {
       { id: 2, gameKey: g[1]?.key || "", marketVal: g[1] ? encVal(g[1].markets.total[0].ticker, g[1].markets.total[0].side) : "" },
       { id: 3, gameKey: g[2]?.key || "", marketVal: g[2] ? encVal(g[2].markets.spread[0].ticker, g[2].markets.spread[0].side) : "" },
     ]);
-    setForm({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", label: "", labelEdited: false });
+    setForm({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
   };
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
@@ -248,10 +253,11 @@ export default function ComboLocks({ user }) {
                 return <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
               {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
               <span style={{ flex: 1 }} />
+              <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history — the worker stops watching it">Move to history</button>
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · auto-archives ${new Date(p.starts_at).toLocaleString()}` : ""}</div>
           </div>
         ))}
       </div>
@@ -292,6 +298,10 @@ export default function ComboLocks({ user }) {
                   <option value="2x">2× — directional short (can lose big)</option>
                   <option value="3x">3× — directional short (can lose big)</option>
                 </select></div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label>Game start — optional (auto-moves this parlay to history once the time passes)</label>
+              <input className="num" type="datetime-local" value={form.starts} onChange={(e) => setForm({ ...form, starts: e.target.value })} />
             </div>
             {preview && (
               <div className="tiles" style={{ marginTop: 2 }}>
@@ -359,6 +369,16 @@ export default function ComboLocks({ user }) {
             </div>
           </div>
         </div>
+      </div>
+
+      <h3>Parlay history — archived</h3>
+      <div className="card">
+        {archived.length === 0 ? <div className="empty">No archived parlays yet. A parlay moves here when you click “Move to history”, or automatically once its game start time passes.</div> : (
+          <table><thead><tr><th>Archived</th><th>Parlay</th><th>Have</th><th>Fill</th><th>Mode</th><th>Cap</th><th>Game start</th></tr></thead>
+            <tbody>{archived.map((a) => (
+              <tr key={a.id}><td>{a.archived_at ? new Date(a.archived_at).toLocaleString() : "—"}</td><td>{a.label}</td><td>{fmtAm(a.parlay_american)} · ${a.parlay_stake}</td><td>{fmtAm(a.fill_american)}</td><td>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</td><td>{a.max_contracts}</td><td>{a.starts_at ? new Date(a.starts_at).toLocaleString() : "—"}</td></tr>
+            ))}</tbody></table>
+        )}
       </div>
 
       <h3>Submitted bets — history</h3>
