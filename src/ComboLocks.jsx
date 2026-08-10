@@ -86,6 +86,9 @@ export default function ComboLocks({ user }) {
   const [kill, setKill] = useState(true); // safe default until settings load
   const [history, setHistory] = useState([]);
   const [archived, setArchived] = useState([]);
+  const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
+  const [quoted, setQuoted] = useState({});       // parlay_id -> contracts the worker quoted (from combo_submissions)
+  const [realUnattr, setRealUnattr] = useState(0);// real combo fills we couldn't tie to a specific parlay
   const [legRows, setLegRows] = useState([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
   const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
@@ -102,16 +105,27 @@ export default function ComboLocks({ user }) {
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
-    const [{ data: p }, { data: s }, { data: h }, { data: ar }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }] = await Promise.all([
       supabase.from("combo_parlays").select("*").eq("active", true).order("created_at", { ascending: false }),
       supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
       supabase.from("combo_submissions").select("*").order("created_at", { ascending: false }).limit(50),
       supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
+      // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
+      supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker").eq("is_combo", true).eq("is_taker", false),
+      // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
+      supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live").or("status.eq.filled,is_live.eq.true"),
     ]);
     setParlays(p || []); if (s) setKill(!!s.kill_switch); setHistory(h || []); setArchived(ar || []);
+    const rf = {}; let un = 0;
+    (fills || []).forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
+    setRealFills(rf); setRealUnattr(un);
+    const q = {}; (booked || []).forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
+    setQuoted(q);
   }, [owner, user]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
+  // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
+  useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
 
   const findMarket = (g, ticker, side) => { for (const t of ["side", "spread", "total"]) { const m = (g.markets[t] || []).find((x) => x.ticker === ticker && x.side === side); if (m) return { ...m, type: t }; } return null; };
   const readLegs = useCallback(() => legRows.map((r) => {
@@ -226,6 +240,8 @@ export default function ComboLocks({ user }) {
         .cl .switch .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
         .cl .switch.on{background:#ef4444}.cl .switch.on .knob{left:23px}
         .cl .empty{color:#6b7280;font-size:14px;padding:8px 2px}
+        .cl .bar{height:7px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:2px}
+        .cl .bar-fill{height:100%;background:#34d399;border-radius:999px;transition:width .3s}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
         .cl .info::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);border:6px solid transparent;border-top-color:#0c1016;opacity:0;transition:opacity .12s;z-index:31}
@@ -258,8 +274,23 @@ export default function ComboLocks({ user }) {
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
             <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · auto-archives ${new Date(p.starts_at).toLocaleString()}` : ""}</div>
+            {(() => {
+              const real = realFills[p.id] || 0, q = quoted[p.id] || 0, cap = p.max_contracts || 0;
+              const pct = cap > 0 ? Math.min(100, Math.round((real / cap) * 100)) : 0;
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
+                    <span style={{ color: "#8a8f98", fontWeight: 600 }}>Real fills (Kalshi account)</span>
+                    <span className="num" style={{ color: real > 0 ? "#34d399" : "#6b7280" }}>{real} of {cap} filled{q > real ? ` · ${q} quoted` : ""}</span>
+                  </div>
+                  <div className="bar"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
+                  {q > real && <div style={{ fontSize: 11, color: "#fcd34d", marginTop: 3 }}>⚠ {q} contracts quoted, only {real} confirmed filled by Kalshi — the difference wasn’t accepted (or hasn’t executed yet).</div>}
+                </div>
+              );
+            })()}
           </div>
         ))}
+        {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>Note: {realUnattr} real combo contract(s) filled couldn’t be tied to a specific parlay (Kalshi fills carry no quote id) — counted but shown unattributed.</div>}
       </div>
 
       <div className="grid2" style={{ marginTop: 16 }}>
