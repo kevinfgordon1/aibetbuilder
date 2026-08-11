@@ -95,6 +95,8 @@ export default function ComboLocks({ user }) {
   const [realUnattr, setRealUnattr] = useState(0);// real combo fills we couldn't tie to a specific parlay
   const [matchCounts, setMatchCounts] = useState({}); // parlay_id -> { n, locks_n, dollar_n, last_match }
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
+  const [matchesByParlay, setMatchesByParlay] = useState({}); // parlay_id -> [combo_matches rows]
+  const [openParlays, setOpenParlays] = useState({});         // parlay_id -> expanded (drilldown open)?
   const [legRows, setLegRows] = useState([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
   const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
@@ -111,7 +113,7 @@ export default function ComboLocks({ user }) {
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
-    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }, { data: mrows }] = await Promise.all([
       // All LIVING parlays (not yet archived), whether the worker is actively watching them
       // (active=true) or paused after recording a quote (active=false). Loading both means a
       // parlay can never fall through the gap between the Active and History lists again.
@@ -126,11 +128,14 @@ export default function ComboLocks({ user }) {
       // How many RFQs matched each parlay (from the read-only watcher).
       supabase.from("combo_match_counts").select("*"),
       // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
-      supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(50),
+      supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(200),
+      // Every RFQ that matched a parlay — for the per-lock drilldown.
+      supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(400),
     ]);
     setParlays(p || []); if (s) setKill(!!s.kill_switch); setHistory(h || []); setArchived(ar || []);
     const mcMap = {}; (mc || []).forEach((r) => { mcMap[r.parlay_id] = r; }); setMatchCounts(mcMap);
     setOutcomes(oc || []);
+    const mbp = {}; (mrows || []).forEach((m) => { (mbp[m.parlay_id] = mbp[m.parlay_id] || []).push(m); }); setMatchesByParlay(mbp);
     const rf = {}; let un = 0;
     (fills || []).forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
     setRealFills(rf); setRealUnattr(un);
@@ -173,6 +178,9 @@ export default function ComboLocks({ user }) {
     (parlays || []).forEach((p) => ((realFills[p.id] || 0) > 0 ? f : w).push(p));
     return { waiting: w, filledParlays: f };
   }, [parlays, realFills]);
+  const toggleOpen = (id) => setOpenParlays((o) => ({ ...o, [id]: !o[id] }));
+  // rfq_id -> the quote outcome we recorded for it (only exists for RFQs we actually quoted).
+  const outcomeByRfq = useMemo(() => { const m = {}; (outcomes || []).forEach((o) => { if (o.rfq_id) m[o.rfq_id] = o; }); return m; }, [outcomes]);
 
   const setLeg = (id, patch) => setLegRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addLeg = () => setLegRows((rows) => [...rows, { id: (rows.at(-1)?.id || 0) + 1, gameKey: "", marketVal: "" }]);
@@ -290,6 +298,7 @@ export default function ComboLocks({ user }) {
         {waiting.length === 0 ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
           <div className="parlay" key={p.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
               <span style={{ fontWeight: 700 }}>{p.label}</span>
               {(() => {
                 const paused = p.active === false;
@@ -321,6 +330,42 @@ export default function ComboLocks({ user }) {
                   </div>
                   <div className="bar"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
                   {q > real && <div style={{ fontSize: 11, color: "#fcd34d", marginTop: 3 }}>⚠ {q} contracts quoted, only {real} confirmed filled by Kalshi — the difference wasn’t accepted (or hasn’t executed yet).</div>}
+                </div>
+              );
+            })()}
+            {openParlays[p.id] && (() => {
+              const rows = matchesByParlay[p.id] || [];
+              const quotedN = rows.filter((m) => outcomeByRfq[m.rfq_id]).length;
+              const lostN = rows.filter((m) => (outcomeByRfq[m.rfq_id] || {}).outcome === "lost").length;
+              const outMap = { executed: ["#6ee7b7", "filled"], accepted: ["#93c5fd", "accepted"], lost: ["#fca5a5", "lost"], posted: ["#9aa3b2", "awaiting"] };
+              const whyMap = { outbid: "outbid (price)", too_slow: "too slow", no_taker: "no taker", unknown: "unknown" };
+              return (
+                <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
+                  <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
+                    Matched RFQs — {rows.length} total · {quotedN} quoted · {lostN} lost
+                  </div>
+                  {rows.length === 0 ? <div className="empty">No RFQs have matched this lock yet. Matches are recorded from when the watcher went live.</div> : (
+                    <table><thead><tr><th>Time</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
+                      <tbody>{rows.map((m) => {
+                        const oc = outcomeByRfq[m.rfq_id];
+                        const req = m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${m.contracts != null ? m.contracts : "—"} contracts`;
+                        const lockable = m.locks === true ? "✓ yes" : m.locks === false ? "no" : "—";
+                        const [ocCol, ocLbl] = oc ? (outMap[oc.outcome] || ["#c3c6cc", oc.outcome]) : (m.locks ? ["#6b7280", "not quoted"] : ["#6b7280", "no-lock"]);
+                        const why = oc && oc.outcome === "lost" ? (oc.loss_reason ? (whyMap[oc.loss_reason] || oc.loss_reason) : "checking…") : "";
+                        const speed = oc && oc.responded_ms != null ? `${(oc.responded_ms / 1000).toFixed(1)}s${oc.rfq_lifetime_ms != null ? `/${(oc.rfq_lifetime_ms / 1000).toFixed(1)}s` : ""}` : "";
+                        return (
+                          <tr key={m.rfq_id}>
+                            <td>{m.matched_at ? new Date(m.matched_at).toLocaleTimeString() : "—"}</td>
+                            <td className="num">{req}</td>
+                            <td className="num" style={{ color: m.locks === true ? "#6ee7b7" : m.locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
+                            <td className="num">{m.worst != null ? money(m.worst) : "—"}</td>
+                            <td className="num">{oc && oc.no_bid != null ? `NO $${Number(oc.no_bid).toFixed(2)}` : "—"}</td>
+                            <td style={{ color: ocCol }}>{ocLbl}</td>
+                            <td style={{ color: "#8a8f98" }}>{why}{why && speed ? " · " : ""}{speed}</td>
+                          </tr>
+                        );
+                      })}</tbody></table>
+                  )}
                 </div>
               );
             })()}
