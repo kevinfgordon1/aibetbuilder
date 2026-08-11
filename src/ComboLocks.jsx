@@ -93,6 +93,8 @@ export default function ComboLocks({ user }) {
   const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
   const [quoted, setQuoted] = useState({});       // parlay_id -> contracts the worker quoted (from combo_submissions)
   const [realUnattr, setRealUnattr] = useState(0);// real combo fills we couldn't tie to a specific parlay
+  const [matchCounts, setMatchCounts] = useState({}); // parlay_id -> { n, locks_n, dollar_n, last_match }
+  const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [legRows, setLegRows] = useState([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
   const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
@@ -109,7 +111,7 @@ export default function ComboLocks({ user }) {
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
-    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }] = await Promise.all([
       // All LIVING parlays (not yet archived), whether the worker is actively watching them
       // (active=true) or paused after recording a quote (active=false). Loading both means a
       // parlay can never fall through the gap between the Active and History lists again.
@@ -121,8 +123,14 @@ export default function ComboLocks({ user }) {
       supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker").eq("is_combo", true).eq("is_taker", false),
       // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
       supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live").or("status.eq.filled,is_live.eq.true"),
+      // How many RFQs matched each parlay (from the read-only watcher).
+      supabase.from("combo_match_counts").select("*"),
+      // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
+      supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(50),
     ]);
     setParlays(p || []); if (s) setKill(!!s.kill_switch); setHistory(h || []); setArchived(ar || []);
+    const mcMap = {}; (mc || []).forEach((r) => { mcMap[r.parlay_id] = r; }); setMatchCounts(mcMap);
+    setOutcomes(oc || []);
     const rf = {}; let un = 0;
     (fills || []).forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
     setRealFills(rf); setRealUnattr(un);
@@ -301,7 +309,7 @@ export default function ComboLocks({ user }) {
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}${mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : " · matched 0 RFQs"; })()}</div>
             {(() => {
               const real = realFills[p.id] || 0, q = quoted[p.id] || 0, cap = p.max_contracts || 0;
               const pct = cap > 0 ? Math.min(100, Math.round((real / cap) * 100)) : 0;
@@ -345,7 +353,7 @@ export default function ComboLocks({ user }) {
                 </div>
                 <div className="bar"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
               </div>
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
             </div>
           );
         })}
@@ -486,6 +494,27 @@ export default function ComboLocks({ user }) {
               return (
               <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "REAL" : "SHADOW"}</span></td><td>{new Date(h.created_at).toLocaleString()}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
                 <td><span className={"st " + stClass} title={h.status === "filled" && !executed ? "Quote posted to Kalshi but not accepted — no position held." : ""}>{dispStatus}</span></td></tr>
+            ); })}</tbody></table>
+        )}
+      </div>
+
+      <h3>Quote outcomes — did our quotes win?</h3>
+      <div className="card">
+        {outcomes.length === 0 ? (
+          <div className="empty">No quote outcomes yet. Once the read-only watcher is running, every quote the worker posts is tracked here: <b>accepted</b> / <b>executed</b> (real fill) / <b>lost</b> (outbid, or the taker took no one), with response latency and a Kalshi fill reconcile.</div>
+        ) : (
+          <table><thead><tr><th>When</th><th>Parlay</th><th>Outcome</th><th>Latency</th><th>Real fill</th></tr></thead>
+            <tbody>{outcomes.map((o) => {
+              const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "executed"], accepted: ["rgba(147,197,253,.18)", "#93c5fd", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "lost"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "awaiting"] };
+              const [bg, col, lbl] = map[o.outcome] || map.posted;
+              return (
+              <tr key={o.id || o.quote_id}>
+                <td>{o.posted_at ? new Date(o.posted_at).toLocaleString() : "—"}</td>
+                <td>{o.label || "—"}</td>
+                <td><span className="st" style={{ background: bg, color: col }} title={o.outcome === "lost" ? "No acceptance arrived — outbid by another maker, or the taker accepted no one." : o.outcome === "executed" ? "Kalshi executed a real position." : ""}>{lbl}</span></td>
+                <td className="num">{o.responded_ms != null ? `${o.responded_ms} ms` : "—"}</td>
+                <td className="num">{o.fill_confirmed ? `✓ ${o.fill_count || ""}` : (o.outcome === "executed" ? "checking…" : "—")}</td>
+              </tr>
             ); })}</tbody></table>
         )}
       </div>
