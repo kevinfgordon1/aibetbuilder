@@ -503,20 +503,24 @@ export default function ComboLocks({ user }) {
         {outcomes.length === 0 ? (
           <div className="empty">No quote outcomes yet. Once the read-only watcher is running, every quote the worker posts is tracked here: <b>accepted</b> / <b>executed</b> (real fill) / <b>lost</b> (outbid, or the taker took no one), with response latency and a Kalshi fill reconcile.</div>
         ) : (
-          <table><thead><tr><th>When</th><th>Parlay</th><th>Your quote</th><th>Outcome</th><th>Why (if lost)</th><th>Latency</th><th>Real fill</th></tr></thead>
+          <table><thead><tr><th>When</th><th>Parlay</th><th>Your quote</th><th>Outcome</th><th>Why (if lost)</th><th>Your speed vs window</th><th>Real fill</th></tr></thead>
             <tbody>{outcomes.map((o) => {
               const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "executed"], accepted: ["rgba(147,197,253,.18)", "#93c5fd", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "lost"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "awaiting"] };
               const [bg, col, lbl] = map[o.outcome] || map.posted;
-              const whyMap = { outbid: "outbid — a better price won", no_taker: "taker accepted no one", unknown: "unknown" };
+              const whyMap = { outbid: "outbid — a better price won", too_slow: "too slow — window closed first", no_taker: "taker accepted no one", unknown: "unknown" };
               const why = o.outcome === "lost" ? (o.loss_reason ? (whyMap[o.loss_reason] || o.loss_reason) : "checking…") : "—";
+              const whyCol = o.loss_reason === "too_slow" ? "#fcd34d" : o.loss_reason === "outbid" ? "#fca5a5" : o.loss_reason === "no_taker" ? "#9aa3b2" : "#6b7280";
+              const secs = (ms) => (ms != null ? `${(ms / 1000).toFixed(1)}s` : null);
               return (
               <tr key={o.id || o.quote_id}>
                 <td>{o.posted_at ? new Date(o.posted_at).toLocaleString() : "—"}</td>
                 <td>{o.label || "—"}</td>
                 <td className="num">{o.no_bid != null ? `NO $${Number(o.no_bid).toFixed(2)}` : "—"}{o.fill_american ? ` · ${fmtAm(o.fill_american)}` : ""}</td>
                 <td><span className="st" style={{ background: bg, color: col }} title={o.outcome === "executed" ? "Kalshi executed a real position." : ""}>{lbl}</span></td>
-                <td style={{ color: o.loss_reason === "outbid" ? "#fca5a5" : o.loss_reason === "no_taker" ? "#9aa3b2" : "#6b7280" }}>{why}</td>
-                <td className="num">{o.responded_ms != null ? `${o.responded_ms} ms` : "—"}</td>
+                <td style={{ color: whyCol }}>{why}</td>
+                <td className="num" style={{ color: o.in_time === false ? "#fcd34d" : "#c3c6cc" }} title="How fast you answered vs how long the RFQ stayed open. Answering after the window closes means the taker already accepted someone.">
+                  {secs(o.responded_ms) || "—"}{o.rfq_lifetime_ms != null ? ` / ${secs(o.rfq_lifetime_ms)} window` : ""}{o.in_time === false ? " ⚠ late" : (o.in_time === true ? " ✓" : "")}
+                </td>
                 <td className="num">{o.fill_confirmed ? `✓ ${o.fill_count || ""}` : (o.outcome === "executed" ? "checking…" : "—")}</td>
               </tr>
             ); })}</tbody></table>
