@@ -78,6 +78,10 @@ const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
 const fmtAm = (a) => (a == null ? "—" : a > 0 ? "+" + a : "" + a);
 const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
+// A parlay auto-moves to History this many hours after its game start — an approximation of
+// "games over," since we only know start times, not end times or Kalshi settlement.
+const HISTORY_BUFFER_HOURS = 6;
+const historyMoveAt = (startsAtIso) => (startsAtIso ? new Date(new Date(startsAtIso).getTime() + HISTORY_BUFFER_HOURS * 3600 * 1000) : null);
 
 export default function ComboLocks({ user }) {
   const [games, setGames] = useState(SAMPLE);
@@ -106,7 +110,10 @@ export default function ComboLocks({ user }) {
   const reload = useCallback(async () => {
     if (!owner) return;
     const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }] = await Promise.all([
-      supabase.from("combo_parlays").select("*").eq("active", true).order("created_at", { ascending: false }),
+      // All LIVING parlays (not yet archived), whether the worker is actively watching them
+      // (active=true) or paused after recording a quote (active=false). Loading both means a
+      // parlay can never fall through the gap between the Active and History lists again.
+      supabase.from("combo_parlays").select("*").is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
       supabase.from("combo_submissions").select("*").order("created_at", { ascending: false }).limit(50),
       supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
@@ -148,6 +155,17 @@ export default function ComboLocks({ user }) {
     return { cap, d };
   }, [form.stake, form.boost, form.fill, form.fair, form.mode]);
 
+  // Lifecycle split (derived, so nothing can disappear):
+  //   waiting  = living parlay with NO confirmed real fill yet  → "Active — waiting to be filled"
+  //   filled   = living parlay WITH ≥1 confirmed real fill       → "Filled — awaiting settlement"
+  // A confirmed real fill means Kalshi actually executed the position (from combo_fills, the
+  // read-only fills reader) — NOT merely a quote the worker posted.
+  const { waiting, filledParlays } = useMemo(() => {
+    const w = [], f = [];
+    (parlays || []).forEach((p) => ((realFills[p.id] || 0) > 0 ? f : w).push(p));
+    return { waiting: w, filledParlays: f };
+  }, [parlays, realFills]);
+
   const setLeg = (id, patch) => setLegRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addLeg = () => setLegRows((rows) => [...rows, { id: (rows.at(-1)?.id || 0) + 1, gameKey: "", marketVal: "" }]);
   const removeLeg = (id) => setLegRows((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
@@ -170,6 +188,8 @@ export default function ComboLocks({ user }) {
   const removeParlay = async (id) => { await supabase.from("combo_parlays").delete().eq("id", id); reload(); };
   // Move a parlay to History: deactivate it (worker stops watching) and stamp archived_at.
   const archiveParlay = async (id) => { await supabase.from("combo_parlays").update({ active: false, archived_at: new Date().toISOString() }).eq("id", id); reload(); };
+  // Reactivate a parlay the worker paused (active=false) — it resumes watching for RFQs.
+  const reactivateParlay = async (id) => { await supabase.from("combo_parlays").update({ active: true }).eq("id", id); reload(); };
   const toggleKill = async () => { const next = !kill; setKill(next);
     await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() }); };
 
@@ -257,23 +277,31 @@ export default function ComboLocks({ user }) {
       </div>
       {kill && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
 
-      <h3>Your active parlays</h3>
+      <h3>Active — waiting to be filled</h3>
       <div className="card">
-        {parlays.length === 0 ? <div className="empty">No active parlays yet — add one below.</div> : parlays.map((p) => (
+        {waiting.length === 0 ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
           <div className="parlay" key={p.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <span style={{ fontWeight: 700 }}>{p.label}</span>
+              {(() => {
+                const paused = p.active === false;
+                const awaiting = (quoted[p.id] || 0) > (realFills[p.id] || 0);
+                if (paused) return <span className="chip" style={{ background: "rgba(245,158,11,.15)", color: "#fcd34d" }} title="The worker paused this parlay because it recorded a posted quote as a fill. It is NOT watching for RFQs until you reactivate it.">⏸ worker paused</span>;
+                if (awaiting) return <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#93c5fd" }} title="A quote was posted for this combo but the taker hasn't accepted it — no position held yet.">quote posted — awaiting acceptance</span>;
+                return <span className="chip" style={{ background: "rgba(16,185,129,.15)", color: "#6ee7b7" }} title="The worker is watching the RFQ firehose for this combo.">● watching</span>;
+              })()}
               <span className="chip num">have {fmtAm(p.parlay_american)} · ${p.parlay_stake}</span>
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
               {(() => { const eff = fillView(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
                 return <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
               {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
               <span style={{ flex: 1 }} />
+              {p.active === false && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
               <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history — the worker stops watching it">Move to history</button>
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · auto-archives ${new Date(p.starts_at).toLocaleString()}` : ""}</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}</div>
             {(() => {
               const real = realFills[p.id] || 0, q = quoted[p.id] || 0, cap = p.max_contracts || 0;
               const pct = cap > 0 ? Math.min(100, Math.round((real / cap) * 100)) : 0;
@@ -291,6 +319,36 @@ export default function ComboLocks({ user }) {
           </div>
         ))}
         {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>Note: {realUnattr} real combo contract(s) filled couldn’t be tied to a specific parlay (Kalshi fills carry no quote id) — counted but shown unattributed.</div>}
+      </div>
+
+      <h3>Filled — awaiting settlement</h3>
+      <div className="card">
+        {filledParlays.length === 0 ? (
+          <div className="empty">No confirmed fills yet. A parlay lands here once Kalshi actually executes a real position for it (from your account fills) — a posted quote that no taker accepted does not count.</div>
+        ) : filledParlays.map((p) => {
+          const real = realFills[p.id] || 0, q = quoted[p.id] || 0, cap = p.max_contracts || 0;
+          const pct = cap > 0 ? Math.min(100, Math.round((real / cap) * 100)) : 0;
+          return (
+            <div className="parlay" key={p.id}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>{p.label}</span>
+                <span className="chip" style={{ background: "rgba(16,185,129,.15)", color: "#6ee7b7" }} title="Kalshi has executed a real position — settles when the games finish.">✓ filled · settling</span>
+                <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
+                <span style={{ flex: 1 }} />
+                <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history now">Move to history</button>
+              </div>
+              <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
+                  <span style={{ color: "#8a8f98", fontWeight: 600 }}>Real fills (Kalshi account)</span>
+                  <span className="num" style={{ color: "#34d399" }}>{real} of {cap} filled{q > real ? ` · ${q} quoted` : ""}</span>
+                </div>
+                <div className="bar"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="grid2" style={{ marginTop: 16 }}>
@@ -402,9 +460,9 @@ export default function ComboLocks({ user }) {
         </div>
       </div>
 
-      <h3>Parlay history — archived</h3>
+      <h3>History — games over</h3>
       <div className="card">
-        {archived.length === 0 ? <div className="empty">No archived parlays yet. A parlay moves here when you click “Move to history”, or automatically once its game start time passes.</div> : (
+        {archived.length === 0 ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : (
           <table><thead><tr><th>Archived</th><th>Parlay</th><th>Have</th><th>Fill</th><th>Mode</th><th>Cap</th><th>Game start</th></tr></thead>
             <tbody>{archived.map((a) => (
               <tr key={a.id}><td>{a.archived_at ? new Date(a.archived_at).toLocaleString() : "—"}</td><td>{a.label}</td><td>{fmtAm(a.parlay_american)} · ${a.parlay_stake}</td><td>{fmtAm(a.fill_american)}</td><td>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</td><td>{a.max_contracts}</td><td>{a.starts_at ? new Date(a.starts_at).toLocaleString() : "—"}</td></tr>
@@ -416,9 +474,18 @@ export default function ComboLocks({ user }) {
       <div className="card">
         {history.length === 0 ? <div className="empty">No submissions yet. Shadow quotes you run land here; once the worker is live, real fills and no-fills show as REAL with a Filled / Unfilled status.</div> : (
           <table><thead><tr><th>Type</th><th>When</th><th>Parlay</th><th>Fill</th><th>Contracts</th><th>Worst lock</th><th>Status</th></tr></thead>
-            <tbody>{history.map((h) => { const isReal = h.is_live || h.status === "filled" || h.status === "unfilled"; return (
+            <tbody>{history.map((h) => {
+              const isReal = h.is_live || h.status === "filled" || h.status === "unfilled";
+              // A row logged 'filled' but with NO order_id is a posted quote that wasn't accepted —
+              // show it honestly as "quoted", not "filled". Only a real execution id counts as filled.
+              const executed = !!h.order_id;
+              const dispStatus = h.status === "filled" && !executed ? "quoted (awaiting)"
+                : h.status === "shadow" ? "would post"
+                : h.status;
+              const stClass = h.status === "filled" && !executed ? "unfilled" : h.status;
+              return (
               <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "REAL" : "SHADOW"}</span></td><td>{new Date(h.created_at).toLocaleString()}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
-                <td><span className={"st " + h.status}>{h.status === "shadow" ? "would post" : h.status}</span></td></tr>
+                <td><span className={"st " + stClass} title={h.status === "filled" && !executed ? "Quote posted to Kalshi but not accepted — no position held." : ""}>{dispStatus}</span></td></tr>
             ); })}</tbody></table>
         )}
       </div>
