@@ -359,7 +359,7 @@ export default function ComboLocks({ user }) {
                             <td className="num">{req}</td>
                             <td className="num" style={{ color: m.locks === true ? "#6ee7b7" : m.locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
                             <td className="num">{m.worst != null ? money(m.worst) : "—"}</td>
-                            <td className="num">{oc && oc.no_bid != null ? `NO $${Number(oc.no_bid).toFixed(2)}` : "—"}</td>
+                            <td className="num">{oc ? (oc.submitted_no_bid != null ? `NO $${Number(oc.submitted_no_bid).toFixed(2)}` : (oc.no_bid != null ? `NO $${Number(oc.no_bid).toFixed(2)}` : "—")) : "—"}</td>
                             <td style={{ color: ocCol }}>{ocLbl}</td>
                             <td style={{ color: "#8a8f98" }}>{why}{why && speed ? " · " : ""}{speed}</td>
                           </tr>
@@ -560,7 +560,14 @@ export default function ComboLocks({ user }) {
               <tr key={o.id || o.quote_id}>
                 <td>{o.posted_at ? new Date(o.posted_at).toLocaleString() : "—"}</td>
                 <td>{o.label || "—"}</td>
-                <td className="num">{o.no_bid != null ? `NO $${Number(o.no_bid).toFixed(2)}` : "—"}{o.fill_american ? ` · ${fmtAm(o.fill_american)}` : ""}</td>
+                <td className="num">{(() => {
+                  const sub = o.submitted_no_bid, intended = o.no_bid;
+                  if (sub != null) {
+                    const mismatch = intended != null && Math.abs(Number(sub) - Number(intended)) > 0.005;
+                    return <>NO ${Number(sub).toFixed(2)} <span style={{ color: "#6b7280" }}>sent</span>{mismatch ? <span style={{ color: "#fcd34d" }}> ≠ ${Number(intended).toFixed(2)} intended</span> : null}</>;
+                  }
+                  return intended != null ? `NO $${Number(intended).toFixed(2)}` : "—";
+                })()}{o.fill_american ? ` · ${fmtAm(o.fill_american)}` : ""}</td>
                 <td><span className="st" style={{ background: bg, color: col }} title={o.outcome === "executed" ? "Kalshi executed a real position." : ""}>{lbl}</span></td>
                 <td style={{ color: whyCol }}>{why}</td>
                 <td className="num" style={{ color: o.in_time === false ? "#fcd34d" : "#c3c6cc" }} title="How fast you answered vs how long the RFQ stayed open. Answering after the window closes means the taker already accepted someone.">
