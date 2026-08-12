@@ -19,6 +19,8 @@ const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
 const americanFromProb = (p) => (!(p > 0 && p < 1) ? null : p < 0.5 ? Math.round((100 * (1 - p)) / p) : -Math.round((100 * p) / (1 - p)));
 const r2 = (x) => Math.round(x * 100) / 100;
+// Floor to cents so we never quote a no_bid worse than the fill target (user buys NO).
+const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
 function nominalProbFromEff(sEff) {
   const b = 1 - KFEE; // solve KFEE*sNom^2 + (1-KFEE)*sNom - sEff = 0
   return (-b + Math.sqrt(b * b + 4 * KFEE * sEff)) / (2 * KFEE);
@@ -28,7 +30,7 @@ function fillView(fillAfterFeeAmerican) {
   const sEff = impliedProb(fillAfterFeeAmerican);
   const sNom = nominalProbFromEff(sEff);
   const takerProb = sNom + TAKER_FEE * sNom * (1 - sNom);
-  return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: r2(1 - sNom).toFixed(2) };
+  return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: floor2(1 - sNom).toFixed(2) };
 }
 // Auto contracts cap for a hedge mode. Fill odds already include your maker fee, so no fee term.
 function hedgeCap({ stake, boostAmerican, fillAmerican, mode = "1x" }) {
