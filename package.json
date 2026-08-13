@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node src/comboPrefill.test.js && node lib/promo-ev.test.js && node lib/ev-parlay-alert.test.js"
+    "test": "node src/comboPrefill.test.js && node lib/promo-ev.test.js && node lib/ev-parlay-alert.test.js && node lib/ev-parlay-scan-flow.test.js"
   },
   "dependencies": {
     "react": "^18.2.0",
