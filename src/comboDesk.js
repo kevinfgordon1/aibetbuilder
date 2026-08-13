@@ -131,9 +131,9 @@ export function lastLoss(outcomes = []) {
 export function lastRelevant(skip, loss) {
   const skipT = skip ? tsMs(skip.at) : 0;
   const lossT = loss ? tsMs(loss.at) : 0;
-  if (skip && loss) return skipT >= lossT ? { kind: "skip", ...skip } : { kind: "loss", ...loss };
-  if (loss) return { kind: "loss", ...loss };
-  if (skip) return { kind: "skip", ...skip };
+  if (skip && loss) return skipT >= lossT ? { ...skip, kind: "skip" } : { ...loss, kind: "loss" };
+  if (loss) return { ...loss, kind: "loss" };
+  if (skip) return { ...skip, kind: "skip" };
   return null;
 }
 
