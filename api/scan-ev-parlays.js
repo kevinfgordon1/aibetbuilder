@@ -1,6 +1,6 @@
 const { supabase } = require('../lib/odds-shared');
-const { SPORT_KEYS, hydrateFeaturedOdds } = require('../lib/promo-ev');
-const { scanBooksForEvParlays } = require('../lib/ev-parlay-alert');
+const { hydrateFeaturedOdds } = require('../lib/promo-ev');
+const { scanBooksForEvParlays, SCAN_SPORT_KEYS } = require('../lib/ev-parlay-alert');
 const { resolveEvParlaysBotToken } = require('../lib/ev-parlays-bot-token');
 const {
   applyAbortSignal,
@@ -16,19 +16,19 @@ const {
 // Env name: EVparlays_alert_telegram_bot_token (case-insensitive fallback).
 
 // GET/POST /api/scan-ev-parlays
-// Reads cached odds (no Odds API pull). Scores 3-leg $100 0% boost parlays
-// for every Promo Builder book. Alerts @evparlaysbot when EV% > 2.
+// MLB only (baseball_mlb), Promo Builder "Next 24h" window. Reads cached odds
+// (no Odds API pull). Scores 3-leg $100 0% boost parlays for every Promo
+// Builder book. Alerts @evparlaysbot when EV% > 2.
 // Telegram is sent before any ev_parlay_alerts upsert; optional table I/O
 // is hard-capped so a missing/slow table cannot starve the DM.
-// odds_cache is required, loaded one sport at a time, each hard-capped
-// (~8s + abortSignal). A sport that times out is skipped. Zero sports → 504.
-// Partial loads still scan + Telegram. Do not wait out maxDuration: 60.
+// odds_cache is required, loaded for baseball_mlb only, hard-capped
+// (~8s + abortSignal). Timeout → 504. Do not wait out maxDuration: 60.
 module.exports = async (req, res) => {
   let sentSuccessfully = false;
   let payload = null;
   try {
     const oddsLoad = await loadOddsCacheBySport(
-      SPORT_KEYS,
+      SCAN_SPORT_KEYS,
       (sport, signal) => applyAbortSignal(
         supabase
           .from('odds_cache')
