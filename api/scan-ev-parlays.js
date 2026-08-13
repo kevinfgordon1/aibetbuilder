@@ -22,7 +22,8 @@ const {
 // Telegram is sent before any ev_parlay_alerts upsert; optional table I/O
 // is hard-capped so a missing/slow table cannot starve the DM.
 // odds_cache is required, loaded for baseball_mlb only, hard-capped
-// (~8s + abortSignal). Timeout → 504. Do not wait out maxDuration: 60.
+// (~25s + abortSignal). Timeout → 504 with timedOutSports. Do not wait
+// out maxDuration: 60.
 module.exports = async (req, res) => {
   let sentSuccessfully = false;
   let payload = null;
