@@ -23,18 +23,6 @@
     {
       "path": "/api/fetch-futures",
       "schedule": "5 4,8 * * *"
-    },
-    {
-      "path": "/api/scan-ev-parlays",
-      "schedule": "1-59/10 11-23 * * *"
-    },
-    {
-      "path": "/api/scan-ev-parlays",
-      "schedule": "1-59/10 0-6 * * *"
-    },
-    {
-      "path": "/api/scan-ev-parlays",
-      "schedule": "1 7-10 * * *"
     }
   ],
   "functions": {
