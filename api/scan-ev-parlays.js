@@ -6,7 +6,7 @@ const {
   applyAbortSignal,
   alertRowsForUpsert,
   deliverEvParlayAlerts,
-  runRequired,
+  loadOddsCacheBySport,
   skipTelegramRequested,
   ODDS_CACHE_TIMEOUT_MS,
   ODDS_CACHE_COLUMNS,
@@ -20,27 +20,37 @@ const {
 // for every Promo Builder book. Alerts @evparlaysbot when EV% > 2.
 // Telegram is sent before any ev_parlay_alerts upsert; optional table I/O
 // is hard-capped so a missing/slow table cannot starve the DM.
-// odds_cache is required and hard-capped (~8s + abortSignal). Timeout/error
-// returns 504/500 immediately — do not wait out maxDuration: 60.
+// odds_cache is required, loaded one sport at a time, each hard-capped
+// (~8s + abortSignal). A sport that times out is skipped. Zero sports → 504.
+// Partial loads still scan + Telegram. Do not wait out maxDuration: 60.
 module.exports = async (req, res) => {
   let sentSuccessfully = false;
   let payload = null;
   try {
-    const oddsLoad = await runRequired(
-      (signal) => applyAbortSignal(
+    const oddsLoad = await loadOddsCacheBySport(
+      SPORT_KEYS,
+      (sport, signal) => applyAbortSignal(
         supabase
           .from('odds_cache')
           .select(ODDS_CACHE_COLUMNS)
-          .in('sport', SPORT_KEYS),
+          .eq('sport', sport)
+          .maybeSingle(),
         signal
       ),
-      { timeoutMs: ODDS_CACHE_TIMEOUT_MS, label: 'odds_cache' }
+      { timeoutMs: ODDS_CACHE_TIMEOUT_MS }
     );
     if (!oddsLoad.ok) {
-      console.error('scan-ev-parlays odds_cache:', oddsLoad.message);
+      console.error('scan-ev-parlays odds_cache:', oddsLoad.message, {
+        loaded: oddsLoad.loadedSports,
+        timedOut: oddsLoad.timedOutSports,
+        errors: oddsLoad.errorSports,
+      });
       return res.status(oddsLoad.status).json({
         error: oddsLoad.message,
         timedOut: oddsLoad.timedOut,
+        loadedSports: oddsLoad.loadedSports,
+        timedOutSports: oddsLoad.timedOutSports,
+        errorSports: oddsLoad.errorSports,
       });
     }
 
@@ -48,6 +58,7 @@ module.exports = async (req, res) => {
     const scan = scanBooksForEvParlays(oddsData);
     console.log(
       `scan-ev-parlays combos=${scan.comboCount} elapsedMs=${scan.elapsedMs} timedOut=${scan.timedOut}`,
+      { loaded: oddsLoad.loadedSports, timedOut: oddsLoad.timedOutSports, errors: oddsLoad.errorSports },
       scan.stats
     );
 
@@ -58,6 +69,9 @@ module.exports = async (req, res) => {
       timedOut: scan.timedOut,
       candidates: scan.parlays.length,
       booksScanned: scan.stats.filter(s => !s.skipped).length,
+      loadedSports: oddsLoad.loadedSports,
+      timedOutSports: oddsLoad.timedOutSports,
+      errorSports: oddsLoad.errorSports,
     };
 
     if (skipTelegramRequested(req)) {
