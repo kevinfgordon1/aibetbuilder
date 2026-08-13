@@ -6,13 +6,10 @@ const {
   selectNewAlerts,
   formatAlertMessage,
 } = require('../lib/ev-parlay-alert');
+const { resolveEvParlaysBotToken } = require('../lib/ev-parlays-bot-token');
 
 // Dedicated @evparlaysbot token. Do NOT use KayGo TELEGRAM_BOT_TOKEN.
-const EV_PARLAYS_BOT_TOKEN_ENV = 'EVparlays_alert_telegram_bot_token';
-
-function evParlaysBotToken() {
-  return process.env.EVparlays_alert_telegram_bot_token;
-}
+// Env name: EVparlays_alert_telegram_bot_token (case-insensitive fallback).
 
 async function collectChatIds() {
   const ids = new Set();
@@ -94,9 +91,9 @@ module.exports = async (req, res) => {
       booksScanned: scan.stats.filter(s => !s.skipped).length,
     };
 
-    const token = evParlaysBotToken();
+    const { token, envName } = resolveEvParlaysBotToken();
+    console.log('scan-ev-parlays:', { tokenPresent: Boolean(token), envName });
     if (!token) {
-      console.log(`scan-ev-parlays: ${EV_PARLAYS_BOT_TOKEN_ENV} missing; scan complete, no send`);
       return res.status(200).json({ ...summary, skippedTelegram: 'missing_token' });
     }
 

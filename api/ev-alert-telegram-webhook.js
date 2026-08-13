@@ -1,4 +1,5 @@
 const { supabase } = require('../lib/odds-shared');
+const { resolveEvParlaysBotToken } = require('../lib/ev-parlays-bot-token');
 
 // ─────────────────────────────────────────────────────────────────────────
 // POST /api/ev-alert-telegram-webhook
@@ -7,7 +8,7 @@ const { supabase } = require('../lib/odds-shared');
 // Separate from KayGo (@Kaygosports_bot / api/telegram-webhook.js).
 //
 // Auth: Telegram secret header must match EV_ALERT_TELEGRAM_WEBHOOK_SECRET.
-// Token used to reply: process.env.EVparlays_alert_telegram_bot_token
+// Token used to reply: EVparlays_alert_telegram_bot_token (case-insensitive).
 //
 // /start → upsert ev_alert_chats (NOT telegram_users)
 // /stop  → is_active=false
@@ -15,14 +16,10 @@ const { supabase } = require('../lib/odds-shared');
 // Always 200 so Telegram does not retry.
 // ─────────────────────────────────────────────────────────────────────────
 
-function evParlaysBotToken() {
-  return process.env.EVparlays_alert_telegram_bot_token;
-}
-
 async function sendTelegram(chatId, text) {
-  const token = evParlaysBotToken();
+  const { token, envName } = resolveEvParlaysBotToken();
   if (!token) {
-    console.log('ev-alert-telegram-webhook: EVparlays_alert_telegram_bot_token missing; skip send');
+    console.log('ev-alert-telegram-webhook:', { tokenPresent: false, envName });
     return;
   }
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
