@@ -6,6 +6,10 @@ const {
   applyAbortSignal,
   alertRowsForUpsert,
   deliverEvParlayAlerts,
+  runRequired,
+  skipTelegramRequested,
+  ODDS_CACHE_TIMEOUT_MS,
+  ODDS_CACHE_COLUMNS,
 } = require('../lib/ev-parlay-scan-flow');
 
 // Dedicated @evparlaysbot token. Do NOT use KayGo TELEGRAM_BOT_TOKEN.
@@ -16,20 +20,31 @@ const {
 // for every Promo Builder book. Alerts @evparlaysbot when EV% > 2.
 // Telegram is sent before any ev_parlay_alerts upsert; optional table I/O
 // is hard-capped so a missing/slow table cannot starve the DM.
+// odds_cache is required and hard-capped (~8s + abortSignal). Timeout/error
+// returns 504/500 immediately — do not wait out maxDuration: 60.
 module.exports = async (req, res) => {
   let sentSuccessfully = false;
   let payload = null;
   try {
-    const { data: rows, error } = await supabase
-      .from('odds_cache')
-      .select('*')
-      .in('sport', SPORT_KEYS);
-    if (error) {
-      console.error('scan-ev-parlays odds_cache error:', error);
-      return res.status(500).json({ error: error.message });
+    const oddsLoad = await runRequired(
+      (signal) => applyAbortSignal(
+        supabase
+          .from('odds_cache')
+          .select(ODDS_CACHE_COLUMNS)
+          .in('sport', SPORT_KEYS),
+        signal
+      ),
+      { timeoutMs: ODDS_CACHE_TIMEOUT_MS, label: 'odds_cache' }
+    );
+    if (!oddsLoad.ok) {
+      console.error('scan-ev-parlays odds_cache:', oddsLoad.message);
+      return res.status(oddsLoad.status).json({
+        error: oddsLoad.message,
+        timedOut: oddsLoad.timedOut,
+      });
     }
 
-    const oddsData = hydrateFeaturedOdds(rows);
+    const oddsData = hydrateFeaturedOdds(oddsLoad.data);
     const scan = scanBooksForEvParlays(oddsData);
     console.log(
       `scan-ev-parlays combos=${scan.comboCount} elapsedMs=${scan.elapsedMs} timedOut=${scan.timedOut}`,
@@ -44,6 +59,13 @@ module.exports = async (req, res) => {
       candidates: scan.parlays.length,
       booksScanned: scan.stats.filter(s => !s.skipped).length,
     };
+
+    if (skipTelegramRequested(req)) {
+      return res.status(200).json({
+        ...summary,
+        skippedTelegram: 'debug',
+      });
+    }
 
     const { token, envName } = resolveEvParlaysBotToken();
     console.log('scan-ev-parlays:', { tokenPresent: Boolean(token), envName });
