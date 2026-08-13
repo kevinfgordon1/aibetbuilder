@@ -3,9 +3,12 @@
 // Backed by Supabase (combo_parlays / combo_settings / combo_submissions) so the
 // always-on worker reads the same active parlays. NO live prices — the lock uses
 // only the user's own numbers.
+// Each card's always-visible desk strip (fill remaining, quoting state, last skip,
+// last loss / tape clearing price) is derived in comboDesk.js from the same polls.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue } from "./comboPrefill";
+import { buildParlayDesk, formatLoss, skipLabel, formatCents, tapeNoPrice } from "./comboDesk";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const OWNER_EMAIL = "kev120909@gmail.com";
@@ -63,6 +66,88 @@ function decideAtFill({ parlayStake, parlayAmerican, fillAmerican, fairAmerican 
     quote: { yes_bid: "0.00", no_bid: v.noBid, rest_remainder: false }, contracts: N };
 }
 const MODE_LABEL = { riskfree: "Risk-free", "1x": "1× pure hedge", "2x": "2× (directional)", "3x": "3× (directional)" };
+const QUOTE_CHIP = {
+  watching: { bg: "rgba(16,185,129,.15)", color: "#6ee7b7", mark: "● ", title: "The worker is watching the RFQ firehose for this combo." },
+  paused: { bg: "rgba(245,158,11,.15)", color: "#fcd34d", mark: "⏸ ", title: "The worker paused this parlay. It is NOT watching for RFQs until you reactivate it." },
+  kill: { bg: "rgba(239,68,68,.18)", color: "#fca5a5", mark: "⛔ ", title: "Kill-switch engaged — the live worker posts nothing." },
+  ceiling: { bg: "rgba(139,92,246,.22)", color: "#c4b5fd", mark: "", title: "Ceiling reached — remaining fill is 0, so the worker stopped quoting this combo." },
+};
+function QuoteChip({ quote }) {
+  if (!quote) return null;
+  const s = QUOTE_CHIP[quote.key] || QUOTE_CHIP.watching;
+  return <span className="chip" style={{ background: s.bg, color: s.color }} title={s.title}>{s.mark}{quote.label}</span>;
+}
+function FillProgress({ desk, thin }) {
+  if (!desk) return null;
+  const { fill, quoted } = desk;
+  return (
+    <div style={{ marginTop: thin ? 6 : 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
+        <span style={{ color: "#8a8f98", fontWeight: 600 }} title="Remaining ceiling accumulates across RFQs — the next quote can only take what's left.">{thin ? "Fill" : "Real fills (Kalshi account)"}</span>
+        <span className="num" style={{ color: fill.filled > 0 ? "#34d399" : "#6b7280" }}>
+          {fill.filled} of {fill.ceiling} filled · {fill.left} left{quoted > fill.filled ? ` · ${quoted} quoted` : ""}
+        </span>
+      </div>
+      <div className={thin ? "bar thin" : "bar"}><div className="bar-fill" style={{ width: fill.pct + "%" }} /></div>
+      {!thin && quoted > fill.filled && (
+        <div style={{ fontSize: 11, color: "#fcd34d", marginTop: 3 }}>⚠ {quoted} contracts quoted, only {fill.filled} confirmed filled by Kalshi — the difference wasn’t accepted (or hasn’t executed yet).</div>
+      )}
+    </div>
+  );
+}
+function DeskChips({ desk, thin }) {
+  if (!desk) return null;
+  const skip = thin ? (desk.relevant && desk.relevant.kind === "skip" ? desk.relevant : null) : desk.skip;
+  const loss = thin ? (desk.relevant && desk.relevant.kind === "loss" ? desk.relevant : null) : desk.loss;
+  if (!skip && !loss && !(desk.awaiting && !thin)) return null;
+  return (
+    <div className={"desk" + (thin ? " thin" : "")}>
+      {desk.awaiting && !thin && <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#93c5fd" }} title="A quote was posted for this combo but the taker hasn't accepted it — no position held yet.">quote posted — awaiting acceptance</span>}
+      {skip && <span className="chip skip num" title="Matched RFQ the worker did not quote. Oversized RFQs are skipped (Kalshi makers cannot partial-fill).">{skip.text}</span>}
+      {loss && <span className="chip loss num" title="Last lost quote. Tape-matched no_purchase / outbid rows show the inferred clearing price.">{loss.text}</span>}
+    </div>
+  );
+}
+function MatchedRfqTable({ matches, outcomeByRfq, desk }) {
+  const rows = matches || [];
+  const quotedN = rows.filter((m) => outcomeByRfq[m.rfq_id]).length;
+  const lostN = rows.filter((m) => (outcomeByRfq[m.rfq_id] || {}).outcome === "lost").length;
+  const skippedN = rows.length - quotedN;
+  const outMap = { executed: ["#6ee7b7", "filled"], accepted: ["#93c5fd", "accepted"], lost: ["#fca5a5", "lost"], posted: ["#9aa3b2", "awaiting"] };
+  const fillCtx = desk ? { filled: desk.fill.filled, ceiling: desk.fill.ceiling, hedgeCap: desk.fill.ceiling } : {};
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
+      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
+        Matched RFQs — {rows.length} total · {quotedN} quoted · {skippedN} skipped · {lostN} lost
+      </div>
+      {rows.length === 0 ? <div className="empty">No RFQs have matched this lock yet. Matches are recorded from when the watcher went live.</div> : (
+        <table><thead><tr><th>Time</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
+          <tbody>{rows.map((m) => {
+            const oc = outcomeByRfq[m.rfq_id];
+            const req = m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${m.contracts != null ? m.contracts : "—"} contracts`;
+            const lockable = m.locks === true ? "✓ yes" : m.locks === false ? "no" : "—";
+            const skip = !oc ? skipLabel(m, fillCtx) : null;
+            const [ocCol, ocLbl] = oc ? (outMap[oc.outcome] || ["#c3c6cc", oc.outcome]) : [skip && skip.kind === "oversized" ? "#fcd34d" : "#6b7280", skip ? skip.text : "skipped"];
+            const why = oc && oc.outcome === "lost" ? (formatLoss(oc) || "checking…") : (skip && skip.kind === "oversized" ? "cannot partial-fill" : "");
+            const tape = oc ? formatCents(tapeNoPrice(oc)) : null;
+            const speed = oc && oc.responded_ms != null ? `${(oc.responded_ms / 1000).toFixed(1)}s${oc.rfq_lifetime_ms != null ? `/${(oc.rfq_lifetime_ms / 1000).toFixed(1)}s` : ""}` : "";
+            const whyBits = [why, tape && oc && oc.outcome === "lost" && !String(why).includes("¢") ? `tape ${tape}` : "", speed].filter(Boolean);
+            return (
+              <tr key={m.rfq_id}>
+                <td>{m.matched_at ? new Date(m.matched_at).toLocaleTimeString() : "—"}</td>
+                <td className="num">{req}</td>
+                <td className="num" style={{ color: m.locks === true ? "#6ee7b7" : m.locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
+                <td className="num">{m.worst != null ? money(m.worst) : "—"}</td>
+                <td className="num">{oc ? (oc.submitted_no_bid != null ? `NO $${Number(oc.submitted_no_bid).toFixed(2)}` : (oc.no_bid != null ? `NO $${Number(oc.no_bid).toFixed(2)}` : "—")) : "—"}</td>
+                <td style={{ color: ocCol }}>{ocLbl}</td>
+                <td style={{ color: "#8a8f98" }}>{whyBits.join(" · ")}</td>
+              </tr>
+            );
+          })}</tbody></table>
+      )}
+    </div>
+  );
+}
 
 /* ── sample games fallback (same shape the /api/kalshi-games feed returns) ── */
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
@@ -222,6 +307,21 @@ export default function ComboLocks({ user, prefill = null }) {
   const toggleOpen = (id) => setOpenParlays((o) => ({ ...o, [id]: !o[id] }));
   // rfq_id -> the quote outcome we recorded for it (only exists for RFQs we actually quoted).
   const outcomeByRfq = useMemo(() => { const m = {}; (outcomes || []).forEach((o) => { if (o.rfq_id) m[o.rfq_id] = o; }); return m; }, [outcomes]);
+  const deskByParlay = useMemo(() => {
+    const out = {};
+    (parlays || []).forEach((p) => {
+      out[p.id] = buildParlayDesk({
+        parlay: p,
+        filled: realFills[p.id] || 0,
+        quoted: quoted[p.id] || 0,
+        kill,
+        matches: matchesByParlay[p.id] || [],
+        outcomes,
+        outcomeByRfq,
+      });
+    });
+    return out;
+  }, [parlays, realFills, quoted, kill, matchesByParlay, outcomes, outcomeByRfq]);
 
   const setLeg = (id, patch) => setLegRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const addLeg = () => setLegRows((rows) => [...rows, { id: (rows.at(-1)?.id || 0) + 1, gameKey: "", marketVal: "" }]);
@@ -318,7 +418,12 @@ export default function ComboLocks({ user, prefill = null }) {
         .cl .switch.on{background:#ef4444}.cl .switch.on .knob{left:23px}
         .cl .empty{color:#6b7280;font-size:14px;padding:8px 2px}
         .cl .bar{height:7px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:2px}
+        .cl .bar.thin{height:4px}
         .cl .bar-fill{height:100%;background:#34d399;border-radius:999px;transition:width .3s}
+        .cl .desk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
+        .cl .desk.thin{margin-top:6px}
+        .cl .chip.skip{background:rgba(245,158,11,.15);color:#fcd34d}
+        .cl .chip.loss{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
         .cl .info::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);border:6px solid transparent;border-top-color:#0c1016;opacity:0;transition:opacity .12s;z-index:31}
@@ -341,13 +446,7 @@ export default function ComboLocks({ user, prefill = null }) {
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
               <span style={{ fontWeight: 700 }}>{p.label}</span>
-              {(() => {
-                const paused = p.active === false;
-                const awaiting = (quoted[p.id] || 0) > (realFills[p.id] || 0);
-                if (paused) return <span className="chip" style={{ background: "rgba(245,158,11,.15)", color: "#fcd34d" }} title="The worker paused this parlay because it recorded a posted quote as a fill. It is NOT watching for RFQs until you reactivate it.">⏸ worker paused</span>;
-                if (awaiting) return <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#93c5fd" }} title="A quote was posted for this combo but the taker hasn't accepted it — no position held yet.">quote posted — awaiting acceptance</span>;
-                return <span className="chip" style={{ background: "rgba(16,185,129,.15)", color: "#6ee7b7" }} title="The worker is watching the RFQ firehose for this combo.">● watching</span>;
-              })()}
+              <QuoteChip quote={(deskByParlay[p.id] || {}).quote} />
               <span className="chip num">have {fmtAm(p.parlay_american)} · ${p.parlay_stake}</span>
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
               {(() => { const eff = fillView(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
@@ -360,56 +459,9 @@ export default function ComboLocks({ user, prefill = null }) {
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
             <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}${mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : " · matched 0 RFQs"; })()}</div>
-            {(() => {
-              const real = realFills[p.id] || 0, q = quoted[p.id] || 0, cap = p.max_contracts || 0;
-              const pct = cap > 0 ? Math.min(100, Math.round((real / cap) * 100)) : 0;
-              return (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
-                    <span style={{ color: "#8a8f98", fontWeight: 600 }}>Real fills (Kalshi account)</span>
-                    <span className="num" style={{ color: real > 0 ? "#34d399" : "#6b7280" }}>{real} of {cap} filled{q > real ? ` · ${q} quoted` : ""}</span>
-                  </div>
-                  <div className="bar"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
-                  {q > real && <div style={{ fontSize: 11, color: "#fcd34d", marginTop: 3 }}>⚠ {q} contracts quoted, only {real} confirmed filled by Kalshi — the difference wasn’t accepted (or hasn’t executed yet).</div>}
-                </div>
-              );
-            })()}
-            {openParlays[p.id] && (() => {
-              const rows = matchesByParlay[p.id] || [];
-              const quotedN = rows.filter((m) => outcomeByRfq[m.rfq_id]).length;
-              const lostN = rows.filter((m) => (outcomeByRfq[m.rfq_id] || {}).outcome === "lost").length;
-              const outMap = { executed: ["#6ee7b7", "filled"], accepted: ["#93c5fd", "accepted"], lost: ["#fca5a5", "lost"], posted: ["#9aa3b2", "awaiting"] };
-              const whyMap = { outbid: "outbid (price)", too_slow: "too slow", no_taker: "no taker", unknown: "unknown" };
-              return (
-                <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
-                  <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
-                    Matched RFQs — {rows.length} total · {quotedN} quoted · {lostN} lost
-                  </div>
-                  {rows.length === 0 ? <div className="empty">No RFQs have matched this lock yet. Matches are recorded from when the watcher went live.</div> : (
-                    <table><thead><tr><th>Time</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
-                      <tbody>{rows.map((m) => {
-                        const oc = outcomeByRfq[m.rfq_id];
-                        const req = m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${m.contracts != null ? m.contracts : "—"} contracts`;
-                        const lockable = m.locks === true ? "✓ yes" : m.locks === false ? "no" : "—";
-                        const [ocCol, ocLbl] = oc ? (outMap[oc.outcome] || ["#c3c6cc", oc.outcome]) : (m.locks ? ["#6b7280", "not quoted"] : ["#6b7280", "no-lock"]);
-                        const why = oc && oc.outcome === "lost" ? (oc.loss_reason ? (whyMap[oc.loss_reason] || oc.loss_reason) : "checking…") : "";
-                        const speed = oc && oc.responded_ms != null ? `${(oc.responded_ms / 1000).toFixed(1)}s${oc.rfq_lifetime_ms != null ? `/${(oc.rfq_lifetime_ms / 1000).toFixed(1)}s` : ""}` : "";
-                        return (
-                          <tr key={m.rfq_id}>
-                            <td>{m.matched_at ? new Date(m.matched_at).toLocaleTimeString() : "—"}</td>
-                            <td className="num">{req}</td>
-                            <td className="num" style={{ color: m.locks === true ? "#6ee7b7" : m.locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
-                            <td className="num">{m.worst != null ? money(m.worst) : "—"}</td>
-                            <td className="num">{oc ? (oc.submitted_no_bid != null ? `NO $${Number(oc.submitted_no_bid).toFixed(2)}` : (oc.no_bid != null ? `NO $${Number(oc.no_bid).toFixed(2)}` : "—")) : "—"}</td>
-                            <td style={{ color: ocCol }}>{ocLbl}</td>
-                            <td style={{ color: "#8a8f98" }}>{why}{why && speed ? " · " : ""}{speed}</td>
-                          </tr>
-                        );
-                      })}</tbody></table>
-                  )}
-                </div>
-              );
-            })()}
+            <FillProgress desk={deskByParlay[p.id]} />
+            <DeskChips desk={deskByParlay[p.id]} />
+            {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
           </div>
         ))}
         {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>Note: {realUnattr} real combo contract(s) filled couldn’t be tied to a specific parlay (Kalshi fills carry no quote id) — counted but shown unattributed.</div>}
@@ -420,26 +472,24 @@ export default function ComboLocks({ user, prefill = null }) {
         {filledParlays.length === 0 ? (
           <div className="empty">No confirmed fills yet. A parlay lands here once Kalshi actually executes a real position for it (from your account fills) — a posted quote that no taker accepted does not count.</div>
         ) : filledParlays.map((p) => {
-          const real = realFills[p.id] || 0, q = quoted[p.id] || 0, cap = p.max_contracts || 0;
-          const pct = cap > 0 ? Math.min(100, Math.round((real / cap) * 100)) : 0;
+          const desk = deskByParlay[p.id];
           return (
             <div className="parlay" key={p.id}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
                 <span className="chip" style={{ background: "rgba(16,185,129,.15)", color: "#6ee7b7" }} title="Kalshi has executed a real position — settles when the games finish.">✓ filled · settling</span>
+                <QuoteChip quote={desk && desk.quote} />
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
                 <span style={{ flex: 1 }} />
+                {p.active === false && desk && desk.fill.left > 0 && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
                 <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history now">Move to history</button>
               </div>
               <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-              <div style={{ marginTop: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
-                  <span style={{ color: "#8a8f98", fontWeight: 600 }}>Real fills (Kalshi account)</span>
-                  <span className="num" style={{ color: "#34d399" }}>{real} of {cap} filled{q > real ? ` · ${q} quoted` : ""}</span>
-                </div>
-                <div className="bar"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
-              </div>
+              <FillProgress desk={desk} thin />
+              <DeskChips desk={desk} thin />
               <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
+              {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
             </div>
           );
         })}
@@ -604,9 +654,9 @@ export default function ComboLocks({ user, prefill = null }) {
             <tbody>{outcomes.map((o) => {
               const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "executed"], accepted: ["rgba(147,197,253,.18)", "#93c5fd", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "lost"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "awaiting"] };
               const [bg, col, lbl] = map[o.outcome] || map.posted;
-              const whyMap = { outbid: "outbid — a better price won", too_slow: "too slow — window closed first", no_taker: "taker accepted no one", unknown: "unknown" };
-              const why = o.outcome === "lost" ? (o.loss_reason ? (whyMap[o.loss_reason] || o.loss_reason) : "checking…") : "—";
-              const whyCol = o.loss_reason === "too_slow" ? "#fcd34d" : o.loss_reason === "outbid" ? "#fca5a5" : o.loss_reason === "no_taker" ? "#9aa3b2" : "#6b7280";
+              const whyMap = { outbid: "outbid — a better price won", too_slow: "too slow — window closed first", no_taker: "taker accepted no one", no_purchase: "no purchase — RFQ closed with no fill", unknown: "unknown" };
+              const why = o.outcome === "lost" ? (formatLoss(o) || (o.loss_reason ? (whyMap[o.loss_reason] || o.loss_reason) : "checking…")) : "—";
+              const whyCol = o.loss_reason === "too_slow" ? "#fcd34d" : (o.loss_reason === "outbid" || formatCents(tapeNoPrice(o)) ? "#fca5a5" : o.loss_reason === "no_taker" || o.loss_reason === "no_purchase" ? "#9aa3b2" : "#6b7280");
               const secs = (ms) => (ms != null ? `${(ms / 1000).toFixed(1)}s` : null);
               return (
               <tr key={o.id || o.quote_id}>
