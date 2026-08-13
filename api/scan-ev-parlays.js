@@ -5,6 +5,7 @@ const {
   scanBooksForEvParlays,
   selectNewAlerts,
   formatAlertMessage,
+  mergeEvAlertChatIds,
 } = require('../lib/ev-parlay-alert');
 const { resolveEvParlaysBotToken } = require('../lib/ev-parlays-bot-token');
 
@@ -12,9 +13,7 @@ const { resolveEvParlaysBotToken } = require('../lib/ev-parlays-bot-token');
 // Env name: EVparlays_alert_telegram_bot_token (case-insensitive fallback).
 
 async function collectChatIds() {
-  const ids = new Set();
   const envId = (process.env.EV_ALERT_TELEGRAM_CHAT_ID || '').trim();
-  if (envId) ids.add(envId);
 
   const { data, error } = await supabase
     .from('ev_alert_chats')
@@ -22,12 +21,11 @@ async function collectChatIds() {
     .eq('is_active', true);
   if (error) {
     console.error('scan-ev-parlays ev_alert_chats read error:', error);
-  } else {
-    for (const row of data || []) {
-      if (row.telegram_chat_id != null) ids.add(String(row.telegram_chat_id));
-    }
   }
-  return [...ids];
+
+  // Env chat + active ev_alert_chats rows; if both empty, Kevin's user id
+  // (same as KayGo ADMIN_CHAT_ID in api/telegram-webhook.js) as @evparlaysbot chat_id.
+  return mergeEvAlertChatIds({ envChatId: envId, rows: error ? [] : data });
 }
 
 async function sendTelegram(token, chatId, text) {
