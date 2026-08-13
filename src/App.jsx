@@ -1377,6 +1377,31 @@ function LandingFull({ onSignIn, onBack }) {
   );
 }
 
+function SendToComboLocksButton({ onSend }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onSend(); }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "7px 12px",
+        borderRadius: 8,
+        fontSize: 12,
+        fontWeight: 700,
+        fontFamily: "'DM Sans', sans-serif",
+        background: "rgba(6,182,212,0.14)",
+        color: "#67e8f9",
+        border: "1px solid rgba(6,182,212,0.45)",
+        cursor: "pointer",
+      }}
+    >
+      Send to Combo Locks
+    </button>
+  );
+}
+
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
@@ -1402,6 +1427,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
   const [fetchedAt, setFetchedAt] = useState(null);
+  const [comboPrefill, setComboPrefill] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1504,6 +1530,37 @@ export default function App() {
   }, [topParlays, stake, boostPct]);
 
   const topFreeBetConversions = promoType === "freebet" ? findTopFreeBetConversions(promoLegs, stake, 50) : [];
+
+  useEffect(() => {
+    if (activeTab !== "combo") setComboPrefill(null);
+  }, [activeTab]);
+
+  const sendToComboLocks = (p) => {
+    if (user?.email !== OWNER_EMAIL) return;
+    const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
+    let fair = "";
+    if (p.combinedProb > 0 && p.combinedProb < 1) {
+      const am = probToAmerican(p.combinedProb);
+      if (Number.isFinite(am)) fair = am;
+    }
+    const startMs = (p.legs || []).map((l) => l.commence_time).filter(Boolean)
+      .map((t) => new Date(t).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
+    setComboPrefill({
+      nonce: Date.now(),
+      stake,
+      boost: boostedOdds,
+      fair,
+      fill: "",
+      mode: "1x",
+      starts: startMs.length ? new Date(startMs[0]).toISOString() : "",
+      label: (p.legs || []).map((l) => l.name).join(" + "),
+      labelEdited: true,
+      legs: (p.legs || []).map((l) => ({
+        name: l.name, market: l.market, game: l.game, commence_time: l.commence_time, sport: l.sport,
+      })),
+    });
+    setActiveTab("combo");
+  };
 
   const togglePromoSport = (sportKey) => {
     setPromoSports(prev => {
@@ -1629,7 +1686,7 @@ export default function App() {
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
 
-          {activeTab === "combo" && user?.email === OWNER_EMAIL && <ComboLocks user={user} />}
+          {activeTab === "combo" && user?.email === OWNER_EMAIL && <ComboLocks user={user} prefill={comboPrefill} />}
 
           {activeTab === "ev" && (
             <div>
@@ -1890,6 +1947,12 @@ export default function App() {
                             <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
 
+                          {user?.email === OWNER_EMAIL && (
+                            <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
+                              <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
+                            </div>
+                          )}
+
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
                               <GuaranteedBadge
@@ -1963,6 +2026,11 @@ export default function App() {
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                               <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
                             </div>
+                            {user?.email === OWNER_EMAIL && (
+                              <div style={{ marginTop: 12 }}>
+                                <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

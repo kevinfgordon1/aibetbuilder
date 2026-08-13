@@ -3,8 +3,9 @@
 // Backed by Supabase (combo_parlays / combo_settings / combo_submissions) so the
 // always-on worker reads the same active parlays. NO live prices — the lock uses
 // only the user's own numbers.
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { mapPromoLegsToKalshi, toDatetimeLocalValue } from "./comboPrefill";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const OWNER_EMAIL = "kev120909@gmail.com";
@@ -78,6 +79,21 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
 const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt run lines)", total: "Total (alt over/unders)" };
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
+const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false };
+const emptyLegRows = (n) => Array.from({ length: Math.max(2, n || 2) }, (_, i) => ({ id: i + 1, gameKey: "", marketVal: "" }));
+function formFromPrefill(prefill) {
+  if (!prefill) return { ...DEFAULT_FORM };
+  return {
+    stake: prefill.stake ?? DEFAULT_FORM.stake,
+    boost: prefill.boost ?? DEFAULT_FORM.boost,
+    fill: prefill.fill ?? "",
+    fair: prefill.fair == null || prefill.fair === "" ? "" : prefill.fair,
+    mode: prefill.mode || "1x",
+    starts: toDatetimeLocalValue(prefill.starts),
+    label: prefill.label || "",
+    labelEdited: true,
+  };
+}
 const fmtAm = (a) => (a == null ? "—" : a > 0 ? "+" + a : "" + a);
 const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 // A parlay auto-moves to History this many hours after its game start — an approximation of
@@ -85,7 +101,7 @@ const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 const HISTORY_BUFFER_HOURS = 6;
 const historyMoveAt = (startsAtIso) => (startsAtIso ? new Date(new Date(startsAtIso).getTime() + HISTORY_BUFFER_HOURS * 3600 * 1000) : null);
 
-export default function ComboLocks({ user }) {
+export default function ComboLocks({ user, prefill = null }) {
   const [games, setGames] = useState(SAMPLE);
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
@@ -99,9 +115,13 @@ export default function ComboLocks({ user }) {
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [matchesByParlay, setMatchesByParlay] = useState({}); // parlay_id -> [combo_matches rows]
   const [openParlays, setOpenParlays] = useState({});         // parlay_id -> expanded (drilldown open)?
-  const [legRows, setLegRows] = useState([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
-  const [form, setForm] = useState({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
+  const [legRows, setLegRows] = useState(() => emptyLegRows(prefill?.legs?.length));
+  const [form, setForm] = useState(() => formFromPrefill(prefill));
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
+  const [gamesReady, setGamesReady] = useState(false);
+  const [prefillWarning, setPrefillWarning] = useState(null);
+  const createFormRef = useRef(null);
+  const appliedNonceRef = useRef(null);
 
   const gameIdx = useMemo(() => { const m = {}; (games.sports.mlb || []).forEach((g) => (m[g.key] = g)); return m; }, [games]);
   const owner = user && user.email === OWNER_EMAIL;
@@ -109,9 +129,9 @@ export default function ComboLocks({ user }) {
   const loadGames = useCallback(async () => {
     try { const r = await fetch("/api/kalshi-games", { headers: { accept: "application/json" } });
       if (!r.ok) throw 0; const d = await r.json();
-      if (d && d.sports && (d.sports.mlb || []).length) { setGames(d); setSrcLive(true); return; }
+      if (d && d.sports && (d.sports.mlb || []).length) { setGames(d); setSrcLive(true); setGamesReady(true); return; }
     } catch (_) {}
-    setGames(SAMPLE); setSrcLive(false);
+    setGames(SAMPLE); setSrcLive(false); setGamesReady(true);
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
@@ -146,6 +166,25 @@ export default function ComboLocks({ user }) {
   }, [owner, user]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
+  // Apply a Promo Builder prefill once live (or sample) games are in. Prefill is
+  // App state and is cleared when leaving this tab — do not insert into Supabase.
+  useEffect(() => {
+    if (!prefill || !gamesReady) return;
+    const nonce = prefill.nonce ?? prefill;
+    if (appliedNonceRef.current === nonce) return;
+    appliedNonceRef.current = nonce;
+    const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports?.mlb || []);
+    const n = Math.max(rows.length, prefill.legs?.length || 0, 2);
+    const next = [];
+    for (let i = 0; i < n; i++) {
+      const r = rows[i] || { gameKey: "", marketVal: "" };
+      next.push({ id: i + 1, gameKey: r.gameKey || "", marketVal: r.marketVal || "" });
+    }
+    setLegRows(next);
+    setForm(formFromPrefill(prefill));
+    setPrefillWarning(unmatched.length ? unmatched : null);
+    requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [prefill, gamesReady, games]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
   useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
 
@@ -229,7 +268,7 @@ export default function ComboLocks({ user }) {
       { id: 2, gameKey: g[1]?.key || "", marketVal: g[1] ? encVal(g[1].markets.total[0].ticker, g[1].markets.total[0].side) : "" },
       { id: 3, gameKey: g[2]?.key || "", marketVal: g[2] ? encVal(g[2].markets.spread[0].ticker, g[2].markets.spread[0].side) : "" },
     ]);
-    setForm({ stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false });
+    setForm({ ...DEFAULT_FORM });
   };
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
@@ -407,9 +446,20 @@ export default function ComboLocks({ user }) {
       </div>
 
       <div className="grid2" style={{ marginTop: 16 }}>
-        <div>
+        <div ref={createFormRef}>
           <h3>Add a parlay</h3>
           <div className="card">
+            {prefill && !gamesReady && (
+              <div className="note warn" style={{ marginBottom: 12 }}>Matching Promo Builder legs to live Kalshi MLB games…</div>
+            )}
+            {prefillWarning && prefillWarning.length > 0 && (
+              <div className="note warn" style={{ marginBottom: 12 }}>
+                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB only today). Fill those rows by hand, then save — nothing has been inserted yet.
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
+                </ul>
+              </div>
+            )}
             <label>Legs — pick each game, then the market (side / spread / total, incl. alternates)</label>
             {legRows.map((r) => (
               <div className="legrow" key={r.id}>
@@ -431,7 +481,7 @@ export default function ComboLocks({ user }) {
               <div><label>Boosted odds — you have</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
               <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Fill odds — you sell at (after maker fees)
                 {+form.fill ? <span className="info" tabIndex={0} data-tip={`The taker is matched at ${fmtAm(fillView(+form.fill).effTaker)} — worse than your ${fmtAm(+form.fill)}, because their taker fee (7%) is 4× your maker fee. That's what a taker actually gets.`}>i</span> : null}
-              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} /></div>
+              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter fill odds" : undefined} /></div>
             </div>
             <div className="row c2">
               <div><label>Fair odds — optional</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
