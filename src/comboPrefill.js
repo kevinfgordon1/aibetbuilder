@@ -1,5 +1,8 @@
 // Map Promo Builder profit-boost legs onto Combo Locks Kalshi create-form rows.
-// Identity only — never inserts into Supabase. Fill odds are left for the user.
+// Identity only — never inserts into Supabase.
+// Recommended fill equals fair (true parlay American) when fair is finite;
+// otherwise fill stays empty. Fill is the odds you sell at AFTER the maker fee
+// (already baked in) — do not apply KFEE again when recommending fill.
 
 export const encVal = (t, s) => `${t}|${s}`;
 
@@ -254,4 +257,23 @@ export function earliestCommence(legs) {
   const times = (legs || []).map((l) => l?.commence_time).filter(Boolean)
     .map((t) => new Date(t).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
   return times.length ? new Date(times[0]).toISOString() : "";
+}
+
+// Same American convention as App.jsx probToAmerican / ComboLocks americanFromProb:
+// 0 < p < 1 required; p < 0.5 → plus money. Never invent a number.
+export function fairAmericanFromProb(combinedProb) {
+  if (!(combinedProb > 0 && combinedProb < 1)) return "";
+  const am = combinedProb < 0.5
+    ? Math.round((100 * (1 - combinedProb)) / combinedProb)
+    : -Math.round((100 * combinedProb) / (1 - combinedProb));
+  return Number.isFinite(am) ? am : "";
+}
+
+// Recommended fill = fair when fair is a finite American number; else "".
+export function recommendedFillFromFair(fair) {
+  return Number.isFinite(fair) ? fair : "";
+}
+
+export function recommendedFillFromProb(combinedProb) {
+  return recommendedFillFromFair(fairAmericanFromProb(combinedProb));
 }

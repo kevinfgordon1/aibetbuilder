@@ -7,6 +7,9 @@ import {
   encVal,
   toDatetimeLocalValue,
   earliestCommence,
+  fairAmericanFromProb,
+  recommendedFillFromFair,
+  recommendedFillFromProb,
 } from "./comboPrefill.js";
 
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
@@ -212,5 +215,20 @@ assert.equal(earliestCommence([
 
 const local = toDatetimeLocalValue("2026-08-07T23:05:00Z");
 assert.match(local, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+
+// Recommended fill = fair (true parlay American). Initial value only — Combo Locks
+// formFromPrefill copies prefill.fill and the fill input stays editable (no lock).
+const fairFrom08 = fairAmericanFromProb(0.08);
+assert.ok(Number.isFinite(fairFrom08) && fairFrom08 > 0, "0.08 is plus-money fair");
+assert.equal(recommendedFillFromProb(0.08), fairFrom08);
+assert.equal(recommendedFillFromFair(fairFrom08), fairFrom08);
+assert.equal(recommendedFillFromFair(""), "");
+for (const bad of [undefined, null, 0, 1, NaN, "", Infinity, -Infinity]) {
+  assert.equal(fairAmericanFromProb(bad), "");
+  assert.equal(recommendedFillFromProb(bad), "");
+}
+for (const emptyFair of [undefined, null, "", NaN, Infinity, -Infinity]) {
+  assert.equal(recommendedFillFromFair(emptyFair), "");
+}
 
 console.log("comboPrefill tests passed");
