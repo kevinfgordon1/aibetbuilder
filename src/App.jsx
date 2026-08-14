@@ -87,6 +87,17 @@ const MARKET_SCOPES = [
   { val: "alt", label: "Alt" },
 ];
 
+function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, minLegOdds, numLegs }) {
+  const selected = SPORTS.filter(s => promoSports.has(s.key)).map(s => s.label);
+  const sportsPart = selected.length === SPORTS.length ? "All sports" : selected.join(", ");
+  const datePart = DATE_RANGES.find(d => d.val === promoDateRange)?.label || promoDateRange;
+  const marketPart = marketScope === "main" ? "mains" : marketScope === "alt" ? "alts" : "all";
+  const parts = [sportsPart, datePart, marketPart];
+  if (promoType === "boost" && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
+  if (promoType === "boost" && numLegs >= 2 && minLegOdds !== "") parts.push(`legs ${minLegOdds}`);
+  return parts.join(" · ");
+}
+
 const PROMO_TYPES = [
   { val: "boost", label: "Profit Boost" },
   { val: "freebet", label: "Free Bet" },
@@ -1473,6 +1484,7 @@ export default function App() {
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb"]));
   const [marketScope, setMarketScope] = useState("all");
+  const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(true);
@@ -1875,98 +1887,124 @@ export default function App() {
                       : "Configure your boost and find the optimal parlay legs ranked by expected value.")
                   : "Convert your free bet into guaranteed cash. Pick the leg you'll place the free bet on, hedge at the best opposing odds across trusted books, lock in real money."}
               </div>
-              <div style={{ display: "flex", gap: 16, marginBottom: 24, flexWrap: "wrap" }}>
-                {controlBox(<>
-                  <label style={labelStyle}>Promo Type</label>
-                  {PROMO_TYPES.map(opt => (
-                    <button key={opt.val} onClick={() => {
-                      setPromoType(opt.val);
-                      window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val });
-                      logEvent(user, 'promo_type_changed', { promo_type: opt.val });
-                    }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </>)}
-                {controlBox(<>
-                  <label style={labelStyle}>Sportsbook</label>
-                  <select value={promoBook} onChange={e => {
-                    setPromoBook(e.target.value);
-                    window.gtag?.('event', 'sportsbook_selected', { book: e.target.value });
-                    logEvent(user, 'sportsbook_selected', { book: e.target.value });
-                  }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
-                    {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
-                  </select>
-                </>)}
-                {controlBox(<>
-                  <label style={labelStyle}>Sports</label>
-                  {SPORTS.map(s => (
-                    <button key={s.key} onClick={() => togglePromoSport(s.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoSports.has(s.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoSports.has(s.key) ? "#3b82f6" : "#6b7280" }}>
-                      {s.label}
-                    </button>
-                  ))}
-                </>)}
-                {controlBox(<>
-                  <label style={labelStyle}>Date</label>
-                  {DATE_RANGES.map(opt => (
-                    <button key={opt.val} onClick={() => setPromoDateRange(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </>)}
-                {controlBox(<>
-                  <label style={labelStyle}>Markets</label>
-                  {MARKET_SCOPES.map(opt => (
-                    <button key={opt.val} onClick={() => setMarketScope(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: marketScope === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: marketScope === opt.val ? "#3b82f6" : "#6b7280" }}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </>)}
-                {promoType === "boost" && controlBox(<>
-                  <label style={labelStyle}>Boost %</label>
-                  <input type="number" value={boostPct} onChange={(e) => setBoostPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </>)}
-                {controlBox(<>
-                  <label style={labelStyle}>{promoType === "freebet" ? "Free Bet $" : "Stake $"}</label>
-                  <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </>)}
-                {promoType === "boost" && controlBox(<>
-                  <label style={labelStyle}>Legs</label>
-                  {[1, 2, 3].map(n => (
-                    <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
-                  ))}
-                  {numLegs >= 3 && (
-                    <>
-                      {numLegs > 3 && (
-                        <>
-                          <button
-                            type="button"
-                            aria-label="Fewer legs"
-                            onClick={() => setNumLegs(n => Math.max(3, n - 1))}
-                            style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
-                          >−</button>
-                          <span style={{ padding: "4px 8px", borderRadius: 6, background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
-                        </>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                  {controlBox(<>
+                    <label style={labelStyle}>Promo Type</label>
+                    {PROMO_TYPES.map(opt => (
+                      <button key={opt.val} onClick={() => {
+                        setPromoType(opt.val);
+                        window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val });
+                        logEvent(user, 'promo_type_changed', { promo_type: opt.val });
+                      }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </>)}
+                  {controlBox(<>
+                    <label style={labelStyle}>Sportsbook</label>
+                    <select value={promoBook} onChange={e => {
+                      setPromoBook(e.target.value);
+                      window.gtag?.('event', 'sportsbook_selected', { book: e.target.value });
+                      logEvent(user, 'sportsbook_selected', { book: e.target.value });
+                    }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
+                      {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
+                    </select>
+                  </>)}
+                  {promoType === "boost" && controlBox(<>
+                    <label style={labelStyle}>Boost %</label>
+                    <input type="number" value={boostPct} onChange={(e) => setBoostPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                  </>)}
+                  {controlBox(<>
+                    <label style={labelStyle}>{promoType === "freebet" ? "Free Bet $" : "Stake $"}</label>
+                    <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                  </>)}
+                  {promoType === "boost" && controlBox(<>
+                    <label style={labelStyle}>Legs</label>
+                    {[1, 2, 3].map(n => (
+                      <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
+                    ))}
+                    {numLegs >= 3 && (
+                      <>
+                        {numLegs > 3 && (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="Fewer legs"
+                              onClick={() => setNumLegs(n => Math.max(3, n - 1))}
+                              style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
+                            >−</button>
+                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          aria-label={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : "More legs"}
+                          title={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : `Add a leg (max ${MAX_PROMO_LEGS})`}
+                          disabled={numLegs >= MAX_PROMO_LEGS}
+                          onClick={() => setNumLegs(n => Math.min(MAX_PROMO_LEGS, n + 1))}
+                          style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: numLegs >= MAX_PROMO_LEGS ? "default" : "pointer", background: "rgba(255,255,255,0.05)", color: numLegs >= MAX_PROMO_LEGS ? "#4b5563" : "#9ca3af", lineHeight: 1, opacity: numLegs >= MAX_PROMO_LEGS ? 0.5 : 1 }}
+                        >+</button>
+                      </>
+                    )}
+                  </>)}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={promoFiltersOpen}
+                    onClick={() => setPromoFiltersOpen(v => !v)}
+                    onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPromoFiltersOpen(v => !v); } }}
+                    style={{ cursor: "pointer", alignSelf: "flex-start" }}
+                  >
+                    {controlBox(<>
+                      <span style={labelStyle}>Filters</span>
+                      <span style={{ fontSize: 11, color: promoFiltersOpen ? "#3b82f6" : "#6b7280" }}>{promoFiltersOpen ? "▲" : "▼"}</span>
+                      {!promoFiltersOpen && (
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>
+                          {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, minLegOdds, numLegs })}
+                        </span>
                       )}
-                      <button
-                        type="button"
-                        aria-label={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : "More legs"}
-                        title={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : `Add a leg (max ${MAX_PROMO_LEGS})`}
-                        disabled={numLegs >= MAX_PROMO_LEGS}
-                        onClick={() => setNumLegs(n => Math.min(MAX_PROMO_LEGS, n + 1))}
-                        style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: numLegs >= MAX_PROMO_LEGS ? "default" : "pointer", background: "rgba(255,255,255,0.05)", color: numLegs >= MAX_PROMO_LEGS ? "#4b5563" : "#9ca3af", lineHeight: 1, opacity: numLegs >= MAX_PROMO_LEGS ? 0.5 : 1 }}
-                      >+</button>
-                    </>
+                    </>)}
+                  </div>
+                  {promoFiltersOpen && (
+                    <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                      {controlBox(<>
+                        <label style={labelStyle}>Sports</label>
+                        {SPORTS.map(s => (
+                          <button key={s.key} onClick={() => togglePromoSport(s.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoSports.has(s.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoSports.has(s.key) ? "#3b82f6" : "#6b7280" }}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Date</label>
+                        {DATE_RANGES.map(opt => (
+                          <button key={opt.val} onClick={() => setPromoDateRange(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Markets</label>
+                        {MARKET_SCOPES.map(opt => (
+                          <button key={opt.val} onClick={() => setMarketScope(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: marketScope === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: marketScope === opt.val ? "#3b82f6" : "#6b7280" }}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {promoType === "boost" && controlBox(<>
+                        <label style={labelStyle}>Min Final Odds</label>
+                        <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
+                      {promoType === "boost" && numLegs >= 2 && controlBox(<>
+                        <label style={labelStyle}>Min Leg Odds</label>
+                        <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
+                    </div>
                   )}
-                </>)}
-                {promoType === "boost" && controlBox(<>
-                  <label style={labelStyle}>Min Final Odds</label>
-                  <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </>)}
-                {promoType === "boost" && numLegs >= 2 && controlBox(<>
-                  <label style={labelStyle}>Min Leg Odds</label>
-                  <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                </>)}
+                </div>
               </div>
 
               {/* ─── PROFIT BOOST RESULTS ─── */}
