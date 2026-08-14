@@ -1949,14 +1949,23 @@ export default function App() {
                     )}
                   </>)}
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: promoFiltersOpen ? "row" : "column", alignItems: promoFiltersOpen ? "center" : undefined, gap: promoFiltersOpen ? 8 : 12, flexWrap: "wrap" }}>
                   <div
                     role="button"
                     tabIndex={0}
                     aria-expanded={promoFiltersOpen}
+                    aria-label={promoFiltersOpen ? "Hide filters" : "Show filters"}
                     onClick={() => setPromoFiltersOpen(v => !v)}
                     onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPromoFiltersOpen(v => !v); } }}
-                    style={{
+                    style={promoFiltersOpen ? {
+                      cursor: "pointer",
+                      flex: "0 0 auto",
+                      alignSelf: "center",
+                      padding: "2px 4px",
+                      display: "flex",
+                      alignItems: "center",
+                      lineHeight: 1,
+                    } : {
                       cursor: "pointer",
                       alignSelf: "flex-start",
                       background: "rgba(56,72,96,0.18)",
@@ -1969,7 +1978,9 @@ export default function App() {
                       lineHeight: 1.2,
                     }}
                   >
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>Filters</span>
+                    {!promoFiltersOpen && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>Filters</span>
+                    )}
                     <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
                     {!promoFiltersOpen && (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", lineHeight: 1.2 }}>
@@ -1978,7 +1989,7 @@ export default function App() {
                     )}
                   </div>
                   {promoFiltersOpen && (
-                    <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                    <>
                       {controlBox(<>
                         <label style={labelStyle}>Sports</label>
                         {SPORTS.map(s => (
@@ -2011,7 +2022,7 @@ export default function App() {
                         <label style={labelStyle}>Min Leg Odds</label>
                         <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
-                    </div>
+                    </>
                   )}
                 </div>
               </div>
