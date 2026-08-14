@@ -1949,14 +1949,14 @@ export default function App() {
                     )}
                   </>)}
                 </div>
-                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div
                     role="button"
                     tabIndex={0}
                     aria-expanded={promoFiltersOpen}
                     onClick={() => setPromoFiltersOpen(v => !v)}
                     onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPromoFiltersOpen(v => !v); } }}
-                    style={{ cursor: "pointer" }}
+                    style={{ cursor: "pointer", alignSelf: "flex-start" }}
                   >
                     {controlBox(<>
                       <span style={labelStyle}>Filters</span>
@@ -1968,40 +1968,42 @@ export default function App() {
                       )}
                     </>)}
                   </div>
-                  {promoFiltersOpen && <>
-                    {controlBox(<>
-                      <label style={labelStyle}>Sports</label>
-                      {SPORTS.map(s => (
-                        <button key={s.key} onClick={() => togglePromoSport(s.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoSports.has(s.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoSports.has(s.key) ? "#3b82f6" : "#6b7280" }}>
-                          {s.label}
-                        </button>
-                      ))}
-                    </>)}
-                    {controlBox(<>
-                      <label style={labelStyle}>Date</label>
-                      {DATE_RANGES.map(opt => (
-                        <button key={opt.val} onClick={() => setPromoDateRange(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
-                          {opt.label}
-                        </button>
-                      ))}
-                    </>)}
-                    {controlBox(<>
-                      <label style={labelStyle}>Markets</label>
-                      {MARKET_SCOPES.map(opt => (
-                        <button key={opt.val} onClick={() => setMarketScope(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: marketScope === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: marketScope === opt.val ? "#3b82f6" : "#6b7280" }}>
-                          {opt.label}
-                        </button>
-                      ))}
-                    </>)}
-                    {promoType === "boost" && controlBox(<>
-                      <label style={labelStyle}>Min Final Odds</label>
-                      <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                    </>)}
-                    {promoType === "boost" && numLegs >= 2 && controlBox(<>
-                      <label style={labelStyle}>Min Leg Odds</label>
-                      <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
-                    </>)}
-                  </>}
+                  {promoFiltersOpen && (
+                    <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                      {controlBox(<>
+                        <label style={labelStyle}>Sports</label>
+                        {SPORTS.map(s => (
+                          <button key={s.key} onClick={() => togglePromoSport(s.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoSports.has(s.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoSports.has(s.key) ? "#3b82f6" : "#6b7280" }}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Date</label>
+                        {DATE_RANGES.map(opt => (
+                          <button key={opt.val} onClick={() => setPromoDateRange(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Markets</label>
+                        {MARKET_SCOPES.map(opt => (
+                          <button key={opt.val} onClick={() => setMarketScope(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: marketScope === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: marketScope === opt.val ? "#3b82f6" : "#6b7280" }}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {promoType === "boost" && controlBox(<>
+                        <label style={labelStyle}>Min Final Odds</label>
+                        <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
+                      {promoType === "boost" && numLegs >= 2 && controlBox(<>
+                        <label style={labelStyle}>Min Leg Odds</label>
+                        <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
+                    </div>
+                  )}
                 </div>
               </div>
 
