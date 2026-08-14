@@ -16,6 +16,8 @@
 //   spread "Philadelphia wins by over 1.5" -> PHI -1.5 (yes) / <opp> +1.5 (no)
 //
 // IDENTITY ONLY — no prices/odds. CJS (api/package.json commonjs).
+// Also proxies GET /markets/{ticker} when called as /api/kalshi-games?tickers=A,B
+// so Combo Locks can show official combo settlement (status/result) without CORS.
 // ─────────────────────────────────────────────────────────────────────────
 'use strict';
 
@@ -31,6 +33,41 @@ async function fetchJson(url) {
     if (!r.ok) return null;
     return await r.json();
   } catch (_) { return null; } finally { clearTimeout(t); }
+}
+
+// Combo Locks settlement: GET /api/kalshi-games?tickers=A,B returns official
+// market status/result (public, keyless). Tickers are Kalshi market ids only.
+const TICKER_RE = /^[A-Za-z0-9]+-[A-Za-z0-9_-]{1,70}$/;
+function tickersFromReq(req) {
+  let raw = '';
+  if (req && req.query) {
+    const q = req.query.tickers || req.query.ticker || '';
+    raw = Array.isArray(q) ? q.join(',') : String(q);
+  }
+  if (!raw && req && req.url) {
+    try {
+      const u = new URL(req.url, 'http://localhost');
+      raw = u.searchParams.get('tickers') || u.searchParams.get('ticker') || '';
+    } catch (_) {}
+  }
+  return [...new Set(String(raw).split(/[,\s]+/).map((s) => s.trim()).filter((s) => TICKER_RE.test(s)))].slice(0, 25);
+}
+function slimMarket(market) {
+  if (!market || !market.ticker) return null;
+  return {
+    ticker: market.ticker,
+    status: market.status || null,
+    result: market.result == null ? '' : String(market.result),
+  };
+}
+async function fetchMarketSettlements(tickers) {
+  const markets = {};
+  await Promise.all((tickers || []).map(async (ticker) => {
+    const data = await fetchJson(`${KALSHI_BASE}/markets/${encodeURIComponent(ticker)}`);
+    const slim = slimMarket(data && data.market);
+    if (slim) markets[slim.ticker] = slim;
+  }));
+  return markets;
 }
 
 const gameKeyOf = (t) => { const i = String(t || '').indexOf('-'); return i === -1 ? t : t.slice(i + 1); };
@@ -139,6 +176,12 @@ async function handler(req, res) {
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   try {
+    const tickers = tickersFromReq(req);
+    if (tickers.length) {
+      const markets = await fetchMarketSettlements(tickers);
+      res.status(200).json({ markets, updatedAt: new Date().toISOString() });
+      return;
+    }
     const sports = {};
     for (const [sport, seriesByType] of Object.entries(MARKET_SERIES)) sports[sport] = await fetchSportGames(seriesByType);
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports });
@@ -148,4 +191,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._helpers = { parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf };
+module.exports._helpers = { parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf, tickersFromReq, slimMarket };
