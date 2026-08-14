@@ -178,6 +178,33 @@ assert.equal(totMissingLine.unmatched.length, 1);
 assert.equal(totMissingLine.rows[0].gameKey, "26AUG071905PHIATL");
 assert.equal(totMissingLine.rows[0].marketVal, "");
 
+const fiveLeg = mapPromoLegsToKalshi([
+  phiMl,
+  {
+    name: "New York Mets ML", market: "ML",
+    game: "New York Mets @ Washington Nationals", sport: "baseball_mlb",
+    commence_time: "2026-08-07T23:05:00Z",
+  },
+  {
+    name: "New York Yankees ML", market: "ML",
+    game: "New York Yankees @ Boston Red Sox", sport: "baseball_mlb",
+    commence_time: "2026-08-07T23:10:00Z",
+  },
+  {
+    name: "Los Angeles Angels ML", market: "ML",
+    game: "Los Angeles Angels @ Los Angeles Dodgers", sport: "baseball_mlb",
+    commence_time: "2026-08-08T02:00:00Z",
+  },
+  {
+    name: "Chicago Cubs ML", market: "ML",
+    game: "Chicago Cubs @ Chicago White Sox", sport: "baseball_mlb",
+    commence_time: "2026-08-08T00:00:00Z",
+  },
+], MLB);
+assert.equal(fiveLeg.unmatched.length, 0, JSON.stringify(fiveLeg.unmatched));
+assert.equal(fiveLeg.rows.length, 5, "Send-to-Combo-Locks must map every grown leg");
+assert.ok(fiveLeg.rows.every((r) => r.gameKey && r.marketVal));
+
 assert.equal(earliestCommence([
   { commence_time: "2026-08-08T01:00:00Z" },
   { commence_time: "2026-08-07T23:05:00Z" },

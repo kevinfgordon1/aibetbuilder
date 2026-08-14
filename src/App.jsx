@@ -92,6 +92,13 @@ const PROMO_TYPES = [
   { val: "freebet", label: "Free Bet" },
 ];
 
+// Profit-boost picker cap. 4+ legs grow greedily from top 3-leg parlays
+// (no C(n,k) explosion). 8 covers typical boost promos without a new toolbar.
+const MAX_PROMO_LEGS = 8;
+// How many top 3-leg seeds to grow from. Extra work is ~seeds × leftover
+// candidates per added leg — similar budget to today's 3-leg scan.
+const GROW_FROM_3_SEEDS = 50;
+
 function isWithinDateRange(commence_time, range) {
   const now = new Date();
   const ct = new Date(commence_time);
@@ -871,7 +878,50 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
   return legs;
 }
 
+function parlayLegKey(p) {
+  return p.legs.map(l => `${l.game}\0${l.name}`).sort().join("\n");
+}
+
+// 4+ legs: take top 3-leg parlays, then greedily add one unused-game leg at a
+// time ranked by calcParlayEV. Same book/filters as the caller already applied
+// to `legs`. minFinalOdds is applied to the finished N-leg, not the 3-leg seed
+// (a short 3-leg can still grow into a long enough parlay).
+function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFinalOdds) {
+  const seedCount = Math.max(maxResults, GROW_FROM_3_SEEDS);
+  const seeds = findTopParlays(legs, 3, boostPct, stake, seedCount, null);
+  const seen = new Set();
+  const grown = [];
+  for (const seed of seeds) {
+    let current = seed;
+    let failed = false;
+    for (let n = current.legs.length; n < numLegs; n++) {
+      const usedGames = new Set(current.legs.map(l => l.game));
+      let best = null;
+      for (const cand of legs) {
+        if (usedGames.has(cand.game)) continue;
+        const nextLegs = current.legs.concat(cand);
+        const r = calcParlayEV(nextLegs, boostPct, stake);
+        if (!best || r.ev > best.ev) best = { legs: nextLegs, ...r };
+      }
+      if (!best) { failed = true; break; }
+      current = best;
+    }
+    if (failed || current.legs.length !== numLegs) continue;
+    if (minFinalOdds !== null && current.parlayOdds < minFinalOdds) continue;
+    const key = parlayLegKey(current);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    grown.push(current);
+  }
+  grown.sort((a, b) => b.ev - a.ev);
+  return grown.slice(0, maxResults);
+}
+
 function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFinalOdds = null) {
+  if (numLegs > 3 && numLegs <= MAX_PROMO_LEGS) {
+    return growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFinalOdds);
+  }
+
   const results = [];
   const getGame = (leg) => leg.game;
 
@@ -1555,6 +1605,7 @@ export default function App() {
       starts: startMs.length ? new Date(startMs[0]).toISOString() : "",
       label: (p.legs || []).map((l) => l.name).join(" + "),
       labelEdited: true,
+      // Every leg — including 4+ grown legs — must reach Combo Locks.
       legs: (p.legs || []).map((l) => ({
         name: l.name, market: l.market, game: l.game, commence_time: l.commence_time, sport: l.sport,
       })),
@@ -1884,6 +1935,29 @@ export default function App() {
                   {[1, 2, 3].map(n => (
                     <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
                   ))}
+                  {numLegs >= 3 && (
+                    <>
+                      {numLegs > 3 && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label="Fewer legs"
+                            onClick={() => setNumLegs(n => Math.max(3, n - 1))}
+                            style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
+                          >−</button>
+                          <span style={{ padding: "4px 8px", borderRadius: 6, background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : "More legs"}
+                        title={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : `Add a leg (max ${MAX_PROMO_LEGS})`}
+                        disabled={numLegs >= MAX_PROMO_LEGS}
+                        onClick={() => setNumLegs(n => Math.min(MAX_PROMO_LEGS, n + 1))}
+                        style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: numLegs >= MAX_PROMO_LEGS ? "default" : "pointer", background: "rgba(255,255,255,0.05)", color: numLegs >= MAX_PROMO_LEGS ? "#4b5563" : "#9ca3af", lineHeight: 1, opacity: numLegs >= MAX_PROMO_LEGS ? 0.5 : 1 }}
+                      >+</button>
+                    </>
+                  )}
                 </>)}
                 {promoType === "boost" && controlBox(<>
                   <label style={labelStyle}>Min Final Odds</label>
@@ -1928,18 +2002,35 @@ export default function App() {
                             </div>
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: p.ev > 0 ? "#10b981" : "#ef4444" }}>+${p.ev.toFixed(2)} EV</div>
                           </div>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                            {p.legs.map((l, li) => (
-                              <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
-                                <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                                  <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
-                                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+                          {p.legs.length > 3 ? (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                              {(isExpanded ? p.legs : p.legs.slice(0, 3)).map((l, li) => (
+                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span style={{ fontSize: 12, fontWeight: 600 }}>{l.name}</span>
+                                  <span style={{ fontSize: 10, color: "#6b7280" }}>{l.market}</span>
+                                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
                                 </div>
-                                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}<DaysAwayWarning commence_time={l.commence_time} /></div>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                              {!isExpanded && p.legs.length > 3 && (
+                                <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: "#93c5fd" }}>
+                                  +{p.legs.length - 3} more
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                              {p.legs.map((l, li) => (
+                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                                    <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
+                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+                                  </div>
+                                  <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}<DaysAwayWarning commence_time={l.commence_time} /></div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
