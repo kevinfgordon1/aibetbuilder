@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
+import { recommendedFillFromFair } from "./comboPrefill";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1612,7 +1613,7 @@ export default function App() {
       stake,
       boost: boostedOdds,
       fair,
-      fill: "",
+      fill: recommendedFillFromFair(fair),
       mode: "1x",
       starts: startMs.length ? new Date(startMs[0]).toISOString() : "",
       label: (p.legs || []).map((l) => l.name).join(" + "),
