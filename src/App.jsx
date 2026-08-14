@@ -1924,28 +1924,25 @@ export default function App() {
                     {[1, 2, 3].map(n => (
                       <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
                     ))}
-                    {numLegs >= 3 && (
+                    {numLegs > 3 && (
                       <>
-                        {numLegs > 3 && (
-                          <>
-                            <button
-                              type="button"
-                              aria-label="Fewer legs"
-                              onClick={() => setNumLegs(n => Math.max(3, n - 1))}
-                              style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
-                            >−</button>
-                            <span style={{ padding: "4px 8px", borderRadius: 6, background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
-                          </>
-                        )}
                         <button
                           type="button"
-                          aria-label={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : "More legs"}
-                          title={numLegs >= MAX_PROMO_LEGS ? `Max ${MAX_PROMO_LEGS} legs` : `Add a leg (max ${MAX_PROMO_LEGS})`}
-                          disabled={numLegs >= MAX_PROMO_LEGS}
-                          onClick={() => setNumLegs(n => Math.min(MAX_PROMO_LEGS, n + 1))}
-                          style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: numLegs >= MAX_PROMO_LEGS ? "default" : "pointer", background: "rgba(255,255,255,0.05)", color: numLegs >= MAX_PROMO_LEGS ? "#4b5563" : "#9ca3af", lineHeight: 1, opacity: numLegs >= MAX_PROMO_LEGS ? 0.5 : 1 }}
-                        >+</button>
+                          aria-label="Fewer legs"
+                          onClick={() => setNumLegs(n => Math.max(3, n - 1))}
+                          style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
+                        >−</button>
+                        <span style={{ padding: "4px 8px", borderRadius: 6, background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
                       </>
+                    )}
+                    {numLegs < MAX_PROMO_LEGS && (
+                      <button
+                        type="button"
+                        aria-label="More legs"
+                        title={`Add a leg (max ${MAX_PROMO_LEGS})`}
+                        onClick={() => setNumLegs(n => Math.min(MAX_PROMO_LEGS, n + 1))}
+                        style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
+                      >+</button>
                     )}
                   </>)}
                 </div>
