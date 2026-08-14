@@ -1956,17 +1956,26 @@ export default function App() {
                     aria-expanded={promoFiltersOpen}
                     onClick={() => setPromoFiltersOpen(v => !v)}
                     onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPromoFiltersOpen(v => !v); } }}
-                    style={{ cursor: "pointer", alignSelf: "flex-start" }}
+                    style={{
+                      cursor: "pointer",
+                      alignSelf: "flex-start",
+                      background: "rgba(56,72,96,0.18)",
+                      border: "1px solid rgba(255,255,255,0.05)",
+                      borderRadius: 8,
+                      padding: "7px 12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      lineHeight: 1.2,
+                    }}
                   >
-                    {controlBox(<>
-                      <span style={labelStyle}>Filters</span>
-                      <span style={{ fontSize: 11, color: promoFiltersOpen ? "#3b82f6" : "#6b7280" }}>{promoFiltersOpen ? "▲" : "▼"}</span>
-                      {!promoFiltersOpen && (
-                        <span style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af" }}>
-                          {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, minLegOdds, numLegs })}
-                        </span>
-                      )}
-                    </>)}
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>Filters</span>
+                    <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
+                    {!promoFiltersOpen && (
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", lineHeight: 1.2 }}>
+                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, minLegOdds, numLegs })}
+                      </span>
+                    )}
                   </div>
                   {promoFiltersOpen && (
                     <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
