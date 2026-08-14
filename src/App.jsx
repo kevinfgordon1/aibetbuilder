@@ -1940,7 +1940,7 @@ export default function App() {
                         type="button"
                         aria-label="More legs"
                         title={`Add a leg (max ${MAX_PROMO_LEGS})`}
-                        onClick={() => setNumLegs(n => Math.min(MAX_PROMO_LEGS, n + 1))}
+                        onClick={() => setNumLegs(n => n <= 3 ? 4 : Math.min(MAX_PROMO_LEGS, n + 1))}
                         style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
                       >+</button>
                     )}
