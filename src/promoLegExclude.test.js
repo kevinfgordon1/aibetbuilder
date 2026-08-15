@@ -49,6 +49,7 @@ const tot = { name: "White Sox/Yankees o8.5", market: "TOT", game: "White Sox @ 
   assert.match(app, /filterExcludedLegs\(/);
   assert.match(app, /setExcludedPromoLegs\(new Set\(\)\)/);
   assert.match(app, /function ExcludeLegButton/);
+  assert.match(app, /width: 22,\s*height: 22,\s*minWidth: 22,\s*minHeight: 22,[\s\S]*?fontSize: 14,/);
   assert.doesNotMatch(app, /localStorage/);
   const combo = fs.readFileSync(path.join(dir, "ComboLocks.jsx"), "utf8");
   assert.doesNotMatch(combo, /excludedPromoLegs|promoLegIdentity|ExcludeLegButton/);
