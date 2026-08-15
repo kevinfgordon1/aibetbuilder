@@ -82,7 +82,7 @@ module.exports = async (req, res) => {
       await sendTelegram(chatId,
         `You're subscribed to +EV 3-leg parlay alerts on @evparlaysbot.\n\n` +
         `You'll get a ping when a 3-leg $100 / 0% boost parlay on any sportsbook ` +
-        `clears EV% > 2.\n\n` +
+        `clears EV% > 3.\n\n` +
         `/stop to unsubscribe · /help for commands`
       );
     } else if (/^\/?stop\b/i.test(text)) {

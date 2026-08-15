@@ -12,7 +12,7 @@ const { skipTelegramRequested } = require('../lib/ev-parlay-scan-flow');
 // GET/POST /api/scan-ev-parlays
 // MLB only (baseball_mlb), Promo Builder "Next 24h" window. Reads cached odds
 // (no Odds API pull). Scores 3-leg $100 0% boost parlays for every Promo
-// Builder book. Alerts @evparlaysbot when EV% > 2.
+// Builder book. Alerts @evparlaysbot when EV% > 3.
 // Telegram is sent before any ev_parlay_alerts upsert.
 module.exports = async (req, res) => {
   let sentSuccessfully = false;
