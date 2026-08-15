@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
 import { recommendedFillFromFair } from "./comboPrefill";
+import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1464,6 +1465,40 @@ function SendToComboLocksButton({ onSend }) {
   );
 }
 
+function ExcludeLegButton({ leg, onExclude }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Exclude ${leg.name}`}
+      title="Remove this leg from all parlays"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onExclude(leg); }}
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 32,
+        height: 32,
+        minWidth: 32,
+        minHeight: 32,
+        padding: 0,
+        border: "none",
+        borderRadius: 6,
+        background: "rgba(255,255,255,0.06)",
+        color: "#9ca3af",
+        fontSize: 18,
+        fontWeight: 700,
+        lineHeight: 1,
+        cursor: "pointer",
+        flexShrink: 0,
+        WebkitTapHighlightColor: "transparent",
+      }}
+    >
+      ×
+    </button>
+  );
+}
+
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
@@ -1491,6 +1526,7 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(true);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
+  const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1516,6 +1552,7 @@ export default function App() {
   }, []);
 
   const fetchOdds = async () => {
+    setExcludedPromoLegs(new Set());
     setDataLoading(true);
     const [featuredRes, eventRes, futuresRes] = await Promise.all([
       supabase.from("odds_cache").select("*").in("sport", SPORT_KEYS),
@@ -1540,7 +1577,7 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-  }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, numLegs, minFinalOdds, minLegOdds, marketScope]);
+  }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, numLegs, minFinalOdds, minLegOdds, marketScope, excludedPromoLegs]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1569,9 +1606,10 @@ export default function App() {
   const promoSportFilter = promoSports.size === SPORTS.length ? null : [...promoSports];
   const parsedMinLeg = (promoType === "boost" && minLegOdds !== "") ? Number(minLegOdds) : null;
   const promoLegsAll = buildAllLegsForBook(allOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
-  const promoLegs = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
+  const promoLegsScoped = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
     : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
     : promoLegsAll;
+  const promoLegs = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
   const parsedMinFinal = (promoType === "boost" && minFinalOdds !== "") ? Number(minFinalOdds) : null;
   const PARLAY_LEG_CAP = 200;
   const parlayLegPool = promoType === "boost"
@@ -1597,6 +1635,16 @@ export default function App() {
   useEffect(() => {
     if (activeTab !== "combo") setComboPrefill(null);
   }, [activeTab]);
+
+  const excludePromoLeg = (leg) => {
+    const key = promoLegIdentity(leg);
+    setExcludedPromoLegs(prev => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  };
 
   const sendToComboLocks = (p) => {
     if (user?.email !== OWNER_EMAIL) return;
@@ -2061,10 +2109,11 @@ export default function App() {
                           {p.legs.length > 3 ? (
                             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
                               {(isExpanded ? p.legs : p.legs.slice(0, 3)).map((l, li) => (
-                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 6px 5px 10px", display: "flex", alignItems: "center", gap: 8 }}>
                                   <span style={{ fontSize: 12, fontWeight: 600 }}>{l.name}</span>
                                   <span style={{ fontSize: 10, color: "#6b7280" }}>{l.market}</span>
                                   <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+                                  <ExcludeLegButton leg={l} onExclude={excludePromoLeg} />
                                 </div>
                               ))}
                               {!isExpanded && p.legs.length > 3 && (
@@ -2076,8 +2125,11 @@ export default function App() {
                           ) : (
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
                               {p.legs.map((l, li) => (
-                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 14px", flex: 1, minWidth: 150 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
+                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 10px 8px 14px", flex: 1, minWidth: 150 }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
+                                    <ExcludeLegButton leg={l} onExclude={excludePromoLeg} />
+                                  </div>
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
                                     <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
@@ -2236,7 +2288,10 @@ export default function App() {
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
                             <div style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 8, padding: "10px 14px" }}>
                               <div style={{ fontSize: 11, color: "#8b5cf6", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Free Bet On</div>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.leg.name}</div>
+                              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{c.leg.name}</div>
+                                <ExcludeLegButton leg={c.leg} onExclude={excludePromoLeg} />
+                              </div>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                                 <span style={{ fontSize: 11, color: "#6b7280" }}>{c.leg.market} — {activePromoBookData.label}</span>
                                 <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: c.leg.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(c.leg.dk)}</span>
