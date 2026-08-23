@@ -289,10 +289,10 @@ export default function ComboLocks({ user, prefill = null }) {
       // All LIVING parlays (not yet archived), whether the worker is actively watching them
       // (active=true) or paused after recording a quote (active=false). Loading both means a
       // parlay can never fall through the gap between the Active and History lists again.
-      supabase.from("combo_parlays").select("*").is("archived_at", null).order("created_at", { ascending: false }),
+      supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
       supabase.from("combo_submissions").select("*").order("created_at", { ascending: false }).limit(50),
-      supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
+      supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
       // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
       supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw").eq("is_combo", true).eq("is_taker", false),
       // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
