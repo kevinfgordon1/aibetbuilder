@@ -148,34 +148,44 @@ export default function ComboTape({ user }) {
   const [poll, setPoll] = useState(false);
 
   const reload = useCallback(async (mode = "full") => {
-    if (!owner) return;
+    if (!owner || !user?.id) return;
     if (mode === "tick") {
       const { data: peek } = await supabase
         .from("combo_parlays")
         .select("id,active,archived_at")
+        .eq("user_id", user.id)
         .is("archived_at", null);
       if (!hasQuotingParlays(peek)) {
         setPoll(false);
         return;
       }
     }
-    const [living, archived, fillRows, matchRows, outcomeRows, skipRows] = await Promise.all([
-      supabase.from("combo_parlays").select("*").is("archived_at", null).order("created_at", { ascending: false }),
-      supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
-      supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,kalshi_created_time,recorded_at").eq("is_combo", true).eq("is_taker", false),
-      supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(MATCH_LIMIT),
-      supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(OUTCOME_LIMIT),
-      supabase.from("combo_submissions").select("*").in("status", ["declined", "limitreached"]).order("created_at", { ascending: false }).limit(SKIP_LIMIT),
+    // combo_parlays + combo_submissions have user_id; fills/matches/outcomes
+    // do not — scope those to his parlay ids after the owner-filtered load.
+    const [living, archived, skipRows] = await Promise.all([
+      supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
+      supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
+      supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["declined", "limitreached"]).order("created_at", { ascending: false }).limit(SKIP_LIMIT),
     ]);
     const livingRows = living.data || [];
-    setParlays([...livingRows, ...(archived.data || [])]);
+    const archivedRows = archived.data || [];
+    const ids = [...livingRows, ...archivedRows].map((p) => p.id).filter(Boolean);
+    const none = { data: [] };
+    const [fillRows, matchRows, outcomeRows] = ids.length
+      ? await Promise.all([
+        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,kalshi_created_time,recorded_at").eq("is_combo", true).eq("is_taker", false).in("parlay_id", ids),
+        supabase.from("combo_matches").select("*").in("parlay_id", ids).order("matched_at", { ascending: false }).limit(MATCH_LIMIT),
+        supabase.from("quote_outcomes").select("*").in("parlay_id", ids).order("updated_at", { ascending: false }).limit(OUTCOME_LIMIT),
+      ])
+      : [none, none, none];
+    setParlays([...livingRows, ...archivedRows]);
     setFills(fillRows.data || []);
     setMatches(matchRows.data || []);
     setOutcomes(outcomeRows.data || []);
     setSkips(skipRows.data || []);
     setLoaded(true);
     setPoll(hasQuotingParlays(livingRows));
-  }, [owner]);
+  }, [owner, user]);
 
   useEffect(() => { reload("full"); }, [reload]);
   useEffect(() => {
