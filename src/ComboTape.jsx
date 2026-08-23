@@ -1,6 +1,7 @@
 // Combo miss-tape — fill closeness + missed RFQs + taped outbid beat.
 // Same owner gate and polls as Combo Locks. Quote-watcher may be parked:
 // outbid counts still render; beat amounts only when tape columns exist.
+// Lock settlement copy is official kalshi_result via settlementFromStored.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { formatCents } from "./comboDesk";
