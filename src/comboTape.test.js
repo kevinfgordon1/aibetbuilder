@@ -7,10 +7,13 @@ import {
   ourNoBid,
   impliedYes,
   americanFromProb,
+  americanFromNo,
   formatAmerican,
+  formatParlayAmerican,
   outbidDelta,
   beatFromOutcome,
   formatBeat,
+  formatBeatTitle,
   isLiveQuotingTs,
   liveFilledContracts,
   classifyMiss,
@@ -21,6 +24,7 @@ import {
   summarizeRows,
   tapeWatcherState,
   typicalBeatText,
+  typicalBeatTitle,
   buildLockTape,
   buildTapeSummary,
   sortLockTapes,
@@ -49,6 +53,16 @@ assert.equal(formatAmerican(1150), "+1150");
 assert.equal(formatAmerican(-150), "-150");
 assert.equal(impliedYes(0.8), 0.2);
 assert.equal(impliedYes(0.77), 0.23);
+
+// Stored NO → YES (1 − NO) → American of the parlay / YES side.
+assert.equal(americanFromNo(0.90), 900);
+assert.equal(formatParlayAmerican({ no: 0.90 }), "+900");
+assert.equal(impliedYes(0.92), 0.08);
+assert.equal(americanFromNo(0.92), 1150);
+assert.equal(formatParlayAmerican({ no: 0.92 }), "+1150");
+assert.equal(formatParlayAmerican({ yes: 0.08 }), "+1150");
+assert.equal(formatParlayAmerican({ no: 0.92, yes: 0.08 }), "+1150");
+assert.equal(formatParlayAmerican({}), null);
 
 // ── our quote prefers the sent NO bid ──
 assert.equal(ourNoBid({ submitted_no_bid: 0.77, no_bid: 0.8 }), 0.77);
@@ -80,7 +94,8 @@ assert.equal(outbidDelta(null, 0.8), null);
   assert.equal(beat.cents, 3);
   assert.equal(beat.ourAmerican, 335);
   assert.equal(beat.theirAmerican, 400);
-  assert.equal(formatBeat(beat), "outbid 3¢ · we +335 they +400");
+  assert.equal(formatBeat(beat), "we +335 they +400");
+  assert.equal(formatBeatTitle(beat), "outbid 3¢");
 }
 {
   const beat = beatFromOutcome({
@@ -91,7 +106,21 @@ assert.equal(outbidDelta(null, 0.8), null);
   assert.equal(beat.known, true);
   assert.equal(beat.cents, 1);
   assert.equal(beat.theirAmerican, 1150);
-  assert.equal(formatBeat(beat), "outbid 1¢ · we +1011 they +1150");
+  assert.equal(formatBeat(beat), "we +1011 they +1150");
+  assert.equal(formatBeatTitle(beat), "outbid 1¢");
+}
+
+{
+  const beat = beatFromOutcome({
+    submitted_no_bid: 0.92,
+    tape_no_price: 0.90,
+    tape_match: "matched",
+  });
+  assert.equal(beat.ourAmerican, 1150);
+  assert.equal(beat.theirAmerican, 900);
+  assert.equal(formatBeat(beat), "we +1150 they +900");
+  assert.equal(formatParlayAmerican({ no: beat.ourNo }), "+1150");
+  assert.equal(formatParlayAmerican({ no: beat.theirNo }), "+900");
 }
 
 // ── no tape → do not invent a beat amount ──
@@ -103,6 +132,7 @@ assert.equal(outbidDelta(null, 0.8), null);
   assert.equal(formatBeat(beat), null);
 }
 assert.equal(formatBeat(null), null);
+assert.equal(formatBeatTitle(null), null);
 
 // ── kickoff cutoff: after starts_at is not live quoting ──
 assert.equal(isLiveQuotingTs("2026-08-22T22:00:00Z", "2026-08-22T23:10:00Z"), true);
@@ -221,7 +251,10 @@ assert.equal(median([1, 2, 3, 4]), 2.5);
   assert.equal(stats.avgCents, 2);
   assert.equal(stats.medCents, 2);
   assert.equal(stats.avgAmericanGap, 102);
-  assert.match(typicalBeatText(stats), /avg 2¢ \/ med 2¢/);
+  assert.equal(stats.avgOurAmerican, 673);
+  assert.equal(stats.avgTheirAmerican, 775);
+  assert.equal(typicalBeatText(stats), "we +673 they +775");
+  assert.match(typicalBeatTitle(stats), /2¢/);
 }
 assert.equal(typicalBeatText({ n: 0 }), null);
 
@@ -294,7 +327,8 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   assert.equal(tape.live.oversized, 1);
   assert.equal(tape.live.tapedOutbid, 1);
   assert.equal(tape.live.beat.avgCents, 3);
-  assert.match(tape.typicalBeat, /3¢/);
+  assert.equal(tape.typicalBeat, "we +335 they +400");
+  assert.match(tape.typicalBeatTitle, /3¢/);
   assert.equal(tape.rows.some((r) => r.rfqId === "late-1"), false);
 }
 
@@ -342,7 +376,8 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   assert.equal(all.fill.filled, 30);
   assert.equal(all.rfq.outbid, 1);
   assert.equal(all.rfq.tapedOutbid, 1);
-  assert.equal(all.typicalBeat.includes("3¢"), true);
+  assert.equal(all.typicalBeat, "we +335 they +400");
+  assert.match(all.typicalBeatTitle, /3¢/);
 }
 
 {
@@ -396,7 +431,7 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
     ceiling: 100,
   });
   assert.equal(later.skipFill, "filled");
-  assert.equal(formatSkipReason(later), "skipped, later filled");
+  assert.equal(formatSkipReason(later), "skipped, later filled +400");
   const row = buildRfqRow({
     match: { rfq_id: "s2", matched_at: "2026-08-22T21:00:00Z", contracts: 80, tape_match: "matched", tape_no_price: 0.8 },
     filled: 40,
@@ -404,7 +439,8 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   });
   assert.equal(row.skipFill, "filled");
   assert.equal(row.tapeNo, 0.8);
-  assert.equal(formatSkipReason(row), "skipped, later filled");
+  assert.equal(formatParlayAmerican({ no: row.tapeNo }), "+400");
+  assert.equal(formatSkipReason(row), "skipped, later filled +400");
 }
 {
   const fromDeclined = classifyMiss({
@@ -415,7 +451,7 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   });
   assert.equal(fromDeclined.bucket, "skipped");
   assert.equal(fromDeclined.skipFill, "filled");
-  assert.equal(formatSkipReason(fromDeclined), "skipped, later filled");
+  assert.equal(formatSkipReason(fromDeclined), "skipped, later filled +1011");
 }
 {
   const none = classifyMiss({
@@ -449,7 +485,8 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   const later = tape.rows.find((r) => r.rfqId === "filled-later");
   assert.equal(later.skipFill, "filled");
   assert.equal(later.tapeNo, 0.8);
-  assert.equal(formatSkipReason(later), "skipped, later filled");
+  assert.equal(formatParlayAmerican({ no: later.tapeNo }), "+400");
+  assert.equal(formatSkipReason(later), "skipped, later filled +400");
   const unknown = tape.rows.find((r) => r.rfqId === "unk");
   assert.equal(unknown.skipFill, "unknown");
   assert.doesNotMatch(formatSkipReason(unknown), /unfilled/);
@@ -490,6 +527,12 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   assert.match(tapeUi, /skipFillSummary/);
   assert.match(tapeUi, /skipLockLine/);
   assert.match(tapeUi, /skipped, later filled|formatSkipReason/);
+  assert.match(tapeUi, /formatParlayAmerican/);
+  assert.match(tapeUi, /formatParlayAmerican\(\{ no: r\.ourNo \}\)/);
+  assert.match(tapeUi, /formatParlayAmerican\(\{ no: r\.tapeNo, yes: r\.tapeYes \}\)/);
+  assert.match(tapeUi, /formatBeatTitle/);
+  assert.doesNotMatch(tapeUi, /r\.ourNo != null \? `NO \$\{Number\(r\.ourNo\)/);
+  assert.doesNotMatch(tapeUi, /formatCents\(r\.tapeNo\)\s*:[^?]*no tape/);
   assert.doesNotMatch(tapeUi, /unfilled/);
   assert.match(tapeUi, /if \(!poll\) return undefined/);
   assert.match(tapeUi, /reload\("tick"\)/);

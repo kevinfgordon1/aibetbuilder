@@ -11,6 +11,8 @@ import {
   buildTapeSummary,
   formatAmerican,
   formatBeat,
+  formatBeatTitle,
+  formatParlayAmerican,
   formatSkipReason,
   hasQuotingParlays,
   isSameLocalDay,
@@ -56,10 +58,10 @@ function reasonColor(row) {
   return "#9aa3b2";
 }
 
-function Tile({ k, v, sub, tone }) {
+function Tile({ k, v, sub, tone, title }) {
   const color = tone === "pos" ? "#34d399" : tone === "neg" ? "#f87171" : tone === "warn" ? "#fcd34d" : "#e8eaed";
   return (
-    <div className="tile">
+    <div className="tile" title={title}>
       <div className="k">{k}</div>
       <div className="v num" style={{ color }}>{v}</div>
       {sub ? <div className="sub">{sub}</div> : null}
@@ -114,16 +116,22 @@ function RfqList({ rows }) {
       <tbody>
         {shown.map((r) => {
           const beat = r.beat && r.beat.known ? formatBeat(r.beat) : (r.bucket === "outbid" ? "no tape" : "—");
-          const tape = r.tapeNo != null
+          const beatTitle = r.beat && r.beat.known ? formatBeatTitle(r.beat) : undefined;
+          const ourAm = formatParlayAmerican({ no: r.ourNo });
+          const tapeAm = formatParlayAmerican({ no: r.tapeNo, yes: r.tapeYes });
+          const tape = tapeAm
+            || (r.bucket === "outbid" ? "no tape" : (r.skipFill === "none" ? "no print" : "—"));
+          const ourTitle = r.ourNo != null ? `NO $${Number(r.ourNo).toFixed(2)}` : undefined;
+          const tapeTitle = r.tapeNo != null
             ? formatCents(r.tapeNo)
-            : (r.bucket === "outbid" ? "no tape" : (r.skipFill === "none" ? "no print" : "—"));
+            : (r.tapeYes != null ? formatCents(r.tapeYes) : undefined);
           return (
             <tr key={r.rfqId || `${r.at}-${r.contracts}`}>
               <td>{r.at ? new Date(r.at).toLocaleTimeString() : "—"}</td>
               <td className="num">{r.contracts != null ? r.contracts : "—"}</td>
-              <td className="num">{r.ourNo != null ? `NO $${Number(r.ourNo).toFixed(2)}` : "—"}</td>
-              <td className="num">{tape}</td>
-              <td className="num" style={{ color: r.bucket === "outbid" ? "#fca5a5" : "#8a8f98" }}>{beat}</td>
+              <td className="num" title={ourTitle}>{ourAm || "—"}</td>
+              <td className="num" title={tapeTitle}>{tape}</td>
+              <td className="num" style={{ color: r.bucket === "outbid" ? "#fca5a5" : "#8a8f98" }} title={beatTitle}>{beat}</td>
               <td style={{ color: reasonColor(r) }}>{reasonLabel(r)}</td>
             </tr>
           );
@@ -255,6 +263,7 @@ export default function ComboTape({ user }) {
   const watcher = useMemo(() => tapeWatcherState(outcomes), [outcomes]);
   const statsFor = (t) => (scope === "today" ? t.today : t.live);
   const beatFor = (t) => (scope === "today" ? t.todayBeat : t.typicalBeat);
+  const beatTitleFor = (t) => (scope === "today" ? t.todayBeatTitle : t.typicalBeatTitle);
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
 
@@ -347,6 +356,7 @@ export default function ComboTape({ user }) {
                   ? `${summary.rfq.outbid} outbid · ${summary.typicalBeat}`
                   : (summary.rfq.outbid ? `${summary.rfq.outbid} outbid · no tape` : "no taped outbids")}
                 tone={summary.rfq.tapedOutbid ? "neg" : "warn"}
+                title={summary.typicalBeatTitle || undefined}
               />
             </div>
             <div className="bar"><div className="bar-fill" style={{ width: summary.fill.pct + "%" }} /></div>
@@ -362,6 +372,7 @@ export default function ComboTape({ user }) {
           const p = t.parlay;
           const s = statsFor(t);
           const beat = beatFor(t);
+          const beatTitle = beatTitleFor(t);
           const skipLine = skipLockLine(s);
           return (
             <div className="parlay" key={p.id}>
@@ -397,7 +408,7 @@ export default function ComboTape({ user }) {
               )}
               <div style={{ fontSize: 13, marginTop: 4 }} className="num">
                 {s.tapedOutbid && beat
-                  ? <span className="chip loss">{`typical beat · ${beat}`}</span>
+                  ? <span className="chip loss" title={beatTitle || undefined}>{`typical beat · ${beat}`}</span>
                   : s.outbid
                     ? <span className="chip warn">outbid {s.outbid} · no tape</span>
                     : null}
