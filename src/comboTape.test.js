@@ -32,7 +32,11 @@ import {
   formatSkipReason,
   skipFillSummary,
   skipLockLine,
+  lockSettlement,
+  settlementTally,
+  settlementSummaryText,
 } from "./comboTape.js";
+import { settlementCopy, settlementFromStored } from "./comboSettlement.js";
 
 // ── American from YES price (combo-worker tape.test.js fixtures) ──
 assert.equal(americanFromProb(0.08), 1150);
@@ -492,6 +496,78 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   assert.match(tapeUi, /hasQuotingParlays/);
   assert.doesNotMatch(tapeUi, /setInterval\(\(\) => \{ reload\(\); \}/);
   assert.doesNotMatch(locks, /skipFill|later filled/);
+  assert.match(tapeUi, /settlementFromStored/);
+  assert.match(tapeUi, /parlay won \(we lost\)|settlement\.text/);
+  assert.match(tapeUi, /pending/);
+  assert.match(tapeUi, /settlementText/);
+  assert.doesNotMatch(tapeUi, /score|finalized from start|kickoff settled/i);
+  assert.doesNotMatch(tapeUi, /kalshi-games/);
+  assert.doesNotMatch(tapeUi, /refreshSettlements/);
+  assert.match(locks, /settlementFromStored/);
+  assert.match(locks, /parlay won \(we lost\)/);
+  assert.match(locks, /parlay lost \(we won\)/);
+}
+
+// ── official Kalshi settlement on Miss tape (same copy as Combo Locks) ──
+{
+  const yes = lockSettlement({ kalshi_result: "yes" });
+  assert.equal(yes.text, "parlay won (we lost)");
+  assert.equal(yes.weWon, false);
+  assert.deepEqual(yes, settlementCopy("yes"));
+  assert.deepEqual(yes, settlementFromStored({ kalshi_result: "yes" }));
+}
+{
+  const no = lockSettlement({ kalshi_result: "no" });
+  assert.equal(no.text, "parlay lost (we won)");
+  assert.equal(no.weWon, true);
+  assert.deepEqual(no, settlementCopy("no"));
+  assert.deepEqual(no, settlementFromStored({ kalshi_result: "no" }));
+}
+{
+  const missing = lockSettlement({ kalshi_result: null, starts_at: "2020-01-01T00:00:00Z" });
+  assert.equal(missing, null);
+  assert.equal(lockSettlement({}), null);
+  assert.equal(lockSettlement({ kalshi_result: "scalar" }), null);
+  assert.equal(settlementFromStored({ kalshi_result: null }), null);
+}
+
+{
+  const yesTape = buildLockTape({
+    parlay: { id: "won", kalshi_result: "yes", max_contracts: 10, created_at: "2026-08-22T18:00:00Z" },
+  });
+  const noTape = buildLockTape({
+    parlay: { id: "lost", kalshi_result: "NO", max_contracts: 10, created_at: "2026-08-22T18:00:00Z" },
+  });
+  const pendingTape = buildLockTape({
+    parlay: {
+      id: "open",
+      kalshi_result: null,
+      starts_at: "2020-01-01T00:00:00Z",
+      max_contracts: 10,
+      created_at: "2026-08-22T18:00:00Z",
+    },
+  });
+  assert.equal(yesTape.settlement.text, "parlay won (we lost)");
+  assert.equal(yesTape.settlement.weWon, false);
+  assert.equal(noTape.settlement.text, "parlay lost (we won)");
+  assert.equal(noTape.settlement.weWon, true);
+  assert.equal(pendingTape.settlement, null);
+  assert.notEqual(pendingTape.settlement && pendingTape.settlement.weWon, true);
+  assert.notEqual(pendingTape.settlement && pendingTape.settlement.weWon, false);
+
+  const tally = settlementTally([yesTape, noTape, pendingTape, yesTape]);
+  assert.equal(tally.weWon, 1);
+  assert.equal(tally.weLost, 2);
+  assert.equal(tally.pending, 1);
+  assert.equal(tally.settled, 3);
+  assert.equal(settlementSummaryText(tally), "we won 1 · we lost 2");
+  assert.equal(settlementSummaryText({ weWon: 0, weLost: 0, settled: 0 }), null);
+
+  const summary = buildTapeSummary([yesTape, noTape, pendingTape], { scope: "all" });
+  assert.equal(summary.settlement.weWon, 1);
+  assert.equal(summary.settlement.weLost, 1);
+  assert.equal(summary.settlement.pending, 1);
+  assert.equal(summary.settlementText, "we won 1 · we lost 1");
 }
 
 assert.equal(isQuotingParlay({ active: true, archived_at: null }), true);
