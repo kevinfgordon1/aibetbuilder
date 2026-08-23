@@ -81,13 +81,18 @@ function MissChips({ stats }) {
   return <span className="num">{bits.join(" · ")}</span>;
 }
 
+const RFQ_CAP = 60;
+
 function RfqList({ rows }) {
   const list = [...(rows || [])].sort((a, b) => {
     if (a.missed !== b.missed) return a.missed ? -1 : 1;
     return Date.parse(b.at || 0) - Date.parse(a.at || 0);
   });
   if (!list.length) return <div className="empty">No matching RFQs before kickoff.</div>;
+  const shown = list.slice(0, RFQ_CAP);
+  const extra = list.length - shown.length;
   return (
+    <>
     <table>
       <thead>
         <tr>
@@ -100,7 +105,7 @@ function RfqList({ rows }) {
         </tr>
       </thead>
       <tbody>
-        {list.map((r) => {
+        {shown.map((r) => {
           const beat = r.beat && r.beat.known ? formatBeat(r.beat) : (r.bucket === "outbid" ? "no tape" : "—");
           return (
             <tr key={r.rfqId || `${r.at}-${r.contracts}`}>
@@ -115,6 +120,8 @@ function RfqList({ rows }) {
         })}
       </tbody>
     </table>
+    {extra > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Showing {shown.length} of {list.length} (misses first). {extra} more omitted.</div>}
+    </>
   );
 }
 
