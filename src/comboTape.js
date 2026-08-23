@@ -345,6 +345,15 @@ export function buildLockTape({
   };
 }
 
+// Living + worker watching. Paused (active=false) or archived is not quoting.
+export function isQuotingParlay(row) {
+  return !!(row && row.archived_at == null && row.active !== false);
+}
+
+export function hasQuotingParlays(rows = []) {
+  return (rows || []).some(isQuotingParlay);
+}
+
 export function lockInScope(tape, scope, now = Date.now()) {
   if (!tape || !tape.parlay) return false;
   if (scope === "active") return tape.living;

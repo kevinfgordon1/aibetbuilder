@@ -10,6 +10,7 @@ import {
   buildTapeSummary,
   formatAmerican,
   formatBeat,
+  hasQuotingParlays,
   isSameLocalDay,
   lockInScope,
   sortLockTapes,
@@ -126,9 +127,20 @@ export default function ComboTape({ user }) {
   const [outcomes, setOutcomes] = useState([]);
   const [open, setOpen] = useState({});
   const [loaded, setLoaded] = useState(false);
+  const [poll, setPoll] = useState(false);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (mode = "full") => {
     if (!owner) return;
+    if (mode === "tick") {
+      const { data: peek } = await supabase
+        .from("combo_parlays")
+        .select("id,active,archived_at")
+        .is("archived_at", null);
+      if (!hasQuotingParlays(peek)) {
+        setPoll(false);
+        return;
+      }
+    }
     const [living, archived, fillRows, matchRows, outcomeRows] = await Promise.all([
       supabase.from("combo_parlays").select("*").is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
@@ -136,18 +148,21 @@ export default function ComboTape({ user }) {
       supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(MATCH_LIMIT),
       supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(OUTCOME_LIMIT),
     ]);
-    setParlays([...(living.data || []), ...(archived.data || [])]);
+    const livingRows = living.data || [];
+    setParlays([...livingRows, ...(archived.data || [])]);
     setFills(fillRows.data || []);
     setMatches(matchRows.data || []);
     setOutcomes(outcomeRows.data || []);
     setLoaded(true);
+    setPoll(hasQuotingParlays(livingRows));
   }, [owner]);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload("full"); }, [reload]);
   useEffect(() => {
-    const t = setInterval(() => { reload(); }, 20000);
+    if (!poll) return undefined;
+    const t = setInterval(() => { reload("tick"); }, 20000);
     return () => clearInterval(t);
-  }, [reload]);
+  }, [reload, poll]);
 
   const outcomeByRfq = useMemo(() => {
     const m = {};
