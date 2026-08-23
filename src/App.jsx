@@ -42,6 +42,7 @@ const ALL_BOOKS = [
   { key: "novig", label: "Novig", color: "#a855f7", bg: "rgba(168,85,247,0.15)", logo: null, exchange: true },
   { key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
   { key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
+  { key: "betopenly", label: "BetOpenly", color: "#e879f9", bg: "rgba(232,121,249,0.15)", logo: null, exchange: true },
 ];
 
 const TRUSTED_BOOK_KEYS = new Set([
