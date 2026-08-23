@@ -23,6 +23,9 @@ const SCOPE = [
   { key: "today", label: "Today" },
   { key: "all", label: "All" },
 ];
+// Same newest-first caps as ComboLocks.jsx — do not page the firehose.
+const MATCH_LIMIT = 400;
+const OUTCOME_LIMIT = 200;
 
 const fmtAm = (a) => formatAmerican(a) || "—";
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString() : "—");
@@ -44,17 +47,6 @@ function reasonColor(bucket) {
   if (bucket === "too_slow" || bucket === "oversized") return "#fcd34d";
   if (bucket === "awaiting") return "#93c5fd";
   return "#9aa3b2";
-}
-
-async function fetchPages(makeQuery, pageSize = 1000) {
-  const rows = [];
-  for (let from = 0; from < 20000; from += pageSize) {
-    const { data, error } = await makeQuery().range(from, from + pageSize - 1);
-    if (error) break;
-    rows.push(...(data || []));
-    if (!data || data.length < pageSize) break;
-  }
-  return rows;
 }
 
 function Tile({ k, v, sub, tone }) {
@@ -141,13 +133,13 @@ export default function ComboTape({ user }) {
       supabase.from("combo_parlays").select("*").is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
       supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,kalshi_created_time,recorded_at").eq("is_combo", true).eq("is_taker", false),
-      fetchPages(() => supabase.from("combo_matches").select("*").order("matched_at", { ascending: false })),
-      fetchPages(() => supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false })),
+      supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(MATCH_LIMIT),
+      supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(OUTCOME_LIMIT),
     ]);
     setParlays([...(living.data || []), ...(archived.data || [])]);
     setFills(fillRows.data || []);
-    setMatches(matchRows);
-    setOutcomes(outcomeRows);
+    setMatches(matchRows.data || []);
+    setOutcomes(outcomeRows.data || []);
     setLoaded(true);
   }, [owner]);
 
@@ -248,6 +240,11 @@ export default function ComboTape({ user }) {
       </div>
       {watcher.key === "off" && (
         <div className="note warn">Quote-watcher is parked. Outbid / skip counts still come from matches and loss_reason. Beat amounts stay blank until tape_no_price is written — we will not invent a delta.</div>
+      )}
+      {loaded && (matches.length >= MATCH_LIMIT || outcomes.length >= OUTCOME_LIMIT) && (
+        <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+          Showing last {MATCH_LIMIT} matches / {OUTCOME_LIMIT} quote outcomes (newest first). Older rows are not polled.
+        </div>
       )}
 
       <h3>Summary — {scope === "active" ? "active locks" : scope === "today" ? "today, before kickoff" : "all locks, before kickoff"}</h3>

@@ -353,6 +353,13 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /Miss tape/);
   assert.match(app, /<ComboTape /);
+  const tapeUi = fs.readFileSync(path.join(dir, "ComboTape.jsx"), "utf8");
+  assert.doesNotMatch(tapeUi, /fetchPages/);
+  assert.doesNotMatch(tapeUi, /\.range\(/);
+  assert.match(tapeUi, /limit\(MATCH_LIMIT\)/);
+  assert.match(tapeUi, /limit\(OUTCOME_LIMIT\)/);
+  assert.match(tapeUi, /const MATCH_LIMIT = 400/);
+  assert.match(tapeUi, /const OUTCOME_LIMIT = 200/);
 }
 
 console.log("comboTape.test.js ok");
