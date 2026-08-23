@@ -1,7 +1,8 @@
 // Combo miss-tape analytics — beat/delta + miss classification over the same
 // polls Combo Locks already uses (combo_parlays / combo_fills / combo_matches /
-// quote_outcomes). Declined / limitreached combo_submissions are the worker's
-// skip log. Does not invent tables or tape columns.
+// quote_outcomes). combo_submissions (quoted / filled / unfilled / declined)
+// plus combo_fills are the lock tape; quote_outcomes stay optional (watcher
+// may be parked). Does not invent tables or tape columns.
 // Lock win/loss copy is official Kalshi combo result only (kalshi_result via
 // settlementFromStored) — never inferred from kickoff, clocks, or scores.
 //
@@ -164,6 +165,69 @@ export function fillEventAt(fill) {
   return (fill && (fill.kalshi_created_time || fill.recorded_at)) || null;
 }
 
+export function fillRfqId(fill) {
+  if (!fill) return null;
+  return fill.rfq_id || (fill.raw && (fill.raw.rfq_id || (fill.raw.msg && fill.raw.msg.rfq_id))) || null;
+}
+
+export function fillRowId(fill) {
+  if (!fill) return null;
+  return fill.fill_id || fill.id || null;
+}
+
+function normStatus(status) {
+  return String(status || "").toLowerCase().replace(/[_-]/g, "");
+}
+
+// combo_submissions check constraint: shadow | filled | unfilled | declined.
+// Worker maps limitreached → declined before insert. "quoted" / "cancelled"
+// are accepted if a later constraint change lands; do not invent columns.
+export function isQuotedLostStatus(status) {
+  const s = normStatus(status);
+  return s === "unfilled" || s === "cancelled" || s === "canceled" || s === "quoted";
+}
+
+export function isFilledSubmission(submission) {
+  if (!submission) return false;
+  return !!submission.order_id;
+}
+
+// Posted, still live / unaccepted: quote_id set, no order_id, is_live or status quoted.
+export function isOpenQuote(submission) {
+  if (!submission || submission.order_id) return false;
+  const status = normStatus(submission.status);
+  if (isSkipStatus(status) || status === "shadow") return false;
+  if (status === "cancelled" || status === "canceled") return false;
+  if (submission.is_live === true) return true;
+  return status === "quoted" || status === "posted";
+}
+
+export function isQuotedLost(submission) {
+  if (!submission || isOpenQuote(submission) || isFilledSubmission(submission)) return false;
+  const status = normStatus(submission.status);
+  if (status === "shadow" || isSkipStatus(status)) return false;
+  if (isQuotedLostStatus(status)) return true;
+  return status === "filled" && !submission.order_id;
+}
+
+export function submissionRank(submission) {
+  if (isFilledSubmission(submission)) return 4;
+  if (isOpenQuote(submission)) return 3;
+  if (isQuotedLost(submission)) return 2;
+  if (submission && isSkipStatus(submission.status)) return 1;
+  return 0;
+}
+
+// Prefer a priced Kalshi fill (fractional count) over a booked order_id twin.
+export function pickFillRow(fills = []) {
+  const list = (fills || []).filter(Boolean);
+  if (!list.length) return null;
+  const priced = list.filter((f) => toNum(f.no_price) != null || toNum(f.yes_price) != null);
+  const pool = priced.length ? priced : list;
+  const real = pool.find((f) => f.fill_id && f.order_id && f.fill_id !== f.order_id);
+  return real || pool[0];
+}
+
 export function liveFilledContracts(fills = [], startsAt) {
   let n = 0;
   (fills || []).forEach((f) => {
@@ -271,11 +335,12 @@ export function settlementSummaryText(tally) {
   return `we won ${tally.weWon} · we lost ${tally.weLost}`;
 }
 
-export function classifyMiss({ match, outcome, submission, filled = 0, ceiling = 0 } = {}) {
+export function classifyMiss({ match, outcome, submission, fill, filled = 0, ceiling = 0 } = {}) {
+  if (fill || isFilledSubmission(submission)
+    || (outcome && (outcome.outcome === "executed" || outcome.outcome === "accepted" || outcome.fill_confirmed))) {
+    return { bucket: "filled", reason: "filled", missed: false };
+  }
   if (outcome) {
-    if (outcome.outcome === "executed" || outcome.outcome === "accepted" || outcome.fill_confirmed) {
-      return { bucket: "filled", reason: "filled", missed: false };
-    }
     if (outcome.outcome === "posted") {
       return { bucket: "awaiting", reason: "awaiting", missed: false };
     }
@@ -298,6 +363,16 @@ export function classifyMiss({ match, outcome, submission, filled = 0, ceiling =
     }
     return { bucket: "quoted", reason: outcome.outcome || "quoted", missed: false };
   }
+  if (isOpenQuote(submission)) {
+    return { bucket: "awaiting", reason: "open", missed: false };
+  }
+  if (isQuotedLost(submission)) {
+    const status = normStatus(submission.status);
+    if (status === "cancelled" || status === "canceled") {
+      return { bucket: "no_taker", reason: "cancelled", missed: true };
+    }
+    return { bucket: "no_taker", reason: "quoted · no take", missed: true };
+  }
   const skipRow = match || submission;
   const skip = skipLabel(skipRow, { filled, ceiling, hedgeCap: ceiling });
   const tape = skipTapeSource(match, submission);
@@ -308,20 +383,30 @@ export function classifyMiss({ match, outcome, submission, filled = 0, ceiling =
   return { bucket: "skipped", reason: "skipped", missed: true, skip, skipFill, skipTape: tape };
 }
 
-export function buildRfqRow({ match, outcome, submission, filled = 0, ceiling = 0, startsAt } = {}) {
-  const at = rfqEventAt(match, outcome) || (submission && submission.created_at) || null;
-  const cls = classifyMiss({ match, outcome, submission, filled, ceiling });
+export function buildRfqRow({ match, outcome, submission, fill, filled = 0, ceiling = 0, startsAt } = {}) {
+  const chosenFill = fill || null;
+  const at = (chosenFill && fillEventAt(chosenFill))
+    || rfqEventAt(match, outcome)
+    || (submission && submission.created_at)
+    || null;
+  const cls = classifyMiss({ match, outcome, submission, fill: chosenFill, filled, ceiling });
   const tapeRow = outcome || cls.skipTape || skipTapeSource(match, submission);
+  const fillCount = chosenFill ? toNum(chosenFill.count) : null;
+  const ourNo = ourNoBid(outcome)
+    || ourNoBid(submission)
+    || (chosenFill ? toNum(chosenFill.no_price) : null);
   return {
-    rfqId: (match && match.rfq_id) || (outcome && outcome.rfq_id) || (submission && submission.rfq_id) || null,
+    rfqId: (match && match.rfq_id) || (outcome && outcome.rfq_id) || (submission && submission.rfq_id) || fillRfqId(chosenFill) || null,
+    fillId: fillRowId(chosenFill),
     at,
     live: isLiveQuotingTs(at, startsAt),
-    contracts: toNum((match && match.contracts) ?? (submission && submission.contracts)),
-    ourNo: ourNoBid(outcome),
+    contracts: fillCount != null ? fillCount : toNum((match && match.contracts) ?? (submission && submission.contracts)),
+    ourNo,
     tapeNo: tapeNoPrice(tapeRow),
     tapeYes: tapeYesPrice(tapeRow),
     outcome,
     submission,
+    fill: chosenFill,
     ...cls,
   };
 }
@@ -459,6 +544,11 @@ export function typicalBeatTitle(stats) {
   return bits.join(" · ") || null;
 }
 
+function sameParlay(row, parlay) {
+  if (!parlay || !parlay.id) return true;
+  return !row || !row.parlay_id || row.parlay_id === parlay.id;
+}
+
 export function buildLockTape({
   parlay,
   fills = [],
@@ -478,39 +568,80 @@ export function buildLockTape({
   parlayOutcomes.forEach((o) => {
     if (o && o.rfq_id && !byRfq[o.rfq_id]) byRfq[o.rfq_id] = o;
   });
-  const bySkip = { ...submissionByRfq };
+  const bySub = {};
+  Object.entries(submissionByRfq || {}).forEach(([rfq, s]) => {
+    if (rfq && s && sameParlay(s, parlay) && normStatus(s.status) !== "shadow") bySub[rfq] = s;
+  });
   (submissions || []).forEach((s) => {
-    if (s && s.rfq_id && !bySkip[s.rfq_id]) bySkip[s.rfq_id] = s;
+    if (!s || !s.rfq_id || !sameParlay(s, parlay)) return;
+    if (normStatus(s.status) === "shadow") return;
+    if (!bySub[s.rfq_id] || submissionRank(s) > submissionRank(bySub[s.rfq_id])) bySub[s.rfq_id] = s;
+  });
+  const subByOrder = {};
+  (submissions || []).forEach((s) => {
+    if (s && s.order_id && sameParlay(s, parlay)) subByOrder[s.order_id] = s;
   });
 
-  const rows = (matches || []).map((m) => buildRfqRow({
-    match: m,
-    outcome: m && m.rfq_id ? byRfq[m.rfq_id] : null,
-    submission: m && m.rfq_id ? bySkip[m.rfq_id] : null,
-    filled: fill.filled,
-    ceiling,
-    startsAt,
-  }));
-  const used = new Set(rows.map((r) => r.rfqId).filter(Boolean));
-  for (const s of submissions || []) {
-    if (!s || !isSkipStatus(s.status)) continue;
-    if (!parlay || s.parlay_id !== parlay.id) continue;
-    if (s.rfq_id && (used.has(s.rfq_id) || byRfq[s.rfq_id])) continue;
+  const bundles = new Map();
+  const take = (key) => {
+    if (!bundles.has(key)) bundles.set(key, { match: null, outcome: null, submission: null, fills: [] });
+    return bundles.get(key);
+  };
+
+  (matches || []).forEach((m) => {
+    if (!m || !sameParlay(m, parlay)) return;
+    if (m.rfq_id) {
+      const b = take(m.rfq_id);
+      b.match = m;
+      if (byRfq[m.rfq_id]) b.outcome = byRfq[m.rfq_id];
+    }
+  });
+  Object.keys(bySub).forEach((rfq) => {
+    if (!rfq) return;
+    const b = take(rfq);
+    b.submission = bySub[rfq];
+    if (byRfq[rfq]) b.outcome = byRfq[rfq];
+  });
+  (fills || []).forEach((f) => {
+    if (!f || !sameParlay(f, parlay)) return;
+    const viaOrder = f.order_id && subByOrder[f.order_id] ? subByOrder[f.order_id].rfq_id : null;
+    const rfq = fillRfqId(f) || viaOrder || null;
+    if (rfq) {
+      take(rfq).fills.push(f);
+      if (!take(rfq).submission && viaOrder) take(rfq).submission = subByOrder[f.order_id];
+      return;
+    }
+    const id = fillRowId(f);
+    if (!id) return;
+    take("fill:" + id).fills.push(f);
+  });
+
+  const rows = [];
+  bundles.forEach((b, key) => {
+    const chosenFill = pickFillRow(b.fills);
+    const submission = b.submission || (key && bySub[key]) || null;
+    const match = b.match || (submission && {
+      rfq_id: submission.rfq_id,
+      contracts: submission.contracts,
+      matched_at: submission.created_at,
+      parlay_id: submission.parlay_id,
+    }) || (chosenFill && fillRfqId(chosenFill) && {
+      rfq_id: fillRfqId(chosenFill),
+      contracts: chosenFill.count,
+      matched_at: fillEventAt(chosenFill),
+      parlay_id: chosenFill.parlay_id,
+    }) || null;
+    if (!match && !b.outcome && !submission && !chosenFill) return;
     rows.push(buildRfqRow({
-      match: {
-        rfq_id: s.rfq_id,
-        contracts: s.contracts,
-        matched_at: s.created_at,
-        parlay_id: s.parlay_id,
-      },
-      outcome: s.rfq_id ? byRfq[s.rfq_id] : null,
-      submission: s,
+      match,
+      outcome: b.outcome || (match && match.rfq_id ? byRfq[match.rfq_id] : null),
+      submission,
+      fill: chosenFill,
       filled: fill.filled,
       ceiling,
       startsAt,
     }));
-    if (s.rfq_id) used.add(s.rfq_id);
-  }
+  });
 
   const liveRows = rows.filter((r) => r.live);
   const todayRows = liveRows.filter((r) => isSameLocalDay(r.at, now));
