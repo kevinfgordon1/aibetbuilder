@@ -409,11 +409,14 @@ assert.equal(isSkipStatus("filled"), false);
 assert.equal(isSkipStatus("unfilled"), false);
 assert.equal(isOpenQuote({ quote_id: "q1", is_live: true, status: "unfilled" }), true);
 assert.equal(isOpenQuote({ quote_id: "q1", is_live: false, status: "unfilled" }), false);
-assert.equal(isOpenQuote({ quote_id: "q1", status: "quoted" }), true);
+assert.equal(isOpenQuote({ quote_id: "q1", status: "quoted" }), false);
+assert.equal(isOpenQuote({ quote_id: "q1", status: "quoted", is_live: false }), false);
+assert.equal(isOpenQuote({ quote_id: "q1", status: "quoted", is_live: true }), true);
 assert.equal(isOpenQuote({ quote_id: "q1", is_live: true, order_id: "o1" }), false);
 assert.equal(isFilledSubmission({ status: "filled", order_id: "o1" }), true);
 assert.equal(isFilledSubmission({ status: "filled" }), false);
 assert.equal(isQuotedLost({ status: "unfilled", quote_id: "q1", is_live: false }), true);
+assert.equal(isQuotedLost({ status: "quoted", quote_id: "q1", is_live: false }), true);
 assert.equal(isQuotedLost({ status: "cancelled", quote_id: "q1" }), true);
 assert.equal(isQuotedLost({ status: "declined" }), false);
 assert.equal(skipFillState(null), "unknown");
@@ -524,7 +527,7 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   const open = classifyMiss({
     submission: {
       rfq_id: "open-1",
-      status: "unfilled",
+      status: "quoted",
       is_live: true,
       quote_id: "q-live",
       submitted_no_bid: 0.91,
@@ -548,6 +551,17 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   });
   assert.equal(cancelledStatus.reason, "cancelled");
   assert.notEqual(cancelledStatus.bucket, "skipped");
+
+  const timedOutQuoted = classifyMiss({
+    submission: { rfq_id: "c3", status: "quoted", is_live: false, quote_id: "q-timeout", contracts: 111 },
+  });
+  assert.equal(isOpenQuote({ status: "quoted", is_live: false, quote_id: "q-timeout" }), false);
+  assert.equal(timedOutQuoted.reason, "quoted · no take");
+  assert.equal(timedOutQuoted.bucket, "no_taker");
+  assert.notEqual(timedOutQuoted.bucket, "awaiting");
+  assert.notEqual(timedOutQuoted.bucket, "open");
+  assert.notEqual(timedOutQuoted.bucket, "skipped");
+  assert.notEqual(timedOutQuoted.bucket, "oversized");
 }
 
 {

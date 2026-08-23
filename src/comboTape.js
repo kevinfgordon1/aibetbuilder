@@ -192,14 +192,13 @@ export function isFilledSubmission(submission) {
   return !!submission.order_id;
 }
 
-// Posted, still live / unaccepted: quote_id set, no order_id, is_live or status quoted.
+// Posted and still live: quote_id set, no order_id, not a skip, is_live === true.
+// combo-worker POSTs status quoted with is_live true; the 20s cancel / rfq_deleted
+// path only flips is_live to false and leaves status quoted. That is not open.
 export function isOpenQuote(submission) {
-  if (!submission || submission.order_id) return false;
-  const status = normStatus(submission.status);
-  if (isSkipStatus(status) || status === "shadow") return false;
-  if (status === "cancelled" || status === "canceled") return false;
-  if (submission.is_live === true) return true;
-  return status === "quoted" || status === "posted";
+  if (!submission || submission.order_id || !submission.quote_id) return false;
+  if (isSkipStatus(submission.status)) return false;
+  return submission.is_live === true;
 }
 
 export function isQuotedLost(submission) {
