@@ -26,6 +26,12 @@ import {
   sortLockTapes,
   isQuotingParlay,
   hasQuotingParlays,
+  isSkipStatus,
+  skipTapeSource,
+  skipFillState,
+  formatSkipReason,
+  skipFillSummary,
+  skipLockLine,
 } from "./comboTape.js";
 
 // ── American from YES price (combo-worker tape.test.js fixtures) ──
@@ -121,6 +127,7 @@ assert.equal(isLiveQuotingTs(null, "2026-08-22T23:10:00Z"), true);
   assert.equal(oversized.bucket, "oversized");
   assert.equal(oversized.missed, true);
   assert.equal(oversized.reason, "oversized");
+  assert.equal(oversized.skipFill, "unknown");
 }
 {
   const skipped = classifyMiss({
@@ -130,6 +137,7 @@ assert.equal(isLiveQuotingTs(null, "2026-08-22T23:10:00Z"), true);
   });
   assert.equal(skipped.bucket, "skipped");
   assert.equal(skipped.reason, "skipped");
+  assert.equal(skipped.skipFill, "unknown");
 }
 {
   const outbid = classifyMiss({
@@ -275,6 +283,8 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   assert.equal(tape.live.filled, 1);
   assert.equal(tape.live.lost, 2);
   assert.equal(tape.live.skipped, 1);
+  assert.equal(tape.live.skippedUnknown, 1);
+  assert.equal(tape.live.skippedFilled, 0);
   assert.equal(tape.live.outbid, 1);
   assert.equal(tape.live.too_slow, 1);
   assert.equal(tape.live.oversized, 1);
@@ -335,15 +345,123 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   const s = summarizeRows([
     { bucket: "filled", missed: false },
     { bucket: "outbid", missed: true, beat: { known: false } },
-    { bucket: "oversized", missed: true },
+    { bucket: "oversized", missed: true, skipFill: "unknown" },
     { bucket: "no_taker", missed: true },
   ]);
   assert.equal(s.matched, 4);
   assert.equal(s.filled, 1);
   assert.equal(s.lost, 2);
   assert.equal(s.skipped, 1);
+  assert.equal(s.skippedUnknown, 1);
+  assert.equal(s.skippedFilled, 0);
   assert.equal(s.missed, 3);
   assert.equal(s.quoted, 3);
+}
+
+// ── skip vs skip-then-filled vs skip-unknown ──
+assert.equal(isSkipStatus("declined"), true);
+assert.equal(isSkipStatus("limitreached"), true);
+assert.equal(isSkipStatus("limit_reached"), true);
+assert.equal(isSkipStatus("filled"), false);
+assert.equal(skipFillState(null), "unknown");
+assert.equal(skipFillState({}), "unknown");
+assert.equal(skipFillState({ tape_match: "matched", tape_no_price: 0.8 }), "filled");
+assert.equal(skipFillState({ tape_match: "none" }), "none");
+assert.equal(skipFillState({ tape_match: "ambiguous" }), "unknown");
+assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
+
+{
+  const fromMatch = skipTapeSource({ tape_match: "matched", tape_no_price: 0.81 }, { status: "declined" });
+  assert.equal(tapeYesPrice({ tape_yes_price: 0.19 }), 0.19);
+  assert.equal(fromMatch.tape_match, "matched");
+  const fromSub = skipTapeSource({ contracts: 80 }, { status: "declined", tape_match: "none" });
+  assert.equal(fromSub.tape_match, "none");
+}
+
+{
+  const unknown = classifyMiss({ match: { rfq_id: "s1", contracts: 80 }, filled: 40, ceiling: 100 });
+  assert.equal(unknown.bucket, "oversized");
+  assert.equal(unknown.skipFill, "unknown");
+  assert.equal(formatSkipReason(unknown), "skipped oversized 80 (need ≤60)");
+  assert.doesNotMatch(formatSkipReason(unknown), /unfilled/);
+}
+{
+  const later = classifyMiss({
+    match: { rfq_id: "s2", contracts: 80, tape_match: "matched", tape_no_price: 0.8, tape_yes_price: 0.2 },
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(later.skipFill, "filled");
+  assert.equal(formatSkipReason(later), "skipped, later filled");
+  const row = buildRfqRow({
+    match: { rfq_id: "s2", matched_at: "2026-08-22T21:00:00Z", contracts: 80, tape_match: "matched", tape_no_price: 0.8 },
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(row.skipFill, "filled");
+  assert.equal(row.tapeNo, 0.8);
+  assert.equal(formatSkipReason(row), "skipped, later filled");
+}
+{
+  const fromDeclined = classifyMiss({
+    match: { rfq_id: "s3", contracts: 12 },
+    submission: { rfq_id: "s3", status: "declined", tape_match: "matched", tape_no_price: 0.91 },
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(fromDeclined.bucket, "skipped");
+  assert.equal(fromDeclined.skipFill, "filled");
+  assert.equal(formatSkipReason(fromDeclined), "skipped, later filled");
+}
+{
+  const none = classifyMiss({
+    match: { rfq_id: "s4", contracts: 12, tape_match: "none" },
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(none.skipFill, "none");
+  assert.match(formatSkipReason(none), /no print/);
+  assert.doesNotMatch(formatSkipReason(none), /unfilled/);
+}
+
+{
+  const tape = buildLockTape({
+    parlay: { id: "p-skip", active: true, max_contracts: 100 },
+    matches: [
+      { rfq_id: "unk", matched_at: "2026-08-22T20:00:00Z", contracts: 12 },
+      { rfq_id: "filled-later", matched_at: "2026-08-22T20:10:00Z", contracts: 80 },
+      { rfq_id: "noprint", matched_at: "2026-08-22T20:20:00Z", contracts: 9 },
+    ],
+    submissions: [
+      { rfq_id: "filled-later", parlay_id: "p-skip", status: "declined", tape_match: "matched", tape_no_price: 0.8, tape_yes_price: 0.2 },
+      { rfq_id: "noprint", parlay_id: "p-skip", status: "limitreached", tape_match: "none" },
+      { rfq_id: "orphan-skip", parlay_id: "p-skip", status: "declined", contracts: 15, created_at: "2026-08-22T20:30:00Z" },
+    ],
+  });
+  assert.equal(tape.live.skipped, 4);
+  assert.equal(tape.live.skippedFilled, 1);
+  assert.equal(tape.live.skippedNone, 1);
+  assert.equal(tape.live.skippedUnknown, 2);
+  const later = tape.rows.find((r) => r.rfqId === "filled-later");
+  assert.equal(later.skipFill, "filled");
+  assert.equal(later.tapeNo, 0.8);
+  assert.equal(formatSkipReason(later), "skipped, later filled");
+  const unknown = tape.rows.find((r) => r.rfqId === "unk");
+  assert.equal(unknown.skipFill, "unknown");
+  assert.doesNotMatch(formatSkipReason(unknown), /unfilled/);
+  assert.equal(tape.rows.some((r) => r.rfqId === "orphan-skip"), true);
+}
+
+{
+  const sum = skipFillSummary({ skipped: 3, skippedFilled: 0, skippedNone: 0, skippedUnknown: 3 });
+  assert.equal(sum.n, 3);
+  assert.match(sum.sub, /later filled unknown/);
+  assert.doesNotMatch(sum.sub, /unfilled/);
+  const known = skipFillSummary({ skipped: 4, skippedFilled: 2, skippedNone: 1, skippedUnknown: 1 });
+  assert.equal(known.sub, "of those, later filled 2 · 1 unknown · 1 no print");
+  assert.equal(skipLockLine({ skipped: 3, skippedFilled: 0, skippedNone: 0, skippedUnknown: 3 }), "3 skipped · later filled unknown");
+  assert.equal(skipLockLine({ skipped: 4, skippedFilled: 2, skippedNone: 1, skippedUnknown: 1 }), "4 skipped · later filled 2 · 1 unknown · 1 no print");
+  assert.equal(skipLockLine({ skipped: 0 }), null);
 }
 
 {
@@ -362,10 +480,18 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   assert.match(tapeUi, /limit\(OUTCOME_LIMIT\)/);
   assert.match(tapeUi, /const MATCH_LIMIT = 400/);
   assert.match(tapeUi, /const OUTCOME_LIMIT = 200/);
+  assert.match(tapeUi, /const SKIP_LIMIT = 400/);
+  assert.match(tapeUi, /limit\(SKIP_LIMIT\)/);
+  assert.match(tapeUi, /k="Skipped"/);
+  assert.match(tapeUi, /skipFillSummary/);
+  assert.match(tapeUi, /skipLockLine/);
+  assert.match(tapeUi, /skipped, later filled|formatSkipReason/);
+  assert.doesNotMatch(tapeUi, /unfilled/);
   assert.match(tapeUi, /if \(!poll\) return undefined/);
   assert.match(tapeUi, /reload\("tick"\)/);
   assert.match(tapeUi, /hasQuotingParlays/);
   assert.doesNotMatch(tapeUi, /setInterval\(\(\) => \{ reload\(\); \}/);
+  assert.doesNotMatch(locks, /skipFill|later filled/);
 }
 
 assert.equal(isQuotingParlay({ active: true, archived_at: null }), true);

@@ -10,9 +10,12 @@ import {
   buildTapeSummary,
   formatAmerican,
   formatBeat,
+  formatSkipReason,
   hasQuotingParlays,
   isSameLocalDay,
   lockInScope,
+  skipFillSummary,
+  skipLockLine,
   sortLockTapes,
   tapeWatcherState,
 } from "./comboTape";
@@ -27,6 +30,7 @@ const SCOPE = [
 // Same newest-first caps as ComboLocks.jsx — do not page the firehose.
 const MATCH_LIMIT = 400;
 const OUTCOME_LIMIT = 200;
+const SKIP_LIMIT = 400;
 
 const fmtAm = (a) => formatAmerican(a) || "—";
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString() : "—");
@@ -37,13 +41,13 @@ function reasonLabel(row) {
   if (row.bucket === "outbid") return row.tape ? "outbid" : "outbid · no tape";
   if (row.bucket === "too_slow") return "too slow";
   if (row.bucket === "no_taker") return "no taker";
-  if (row.bucket === "oversized") return (row.skip && row.skip.text) || "oversized";
-  if (row.bucket === "skipped") return (row.skip && row.skip.text) || "skipped";
+  if (row.bucket === "oversized" || row.bucket === "skipped") return formatSkipReason(row);
   return row.reason || "lost";
 }
 
-function reasonColor(bucket) {
-  if (bucket === "filled") return "#6ee7b7";
+function reasonColor(row) {
+  const bucket = row && row.bucket;
+  if (bucket === "filled" || (row && row.skipFill === "filled")) return "#6ee7b7";
   if (bucket === "outbid") return "#fca5a5";
   if (bucket === "too_slow" || bucket === "oversized") return "#fcd34d";
   if (bucket === "awaiting") return "#93c5fd";
@@ -100,14 +104,17 @@ function RfqList({ rows }) {
       <tbody>
         {shown.map((r) => {
           const beat = r.beat && r.beat.known ? formatBeat(r.beat) : (r.bucket === "outbid" ? "no tape" : "—");
+          const tape = r.tapeNo != null
+            ? formatCents(r.tapeNo)
+            : (r.bucket === "outbid" ? "no tape" : (r.skipFill === "none" ? "no print" : "—"));
           return (
             <tr key={r.rfqId || `${r.at}-${r.contracts}`}>
               <td>{r.at ? new Date(r.at).toLocaleTimeString() : "—"}</td>
               <td className="num">{r.contracts != null ? r.contracts : "—"}</td>
               <td className="num">{r.ourNo != null ? `NO $${Number(r.ourNo).toFixed(2)}` : "—"}</td>
-              <td className="num">{r.tapeNo != null ? formatCents(r.tapeNo) : (r.bucket === "outbid" ? "no tape" : "—")}</td>
+              <td className="num">{tape}</td>
               <td className="num" style={{ color: r.bucket === "outbid" ? "#fca5a5" : "#8a8f98" }}>{beat}</td>
-              <td style={{ color: reasonColor(r.bucket) }}>{reasonLabel(r)}</td>
+              <td style={{ color: reasonColor(r) }}>{reasonLabel(r)}</td>
             </tr>
           );
         })}
@@ -125,6 +132,7 @@ export default function ComboTape({ user }) {
   const [fills, setFills] = useState([]);
   const [matches, setMatches] = useState([]);
   const [outcomes, setOutcomes] = useState([]);
+  const [skips, setSkips] = useState([]);
   const [open, setOpen] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [poll, setPoll] = useState(false);
@@ -141,18 +149,20 @@ export default function ComboTape({ user }) {
         return;
       }
     }
-    const [living, archived, fillRows, matchRows, outcomeRows] = await Promise.all([
+    const [living, archived, fillRows, matchRows, outcomeRows, skipRows] = await Promise.all([
       supabase.from("combo_parlays").select("*").is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_parlays").select("*").not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
       supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,kalshi_created_time,recorded_at").eq("is_combo", true).eq("is_taker", false),
       supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(MATCH_LIMIT),
       supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(OUTCOME_LIMIT),
+      supabase.from("combo_submissions").select("*").in("status", ["declined", "limitreached"]).order("created_at", { ascending: false }).limit(SKIP_LIMIT),
     ]);
     const livingRows = living.data || [];
     setParlays([...livingRows, ...(archived.data || [])]);
     setFills(fillRows.data || []);
     setMatches(matchRows.data || []);
     setOutcomes(outcomeRows.data || []);
+    setSkips(skipRows.data || []);
     setLoaded(true);
     setPoll(hasQuotingParlays(livingRows));
   }, [owner]);
@@ -188,6 +198,21 @@ export default function ComboTape({ user }) {
     return m;
   }, [matches]);
 
+  const skipByRfq = useMemo(() => {
+    const m = {};
+    (skips || []).forEach((s) => { if (s.rfq_id && !m[s.rfq_id]) m[s.rfq_id] = s; });
+    return m;
+  }, [skips]);
+
+  const skipsByParlay = useMemo(() => {
+    const m = {};
+    (skips || []).forEach((row) => {
+      if (!row.parlay_id) return;
+      (m[row.parlay_id] = m[row.parlay_id] || []).push(row);
+    });
+    return m;
+  }, [skips]);
+
   const tapes = useMemo(() => {
     return (parlays || []).map((p) => buildLockTape({
       parlay: p,
@@ -195,8 +220,10 @@ export default function ComboTape({ user }) {
       matches: matchesByParlay[p.id] || [],
       outcomes,
       outcomeByRfq,
+      submissions: skipsByParlay[p.id] || [],
+      submissionByRfq: skipByRfq,
     }));
-  }, [parlays, fillsByParlay, matchesByParlay, outcomes, outcomeByRfq]);
+  }, [parlays, fillsByParlay, matchesByParlay, outcomes, outcomeByRfq, skipsByParlay, skipByRfq]);
 
   const visible = useMemo(
     () => sortLockTapes(tapes).filter((t) => lockInScope(t, scope)),
@@ -204,6 +231,7 @@ export default function ComboTape({ user }) {
   );
 
   const summary = useMemo(() => buildTapeSummary(tapes, { scope }), [tapes, scope]);
+  const skipSum = skipFillSummary(summary.rfq);
   const watcher = useMemo(() => tapeWatcherState(outcomes), [outcomes]);
   const statsFor = (t) => (scope === "today" ? t.today : t.live);
   const beatFor = (t) => (scope === "today" ? t.todayBeat : t.typicalBeat);
@@ -225,7 +253,7 @@ export default function ComboTape({ user }) {
         .cl .chip.loss{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
         .cl .leg .ty{font-size:10px;font-weight:700;text-transform:uppercase;color:#7ea2e0;margin-right:5px}
-        .cl .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:10px 0}
+        .cl .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0}
         .cl .tile{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px}
         .cl .tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280}
         .cl .tile .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:3px}
@@ -254,11 +282,11 @@ export default function ComboTape({ user }) {
         </div>
       </div>
       {watcher.key === "off" && (
-        <div className="note warn">Quote-watcher is parked. Outbid / skip counts still come from matches and loss_reason. Beat amounts stay blank until tape_no_price is written — we will not invent a delta.</div>
+        <div className="note warn">Quote-watcher is parked. Outbid / skip counts still come from matches and declined submissions. Later-filled on skips stays unknown until skip-tape is written. Beat amounts stay blank until tape_no_price is written — we will not invent a delta.</div>
       )}
-      {loaded && (matches.length >= MATCH_LIMIT || outcomes.length >= OUTCOME_LIMIT) && (
+      {loaded && (matches.length >= MATCH_LIMIT || outcomes.length >= OUTCOME_LIMIT || skips.length >= SKIP_LIMIT) && (
         <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
-          Showing last {MATCH_LIMIT} matches / {OUTCOME_LIMIT} quote outcomes (newest first). Older rows are not polled.
+          Showing last {MATCH_LIMIT} matches / {OUTCOME_LIMIT} quote outcomes / {SKIP_LIMIT} declined skips (newest first). Older rows are not polled.
         </div>
       )}
 
@@ -277,6 +305,12 @@ export default function ComboTape({ user }) {
                 k="Matching RFQs"
                 v={summary.rfq.matched}
                 sub={`${summary.rfq.filled} filled · ${summary.rfq.lost} quoted-and-lost · ${summary.rfq.skipped} skipped`}
+              />
+              <Tile
+                k="Skipped"
+                v={skipSum.n}
+                sub={skipSum.sub}
+                tone={summary.rfq.skippedFilled ? "pos" : (summary.rfq.skipped ? "warn" : undefined)}
               />
               <Tile
                 k="Taped outbids"
@@ -300,6 +334,7 @@ export default function ComboTape({ user }) {
           const p = t.parlay;
           const s = statsFor(t);
           const beat = beatFor(t);
+          const skipLine = skipLockLine(s);
           return (
             <div className="parlay" key={p.id}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
@@ -322,10 +357,15 @@ export default function ComboTape({ user }) {
               </div>
               <div className="bar"><div className="bar-fill" style={{ width: t.fill.pct + "%" }} /></div>
               <div style={{ fontSize: 13, color: "#c3c6cc", marginTop: 8 }} className="num">
-                {s.matched} matched · {s.quoted} quoted · {s.filled} filled · {s.missed} missed
+                {s.matched} matched · {s.quoted} quoted · {s.filled} filled · {s.skipped} skipped · {s.missed} missed
                 <span style={{ color: "#8a8f98" }}> — </span>
                 <MissChips stats={s} />
               </div>
+              {skipLine && (
+                <div style={{ fontSize: 13, marginTop: 4 }} className="num">
+                  <span className={"chip " + (s.skippedFilled ? "ok" : "warn")}>{skipLine}</span>
+                </div>
+              )}
               <div style={{ fontSize: 13, marginTop: 4 }} className="num">
                 {s.tapedOutbid && beat
                   ? <span className="chip loss">{`typical beat · ${beat}`}</span>
