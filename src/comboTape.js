@@ -8,6 +8,7 @@
 // Beat math matches combo-worker tape.js: theirNo − ourNo (positive = they paid
 // more for NO, so the requester got a cheaper YES). YES American is converted
 // from the NO price (1 − NO), never guessed when tape columns are empty.
+// Miss-tape display is that YES / parlay American (e.g. 0.90 NO → +900), not cents.
 // Miss labels reuse comboDesk skipLabel / tapeNoPrice / tapeMatch.
 //
 // Skip-then-filled is tape_match=matched on the skip row (match and/or declined
@@ -72,6 +73,17 @@ export function formatAmerican(a) {
   return a > 0 ? "+" + a : String(a);
 }
 
+// combo-worker tape.js: YES = 1 − NO, then American of the YES / parlay side.
+export function americanFromNo(noPrice) {
+  return americanFromProb(impliedYes(noPrice));
+}
+
+export function formatParlayAmerican({ no, yes } = {}) {
+  const fromNo = americanFromNo(no);
+  if (fromNo != null) return formatAmerican(fromNo);
+  return formatAmerican(americanFromProb(yes));
+}
+
 // theirNo − ourNo. Positive = they paid more for NO (we were too cheap on NO).
 export function outbidDelta(ourNo, theirNo) {
   const ours = toNum(ourNo);
@@ -120,11 +132,16 @@ export function formatBeat(beat) {
   if (!beat || !beat.known || beat.cents == null) return null;
   const we = formatAmerican(beat.ourAmerican);
   const they = formatAmerican(beat.theirAmerican);
-  const am = we && they ? ` · we ${we} they ${they}` : "";
+  if (we && they) return `we ${we} they ${they}`;
+  return we || they || null;
+}
+
+export function formatBeatTitle(beat) {
+  if (!beat || !beat.known || beat.cents == null) return null;
   const cents = `${Math.abs(beat.cents)}¢`;
-  if (beat.dollars > 0) return `outbid ${cents}${am}`;
-  if (beat.dollars < 0) return `we were longer ${cents}${am}`;
-  return `same price${am}`;
+  if (beat.dollars > 0) return `outbid ${cents}`;
+  if (beat.dollars < 0) return `we were longer ${cents}`;
+  return "same price";
 }
 
 // Live quoting stops at first-game kickoff. Unknown timestamps stay in.
@@ -189,10 +206,22 @@ export function skipFillState(source) {
   return "unknown";
 }
 
+export function skipTapeAmerican(row) {
+  const src = (row && row.skipTape) || row;
+  if (!src) return null;
+  return formatParlayAmerican({
+    no: row.tapeNo != null ? row.tapeNo : tapeNoPrice(src),
+    yes: row.tapeYes != null ? row.tapeYes : tapeYesPrice(src),
+  });
+}
+
 export function formatSkipReason(row) {
   const skipText = (row && row.skip && row.skip.text)
     || (row && row.bucket === "oversized" ? "oversized" : "skipped");
-  if (row && row.skipFill === "filled") return "skipped, later filled";
+  if (row && row.skipFill === "filled") {
+    const am = skipTapeAmerican(row);
+    return am ? `skipped, later filled ${am}` : "skipped, later filled";
+  }
   if (row && row.skipFill === "none") return `${skipText} · no print`;
   return skipText;
 }
@@ -312,18 +341,33 @@ export function median(nums) {
 export function beatStats(beats = []) {
   const known = (beats || []).filter((b) => b && b.known && b.cents != null);
   if (!known.length) {
-    return { n: 0, avgCents: null, medCents: null, avgAmericanGap: null, medAmericanGap: null };
+    return {
+      n: 0,
+      avgCents: null,
+      medCents: null,
+      avgAmericanGap: null,
+      medAmericanGap: null,
+      avgOurAmerican: null,
+      avgTheirAmerican: null,
+      medOurAmerican: null,
+      medTheirAmerican: null,
+    };
   }
   const cents = known.map((b) => b.cents);
-  const gaps = known
-    .filter((b) => b.ourAmerican != null && b.theirAmerican != null)
-    .map((b) => b.theirAmerican - b.ourAmerican);
+  const withAm = known.filter((b) => b.ourAmerican != null && b.theirAmerican != null);
+  const gaps = withAm.map((b) => b.theirAmerican - b.ourAmerican);
+  const ours = withAm.map((b) => b.ourAmerican);
+  const theirs = withAm.map((b) => b.theirAmerican);
   return {
     n: known.length,
     avgCents: Math.round(mean(cents)),
     medCents: Math.round(median(cents)),
     avgAmericanGap: gaps.length ? Math.round(mean(gaps)) : null,
     medAmericanGap: gaps.length ? Math.round(median(gaps)) : null,
+    avgOurAmerican: ours.length ? Math.round(mean(ours)) : null,
+    avgTheirAmerican: theirs.length ? Math.round(mean(theirs)) : null,
+    medOurAmerican: ours.length ? Math.round(median(ours)) : null,
+    medTheirAmerican: theirs.length ? Math.round(median(theirs)) : null,
   };
 }
 
@@ -394,12 +438,25 @@ export function tapeWatcherState(outcomes = []) {
 
 export function typicalBeatText(stats) {
   if (!stats || !stats.n) return null;
+  const we = formatAmerican(stats.avgOurAmerican);
+  const they = formatAmerican(stats.avgTheirAmerican);
+  if (we && they) return `we ${we} they ${they}`;
   const avgAm = formatAmerican(stats.avgAmericanGap);
   const medAm = formatAmerican(stats.medAmericanGap);
-  const am = avgAm != null && medAm != null
-    ? ` · American gap avg ${avgAm} / med ${medAm}`
-    : "";
-  return `avg ${stats.avgCents}¢ / med ${stats.medCents}¢${am}`;
+  if (avgAm != null && medAm != null) return `avg ${avgAm} / med ${medAm}`;
+  return null;
+}
+
+export function typicalBeatTitle(stats) {
+  if (!stats || !stats.n) return null;
+  const medWe = formatAmerican(stats.medOurAmerican);
+  const medThey = formatAmerican(stats.medTheirAmerican);
+  const bits = [];
+  if (medWe && medThey) bits.push(`med we ${medWe} they ${medThey}`);
+  if (stats.avgCents != null && stats.medCents != null) {
+    bits.push(`avg ${Math.abs(stats.avgCents)}¢ / med ${Math.abs(stats.medCents)}¢`);
+  }
+  return bits.join(" · ") || null;
 }
 
 export function buildLockTape({
@@ -472,7 +529,9 @@ export function buildLockTape({
     live,
     today,
     typicalBeat: typicalBeatText(live.beat),
+    typicalBeatTitle: typicalBeatTitle(live.beat),
     todayBeat: typicalBeatText(today.beat),
+    todayBeatTitle: typicalBeatTitle(today.beat),
   };
 }
 
@@ -534,6 +593,7 @@ export function buildTapeSummary(lockTapes = [], { scope = "active", now = Date.
     fill,
     rfq: { ...rfq, beat },
     typicalBeat: typicalBeatText(beat),
+    typicalBeatTitle: typicalBeatTitle(beat),
     settlement,
     settlementText: settlementSummaryText(settlement),
   };
