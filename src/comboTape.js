@@ -2,6 +2,8 @@
 // polls Combo Locks already uses (combo_parlays / combo_fills / combo_matches /
 // quote_outcomes). Declined / limitreached combo_submissions are the worker's
 // skip log. Does not invent tables or tape columns.
+// Lock win/loss copy is official Kalshi combo result only (kalshi_result via
+// settlementFromStored) — never inferred from kickoff, clocks, or scores.
 //
 // Beat math matches combo-worker tape.js: theirNo − ourNo (positive = they paid
 // more for NO, so the requester got a cheaper YES). YES American is converted
@@ -19,6 +21,7 @@ import {
   skipLabel,
   outcomesForParlay,
 } from "./comboDesk.js";
+import { settlementFromStored } from "./comboSettlement.js";
 
 function toNum(v) {
   if (v == null || v === "") return null;
@@ -212,6 +215,31 @@ export function skipLockLine(stats) {
   if (!s.n) return null;
   if (!s.known) return `${s.n} skipped · later filled unknown`;
   return `${s.n} skipped · ${s.sub.replace(/^of those, /, "")}`;
+}
+
+// Official Kalshi combo result only (combo_parlays.kalshi_result). Same copy as
+// Combo Locks: we sold NO, so yes = parlay won (we lost), no = parlay lost (we won).
+// Never infer from kickoff, clocks, or scores.
+export function lockSettlement(parlay) {
+  return settlementFromStored(parlay);
+}
+
+export function settlementTally(lockTapes = []) {
+  let weWon = 0;
+  let weLost = 0;
+  let pending = 0;
+  for (const t of lockTapes || []) {
+    const s = (t && t.settlement) || lockSettlement(t && t.parlay);
+    if (!s) pending++;
+    else if (s.weWon) weWon++;
+    else weLost++;
+  }
+  return { weWon, weLost, pending, settled: weWon + weLost };
+}
+
+export function settlementSummaryText(tally) {
+  if (!tally || !tally.settled) return null;
+  return `we won ${tally.weWon} · we lost ${tally.weLost}`;
 }
 
 export function classifyMiss({ match, outcome, submission, filled = 0, ceiling = 0 } = {}) {
@@ -435,6 +463,7 @@ export function buildLockTape({
   return {
     parlay,
     fill,
+    settlement: lockSettlement(parlay),
     archived: !!(parlay && parlay.archived_at),
     living: !!(parlay && !parlay.archived_at),
     startsAt,
@@ -499,11 +528,14 @@ export function buildTapeSummary(lockTapes = [], { scope = "active", now = Date.
   }
   const fill = remainingFill({ filled, ceiling });
   const beat = beatStats(beats);
+  const settlement = settlementTally(locks);
   return {
     lockCount: locks.length,
     fill,
     rfq: { ...rfq, beat },
     typicalBeat: typicalBeatText(beat),
+    settlement,
+    settlementText: settlementSummaryText(settlement),
   };
 }
 

@@ -19,6 +19,7 @@ import {
   sortLockTapes,
   tapeWatcherState,
 } from "./comboTape";
+import { settlementFromStored } from "./comboSettlement";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
@@ -63,6 +64,14 @@ function Tile({ k, v, sub, tone }) {
       {sub ? <div className="sub">{sub}</div> : null}
     </div>
   );
+}
+
+function SettlementChip({ settlement }) {
+  const title = "Official Kalshi combo-market result. We sold NO, so yes = parlay won (we lost) and no = parlay lost (we won).";
+  if (settlement) {
+    return <span className={"chip " + (settlement.weWon ? "settle-win" : "settle-lose")} title={title}>{settlement.text}</span>;
+  }
+  return <span className="chip settle-wait" title={title}>pending</span>;
 }
 
 function MissChips({ stats }) {
@@ -251,6 +260,9 @@ export default function ComboTape({ user }) {
         .cl .chip.warn{background:rgba(245,158,11,.15);color:#fcd34d}
         .cl .chip.ok{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.loss{background:rgba(248,113,113,.14);color:#fca5a5}
+        .cl .chip.settle-win{background:rgba(16,185,129,.15);color:#6ee7b7}
+        .cl .chip.settle-lose{background:rgba(248,113,113,.14);color:#fca5a5}
+        .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#93c5fd}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
         .cl .leg .ty{font-size:10px;font-weight:700;text-transform:uppercase;color:#7ea2e0;margin-right:5px}
         .cl .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0}
@@ -274,6 +286,11 @@ export default function ComboTape({ user }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>Miss tape</div>
         <span className={"chip " + (watcher.key === "on" ? "ok" : "warn")}>{watcher.label}</span>
+        {summary.settlementText && (
+          <span className="chip num" title="Official Kalshi combo results only. We sold NO, so Kalshi no = we won and Kalshi yes = we lost.">
+            {summary.settlementText}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 6 }}>
           {SCOPE.map((s) => (
@@ -342,6 +359,7 @@ export default function ComboTape({ user }) {
                   {open[p.id] ? "▾" : "▸"}
                 </button>
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
+                <SettlementChip settlement={t.settlement || settlementFromStored(p)} />
                 {t.archived && <span className="chip">archived</span>}
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
                 {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
