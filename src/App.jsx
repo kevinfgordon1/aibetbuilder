@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
+import ComboTape from "./ComboTape";
 import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 
@@ -1785,7 +1786,10 @@ export default function App() {
           logEvent(user, 'tab_switched', { tab: 'odds_board' });
         }}>Odds Board</button>
         {user?.email === OWNER_EMAIL && (
-          <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
+          <>
+            <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
+            <button style={tabStyle("missTape")} onClick={() => setActiveTab("missTape")}>Miss tape</button>
+          </>
         )}
       </div>
 
@@ -1802,6 +1806,8 @@ export default function App() {
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
 
           {activeTab === "combo" && user?.email === OWNER_EMAIL && <ComboLocks user={user} prefill={comboPrefill} />}
+
+          {activeTab === "missTape" && user?.email === OWNER_EMAIL && <ComboTape user={user} />}
 
           {activeTab === "ev" && (
             <div>
