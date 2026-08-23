@@ -1,6 +1,7 @@
 // Combo miss-tape — fill closeness + missed RFQs + taped outbid beat.
 // Same owner gate and polls as Combo Locks. Quote-watcher may be parked:
-// outbid counts still render; beat amounts only when tape columns exist.
+// open quotes and fills come from combo_submissions / combo_fills; beat
+// amounts only when tape columns exist.
 // Lock settlement copy is official kalshi_result via settlementFromStored.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
@@ -35,15 +36,20 @@ const SCOPE = [
 const MATCH_LIMIT = 400;
 const OUTCOME_LIMIT = 200;
 const SKIP_LIMIT = 400;
+const QUOTE_LIMIT = 400;
+const SUBMISSION_LIMIT = SKIP_LIMIT + QUOTE_LIMIT;
 
 const fmtAm = (a) => formatAmerican(a) || "—";
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString() : "—");
 
 function reasonLabel(row) {
   if (row.bucket === "filled") return "filled";
+  if (row.reason === "open" || row.bucket === "open") return "open";
   if (row.bucket === "awaiting") return "awaiting";
   if (row.bucket === "outbid") return row.tape ? "outbid" : "outbid · no tape";
   if (row.bucket === "too_slow") return "too slow";
+  if (row.reason === "cancelled") return "cancelled";
+  if (row.reason === "quoted · no take") return "quoted · no take";
   if (row.bucket === "no_taker") return "no taker";
   if (row.bucket === "oversized" || row.bucket === "skipped") return formatSkipReason(row);
   return row.reason || "lost";
@@ -54,7 +60,7 @@ function reasonColor(row) {
   if (bucket === "filled" || (row && row.skipFill === "filled")) return "#6ee7b7";
   if (bucket === "outbid") return "#fca5a5";
   if (bucket === "too_slow" || bucket === "oversized") return "#fcd34d";
-  if (bucket === "awaiting") return "#93c5fd";
+  if (bucket === "awaiting" || bucket === "open") return "#93c5fd";
   return "#9aa3b2";
 }
 
@@ -93,10 +99,7 @@ function MissChips({ stats }) {
 const RFQ_CAP = 60;
 
 function RfqList({ rows }) {
-  const list = [...(rows || [])].sort((a, b) => {
-    if (a.missed !== b.missed) return a.missed ? -1 : 1;
-    return Date.parse(b.at || 0) - Date.parse(a.at || 0);
-  });
+  const list = [...(rows || [])].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
   if (!list.length) return <div className="empty">No matching RFQs before kickoff.</div>;
   const shown = list.slice(0, RFQ_CAP);
   const extra = list.length - shown.length;
@@ -126,7 +129,7 @@ function RfqList({ rows }) {
             ? formatCents(r.tapeNo)
             : (r.tapeYes != null ? formatCents(r.tapeYes) : undefined);
           return (
-            <tr key={r.rfqId || `${r.at}-${r.contracts}`}>
+            <tr key={r.rfqId || r.fillId || `${r.at}-${r.contracts}`}>
               <td>{r.at ? new Date(r.at).toLocaleTimeString() : "—"}</td>
               <td className="num">{r.contracts != null ? r.contracts : "—"}</td>
               <td className="num" title={ourTitle}>{ourAm || "—"}</td>
@@ -138,7 +141,7 @@ function RfqList({ rows }) {
         })}
       </tbody>
     </table>
-    {extra > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Showing {shown.length} of {list.length} (misses first). {extra} more omitted.</div>}
+    {extra > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Showing {shown.length} of {list.length} (newest first). {extra} more omitted.</div>}
     </>
   );
 }
@@ -150,7 +153,7 @@ export default function ComboTape({ user }) {
   const [fills, setFills] = useState([]);
   const [matches, setMatches] = useState([]);
   const [outcomes, setOutcomes] = useState([]);
-  const [skips, setSkips] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [open, setOpen] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [poll, setPoll] = useState(false);
@@ -170,10 +173,12 @@ export default function ComboTape({ user }) {
     }
     // combo_parlays + combo_submissions have user_id; fills/matches/outcomes
     // do not — scope those to his parlay ids after the owner-filtered load.
-    const [living, archived, skipRows] = await Promise.all([
+    // One submissions query: quoted + declined + filled (unfilled is how
+    // combo-worker stores posted-and-lost / live quotes).
+    const [living, archived, submissionRows] = await Promise.all([
       supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
-      supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["declined", "limitreached"]).order("created_at", { ascending: false }).limit(SKIP_LIMIT),
+      supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["quoted", "declined", "limitreached", "filled", "unfilled"]).order("created_at", { ascending: false }).limit(SUBMISSION_LIMIT),
     ]);
     const livingRows = living.data || [];
     const archivedRows = archived.data || [];
@@ -181,7 +186,7 @@ export default function ComboTape({ user }) {
     const none = { data: [] };
     const [fillRows, matchRows, outcomeRows] = ids.length
       ? await Promise.all([
-        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,kalshi_created_time,recorded_at").eq("is_combo", true).eq("is_taker", false).in("parlay_id", ids),
+        supabase.from("combo_fills").select("id,fill_id,order_id,parlay_id,count,is_combo,is_taker,ticker,raw,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false).in("parlay_id", ids),
         supabase.from("combo_matches").select("*").in("parlay_id", ids).order("matched_at", { ascending: false }).limit(MATCH_LIMIT),
         supabase.from("quote_outcomes").select("*").in("parlay_id", ids).order("updated_at", { ascending: false }).limit(OUTCOME_LIMIT),
       ])
@@ -190,7 +195,7 @@ export default function ComboTape({ user }) {
     setFills(fillRows.data || []);
     setMatches(matchRows.data || []);
     setOutcomes(outcomeRows.data || []);
-    setSkips(skipRows.data || []);
+    setSubmissions(submissionRows.data || []);
     setLoaded(true);
     setPoll(hasQuotingParlays(livingRows));
   }, [owner, user]);
@@ -226,20 +231,20 @@ export default function ComboTape({ user }) {
     return m;
   }, [matches]);
 
-  const skipByRfq = useMemo(() => {
+  const submissionByRfq = useMemo(() => {
     const m = {};
-    (skips || []).forEach((s) => { if (s.rfq_id && !m[s.rfq_id]) m[s.rfq_id] = s; });
+    (submissions || []).forEach((s) => { if (s.rfq_id && !m[s.rfq_id]) m[s.rfq_id] = s; });
     return m;
-  }, [skips]);
+  }, [submissions]);
 
-  const skipsByParlay = useMemo(() => {
+  const submissionsByParlay = useMemo(() => {
     const m = {};
-    (skips || []).forEach((row) => {
+    (submissions || []).forEach((row) => {
       if (!row.parlay_id) return;
       (m[row.parlay_id] = m[row.parlay_id] || []).push(row);
     });
     return m;
-  }, [skips]);
+  }, [submissions]);
 
   const tapes = useMemo(() => {
     return (parlays || []).map((p) => buildLockTape({
@@ -248,10 +253,10 @@ export default function ComboTape({ user }) {
       matches: matchesByParlay[p.id] || [],
       outcomes,
       outcomeByRfq,
-      submissions: skipsByParlay[p.id] || [],
-      submissionByRfq: skipByRfq,
+      submissions: submissionsByParlay[p.id] || [],
+      submissionByRfq,
     }));
-  }, [parlays, fillsByParlay, matchesByParlay, outcomes, outcomeByRfq, skipsByParlay, skipByRfq]);
+  }, [parlays, fillsByParlay, matchesByParlay, outcomes, outcomeByRfq, submissionsByParlay, submissionByRfq]);
 
   const visible = useMemo(
     () => sortLockTapes(tapes).filter((t) => lockInScope(t, scope)),
@@ -319,11 +324,11 @@ export default function ComboTape({ user }) {
         </div>
       </div>
       {watcher.key === "off" && (
-        <div className="note warn">Quote-watcher is parked. Outbid / skip counts still come from matches and declined submissions. Later-filled on skips stays unknown until skip-tape is written. Beat amounts stay blank until tape_no_price is written — we will not invent a delta.</div>
+        <div className="note warn">Quote-watcher is parked. Open quotes, fills, and skips come from combo_submissions and combo_fills. Later-filled on skips stays unknown until skip-tape is written. Beat amounts stay blank until tape_no_price is written — we will not invent a delta.</div>
       )}
-      {loaded && (matches.length >= MATCH_LIMIT || outcomes.length >= OUTCOME_LIMIT || skips.length >= SKIP_LIMIT) && (
+      {loaded && (matches.length >= MATCH_LIMIT || outcomes.length >= OUTCOME_LIMIT || submissions.length >= SUBMISSION_LIMIT) && (
         <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
-          Showing last {MATCH_LIMIT} matches / {OUTCOME_LIMIT} quote outcomes / {SKIP_LIMIT} declined skips (newest first). Older rows are not polled.
+          Showing last {MATCH_LIMIT} matches / {OUTCOME_LIMIT} quote outcomes / {SUBMISSION_LIMIT} submissions ({SKIP_LIMIT} skips + {QUOTE_LIMIT} quoted, newest first). Older rows are not polled.
         </div>
       )}
 
