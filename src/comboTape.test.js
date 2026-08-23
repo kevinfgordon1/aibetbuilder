@@ -24,6 +24,8 @@ import {
   buildLockTape,
   buildTapeSummary,
   sortLockTapes,
+  isQuotingParlay,
+  hasQuotingParlays,
 } from "./comboTape.js";
 
 // ── American from YES price (combo-worker tape.test.js fixtures) ──
@@ -360,6 +362,18 @@ assert.equal(tapeWatcherState([{ tape_no_price: 0.8, tape_match: "matched" }]).k
   assert.match(tapeUi, /limit\(OUTCOME_LIMIT\)/);
   assert.match(tapeUi, /const MATCH_LIMIT = 400/);
   assert.match(tapeUi, /const OUTCOME_LIMIT = 200/);
+  assert.match(tapeUi, /if \(!poll\) return undefined/);
+  assert.match(tapeUi, /reload\("tick"\)/);
+  assert.match(tapeUi, /hasQuotingParlays/);
+  assert.doesNotMatch(tapeUi, /setInterval\(\(\) => \{ reload\(\); \}/);
 }
+
+assert.equal(isQuotingParlay({ active: true, archived_at: null }), true);
+assert.equal(isQuotingParlay({ active: false, archived_at: null }), false);
+assert.equal(isQuotingParlay({ active: true, archived_at: "2026-08-22T00:00:00Z" }), false);
+assert.equal(isQuotingParlay({ archived_at: null }), true);
+assert.equal(hasQuotingParlays([]), false);
+assert.equal(hasQuotingParlays([{ active: false, archived_at: null }, { active: true, archived_at: "2026-08-21T00:00:00Z" }]), false);
+assert.equal(hasQuotingParlays([{ active: true, archived_at: null }]), true);
 
 console.log("comboTape.test.js ok");
