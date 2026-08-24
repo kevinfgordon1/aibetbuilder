@@ -66,7 +66,23 @@ function mostCommon(values) {
   return best;
 }
 
-function rfqsAndQuotes({ parlay, fills = [], matches = [] } = {}) {
+function sameParlay(row, parlay) {
+  if (!parlay || !parlay.id) return true;
+  return !row || !row.parlay_id || row.parlay_id === parlay.id;
+}
+
+function tickersForParlay(rows, parlay) {
+  return (rows || [])
+    .filter((row) => row && sameParlay(row, parlay))
+    .map(tickerFromRecord)
+    .filter(Boolean);
+}
+
+function isShadowSubmission(row) {
+  return String(row && row.status != null ? row.status : "").trim().toLowerCase() === "shadow";
+}
+
+function rfqsAndQuotes({ parlay, fills = [], matches = [], submissions = [] } = {}) {
   const rfqs = new Set();
   const quotes = new Set();
   (matches || []).forEach((m) => {
@@ -80,10 +96,15 @@ function rfqsAndQuotes({ parlay, fills = [], matches = [] } = {}) {
     const qid = f.quote_id || (f.raw && (f.raw.quote_id || (f.raw.msg && f.raw.msg.quote_id)));
     if (qid) quotes.add(qid);
   });
+  (submissions || []).forEach((s) => {
+    if (!s || !sameParlay(s, parlay) || isShadowSubmission(s)) return;
+    if (s.rfq_id) rfqs.add(s.rfq_id);
+    if (s.quote_id) quotes.add(s.quote_id);
+  });
   return { rfqs, quotes };
 }
 
-export function resolveComboTicker({ parlay, fills = [], outcomes = [], matches = [] } = {}) {
+export function resolveComboTicker({ parlay, fills = [], outcomes = [], matches = [], submissions = [] } = {}) {
   if (!parlay) return null;
   if (parlay.combo_ticker) return String(parlay.combo_ticker);
   const fromFills = (fills || [])
@@ -91,7 +112,13 @@ export function resolveComboTicker({ parlay, fills = [], outcomes = [], matches 
     .map(tickerFromRecord)
     .filter(Boolean);
   if (fromFills.length) return mostCommon(fromFills);
-  const { rfqs, quotes } = rfqsAndQuotes({ parlay, fills, matches });
+  // combo_matches may carry ticker / market_ticker; quote-watcher upserts did not.
+  const fromMatches = tickersForParlay(matches, parlay);
+  if (fromMatches.length) return mostCommon(fromMatches);
+  // skip-tape writes market_ticker on quoted / skipped / unfilled combo_submissions.
+  const fromSubs = tickersForParlay((submissions || []).filter((s) => s && !isShadowSubmission(s)), parlay);
+  if (fromSubs.length) return mostCommon(fromSubs);
+  const { rfqs, quotes } = rfqsAndQuotes({ parlay, fills, matches, submissions });
   const linked = (outcomes || []).filter((o) => o && (
     o.parlay_id === parlay.id
     || (o.rfq_id && rfqs.has(o.rfq_id))
@@ -101,4 +128,13 @@ export function resolveComboTicker({ parlay, fills = [], outcomes = [], matches 
   if (fromOutcomes.length) return mostCommon(fromOutcomes);
   // Do not reconstruct from individual parlay legs — those are single-game markets.
   return null;
+}
+
+// History Outcome: official stored result, else awaiting once a combo ticker exists, else dash.
+export function historyOutcome({ parlay, liveResult, fills = [], outcomes = [], matches = [], submissions = [] } = {}) {
+  const stored = settlementFromStored(parlay) || settlementCopy(liveResult);
+  if (stored) return { kind: "result", settlement: stored };
+  const ticker = resolveComboTicker({ parlay, fills, outcomes, matches, submissions });
+  if (ticker) return { kind: "awaiting", ticker };
+  return { kind: "none" };
 }

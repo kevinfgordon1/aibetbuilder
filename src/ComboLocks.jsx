@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue } from "./comboPrefill";
 import { buildParlayDesk, formatLoss, skipLabel, formatCents, tapeNoPrice } from "./comboDesk";
-import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement } from "./comboSettlement";
+import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const OWNER_EMAIL = "kev120909@gmail.com";
@@ -78,12 +78,12 @@ function QuoteChip({ quote }) {
   const s = QUOTE_CHIP[quote.key] || QUOTE_CHIP.watching;
   return <span className="chip" style={{ background: s.bg, color: s.color }} title={s.title}>{s.mark}{quote.label}</span>;
 }
-function SettlementChip({ settlement, filled }) {
+function SettlementChip({ settlement, filled, awaiting }) {
   const title = "Official Kalshi combo-market result. We sold NO, so yes = parlay won (we lost) and no = parlay lost (we won).";
   if (settlement) {
     return <span className={"chip " + (settlement.weWon ? "settle-win" : "settle-lose")} title={title}>{settlement.text}</span>;
   }
-  if (!filled) return null;
+  if (!filled && !awaiting) return null;
   return <span className="chip settle-wait" title="Waiting for Kalshi to determine this combo market.">awaiting settlement</span>;
 }
 function FillProgress({ desk, thin }) {
@@ -208,6 +208,8 @@ export default function ComboLocks({ user, prefill = null }) {
   const [realUnattr, setRealUnattr] = useState(0);// real combo fills we couldn't tie to a specific parlay
   const [matchCounts, setMatchCounts] = useState({}); // parlay_id -> { n, locks_n, dollar_n, last_match }
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
+  const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
+  const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
   const [matchesByParlay, setMatchesByParlay] = useState({}); // parlay_id -> [combo_matches rows]
   const [openParlays, setOpenParlays] = useState({});         // parlay_id -> expanded (drilldown open)?
   const [legRows, setLegRows] = useState(() => emptyLegRows(prefill?.legs?.length));
@@ -233,50 +235,73 @@ export default function ComboLocks({ user, prefill = null }) {
   const cardSettlement = useCallback((p) => {
     return settlementFromStored(p) || settlementCopy(liveSettlement[p && p.id] && liveSettlement[p.id].result);
   }, [liveSettlement]);
-  const refreshSettlements = useCallback(async ({ living, archived, fills, outcomes, matchesByParlay, filledById }) => {
+  const refreshSettlements = useCallback(async ({ living, archived, fills, outcomes, matchesByParlay, submissions, filledById }) => {
     if (settleInflight.current) return;
+    const tickerOf = (row) => resolveComboTicker({
+      parlay: row,
+      fills,
+      outcomes,
+      matches: (matchesByParlay && matchesByParlay[row.id]) || [],
+      submissions,
+    });
     const candidates = [];
+    const foundTickers = [];
     (living || []).forEach((row) => {
-      if (!row || row.kalshi_result === "yes" || row.kalshi_result === "no") return;
+      if (!row) return;
+      const ticker = tickerOf(row);
+      if (ticker && !row.combo_ticker) foundTickers.push({ row, ticker });
+      if (row.kalshi_result === "yes" || row.kalshi_result === "no") return;
       if (!((filledById && filledById[row.id]) > 0)) return;
-      const ticker = resolveComboTicker({ parlay: row, fills, outcomes, matches: (matchesByParlay && matchesByParlay[row.id]) || [] });
       if (ticker) candidates.push({ row, ticker });
     });
     (archived || []).forEach((row) => {
-      if (!row || row.kalshi_result === "yes" || row.kalshi_result === "no") return;
-      const ticker = resolveComboTicker({ parlay: row, fills, outcomes, matches: (matchesByParlay && matchesByParlay[row.id]) || [] });
+      if (!row) return;
+      const ticker = tickerOf(row);
+      if (ticker && !row.combo_ticker) foundTickers.push({ row, ticker });
+      if (row.kalshi_result === "yes" || row.kalshi_result === "no") return;
       if (ticker) candidates.push({ row, ticker });
     });
-    if (!candidates.length) return;
+    if (!candidates.length && !foundTickers.length) return;
     const tickers = [...new Set(candidates.map((c) => c.ticker))];
     settleInflight.current = true;
     try {
-      const r = await fetch("/api/kalshi-games?tickers=" + encodeURIComponent(tickers.join(",")), { headers: { accept: "application/json" } });
-      if (!r.ok) return;
-      const d = await r.json();
-      const markets = (d && d.markets) || {};
       const livePatch = {};
       const rowPatch = {};
-      for (const { row, ticker } of candidates) {
-        const m = markets[ticker];
-        if (!m) continue;
-        const official = marketSettlement(m);
-        const next = {};
-        if (!row.combo_ticker) next.combo_ticker = ticker;
-        if (official) {
-          next.kalshi_result = official.result;
-          next.kalshi_status = m.status || null;
-          next.settled_at = new Date().toISOString();
-          livePatch[row.id] = { result: official.result, status: m.status, ticker };
+      const stampTicker = ({ row, ticker }) => {
+        if (!ticker || row.combo_ticker || (rowPatch[row.id] && rowPatch[row.id].combo_ticker)) return;
+        rowPatch[row.id] = { ...(rowPatch[row.id] || {}), combo_ticker: ticker };
+      };
+      foundTickers.forEach(stampTicker);
+      candidates.forEach(stampTicker);
+      if (tickers.length) {
+        const r = await fetch("/api/kalshi-games?tickers=" + encodeURIComponent(tickers.join(",")), { headers: { accept: "application/json" } });
+        if (r.ok) {
+          const d = await r.json();
+          const markets = (d && d.markets) || {};
+          for (const { row, ticker } of candidates) {
+            const m = markets[ticker];
+            if (!m) continue;
+            const official = marketSettlement(m);
+            if (!official) continue;
+            const next = rowPatch[row.id] || {};
+            next.kalshi_result = official.result;
+            next.kalshi_status = m.status || null;
+            next.settled_at = new Date().toISOString();
+            rowPatch[row.id] = next;
+            livePatch[row.id] = { result: official.result, status: m.status, ticker };
+          }
         }
-        if (!Object.keys(next).length) continue;
-        rowPatch[row.id] = next;
-        await supabase.from("combo_parlays").update(next).eq("id", row.id);
+      }
+      for (const [id, next] of Object.entries(rowPatch)) {
+        if (!next || !Object.keys(next).length) continue;
+        await supabase.from("combo_parlays").update(next).eq("id", id);
       }
       if (Object.keys(livePatch).length) setLiveSettlement((prev) => ({ ...prev, ...livePatch }));
-      const apply = (list) => (list || []).map((p) => (rowPatch[p.id] ? { ...p, ...rowPatch[p.id] } : p));
-      setParlays((prev) => apply(prev));
-      setArchived((prev) => apply(prev));
+      if (Object.keys(rowPatch).length) {
+        const apply = (list) => (list || []).map((p) => (rowPatch[p.id] ? { ...p, ...rowPatch[p.id] } : p));
+        setParlays((prev) => apply(prev));
+        setArchived((prev) => apply(prev));
+      }
     } catch (_) {
       // Keep awaiting settlement; next 20s poll retries.
     } finally {
@@ -285,7 +310,7 @@ export default function ComboLocks({ user, prefill = null }) {
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
-    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }, { data: mrows }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }, { data: mrows }, { data: subs }] = await Promise.all([
       // All LIVING parlays (not yet archived), whether the worker is actively watching them
       // (active=true) or paused after recording a quote (active=false). Loading both means a
       // parlay can never fall through the gap between the Active and History lists again.
@@ -303,17 +328,22 @@ export default function ComboLocks({ user, prefill = null }) {
       supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(200),
       // Every RFQ that matched a parlay — for the per-lock drilldown.
       supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(400),
+      // Combo ticker on quoted / skipped / unfilled submissions (skip-tape market_ticker).
+      supabase.from("combo_submissions").select("parlay_id,status,ticker,market_ticker,raw").eq("user_id", user.id).order("created_at", { ascending: false }).limit(400),
     ]);
     setParlays(p || []); if (s) setKill(!!s.kill_switch); setHistory(h || []); setArchived(ar || []);
     const mcMap = {}; (mc || []).forEach((r) => { mcMap[r.parlay_id] = r; }); setMatchCounts(mcMap);
     setOutcomes(oc || []);
+    const subRows = subs || [];
+    setSubmissions(subRows);
     const mbp = {}; (mrows || []).forEach((m) => { (mbp[m.parlay_id] = mbp[m.parlay_id] || []).push(m); }); setMatchesByParlay(mbp);
     const rf = {}; let un = 0;
     (fills || []).forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
+    setComboFills(fills || []);
     setRealFills(rf); setRealUnattr(un);
     const q = {}; (booked || []).forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
     setQuoted(q);
-    refreshSettlements({ living: p || [], archived: ar || [], fills: fills || [], outcomes: oc || [], matchesByParlay: mbp, filledById: rf });
+    refreshSettlements({ living: p || [], archived: ar || [], fills: fills || [], outcomes: oc || [], matchesByParlay: mbp, submissions: subRows, filledById: rf });
   }, [owner, user, refreshSettlements]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
@@ -689,10 +719,17 @@ export default function ComboLocks({ user, prefill = null }) {
         {archived.length === 0 ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : (
           <table><thead><tr><th>Archived</th><th>Parlay</th><th>Have</th><th>Fill</th><th>Mode</th><th>Cap</th><th>Outcome</th><th>Game start</th></tr></thead>
             <tbody>{archived.map((a) => {
-              const s = cardSettlement(a);
+              const out = historyOutcome({
+                parlay: a,
+                liveResult: liveSettlement[a.id] && liveSettlement[a.id].result,
+                fills: comboFills,
+                outcomes,
+                matches: matchesByParlay[a.id] || [],
+                submissions,
+              });
               return (
               <tr key={a.id}><td>{a.archived_at ? new Date(a.archived_at).toLocaleString() : "—"}</td><td>{a.label}</td><td>{fmtAm(a.parlay_american)} · ${a.parlay_stake}</td><td>{fmtAm(a.fill_american)}</td><td>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</td><td>{a.max_contracts}</td>
-                <td>{s ? <SettlementChip settlement={s} /> : "—"}</td>
+                <td>{out.kind === "result" ? <SettlementChip settlement={out.settlement} /> : out.kind === "awaiting" ? <SettlementChip awaiting /> : "—"}</td>
                 <td>{a.starts_at ? new Date(a.starts_at).toLocaleString() : "—"}</td></tr>
             ); })}</tbody></table>
         )}
