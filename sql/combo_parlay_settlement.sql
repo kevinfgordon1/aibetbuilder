@@ -16,7 +16,7 @@ ALTER TABLE public.combo_parlays
   CHECK (kalshi_result IS NULL OR kalshi_result IN ('yes', 'no'));
 
 COMMENT ON COLUMN public.combo_parlays.combo_ticker IS
-  'Kalshi combo/MVE market ticker from the fill; used to poll official settlement.';
+  'Kalshi combo/MVE market ticker from a fill, match, or submission; used to poll official settlement.';
 COMMENT ON COLUMN public.combo_parlays.kalshi_result IS
   'Official Kalshi combo result once determined: yes or no.';
 COMMENT ON COLUMN public.combo_parlays.kalshi_status IS
