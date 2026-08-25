@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
 import ComboTape from "./ComboTape";
@@ -11,6 +11,16 @@ import {
   saveExcludedMatchingBooks,
   toggleMatchingBookKey,
 } from "./promoMatchingBooks.js";
+import {
+  loadModeForTab,
+  buildOddsQueryPlan,
+  queryOddsCaches,
+  shouldFetchFullBoard,
+  shouldFetchPromoOdds,
+  shouldRunEvScan,
+  promoNeedsReload,
+  evHeaderValues,
+} from "./oddsLoad.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1175,12 +1185,20 @@ export default function App() {
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [dataLoading, setDataLoading] = useState(true);
+  const [promoLoading, setPromoLoading] = useState(true);
+  const [promoLoaded, setPromoLoaded] = useState(false);
+  const [promoLoadedSports, setPromoLoadedSports] = useState(null);
+  const [promoBoardData, setPromoBoardData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
+  const [fullBoardLoading, setFullBoardLoading] = useState(false);
+  const [fullBoardLoaded, setFullBoardLoaded] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
+  const [evScan, setEvScan] = useState(null);
+  const promoFetchGen = useRef(0);
+  const fullFetchGen = useRef(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1205,28 +1223,82 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchOdds = async () => {
-    setExcludedPromoLegs(new Set());
-    setDataLoading(true);
-    const [featuredRes, eventRes, futuresRes] = await Promise.all([
-      supabase.from("odds_cache").select("*").in("sport", SPORT_KEYS),
-      supabase.from("event_odds_cache").select("*").in("sport", SPORT_KEYS),
-      supabase.from("odds_cache").select("*").in("sport", FUTURES_KEYS),
-    ]);
-    const featuredRows = featuredRes.data;
-    if (featuredRes.error || !featuredRows) { setDataLoading(false); return; }
+  const applyTransformed = (featuredRows, eventRows) => {
     const featured = featuredRows.map(row => transformOddsData(row.data, row.sport));
-    const eventRows = eventRes.data || [];
     const eventTransformed = eventRows.map(row => transformEventOddsData(row.data, row.sport));
+    return mergeOddsData([...featured, ...eventTransformed]);
+  };
+
+  const loadPromoBoard = async () => {
+    const gen = ++promoFetchGen.current;
+    setExcludedPromoLegs(new Set());
+    setPromoLoading(true);
+    const plan = buildOddsQueryPlan({
+      mode: "promo",
+      promoSports,
+      featuredSportKeys: SPORT_KEYS,
+      futuresKeys: FUTURES_KEYS,
+    });
+    const { featured, events } = await queryOddsCaches(supabase, plan);
+    if (gen !== promoFetchGen.current) return;
+    const featuredRows = featured.data;
+    if (featured.error || !featuredRows) { setPromoLoading(false); return; }
+    const eventRows = events.data || [];
     setOddsSource({ featured: featuredRows, events: eventRows });
-    setAllOddsData(mergeOddsData([...featured, ...eventTransformed]));
-    setFuturesData((futuresRes.data || []).map(row => transformFuturesData(row.data, row.sport)));
+    setPromoBoardData(applyTransformed(featuredRows, eventRows));
+    setPromoLoadedSports(new Set(plan.featuredSports));
     setFetchedAt(featuredRows[0]?.fetched_at);
-    setDataLoading(false);
+    setPromoLoaded(true);
+    setPromoLoading(false);
     window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
   };
 
-  useEffect(() => { fetchOdds(); }, []);
+  const loadFullBoard = async () => {
+    const gen = ++fullFetchGen.current;
+    setFullBoardLoading(true);
+    const plan = buildOddsQueryPlan({
+      mode: "full",
+      featuredSportKeys: SPORT_KEYS,
+      futuresKeys: FUTURES_KEYS,
+    });
+    const { featured, events, futures } = await queryOddsCaches(supabase, plan);
+    if (gen !== fullFetchGen.current) return;
+    const featuredRows = featured.data;
+    if (featured.error || !featuredRows) { setFullBoardLoading(false); return; }
+    const eventRows = events.data || [];
+    setAllOddsData(applyTransformed(featuredRows, eventRows));
+    setFuturesData((futures.data || []).map(row => transformFuturesData(row.data, row.sport)));
+    setFetchedAt(featuredRows[0]?.fetched_at);
+    setFullBoardLoaded(true);
+    setFullBoardLoading(false);
+    window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
+  };
+
+  const fetchOdds = async ({ forceRefresh = true } = {}) => {
+    const tab = activeTab;
+    if (shouldFetchFullBoard({ tab, fullBoardLoaded, forceRefresh })) {
+      await loadFullBoard();
+      return;
+    }
+    if (shouldFetchPromoOdds({ tab, forceRefresh, promoLoaded })) {
+      await loadPromoBoard();
+    }
+  };
+
+  useEffect(() => { fetchOdds({ forceRefresh: false }); }, []);
+
+  useEffect(() => {
+    if (shouldFetchFullBoard({ tab: activeTab, fullBoardLoaded, forceRefresh: false })) {
+      loadFullBoard();
+    }
+  }, [activeTab, fullBoardLoaded]);
+
+  useEffect(() => {
+    if (!promoLoaded) return;
+    if (promoNeedsReload(promoSports, promoLoadedSports)) {
+      loadPromoBoard();
+    }
+  }, [promoSports]);
 
   useEffect(() => {
     setPromoPage(5);
@@ -1247,20 +1319,44 @@ export default function App() {
   };
 
   const promoOddsData = useMemo(() => {
-    if (matchingSetIsFull(matchingBookKeys, TRUSTED_BOOK_KEYS)) return allOddsData;
+    if (matchingSetIsFull(matchingBookKeys, TRUSTED_BOOK_KEYS)) return promoBoardData;
     const { featured, events } = oddsSource;
     return mergeOddsData([
       ...featured.map(row => transformOddsData(row.data, row.sport, matchingBookKeys)),
       ...events.map(row => transformEventOddsData(row.data, row.sport, matchingBookKeys)),
     ]);
-  }, [allOddsData, oddsSource, matchingBookKeys]);
+  }, [promoBoardData, oddsSource, matchingBookKeys]);
 
-  const allEvLegs = buildAllLegsAllBooks(allOddsData, null, evDateRange);
-  const evBets = allEvLegs.map(l => {
-    const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
-    return { ...l, prob, ev, profit };
-  }).sort((a, b) => b.ev - a.ev);
-  const positiveEV = evBets.filter(b => b.ev > 0);
+  const liveEvScan = useMemo(() => {
+    if (!fullBoardLoaded) return null;
+    if (!shouldRunEvScan(loadModeForTab(activeTab))) return null;
+    const allEvLegs = buildAllLegsAllBooks(allOddsData, null, evDateRange);
+    const evBets = allEvLegs.map(l => {
+      const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
+      return { ...l, prob, ev, profit };
+    }).sort((a, b) => b.ev - a.ev);
+    const positiveEV = evBets.filter(b => b.ev > 0);
+    return { allEvLegs, evBets, positiveEV };
+  }, [fullBoardLoaded, allOddsData, evDateRange, activeTab]);
+
+  useEffect(() => {
+    if (liveEvScan) setEvScan(liveEvScan);
+  }, [liveEvScan]);
+
+  const evScanView = liveEvScan || evScan;
+  const allEvLegs = evScanView?.allEvLegs ?? [];
+  const evBets = evScanView?.evBets ?? [];
+  const positiveEV = evScanView?.positiveEV ?? [];
+  const refreshBusy = activeTab === "ev" || activeTab === "odds"
+    ? fullBoardLoading
+    : activeTab === "promo" ? promoLoading : false;
+  const showFullPageSpinner =
+    ((activeTab === "ev" || activeTab === "odds") && fullBoardLoading) ||
+    (activeTab === "promo" && promoLoading && !promoLoaded);
+  const evHeader = evHeaderValues({
+    evScan: evScanView,
+    showLoading: fullBoardLoading && (activeTab === "ev" || activeTab === "odds"),
+  });
 
   // +EV Bets tab — single-book filter
   const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
@@ -1409,15 +1505,15 @@ export default function App() {
                 Updated {new Date(fetchedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET
               </div>
               <button
-                onClick={() => { fetchOdds(); logEvent(user, 'odds_refreshed', { trigger: 'manual' }); }}
-                disabled={dataLoading}
+                onClick={() => { fetchOdds({ forceRefresh: true }); logEvent(user, 'odds_refreshed', { trigger: 'manual' }); }}
+                disabled={refreshBusy}
                 title="Refresh odds data"
-                style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: dataLoading ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: dataLoading ? 0.6 : 1, transition: "all 0.2s" }}
-                onMouseEnter={e => { if (!dataLoading) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
-                onMouseLeave={e => { if (!dataLoading) e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
+                style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: refreshBusy ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: refreshBusy ? 0.6 : 1, transition: "all 0.2s" }}
+                onMouseEnter={e => { if (!refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
+                onMouseLeave={e => { if (!refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
               >
-                <span style={{ display: "inline-block", animation: dataLoading ? "spin 1s linear infinite" : "none" }}>↻</span>
-                {dataLoading ? "Refreshing" : "Refresh"}
+                <span style={{ display: "inline-block", animation: refreshBusy ? "spin 1s linear infinite" : "none" }}>↻</span>
+                {refreshBusy ? "Refreshing" : "Refresh"}
               </button>
             </div>
           )}
@@ -1433,9 +1529,9 @@ export default function App() {
       </div>
 
       <div style={{ padding: "24px 32px 0", display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <StatCard label="Total Bets Analyzed" value={dataLoading ? "..." : allEvLegs.length} sub="all sports & books" />
-        <StatCard label="+EV Bets Found" value={dataLoading ? "..." : positiveEV.length} color="#10b981" />
-        <StatCard label="Best Single EV" value={dataLoading ? "..." : evBets[0] ? `+$${evBets[0].ev.toFixed(2)}` : "--"} color="#3b82f6" sub={evBets[0] ? evBets[0].name : ""} />
+        <StatCard label="Total Bets Analyzed" value={evHeader.total} sub="all sports & books" />
+        <StatCard label="+EV Bets Found" value={evHeader.plusEv} color="#10b981" />
+        <StatCard label="Best Single EV" value={evHeader.bestValue} color="#3b82f6" sub={evHeader.bestSub} />
       </div>
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
@@ -1462,14 +1558,14 @@ export default function App() {
         )}
       </div>
 
-      {dataLoading && (
+      {showFullPageSpinner && (
         <div style={{ padding: "60px 32px", textAlign: "center", color: "#4b5563" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⏳</div>
           <div style={{ fontSize: 14 }}>Loading live odds...</div>
         </div>
       )}
 
-      {!dataLoading && (
+      {!showFullPageSpinner && (
         <div style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
