@@ -4,6 +4,13 @@ import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
+import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
+import {
+  loadMatchingBookKeys,
+  matchingSetIsFull,
+  saveExcludedMatchingBooks,
+  toggleMatchingBookKey,
+} from "./promoMatchingBooks.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -243,371 +250,12 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel }) {
   );
 }
 
-function transformOddsData(gamesArray, sportKey) {
-  const moneylines = [];
-  const spreads = [];
-  const totals = [];
-  const now = new Date();
-
-  gamesArray.forEach(game => {
-    if (new Date(game.commence_time) <= now) return;
-    const away = game.away_team;
-    const home = game.home_team;
-    const bookmakers = game.bookmakers || [];
-    const commence_time = game.commence_time;
-
-    const getOdds = (bookKey, marketKey, teamName, prop = "price") => {
-      const book = bookmakers.find(b => b.key === bookKey);
-      if (!book) return null;
-      const market = book.markets.find(m => m.key === marketKey);
-      if (!market) return null;
-      const outcome = market.outcomes.find(o => o.name === teamName);
-      return outcome ? outcome[prop] : null;
-    };
-
-    const getBestOdds = (marketKey, teamName) => {
-      let best = null, bestBook = null;
-      bookmakers.forEach(book => {
-        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
-        const market = book.markets.find(m => m.key === marketKey);
-        if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === teamName);
-        if (!outcome) return;
-        const val = outcome.price;
-        if (val === null || val === undefined) return;
-        if (best === null || val > best) { best = val; bestBook = book.key; }
-      });
-      return { best, bestBook };
-    };
-
-    const getBestSpreadOddsAtLine = (teamName, targetPoint) => {
-      let best = null, bestBook = null;
-      bookmakers.forEach(book => {
-        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
-        const market = book.markets.find(m => m.key === "spreads");
-        if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === teamName && o.point === targetPoint);
-        if (!outcome) return;
-        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; }
-      });
-      return { best, bestBook };
-    };
-
-    const countSpreadLinesAtPoint = (teamName, targetPoint) => {
-      let count = 0;
-      bookmakers.forEach(book => {
-        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
-        const market = book.markets.find(m => m.key === "spreads");
-        if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === teamName && o.point === targetPoint);
-        if (outcome) count++;
-      });
-      return count;
-    };
-
-    const getBestTotalOddsAtLine = (side, targetPoint) => {
-      let best = null, bestBook = null;
-      bookmakers.forEach(book => {
-        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
-        const market = book.markets.find(m => m.key === "totals");
-        if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === side && o.point === targetPoint);
-        if (!outcome) return;
-        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; }
-      });
-      return { best, bestBook };
-    };
-
-    const countTotalLinesAtPoint = (side, targetPoint) => {
-      let count = 0;
-      bookmakers.forEach(book => {
-        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
-        const market = book.markets.find(m => m.key === "totals");
-        if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === side && o.point === targetPoint);
-        if (outcome) count++;
-      });
-      return count;
-    };
-
-    const countMLLines = (teamName) => {
-      let count = 0;
-      bookmakers.forEach(book => {
-        if (!TRUSTED_BOOK_KEYS.has(book.key)) return;
-        const market = book.markets.find(m => m.key === "h2h");
-        if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === teamName);
-        if (outcome) count++;
-      });
-      return count;
-    };
-
-    const bookOdds = {};
-    ALL_BOOKS.forEach(b => {
-      bookOdds[b.key] = {
-        ml_away: getOdds(b.key, "h2h", away),
-        ml_home: getOdds(b.key, "h2h", home),
-        spr_away: getOdds(b.key, "spreads", away),
-        spr_away_line: getOdds(b.key, "spreads", away, "point"),
-        spr_home: getOdds(b.key, "spreads", home),
-        spr_home_line: getOdds(b.key, "spreads", home, "point"),
-        tot_line: getOdds(b.key, "totals", "Over", "point"),
-        tot_over: getOdds(b.key, "totals", "Over"),
-        tot_under: getOdds(b.key, "totals", "Under"),
-      };
-    });
-
-    const bestAwayML = getBestOdds("h2h", away);
-    const bestHomeML = getBestOdds("h2h", home);
-    const best_away = bestAwayML.best;
-    const best_home = bestHomeML.best;
-
-    const isThreeWay = bookmakers.some(b => {
-      const m = (b.markets || []).find(mk => mk.key === "h2h");
-      return m && m.outcomes.some(o => o.name === "Draw");
-    });
-
-    moneylines.push({
-      away, home, commence_time, bookOdds, sport: sportKey,
-      best_away, best_home,
-      is_three_way: isThreeWay,
-      best_away_book: bestAwayML.bestBook,
-      best_home_book: bestHomeML.bestBook,
-      ml_opp_count_away: countMLLines(home),
-      ml_opp_count_home: countMLLines(away),
-    });
-
-    ALL_BOOKS.forEach(b => {
-      const bookData = bookmakers.find(bm => bm.key === b.key);
-      if (!bookData) return;
-      const sprMarket = bookData.markets.find(m => m.key === "spreads");
-      if (!sprMarket) return;
-      const awayOutcome = sprMarket.outcomes.find(o => o.name === away);
-      const homeOutcome = sprMarket.outcomes.find(o => o.name === home);
-      if (!awayOutcome || !homeOutcome) return;
-      const awayPoint = awayOutcome.point;
-      const homePoint = homeOutcome.point;
-      const fmtPoint = (p) => p > 0 ? `+${p}` : `${p}`;
-
-      const oppAwayLookup = getBestSpreadOddsAtLine(home, -awayPoint);
-      let bestOppForAway = oppAwayLookup.best;
-      let bestOppForAwayBook = oppAwayLookup.bestBook;
-      const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
-      if (bestOppForAway === null) { bestOppForAway = homeOutcome.price; bestOppForAwayBook = b.key; }
-
-      const oppHomeLookup = getBestSpreadOddsAtLine(away, -homePoint);
-      let bestOppForHome = oppHomeLookup.best;
-      let bestOppForHomeBook = oppHomeLookup.bestBook;
-      const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
-      if (bestOppForHome === null) { bestOppForHome = awayOutcome.price; bestOppForHomeBook = b.key; }
-
-      spreads.push({
-        away, home, commence_time, bookOdds, sport: sportKey,
-        best_away, best_home, book: b.key,
-        away_odds: awayOutcome.price, home_odds: homeOutcome.price,
-        away_line: fmtPoint(awayPoint), home_line: fmtPoint(homePoint),
-        away_point: awayPoint, home_point: homePoint,
-        bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
-        bestOpp_away_book: bestOppForAwayBook, bestOpp_home_book: bestOppForHomeBook,
-        bestOppCount_away: oppCountForAway || 1,
-        bestOppName_away: `${home} ${fmtPoint(-awayPoint)}`,
-        bestOppCount_home: oppCountForHome || 1,
-        bestOppName_home: `${away} ${fmtPoint(-homePoint)}`,
-      });
-    });
-
-    ALL_BOOKS.forEach(b => {
-      const bookData = bookmakers.find(bm => bm.key === b.key);
-      if (!bookData) return;
-      const totMarket = bookData.markets.find(m => m.key === "totals");
-      if (!totMarket) return;
-      const overOutcome = totMarket.outcomes.find(o => o.name === "Over");
-      const underOutcome = totMarket.outcomes.find(o => o.name === "Under");
-      if (!overOutcome || !underOutcome) return;
-      const line = overOutcome.point;
-
-      const oppOverLookup = getBestTotalOddsAtLine("Under", line);
-      let bestOppForOver = oppOverLookup.best;
-      let bestOppForOverBook = oppOverLookup.bestBook;
-      const oppCountForOver = countTotalLinesAtPoint("Under", line);
-      if (bestOppForOver === null) { bestOppForOver = underOutcome.price; bestOppForOverBook = b.key; }
-
-      const oppUnderLookup = getBestTotalOddsAtLine("Over", line);
-      let bestOppForUnder = oppUnderLookup.best;
-      let bestOppForUnderBook = oppUnderLookup.bestBook;
-      const oppCountForUnder = countTotalLinesAtPoint("Over", line);
-      if (bestOppForUnder === null) { bestOppForUnder = overOutcome.price; bestOppForUnderBook = b.key; }
-
-      totals.push({
-        away, home, commence_time, bookOdds, sport: sportKey,
-        best_away, best_home, book: b.key,
-        line, over_odds: overOutcome.price, under_odds: underOutcome.price,
-        bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
-        bestOpp_over_book: bestOppForOverBook, bestOpp_under_book: bestOppForUnderBook,
-        bestOppCount_over: oppCountForOver || 1,
-        bestOppName_over: `${away}/${home} u${line}`,
-        bestOppCount_under: oppCountForUnder || 1,
-        bestOppName_under: `${away}/${home} o${line}`,
-        match: true,
-      });
-    });
-  });
-
-  return { moneylines, run_lines: spreads, totals, team_totals: [] };
+function transformOddsData(gamesArray, sportKey, trustedBookKeys = TRUSTED_BOOK_KEYS) {
+  return transformOddsDataForBooks(gamesArray, sportKey, trustedBookKeys, ALL_BOOKS);
 }
 
-function transformEventOddsData(game, sportKey) {
-  const run_lines = [];
-  const totals = [];
-  const team_totals = [];
-  const empty = { moneylines: [], run_lines, totals, team_totals };
-  if (!game || !game.bookmakers) return empty;
-  if (new Date(game.commence_time) <= new Date()) return empty;
-
-  const away = game.away_team;
-  const home = game.home_team;
-  const commence_time = game.commence_time;
-  const bookmakers = game.bookmakers;
-  const isHalf = (p) => p != null && Math.abs(p % 1) === 0.5;
-  const fmtPoint = (p) => (p > 0 ? `+${p}` : `${p}`);
-
-  const bestSpreadAt = (teamName, point) => {
-    let best = null, bestBook = null, count = 0;
-    bookmakers.forEach(b => {
-      if (!TRUSTED_BOOK_KEYS.has(b.key)) return;
-      const m = (b.markets || []).find(mk => mk.key === "alternate_spreads");
-      if (!m) return;
-      const o = m.outcomes.find(x => x.name === teamName && x.point === point);
-      if (!o || o.price == null) return;
-      count++;
-      if (best === null || o.price > best) { best = o.price; bestBook = b.key; }
-    });
-    return { best, bestBook, count };
-  };
-
-  const bestTotalAt = (side, point) => {
-    let best = null, bestBook = null, count = 0;
-    bookmakers.forEach(b => {
-      if (!TRUSTED_BOOK_KEYS.has(b.key)) return;
-      const m = (b.markets || []).find(mk => mk.key === "alternate_totals");
-      if (!m) return;
-      const o = m.outcomes.find(x => x.name === side && x.point === point);
-      if (!o || o.price == null) return;
-      count++;
-      if (best === null || o.price > best) { best = o.price; bestBook = b.key; }
-    });
-    return { best, bestBook, count };
-  };
-
-  const bestTeamTotalAt = (team, side, point) => {
-    let best = null, bestBook = null, count = 0;
-    bookmakers.forEach(b => {
-      if (!TRUSTED_BOOK_KEYS.has(b.key)) return;
-      (b.markets || []).forEach(m => {
-        if (m.key !== "team_totals" && m.key !== "alternate_team_totals") return;
-        const o = m.outcomes.find(x => x.name === side && x.description === team && x.point === point);
-        if (!o || o.price == null) return;
-        count++;
-        if (best === null || o.price > best) { best = o.price; bestBook = b.key; }
-      });
-    });
-    return { best, bestBook, count };
-  };
-
-  ALL_BOOKS.forEach(b => {
-    const bm = bookmakers.find(x => x.key === b.key);
-    if (!bm) return;
-    const markets = bm.markets || [];
-
-    const sprM = markets.find(m => m.key === "alternate_spreads");
-    if (sprM) {
-      const awayPts = new Map();
-      const homePts = new Map();
-      sprM.outcomes.forEach(o => {
-        if (!isHalf(o.point) || o.price == null) return;
-        if (o.name === away) awayPts.set(o.point, o.price);
-        else if (o.name === home) homePts.set(o.point, o.price);
-      });
-      awayPts.forEach((awayOdds, P) => {
-        const homeOdds = homePts.get(-P);
-        if (homeOdds == null) return;
-        const oppA = bestSpreadAt(home, -P);
-        const oppH = bestSpreadAt(away, P);
-        run_lines.push({
-          away, home, commence_time, sport: sportKey, book: b.key, is_alt: true,
-          away_odds: awayOdds, home_odds: homeOdds,
-          away_line: fmtPoint(P), home_line: fmtPoint(-P),
-          away_point: P, home_point: -P,
-          bestOpp_away: oppA.best != null ? oppA.best : homeOdds,
-          bestOpp_away_book: oppA.best != null ? oppA.bestBook : b.key,
-          bestOpp_home: oppH.best != null ? oppH.best : awayOdds,
-          bestOpp_home_book: oppH.best != null ? oppH.bestBook : b.key,
-          bestOppCount_away: oppA.count || 1, bestOppName_away: `${home} ${fmtPoint(-P)}`,
-          bestOppCount_home: oppH.count || 1, bestOppName_home: `${away} ${fmtPoint(P)}`,
-        });
-      });
-    }
-
-    const totM = markets.find(m => m.key === "alternate_totals");
-    if (totM) {
-      const byLine = new Map();
-      totM.outcomes.forEach(o => {
-        if (!isHalf(o.point) || o.price == null) return;
-        const cur = byLine.get(o.point) || { line: o.point, over: null, under: null };
-        if (o.name === "Over") cur.over = o.price;
-        else if (o.name === "Under") cur.under = o.price;
-        byLine.set(o.point, cur);
-      });
-      byLine.forEach(({ line, over, under }) => {
-        if (over == null || under == null) return;
-        const oppO = bestTotalAt("Under", line);
-        const oppU = bestTotalAt("Over", line);
-        totals.push({
-          away, home, commence_time, sport: sportKey, book: b.key, is_alt: true,
-          line, over_odds: over, under_odds: under,
-          bestOpp_over: oppO.best != null ? oppO.best : under,
-          bestOpp_over_book: oppO.best != null ? oppO.bestBook : b.key,
-          bestOpp_under: oppU.best != null ? oppU.best : over,
-          bestOpp_under_book: oppU.best != null ? oppU.bestBook : b.key,
-          bestOppCount_over: oppO.count || 1, bestOppName_over: `${away}/${home} u${line}`,
-          bestOppCount_under: oppU.count || 1, bestOppName_under: `${away}/${home} o${line}`,
-          match: true,
-        });
-      });
-    }
-
-    const ttMarkets = markets.filter(m => m.key === "team_totals" || m.key === "alternate_team_totals");
-    if (ttMarkets.length) {
-      const byTeamLine = new Map();
-      ttMarkets.forEach(m => {
-        m.outcomes.forEach(o => {
-          if (!isHalf(o.point) || o.price == null || !o.description) return;
-          const key = `${o.description}|${o.point}`;
-          const cur = byTeamLine.get(key) || { team: o.description, line: o.point, over: null, under: null };
-          if (o.name === "Over") cur.over = o.price;
-          else if (o.name === "Under") cur.under = o.price;
-          byTeamLine.set(key, cur);
-        });
-      });
-      byTeamLine.forEach(({ team, line, over, under }) => {
-        if (over == null || under == null) return;
-        const oppO = bestTeamTotalAt(team, "Under", line);
-        const oppU = bestTeamTotalAt(team, "Over", line);
-        team_totals.push({
-          away, home, commence_time, sport: sportKey, book: b.key, team, line, is_alt: true,
-          over_odds: over, under_odds: under,
-          bestOpp_over: oppO.best != null ? oppO.best : under,
-          bestOpp_over_book: oppO.best != null ? oppO.bestBook : b.key,
-          bestOpp_under: oppU.best != null ? oppU.best : over,
-          bestOpp_under_book: oppU.best != null ? oppU.bestBook : b.key,
-          bestOppCount_over: oppO.count || 1, bestOppName_over: `${team} u${line}`,
-          bestOppCount_under: oppU.count || 1, bestOppName_under: `${team} o${line}`,
-        });
-      });
-    }
-  });
-
-  return { moneylines: [], run_lines, totals, team_totals };
+function transformEventOddsData(game, sportKey, trustedBookKeys = TRUSTED_BOOK_KEYS) {
+  return transformEventOddsDataForBooks(game, sportKey, trustedBookKeys, ALL_BOOKS);
 }
 
 function mergeOddsData(allData) {
@@ -1531,6 +1179,8 @@ export default function App() {
   const [fetchedAt, setFetchedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
+  const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
+  const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1568,6 +1218,7 @@ export default function App() {
     const featured = featuredRows.map(row => transformOddsData(row.data, row.sport));
     const eventRows = eventRes.data || [];
     const eventTransformed = eventRows.map(row => transformEventOddsData(row.data, row.sport));
+    setOddsSource({ featured: featuredRows, events: eventRows });
     setAllOddsData(mergeOddsData([...featured, ...eventTransformed]));
     setFuturesData((futuresRes.data || []).map(row => transformFuturesData(row.data, row.sport)));
     setFetchedAt(featuredRows[0]?.fetched_at);
@@ -1581,7 +1232,7 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-  }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, numLegs, minFinalOdds, minLegOdds, marketScope, excludedPromoLegs]);
+  }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, numLegs, minFinalOdds, minLegOdds, marketScope, excludedPromoLegs, matchingBookKeys]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1594,6 +1245,15 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null);
   };
+
+  const promoOddsData = useMemo(() => {
+    if (matchingSetIsFull(matchingBookKeys, TRUSTED_BOOK_KEYS)) return allOddsData;
+    const { featured, events } = oddsSource;
+    return mergeOddsData([
+      ...featured.map(row => transformOddsData(row.data, row.sport, matchingBookKeys)),
+      ...events.map(row => transformEventOddsData(row.data, row.sport, matchingBookKeys)),
+    ]);
+  }, [allOddsData, oddsSource, matchingBookKeys]);
 
   const allEvLegs = buildAllLegsAllBooks(allOddsData, null, evDateRange);
   const evBets = allEvLegs.map(l => {
@@ -1609,7 +1269,7 @@ export default function App() {
 
   const promoSportFilter = promoSports.size === SPORTS.length ? null : [...promoSports];
   const parsedMinLeg = (promoType === "boost" && minLegOdds !== "") ? Number(minLegOdds) : null;
-  const promoLegsAll = buildAllLegsForBook(allOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
+  const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
   const promoLegsScoped = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
     : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
     : promoLegsAll;
@@ -1687,6 +1347,15 @@ export default function App() {
     });
   };
 
+  const toggleMatchingBook = (bookKey) => {
+    setMatchingBookKeys(prev => {
+      const next = toggleMatchingBookKey(prev, bookKey, TRUSTED_BOOK_KEYS);
+      if (next === prev) return prev;
+      saveExcludedMatchingBooks(next, TRUSTED_BOOK_KEYS);
+      return next;
+    });
+  };
+
   const tabStyle = (tab) => ({
     padding: "10px 20px", cursor: "pointer", fontSize: 14, fontWeight: 600,
     color: activeTab === tab ? "#f0f0f0" : "#6b7280",
@@ -1696,7 +1365,7 @@ export default function App() {
   });
 
   const controlBox = (children) => (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       {children}
     </div>
   );
@@ -2066,6 +1735,14 @@ export default function App() {
                         {MARKET_SCOPES.map(opt => (
                           <button key={opt.val} onClick={() => setMarketScope(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: marketScope === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: marketScope === opt.val ? "#3b82f6" : "#6b7280" }}>
                             {opt.label}
+                          </button>
+                        ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Matching books</label>
+                        {ALL_BOOKS.filter(b => TRUSTED_BOOK_KEYS.has(b.key)).map(b => (
+                          <button key={b.key} onClick={() => toggleMatchingBook(b.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: matchingBookKeys.has(b.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: matchingBookKeys.has(b.key) ? "#3b82f6" : "#6b7280" }}>
+                            {b.label}
                           </button>
                         ))}
                       </>)}
