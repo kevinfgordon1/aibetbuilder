@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "ev-alerts": "node worker/ev-parlay-alerts.js",
-    "test": "node src/comboPrefill.test.js && node src/comboDesk.test.js && node src/comboTape.test.js && node src/comboSettlement.test.js && node src/promoLegExclude.test.js && node src/promoMatchingBooks.test.js && node src/oddsLoad.test.js && node lib/promo-ev.test.js && node lib/ev-parlay-alert.test.js && node lib/ev-parlay-scan-flow.test.js && node lib/ev-parlay-scan-job.test.js && node worker/ev-parlay-alerts.test.js"
+    "test": "node src/comboPrefill.test.js && node src/comboDesk.test.js && node src/comboTape.test.js && node src/comboSettlement.test.js && node src/promoLegExclude.test.js && node src/promoMatchingBooks.test.js && node src/promoNoSweat.test.js && node src/oddsLoad.test.js && node lib/promo-ev.test.js && node lib/ev-parlay-alert.test.js && node lib/ev-parlay-scan-flow.test.js && node lib/ev-parlay-scan-job.test.js && node worker/ev-parlay-alerts.test.js"
   },
   "dependencies": {
     "react": "^18.2.0",
