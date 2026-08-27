@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calcNoSweatEV, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
+import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 
 // $100 stake, +100 (D=2), p=0.5, 100% refund, 70% conversion
 // EV = 0.5×100 + 0.5×(−100+70) = 50 − 15 = +35
@@ -52,5 +52,19 @@ const parlay = calcNoSweatEV({
 assert.equal(parlay.winProfit, 300);
 assert.equal(parlay.loseNet, -30);
 assert.equal(parlay.ev, 52.5);
+
+// 1-leg lock: $100 no-sweat at +100 (D=2), hedge +100 (d_h=2), V=$70
+// H = (100 + 100 − 70) / 2 = 65; lock = 100 − 65 = 35
+// Lose path: −100 + 70 credit + 65 = +35
+const lock = calcNoSweatLock({
+  winProfit: 100,
+  stake: 100,
+  creditValue: 70,
+  hedgeDecimal: 2,
+});
+assert.equal(lock.hedgeStake, 65);
+assert.equal(lock.lockedProfit, 35);
+assert.equal(lock.valid, true);
+assert.equal(-100 + 70 + lock.hedgeStake * (lock.d_h - 1), 35);
 
 console.log("promoNoSweat.test.js: all passed");

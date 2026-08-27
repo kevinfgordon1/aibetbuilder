@@ -29,3 +29,24 @@ export function calcNoSweatEV({
   const ev = winProb * winProfit + (1 - winProb) * loseNet;
   return { ev, winProfit, loseNet, refund, creditValue };
 }
+
+// 1-leg only. Equalize both sides after valuing a loss refund as credit cash V.
+// H = (winProfit + S − V) / d_h
+// Locked cash = winProfit − H  (= −S + V + H×(d_h − 1))
+export function calcNoSweatLock({
+  winProfit,
+  stake,
+  creditValue,
+  hedgeDecimal,
+} = {}) {
+  const profit = Number(winProfit);
+  const S = Number(stake);
+  const V = Number(creditValue);
+  const d_h = Number(hedgeDecimal);
+  if (!isFinite(d_h) || d_h <= 1 || !isFinite(profit) || !isFinite(S) || !isFinite(V)) {
+    return { valid: false, hedgeStake: 0, lockedProfit: 0, d_h: 0 };
+  }
+  const hedgeStake = (profit + S - V) / d_h;
+  const lockedProfit = profit - hedgeStake;
+  return { valid: lockedProfit > 0 && hedgeStake > 0, hedgeStake, lockedProfit, d_h };
+}
