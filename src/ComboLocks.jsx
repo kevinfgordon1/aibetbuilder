@@ -10,34 +10,19 @@ import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue } from "./comboPrefill";
 import { buildParlayDesk, formatLoss, skipLabel, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
+import { fillView } from "./comboFill";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const OWNER_EMAIL = "kev120909@gmail.com";
 
-/* ── engine (mirrors worker engine.js exactly) ── */
-// The fill odds you enter are the odds you SELL at AFTER your maker fee — already baked in.
-// The lock math uses them directly (no separate fee term). Fees below only recover the nominal
-// exchange price and the taker's matched odds (they pay a 7% taker fee, 4× your 1.75% maker fee).
-const KFEE = 0.0175;
-const TAKER_FEE = 0.07;
+/* ── engine (mirrors worker engine.js; fill-odds fee curve lives in comboFill.js) ── */
+// The fill odds you enter are the odds you SELL at AFTER combo maker fees — already baked in.
+// The lock math uses them directly (no separate fee term). comboFill recovers the nominal
+// exchange price and the taker's matched odds (they pay a 7% taker fee, 2× your 3.5% combo maker fee).
 const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
-const americanFromProb = (p) => (!(p > 0 && p < 1) ? null : p < 0.5 ? Math.round((100 * (1 - p)) / p) : -Math.round((100 * p) / (1 - p)));
 const r2 = (x) => Math.round(x * 100) / 100;
-// Floor to cents so we never quote a no_bid worse than the fill target (user buys NO).
-const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
-function nominalProbFromEff(sEff) {
-  const b = 1 - KFEE; // solve KFEE*sNom^2 + (1-KFEE)*sNom - sEff = 0
-  return (-b + Math.sqrt(b * b + 4 * KFEE * sEff)) / (2 * KFEE);
-}
-// Your fill is net of your maker fee. effTaker = the odds the taker is matched at (nominal + their fee).
-function fillView(fillAfterFeeAmerican) {
-  const sEff = impliedProb(fillAfterFeeAmerican);
-  const sNom = nominalProbFromEff(sEff);
-  const takerProb = sNom + TAKER_FEE * sNom * (1 - sNom);
-  return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: floor2(1 - sNom).toFixed(2) };
-}
-// Auto contracts cap for a hedge mode. Fill odds already include your maker fee, so no fee term.
+// Auto contracts cap for a hedge mode. Fill odds already include your combo maker fee, so no fee term.
 function hedgeCap({ stake, boostAmerican, fillAmerican, mode = "1x" }) {
   if (!(stake > 0) || !boostAmerican || !fillAmerican) return 0;
   const winReturn = stake * aToDec(boostAmerican);
@@ -57,7 +42,7 @@ function decideAtFill({ parlayStake, parlayAmerican, fillAmerican, fairAmerican 
   const cap = hedgeCap({ stake: parlayStake, boostAmerican: parlayAmerican, fillAmerican, mode: hedgeMode });
   const N = Math.min(rfqContracts, cap); // partial fill up to the cap — bigger RFQs fill to the cap
   if (!(N > 0)) return { ok: false, reason: "zero_cap", cap };
-  const s = impliedProb(fillAmerican); // already net of your maker fee
+  const s = impliedProb(fillAmerican); // already net of combo maker fee
   const hit = bookHit + N * s - N, miss = bookMiss + N * s, worst = Math.min(hit, miss);
   const v = fillView(fillAmerican);
   return { ok: true, locks: worst >= 0, hit: r2(hit), miss: r2(miss), worst: r2(worst),
@@ -628,8 +613,8 @@ export default function ComboLocks({ user, prefill = null }) {
             <div className="row c3" style={{ marginTop: 14 }}>
               <div><label>Stake ($) — your bet</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
               <div><label>Boosted odds — you have</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
-              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Fill odds — you sell at (after maker fees)
-                {+form.fill ? <span className="info" tabIndex={0} data-tip={`The taker is matched at ${fmtAm(fillView(+form.fill).effTaker)} — worse than your ${fmtAm(+form.fill)}, because their taker fee (7%) is 4× your maker fee. That's what a taker actually gets.`}>i</span> : null}
+              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Fill odds — you sell at (after combo maker fees)
+                {+form.fill ? <span className="info" tabIndex={0} data-tip={`The taker is matched at ${fmtAm(fillView(+form.fill).effTaker)} — worse than your ${fmtAm(+form.fill)}, because their taker fee (7%) is 2× your combo maker fee. That's what a taker actually gets.`}>i</span> : null}
               </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter fill odds" : undefined} /></div>
             </div>
             <div className="row c2">
@@ -701,7 +686,7 @@ export default function ComboLocks({ user, prefill = null }) {
                     <div className="tile"><div className="k">You profit if parlay loses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
                     <div className="tile"><div className="k">Worst case</div><div className={"v " + (res.worst >= 0 ? "pos" : "neg")}>{money(res.worst)}</div></div>
                   </div>
-                  <div className="kv"><span>You sell at (after your maker fee)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
+                  <div className="kv"><span>You sell at (after combo maker fees)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
                   <div className="kv"><span>Taker is matched at</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
                   <div className="kv"><span>Contracts</span><span className="num">{res.contracts}</span></div>
                   {res.competitive != null && <div className={"note " + (res.competitive ? "ok" : "warn")}>{res.competitive ? `✓ Your fill ${fmtAm(res.fillAmerican)} beats fair ${fmtAm(res.parlay.fair_american)} — competitive.` : `⚠ Your fill ${fmtAm(res.fillAmerican)} is stingier than fair ${fmtAm(res.parlay.fair_american)} — probably won't fill.`}</div>}
