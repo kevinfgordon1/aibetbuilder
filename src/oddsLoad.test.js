@@ -238,6 +238,12 @@ function fullPlan() {
   assert.match(app, /setPromoBoardData/);
   assert.doesNotMatch(app, /in\("sport", SPORT_KEYS\)/);
   assert.doesNotMatch(app, /in\("sport", FUTURES_KEYS\)/);
+  assert.match(app, /const DEFAULT_PROMO_SPORT_KEYS = \["baseball_mlb", "americanfootball_ncaaf"\]/);
+  assert.match(app, /const DEFAULT_PROMO_DATE_RANGE = "7d"/);
+  assert.match(app, /\[promoDateRange, setPromoDateRange\] = useState\(DEFAULT_PROMO_DATE_RANGE\)/);
+  assert.match(app, /\[promoSports, setPromoSports\] = useState\(new Set\(DEFAULT_PROMO_SPORT_KEYS\)\)/);
+  assert.match(app, /\[evDateRange, setEvDateRange\] = useState\("any"\)/);
+  assert.match(app, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
 }
 
 console.log("oddsLoad.test.js: ok");
