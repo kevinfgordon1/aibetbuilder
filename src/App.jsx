@@ -105,8 +105,8 @@ const DATE_RANGES = [
   { val: "any", label: "Any" },
 ];
 
-// Promo Builder first-load fallback (not persisted; Matching books is the only
-// filter written to localStorage). +EV and Odds Board keep their own state.
+// Promo Builder first-load fallback. Sports/date are not persisted;
+// +EV and Odds Board keep their own state.
 const DEFAULT_PROMO_SPORT_KEYS = ["baseball_mlb", "americanfootball_ncaaf"];
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
