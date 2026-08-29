@@ -105,6 +105,11 @@ const DATE_RANGES = [
   { val: "any", label: "Any" },
 ];
 
+// Promo Builder first-load fallback. Sports/date are not persisted;
+// +EV and Odds Board keep their own state.
+const DEFAULT_PROMO_SPORT_KEYS = ["baseball_mlb", "americanfootball_ncaaf"];
+const DEFAULT_PROMO_DATE_RANGE = "7d";
+
 const MARKET_SCOPES = [
   { val: "all", label: "All" },
   { val: "main", label: "Main" },
@@ -1198,7 +1203,7 @@ export default function App() {
   const [numLegs, setNumLegs] = useState(3);
   const [minFinalOdds, setMinFinalOdds] = useState("");
   const [minLegOdds, setMinLegOdds] = useState("");
-  const [promoDateRange, setPromoDateRange] = useState("any");
+  const [promoDateRange, setPromoDateRange] = useState(DEFAULT_PROMO_DATE_RANGE);
   const [promoPage, setPromoPage] = useState(5);
   const [expandedPromo, setExpandedPromo] = useState(null);
   const [expandedFreeBet, setExpandedFreeBet] = useState(null);
@@ -1206,7 +1211,7 @@ export default function App() {
   const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
   const [evDateRange, setEvDateRange] = useState("any");
   const [promoBook, setPromoBook] = useState("draftkings");
-  const [promoSports, setPromoSports] = useState(new Set(["baseball_mlb"]));
+  const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
   const [marketScope, setMarketScope] = useState("all");
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
