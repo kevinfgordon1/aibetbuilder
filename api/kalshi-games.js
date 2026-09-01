@@ -2,12 +2,15 @@
 // api/kalshi-games.js — same-origin feed of Kalshi single-game markets for the
 // Combo Locks tab. Proxies Kalshi (public, keyless) so the browser avoids CORS.
 //
-// Pulls three series per game and groups them under one game key:
-//   side  = KXMLBGAME    (moneyline, per team)
-//   spread= KXMLBSPREAD  (run line — full alt ladder, per team+line)
-//   total = KXMLBTOTAL   (over/under — full alt ladder, per line)
-// All share the game key `<SERIES>-<DATE><TIME><TEAMS>` (group on the part after
-// the series prefix, e.g. 26AUG071840TORPHI).
+// Pulls three series per sport and groups them under one game key:
+//   MLB   side=KXMLBGAME    spread=KXMLBSPREAD   total=KXMLBTOTAL
+//   NFL   side=KXNFLGAME    spread=KXNFLSPREAD   total=KXNFLTOTAL
+//   NCAAF side=KXNCAAFGAME  spread=KXNCAAFSPREAD total=KXNCAAFTOTAL
+// Series tickers were confirmed against the live Kalshi series catalog; if a
+// type 404s later, that ladder is simply empty (moneyline still ships).
+// All share the game key `<SERIES>-<DATE[TIME]><TEAMS>` (group on the part after
+// the series prefix). MLB keys include HHMM (e.g. 26AUG071840TORPHI); NFL/NCAAF
+// keys are date-only (e.g. 26SEP09NESEA, 26SEP03MASSRUTG).
 //
 // Kalshi lists only ONE side of each spread/total as a market; the OTHER side is
 // that market's NO. We expand every market into BOTH selectable legs with clean
@@ -23,11 +26,15 @@
 
 const KALSHI_BASE = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
 const COMBO_COLLECTION = process.env.KALSHI_COMBO_COLLECTION || 'KXMVESPORTSMULTIGAMEEXTENDED-R';
-const MARKET_SERIES = { mlb: { side: 'KXMLBGAME', spread: 'KXMLBSPREAD', total: 'KXMLBTOTAL' } };
+const MARKET_SERIES = {
+  mlb: { side: 'KXMLBGAME', spread: 'KXMLBSPREAD', total: 'KXMLBTOTAL' },
+  nfl: { side: 'KXNFLGAME', spread: 'KXNFLSPREAD', total: 'KXNFLTOTAL' },
+  ncaaf: { side: 'KXNCAAFGAME', spread: 'KXNCAAFSPREAD', total: 'KXNCAAFTOTAL' },
+};
 
 async function fetchJson(url) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
+  const t = setTimeout(() => ctrl.abort(), 12000);
   try {
     const r = await fetch(url, { signal: ctrl.signal, headers: { accept: 'application/json' } });
     if (!r.ok) return null;
@@ -73,17 +80,14 @@ async function fetchMarketSettlements(tickers) {
 const gameKeyOf = (t) => { const i = String(t || '').indexOf('-'); return i === -1 ? t : t.slice(i + 1); };
 const marketLabel = (m) => m.yes_sub_title || m.subtitle || m.title || m.ticker;
 
-// First pitch (UTC ms) parsed from the game key's leading YYMONDDHHMM, interpreted as
-// US Eastern — Kalshi tickers + market rules_primary use ET (e.g. "...071840..." = the
-// game "scheduled for Aug 7 at 6:40 PM EDT"). NOTE: occurrence_datetime / expected_
-// expiration_time are the game END/settlement (~3h later), NOT first pitch — do not use
-// them for a "has it started" test. Returns NaN if unparseable.
+// Game start (UTC ms) from the key's leading YYMONDD[HHMM], interpreted as US Eastern —
+// Kalshi tickers + market rules_primary use ET (e.g. MLB "...071840..." = Aug 7 at
+// 6:40 PM EDT). NFL/NCAAF keys omit HHMM (e.g. 26SEP09NESEA) — those resolve to the
+// start of that ET calendar day. NOTE: occurrence_datetime / expected_expiration_time
+// are the game END/settlement (~3h later) on MLB, so they are not used for the
+// pre-game cutoff. Returns NaN if unparseable.
 const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
-function firstPitchUtcMs(gameKey) {
-  const m = /^(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})/.exec(gameKey || '');
-  if (!m) return NaN;
-  const y = 2000 + Number(m[1]), mon = MONTHS[m[2]], d = Number(m[3]), hh = Number(m[4]), mm = Number(m[5]);
-  if (mon == null) return NaN;
+function etWallToUtcMs(y, mon, d, hh, mm) {
   const asUTC = Date.UTC(y, mon, d, hh, mm);
   // Shift the ET wall-clock time to true UTC using the America/New_York offset at that instant (handles EDT/EST).
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23',
@@ -91,6 +95,42 @@ function firstPitchUtcMs(gameKey) {
   const p = {}; parts.forEach((x) => (p[x.type] = x.value));
   const etAsIfUTC = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute));
   return asUTC + (asUTC - etAsIfUTC);
+}
+function firstPitchUtcMs(gameKey) {
+  const m = /^(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})/.exec(gameKey || '');
+  if (!m) return NaN;
+  const y = 2000 + Number(m[1]), mon = MONTHS[m[2]], d = Number(m[3]), hh = Number(m[4]), mm = Number(m[5]);
+  if (mon == null) return NaN;
+  return etWallToUtcMs(y, mon, d, hh, mm);
+}
+function dateOnlyUtcMs(gameKey) {
+  if (Number.isFinite(firstPitchUtcMs(gameKey))) return NaN;
+  const m = /^(\d{2})([A-Z]{3})(\d{2})(?![0-9])/.exec(gameKey || '');
+  if (!m) return NaN;
+  const y = 2000 + Number(m[1]), mon = MONTHS[m[2]], d = Number(m[3]);
+  if (mon == null) return NaN;
+  return etWallToUtcMs(y, mon, d, 0, 0);
+}
+function gameStartUtcMs(gameKey) {
+  const timed = firstPitchUtcMs(gameKey);
+  if (Number.isFinite(timed)) return timed;
+  return dateOnlyUtcMs(gameKey);
+}
+function isUpcomingGame(gameKey, nowMs) {
+  const timed = firstPitchUtcMs(gameKey);
+  if (Number.isFinite(timed)) return timed > nowMs;
+  const dayStart = dateOnlyUtcMs(gameKey);
+  if (!Number.isFinite(dayStart)) return false;
+  // Date-only football keys: keep the slate through the end of that ET day.
+  return dayStart + 24 * 3600 * 1000 > nowMs;
+}
+function occurrenceMsOf(ev) {
+  let best = Infinity;
+  for (const m of ev && ev.markets || []) {
+    const t = Date.parse(m.occurrence_datetime);
+    if (Number.isFinite(t) && t < best) best = t;
+  }
+  return best === Infinity ? NaN : best;
 }
 
 // ── label parsers (validated against Kalshi's real strings in the test) ──
@@ -139,36 +179,50 @@ async function fetchSeriesEvents(seriesTicker) {
   return events;
 }
 
-async function fetchSportGames(seriesByType) {
-  const byKey = new Map(); // key -> { key, title, date, raw:{side,spread,total} }
-  for (const [type, series] of Object.entries(seriesByType)) {
-    for (const ev of await fetchSeriesEvents(series)) {
+function groupSportGames(eventsByType, nowMs = Date.now()) {
+  const byKey = new Map(); // key -> { key, title, date, occurrenceMs, raw:{side,spread,total} }
+  for (const [type, events] of Object.entries(eventsByType || {})) {
+    if (!events) continue;
+    for (const ev of events) {
       const key = gameKeyOf(ev.event_ticker || ev.ticker); if (!key) continue;
       let g = byKey.get(key);
-      if (!g) { g = { key, title: null, date: null, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
+      if (!g) { g = { key, title: null, date: null, occurrenceMs: NaN, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
       if (type === 'side' || !g.title) { g.title = ev.title || g.title; g.date = ev.sub_title || g.date; }
+      const occ = occurrenceMsOf(ev);
+      if (Number.isFinite(occ) && (!Number.isFinite(g.occurrenceMs) || occ < g.occurrenceMs)) g.occurrenceMs = occ;
+      if (!g.raw[type]) g.raw[type] = [];
       (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: marketLabel(m) }); });
     }
   }
   const games = [];
-  const nowMs = Date.now();
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
-    // PRE-GAME ONLY: drop any game whose FIRST PITCH is now or in the past (in-play/done),
-    // or whose start time can't be parsed.
-    const startMs = firstPitchUtcMs(g.key);
-    if (!Number.isFinite(startMs) || startMs <= nowMs) continue;
+    // PRE-GAME: MLB (datetime key) drops once first pitch has passed. Football
+    // (date-only key) stays through the end of that ET calendar day.
+    if (!isUpcomingGame(g.key, nowMs)) continue;
+    const timed = firstPitchUtcMs(g.key);
+    const startMs = Number.isFinite(timed) ? timed
+      : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
+    if (!Number.isFinite(startMs)) continue;
     const teamNames = g.raw.side.map(m => m.label);
     games.push({
       key: g.key, title: g.title, date: g.date, startTime: new Date(startMs).toISOString(),
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
-        spread: expandSpreads(g.raw.spread, teamNames),
-        total: expandTotals(g.raw.total),
+        spread: expandSpreads(g.raw.spread || [], teamNames),
+        total: expandTotals(g.raw.total || []),
       },
     });
   }
   return games;
+}
+
+async function fetchSportGames(seriesByType) {
+  const eventsByType = {};
+  await Promise.all(Object.entries(seriesByType || {}).map(async ([type, series]) => {
+    eventsByType[type] = await fetchSeriesEvents(series);
+  }));
+  return groupSportGames(eventsByType);
 }
 
 async function handler(req, res) {
@@ -183,7 +237,10 @@ async function handler(req, res) {
       return;
     }
     const sports = {};
-    for (const [sport, seriesByType] of Object.entries(MARKET_SERIES)) sports[sport] = await fetchSportGames(seriesByType);
+    await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
+      const games = await fetchSportGames(seriesByType);
+      sports[sport] = games.map((g) => ({ ...g, sport }));
+    }));
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports });
   } catch (e) {
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: null, sports: {}, error: String(e && e.message || e) });
@@ -191,4 +248,8 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._helpers = { parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf, tickersFromReq, slimMarket };
+module.exports.MARKET_SERIES = MARKET_SERIES;
+module.exports._helpers = {
+  parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf, tickersFromReq, slimMarket,
+  groupSportGames, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
+};

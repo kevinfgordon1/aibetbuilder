@@ -10,6 +10,9 @@ import {
   fairAmericanFromProb,
   recommendedFillFromFair,
   recommendedFillFromProb,
+  flattenComboGames,
+  formatGameOption,
+  comboGameId,
 } from "./comboPrefill.js";
 
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
@@ -61,6 +64,12 @@ assert.equal(identifyTeam("Chicago Cubs"), "CHC");
 assert.equal(identifyTeam("Chicago White Sox"), "CWS");
 assert.equal(identifyTeam("Guardians"), "CLE");
 assert.equal(identifyTeam("Washington Nationals"), "WSH");
+assert.equal(identifyTeam("Kansas City Chiefs", "nfl"), "KC");
+assert.equal(identifyTeam("New England Patriots", "nfl"), "NE");
+assert.equal(identifyTeam("Seattle Seahawks", "nfl"), "SEA");
+assert.equal(identifyTeam("Los Angeles R", "nfl"), "LAR");
+assert.equal(identifyTeam("New York J", "nfl"), "NYJ");
+assert.equal(identifyTeam("Kansas City Royals"), "KC");
 
 assert.deepEqual(parsePromoTotal("Los Angeles Angels/Atlanta Braves o8.5"), { ou: "over", line: "8.5" });
 assert.deepEqual(parsePromoTotal("Guardians/Tigers u8.5"), { ou: "under", line: "8.5" });
@@ -141,7 +150,7 @@ const nfl = mapPromoLegsToKalshi([{
   game: "Kansas City Chiefs @ Buffalo Bills", sport: "americanfootball_nfl",
 }, phiMl], MLB);
 assert.equal(nfl.unmatched.length, 1);
-assert.match(nfl.unmatched[0].reason, /MLB/);
+assert.match(nfl.unmatched[0].reason, /no matching Kalshi NFL/);
 assert.equal(nfl.rows[0].marketVal, "");
 assert.ok(nfl.rows[1].marketVal);
 
@@ -207,6 +216,89 @@ const fiveLeg = mapPromoLegsToKalshi([
 assert.equal(fiveLeg.unmatched.length, 0, JSON.stringify(fiveLeg.unmatched));
 assert.equal(fiveLeg.rows.length, 5, "Send-to-Combo-Locks must map every grown leg");
 assert.ok(fiveLeg.rows.every((r) => r.gameKey && r.marketVal));
+
+const nflGame = {
+  key: "26SEP09NESEA",
+  sport: "nfl",
+  title: "New England vs Seattle",
+  date: "NE vs SEA (Sep 9)",
+  startTime: "2026-09-10T03:20:00Z",
+  markets: {
+    side: [
+      { ticker: "KXNFLGAME-26SEP09NESEA-NE", side: "yes", label: "New England" },
+      { ticker: "KXNFLGAME-26SEP09NESEA-SEA", side: "yes", label: "Seattle" },
+    ],
+    spread: [
+      { ticker: "KXNFLSPREAD-26SEP09NESEA-SEA7", side: "yes", label: "Seattle \u22126.5" },
+      { ticker: "KXNFLSPREAD-26SEP09NESEA-SEA7", side: "no", label: "New England +6.5" },
+    ],
+    total: [
+      { ticker: "KXNFLTOTAL-26SEP09NESEA-43", side: "yes", label: "Over 42.5" },
+      { ticker: "KXNFLTOTAL-26SEP09NESEA-43", side: "no", label: "Under 42.5" },
+    ],
+  },
+};
+const ncaafGame = {
+  key: "26SEP03MASSRUTG",
+  sport: "ncaaf",
+  title: "UMass vs Rutgers",
+  date: "MASS vs RUTG (Sep 3)",
+  startTime: "2026-09-04T01:00:00Z",
+  markets: {
+    side: [
+      { ticker: "KXNCAAFGAME-26SEP03MASSRUTG-MASS", side: "yes", label: "UMass" },
+      { ticker: "KXNCAAFGAME-26SEP03MASSRUTG-RUTG", side: "yes", label: "Rutgers" },
+    ],
+    spread: [
+      { ticker: "KXNCAAFSPREAD-26SEP03MASSRUTG-RUTG36", side: "yes", label: "Rutgers \u221235.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03MASSRUTG-RUTG36", side: "no", label: "UMass +35.5" },
+    ],
+    total: [
+      { ticker: "KXNCAAFTOTAL-26SEP03MASSRUTG-50", side: "yes", label: "Over 49.5" },
+      { ticker: "KXNCAAFTOTAL-26SEP03MASSRUTG-50", side: "no", label: "Under 49.5" },
+    ],
+  },
+};
+const SPORTS = { mlb: MLB, nfl: [nflGame], ncaaf: [ncaafGame] };
+
+const nflHit = mapPromoLegsToKalshi([{
+  name: "New England Patriots ML", market: "ML",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+  commence_time: "2026-09-10T00:20:00Z",
+}], SPORTS);
+assert.equal(nflHit.unmatched.length, 0, JSON.stringify(nflHit.unmatched));
+assert.equal(nflHit.rows[0].gameKey, "26SEP09NESEA");
+assert.equal(nflHit.rows[0].marketVal, encVal("KXNFLGAME-26SEP09NESEA-NE", "yes"));
+
+const nflSpreadHit = mapPromoLegsToKalshi([{
+  name: "Seattle Seahawks -6.5", market: "SPR",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], SPORTS);
+assert.equal(nflSpreadHit.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP09NESEA-SEA7", "yes"));
+
+const ncaafHit = mapPromoLegsToKalshi([{
+  name: "Rutgers Scarlet Knights ML", market: "ML",
+  game: "UMass Minutemen @ Rutgers Scarlet Knights", sport: "americanfootball_ncaaf",
+}], SPORTS);
+assert.equal(ncaafHit.unmatched.length, 0, JSON.stringify(ncaafHit.unmatched));
+assert.equal(ncaafHit.rows[0].gameKey, "26SEP03MASSRUTG");
+assert.equal(ncaafHit.rows[0].marketVal, encVal("KXNCAAFGAME-26SEP03MASSRUTG-RUTG", "yes"));
+
+const mixed = mapPromoLegsToKalshi([phiMl, {
+  name: "Seattle Seahawks ML", market: "ML",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], SPORTS);
+assert.equal(mixed.unmatched.length, 0, JSON.stringify(mixed.unmatched));
+assert.equal(mixed.rows[0].gameKey, "26AUG071905PHIATL");
+assert.equal(mixed.rows[1].marketVal, encVal("KXNFLGAME-26SEP09NESEA-SEA", "yes"));
+
+const flat = flattenComboGames(SPORTS);
+assert.ok(flat.some((g) => g.sport === "nfl" && g.key === "26SEP09NESEA"));
+assert.ok(flat.some((g) => g.sport === "ncaaf" && g.key === "26SEP03MASSRUTG"));
+assert.ok(flat.some((g) => g.sport === "mlb" && g.key === "26AUG071905PHIATL"));
+assert.equal(formatGameOption(flat.find((g) => g.key === "26SEP09NESEA")), "NFL · New England vs Seattle · NE vs SEA (Sep 9)");
+assert.equal(formatGameOption(flat.find((g) => g.key === "26SEP03MASSRUTG")), "NCAAF · UMass vs Rutgers · MASS vs RUTG (Sep 3)");
+assert.equal(comboGameId(flat.find((g) => g.key === "26SEP09NESEA")), "nfl:26SEP09NESEA");
 
 assert.equal(earliestCommence([
   { commence_time: "2026-08-08T01:00:00Z" },

@@ -6,6 +6,14 @@
 
 export const encVal = (t, s) => `${t}|${s}`;
 
+export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf"];
+export const COMBO_SPORT_LABEL = { mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF" };
+const PROMO_TO_SPORT = {
+  baseball_mlb: "mlb",
+  americanfootball_nfl: "nfl",
+  americanfootball_ncaaf: "ncaaf",
+};
+
 const MINUS = /[+\-\u2212]/;
 
 // Canonical MLB ids match the 2–3 letter codes Kalshi bakes into game keys.
@@ -44,14 +52,62 @@ const MLB_TEAMS = [
   { id: "WSH", aliases: ["washington nationals", "washington", "nationals", "wsh", "was"] },
 ];
 
-const TWO_LETTER = new Set(["AZ", "KC", "SD", "SF", "TB"]);
-const CODE_TO_ID = {};
-for (const t of MLB_TEAMS) {
-  CODE_TO_ID[t.id] = t.id;
-  for (const a of t.aliases) {
-    if (/^[a-z]{2,3}$/.test(a)) CODE_TO_ID[a.toUpperCase()] = t.id;
+const NFL_TEAMS = [
+  { id: "ARI", aliases: ["arizona cardinals", "arizona", "cardinals", "ari"] },
+  { id: "ATL", aliases: ["atlanta falcons", "atlanta", "falcons", "atl"] },
+  { id: "BAL", aliases: ["baltimore ravens", "baltimore", "ravens", "bal"] },
+  { id: "BUF", aliases: ["buffalo bills", "buffalo", "bills", "buf"] },
+  { id: "CAR", aliases: ["carolina panthers", "carolina", "panthers", "car"] },
+  { id: "CHI", aliases: ["chicago bears", "chicago", "bears", "chi"] },
+  { id: "CIN", aliases: ["cincinnati bengals", "cincinnati", "bengals", "cin"] },
+  { id: "CLE", aliases: ["cleveland browns", "cleveland", "browns", "cle"] },
+  { id: "DAL", aliases: ["dallas cowboys", "dallas", "cowboys", "dal"] },
+  { id: "DEN", aliases: ["denver broncos", "denver", "broncos", "den"] },
+  { id: "DET", aliases: ["detroit lions", "detroit", "lions", "det"] },
+  { id: "GB", aliases: ["green bay packers", "green bay", "packers", "gb", "gnb"] },
+  { id: "HOU", aliases: ["houston texans", "houston", "texans", "hou"] },
+  { id: "IND", aliases: ["indianapolis colts", "indianapolis", "colts", "ind"] },
+  { id: "JAC", aliases: ["jacksonville jaguars", "jacksonville", "jaguars", "jac", "jax"] },
+  { id: "KC", aliases: ["kansas city chiefs", "kansas city", "chiefs", "kc", "kcc"] },
+  { id: "LAC", aliases: ["los angeles chargers", "la chargers", "chargers", "lac", "los angeles c"] },
+  { id: "LAR", aliases: ["los angeles rams", "la rams", "rams", "lar", "los angeles r"] },
+  { id: "LV", aliases: ["las vegas raiders", "las vegas", "raiders", "lv", "lvr", "oakland raiders"] },
+  { id: "MIA", aliases: ["miami dolphins", "miami", "dolphins", "mia"] },
+  { id: "MIN", aliases: ["minnesota vikings", "minnesota", "vikings", "min"] },
+  { id: "NE", aliases: ["new england patriots", "new england", "patriots", "ne", "nwe"] },
+  { id: "NO", aliases: ["new orleans saints", "new orleans", "saints", "no", "nor"] },
+  { id: "NYG", aliases: ["new york giants", "ny giants", "giants", "nyg", "new york g"] },
+  { id: "NYJ", aliases: ["new york jets", "ny jets", "jets", "nyj", "new york j"] },
+  { id: "PHI", aliases: ["philadelphia eagles", "philadelphia", "eagles", "phi"] },
+  { id: "PIT", aliases: ["pittsburgh steelers", "pittsburgh", "steelers", "pit"] },
+  { id: "SEA", aliases: ["seattle seahawks", "seattle", "seahawks", "sea"] },
+  { id: "SF", aliases: ["san francisco 49ers", "san francisco", "49ers", "niners", "sf", "sfo"] },
+  { id: "TB", aliases: ["tampa bay buccaneers", "tampa bay", "buccaneers", "bucs", "tb", "tam", "tampa"] },
+  { id: "TEN", aliases: ["tennessee titans", "tennessee", "titans", "ten"] },
+  { id: "WAS", aliases: ["washington commanders", "washington", "commanders", "was", "wsh", "football team"] },
+];
+
+function buildSportIndex(teams, extraTwo = []) {
+  const twoLetter = new Set(extraTwo);
+  const codeToId = {};
+  const aliases = [];
+  for (const t of teams) {
+    if (t.id.length === 2) twoLetter.add(t.id);
+    codeToId[t.id] = t.id;
+    for (const a of t.aliases) {
+      if (/^[a-z]{2,4}$/.test(a)) codeToId[a.toUpperCase()] = t.id;
+      const n = normalize(a);
+      aliases.push({ id: t.id, alias: n, len: n.length });
+    }
   }
+  aliases.sort((a, b) => b.len - a.len);
+  return { twoLetter, codeToId, aliases };
 }
+
+const SPORT_INDEX = {
+  mlb: buildSportIndex(MLB_TEAMS, ["AZ", "KC", "SD", "SF", "TB"]),
+  nfl: buildSportIndex(NFL_TEAMS, ["NE", "SF", "GB", "KC", "TB", "LV", "NO"]),
+};
 
 export function normalize(s) {
   return String(s || "")
@@ -62,25 +118,16 @@ export function normalize(s) {
     .trim();
 }
 
-function aliasList() {
-  const out = [];
-  for (const t of MLB_TEAMS) {
-    for (const a of t.aliases) out.push({ id: t.id, alias: normalize(a), len: normalize(a).length });
-  }
-  out.sort((a, b) => b.len - a.len);
-  return out;
-}
-const ALIASES = aliasList();
-
-export function identifyTeam(raw) {
+export function identifyTeam(raw, sport = "mlb") {
+  const index = SPORT_INDEX[sport] || SPORT_INDEX.mlb;
   const n = normalize(String(raw || "").replace(/\b(ml|moneyline)\b/gi, ""));
   if (!n) return null;
-  for (const a of ALIASES) {
+  for (const a of index.aliases) {
     if (n === a.alias) return a.id;
   }
   // Prefer the longest alias that is a whole-token substring ("angels" in "la angels").
   let best = null;
-  for (const a of ALIASES) {
+  for (const a of index.aliases) {
     if (a.len < 3) continue;
     const padded = ` ${n} `;
     if (padded.includes(` ${a.alias} `) || n.endsWith(" " + a.alias) || n.startsWith(a.alias + " ")) {
@@ -98,34 +145,71 @@ function splitAt(game) {
   return [];
 }
 
-function parseGameKeyIds(key) {
-  const m = /^(\d{2}[A-Z]{3}\d{2}\d{2}\d{2})([A-Z]+)$/.exec(key || "");
-  if (!m) return [];
-  const rest = m[2];
+function parseGameKeyIds(key, sport = "mlb") {
+  const index = SPORT_INDEX[sport] || SPORT_INDEX.mlb;
+  const timed = /^(\d{2}[A-Z]{3}\d{2}\d{2}\d{2})([A-Z]+)$/.exec(key || "");
+  const dated = /^(\d{2}[A-Z]{3}\d{2})([A-Z]+)$/.exec(key || "");
+  const rest = timed ? timed[2] : (dated ? dated[2] : "");
+  if (!rest) return [];
   let codes = [];
   if (rest.length === 6) codes = [rest.slice(0, 3), rest.slice(3)];
   else if (rest.length === 5) {
-    if (TWO_LETTER.has(rest.slice(0, 2))) codes = [rest.slice(0, 2), rest.slice(2)];
-    else if (TWO_LETTER.has(rest.slice(-2))) codes = [rest.slice(0, 3), rest.slice(3)];
+    if (index.twoLetter.has(rest.slice(0, 2))) codes = [rest.slice(0, 2), rest.slice(2)];
+    else if (index.twoLetter.has(rest.slice(-2))) codes = [rest.slice(0, 3), rest.slice(3)];
   } else if (rest.length === 4) codes = [rest.slice(0, 2), rest.slice(2)];
-  return codes.map((c) => CODE_TO_ID[c]).filter(Boolean);
+  return codes.map((c) => index.codeToId[c]).filter(Boolean);
 }
 
-function kalshiTeamIds(game) {
-  const fromKey = parseGameKeyIds(game.key);
+function kalshiTeamIds(game, sport = "mlb") {
+  const fromKey = parseGameKeyIds(game.key, sport);
   if (fromKey.length === 2) return fromKey;
-  const fromDate = splitAt(game.date).map(identifyTeam).filter(Boolean);
+  const idOf = (raw) => identifyTeam(raw, sport);
+  const fromDate = splitAt(game.date).map(idOf).filter(Boolean);
   if (fromDate.length === 2) return fromDate;
-  const fromTitle = splitAt(game.title).map(identifyTeam).filter(Boolean);
+  const fromTitle = splitAt(game.title).map(idOf).filter(Boolean);
   if (fromTitle.length === 2) return fromTitle;
-  const fromSides = (game.markets?.side || []).map((m) => identifyTeam(m.label)).filter(Boolean);
+  const fromSides = (game.markets?.side || []).map((m) => idOf(m.label)).filter(Boolean);
   return fromSides;
 }
 
-function teamsMatchGame(promoGame, kalshiGame) {
+function significantTokens(s) {
+  return normalize(s).split(" ").filter((t) => t.length >= 3 && t !== "the" && t !== "and");
+}
+
+function nameMatchesLabel(promoName, label) {
+  const p = normalize(promoName);
+  const k = normalize(label);
+  if (!p || !k) return false;
+  if (p === k || p.includes(k) || k.includes(p)) return true;
+  const pt = significantTokens(promoName);
+  const kt = significantTokens(label);
+  if (!pt.length || !kt.length) return false;
+  const longest = pt.reduce((a, b) => (a.length >= b.length ? a : b));
+  if (longest.length >= 4 && (kt.includes(longest) || k.includes(longest))) return true;
+  const overlap = pt.filter((t) => kt.includes(t) || k.includes(t));
+  return overlap.length >= Math.min(2, pt.length);
+}
+
+function ncaafTeamsMatch(promoGame, kalshiGame) {
   const [away, home] = splitAt(promoGame);
-  const promoIds = [identifyTeam(away), identifyTeam(home)].filter(Boolean);
-  const kalshiIds = kalshiTeamIds(kalshiGame);
+  if (!away || !home) return false;
+  const sides = (kalshiGame.markets?.side || []).map((m) => m.label).filter(Boolean);
+  if (sides.length >= 2) {
+    const a0 = nameMatchesLabel(away, sides[0]);
+    const a1 = nameMatchesLabel(away, sides[1]);
+    const h0 = nameMatchesLabel(home, sides[0]);
+    const h1 = nameMatchesLabel(home, sides[1]);
+    return (a0 && h1 && !a1 && !h0) || (a1 && h0 && !a0 && !h1) || (a0 && h1) || (a1 && h0);
+  }
+  const title = kalshiGame.title || "";
+  return nameMatchesLabel(away, title) && nameMatchesLabel(home, title);
+}
+
+function teamsMatchGame(promoGame, kalshiGame, sport = "mlb") {
+  if (sport === "ncaaf") return ncaafTeamsMatch(promoGame, kalshiGame);
+  const [away, home] = splitAt(promoGame);
+  const promoIds = [identifyTeam(away, sport), identifyTeam(home, sport)].filter(Boolean);
+  const kalshiIds = kalshiTeamIds(kalshiGame, sport);
   if (promoIds.length === 2 && kalshiIds.length === 2) {
     const set = new Set(kalshiIds);
     return set.has(promoIds[0]) && set.has(promoIds[1]);
@@ -133,8 +217,16 @@ function teamsMatchGame(promoGame, kalshiGame) {
   return false;
 }
 
-function matchKalshiGame(promoLeg, mlbGames) {
-  const candidates = (mlbGames || []).filter((g) => teamsMatchGame(promoLeg.game, g));
+function promoSportOf(leg) {
+  if (!leg?.sport) return "mlb";
+  return PROMO_TO_SPORT[leg.sport] || null;
+}
+
+function matchKalshiGame(promoLeg, games) {
+  const sport = promoSportOf(promoLeg);
+  if (!sport) return null;
+  const pool = (games || []).filter((g) => (g.sport || "mlb") === sport);
+  const candidates = pool.filter((g) => teamsMatchGame(promoLeg.game, g, sport));
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
   const t = new Date(promoLeg.commence_time).getTime();
@@ -144,6 +236,55 @@ function matchKalshiGame(promoLeg, mlbGames) {
     const db = Math.abs(new Date(b.startTime).getTime() - t);
     return (Number.isFinite(da) ? da : Infinity) - (Number.isFinite(db) ? db : Infinity);
   })[0];
+}
+
+export function comboGameId(game) {
+  if (!game) return "";
+  return game.sport ? `${game.sport}:${game.key}` : game.key;
+}
+
+export function flattenComboGames(sportsOrList) {
+  const buckets = [];
+  if (Array.isArray(sportsOrList)) {
+    buckets.push({ sport: sportsOrList[0]?.sport || "mlb", games: sportsOrList });
+  } else {
+    for (const sport of COMBO_SPORT_ORDER) {
+      buckets.push({ sport, games: (sportsOrList && sportsOrList[sport]) || [] });
+    }
+  }
+  const out = [];
+  for (const { sport, games } of buckets) {
+    for (const g of games || []) {
+      const s = g.sport || sport;
+      out.push({ ...g, sport: s, sportLabel: COMBO_SPORT_LABEL[s] || String(s).toUpperCase() });
+    }
+  }
+  out.sort((a, b) => {
+    const ta = Date.parse(a.startTime);
+    const tb = Date.parse(b.startTime);
+    const da = Number.isFinite(ta) ? ta : Infinity;
+    const db = Number.isFinite(tb) ? tb : Infinity;
+    if (da !== db) return da - db;
+    const ia = COMBO_SPORT_ORDER.indexOf(a.sport);
+    const ib = COMBO_SPORT_ORDER.indexOf(b.sport);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  return out;
+}
+
+export function formatGameOption(g) {
+  const title = g.title || g.key || "Game";
+  const date = g.date ? ` · ${g.date}` : "";
+  return `${g.sportLabel || "MLB"} · ${title}${date}`;
+}
+
+export function indexComboGames(sportsOrList) {
+  const m = {};
+  for (const g of flattenComboGames(sportsOrList)) {
+    m[comboGameId(g)] = g;
+    if (!m[g.key]) m[g.key] = g;
+  }
+  return m;
 }
 
 export function parsePromoTotal(name) {
@@ -172,13 +313,16 @@ function parseMarketLine(label) {
   return { team: m[1].trim(), sign: m[2] === "+" ? "+" : "-", line: m[3] };
 }
 
-function matchMarket(promoLeg, game) {
+function matchMarket(promoLeg, game, sport = "mlb") {
   const market = promoLeg.market;
   if (market === "ML") {
-    const teamId = identifyTeam(promoLeg.name);
     const sides = game.markets?.side || [];
+    if (sport === "ncaaf") {
+      return sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
+    }
+    const teamId = identifyTeam(promoLeg.name, sport);
     if (teamId) {
-      const hit = sides.find((m) => identifyTeam(m.label) === teamId);
+      const hit = sides.find((m) => identifyTeam(m.label, sport) === teamId);
       if (hit) return hit;
     }
     return null;
@@ -192,12 +336,13 @@ function matchMarket(promoLeg, game) {
   if (market === "SPR") {
     const parsed = parsePromoSpread(promoLeg.name);
     if (!parsed) return null;
-    const teamId = identifyTeam(parsed.team);
+    const teamId = identifyTeam(parsed.team, sport);
     for (const m of game.markets?.spread || []) {
       const sm = parseMarketLine(m.label);
       if (!sm || !linesEqual(sm.line, parsed.line) || sm.sign !== parsed.sign) continue;
-      const labelId = identifyTeam(sm.team);
+      const labelId = identifyTeam(sm.team, sport);
       if (teamId && labelId && teamId === labelId) return m;
+      if (sport === "ncaaf" && nameMatchesLabel(parsed.team, sm.team)) return m;
       if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return m;
     }
     return null;
@@ -205,21 +350,18 @@ function matchMarket(promoLeg, game) {
   return null;
 }
 
-function isMlbLeg(leg) {
-  if (!leg?.sport) return true;
-  return leg.sport === "baseball_mlb";
-}
-
 function unmatchedEntry(leg, reason) {
   return { name: leg?.name || "(unnamed leg)", reason };
 }
 
-export function mapPromoLegsToKalshi(promoLegs, mlbGames) {
+export function mapPromoLegsToKalshi(promoLegs, games) {
   const unmatched = [];
   const rows = [];
+  const flat = flattenComboGames(games);
   for (const leg of promoLegs || []) {
-    if (!isMlbLeg(leg)) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks only maps MLB today"));
+    const sport = promoSportOf(leg);
+    if (!sport) {
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, and NCAAF main lines"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
@@ -228,13 +370,13 @@ export function mapPromoLegsToKalshi(promoLegs, mlbGames) {
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
-    const game = matchKalshiGame(leg, mlbGames);
+    const game = matchKalshiGame(leg, flat);
     if (!game) {
-      unmatched.push(unmatchedEntry(leg, "no matching Kalshi MLB game"));
+      unmatched.push(unmatchedEntry(leg, `no matching Kalshi ${COMBO_SPORT_LABEL[sport]} game`));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
-    const mkt = matchMarket(leg, game);
+    const mkt = matchMarket(leg, game, sport);
     if (!mkt) {
       unmatched.push(unmatchedEntry(leg, `no matching ${leg.market || "market"} on ${game.title || game.key}`));
       rows.push({ gameKey: game.key, marketVal: "" });
