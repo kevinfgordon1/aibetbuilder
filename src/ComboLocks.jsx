@@ -7,7 +7,7 @@
 // last loss / tape clearing price) is derived in comboDesk.js from the same polls.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { mapPromoLegsToKalshi, toDatetimeLocalValue } from "./comboPrefill";
+import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { buildParlayDesk, formatLoss, skipLabel, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
 
@@ -162,15 +162,34 @@ function MatchedRfqTable({ matches, outcomeByRfq, desk }) {
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
 const gTot = (tk, line) => [{ ticker: tk, side: "yes", label: `Over ${line}` }, { ticker: tk, side: "no", label: `Under ${line}` }];
 const gSpr = (tk, fav, dog, line) => [{ ticker: tk, side: "yes", label: `${fav} −${line}` }, { ticker: tk, side: "no", label: `${dog} +${line}` }];
-const sampleGame = (key, ka, kb, A, B) => ({ key, title: `${A} vs ${B}`, date: `${ka} vs ${kb}`, markets: {
-  side: [gSide(`KXMLBGAME-${key}-${ka}`, A), gSide(`KXMLBGAME-${key}-${kb}`, B)],
-  spread: [...gSpr(`KXMLBSPREAD-${key}-${ka}2`, A, B, "1.5"), ...gSpr(`KXMLBSPREAD-${key}-${ka}3`, A, B, "2.5"), ...gSpr(`KXMLBSPREAD-${key}-${kb}2`, B, A, "1.5")],
-  total: [...gTot(`KXMLBTOTAL-${key}-7`, "6.5"), ...gTot(`KXMLBTOTAL-${key}-8`, "7.5"), ...gTot(`KXMLBTOTAL-${key}-9`, "8.5"), ...gTot(`KXMLBTOTAL-${key}-10`, "9.5")] } });
-const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true, sports: { mlb: [
-  sampleGame("26AUG071905PHIATL", "PHI", "ATL", "Philadelphia", "Atlanta"),
-  sampleGame("26AUG071905NYMWSH", "NYM", "WSH", "New York M", "Washington"),
-  sampleGame("26AUG071905NYYBOS", "NYY", "BOS", "New York Y", "Boston") ] } };
-const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt run lines)", total: "Total (alt over/unders)" };
+const sampleGame = (key, ka, kb, A, B, series = { side: "KXMLBGAME", spread: "KXMLBSPREAD", total: "KXMLBTOTAL" }, lines = ["1.5", "2.5"], totals = ["6.5", "7.5", "8.5", "9.5"]) => ({
+  key, title: `${A} vs ${B}`, date: `${ka} vs ${kb}`,
+  markets: {
+    side: [gSide(`${series.side}-${key}-${ka}`, A), gSide(`${series.side}-${key}-${kb}`, B)],
+    spread: [
+      ...gSpr(`${series.spread}-${key}-${ka}2`, A, B, lines[0]),
+      ...(lines[1] ? gSpr(`${series.spread}-${key}-${ka}3`, A, B, lines[1]) : []),
+      ...gSpr(`${series.spread}-${key}-${kb}2`, B, A, lines[0]),
+    ],
+    total: totals.flatMap((line, i) => gTot(`${series.total}-${key}-${Math.floor(Number(line))}`, line)),
+  },
+});
+const NFL_SERIES = { side: "KXNFLGAME", spread: "KXNFLSPREAD", total: "KXNFLTOTAL" };
+const NCAAF_SERIES = { side: "KXNCAAFGAME", spread: "KXNCAAFSPREAD", total: "KXNCAAFTOTAL" };
+const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true, sports: {
+  mlb: [
+    sampleGame("26AUG071905PHIATL", "PHI", "ATL", "Philadelphia", "Atlanta"),
+    sampleGame("26AUG071905NYMWSH", "NYM", "WSH", "New York M", "Washington"),
+    sampleGame("26AUG071905NYYBOS", "NYY", "BOS", "New York Y", "Boston"),
+  ],
+  nfl: [
+    sampleGame("26SEP09NESEA", "NE", "SEA", "New England", "Seattle", NFL_SERIES, ["3.5", "6.5"], ["42.5", "45.5"]),
+  ],
+  ncaaf: [
+    sampleGame("26SEP03MASSRUTG", "MASS", "RUTG", "UMass", "Rutgers", NCAAF_SERIES, ["35.5"], ["49.5", "52.5"]),
+  ],
+} };
+const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)" };
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
 const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false };
@@ -222,13 +241,15 @@ export default function ComboLocks({ user, prefill = null }) {
   const settleInflight = useRef(false);
   const [liveSettlement, setLiveSettlement] = useState({}); // parlay_id -> { result, status, ticker } from Kalshi this session
 
-  const gameIdx = useMemo(() => { const m = {}; (games.sports.mlb || []).forEach((g) => (m[g.key] = g)); return m; }, [games]);
+  const gameList = useMemo(() => flattenComboGames(games.sports), [games]);
+  const gameIdx = useMemo(() => indexComboGames(games.sports), [games]);
   const owner = user && user.email === OWNER_EMAIL;
 
   const loadGames = useCallback(async () => {
     try { const r = await fetch("/api/kalshi-games", { headers: { accept: "application/json" } });
       if (!r.ok) throw 0; const d = await r.json();
-      if (d && d.sports && (d.sports.mlb || []).length) { setGames(d); setSrcLive(true); setGamesReady(true); return; }
+      const n = COMBO_SPORT_ORDER.reduce((acc, s) => acc + ((d.sports && d.sports[s]) || []).length, 0);
+      if (d && d.sports && n) { setGames(d); setSrcLive(true); setGamesReady(true); return; }
     } catch (_) {}
     setGames(SAMPLE); setSrcLive(false); setGamesReady(true);
   }, []);
@@ -354,18 +375,19 @@ export default function ComboLocks({ user, prefill = null }) {
     const nonce = prefill.nonce ?? prefill;
     if (appliedNonceRef.current === nonce) return;
     appliedNonceRef.current = nonce;
-    const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports?.mlb || []);
+    const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports);
     const n = Math.max(rows.length, prefill.legs?.length || 0, 2);
     const next = [];
     for (let i = 0; i < n; i++) {
       const r = rows[i] || { gameKey: "", marketVal: "" };
-      next.push({ id: i + 1, gameKey: r.gameKey || "", marketVal: r.marketVal || "" });
+      const g = r.gameKey ? gameIdx[r.gameKey] : null;
+      next.push({ id: i + 1, gameKey: g ? comboGameId(g) : (r.gameKey || ""), marketVal: r.marketVal || "" });
     }
     setLegRows(next);
     setForm(formFromPrefill(prefill));
     setPrefillWarning(unmatched.length ? unmatched : null);
     requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [prefill, gamesReady, games]);
+  }, [prefill, gamesReady, games, gameIdx]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
   useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
 
@@ -458,11 +480,11 @@ export default function ComboLocks({ user, prefill = null }) {
     }
   };
   const loadExample = () => {
-    const g = games.sports.mlb || [];
+    const g = gameList;
     setLegRows([
-      { id: 1, gameKey: g[0]?.key || "", marketVal: g[0] ? encVal(g[0].markets.side[0].ticker, "yes") : "" },
-      { id: 2, gameKey: g[1]?.key || "", marketVal: g[1] ? encVal(g[1].markets.total[0].ticker, g[1].markets.total[0].side) : "" },
-      { id: 3, gameKey: g[2]?.key || "", marketVal: g[2] ? encVal(g[2].markets.spread[0].ticker, g[2].markets.spread[0].side) : "" },
+      { id: 1, gameKey: g[0] ? comboGameId(g[0]) : "", marketVal: g[0] ? encVal(g[0].markets.side[0].ticker, "yes") : "" },
+      { id: 2, gameKey: g[1] ? comboGameId(g[1]) : "", marketVal: g[1]?.markets.total[0] ? encVal(g[1].markets.total[0].ticker, g[1].markets.total[0].side) : "" },
+      { id: 3, gameKey: g[2] ? comboGameId(g[2]) : "", marketVal: g[2]?.markets.spread[0] ? encVal(g[2].markets.spread[0].ticker, g[2].markets.spread[0].side) : "" },
     ]);
     setForm({ ...DEFAULT_FORM });
   };
@@ -599,11 +621,11 @@ export default function ComboLocks({ user, prefill = null }) {
           <h3>Add a parlay</h3>
           <div className="card">
             {prefill && !gamesReady && (
-              <div className="note warn" style={{ marginBottom: 12 }}>Matching Promo Builder legs to live Kalshi MLB games…</div>
+              <div className="note warn" style={{ marginBottom: 12 }}>Matching Promo Builder legs to live Kalshi games…</div>
             )}
             {prefillWarning && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
-                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB only today). Fill those rows by hand, then save — nothing has been inserted yet.
+                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF main lines). Fill those rows by hand, then save — nothing has been inserted yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
                 </ul>
@@ -615,7 +637,7 @@ export default function ComboLocks({ user, prefill = null }) {
                 <div><label>Game</label>
                   <select value={r.gameKey} onChange={(e) => setLeg(r.id, { gameKey: e.target.value, marketVal: "" })}>
                     <option value="">— game —</option>
-                    {(games.sports.mlb || []).map((g) => <option key={g.key} value={g.key}>{g.title}{g.date ? " · " + g.date : ""}</option>)}
+                    {gameList.map((g) => <option key={comboGameId(g)} value={comboGameId(g)}>{formatGameOption(g)}</option>)}
                   </select></div>
                 <div><label>Market</label>
                   <select value={r.marketVal} onChange={(e) => setLeg(r.id, { marketVal: e.target.value })}>
