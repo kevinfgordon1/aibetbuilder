@@ -355,6 +355,16 @@ function DaysAwayWarning({ commence_time }) {
   return <span style={{ color: "#ef4444", fontWeight: 700 }}> — {d} {d === 1 ? "day" : "days"} away</span>;
 }
 
+// ET start line on promo chips and expanded LEG cells — same format for every N.
+function PromoLegStartTime({ commence_time }) {
+  return (
+    <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>
+      {formatET(commence_time)}
+      <DaysAwayWarning commence_time={commence_time} />
+    </div>
+  );
+}
+
 // Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
 // (dec-1)*100 alone silently prints favorites as plus-money, e.g. 1.87 -> "+87" not "-115".
 function decimalToAmerican(dec) {
@@ -602,6 +612,7 @@ function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFina
       let best = null;
       for (const cand of legs) {
         if (usedGames.has(cand.game)) continue;
+        // Concat the original candidate — do not slim it (commence_time must survive).
         const nextLegs = current.legs.concat(cand);
         const r = calc(nextLegs);
         if (!best || r.ev > best.ev) best = { legs: nextLegs, ...r };
@@ -1187,6 +1198,93 @@ function ExcludeLegButton({ leg, onExclude }) {
     >
       ×
     </button>
+  );
+}
+
+function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
+  if (legs.length > 3) {
+    return (
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        {(isExpanded ? legs : legs.slice(0, 3)).map((l, li) => (
+          <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 6px 5px 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>{l.name}</span>
+              <span style={{ fontSize: 10, color: "#6b7280" }}>{l.market}</span>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+              <ExcludeLegButton leg={l} onExclude={onExclude} />
+            </div>
+            <PromoLegStartTime commence_time={l.commence_time} />
+          </div>
+        ))}
+        {!isExpanded && legs.length > 3 && (
+          <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: "#93c5fd" }}>
+            +{legs.length - 3} more
+          </div>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+      {legs.map((l, li) => (
+        <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 10px 8px 14px", flex: 1, minWidth: 150 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
+            <ExcludeLegButton leg={l} onExclude={onExclude} />
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
+            <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
+          </div>
+          <PromoLegStartTime commence_time={l.commence_time} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption }) {
+  return (
+    <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
+        <div>Leg</div>
+        <div style={{ textAlign: "center" }}>True Win Prob (best opp)</div>
+        <div style={{ textAlign: "center" }}>{bookLabel} Odds</div>
+        <div style={{ textAlign: "center" }}>Edge</div>
+      </div>
+      {legs.map((l, li) => {
+        const tp = ourTrueProb(l.bestOpp);
+        const bookImpl = impliedProb(l.dk);
+        const edge = tp - bookImpl;
+        const tpAm = probToAmerican(tp);
+        const adjustmentNote = ADJUSTED_BOOK_NOTES[l.bestOppBook] || null;
+        return (
+          <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
+              <PromoLegStartTime commence_time={l.commence_time} />
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
+                {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
+              </div>
+              {l.bestOppBook && (
+                <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                  {formatOdds(l.bestOpp)} on {ALL_BOOKS.find(x => x.key === l.bestOppBook)?.label || l.bestOppBook}
+                  {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
+                </div>
+              )}
+            </div>
+            <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: edge >= 0 ? "#10b981" : "#ef4444" }}>{edge >= 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
+              {edgeCaption && <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>{edgeCaption}</div>}
+            </div>
+          </div>
+        );
+      })}
+      {footer}
+    </div>
   );
 }
 
@@ -1948,39 +2046,7 @@ export default function App() {
                             </div>
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: p.ev > 0 ? "#10b981" : "#ef4444" }}>+${p.ev.toFixed(2)} EV</div>
                           </div>
-                          {p.legs.length > 3 ? (
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-                              {(isExpanded ? p.legs : p.legs.slice(0, 3)).map((l, li) => (
-                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 6px 5px 10px", display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontSize: 12, fontWeight: 600 }}>{l.name}</span>
-                                  <span style={{ fontSize: 10, color: "#6b7280" }}>{l.market}</span>
-                                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
-                                  <ExcludeLegButton leg={l} onExclude={excludePromoLeg} />
-                                </div>
-                              ))}
-                              {!isExpanded && p.legs.length > 3 && (
-                                <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: "#93c5fd" }}>
-                                  +{p.legs.length - 3} more
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                              {p.legs.map((l, li) => (
-                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 10px 8px 14px", flex: 1, minWidth: 150 }}>
-                                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
-                                    <ExcludeLegButton leg={l} onExclude={excludePromoLeg} />
-                                  </div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                                    <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
-                                  </div>
-                                  <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}<DaysAwayWarning commence_time={l.commence_time} /></div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          <PromoParlayLegChips legs={p.legs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
@@ -2010,55 +2076,26 @@ export default function App() {
                         {isExpanded && (
                           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
                             onClick={e => e.stopPropagation()}>
-                            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-                              <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
-                                <div>Leg</div>
-                                <div style={{ textAlign: "center" }}>True Win Prob (best opp)</div>
-                                <div style={{ textAlign: "center" }}>{activePromoBookData.label} Odds</div>
-                                <div style={{ textAlign: "center" }}>Edge</div>
-                              </div>
-                              {p.legs.map((l, li) => {
-                                const tp = ourTrueProb(l.bestOpp);
-                                const bookImpl = impliedProb(l.dk);
-                                const edge = tp - bookImpl;
-                                const tpAm = probToAmerican(tp);
-                                const adjustmentNote = getAdjustmentNote(l.bestOppBook);
-                                return (
-                                  <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < p.legs.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{l.name}</div>
-                                    <div style={{ textAlign: "center" }}>
-                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
-                                        {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
-                                      </div>
-                                      {l.bestOppBook && (
-                                        <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
-                                          {formatOdds(l.bestOpp)} on {getBookLabel(l.bestOppBook)}
-                                          {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
-                                    <div style={{ textAlign: "center" }}>
-                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: edge >= 0 ? "#10b981" : "#ef4444" }}>{edge >= 0 ? "+" : ""}{(edge * 100).toFixed(1)}%</div>
-                                      <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>(without boost)</div>
-                                    </div>
+                            <PromoExpandedLegsTable
+                              legs={p.legs}
+                              bookLabel={activePromoBookData.label}
+                              edgeCaption="(without boost)"
+                              footer={
+                                <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
+                                    {isSingle ? "Total" : "Parlay Total"} <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>
                                   </div>
-                                );
-                              })}
-                              <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
-                                  {isSingle ? "Total" : "Parlay Total"} <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>
+                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
+                                    {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                                  </div>
+                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>+{p.parlayOdds}</div>
+                                  <div style={{ textAlign: "center" }}>
+                                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: p.ev >= 0 ? "#10b981" : "#ef4444" }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
+                                    <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>(with boost)</div>
+                                  </div>
                                 </div>
-                                <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                  {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
-                                </div>
-                                <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>+{p.parlayOdds}</div>
-                                <div style={{ textAlign: "center" }}>
-                                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: p.ev >= 0 ? "#10b981" : "#ef4444" }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
-                                  <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>(with boost)</div>
-                                </div>
-                              </div>
-                            </div>
+                              }
+                            />
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                               <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * p.combinedProb).toFixed(2)}</strong></div>
                               <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - p.combinedProb)).toFixed(2)}</strong></div>
@@ -2129,39 +2166,7 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                          {p.legs.length > 3 ? (
-                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-                              {(isExpanded ? p.legs : p.legs.slice(0, 3)).map((l, li) => (
-                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "5px 6px 5px 10px", display: "flex", alignItems: "center", gap: 8 }}>
-                                  <span style={{ fontSize: 12, fontWeight: 600 }}>{l.name}</span>
-                                  <span style={{ fontSize: 10, color: "#6b7280" }}>{l.market}</span>
-                                  <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
-                                  <ExcludeLegButton leg={l} onExclude={excludePromoLeg} />
-                                </div>
-                              ))}
-                              {!isExpanded && p.legs.length > 3 && (
-                                <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: "#93c5fd" }}>
-                                  +{p.legs.length - 3} more
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-                              {p.legs.map((l, li) => (
-                                <div key={li} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "8px 10px 8px 14px", flex: 1, minWidth: 150 }}>
-                                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600 }}>{l.name}</div>
-                                    <ExcludeLegButton leg={l} onExclude={excludePromoLeg} />
-                                  </div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-                                    <span style={{ fontSize: 11, color: "#6b7280" }}>{l.market}</span>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
-                                  </div>
-                                  <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(l.commence_time)}<DaysAwayWarning commence_time={l.commence_time} /></div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          <PromoParlayLegChips legs={p.legs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
@@ -2252,6 +2257,20 @@ export default function App() {
                               </>
                             ) : (
                               <>
+                                <PromoExpandedLegsTable
+                                  legs={p.legs}
+                                  bookLabel={activePromoBookData.label}
+                                  footer={
+                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
+                                      <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{isSingle ? "Total" : "Parlay Total"}</div>
+                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
+                                        {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                                      </div>
+                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</div>
+                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
+                                    </div>
+                                  }
+                                />
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                                   <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * p.combinedProb).toFixed(2)}</strong></div>
                                   <div>Lose → <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash <span style={{ color: "#6b7280" }}>(net {p.loseNet >= 0 ? "+" : "−"}${Math.abs(p.loseNet).toFixed(0)})</span> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>{p.loseNet * (1 - p.combinedProb) >= 0 ? "+" : "−"}${Math.abs(p.loseNet * (1 - p.combinedProb)).toFixed(2)}</strong></div>
