@@ -719,9 +719,11 @@ export function mapUnhedgedRow(row, index = 0) {
   const at = rowTime(row);
   const venueRaw = pickFirst(row, VENUE_KEYS);
   const status = rowStatus(row);
+  const filledAt = row && (row.filled_at || row.filledAt);
   return {
     id: (row && (row.id || row.rfq_id)) || `row-${index}`,
     at,
+    filledAt: filledAt || null,
     timeEt: formatEtTime(at),
     venue: formatVenue(venueRaw),
     venueKey: venueKey(venueRaw),
@@ -740,8 +742,20 @@ export function mapUnhedgedRow(row, index = 0) {
   };
 }
 
+function fillTimeMs(row) {
+  return timeMs(row && (row.filledAt || row.filled_at));
+}
+
+// Filled first (recency of fill), then created/seen time. Do not invent a fill.
 export function sortUnhedgedRows(rows) {
-  return [...(rows || [])].sort((a, b) => timeMs(b.at) - timeMs(a.at) || String(b.id).localeCompare(String(a.id)));
+  return [...(rows || [])].sort((a, b) => {
+    const aFilled = a && a.status === "filled" ? 1 : 0;
+    const bFilled = b && b.status === "filled" ? 1 : 0;
+    if (bFilled !== aFilled) return bFilled - aFilled;
+    const byFill = fillTimeMs(b) - fillTimeMs(a);
+    if (byFill) return byFill;
+    return timeMs(b.at) - timeMs(a.at) || String(b.id).localeCompare(String(a.id));
+  });
 }
 
 export function mapUnhedgedRows(rows) {
@@ -782,42 +796,84 @@ export function isMissingUserIdColumn(error) {
   );
 }
 
-async function runSelect(client, { userId, limit }) {
+export function isMissingFilledAtColumn(error) {
+  if (!error) return false;
+  const code = String(error.code || "");
+  const msg = errorText(error);
+  if (!msg.includes("filled_at")) return false;
+  return (
+    code === "42703"
+    || code === "PGRST204"
+    || msg.includes("does not exist")
+    || msg.includes("not find")
+    || msg.includes("unknown")
+  );
+}
+
+async function runSelect(client, { userId, limit, orderByFilledAt = true }) {
   let q = client.from(UNHEDGED_TABLE).select("*");
   if (userId) q = q.eq("user_id", userId);
-  if (typeof q.order === "function") q = q.order("created_at", { ascending: false });
+  if (typeof q.order === "function") {
+    // Filled rows are UPDATEd in place; created_at stays the first-sight insert.
+    // Order fill recency first (nulls last) so status=filled is not buried
+    // under thousands of newer seen rows, then created_at, then limit.
+    if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
+    q = q.order("created_at", { ascending: false });
+  }
   if (typeof q.limit === "function") q = q.limit(limit);
   return q;
 }
 
+function classifySelectError(error, { userId, orderByFilledAt }) {
+  if (!error) return null;
+  // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
+  // matches the table-missing message fallback.
+  if (userId && isMissingUserIdColumn(error)) return "missing_user_id";
+  if (orderByFilledAt && isMissingFilledAtColumn(error)) return "missing_filled_at";
+  if (isMissingTableError(error)) return "missing_table";
+  return "other";
+}
+
 // Select * for the signed-in user when user_id exists on the table; otherwise
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
+// If filled_at is not in the schema cache (PGRST204), retry created_at only.
 export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" } };
   }
-  let result;
-  try {
-    result = await runSelect(client, { userId, limit });
-  } catch (err) {
-    if (isMissingTableError(err)) return { rows: [], missingTable: true, error: err };
-    return { rows: [], missingTable: false, error: err };
-  }
-  let error = result && result.error;
-  let data = result && result.data;
-  if (error && userId && isMissingUserIdColumn(error)) {
+  let scopedUserId = userId;
+  let orderByFilledAt = true;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let result;
     try {
-      result = await runSelect(client, { userId: null, limit });
+      result = await runSelect(client, { userId: scopedUserId, limit, orderByFilledAt });
     } catch (err) {
-      if (isMissingTableError(err)) return { rows: [], missingTable: true, error: err };
+      const kind = classifySelectError(err, { userId: scopedUserId, orderByFilledAt });
+      if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
+      if (kind === "missing_user_id") {
+        scopedUserId = null;
+        continue;
+      }
+      if (kind === "missing_filled_at") {
+        orderByFilledAt = false;
+        continue;
+      }
       return { rows: [], missingTable: false, error: err };
     }
-    error = result && result.error;
-    data = result && result.data;
+    const error = result && result.error;
+    const data = result && result.data;
+    const kind = classifySelectError(error, { userId: scopedUserId, orderByFilledAt });
+    if (kind === "missing_table") return { rows: [], missingTable: true, error };
+    if (kind === "missing_user_id") {
+      scopedUserId = null;
+      continue;
+    }
+    if (kind === "missing_filled_at") {
+      orderByFilledAt = false;
+      continue;
+    }
+    if (error) return { rows: [], missingTable: false, error };
+    return { rows: Array.isArray(data) ? data : [], missingTable: false, error: null };
   }
-  if (error && isMissingTableError(error)) {
-    return { rows: [], missingTable: true, error };
-  }
-  if (error) return { rows: [], missingTable: false, error };
-  return { rows: Array.isArray(data) ? data : [], missingTable: false, error: null };
+  return { rows: [], missingTable: false, error: { message: "retries exhausted" } };
 }

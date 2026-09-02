@@ -91,8 +91,8 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
           <Tile
             k="Fetched"
             v={summary.fetched}
-            sub={`newest ${UNHEDGED_LIMIT}`}
-            title="Rows in this newest-first fetch before the MLB/NFL moneyline filter."
+            sub={`last ${UNHEDGED_LIMIT}`}
+            title="Rows in this fetch (filled_at then created_at) before the MLB/NFL moneyline filter."
           />
           <Tile
             k="Shown"
@@ -177,7 +177,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
         )}
         {loaded && summary.fetched >= UNHEDGED_LIMIT && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Showing MLB and NFL moneylines from the newest {UNHEDGED_LIMIT} fetched (newest first). Older rows are not polled.
+            Showing MLB and NFL moneylines from the last {UNHEDGED_LIMIT} fetched (filled first). Older rows are not polled.
           </div>
         )}
       </div>
