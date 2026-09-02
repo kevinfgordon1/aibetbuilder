@@ -8,6 +8,8 @@ import {
   americanFromProb,
   coerceAmerican,
   fetchUnhedgedRfqs,
+  resolveUnhedgedLimit,
+  unhedgedRefreshLabel,
   filterUnhedgedAnalytics,
   filterUnhedgedRowsByQuoteBeat,
   filterUnhedgedRowsByVenue,
@@ -723,7 +725,7 @@ assert.equal(
   assert.equal(shown.some((r) => r.id === "seen" || r.status === "seen"), false);
 }
 
-// ── Venue filter (client chips; fetch stays filled-only 400) ──
+// ── Venue filter (client chips; fetch stays filled-only 1000) ──
 assert.equal(normalizeVenueFilter("all"), "all");
 assert.equal(normalizeVenueFilter("Kalshi"), "kalshi");
 assert.equal(normalizeVenueFilter("poly"), "polymarket");
@@ -945,8 +947,35 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(hasEq(client.calls[0], "user_id", "u1"), false);
   assertStatusFilledEq(client.calls[0]);
   assert.equal(client.calls[0].limit, UNHEDGED_LIMIT);
-  assert.equal(UNHEDGED_LIMIT, 400);
+  assert.equal(UNHEDGED_LIMIT, 1000);
+  assert.equal(resolveUnhedgedLimit(), 1000);
+  assert.equal(resolveUnhedgedLimit(null), 1000);
+  assert.equal(resolveUnhedgedLimit(50), 50);
+  assert.equal(resolveUnhedgedLimit(5000), 1000);
   assertFilledThenCreatedBeforeLimit(client.calls[0]);
+}
+
+// ── Refresh re-fetches the same filled query (limit 1000, newest fill first) ──
+{
+  const first = [{ id: "old", status: "filled", fill_american: -110 }];
+  const second = [{ id: "new", status: "filled", fill_american: 200 }];
+  const client = createSequenceClient([
+    { data: first, error: null },
+    { data: second, error: null },
+  ]);
+  const a = await fetchUnhedgedRfqs(client, { userId: "u1" });
+  const b = await fetchUnhedgedRfqs(client, { userId: "u1" });
+  assert.deepEqual(a.rows.map((r) => r.id), ["old"]);
+  assert.deepEqual(b.rows.map((r) => r.id), ["new"]);
+  assert.equal(client.calls.length, 2);
+  assert.equal(client.calls[0].limit, 1000);
+  assert.equal(client.calls[1].limit, 1000);
+  assertStatusFilledEq(client.calls[0]);
+  assertStatusFilledEq(client.calls[1]);
+  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledThenCreatedBeforeLimit(client.calls[1]);
+  assert.equal(unhedgedRefreshLabel(false), "Refresh");
+  assert.equal(unhedgedRefreshLabel(true), "Refreshing…");
 }
 
 // ── Seen rows from the wire are dropped even if the query leaked them ──
@@ -1110,8 +1139,13 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /label: "Polymarket"/);
   assert.match(page, /venueFilter/);
   assert.match(page, /quoteBeatFill/);
+  assert.match(page, /unhedgedRefreshLabel/);
+  assert.match(page, /onRefresh/);
+  assert.match(page, /reload\(\{ button: true \}\)/);
+  assert.match(page, /limit: UNHEDGED_LIMIT/);
   assert.doesNotMatch(page, /Would-quote \/ Fair/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
+  assert.doesNotMatch(page, /location\.reload|window\.location/);
   assert.doesNotMatch(page, /onSubmit|postQuote|createQuote|type="submit"/);
   assert.doesNotMatch(page, /className="cl"/);
   assert.doesNotMatch(page, /combo_parlays|combo_submissions|combo_fills/);

@@ -3,7 +3,7 @@
 // incrementally; pick known aliases and never invent a price.
 //
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
-// Fetch status=eq.filled, order filled_at desc, limit 400. If the status
+// Fetch status=eq.filled, order filled_at desc, limit 1000. If the status
 // filter fails, client-filter filled as fallback. Do not list
 // seen / started / would_quote. Venue and would-quote-beat-fill are
 // client chips over that window — they do not change the query.
@@ -19,7 +19,7 @@
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
-export const UNHEDGED_LIMIT = 400;
+export const UNHEDGED_LIMIT = 1000;
 export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
 export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
 
@@ -863,7 +863,19 @@ export function filterUnhedgedRowsByQuoteBeat(rows, beatOnly = false) {
 }
 
 // Client analytics over already-visible (filled MLB/NFL) rows. Fetch stays
-// filled-only 400 — these chips do not change the query.
+// filled-only 1000 — these chips do not change the query.
+
+export function resolveUnhedgedLimit(limit) {
+  if (limit == null || limit === "") return UNHEDGED_LIMIT;
+  const n = toNum(limit);
+  if (n == null || n <= 0) return UNHEDGED_LIMIT;
+  return Math.min(Math.floor(n), UNHEDGED_LIMIT);
+}
+
+export function unhedgedRefreshLabel(refreshing) {
+  return refreshing ? "Refreshing…" : "Refresh";
+}
+
 export function filterUnhedgedAnalytics(rows, { venue = "all", quoteBeatFill = false } = {}) {
   return filterUnhedgedRowsByQuoteBeat(filterUnhedgedRowsByVenue(rows, venue), quoteBeatFill);
 }
@@ -956,7 +968,7 @@ async function runSelect(client, { userId, limit, orderByFilledAt = true, filter
   if (userId) q = q.eq("user_id", userId);
   if (filterStatus) q = q.eq("status", "filled");
   if (typeof q.order === "function") {
-    // Filled-only: newest fill first so the 400-row window is not wasted on seen.
+    // Filled-only: newest fill first so the 1000-row window is not wasted on seen.
     if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
     q = q.order("created_at", { ascending: false });
   }
@@ -982,20 +994,21 @@ function finalizeFetchedRows(data) {
 
 // Select * for the signed-in user when user_id exists on the table; otherwise
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
-// status=eq.filled first so the 400-row window is fills. If that filter fails
+// status=eq.filled first so the 1000-row window is fills. If that filter fails
 // (missing status column), retry without it and client-filter filled.
 // If filled_at is not in the schema cache (PGRST204), retry created_at only.
 export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" } };
   }
+  const rowLimit = resolveUnhedgedLimit(limit);
   let scopedUserId = userId;
   let orderByFilledAt = true;
   let filterStatus = true;
   for (let attempt = 0; attempt < 8; attempt++) {
     let result;
     try {
-      result = await runSelect(client, { userId: scopedUserId, limit, orderByFilledAt, filterStatus });
+      result = await runSelect(client, { userId: scopedUserId, limit: rowLimit, orderByFilledAt, filterStatus });
     } catch (err) {
       const kind = classifySelectError(err, { userId: scopedUserId, orderByFilledAt, filterStatus });
       if (kind === "missing_table") return { rows: [], missingTable: true, error: err };

@@ -2,7 +2,7 @@
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
 // Summary + tape are MLB and NFL moneylines only. Venue and
-// would-quote-beat-fill chips are client-side over the filled 400.
+// would-quote-beat-fill chips are client-side over the filled 1000.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
@@ -12,6 +12,7 @@ import {
   filterUnhedgedAnalytics,
   isTickerBlob,
   summarizeUnhedgedRows,
+  unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
 
@@ -57,7 +58,7 @@ function Tile({ k, v, sub, tone, title }) {
   );
 }
 
-export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) {
+export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, onRefresh, refreshing }) {
   const list = rows || [];
   const [venueFilter, setVenueFilter] = useState("all");
   const [quoteBeatFill, setQuoteBeatFill] = useState(false);
@@ -81,6 +82,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
         .uh .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .uh .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
         .uh .chip.btn{cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font:inherit;font-size:12px;font-weight:600}
+        .uh .chip.btn:disabled{opacity:.55;cursor:wait}
         .uh .chip.btn.on{background:rgba(59,130,246,.2);color:#93c5fd;border-color:rgba(59,130,246,.35)}
         .uh .chip.btn.venue-kalshi.on{background:rgba(6,182,212,.2);color:#67e8f9;border-color:rgba(6,182,212,.35)}
         .uh .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
@@ -108,6 +110,18 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
         {loaded && !missingTable && (
           <span className="chip ok num">{summary.filled} filled</span>
         )}
+        {onRefresh ? (
+          <button
+            type="button"
+            className="chip btn"
+            disabled={!!refreshing || !loaded}
+            aria-busy={!!refreshing}
+            title="Re-fetch the filled tape. Does not reload the app."
+            onClick={onRefresh}
+          >
+            {unhedgedRefreshLabel(refreshing)}
+          </button>
+        ) : null}
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
         Filled RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only. No quoting from this page.
@@ -226,14 +240,20 @@ export default function UnhedgedTape({ user }) {
   const [missingTable, setMissingTable] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async ({ button } = {}) => {
     if (!owner) return;
-    const result = await fetchUnhedgedRfqs(supabase, { userId: user && user.id, limit: UNHEDGED_LIMIT });
-    setRaw(result.rows);
-    setMissingTable(result.missingTable);
-    setError(result.error);
-    setLoaded(true);
+    if (button) setRefreshing(true);
+    try {
+      const result = await fetchUnhedgedRfqs(supabase, { userId: user && user.id, limit: UNHEDGED_LIMIT });
+      setRaw(result.rows);
+      setMissingTable(result.missingTable);
+      setError(result.error);
+      setLoaded(true);
+    } finally {
+      if (button) setRefreshing(false);
+    }
   }, [owner, user]);
 
   useEffect(() => { reload(); }, [reload]);
@@ -254,6 +274,8 @@ export default function UnhedgedTape({ user }) {
       missingTable={missingTable}
       loaded={loaded}
       error={error}
+      onRefresh={() => { reload({ button: true }); }}
+      refreshing={refreshing}
     />
   );
 }
