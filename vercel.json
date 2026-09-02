@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/fetch-odds",
-      "schedule": "*/10 11-23 * * *"
+      "schedule": "*/5 11-23 * * *"
     },
     {
       "path": "/api/fetch-odds",
-      "schedule": "*/10 0-6 * * *"
+      "schedule": "*/5 0-6 * * *"
     },
     {
       "path": "/api/fetch-odds",
