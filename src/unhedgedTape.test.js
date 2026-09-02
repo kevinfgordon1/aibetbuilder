@@ -15,11 +15,14 @@ import {
   isMissingUserIdColumn,
   filterMlbNflMoneylineRows,
   isMlbNflMoneylineRow,
+  formatUnhedgedLegText,
   mapUnhedgedRow,
   mapUnhedgedRows,
   normalizeStatus,
+  parseKalshiGameTicker,
   rowStatus,
   summarizeUnhedgedRows,
+  teamShortName,
 } from "./unhedgedTape.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -81,8 +84,10 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.timeEt, "Sep 2, 12:30 PM ET");
   assert.equal(row.venue, "Kalshi");
   assert.equal(row.venueKey, "kalshi");
-  assert.equal(row.label, "NYY / BOS");
+  assert.equal(row.label, "Yankees ML · Red Sox ML");
   assert.equal(row.legs.length, 2);
+  assert.equal(row.legs[0].text, "Yankees ML");
+  assert.equal(row.legs[1].text, "Red Sox ML");
   assert.equal(row.contractsText, "40");
   assert.equal(row.theirText, "+900");
   assert.equal(row.ourText, "+850");
@@ -147,7 +152,9 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.ourText, "+178");
   assert.equal(row.theirAmerican, 190);
   assert.equal(row.fillText, "—");
-  assert.equal(row.legs[0].text, "atl");
+  assert.equal(row.legs[0].text, "Braves ML");
+  assert.equal(row.label, "Braves ML");
+  assert.doesNotMatch(row.label, /KXMLBGAME|ATLWSH/);
 }
 
 {
@@ -160,6 +167,68 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.statusTone, "ok");
   assert.equal(row.fillAmerican, 355);
   assert.equal(row.fillText, "+355");
+}
+
+// ── Human MLB/NFL moneyline legs (not Kalshi tickers) ──
+assert.equal(teamShortName("WSH", "mlb"), "Nats");
+assert.equal(teamShortName("WAS", "mlb"), "Nats");
+assert.equal(teamShortName("TEX", "mlb"), "Rangers");
+assert.equal(teamShortName("COL", "mlb"), "Rockies");
+assert.equal(teamShortName("BOS", "mlb"), "Red Sox");
+assert.equal(teamShortName("PIT", "mlb"), "Pirates");
+assert.equal(teamShortName("SEA", "nfl"), "Seahawks");
+assert.equal(parseKalshiGameTicker("KXMLBGAME-26SEP021510BALCOL-COL").teamCode, "COL");
+assert.equal(formatUnhedgedLegText({
+  league: "mlb",
+  ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+  selection: "col",
+  side: "yes",
+  teams: ["bal", "col"],
+}), "Rockies ML");
+assert.equal(formatUnhedgedLegText({
+  league: "mlb",
+  ticker: "KXMLBGAME-26SEP021305ATLWSH-WSH",
+  selection: "was",
+  side: "yes",
+  teams: ["atl", "was"],
+}), "Nats ML");
+assert.equal(formatUnhedgedLegText({
+  league: "mlb",
+  ticker: "KXMLBGAME-26SEP021510BALCOL-COL:no",
+  side: "no",
+  teams: ["bal", "col"],
+}), "Orioles ML");
+assert.equal(formatUnhedgedLegText({
+  league: "mlb",
+  selection: "col",
+  side: "no",
+}), "Rockies lose");
+assert.equal(formatUnhedgedLegText({
+  league: "nfl",
+  ticker: "KXNFLGAME-26SEP09NESEA-SEA",
+  selection: "sea",
+  side: "yes",
+  teams: ["ne", "sea"],
+}), "Seahawks ML");
+assert.equal(formatUnhedgedLegText({
+  league: "nfl",
+  symbol: "aec-nfl-ne-sea-2026-09-09",
+  selection: "ne",
+  side: "yes",
+  teams: ["ne", "sea"],
+}), "Patriots ML");
+{
+  const row = mapUnhedgedRow({
+    id: "parlay",
+    legs: [
+      { league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-WSH", selection: "was", side: "yes", teams: ["atl", "was"] },
+      { league: "mlb", ticker: "KXMLBGAME-26SEP021435ATHTEX-TEX", selection: "tex", side: "yes", teams: ["ath", "tex"] },
+      { league: "mlb", ticker: "KXMLBGAME-26SEP021510BALCOL-COL", selection: "col", side: "yes", teams: ["bal", "col"] },
+    ],
+  });
+  assert.equal(row.label, "Nats ML · Rangers ML · Rockies ML");
+  assert.equal(row.legs.map((l) => l.text).join(" · "), "Nats ML · Rangers ML · Rockies ML");
+  assert.doesNotMatch(JSON.stringify(row.legs), /KXMLBGAME|KXNFLGAME/);
 }
 
 // ── MLB / NFL moneyline filter (hide ncaaf; spreads out) ──
@@ -360,6 +429,7 @@ function assertOrderBeforeLimit(call) {
   assert.match(page, /This tab is private/);
   assert.match(page, /Time ET/);
   assert.match(page, /Would-quote/);
+  assert.match(page, /\{r\.label\}/);
   assert.match(page, /MLB and NFL moneyline/);
   assert.match(page, /we are paper/);
   assert.match(page, /is-filled/);

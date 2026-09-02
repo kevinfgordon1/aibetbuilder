@@ -57,6 +57,78 @@ const NON_ML_MARKET = /\b(spread|run[_ -]?line|total|over_under|\bou\b|prop|prop
 const ML_TYPE = /^(ml|moneyline|h2h|game)$/i;
 const GAME_ML_ID = /kx(mlb|nfl)game-|aec-(mlb|nfl)-/i;
 
+// Common short names Kevin would say. WAS/WSH → Nats (MLB) / Commanders (NFL).
+const MLB_SHORT = {
+  ARI: "D-backs", AZ: "D-backs",
+  ATL: "Braves",
+  BAL: "Orioles",
+  BOS: "Red Sox",
+  CHC: "Cubs",
+  CWS: "White Sox", CHW: "White Sox",
+  CIN: "Reds",
+  CLE: "Guardians",
+  COL: "Rockies",
+  DET: "Tigers",
+  HOU: "Astros",
+  KC: "Royals", KCR: "Royals",
+  LAA: "Angels",
+  LAD: "Dodgers",
+  MIA: "Marlins",
+  MIL: "Brewers",
+  MIN: "Twins",
+  NYM: "Mets",
+  NYY: "Yankees",
+  ATH: "A's", OAK: "A's",
+  PHI: "Phillies",
+  PIT: "Pirates",
+  SD: "Padres", SDP: "Padres",
+  SF: "Giants", SFG: "Giants",
+  SEA: "Mariners",
+  STL: "Cardinals",
+  TB: "Rays", TBR: "Rays",
+  TEX: "Rangers",
+  TOR: "Jays",
+  WSH: "Nats", WAS: "Nats",
+};
+const NFL_SHORT = {
+  ARI: "Cardinals",
+  ATL: "Falcons",
+  BAL: "Ravens",
+  BUF: "Bills",
+  CAR: "Panthers",
+  CHI: "Bears",
+  CIN: "Bengals",
+  CLE: "Browns",
+  DAL: "Cowboys",
+  DEN: "Broncos",
+  DET: "Lions",
+  GB: "Packers", GNB: "Packers",
+  HOU: "Texans",
+  IND: "Colts",
+  JAC: "Jaguars", JAX: "Jaguars",
+  KC: "Chiefs",
+  LAC: "Chargers",
+  LAR: "Rams",
+  LV: "Raiders", LVR: "Raiders",
+  MIA: "Dolphins",
+  MIN: "Vikings",
+  NE: "Patriots", NWE: "Patriots",
+  NO: "Saints", NOR: "Saints",
+  NYG: "Giants",
+  NYJ: "Jets",
+  PHI: "Eagles",
+  PIT: "Steelers",
+  SEA: "Seahawks",
+  SF: "49ers", SFO: "49ers",
+  TB: "Bucs", TAM: "Bucs",
+  TEN: "Titans",
+  WAS: "Commanders", WSH: "Commanders",
+};
+const MLB_TWO = new Set(["AZ", "KC", "SD", "SF", "TB"]);
+const NFL_TWO = new Set(["GB", "KC", "LV", "NE", "NO", "SF", "TB"]);
+const MLB_ALIAS = { AZ: "ARI", CHW: "CWS", KCR: "KC", OAK: "ATH", SDP: "SD", SFG: "SF", TBR: "TB", WAS: "WSH" };
+const NFL_ALIAS = { GNB: "GB", JAX: "JAC", LVR: "LV", NOR: "NO", NWE: "NE", SFO: "SF", TAM: "TB", WSH: "WAS" };
+
 export function toNum(v) {
   if (v == null || v === "") return null;
   const n = typeof v === "string" ? parseFloat(v) : Number(v);
@@ -147,21 +219,181 @@ export function formatVenue(value) {
   return String(value).trim();
 }
 
-function legChip(leg) {
+export function looksLikeGameTicker(value) {
+  const s = String(value == null ? "" : value).trim();
+  return /kx(mlb|nfl)game-/i.test(s) || /aec-(mlb|nfl)-/i.test(s);
+}
+
+export function isTeamCode(value) {
+  return /^[A-Za-z]{2,3}$/.test(String(value == null ? "" : value).trim());
+}
+
+export function canonicalTeamCode(code, league) {
+  const c = String(code == null ? "" : code).trim().toUpperCase();
+  if (!c) return "";
+  if (league === "nfl") return NFL_ALIAS[c] || c;
+  if (league === "mlb") return MLB_ALIAS[c] || c;
+  return MLB_ALIAS[c] || NFL_ALIAS[c] || c;
+}
+
+export function teamShortName(code, league) {
+  const raw = String(code == null ? "" : code).trim().toUpperCase();
+  if (!raw) return "";
+  const canon = canonicalTeamCode(raw, league);
+  if (league === "mlb") return MLB_SHORT[canon] || MLB_SHORT[raw] || "";
+  if (league === "nfl") return NFL_SHORT[canon] || NFL_SHORT[raw] || "";
+  const mlb = MLB_SHORT[canon] || MLB_SHORT[raw] || "";
+  const nfl = NFL_SHORT[canon] || NFL_SHORT[raw] || "";
+  if (mlb && nfl && mlb !== nfl) return "";
+  return mlb || nfl || "";
+}
+
+function splitPackedTeams(rest, league) {
+  const token = String(rest || "").toUpperCase();
+  const two = league === "nfl" ? NFL_TWO : MLB_TWO;
+  if (token.length === 6) return [token.slice(0, 3), token.slice(3)];
+  if (token.length === 4) return [token.slice(0, 2), token.slice(2)];
+  if (token.length === 5) {
+    if (two.has(token.slice(0, 2))) return [token.slice(0, 2), token.slice(2)];
+    if (two.has(token.slice(-2))) return [token.slice(0, 3), token.slice(3)];
+  }
+  return [];
+}
+
+export function parseKalshiGameTicker(ticker) {
+  const raw = String(ticker == null ? "" : ticker).trim();
+  if (!raw) return null;
+  const [body, sideSuffix] = raw.split(":");
+  const parts = body.split("-").filter(Boolean);
+  if (parts.length < 2) return null;
+  const series = parts[0].toUpperCase();
+  let league = "";
+  if (series === "KXMLBGAME") league = "mlb";
+  else if (series === "KXNFLGAME") league = "nfl";
+  else return null;
+  const teamPart = parts[parts.length - 1];
+  const mid = parts.length >= 3 ? parts[parts.length - 2] : "";
+  const teamCode = isTeamCode(teamPart) ? teamPart.toUpperCase() : "";
+  let teams = [];
+  const dated = league === "mlb"
+    ? /^(\d{2}[A-Z]{3}\d{2}\d{4})([A-Z]{4,6})$/.exec(mid)
+    : /^(\d{2}[A-Z]{3}\d{2})([A-Z]{4,6})$/.exec(mid);
+  if (dated) teams = splitPackedTeams(dated[2], league);
+  const side = String(sideSuffix || "").trim().toLowerCase();
+  return {
+    league,
+    teamCode,
+    teams,
+    side: side === "no" || side === "yes" ? side : "",
+  };
+}
+
+export function parsePolyGameSymbol(symbol) {
+  const raw = String(symbol == null ? "" : symbol).trim().toLowerCase();
+  const m = /^aec-(mlb|nfl)-([a-z]{2,3})-([a-z]{2,3})-\d{4}-\d{2}-\d{2}$/.exec(raw);
+  if (!m) return null;
+  return { league: m[1], teams: [m[2].toUpperCase(), m[3].toUpperCase()] };
+}
+
+function normalizeSide(value) {
+  const raw = String(value == null ? "" : value).trim().toLowerCase();
+  if (raw === "no" || raw === "n" || raw === "lose" || raw === "loser") return "no";
+  if (raw === "yes" || raw === "y" || raw === "win" || raw === "winner") return "yes";
+  return "";
+}
+
+function codesEqual(a, b, league) {
+  const left = canonicalTeamCode(a, league);
+  const right = canonicalTeamCode(b, league);
+  return !!(left && right && left === right);
+}
+
+function opponentOf(selected, teams, league) {
+  const list = (teams || []).map((t) => canonicalTeamCode(t, league)).filter(Boolean);
+  if (list.length !== 2) return "";
+  const sel = canonicalTeamCode(selected, league);
+  if (!sel) return "";
+  return list.find((c) => c !== sel) || "";
+}
+
+export function parseUnhedgedLeg(leg) {
   if (leg == null) return null;
   if (typeof leg === "string") {
     const text = leg.trim();
-    return text ? { type: "", text } : null;
+    if (!text) return null;
+    if (looksLikeGameTicker(text)) return parseUnhedgedLeg({ ticker: text });
+    return null;
   }
   if (typeof leg !== "object") return null;
-  const type = String(leg.type || leg.side || "").trim();
-  const selection = String(leg.selection || "").trim();
-  const teams = Array.isArray(leg.teams) ? leg.teams.filter(Boolean).join("/") : "";
-  const text = String(
-    leg.label || leg.title || selection || teams || leg.market_ticker || leg.ticker || leg.symbol || leg.slug || ""
-  ).trim();
-  if (!text && !type) return null;
-  return { type, text: text || type };
+  const ticker = parseKalshiGameTicker(leg.ticker || leg.market_ticker);
+  const poly = parsePolyGameSymbol(leg.symbol || leg.slug);
+  const league = ticker && ticker.league
+    || poly && poly.league
+    || (["mlb", "nfl"].includes(String(leg.league || leg.sport || "").toLowerCase())
+      ? String(leg.league || leg.sport).toLowerCase()
+      : "");
+  const fromField = Array.isArray(leg.teams) ? leg.teams.filter(Boolean) : [];
+  const teams = fromField.length >= 2
+    ? fromField
+    : (ticker && ticker.teams.length === 2 ? ticker.teams : (poly && poly.teams) || fromField);
+  let teamCode = "";
+  if (ticker && ticker.teamCode) teamCode = ticker.teamCode;
+  else if (isTeamCode(leg.selection)) teamCode = String(leg.selection).trim().toUpperCase();
+  else if (isTeamCode(leg.label) && !looksLikeGameTicker(leg.label)) teamCode = String(leg.label).trim().toUpperCase();
+  else if (teams.length === 1 && isTeamCode(teams[0])) teamCode = String(teams[0]).trim().toUpperCase();
+  if (!teamCode) return null;
+  const side = normalizeSide(leg.side) || normalizeSide(ticker && ticker.side) || "yes";
+  const opponentCode = opponentOf(teamCode, teams, league);
+  return {
+    league,
+    teamCode: canonicalTeamCode(teamCode, league) || teamCode,
+    opponentCode,
+    side,
+  };
+}
+
+export function formatUnhedgedLegText(leg) {
+  const parsed = parseUnhedgedLeg(leg);
+  if (parsed) {
+    const name = teamShortName(parsed.teamCode, parsed.league) || parsed.teamCode;
+    if (parsed.side === "no") {
+      if (parsed.opponentCode) {
+        const opp = teamShortName(parsed.opponentCode, parsed.league) || parsed.opponentCode;
+        return opp + " ML";
+      }
+      return name + " lose";
+    }
+    return name + " ML";
+  }
+  if (leg == null) return "";
+  if (typeof leg === "string") {
+    const text = leg.trim();
+    return looksLikeGameTicker(text) ? "" : text;
+  }
+  if (typeof leg !== "object") return "";
+  const stated = String(leg.label || leg.title || "").trim();
+  if (stated && !looksLikeGameTicker(stated)) return stated;
+  if (isTeamCode(leg.selection)) {
+    const league = String(leg.league || "").toLowerCase();
+    const name = teamShortName(leg.selection, league) || String(leg.selection).toUpperCase();
+    return name + " ML";
+  }
+  return "";
+}
+
+function legChip(leg) {
+  if (leg == null) return null;
+  const human = formatUnhedgedLegText(leg);
+  if (human) return { type: "", text: human };
+  if (typeof leg === "string") {
+    const text = leg.trim();
+    return text && !looksLikeGameTicker(text) ? { type: "", text } : null;
+  }
+  if (typeof leg !== "object") return null;
+  const type = String(leg.type || "").trim();
+  const text = String(leg.label || leg.title || "").trim();
+  if (text && !looksLikeGameTicker(text)) return { type: type === "ml" || type === "moneyline" ? "" : type, text };
+  return null;
 }
 
 function rawLegList(row) {
@@ -238,11 +470,11 @@ export function rowLegs(row) {
 }
 
 export function rowLabel(row) {
-  const label = pickFirst(row, LABEL_KEYS);
-  if (label != null && String(label).trim()) return String(label).trim();
   const chips = rowLegs(row);
-  if (!chips.length) return "—";
-  return chips.map((c) => (c.type ? `${c.type} ${c.text}` : c.text).trim()).join(" · ");
+  if (chips.length) return chips.map((c) => c.text).filter(Boolean).join(" · ");
+  const label = pickFirst(row, LABEL_KEYS);
+  if (label != null && String(label).trim() && !looksLikeGameTicker(label)) return String(label).trim();
+  return "—";
 }
 
 export function rowContracts(row) {
