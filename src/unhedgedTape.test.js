@@ -10,9 +10,13 @@ import {
   fetchUnhedgedRfqs,
   formatAmerican,
   formatEtTime,
+  formatScanAmerican,
+  formatUnhedgedLeg,
   formatVenue,
+  legFairAmerican,
   isMissingTableError,
   isMissingUserIdColumn,
+  isTickerBlob,
   filterMlbNflMoneylineRows,
   isMlbNflMoneylineRow,
   mapUnhedgedRow,
@@ -20,6 +24,7 @@ import {
   normalizeStatus,
   rowStatus,
   summarizeUnhedgedRows,
+  teamDisplayName,
 } from "./unhedgedTape.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -81,8 +86,10 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.timeEt, "Sep 2, 12:30 PM ET");
   assert.equal(row.venue, "Kalshi");
   assert.equal(row.venueKey, "kalshi");
-  assert.equal(row.label, "NYY / BOS");
+  assert.equal(row.label, "Yanks ML · Red Sox ML");
   assert.equal(row.legs.length, 2);
+  assert.equal(row.legs[0].text, "Yanks ML");
+  assert.equal(row.legs[1].text, "Red Sox ML");
   assert.equal(row.contractsText, "40");
   assert.equal(row.theirText, "+900");
   assert.equal(row.ourText, "+850");
@@ -110,7 +117,7 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.fillAmerican, 376);
   assert.equal(row.contractsText, "12.5");
   assert.equal(row.status, "filled");
-  assert.equal(row.label, "NYY ML · BOS ML");
+  assert.equal(row.label, "Yanks ML · Red Sox ML");
 }
 
 // ── NO price → YES American ──
@@ -147,7 +154,8 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.ourText, "+178");
   assert.equal(row.theirAmerican, 190);
   assert.equal(row.fillText, "—");
-  assert.equal(row.legs[0].text, "atl");
+  assert.equal(row.legs[0].text, "Braves ML");
+  assert.equal(row.label, "Braves ML");
 }
 
 {
@@ -160,6 +168,142 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(row.statusTone, "ok");
   assert.equal(row.fillAmerican, 355);
   assert.equal(row.fillText, "+355");
+}
+
+// ── Spoken parlay names from Kalshi tickers (COL + yes → Rockies ML) ──
+assert.equal(isTickerBlob("KXMLBGAME-26SEP021510BALCOL-COL"), true);
+assert.equal(isTickerBlob("KXNFLGAME-26SEP09NEKC-KC"), true);
+assert.equal(isTickerBlob("KXMVE-SOMETHING"), true);
+assert.equal(isTickerBlob("Rockies ML"), false);
+assert.equal(isTickerBlob("Nats ML · Rangers ML"), false);
+assert.equal(teamDisplayName("COL", "mlb"), "Rockies");
+assert.equal(teamDisplayName("WSH", "mlb"), "Nats");
+assert.equal(teamDisplayName("WAS", "mlb"), "Nats");
+assert.equal(teamDisplayName("NYY", "mlb"), "Yanks");
+assert.equal(teamDisplayName("KC", "mlb"), "Royals");
+assert.equal(teamDisplayName("KC", "nfl"), "Chiefs");
+assert.equal(teamDisplayName("PHI", "nfl"), "Eagles");
+assert.equal(
+  formatUnhedgedLeg({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb" }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+    side: "yes",
+    league: "mlb",
+    fair_american: 145,
+  }),
+  "Rockies ML +145",
+);
+assert.equal(formatScanAmerican(-118), "\u2212118");
+assert.equal(legFairAmerican({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes" }), null);
+assert.equal(legFairAmerican({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", fair_american: 145 }), 145);
+
+{
+  const row = mapUnhedgedRow({
+    id: "col-yes",
+    venue: "kalshi",
+    ticker: "KXMVE-COMBO-SHOULD-HIDE",
+    legs: [{
+      ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+      symbol: "KXMLBGAME-26SEP021510BALCOL-COL",
+      side: "yes",
+      league: "mlb",
+      selection: "COL",
+      teams: ["BAL", "COL"],
+      date: "2026-09-02",
+    }],
+  });
+  assert.equal(row.legs[0].text, "Rockies ML");
+  assert.equal(row.label, "Rockies ML");
+  assert.doesNotMatch(row.label, /KXMLB|KXMVE|BALCOL/);
+  assert.doesNotMatch(row.legs[0].text, /KXMLB|BALCOL|COL-/);
+}
+
+{
+  const noOpp = formatUnhedgedLeg({
+    ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+    side: "no",
+    league: "mlb",
+    teams: ["BAL", "COL"],
+  });
+  assert.equal(noOpp, "Orioles ML");
+  const noSolo = formatUnhedgedLeg({
+    ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+    side: "no",
+    league: "mlb",
+  });
+  assert.equal(noSolo, "Rockies lose");
+}
+
+{
+  const row = mapUnhedgedRow({
+    ticker: "KXMVE-HIDE-ME",
+    label: "KXMLBGAME-26SEP021510WSHTEX-WSH",
+    legs: [
+      { ticker: "KXMLBGAME-26SEP021510WSHTEX-WSH", side: "yes", league: "mlb", selection: "wsh", teams: ["wsh", "tex"] },
+      { ticker: "KXMLBGAME-26SEP021510TEXHOU-TEX", side: "yes", league: "mlb", selection: "tex" },
+      { ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb", selection: "col" },
+    ],
+  });
+  assert.equal(row.label, "Nats ML · Rangers ML · Rockies ML");
+  assert.deepEqual(row.legs.map((l) => l.text), ["Nats ML", "Rangers ML", "Rockies ML"]);
+  for (const chip of row.legs) {
+    assert.equal(isTickerBlob(chip.text), false);
+    assert.doesNotMatch(chip.text, /KXMLB|KXNFL|KXMVE/);
+  }
+}
+
+{
+  const row = mapUnhedgedRow({
+    legs: [{ ticker: "KXNFLGAME-26SEP09NEKC-KC", side: "yes", league: "nfl", selection: "kc", teams: ["ne", "kc"] }],
+  });
+  assert.equal(row.legs[0].text, "Chiefs ML");
+  assert.equal(row.label, "Chiefs ML");
+}
+
+{
+  const row = mapUnhedgedRow({
+    legs: [{ ticker: "KXNFLGAME-26SEP09PHIKC-PHI", side: "no", league: "nfl", teams: ["phi", "kc"] }],
+  });
+  assert.equal(row.legs[0].text, "Chiefs ML");
+}
+
+// ── Per-leg fair (worker fields only; row our_fair_american is the parlay) ──
+{
+  const row = mapUnhedgedRow({
+    our_fair_american: 400,
+    our_quote_american: 380,
+    ticker: "KXMVE-PARLAY",
+    legs: [
+      { ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb", fair_american: 145 },
+      { ticker: "KXMLBGAME-26SEP021510BOSNYY-BOS", side: "yes", league: "mlb", our_fair_american: -118 },
+      { ticker: "KXMLBGAME-26SEP021510PITMIL-PIT", side: "yes", league: "mlb", true_american: -133 },
+    ],
+  });
+  assert.equal(row.label, "Rockies ML +145 · Red Sox ML \u2212118 · Pirates ML \u2212133");
+  assert.deepEqual(row.legs.map((l) => l.text), [
+    "Rockies ML +145",
+    "Red Sox ML \u2212118",
+    "Pirates ML \u2212133",
+  ]);
+  assert.equal(row.ourAmerican, 380);
+  assert.equal(row.ourText, "+380");
+  for (const chip of row.legs) {
+    assert.doesNotMatch(chip.text, /KXMLB|KXMVE|\+400|\+380/);
+  }
+}
+
+{
+  const row = mapUnhedgedRow({
+    our_fair_american: 400,
+    legs: [{ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb" }],
+  });
+  assert.equal(row.legs[0].text, "Rockies ML");
+  assert.equal(row.label, "Rockies ML");
+  assert.equal(row.ourText, "+400");
+  assert.doesNotMatch(row.legs[0].text, /\+400|\+145|145/);
 }
 
 // ── MLB / NFL moneyline filter (hide ncaaf; spreads out) ──
@@ -359,7 +503,8 @@ function assertOrderBeforeLimit(call) {
   assert.match(page, /No unhedged RFQ tape yet/);
   assert.match(page, /This tab is private/);
   assert.match(page, /Time ET/);
-  assert.match(page, /Would-quote/);
+  assert.match(page, /Would-quote \/ Fair/);
+  assert.match(page, /isTickerBlob/);
   assert.match(page, /MLB and NFL moneyline/);
   assert.match(page, /we are paper/);
   assert.match(page, /is-filled/);
