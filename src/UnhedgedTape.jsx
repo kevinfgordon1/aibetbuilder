@@ -149,10 +149,10 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
                   <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
                   <td>
                     <div>{r.label}</div>
-                    {r.legs.length > 0 && (
+                    {r.legs.length > 1 && (
                       <div style={{ marginTop: 4 }}>
                         {r.legs.map((l, i) => (
-                          <span className="leg" key={i}>{l.type ? <span className="ty">{l.type}</span> : null}{l.text}</span>
+                          <span className="leg" key={i}>{l.text}</span>
                         ))}
                       </div>
                     )}
