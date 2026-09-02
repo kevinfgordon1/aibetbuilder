@@ -3,10 +3,12 @@
 // incrementally; pick known aliases and never invent a price.
 //
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
-// Fetch status=eq.filled, order filled_at desc, limit 1000. If the status
+// Fetch status=eq.filled, order updated_at desc, limit 1000. If the status
 // filter fails, client-filter filled as fallback. Do not list
 // seen / started / would_quote. Venue and would-quote-beat-fill are
 // client chips over that window — they do not change the query.
+// After combo-worker #40, filled_at is tape tradeTs (often earlier) or null
+// (never Date.now()). Newest activity is updated_at, not filled_at.
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
@@ -29,6 +31,7 @@ const TIME_KEYS = [
   "seen_at",
   "quoted_at",
   "filled_at",
+  "updated_at",
   "rfq_created_ts",
   "created_ts",
   "created_time",
@@ -380,7 +383,23 @@ export function coerceAmerican(value) {
 export function rowTime(row) {
   const filled = row && (row.filled_at || row.filledAt);
   if (filled) return filled;
+  const updated = row && (row.updated_at || row.updatedAt);
+  if (updated) return updated;
+  const created = row && (row.created_at || row.createdAt);
+  if (created) return created;
   return pickFirst(row, TIME_KEYS);
+}
+
+// Display / sort clock: filled_at if present, else updated_at, else created/at.
+// Null fill times must not sink a later write under an older fill stamp.
+// Do not invent a fill.
+export function unhedgedActivityTs(row) {
+  if (!row) return null;
+  return row.filledAt || row.filled_at
+    || row.updatedAt || row.updated_at
+    || row.at
+    || row.created_at || row.createdAt
+    || null;
 }
 
 export function timeMs(ts) {
@@ -893,6 +912,7 @@ export function mapUnhedgedRow(row, index = 0) {
   const venueRaw = pickFirst(row, VENUE_KEYS);
   const status = rowStatus(row);
   const filledAt = row && (row.filled_at || row.filledAt);
+  const updatedAt = row && (row.updated_at || row.updatedAt);
   const contracts = rowContracts(row);
   const cashSize = rowCashSize(row);
   const quote = ourQuoteAmerican(row);
@@ -902,6 +922,7 @@ export function mapUnhedgedRow(row, index = 0) {
     id: (row && (row.id || row.rfq_id)) || `row-${index}`,
     at,
     filledAt: filledAt || null,
+    updatedAt: updatedAt || null,
     timeEt: formatEtTime(at),
     venue: formatVenue(venueRaw),
     venueKey: venueKey(venueRaw),
@@ -1004,19 +1025,21 @@ export function filterUnhedgedAnalytics(rows, { venue = "all", quoteBeatFill = f
   return filterUnhedgedRowsByQuoteBeat(filterUnhedgedRowsByVenue(rows, venue), quoteBeatFill);
 }
 
-function fillTimeMs(row) {
-  return timeMs(row && (row.filledAt || row.filled_at));
+function activityTimeMs(row) {
+  return timeMs(unhedgedActivityTs(row));
 }
 
-// Filled first (recency of fill), then created/seen time. Do not invent a fill.
+// Filled first, then newest activity (filledAt || updatedAt || created/at).
+// A null filled_at must not sink a later updated_at/created_at under an older
+// fill stamp. Do not invent a fill.
 export function sortUnhedgedRows(rows) {
   return [...(rows || [])].sort((a, b) => {
     const aFilled = a && a.status === "filled" ? 1 : 0;
     const bFilled = b && b.status === "filled" ? 1 : 0;
     if (bFilled !== aFilled) return bFilled - aFilled;
-    const byFill = fillTimeMs(b) - fillTimeMs(a);
-    if (byFill) return byFill;
-    return timeMs(b.at) - timeMs(a.at) || String(b.id).localeCompare(String(a.id));
+    const byActivity = activityTimeMs(b) - activityTimeMs(a);
+    if (byActivity) return byActivity;
+    return String(b.id).localeCompare(String(a.id));
   });
 }
 
@@ -1072,12 +1095,11 @@ export function isMissingFilledAtColumn(error) {
   );
 }
 
-export function isMissingStatusColumn(error) {
+export function isMissingUpdatedAtColumn(error) {
   if (!error) return false;
   const code = String(error.code || "");
   const msg = errorText(error);
-  if (!/\bstatus\b/.test(msg)) return false;
-  if (msg.includes("user_id") || msg.includes("filled_at")) return false;
+  if (!msg.includes("updated_at")) return false;
   return (
     code === "42703"
     || code === "PGRST204"
@@ -1087,25 +1109,43 @@ export function isMissingStatusColumn(error) {
   );
 }
 
-async function runSelect(client, { userId, limit, orderByFilledAt = true, filterStatus = true }) {
+export function isMissingStatusColumn(error) {
+  if (!error) return false;
+  const code = String(error.code || "");
+  const msg = errorText(error);
+  if (!/\bstatus\b/.test(msg)) return false;
+  if (msg.includes("user_id") || msg.includes("filled_at") || msg.includes("updated_at")) return false;
+  return (
+    code === "42703"
+    || code === "PGRST204"
+    || msg.includes("does not exist")
+    || msg.includes("not find")
+    || msg.includes("unknown")
+  );
+}
+
+async function runSelect(client, { userId, limit, orderByUpdatedAt = true, orderByFilledAt = false, filterStatus = true }) {
   let q = client.from(UNHEDGED_TABLE).select("*");
   if (userId) q = q.eq("user_id", userId);
   if (filterStatus) q = q.eq("status", "filled");
   if (typeof q.order === "function") {
-    // Filled-only: newest fill first so the 1000-row window is not wasted on seen.
-    if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
+    // Newest activity first so the 1000-row window includes late writes
+    // whose filled_at is tape tradeTs (often earlier) or null.
+    if (orderByUpdatedAt) q = q.order("updated_at", { ascending: false, nullsFirst: false });
+    else if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
     q = q.order("created_at", { ascending: false });
   }
   if (typeof q.limit === "function") q = q.limit(limit);
   return q;
 }
 
-function classifySelectError(error, { userId, orderByFilledAt, filterStatus }) {
+function classifySelectError(error, { userId, orderByUpdatedAt, orderByFilledAt, filterStatus }) {
   if (!error) return null;
   // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
   // matches the table-missing message fallback.
   if (userId && isMissingUserIdColumn(error)) return "missing_user_id";
   if (filterStatus && isMissingStatusColumn(error)) return "missing_status";
+  if (orderByUpdatedAt && isMissingUpdatedAtColumn(error)) return "missing_updated_at";
   if (orderByFilledAt && isMissingFilledAtColumn(error)) return "missing_filled_at";
   if (isMissingTableError(error)) return "missing_table";
   return "other";
@@ -1120,21 +1160,35 @@ function finalizeFetchedRows(data) {
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
 // status=eq.filled first so the 1000-row window is fills. If that filter fails
 // (missing status column), retry without it and client-filter filled.
-// If filled_at is not in the schema cache (PGRST204), retry created_at only.
+// Prefer updated_at desc (newest activity). If updated_at is not in the schema
+// cache (PGRST204), retry filled_at then created_at only — same pattern as
+// the old filled_at fallback.
 export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" } };
   }
   const rowLimit = resolveUnhedgedLimit(limit);
   let scopedUserId = userId;
-  let orderByFilledAt = true;
+  let orderByUpdatedAt = true;
+  let orderByFilledAt = false;
   let filterStatus = true;
   for (let attempt = 0; attempt < 8; attempt++) {
     let result;
     try {
-      result = await runSelect(client, { userId: scopedUserId, limit: rowLimit, orderByFilledAt, filterStatus });
+      result = await runSelect(client, {
+        userId: scopedUserId,
+        limit: rowLimit,
+        orderByUpdatedAt,
+        orderByFilledAt,
+        filterStatus,
+      });
     } catch (err) {
-      const kind = classifySelectError(err, { userId: scopedUserId, orderByFilledAt, filterStatus });
+      const kind = classifySelectError(err, {
+        userId: scopedUserId,
+        orderByUpdatedAt,
+        orderByFilledAt,
+        filterStatus,
+      });
       if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
       if (kind === "missing_user_id") {
         scopedUserId = null;
@@ -1142,6 +1196,11 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
       }
       if (kind === "missing_status") {
         filterStatus = false;
+        continue;
+      }
+      if (kind === "missing_updated_at") {
+        orderByUpdatedAt = false;
+        orderByFilledAt = true;
         continue;
       }
       if (kind === "missing_filled_at") {
@@ -1152,7 +1211,12 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
     }
     const error = result && result.error;
     const data = result && result.data;
-    const kind = classifySelectError(error, { userId: scopedUserId, orderByFilledAt, filterStatus });
+    const kind = classifySelectError(error, {
+      userId: scopedUserId,
+      orderByUpdatedAt,
+      orderByFilledAt,
+      filterStatus,
+    });
     if (kind === "missing_table") return { rows: [], missingTable: true, error };
     if (kind === "missing_user_id") {
       scopedUserId = null;
@@ -1160,6 +1224,11 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
     }
     if (kind === "missing_status") {
       filterStatus = false;
+      continue;
+    }
+    if (kind === "missing_updated_at") {
+      orderByUpdatedAt = false;
+      orderByFilledAt = true;
       continue;
     }
     if (kind === "missing_filled_at") {
