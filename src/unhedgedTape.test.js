@@ -13,10 +13,13 @@ import {
   formatVenue,
   isMissingTableError,
   isMissingUserIdColumn,
+  filterMlbNflMoneylineRows,
+  isMlbNflMoneylineRow,
   mapUnhedgedRow,
   mapUnhedgedRows,
   normalizeStatus,
   rowStatus,
+  summarizeUnhedgedRows,
 } from "./unhedgedTape.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -54,6 +57,12 @@ assert.equal(rowStatus({ status: "quoted" }), "quoted");
 assert.equal(rowStatus({ fill_american: -120 }), "filled");
 assert.equal(rowStatus({ fair_american: 250 }), "would_quote");
 assert.equal(rowStatus({}), "seen");
+assert.equal(normalizeStatus("started"), "started");
+assert.equal(rowStatus({ status: "started" }), "started");
+assert.equal(rowStatus({ status: "seen", our_quote_american: 178 }), "would_quote");
+assert.equal(rowStatus({ status: "seen" }), "seen");
+assert.equal(rowStatus({ status: "filled", our_quote_american: 178 }), "filled");
+assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
 
 // ── Row mapping: worker-shaped row ──
 {
@@ -119,6 +128,100 @@ assert.equal(rowStatus({}), "seen");
   ]);
   assert.equal(mapped[0].id, "new");
   assert.equal(mapped[1].id, "old");
+}
+
+// ── Worker columns: our_quote / taker_american (status still seen) ──
+{
+  const row = mapUnhedgedRow({
+    id: "w1",
+    venue: "kalshi",
+    status: "seen",
+    our_quote_american: 178,
+    our_fair_american: 201,
+    taker_american: 190,
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl", side: "yes", teams: ["atl", "was"] }],
+  });
+  assert.equal(row.status, "would_quote");
+  assert.equal(row.statusTone, "warn");
+  assert.equal(row.ourAmerican, 178);
+  assert.equal(row.ourText, "+178");
+  assert.equal(row.theirAmerican, 190);
+  assert.equal(row.fillText, "—");
+  assert.equal(row.legs[0].text, "atl");
+}
+
+{
+  const row = mapUnhedgedRow({
+    id: "w2",
+    status: "filled",
+    fill_yes_price: 0.22,
+  });
+  assert.equal(row.status, "filled");
+  assert.equal(row.statusTone, "ok");
+  assert.equal(row.fillAmerican, 355);
+  assert.equal(row.fillText, "+355");
+}
+
+// ── MLB / NFL moneyline filter (hide ncaaf; spreads out) ──
+{
+  const mlb = {
+    id: "mlb",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const nfl = {
+    id: "nfl",
+    legs: [{ league: "nfl", symbol: "aec-nfl-ne-sea-2026-09-09", selection: "sea" }],
+  };
+  const mixed = {
+    id: "mix",
+    legs: [
+      { league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL" },
+      { league: "nfl", ticker: "KXNFLGAME-26SEP09NESEA-SEA" },
+    ],
+  };
+  const ncaaf = {
+    id: "ncaaf",
+    legs: [{ league: "ncaaf", ticker: "KXNCAAFGAME-26SEP03MASSRUTG-RUTG" }],
+  };
+  const mixedNcaaf = {
+    id: "mix-ncaaf",
+    legs: [
+      { league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL" },
+      { league: "ncaaf", ticker: "KXNCAAFGAME-26SEP03MASSRUTG-RUTG" },
+    ],
+  };
+  const spread = {
+    id: "spread",
+    legs: [{ league: "mlb", type: "spread", ticker: "KXMLBSPREAD-26SEP02NYYBOS" }],
+  };
+  assert.equal(isMlbNflMoneylineRow(mlb), true);
+  assert.equal(isMlbNflMoneylineRow(nfl), true);
+  assert.equal(isMlbNflMoneylineRow(mixed), true);
+  assert.equal(isMlbNflMoneylineRow(ncaaf), false);
+  assert.equal(isMlbNflMoneylineRow(mixedNcaaf), false);
+  assert.equal(isMlbNflMoneylineRow(spread), false);
+  assert.equal(isMlbNflMoneylineRow({ id: "empty", legs: [] }), false);
+  const kept = filterMlbNflMoneylineRows([mlb, nfl, mixed, ncaaf, mixedNcaaf, spread]);
+  assert.deepEqual(kept.map((r) => r.id), ["mlb", "nfl", "mix"]);
+}
+
+// ── Summary counts mapped statuses over the filtered list; no invented fills ──
+{
+  const mapped = mapUnhedgedRows([
+    { id: "a", status: "seen", our_quote_american: 150, created_at: "2026-09-02T12:00:00.000Z" },
+    { id: "b", status: "seen", created_at: "2026-09-02T11:00:00.000Z" },
+    { id: "c", status: "started", created_at: "2026-09-02T10:00:00.000Z" },
+    { id: "d", status: "filled", fill_american: -110, created_at: "2026-09-02T09:00:00.000Z" },
+  ]);
+  const s = summarizeUnhedgedRows(mapped, { fetched: 400 });
+  assert.equal(s.fetched, 400);
+  assert.equal(s.total, 4);
+  assert.equal(s.wouldQuote, 1);
+  assert.equal(s.seen, 1);
+  assert.equal(s.started, 1);
+  assert.equal(s.filled, 1);
+  assert.equal(s.quoted, 0);
+  assert.equal(mapped[0].id, "a");
 }
 
 // ── Missing table / missing user_id column ──
@@ -257,6 +360,12 @@ function assertOrderBeforeLimit(call) {
   assert.match(page, /This tab is private/);
   assert.match(page, /Time ET/);
   assert.match(page, /Would-quote/);
+  assert.match(page, /MLB and NFL moneyline/);
+  assert.match(page, /we are paper/);
+  assert.match(page, /is-filled/);
+  assert.match(page, /filterMlbNflMoneylineRows/);
+  assert.match(page, /summarizeUnhedgedRows/);
+  assert.doesNotMatch(page, /NCAAF|ncaaf/);
   assert.doesNotMatch(page, /onSubmit|postQuote|createQuote|type="submit"/);
   assert.doesNotMatch(page, /className="cl"/);
   assert.doesNotMatch(page, /combo_parlays|combo_submissions|combo_fills/);

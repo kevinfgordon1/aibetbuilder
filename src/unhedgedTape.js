@@ -2,12 +2,15 @@
 // Combo-worker writes this table in a parallel PR. Column names may arrive
 // incrementally; pick known aliases and never invent a price.
 //
-// Status is seen / would_quote / quoted / filled only. Missing table must
-// become an empty state (PGRST205 / 42P01), not a thrown error.
+// Worker statuses: seen, started, would_quote, filled. A row with
+// our_quote_american / would_quote is would_quote even if status is still
+// seen. The page summary and tape are MLB + NFL moneylines only.
+// Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
 export const UNHEDGED_LIMIT = 400;
-export const UNHEDGED_STATUSES = ["seen", "would_quote", "quoted", "filled"];
+export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
+export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
 
 const TIME_KEYS = [
   "created_at",
@@ -29,24 +32,30 @@ const LEGS_KEYS = ["legs", "combo_legs", "comboLegs", "mve_selected_legs", "sele
 const CONTRACT_KEYS = ["contracts", "contracts_fp", "qty", "size", "count", "qtyDecimal"];
 
 const THEIR_AMERICAN_KEYS = [
+  "taker_american",
   "rfq_american",
   "their_american",
   "rfq_price_american",
   "their_price_american",
 ];
-const THEIR_YES_KEYS = ["rfq_yes", "their_yes", "yes_price", "rfq_price", "target_yes"];
-const THEIR_NO_KEYS = ["rfq_no", "their_no", "no_price"];
+const THEIR_YES_KEYS = ["taker_yes_price", "rfq_yes", "their_yes", "yes_price", "rfq_price", "target_yes"];
+const THEIR_NO_KEYS = ["taker_no_price", "rfq_no", "their_no", "no_price"];
 
 const OUR_AMERICAN_KEYS = [
-  "would_quote_american",
-  "fair_american",
-  "our_american",
   "our_quote_american",
+  "would_quote_american",
+  "our_american",
+  "our_fair_american",
+  "fair_american",
 ];
-const OUR_PRICE_KEYS = ["would_quote", "fair", "our_quote"];
+const OUR_PRICE_KEYS = ["would_quote", "our_quote", "fair"];
 
 const FILL_AMERICAN_KEYS = ["fill_american", "filled_american", "fill_price_american"];
-const FILL_PRICE_KEYS = ["fill_price", "fill", "filled_price"];
+const FILL_PRICE_KEYS = ["fill_yes_price", "fill_price", "fill", "filled_price"];
+
+const NON_ML_MARKET = /\b(spread|run[_ -]?line|total|over_under|\bou\b|prop|props)\b|kx(mlb|nfl)(spread|total)/i;
+const ML_TYPE = /^(ml|moneyline|h2h|game)$/i;
+const GAME_ML_ID = /kx(mlb|nfl)game-|aec-(mlb|nfl)-/i;
 
 export function toNum(v) {
   if (v == null || v === "") return null;
@@ -146,11 +155,76 @@ function legChip(leg) {
   }
   if (typeof leg !== "object") return null;
   const type = String(leg.type || leg.side || "").trim();
+  const selection = String(leg.selection || "").trim();
+  const teams = Array.isArray(leg.teams) ? leg.teams.filter(Boolean).join("/") : "";
   const text = String(
-    leg.label || leg.title || leg.market_ticker || leg.ticker || leg.symbol || leg.slug || ""
+    leg.label || leg.title || selection || teams || leg.market_ticker || leg.ticker || leg.symbol || leg.slug || ""
   ).trim();
   if (!text && !type) return null;
   return { type, text: text || type };
+}
+
+function rawLegList(row) {
+  const raw = pickFirst(row, LEGS_KEYS);
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    return text ? [text] : [];
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((leg) => leg != null && leg !== "");
+}
+
+function legBlob(leg) {
+  if (leg == null) return "";
+  if (typeof leg === "string") return leg;
+  if (typeof leg !== "object") return "";
+  return [leg.league, leg.sport, leg.type, leg.market, leg.market_type, leg.ticker, leg.symbol, leg.market_ticker, leg.slug, leg.label, leg.title]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function legLeague(leg) {
+  if (leg == null) return "";
+  const blob = String(legBlob(leg)).toLowerCase();
+  if (typeof leg === "object") {
+    const stated = String(leg.league || leg.sport || "").trim().toLowerCase();
+    if (stated === "mlb" || stated === "baseball_mlb") return "mlb";
+    if (stated === "nfl" || stated === "americanfootball_nfl") return "nfl";
+    if (stated === "ncaaf" || stated === "americanfootball_ncaaf") return "ncaaf";
+  }
+  if (/\bncaaf\b|kxncaaf|aec-ncaaf/.test(blob)) return "ncaaf";
+  if (/kxnflgame|aec-nfl-/.test(blob)) return "nfl";
+  if (/kxmlbgame|aec-mlb-/.test(blob)) return "mlb";
+  if (/\bnfl\b/.test(blob) && !/ncaaf/.test(blob)) return "nfl";
+  if (/\bmlb\b/.test(blob)) return "mlb";
+  return "";
+}
+
+export function isMoneylineLeg(leg) {
+  if (leg == null) return false;
+  const blob = legBlob(leg);
+  if (NON_ML_MARKET.test(blob)) return false;
+  if (typeof leg === "object") {
+    const type = String(leg.type || leg.market || leg.market_type || "").trim();
+    if (type && ML_TYPE.test(type)) return true;
+  }
+  if (GAME_ML_ID.test(blob)) return true;
+  const league = legLeague(leg);
+  return league === "mlb" || league === "nfl";
+}
+
+// True when every leg is an MLB or NFL moneyline. Mixed or NCAAF rows are out.
+export function isMlbNflMoneylineRow(row) {
+  const legs = rawLegList(row);
+  if (!legs.length) return false;
+  return legs.every((leg) => {
+    const league = legLeague(leg);
+    return (league === "mlb" || league === "nfl") && isMoneylineLeg(leg);
+  });
+}
+
+export function filterMlbNflMoneylineRows(rows) {
+  return (rows || []).filter(isMlbNflMoneylineRow);
 }
 
 export function rowLegs(row) {
@@ -204,6 +278,7 @@ export function normalizeStatus(value) {
   const raw = String(value == null ? "" : value).trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (!raw) return null;
   if (raw === "seen" || raw === "received" || raw === "new") return "seen";
+  if (raw === "started" || raw === "start" || raw === "in_progress") return "started";
   if (raw === "would_quote" || raw === "wouldquote" || raw === "would") return "would_quote";
   if (raw === "quoted" || raw === "quote" || raw === "posted") return "quoted";
   if (raw === "filled" || raw === "fill" || raw === "executed") return "filled";
@@ -212,17 +287,42 @@ export function normalizeStatus(value) {
 
 export function rowStatus(row) {
   const fromCol = normalizeStatus(pickFirst(row, ["status", "state"]));
-  if (fromCol) return fromCol;
-  if (fillAmerican(row) != null) return "filled";
-  if (ourQuoteAmerican(row) != null) return "would_quote";
-  return "seen";
+  if (fromCol === "filled" || fillAmerican(row) != null) return "filled";
+  if (fromCol === "quoted") return "quoted";
+  if (fromCol === "would_quote" || ourQuoteAmerican(row) != null) return "would_quote";
+  if (fromCol === "started") return "started";
+  return fromCol || "seen";
 }
 
 export function statusTone(status) {
   if (status === "filled") return "ok";
   if (status === "quoted") return "fill";
+  if (status === "started") return "fill";
   if (status === "would_quote") return "warn";
   return "";
+}
+
+// Counts over already-mapped (and already-filtered) rows. Do not invent.
+export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
+  const list = rows || [];
+  const summary = {
+    fetched: fetched == null ? list.length : fetched,
+    total: list.length,
+    seen: 0,
+    started: 0,
+    wouldQuote: 0,
+    quoted: 0,
+    filled: 0,
+  };
+  for (const r of list) {
+    const status = r && r.status;
+    if (status === "filled") summary.filled += 1;
+    else if (status === "quoted") summary.quoted += 1;
+    else if (status === "would_quote") summary.wouldQuote += 1;
+    else if (status === "started") summary.started += 1;
+    else if (status === "seen") summary.seen += 1;
+  }
+  return summary;
 }
 
 export function formatContracts(n) {
