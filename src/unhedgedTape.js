@@ -5,7 +5,8 @@
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
 // Fetch status=eq.filled, order filled_at desc, limit 400. If the status
 // filter fails, client-filter filled as fallback. Do not list
-// seen / started / would_quote.
+// seen / started / would_quote. Venue and would-quote-beat-fill are
+// client chips over that window — they do not change the query.
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
@@ -802,6 +803,69 @@ export function mapUnhedgedRow(row, index = 0) {
 // Filled MLB/NFL moneylines only. Seen / started / would_quote / NCAAF stay out.
 export function visibleUnhedgedRows(rows) {
   return mapUnhedgedRows(filterMlbNflMoneylineRows(filterFilledUnhedgedRows(rows)));
+}
+
+export const UNHEDGED_VENUE_FILTERS = ["all", "kalshi", "polymarket"];
+
+export function normalizeVenueFilter(value) {
+  const key = venueKey(value);
+  if (key === "kalshi" || key === "polymarket") return key;
+  return "all";
+}
+
+export function rowVenueKey(row) {
+  if (!row) return "";
+  if (row.venueKey) return row.venueKey;
+  return venueKey(pickFirst(row, VENUE_KEYS) || row.venue);
+}
+
+export function rowMatchesVenueFilter(row, venue) {
+  const wanted = normalizeVenueFilter(venue);
+  if (wanted === "all") return true;
+  return rowVenueKey(row) === wanted;
+}
+
+export function filterUnhedgedRowsByVenue(rows, venue) {
+  return (rows || []).filter((row) => rowMatchesVenueFilter(row, venue));
+}
+
+// Quote and fill must both already exist. Never invent a price; never use fair.
+// Mapped rows already resolved these — a null there is a missing price, not a
+// hint to go looking for another column.
+export function rowQuoteAmerican(row) {
+  if (!row) return null;
+  if (Object.prototype.hasOwnProperty.call(row, "ourAmerican")) {
+    return row.ourAmerican == null ? null : toNum(row.ourAmerican);
+  }
+  return ourQuoteAmerican(row);
+}
+
+export function rowFillAmerican(row) {
+  if (!row) return null;
+  if (Object.prototype.hasOwnProperty.call(row, "fillAmerican")) {
+    return row.fillAmerican == null ? null : toNum(row.fillAmerican);
+  }
+  return fillAmerican(row);
+}
+
+// Better buy-side YES than the print: higher American (our +614 vs fill +452,
+// or our −110 vs fill −150). Missing quote or fill never passes.
+export function wouldQuoteBeatsFill(row) {
+  const quote = rowQuoteAmerican(row);
+  const fill = rowFillAmerican(row);
+  if (quote == null || fill == null) return false;
+  return quote > fill;
+}
+
+export function filterUnhedgedRowsByQuoteBeat(rows, beatOnly = false) {
+  if (!beatOnly) return rows || [];
+  return (rows || []).filter(wouldQuoteBeatsFill);
+}
+
+// Client analytics over already-visible (filled MLB/NFL) rows. Fetch stays
+// filled-only 400 — these chips do not change the query.
+export function filterUnhedgedAnalytics(rows, { venue = "all", quoteBeatFill = false } = {}) {
+  return filterUnhedgedRowsByQuoteBeat(filterUnhedgedRowsByVenue(rows, venue), quoteBeatFill);
 }
 
 function fillTimeMs(row) {

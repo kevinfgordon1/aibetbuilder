@@ -1,13 +1,15 @@
 // Unhedged RFQ blotter — read-only filled RFQs from public.unhedged_rfqs.
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
-// Summary + tape are MLB and NFL moneylines only.
+// Summary + tape are MLB and NFL moneylines only. Venue and
+// would-quote-beat-fill chips are client-side over the filled 400.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
   UNHEDGED_LIMIT,
   fetchUnhedgedRfqs,
+  filterUnhedgedAnalytics,
   isTickerBlob,
   summarizeUnhedgedRows,
   visibleUnhedgedRows,
@@ -18,6 +20,26 @@ const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env
 function VenueChip({ venue, venueKey }) {
   const cls = venueKey === "kalshi" ? "venue-kalshi" : venueKey === "polymarket" ? "venue-poly" : "";
   return <span className={"chip " + cls}>{venue}</span>;
+}
+
+const VENUE_CHIPS = [
+  { key: "all", label: "All" },
+  { key: "kalshi", label: "Kalshi", cls: "venue-kalshi" },
+  { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
+];
+
+function FilterChip({ label, active, onClick, className, title }) {
+  return (
+    <button
+      type="button"
+      className={"chip btn" + (active ? " on" : "") + (className ? " " + className : "")}
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
 }
 
 function visibleLegChips(legs) {
@@ -37,9 +59,15 @@ function Tile({ k, v, sub, tone, title }) {
 
 export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) {
   const list = rows || [];
+  const [venueFilter, setVenueFilter] = useState("all");
+  const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const filtered = useMemo(
+    () => filterUnhedgedAnalytics(list, { venue: venueFilter, quoteBeatFill }),
+    [list, venueFilter, quoteBeatFill],
+  );
   const summary = useMemo(
-    () => summarizeUnhedgedRows(list, { fetched: fetched == null ? list.length : fetched }),
-    [list, fetched],
+    () => summarizeUnhedgedRows(filtered, { fetched: fetched == null ? list.length : fetched }),
+    [filtered, fetched, list.length],
   );
   return (
     <div className="uh">
@@ -52,6 +80,12 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
         .uh .chip.ok{background:rgba(16,185,129,.18);color:#6ee7b7}
         .uh .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .uh .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
+        .uh .chip.btn{cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font:inherit;font-size:12px;font-weight:600}
+        .uh .chip.btn.on{background:rgba(59,130,246,.2);color:#93c5fd;border-color:rgba(59,130,246,.35)}
+        .uh .chip.btn.venue-kalshi.on{background:rgba(6,182,212,.2);color:#67e8f9;border-color:rgba(6,182,212,.35)}
+        .uh .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
+        .uh .chip.btn.warn.on{background:rgba(245,158,11,.2);color:#fcd34d;border-color:rgba(245,158,11,.35)}
+        .uh .filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px}
         .uh .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
         .uh .empty{color:#6b7280;font-size:14px;padding:8px 2px}
         .uh .muted{color:#6b7280}
@@ -78,6 +112,30 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
         Filled RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only. No quoting from this page.
       </div>
+
+      {loaded && !missingTable && (
+        <div className="filters" role="group" aria-label="Unhedged RFQ filters">
+          <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Venue</span>
+          {VENUE_CHIPS.map((c) => (
+            <FilterChip
+              key={c.key}
+              label={c.label}
+              className={c.cls}
+              active={venueFilter === c.key}
+              onClick={() => setVenueFilter(c.key)}
+              title={c.key === "all" ? "All venues in this filled fetch" : `Filled ${c.label} only`}
+            />
+          ))}
+          <span className="muted" style={{ margin: "0 4px" }}>·</span>
+          <FilterChip
+            label="Would-quote beat fill"
+            className="warn"
+            active={quoteBeatFill}
+            onClick={() => setQuoteBeatFill((on) => !on)}
+            title="Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Rows missing quote or fill never pass."
+          />
+        </div>
+      )}
 
       {loaded && !missingTable && (
         <div className="tiles">
@@ -108,6 +166,10 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
             No filled MLB or NFL moneyline RFQs.
             {error && error.message ? <span className="muted"> ({error.message})</span> : null}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="empty">
+            No filled MLB or NFL moneyline RFQs match these filters.
+          </div>
         ) : (
           <table>
             <thead>
@@ -122,7 +184,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
               </tr>
             </thead>
             <tbody>
-              {list.map((r) => {
+              {filtered.map((r) => {
                 const chips = visibleLegChips(r.legs);
                 return (
                   <tr key={r.id}>

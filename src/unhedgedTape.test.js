@@ -8,6 +8,9 @@ import {
   americanFromProb,
   coerceAmerican,
   fetchUnhedgedRfqs,
+  filterUnhedgedAnalytics,
+  filterUnhedgedRowsByQuoteBeat,
+  filterUnhedgedRowsByVenue,
   formatAmerican,
   formatAmount,
   formatCashSize,
@@ -31,12 +34,14 @@ import {
   mapUnhedgedRow,
   mapUnhedgedRows,
   normalizeStatus,
+  normalizeVenueFilter,
   ourQuoteAmerican,
   rowStatus,
   resolveTeamToken,
   summarizeUnhedgedRows,
   teamDisplayName,
   visibleUnhedgedRows,
+  wouldQuoteBeatsFill,
 } from "./unhedgedTape.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -718,6 +723,110 @@ assert.equal(
   assert.equal(shown.some((r) => r.id === "seen" || r.status === "seen"), false);
 }
 
+// ── Venue filter (client chips; fetch stays filled-only 400) ──
+assert.equal(normalizeVenueFilter("all"), "all");
+assert.equal(normalizeVenueFilter("Kalshi"), "kalshi");
+assert.equal(normalizeVenueFilter("poly"), "polymarket");
+assert.equal(normalizeVenueFilter(""), "all");
+{
+  const kalshi = {
+    id: "k",
+    status: "filled",
+    venue: "kalshi",
+    fill_american: 452,
+    our_quote_american: 614,
+    filled_at: "2026-09-02T16:26:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const poly = {
+    id: "p",
+    status: "filled",
+    venue: "polymarket",
+    fill_american: -150,
+    our_quote_american: -110,
+    filled_at: "2026-09-02T16:24:00.000Z",
+    legs: [{ league: "nfl", symbol: "aec-nfl-ne-sea-2026-09-09", selection: "sea" }],
+  };
+  const shown = visibleUnhedgedRows([kalshi, poly]);
+  assert.deepEqual(shown.map((r) => r.id), ["k", "p"]);
+  assert.deepEqual(filterUnhedgedRowsByVenue(shown, "all").map((r) => r.id), ["k", "p"]);
+  assert.deepEqual(filterUnhedgedRowsByVenue(shown, "kalshi").map((r) => r.id), ["k"]);
+  assert.deepEqual(filterUnhedgedRowsByVenue(shown, "polymarket").map((r) => r.id), ["p"]);
+  assert.deepEqual(filterUnhedgedRowsByVenue(shown, "Kalshi").map((r) => r.id), ["k"]);
+  assert.deepEqual(filterUnhedgedAnalytics(shown, { venue: "all" }).map((r) => r.id), ["k", "p"]);
+  assert.deepEqual(filterUnhedgedAnalytics(shown, { venue: "kalshi" }).map((r) => r.id), ["k"]);
+  assert.deepEqual(filterUnhedgedAnalytics(shown, { venue: "polymarket" }).map((r) => r.id), ["p"]);
+}
+
+// ── Would-quote beat fill: our_quote_american > fill_american; never invent ──
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: 614, fill_american: 452 }), true);
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: -110, fill_american: -150 }), true);
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: 452, fill_american: 614 }), false);
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: -150, fill_american: -110 }), false);
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: 452, fill_american: 452 }), false);
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: 614 }), false);
+assert.equal(wouldQuoteBeatsFill({ fill_american: 452 }), false);
+assert.equal(wouldQuoteBeatsFill({ our_fair_american: 700, fill_american: 452 }), false);
+assert.equal(wouldQuoteBeatsFill({ our_quote_american: 614, fill_yes_price: 0.181 }), true);
+assert.equal(wouldQuoteBeatsFill({ would_quote_american: 614, fill_american: 452 }), true);
+assert.equal(wouldQuoteBeatsFill({ ourAmerican: 614, fillAmerican: 452 }), true);
+assert.equal(wouldQuoteBeatsFill({ ourAmerican: 452, fillAmerican: 614 }), false);
+assert.equal(wouldQuoteBeatsFill({ ourAmerican: null, fillAmerican: 452, our_quote_american: 900 }), false);
+assert.equal(wouldQuoteBeatsFill({}), false);
+{
+  const beatPlus = {
+    id: "beat-plus",
+    status: "filled",
+    venue: "kalshi",
+    our_quote_american: 614,
+    fill_american: 452,
+    filled_at: "2026-09-02T16:26:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const beatMinus = {
+    id: "beat-minus",
+    status: "filled",
+    venue: "polymarket",
+    our_quote_american: -110,
+    fill_american: -150,
+    filled_at: "2026-09-02T16:25:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const worse = {
+    id: "worse",
+    status: "filled",
+    venue: "kalshi",
+    our_quote_american: 400,
+    fill_american: 452,
+    filled_at: "2026-09-02T16:24:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const noQuote = {
+    id: "no-quote",
+    status: "filled",
+    venue: "kalshi",
+    fill_american: 452,
+    filled_at: "2026-09-02T16:23:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const noFill = {
+    id: "no-fill",
+    status: "filled",
+    venue: "kalshi",
+    our_quote_american: 614,
+    filled_at: "2026-09-02T16:22:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const shown = visibleUnhedgedRows([beatPlus, beatMinus, worse, noQuote, noFill]);
+  assert.deepEqual(shown.map((r) => r.id), ["beat-plus", "beat-minus", "worse", "no-quote", "no-fill"]);
+  assert.deepEqual(filterUnhedgedRowsByQuoteBeat(shown, false).map((r) => r.id), shown.map((r) => r.id));
+  assert.deepEqual(filterUnhedgedRowsByQuoteBeat(shown, true).map((r) => r.id), ["beat-plus", "beat-minus"]);
+  assert.deepEqual(filterUnhedgedAnalytics(shown, { quoteBeatFill: true }).map((r) => r.id), ["beat-plus", "beat-minus"]);
+  assert.deepEqual(filterUnhedgedAnalytics(shown, { venue: "kalshi", quoteBeatFill: true }).map((r) => r.id), ["beat-plus"]);
+  assert.deepEqual(filterUnhedgedAnalytics(shown, { venue: "polymarket", quoteBeatFill: true }).map((r) => r.id), ["beat-minus"]);
+  assert.equal(shown.filter(wouldQuoteBeatsFill).some((r) => r.ourAmerican == null || r.fillAmerican == null), false);
+}
+
 // ── Missing table / missing user_id column ──
 assert.equal(isMissingTableError({ code: "PGRST205", message: "Could not find the table 'public.unhedged_rfqs' in the schema cache" }), true);
 assert.equal(isMissingTableError({ code: "42P01", message: 'relation "unhedged_rfqs" does not exist' }), true);
@@ -821,6 +930,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(client.calls[0].select, "*");
   assert.equal(hasEq(client.calls[0], "user_id", "u1"), true);
   assertStatusFilledEq(client.calls[0]);
+  assert.equal((client.calls[0].eqs || []).some((e) => e.col === "venue"), false);
   assert.equal(client.calls[0].limit, 50);
   assertFilledThenCreatedBeforeLimit(client.calls[0]);
 }
@@ -991,8 +1101,15 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /We did not take these/);
   assert.match(page, /paper only/);
   assert.match(page, /visibleUnhedgedRows/);
+  assert.match(page, /filterUnhedgedAnalytics/);
   assert.match(page, /summarizeUnhedgedRows/);
   assert.match(page, /newest fill first/);
+  assert.match(page, /Would-quote beat fill/);
+  assert.match(page, /label: "All"/);
+  assert.match(page, /label: "Kalshi"/);
+  assert.match(page, /label: "Polymarket"/);
+  assert.match(page, /venueFilter/);
+  assert.match(page, /quoteBeatFill/);
   assert.doesNotMatch(page, /Would-quote \/ Fair/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
   assert.doesNotMatch(page, /onSubmit|postQuote|createQuote|type="submit"/);
