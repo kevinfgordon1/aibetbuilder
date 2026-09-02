@@ -301,6 +301,7 @@ export function isMissingUserIdColumn(error) {
 async function runSelect(client, { userId, limit }) {
   let q = client.from(UNHEDGED_TABLE).select("*");
   if (userId) q = q.eq("user_id", userId);
+  if (typeof q.order === "function") q = q.order("created_at", { ascending: false });
   if (typeof q.limit === "function") q = q.limit(limit);
   return q;
 }
