@@ -3,22 +3,24 @@
 // incrementally; pick known aliases and never invent a price.
 //
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
-// Fetch status=eq.filled, order filled_at desc, limit 400. If the status
+// Fetch status=eq.filled, order filled_at desc, limit 1000. If the status
 // filter fails, client-filter filled as fallback. Do not list
-// seen / started / would_quote.
+// seen / started / would_quote. Venue and would-quote-beat-fill are
+// client chips over that window — they do not change the query.
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
 // only — the tape does not show those). Tape is MLB + NFL moneylines only.
-// Legs: "Rockies ML +145" from Kalshi ticker or Poly aec-* slug via
-// formatUnhedgedLegName + optional per-leg fair_american.
+// Legs: spoken name via formatUnhedgedLegName. Per-leg invert fair and
+// venue opponent Americans live on a breakdown row — never crammed onto
+// the name, never copied from the row parlay our_fair_american.
 // Row our_fair_american is the parlay true/fair (invert product).
 // Row our_quote_american is the 5% net-cost wrap (what we would have filled).
-// Never copy the parlay fair onto chips. Never label fair as the fill.
+// Never label fair as the fill.
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
-export const UNHEDGED_LIMIT = 400;
+export const UNHEDGED_LIMIT = 1000;
 export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
 export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
 
@@ -64,8 +66,29 @@ const FAIR_AMERICAN_KEYS = [
   "true_american",
 ];
 
-// Per-leg fair only. Row our_fair_american is the parlay fair — never copy it onto chips.
+// Per-leg fair only. Row our_fair_american is the parlay fair — never copy it onto a leg.
 const LEG_FAIR_AMERICAN_KEYS = ["fair_american", "our_fair_american", "true_american"];
+const LEG_KALSHI_AMERICAN_KEYS = ["kalshi_opponent_american", "kalshi_american"];
+const LEG_POLY_AMERICAN_KEYS = [
+  "poly_opponent_american",
+  "polymarket_opponent_american",
+  "poly_american",
+];
+const LEG_BEST_OPP_AMERICAN_KEYS = ["best_opponent_american"];
+const NESTED_KALSHI_AMERICAN_KEYS = [
+  "kalshi_opponent_american",
+  "opponent_american",
+  "kalshi_american",
+  "american",
+];
+const NESTED_POLY_AMERICAN_KEYS = [
+  "poly_opponent_american",
+  "polymarket_opponent_american",
+  "opponent_american",
+  "poly_american",
+  "polymarket_american",
+  "american",
+];
 
 const FILL_AMERICAN_KEYS = ["fill_american", "filled_american", "fill_price_american"];
 const FILL_PRICE_KEYS = ["fill_yes_price", "fill_price", "fill", "filled_price"];
@@ -535,12 +558,79 @@ export function formatUnhedgedLeg(leg, leagueHint = "") {
   return withLegFair(formatUnhedgedLegName(leg, leagueHint), leg);
 }
 
+export function statedAmerican(value) {
+  if (value == null || value === "") return null;
+  const n = coerceAmerican(value);
+  return n == null || n === 0 ? null : n;
+}
+
+export function formatBreakdownAmerican(a) {
+  return formatScanAmerican(a) || "—";
+}
+
 export function legFairAmerican(leg) {
   if (!leg || typeof leg !== "object") return null;
   const stated = pickFirst(leg, LEG_FAIR_AMERICAN_KEYS);
-  if (stated == null) return null;
-  const n = coerceAmerican(stated);
-  return n == null || n === 0 ? null : n;
+  return stated == null ? null : statedAmerican(stated);
+}
+
+function pickStatedAmerican(obj, keys) {
+  if (!obj || typeof obj !== "object") return null;
+  const stated = pickFirst(obj, keys);
+  return stated == null ? null : statedAmerican(stated);
+}
+
+function quoteBagVenue(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  return venueKey(obj.venue || obj.exchange || obj.source || obj.book);
+}
+
+function collectQuoteBags(leg, venue) {
+  const bags = [];
+  if (!leg || typeof leg !== "object") return bags;
+  const quotes = leg.quotes;
+  if (Array.isArray(quotes)) {
+    for (const q of quotes) {
+      if (!q || typeof q !== "object") continue;
+      const key = quoteBagVenue(q);
+      if (key === venue) bags.push(q);
+    }
+  } else if (quotes && typeof quotes === "object") {
+    const nested = venue === "kalshi"
+      ? (quotes.kalshi || quotes.Kalshi)
+      : (quotes.poly || quotes.polymarket || quotes.Polymarket);
+    if (nested && typeof nested === "object") bags.push(nested);
+  }
+  if (venue === "kalshi" && leg.kalshi && typeof leg.kalshi === "object") bags.push(leg.kalshi);
+  if (venue === "polymarket") {
+    if (leg.poly && typeof leg.poly === "object") bags.push(leg.poly);
+    if (leg.polymarket && typeof leg.polymarket === "object") bags.push(leg.polymarket);
+  }
+  return bags;
+}
+
+export function legKalshiAmerican(leg) {
+  const flat = pickStatedAmerican(leg, LEG_KALSHI_AMERICAN_KEYS);
+  if (flat != null) return flat;
+  for (const bag of collectQuoteBags(leg, "kalshi")) {
+    const n = pickStatedAmerican(bag, NESTED_KALSHI_AMERICAN_KEYS);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+export function legPolyAmerican(leg) {
+  const flat = pickStatedAmerican(leg, LEG_POLY_AMERICAN_KEYS);
+  if (flat != null) return flat;
+  for (const bag of collectQuoteBags(leg, "polymarket")) {
+    const n = pickStatedAmerican(bag, NESTED_POLY_AMERICAN_KEYS);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+export function legBestOpponentAmerican(leg) {
+  return pickStatedAmerican(leg, LEG_BEST_OPP_AMERICAN_KEYS);
 }
 
 function withLegFair(name, leg) {
@@ -549,11 +639,46 @@ function withLegFair(name, leg) {
   return fairText ? `${name} ${fairText}` : name;
 }
 
-function legChip(leg) {
+export function mapUnhedgedLeg(leg, leagueHint = "") {
   if (leg == null) return null;
-  const text = formatUnhedgedLeg(leg);
-  if (!text || isTickerBlob(text)) return null;
-  return { type: "", text, fairAmerican: legFairAmerican(leg) };
+  const name = formatUnhedgedLegName(leg, leagueHint);
+  if (!name || isTickerBlob(name)) return null;
+  const obj = typeof leg === "object" ? leg : null;
+  const fair = obj ? legFairAmerican(obj) : null;
+  const kalshi = obj ? legKalshiAmerican(obj) : null;
+  const poly = obj ? legPolyAmerican(obj) : null;
+  const best = obj ? legBestOpponentAmerican(obj) : null;
+  return {
+    type: "",
+    name,
+    text: name,
+    fairAmerican: fair,
+    fairText: formatBreakdownAmerican(fair),
+    kalshiAmerican: kalshi,
+    kalshiText: formatBreakdownAmerican(kalshi),
+    polyAmerican: poly,
+    polyText: formatBreakdownAmerican(poly),
+    bestOpponentAmerican: best,
+    bestText: formatBreakdownAmerican(best),
+  };
+}
+
+export function formatLegBreakdownLine(leg) {
+  const b = leg && Object.prototype.hasOwnProperty.call(leg, "fairText")
+    ? leg
+    : mapUnhedgedLeg(leg);
+  if (!b) return "";
+  const parts = [b.name, b.fairText, b.kalshiText, b.polyText];
+  if (b.bestOpponentAmerican != null) parts.push(b.bestText);
+  return parts.join(" | ");
+}
+
+export function legBreakdownLines(row) {
+  if (!row) return [];
+  const mapped = Array.isArray(row.legs)
+    && row.legs.some((l) => l && Object.prototype.hasOwnProperty.call(l, "fairText"));
+  const legs = mapped ? row.legs : rowLegs(row);
+  return (legs || []).map(formatLegBreakdownLine).filter(Boolean);
 }
 
 function rawLegList(row) {
@@ -631,20 +756,20 @@ export function rowLegs(row) {
   const raw = pickFirst(row, LEGS_KEYS);
   const league = row ? legLeague(row) : "";
   if (typeof raw === "string") {
-    const text = formatUnhedgedLeg(raw, league);
-    return text ? [{ type: "", text }] : [];
+    const mapped = mapUnhedgedLeg(raw, league);
+    return mapped ? [mapped] : [];
   }
   if (!Array.isArray(raw)) return [];
-  return raw.map(legChip).filter(Boolean);
+  return raw.map((leg) => mapUnhedgedLeg(leg, league)).filter(Boolean);
 }
 
 export function rowLabel(row) {
   const chips = rowLegs(row);
-  const texts = chips.map((c) => c.text).filter((t) => t && !isTickerBlob(t));
+  const texts = chips.map((c) => c.name || c.text).filter((t) => t && !isTickerBlob(t));
   if (texts.length) return texts.join(" · ");
   const label = pickFirst(row, LABEL_KEYS);
   if (label != null && String(label).trim() && !isTickerBlob(label)) {
-    return formatUnhedgedLeg(String(label).trim()) || String(label).trim();
+    return formatUnhedgedLegName(String(label).trim()) || String(label).trim();
   }
   return "—";
 }
@@ -804,6 +929,81 @@ export function visibleUnhedgedRows(rows) {
   return mapUnhedgedRows(filterMlbNflMoneylineRows(filterFilledUnhedgedRows(rows)));
 }
 
+export const UNHEDGED_VENUE_FILTERS = ["all", "kalshi", "polymarket"];
+
+export function normalizeVenueFilter(value) {
+  const key = venueKey(value);
+  if (key === "kalshi" || key === "polymarket") return key;
+  return "all";
+}
+
+export function rowVenueKey(row) {
+  if (!row) return "";
+  if (row.venueKey) return row.venueKey;
+  return venueKey(pickFirst(row, VENUE_KEYS) || row.venue);
+}
+
+export function rowMatchesVenueFilter(row, venue) {
+  const wanted = normalizeVenueFilter(venue);
+  if (wanted === "all") return true;
+  return rowVenueKey(row) === wanted;
+}
+
+export function filterUnhedgedRowsByVenue(rows, venue) {
+  return (rows || []).filter((row) => rowMatchesVenueFilter(row, venue));
+}
+
+// Quote and fill must both already exist. Never invent a price; never use fair.
+// Mapped rows already resolved these — a null there is a missing price, not a
+// hint to go looking for another column.
+export function rowQuoteAmerican(row) {
+  if (!row) return null;
+  if (Object.prototype.hasOwnProperty.call(row, "ourAmerican")) {
+    return row.ourAmerican == null ? null : toNum(row.ourAmerican);
+  }
+  return ourQuoteAmerican(row);
+}
+
+export function rowFillAmerican(row) {
+  if (!row) return null;
+  if (Object.prototype.hasOwnProperty.call(row, "fillAmerican")) {
+    return row.fillAmerican == null ? null : toNum(row.fillAmerican);
+  }
+  return fillAmerican(row);
+}
+
+// Better buy-side YES than the print: higher American (our +614 vs fill +452,
+// or our −110 vs fill −150). Missing quote or fill never passes.
+export function wouldQuoteBeatsFill(row) {
+  const quote = rowQuoteAmerican(row);
+  const fill = rowFillAmerican(row);
+  if (quote == null || fill == null) return false;
+  return quote > fill;
+}
+
+export function filterUnhedgedRowsByQuoteBeat(rows, beatOnly = false) {
+  if (!beatOnly) return rows || [];
+  return (rows || []).filter(wouldQuoteBeatsFill);
+}
+
+// Client analytics over already-visible (filled MLB/NFL) rows. Fetch stays
+// filled-only 1000 — these chips do not change the query.
+
+export function resolveUnhedgedLimit(limit) {
+  if (limit == null || limit === "") return UNHEDGED_LIMIT;
+  const n = toNum(limit);
+  if (n == null || n <= 0) return UNHEDGED_LIMIT;
+  return Math.min(Math.floor(n), UNHEDGED_LIMIT);
+}
+
+export function unhedgedRefreshLabel(refreshing) {
+  return refreshing ? "Refreshing…" : "Refresh";
+}
+
+export function filterUnhedgedAnalytics(rows, { venue = "all", quoteBeatFill = false } = {}) {
+  return filterUnhedgedRowsByQuoteBeat(filterUnhedgedRowsByVenue(rows, venue), quoteBeatFill);
+}
+
 function fillTimeMs(row) {
   return timeMs(row && (row.filledAt || row.filled_at));
 }
@@ -892,7 +1092,7 @@ async function runSelect(client, { userId, limit, orderByFilledAt = true, filter
   if (userId) q = q.eq("user_id", userId);
   if (filterStatus) q = q.eq("status", "filled");
   if (typeof q.order === "function") {
-    // Filled-only: newest fill first so the 400-row window is not wasted on seen.
+    // Filled-only: newest fill first so the 1000-row window is not wasted on seen.
     if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
     q = q.order("created_at", { ascending: false });
   }
@@ -918,20 +1118,21 @@ function finalizeFetchedRows(data) {
 
 // Select * for the signed-in user when user_id exists on the table; otherwise
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
-// status=eq.filled first so the 400-row window is fills. If that filter fails
+// status=eq.filled first so the 1000-row window is fills. If that filter fails
 // (missing status column), retry without it and client-filter filled.
 // If filled_at is not in the schema cache (PGRST204), retry created_at only.
 export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" } };
   }
+  const rowLimit = resolveUnhedgedLimit(limit);
   let scopedUserId = userId;
   let orderByFilledAt = true;
   let filterStatus = true;
   for (let attempt = 0; attempt < 8; attempt++) {
     let result;
     try {
-      result = await runSelect(client, { userId: scopedUserId, limit, orderByFilledAt, filterStatus });
+      result = await runSelect(client, { userId: scopedUserId, limit: rowLimit, orderByFilledAt, filterStatus });
     } catch (err) {
       const kind = classifySelectError(err, { userId: scopedUserId, orderByFilledAt, filterStatus });
       if (kind === "missing_table") return { rows: [], missingTable: true, error: err };

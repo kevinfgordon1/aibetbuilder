@@ -1,15 +1,19 @@
 // Unhedged RFQ blotter — read-only filled RFQs from public.unhedged_rfqs.
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
-// Summary + tape are MLB and NFL moneylines only.
+// Summary + tape are MLB and NFL moneylines only. Venue and
+// would-quote-beat-fill chips are client-side over the filled 1000.
+// Legs cell is a per-leg Fair / Kalshi / Poly breakdown — not a cramped chip.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
   UNHEDGED_LIMIT,
   fetchUnhedgedRfqs,
+  filterUnhedgedAnalytics,
   isTickerBlob,
   summarizeUnhedgedRows,
+  unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
 
@@ -20,8 +24,58 @@ function VenueChip({ venue, venueKey }) {
   return <span className={"chip " + cls}>{venue}</span>;
 }
 
-function visibleLegChips(legs) {
-  return (legs || []).filter((l) => l.text && !isTickerBlob(l.text));
+const VENUE_CHIPS = [
+  { key: "all", label: "All" },
+  { key: "kalshi", label: "Kalshi", cls: "venue-kalshi" },
+  { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
+];
+
+function FilterChip({ label, active, onClick, className, title }) {
+  return (
+    <button
+      type="button"
+      className={"chip btn" + (active ? " on" : "") + (className ? " " + className : "")}
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
+function visibleBreakdownLegs(legs) {
+  return (legs || []).filter((l) => (l.name || l.text) && !isTickerBlob(l.name || l.text));
+}
+
+function LegBreakdown({ legs }) {
+  const rows = visibleBreakdownLegs(legs);
+  if (!rows.length) return null;
+  const showBest = rows.some((l) => l.bestOpponentAmerican != null);
+  return (
+    <table className="legs">
+      <thead>
+        <tr>
+          <th>Leg</th>
+          <th>Fair</th>
+          <th>Kalshi</th>
+          <th>Poly</th>
+          {showBest ? <th>Best opp</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((l, i) => (
+          <tr key={i}>
+            <td>{l.name || l.text}</td>
+            <td className="num fair">{l.fairText || "—"}</td>
+            <td className="num">{l.kalshiText || "—"}</td>
+            <td className="num">{l.polyText || "—"}</td>
+            {showBest ? <td className="num">{l.bestText || "—"}</td> : null}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 function Tile({ k, v, sub, tone, title }) {
@@ -35,11 +89,17 @@ function Tile({ k, v, sub, tone, title }) {
   );
 }
 
-export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) {
+export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, onRefresh, refreshing }) {
   const list = rows || [];
+  const [venueFilter, setVenueFilter] = useState("all");
+  const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const filtered = useMemo(
+    () => filterUnhedgedAnalytics(list, { venue: venueFilter, quoteBeatFill }),
+    [list, venueFilter, quoteBeatFill],
+  );
   const summary = useMemo(
-    () => summarizeUnhedgedRows(list, { fetched: fetched == null ? list.length : fetched }),
-    [list, fetched],
+    () => summarizeUnhedgedRows(filtered, { fetched: fetched == null ? list.length : fetched }),
+    [filtered, fetched, list.length],
   );
   return (
     <div className="uh">
@@ -52,7 +112,17 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
         .uh .chip.ok{background:rgba(16,185,129,.18);color:#6ee7b7}
         .uh .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .uh .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
-        .uh .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
+        .uh .chip.btn{cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font:inherit;font-size:12px;font-weight:600}
+        .uh .chip.btn:disabled{opacity:.55;cursor:wait}
+        .uh .chip.btn.on{background:rgba(59,130,246,.2);color:#93c5fd;border-color:rgba(59,130,246,.35)}
+        .uh .chip.btn.venue-kalshi.on{background:rgba(6,182,212,.2);color:#67e8f9;border-color:rgba(6,182,212,.35)}
+        .uh .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
+        .uh .chip.btn.warn.on{background:rgba(245,158,11,.2);color:#fcd34d;border-color:rgba(245,158,11,.35)}
+        .uh .filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+        .uh .legs{width:auto;min-width:100%;margin:2px 0 0;border-collapse:collapse;font-size:12px}
+        .uh .legs th{padding:2px 10px 2px 0;border-bottom:1px solid rgba(255,255,255,0.08);font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;font-weight:600}
+        .uh .legs td{padding:3px 10px 3px 0;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle}
+        .uh .legs tr:last-child td{border-bottom:none}
         .uh .empty{color:#6b7280;font-size:14px;padding:8px 2px}
         .uh .muted{color:#6b7280}
         .uh .fair{color:#93c5fd}
@@ -74,10 +144,46 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
         {loaded && !missingTable && (
           <span className="chip ok num">{summary.filled} filled</span>
         )}
+        {onRefresh ? (
+          <button
+            type="button"
+            className="chip btn"
+            disabled={!!refreshing || !loaded}
+            aria-busy={!!refreshing}
+            title="Re-fetch the filled tape. Does not reload the app."
+            onClick={onRefresh}
+          >
+            {unhedgedRefreshLabel(refreshing)}
+          </button>
+        ) : null}
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
         Filled RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only. No quoting from this page.
       </div>
+
+      {loaded && !missingTable && (
+        <div className="filters" role="group" aria-label="Unhedged RFQ filters">
+          <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Venue</span>
+          {VENUE_CHIPS.map((c) => (
+            <FilterChip
+              key={c.key}
+              label={c.label}
+              className={c.cls}
+              active={venueFilter === c.key}
+              onClick={() => setVenueFilter(c.key)}
+              title={c.key === "all" ? "All venues in this filled fetch" : `Filled ${c.label} only`}
+            />
+          ))}
+          <span className="muted" style={{ margin: "0 4px" }}>·</span>
+          <FilterChip
+            label="Would-quote beat fill"
+            className="warn"
+            active={quoteBeatFill}
+            onClick={() => setQuoteBeatFill((on) => !on)}
+            title="Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Rows missing quote or fill never pass."
+          />
+        </div>
+      )}
 
       {loaded && !missingTable && (
         <div className="tiles">
@@ -108,6 +214,10 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
             No filled MLB or NFL moneyline RFQs.
             {error && error.message ? <span className="muted"> ({error.message})</span> : null}
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="empty">
+            No filled MLB or NFL moneyline RFQs match these filters.
+          </div>
         ) : (
           <table>
             <thead>
@@ -122,21 +232,13 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
               </tr>
             </thead>
             <tbody>
-              {list.map((r) => {
-                const chips = visibleLegChips(r.legs);
+              {filtered.map((r) => {
                 return (
                   <tr key={r.id}>
                     <td className="num muted">{r.timeEt}</td>
                     <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
                     <td>
-                      <div>{r.label}</div>
-                      {chips.length > 0 && (
-                        <div style={{ marginTop: 4 }}>
-                          {chips.map((l, i) => (
-                            <span className="leg" key={i}>{l.text}</span>
-                          ))}
-                        </div>
-                      )}
+                      <LegBreakdown legs={r.legs} />
                     </td>
                     <td className="num">{r.amountText}</td>
                     <td className="num">{r.fillText}</td>
@@ -164,14 +266,20 @@ export default function UnhedgedTape({ user }) {
   const [missingTable, setMissingTable] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async ({ button } = {}) => {
     if (!owner) return;
-    const result = await fetchUnhedgedRfqs(supabase, { userId: user && user.id, limit: UNHEDGED_LIMIT });
-    setRaw(result.rows);
-    setMissingTable(result.missingTable);
-    setError(result.error);
-    setLoaded(true);
+    if (button) setRefreshing(true);
+    try {
+      const result = await fetchUnhedgedRfqs(supabase, { userId: user && user.id, limit: UNHEDGED_LIMIT });
+      setRaw(result.rows);
+      setMissingTable(result.missingTable);
+      setError(result.error);
+      setLoaded(true);
+    } finally {
+      if (button) setRefreshing(false);
+    }
   }, [owner, user]);
 
   useEffect(() => { reload(); }, [reload]);
@@ -192,6 +300,8 @@ export default function UnhedgedTape({ user }) {
       missingTable={missingTable}
       loaded={loaded}
       error={error}
+      onRefresh={() => { reload({ button: true }); }}
+      refreshing={refreshing}
     />
   );
 }
