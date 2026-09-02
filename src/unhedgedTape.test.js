@@ -1095,19 +1095,6 @@ function assertUpdatedThenCreatedBeforeLimit(call) {
   assert.ok(orderAt[1] < limitAt, "expected both .order() calls before .limit()");
 }
 
-function assertFilledThenCreatedBeforeLimit(call) {
-  assert.deepEqual(call.orders, [
-    { col: "filled_at", opts: { ascending: false, nullsFirst: false } },
-    { col: "created_at", opts: { ascending: false } },
-  ]);
-  const orderAt = orderIndexes(call);
-  const limitAt = call.ops.indexOf("limit");
-  assert.equal(orderAt.length, 2, "expected .order(filled_at) then .order(created_at)");
-  assert.ok(orderAt[0] < orderAt[1], "expected filled_at order before created_at order");
-  assert.ok(limitAt >= 0, "expected .limit()");
-  assert.ok(orderAt[1] < limitAt, "expected both .order() calls before .limit()");
-}
-
 function hasEq(call, col, val) {
   return (call.eqs || []).some((e) => e.col === col && e.val === val);
 }
@@ -1221,7 +1208,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
 }
 
-// ── updated_at missing (PGRST204) → retry filled_at then created_at, same user_id ──
+// ── updated_at missing (PGRST204) → retry created_at only, same user_id ──
 {
   const rows = [{ id: "4", status: "filled", fill_american: -110 }];
   const client = createSequenceClient([
@@ -1237,27 +1224,10 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertStatusFilledEq(client.calls[0]);
   assertStatusFilledEq(client.calls[1]);
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertFilledThenCreatedBeforeLimit(client.calls[1]);
+  assertCreatedAtOnlyBeforeLimit(client.calls[1]);
 }
 
-// ── updated_at then filled_at missing → created_at only, same user_id ──
-{
-  const rows = [{ id: "4b", status: "filled", fill_american: -110 }];
-  const client = createSequenceClient([
-    { data: null, error: { code: "PGRST204", message: "Could not find the 'updated_at' column of 'unhedged_rfqs' in the schema cache" } },
-    { data: null, error: { code: "PGRST204", message: "Could not find the 'filled_at' column of 'unhedged_rfqs' in the schema cache" } },
-    { data: rows, error: null },
-  ]);
-  const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
-  assert.equal(result.missingTable, false);
-  assert.deepEqual(result.rows, rows);
-  assert.equal(client.calls.length, 3);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertFilledThenCreatedBeforeLimit(client.calls[1]);
-  assertCreatedAtOnlyBeforeLimit(client.calls[2]);
-}
-
-// ── updated_at missing then user_id missing → filled_at + created_at, unscoped, still filled ──
+// ── updated_at missing then user_id missing → created_at only, unscoped, still filled ──
 {
   const rows = [{ id: "5", status: "filled", fill_american: -105 }];
   const client = createSequenceClient([
@@ -1270,8 +1240,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls.length, 3);
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertFilledThenCreatedBeforeLimit(client.calls[1]);
-  assertFilledThenCreatedBeforeLimit(client.calls[2]);
+  assertCreatedAtOnlyBeforeLimit(client.calls[1]);
+  assertCreatedAtOnlyBeforeLimit(client.calls[2]);
   assert.equal(hasEq(client.calls[2], "user_id", "u1"), false);
   assertStatusFilledEq(client.calls[2]);
 }

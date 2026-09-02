@@ -1124,29 +1124,29 @@ export function isMissingStatusColumn(error) {
   );
 }
 
-async function runSelect(client, { userId, limit, orderByUpdatedAt = true, orderByFilledAt = false, filterStatus = true }) {
+async function runSelect(client, { userId, limit, orderByUpdatedAt = true, filterStatus = true }) {
   let q = client.from(UNHEDGED_TABLE).select("*");
   if (userId) q = q.eq("user_id", userId);
   if (filterStatus) q = q.eq("status", "filled");
   if (typeof q.order === "function") {
     // Newest activity first so the 1000-row window includes late writes
-    // whose filled_at is tape tradeTs (often earlier) or null.
+    // whose filled_at is tape tradeTs (often earlier) or null. Prefer
+    // updated_at; if that column is missing, created_at only — do not fall
+    // back to filled_at desc (nulls last would bury those writes again).
     if (orderByUpdatedAt) q = q.order("updated_at", { ascending: false, nullsFirst: false });
-    else if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
     q = q.order("created_at", { ascending: false });
   }
   if (typeof q.limit === "function") q = q.limit(limit);
   return q;
 }
 
-function classifySelectError(error, { userId, orderByUpdatedAt, orderByFilledAt, filterStatus }) {
+function classifySelectError(error, { userId, orderByUpdatedAt, filterStatus }) {
   if (!error) return null;
   // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
   // matches the table-missing message fallback.
   if (userId && isMissingUserIdColumn(error)) return "missing_user_id";
   if (filterStatus && isMissingStatusColumn(error)) return "missing_status";
   if (orderByUpdatedAt && isMissingUpdatedAtColumn(error)) return "missing_updated_at";
-  if (orderByFilledAt && isMissingFilledAtColumn(error)) return "missing_filled_at";
   if (isMissingTableError(error)) return "missing_table";
   return "other";
 }
@@ -1161,8 +1161,8 @@ function finalizeFetchedRows(data) {
 // status=eq.filled first so the 1000-row window is fills. If that filter fails
 // (missing status column), retry without it and client-filter filled.
 // Prefer updated_at desc (newest activity). If updated_at is not in the schema
-// cache (PGRST204), retry filled_at then created_at only — same pattern as
-// the old filled_at fallback.
+// cache (PGRST204), retry created_at only — same pattern as the old filled_at
+// fallback. Do not retry filled_at desc; that window hides null/early tape stamps.
 export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" } };
@@ -1170,7 +1170,6 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
   const rowLimit = resolveUnhedgedLimit(limit);
   let scopedUserId = userId;
   let orderByUpdatedAt = true;
-  let orderByFilledAt = false;
   let filterStatus = true;
   for (let attempt = 0; attempt < 8; attempt++) {
     let result;
@@ -1179,14 +1178,12 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
         userId: scopedUserId,
         limit: rowLimit,
         orderByUpdatedAt,
-        orderByFilledAt,
         filterStatus,
       });
     } catch (err) {
       const kind = classifySelectError(err, {
         userId: scopedUserId,
         orderByUpdatedAt,
-        orderByFilledAt,
         filterStatus,
       });
       if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
@@ -1200,11 +1197,6 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
       }
       if (kind === "missing_updated_at") {
         orderByUpdatedAt = false;
-        orderByFilledAt = true;
-        continue;
-      }
-      if (kind === "missing_filled_at") {
-        orderByFilledAt = false;
         continue;
       }
       return { rows: [], missingTable: false, error: err };
@@ -1214,7 +1206,6 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
     const kind = classifySelectError(error, {
       userId: scopedUserId,
       orderByUpdatedAt,
-      orderByFilledAt,
       filterStatus,
     });
     if (kind === "missing_table") return { rows: [], missingTable: true, error };
@@ -1228,11 +1219,6 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
     }
     if (kind === "missing_updated_at") {
       orderByUpdatedAt = false;
-      orderByFilledAt = true;
-      continue;
-    }
-    if (kind === "missing_filled_at") {
-      orderByFilledAt = false;
       continue;
     }
     if (error) return { rows: [], missingTable: false, error };
