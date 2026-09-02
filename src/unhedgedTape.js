@@ -11,11 +11,12 @@
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
 // only — the tape does not show those). Tape is MLB + NFL moneylines only.
-// Legs: "Rockies ML +145" from Kalshi ticker or Poly aec-* slug via
-// formatUnhedgedLegName + optional per-leg fair_american.
+// Legs: spoken name via formatUnhedgedLegName. Per-leg invert fair and
+// venue opponent Americans live on a breakdown row — never crammed onto
+// the name, never copied from the row parlay our_fair_american.
 // Row our_fair_american is the parlay true/fair (invert product).
 // Row our_quote_american is the 5% net-cost wrap (what we would have filled).
-// Never copy the parlay fair onto chips. Never label fair as the fill.
+// Never label fair as the fill.
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
@@ -65,8 +66,29 @@ const FAIR_AMERICAN_KEYS = [
   "true_american",
 ];
 
-// Per-leg fair only. Row our_fair_american is the parlay fair — never copy it onto chips.
+// Per-leg fair only. Row our_fair_american is the parlay fair — never copy it onto a leg.
 const LEG_FAIR_AMERICAN_KEYS = ["fair_american", "our_fair_american", "true_american"];
+const LEG_KALSHI_AMERICAN_KEYS = ["kalshi_opponent_american", "kalshi_american"];
+const LEG_POLY_AMERICAN_KEYS = [
+  "poly_opponent_american",
+  "polymarket_opponent_american",
+  "poly_american",
+];
+const LEG_BEST_OPP_AMERICAN_KEYS = ["best_opponent_american"];
+const NESTED_KALSHI_AMERICAN_KEYS = [
+  "kalshi_opponent_american",
+  "opponent_american",
+  "kalshi_american",
+  "american",
+];
+const NESTED_POLY_AMERICAN_KEYS = [
+  "poly_opponent_american",
+  "polymarket_opponent_american",
+  "opponent_american",
+  "poly_american",
+  "polymarket_american",
+  "american",
+];
 
 const FILL_AMERICAN_KEYS = ["fill_american", "filled_american", "fill_price_american"];
 const FILL_PRICE_KEYS = ["fill_yes_price", "fill_price", "fill", "filled_price"];
@@ -536,12 +558,79 @@ export function formatUnhedgedLeg(leg, leagueHint = "") {
   return withLegFair(formatUnhedgedLegName(leg, leagueHint), leg);
 }
 
+export function statedAmerican(value) {
+  if (value == null || value === "") return null;
+  const n = coerceAmerican(value);
+  return n == null || n === 0 ? null : n;
+}
+
+export function formatBreakdownAmerican(a) {
+  return formatScanAmerican(a) || "—";
+}
+
 export function legFairAmerican(leg) {
   if (!leg || typeof leg !== "object") return null;
   const stated = pickFirst(leg, LEG_FAIR_AMERICAN_KEYS);
-  if (stated == null) return null;
-  const n = coerceAmerican(stated);
-  return n == null || n === 0 ? null : n;
+  return stated == null ? null : statedAmerican(stated);
+}
+
+function pickStatedAmerican(obj, keys) {
+  if (!obj || typeof obj !== "object") return null;
+  const stated = pickFirst(obj, keys);
+  return stated == null ? null : statedAmerican(stated);
+}
+
+function quoteBagVenue(obj) {
+  if (!obj || typeof obj !== "object") return "";
+  return venueKey(obj.venue || obj.exchange || obj.source || obj.book);
+}
+
+function collectQuoteBags(leg, venue) {
+  const bags = [];
+  if (!leg || typeof leg !== "object") return bags;
+  const quotes = leg.quotes;
+  if (Array.isArray(quotes)) {
+    for (const q of quotes) {
+      if (!q || typeof q !== "object") continue;
+      const key = quoteBagVenue(q);
+      if (key === venue) bags.push(q);
+    }
+  } else if (quotes && typeof quotes === "object") {
+    const nested = venue === "kalshi"
+      ? (quotes.kalshi || quotes.Kalshi)
+      : (quotes.poly || quotes.polymarket || quotes.Polymarket);
+    if (nested && typeof nested === "object") bags.push(nested);
+  }
+  if (venue === "kalshi" && leg.kalshi && typeof leg.kalshi === "object") bags.push(leg.kalshi);
+  if (venue === "polymarket") {
+    if (leg.poly && typeof leg.poly === "object") bags.push(leg.poly);
+    if (leg.polymarket && typeof leg.polymarket === "object") bags.push(leg.polymarket);
+  }
+  return bags;
+}
+
+export function legKalshiAmerican(leg) {
+  const flat = pickStatedAmerican(leg, LEG_KALSHI_AMERICAN_KEYS);
+  if (flat != null) return flat;
+  for (const bag of collectQuoteBags(leg, "kalshi")) {
+    const n = pickStatedAmerican(bag, NESTED_KALSHI_AMERICAN_KEYS);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+export function legPolyAmerican(leg) {
+  const flat = pickStatedAmerican(leg, LEG_POLY_AMERICAN_KEYS);
+  if (flat != null) return flat;
+  for (const bag of collectQuoteBags(leg, "polymarket")) {
+    const n = pickStatedAmerican(bag, NESTED_POLY_AMERICAN_KEYS);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+export function legBestOpponentAmerican(leg) {
+  return pickStatedAmerican(leg, LEG_BEST_OPP_AMERICAN_KEYS);
 }
 
 function withLegFair(name, leg) {
@@ -550,11 +639,46 @@ function withLegFair(name, leg) {
   return fairText ? `${name} ${fairText}` : name;
 }
 
-function legChip(leg) {
+export function mapUnhedgedLeg(leg, leagueHint = "") {
   if (leg == null) return null;
-  const text = formatUnhedgedLeg(leg);
-  if (!text || isTickerBlob(text)) return null;
-  return { type: "", text, fairAmerican: legFairAmerican(leg) };
+  const name = formatUnhedgedLegName(leg, leagueHint);
+  if (!name || isTickerBlob(name)) return null;
+  const obj = typeof leg === "object" ? leg : null;
+  const fair = obj ? legFairAmerican(obj) : null;
+  const kalshi = obj ? legKalshiAmerican(obj) : null;
+  const poly = obj ? legPolyAmerican(obj) : null;
+  const best = obj ? legBestOpponentAmerican(obj) : null;
+  return {
+    type: "",
+    name,
+    text: name,
+    fairAmerican: fair,
+    fairText: formatBreakdownAmerican(fair),
+    kalshiAmerican: kalshi,
+    kalshiText: formatBreakdownAmerican(kalshi),
+    polyAmerican: poly,
+    polyText: formatBreakdownAmerican(poly),
+    bestOpponentAmerican: best,
+    bestText: formatBreakdownAmerican(best),
+  };
+}
+
+export function formatLegBreakdownLine(leg) {
+  const b = leg && Object.prototype.hasOwnProperty.call(leg, "fairText")
+    ? leg
+    : mapUnhedgedLeg(leg);
+  if (!b) return "";
+  const parts = [b.name, b.fairText, b.kalshiText, b.polyText];
+  if (b.bestOpponentAmerican != null) parts.push(b.bestText);
+  return parts.join(" | ");
+}
+
+export function legBreakdownLines(row) {
+  if (!row) return [];
+  const mapped = Array.isArray(row.legs)
+    && row.legs.some((l) => l && Object.prototype.hasOwnProperty.call(l, "fairText"));
+  const legs = mapped ? row.legs : rowLegs(row);
+  return (legs || []).map(formatLegBreakdownLine).filter(Boolean);
 }
 
 function rawLegList(row) {
@@ -632,20 +756,20 @@ export function rowLegs(row) {
   const raw = pickFirst(row, LEGS_KEYS);
   const league = row ? legLeague(row) : "";
   if (typeof raw === "string") {
-    const text = formatUnhedgedLeg(raw, league);
-    return text ? [{ type: "", text }] : [];
+    const mapped = mapUnhedgedLeg(raw, league);
+    return mapped ? [mapped] : [];
   }
   if (!Array.isArray(raw)) return [];
-  return raw.map(legChip).filter(Boolean);
+  return raw.map((leg) => mapUnhedgedLeg(leg, league)).filter(Boolean);
 }
 
 export function rowLabel(row) {
   const chips = rowLegs(row);
-  const texts = chips.map((c) => c.text).filter((t) => t && !isTickerBlob(t));
+  const texts = chips.map((c) => c.name || c.text).filter((t) => t && !isTickerBlob(t));
   if (texts.length) return texts.join(" · ");
   const label = pickFirst(row, LABEL_KEYS);
   if (label != null && String(label).trim() && !isTickerBlob(label)) {
-    return formatUnhedgedLeg(String(label).trim()) || String(label).trim();
+    return formatUnhedgedLegName(String(label).trim()) || String(label).trim();
   }
   return "—";
 }

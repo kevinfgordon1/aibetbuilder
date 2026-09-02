@@ -18,9 +18,15 @@ import {
   formatCashSize,
   formatEtTime,
   formatScanAmerican,
+  formatBreakdownAmerican,
+  formatLegBreakdownLine,
   formatUnhedgedLeg,
   formatUnhedgedLegName,
   formatVenue,
+  legBestOpponentAmerican,
+  legBreakdownLines,
+  legKalshiAmerican,
+  legPolyAmerican,
   fairAmerican,
   filterFilledUnhedgedRows,
   isFilledUnhedgedRow,
@@ -262,7 +268,9 @@ assert.equal(fairAmerican({ our_quote_american: 178 }), null);
   assert.equal(row.fairText, "+201");
   assert.equal(row.ourAmerican, 178);
   assert.equal(row.ourText, "+178");
-  assert.equal(row.legs[0].text, "Rockies ML +145");
+  assert.equal(row.legs[0].text, "Rockies ML");
+  assert.equal(row.legs[0].name, "Rockies ML");
+  assert.equal(row.legs[0].fairText, "+145");
   assert.notEqual(row.fairText, row.fillText);
   assert.notEqual(row.fairText, row.ourText);
 }
@@ -532,8 +540,9 @@ assert.equal(
     }],
   });
   assert.equal(row.venue, "Polymarket");
-  assert.equal(row.legs[0].text, "Rockies ML +145");
-  assert.equal(row.label, "Rockies ML +145");
+  assert.equal(row.legs[0].text, "Rockies ML");
+  assert.equal(row.legs[0].fairText, "+145");
+  assert.equal(row.label, "Rockies ML");
   assert.doesNotMatch(row.label, /aec-mlb|KXMLB|BALCOL/);
 }
 
@@ -562,8 +571,9 @@ assert.equal(
       { symbol: "aec-nfl-phi-kc-2026-09-09-chiefs", side: "yes", league: "nfl", selection: "chiefs", fair_american: -118 },
     ],
   });
-  assert.equal(row.label, "Rockies ML +145 · Chiefs ML \u2212118");
-  assert.deepEqual(row.legs.map((l) => l.text), ["Rockies ML +145", "Chiefs ML \u2212118"]);
+  assert.equal(row.label, "Rockies ML · Chiefs ML");
+  assert.deepEqual(row.legs.map((l) => l.text), ["Rockies ML", "Chiefs ML"]);
+  assert.deepEqual(row.legs.map((l) => l.fairText), ["+145", "\u2212118"]);
   assert.equal(row.ourText, "—");
   assert.equal(row.fairText, "+400");
 }
@@ -580,18 +590,16 @@ assert.equal(
       { ticker: "KXMLBGAME-26SEP021510PITMIL-PIT", side: "yes", league: "mlb", true_american: -133 },
     ],
   });
-  assert.equal(row.label, "Rockies ML +145 · Red Sox ML \u2212118 · Pirates ML \u2212133");
-  assert.deepEqual(row.legs.map((l) => l.text), [
-    "Rockies ML +145",
-    "Red Sox ML \u2212118",
-    "Pirates ML \u2212133",
-  ]);
+  assert.equal(row.label, "Rockies ML · Red Sox ML · Pirates ML");
+  assert.deepEqual(row.legs.map((l) => l.text), ["Rockies ML", "Red Sox ML", "Pirates ML"]);
+  assert.deepEqual(row.legs.map((l) => l.fairText), ["+145", "\u2212118", "\u2212133"]);
   assert.equal(row.ourAmerican, 380);
   assert.equal(row.ourText, "+380");
   assert.equal(row.fairAmerican, 400);
   assert.equal(row.fairText, "+400");
   for (const chip of row.legs) {
-    assert.doesNotMatch(chip.text, /KXMLB|KXMVE|\+400|\+380/);
+    assert.doesNotMatch(chip.text, /KXMLB|KXMVE|\+400|\+380|\+145|145/);
+    assert.notEqual(chip.fairText, "+400");
   }
 }
 
@@ -604,7 +612,101 @@ assert.equal(
   assert.equal(row.label, "Rockies ML");
   assert.equal(row.ourText, "—");
   assert.equal(row.fairText, "+400");
+  assert.equal(row.legs[0].fairText, "—");
   assert.doesNotMatch(row.legs[0].text, /\+400|\+145|145/);
+}
+
+// ── Per-leg breakdown: one line per leg; missing venue odds are —; no row-fair reuse ──
+assert.equal(formatBreakdownAmerican(-118), "\u2212118");
+assert.equal(formatBreakdownAmerican(145), "+145");
+assert.equal(formatBreakdownAmerican(null), "—");
+assert.equal(legKalshiAmerican({ kalshi_opponent_american: -110 }), -110);
+assert.equal(legKalshiAmerican({ kalshi_american: 145 }), 145);
+assert.equal(legKalshiAmerican({ quotes: { kalshi: { opponent_american: -115 } } }), -115);
+assert.equal(legKalshiAmerican({ quotes: [{ venue: "kalshi", opponent_american: -108 }] }), -108);
+assert.equal(legKalshiAmerican({ fair_american: 145 }), null);
+assert.equal(legPolyAmerican({ poly_opponent_american: 130 }), 130);
+assert.equal(legPolyAmerican({ polymarket_opponent_american: -120 }), -120);
+assert.equal(legPolyAmerican({ poly_american: 105 }), 105);
+assert.equal(legPolyAmerican({ quotes: { polymarket: { american: 122 } } }), 122);
+assert.equal(legPolyAmerican({ kalshi_opponent_american: -110 }), null);
+assert.equal(legBestOpponentAmerican({ best_opponent_american: 125 }), 125);
+assert.equal(legBestOpponentAmerican({}), null);
+{
+  const row = mapUnhedgedRow({
+    our_fair_american: 400,
+    our_quote_american: 380,
+    legs: [
+      {
+        ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+        side: "yes",
+        league: "mlb",
+        fair_american: 145,
+        kalshi_opponent_american: -110,
+      },
+      {
+        ticker: "KXMLBGAME-26SEP021510BOSNYY-BOS",
+        side: "yes",
+        league: "mlb",
+        our_fair_american: -118,
+        poly_opponent_american: 130,
+      },
+      {
+        ticker: "KXMLBGAME-26SEP021510PITMIL-PIT",
+        side: "yes",
+        league: "mlb",
+        true_american: -133,
+        quotes: { kalshi: { opponent_american: -105 }, polymarket: { opponent_american: 140 } },
+        best_opponent_american: 140,
+      },
+    ],
+  });
+  assert.equal(row.legs.length, 3);
+  assert.deepEqual(row.legs.map((l) => l.name), ["Rockies ML", "Red Sox ML", "Pirates ML"]);
+  assert.deepEqual(legBreakdownLines(row), [
+    "Rockies ML | +145 | \u2212110 | —",
+    "Red Sox ML | \u2212118 | — | +130",
+    "Pirates ML | \u2212133 | \u2212105 | +140 | +140",
+  ]);
+  assert.equal(row.legs[0].kalshiText, "\u2212110");
+  assert.equal(row.legs[0].polyText, "—");
+  assert.equal(row.legs[1].kalshiText, "—");
+  assert.equal(row.legs[1].polyText, "+130");
+  assert.equal(row.fairText, "+400");
+  for (const leg of row.legs) {
+    assert.notEqual(leg.fairText, "+400");
+    assert.doesNotMatch(leg.name, /\+400|\+380/);
+    assert.doesNotMatch(formatLegBreakdownLine(leg), /\+400|\+380/);
+  }
+}
+{
+  const row = mapUnhedgedRow({
+    our_fair_american: 400,
+    legs: [
+      { ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb" },
+      { ticker: "KXMLBGAME-26SEP021510BOSNYY-BOS", side: "yes", league: "mlb" },
+    ],
+  });
+  assert.equal(row.legs.length, 2);
+  assert.deepEqual(legBreakdownLines(row), [
+    "Rockies ML | — | — | —",
+    "Red Sox ML | — | — | —",
+  ]);
+  assert.equal(row.fairText, "+400");
+  assert.equal(row.legs.every((l) => l.fairText === "—"), true);
+}
+{
+  const raw = {
+    our_fair_american: 400,
+    legs: [
+      { ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb", fair_american: 145 },
+      { ticker: "KXMLBGAME-26SEP021510BOSNYY-BOS", side: "yes", league: "mlb", fair_american: -118 },
+    ],
+  };
+  assert.deepEqual(legBreakdownLines(raw), [
+    "Rockies ML | +145 | — | —",
+    "Red Sox ML | \u2212118 | — | —",
+  ]);
 }
 
 // ── MLB / NFL moneyline filter (hide ncaaf; spreads out) ──
@@ -1126,6 +1228,12 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /True \/ fair/);
   assert.match(page, />Would-quote</);
   assert.match(page, /isTickerBlob/);
+  assert.match(page, /LegBreakdown/);
+  assert.match(page, /className="legs"/);
+  assert.match(page, />Fair</);
+  assert.match(page, />Kalshi</);
+  assert.match(page, />Poly</);
+  assert.match(page, /Best opp/);
   assert.match(page, /filled MLB or NFL moneyline/);
   assert.match(page, /We did not take these/);
   assert.match(page, /paper only/);

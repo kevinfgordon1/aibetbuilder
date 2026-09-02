@@ -3,6 +3,7 @@
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
 // Summary + tape are MLB and NFL moneylines only. Venue and
 // would-quote-beat-fill chips are client-side over the filled 1000.
+// Legs cell is a per-leg Fair / Kalshi / Poly breakdown — not a cramped chip.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
@@ -43,8 +44,38 @@ function FilterChip({ label, active, onClick, className, title }) {
   );
 }
 
-function visibleLegChips(legs) {
-  return (legs || []).filter((l) => l.text && !isTickerBlob(l.text));
+function visibleBreakdownLegs(legs) {
+  return (legs || []).filter((l) => (l.name || l.text) && !isTickerBlob(l.name || l.text));
+}
+
+function LegBreakdown({ legs }) {
+  const rows = visibleBreakdownLegs(legs);
+  if (!rows.length) return null;
+  const showBest = rows.some((l) => l.bestOpponentAmerican != null);
+  return (
+    <table className="legs">
+      <thead>
+        <tr>
+          <th>Leg</th>
+          <th>Fair</th>
+          <th>Kalshi</th>
+          <th>Poly</th>
+          {showBest ? <th>Best opp</th> : null}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((l, i) => (
+          <tr key={i}>
+            <td>{l.name || l.text}</td>
+            <td className="num fair">{l.fairText || "—"}</td>
+            <td className="num">{l.kalshiText || "—"}</td>
+            <td className="num">{l.polyText || "—"}</td>
+            {showBest ? <td className="num">{l.bestText || "—"}</td> : null}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 function Tile({ k, v, sub, tone, title }) {
@@ -88,7 +119,10 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
         .uh .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
         .uh .chip.btn.warn.on{background:rgba(245,158,11,.2);color:#fcd34d;border-color:rgba(245,158,11,.35)}
         .uh .filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px}
-        .uh .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
+        .uh .legs{width:auto;min-width:100%;margin:2px 0 0;border-collapse:collapse;font-size:12px}
+        .uh .legs th{padding:2px 10px 2px 0;border-bottom:1px solid rgba(255,255,255,0.08);font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;font-weight:600}
+        .uh .legs td{padding:3px 10px 3px 0;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle}
+        .uh .legs tr:last-child td{border-bottom:none}
         .uh .empty{color:#6b7280;font-size:14px;padding:8px 2px}
         .uh .muted{color:#6b7280}
         .uh .fair{color:#93c5fd}
@@ -199,20 +233,12 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
             </thead>
             <tbody>
               {filtered.map((r) => {
-                const chips = visibleLegChips(r.legs);
                 return (
                   <tr key={r.id}>
                     <td className="num muted">{r.timeEt}</td>
                     <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
                     <td>
-                      <div>{r.label}</div>
-                      {chips.length > 0 && (
-                        <div style={{ marginTop: 4 }}>
-                          {chips.map((l, i) => (
-                            <span className="leg" key={i}>{l.text}</span>
-                          ))}
-                        </div>
-                      )}
+                      <LegBreakdown legs={r.legs} />
                     </td>
                     <td className="num">{r.amountText}</td>
                     <td className="num">{r.fillText}</td>
