@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
 import ComboTape from "./ComboTape";
+import UnhedgedTape from "./UnhedgedTape";
 import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
@@ -1700,6 +1701,7 @@ export default function App() {
           <>
             <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
             <button style={tabStyle("missTape")} onClick={() => setActiveTab("missTape")}>Miss tape</button>
+            <button style={tabStyle("unhedged")} onClick={() => setActiveTab("unhedged")}>Unhedged RFQs</button>
           </>
         )}
       </div>
@@ -1719,6 +1721,8 @@ export default function App() {
           {activeTab === "combo" && user?.email === OWNER_EMAIL && <ComboLocks user={user} prefill={comboPrefill} />}
 
           {activeTab === "missTape" && user?.email === OWNER_EMAIL && <ComboTape user={user} />}
+
+          {activeTab === "unhedged" && user?.email === OWNER_EMAIL && <UnhedgedTape user={user} />}
 
           {activeTab === "ev" && (
             <div>
