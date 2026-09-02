@@ -2,13 +2,19 @@
 // Combo-worker writes this table in a parallel PR. Column names may arrive
 // incrementally; pick known aliases and never invent a price.
 //
+// The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
+// Fetch status=eq.filled, order filled_at desc, limit 400. If the status
+// filter fails, client-filter filled as fallback. Do not list
+// seen / started / would_quote.
+//
 // Worker statuses: seen, started, would_quote, filled. A row with
-// our_quote_american / would_quote is would_quote even if status is still
-// seen. The page summary and tape are MLB + NFL moneylines only.
-// Legs read as Kevin scans parlays: "Rockies ML +145" from Kalshi ticker
-// team code or Poly aec-* slug (last hyphen token = code or spoken name)
-// + side + optional per-leg fair_american. Row our_fair_american is
-// the parlay fair (Would-quote / Fair column) — never copied onto chips.
+// our_quote_american is would_quote even if status is still seen (mapping
+// only — the tape does not show those). Tape is MLB + NFL moneylines only.
+// Legs: "Rockies ML +145" from Kalshi ticker or Poly aec-* slug via
+// formatUnhedgedLegName + optional per-leg fair_american.
+// Row our_fair_american is the parlay true/fair (invert product).
+// Row our_quote_american is the 5% net-cost wrap (what we would have filled).
+// Never copy the parlay fair onto chips. Never label fair as the fill.
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
@@ -34,6 +40,7 @@ const VENUE_KEYS = ["venue", "exchange", "source", "book"];
 const LABEL_KEYS = ["label", "title", "market_label", "parlay_label", "market_ticker", "ticker"];
 const LEGS_KEYS = ["legs", "combo_legs", "comboLegs", "mve_selected_legs", "selected_legs"];
 const CONTRACT_KEYS = ["contracts", "contracts_fp", "qty", "size", "count", "qtyDecimal"];
+const CASH_SIZE_KEYS = ["cash_size", "cashSize"];
 
 const THEIR_AMERICAN_KEYS = [
   "taker_american",
@@ -45,14 +52,17 @@ const THEIR_AMERICAN_KEYS = [
 const THEIR_YES_KEYS = ["taker_yes_price", "rfq_yes", "their_yes", "yes_price", "rfq_price", "target_yes"];
 const THEIR_NO_KEYS = ["taker_no_price", "rfq_no", "their_no", "no_price"];
 
-const OUR_AMERICAN_KEYS = [
+// Would-quote is the 5% wrap only. Do not fall back to fair / true.
+const QUOTE_AMERICAN_KEYS = [
   "our_quote_american",
   "would_quote_american",
-  "our_american",
-  "our_fair_american",
-  "fair_american",
 ];
-const OUR_PRICE_KEYS = ["would_quote", "our_quote", "fair"];
+
+// Row true/fair is the parlay invert product. Never treat this as the fill.
+const FAIR_AMERICAN_KEYS = [
+  "our_fair_american",
+  "true_american",
+];
 
 // Per-leg fair only. Row our_fair_american is the parlay fair — never copy it onto chips.
 const LEG_FAIR_AMERICAN_KEYS = ["fair_american", "our_fair_american", "true_american"];
@@ -345,6 +355,8 @@ export function coerceAmerican(value) {
 }
 
 export function rowTime(row) {
+  const filled = row && (row.filled_at || row.filledAt);
+  if (filled) return filled;
   return pickFirst(row, TIME_KEYS);
 }
 
@@ -607,6 +619,14 @@ export function filterMlbNflMoneylineRows(rows) {
   return (rows || []).filter(isMlbNflMoneylineRow);
 }
 
+export function isFilledUnhedgedRow(row) {
+  return rowStatus(row) === "filled";
+}
+
+export function filterFilledUnhedgedRows(rows) {
+  return (rows || []).filter(isFilledUnhedgedRow);
+}
+
 export function rowLegs(row) {
   const raw = pickFirst(row, LEGS_KEYS);
   const league = row ? legLeague(row) : "";
@@ -633,6 +653,28 @@ export function rowContracts(row) {
   return toNum(pickFirst(row, CONTRACT_KEYS));
 }
 
+export function rowCashSize(row) {
+  return toNum(pickFirst(row, CASH_SIZE_KEYS));
+}
+
+export function formatCashSize(n) {
+  const v = toNum(n);
+  if (v == null) return null;
+  const sign = v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  if (Number.isInteger(abs)) return `${sign}$${abs}`;
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
+export function formatAmount(contracts, cashSize) {
+  const c = formatContracts(contracts);
+  const cash = formatCashSize(cashSize);
+  if (c === "—" && !cash) return "—";
+  if (c === "—") return cash;
+  if (!cash) return c;
+  return `${c} · ${cash}`;
+}
+
 export function theirRfqAmerican(row) {
   const stated = pickFirst(row, THEIR_AMERICAN_KEYS);
   if (stated != null) return coerceAmerican(stated);
@@ -645,10 +687,13 @@ export function theirRfqAmerican(row) {
 }
 
 export function ourQuoteAmerican(row) {
-  const stated = pickFirst(row, OUR_AMERICAN_KEYS);
-  if (stated != null) return coerceAmerican(stated);
-  const price = pickFirst(row, OUR_PRICE_KEYS);
-  return price != null ? coerceAmerican(price) : null;
+  const stated = pickFirst(row, QUOTE_AMERICAN_KEYS);
+  return stated != null ? coerceAmerican(stated) : null;
+}
+
+export function fairAmerican(row) {
+  const stated = pickFirst(row, FAIR_AMERICAN_KEYS);
+  return stated != null ? coerceAmerican(stated) : null;
 }
 
 export function fillAmerican(row) {
@@ -687,6 +732,7 @@ export function statusTone(status) {
 }
 
 // Counts over already-mapped (and already-filtered) rows. Do not invent.
+// withQuote = rows that have our_quote_american (filled tape still wants this).
 export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
   const list = rows || [];
   const summary = {
@@ -695,6 +741,7 @@ export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
     seen: 0,
     started: 0,
     wouldQuote: 0,
+    withQuote: 0,
     quoted: 0,
     filled: 0,
   };
@@ -705,6 +752,7 @@ export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
     else if (status === "would_quote") summary.wouldQuote += 1;
     else if (status === "started") summary.started += 1;
     else if (status === "seen") summary.seen += 1;
+    if (r && r.ourAmerican != null) summary.withQuote += 1;
   }
   return summary;
 }
@@ -720,6 +768,11 @@ export function mapUnhedgedRow(row, index = 0) {
   const venueRaw = pickFirst(row, VENUE_KEYS);
   const status = rowStatus(row);
   const filledAt = row && (row.filled_at || row.filledAt);
+  const contracts = rowContracts(row);
+  const cashSize = rowCashSize(row);
+  const quote = ourQuoteAmerican(row);
+  const fair = fairAmerican(row);
+  const fill = fillAmerican(row);
   return {
     id: (row && (row.id || row.rfq_id)) || `row-${index}`,
     at,
@@ -729,17 +782,26 @@ export function mapUnhedgedRow(row, index = 0) {
     venueKey: venueKey(venueRaw),
     label: rowLabel(row),
     legs: rowLegs(row),
-    contracts: rowContracts(row),
-    contractsText: formatContracts(rowContracts(row)),
+    contracts,
+    cashSize,
+    contractsText: formatContracts(contracts),
+    amountText: formatAmount(contracts, cashSize),
     theirAmerican: theirRfqAmerican(row),
     theirText: formatAmerican(theirRfqAmerican(row)) || "—",
-    ourAmerican: ourQuoteAmerican(row),
-    ourText: formatAmerican(ourQuoteAmerican(row)) || "—",
+    ourAmerican: quote,
+    ourText: formatAmerican(quote) || "—",
+    fairAmerican: fair,
+    fairText: formatAmerican(fair) || "—",
     status,
     statusTone: statusTone(status),
-    fillAmerican: fillAmerican(row),
-    fillText: formatAmerican(fillAmerican(row)) || "—",
+    fillAmerican: fill,
+    fillText: formatAmerican(fill) || "—",
   };
+}
+
+// Filled MLB/NFL moneylines only. Seen / started / would_quote / NCAAF stay out.
+export function visibleUnhedgedRows(rows) {
+  return mapUnhedgedRows(filterMlbNflMoneylineRows(filterFilledUnhedgedRows(rows)));
 }
 
 function fillTimeMs(row) {
@@ -810,13 +872,27 @@ export function isMissingFilledAtColumn(error) {
   );
 }
 
-async function runSelect(client, { userId, limit, orderByFilledAt = true }) {
+export function isMissingStatusColumn(error) {
+  if (!error) return false;
+  const code = String(error.code || "");
+  const msg = errorText(error);
+  if (!/\bstatus\b/.test(msg)) return false;
+  if (msg.includes("user_id") || msg.includes("filled_at")) return false;
+  return (
+    code === "42703"
+    || code === "PGRST204"
+    || msg.includes("does not exist")
+    || msg.includes("not find")
+    || msg.includes("unknown")
+  );
+}
+
+async function runSelect(client, { userId, limit, orderByFilledAt = true, filterStatus = true }) {
   let q = client.from(UNHEDGED_TABLE).select("*");
   if (userId) q = q.eq("user_id", userId);
+  if (filterStatus) q = q.eq("status", "filled");
   if (typeof q.order === "function") {
-    // Filled rows are UPDATEd in place; created_at stays the first-sight insert.
-    // Order fill recency first (nulls last) so status=filled is not buried
-    // under thousands of newer seen rows, then created_at, then limit.
+    // Filled-only: newest fill first so the 400-row window is not wasted on seen.
     if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
     q = q.order("created_at", { ascending: false });
   }
@@ -824,18 +900,26 @@ async function runSelect(client, { userId, limit, orderByFilledAt = true }) {
   return q;
 }
 
-function classifySelectError(error, { userId, orderByFilledAt }) {
+function classifySelectError(error, { userId, orderByFilledAt, filterStatus }) {
   if (!error) return null;
   // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
   // matches the table-missing message fallback.
   if (userId && isMissingUserIdColumn(error)) return "missing_user_id";
+  if (filterStatus && isMissingStatusColumn(error)) return "missing_status";
   if (orderByFilledAt && isMissingFilledAtColumn(error)) return "missing_filled_at";
   if (isMissingTableError(error)) return "missing_table";
   return "other";
 }
 
+function finalizeFetchedRows(data) {
+  // Query filter is the window; client filter is the rule (and the fallback).
+  return filterFilledUnhedgedRows(Array.isArray(data) ? data : []);
+}
+
 // Select * for the signed-in user when user_id exists on the table; otherwise
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
+// status=eq.filled first so the 400-row window is fills. If that filter fails
+// (missing status column), retry without it and client-filter filled.
 // If filled_at is not in the schema cache (PGRST204), retry created_at only.
 export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
   if (!client || typeof client.from !== "function") {
@@ -843,15 +927,20 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
   }
   let scopedUserId = userId;
   let orderByFilledAt = true;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let filterStatus = true;
+  for (let attempt = 0; attempt < 8; attempt++) {
     let result;
     try {
-      result = await runSelect(client, { userId: scopedUserId, limit, orderByFilledAt });
+      result = await runSelect(client, { userId: scopedUserId, limit, orderByFilledAt, filterStatus });
     } catch (err) {
-      const kind = classifySelectError(err, { userId: scopedUserId, orderByFilledAt });
+      const kind = classifySelectError(err, { userId: scopedUserId, orderByFilledAt, filterStatus });
       if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
       if (kind === "missing_user_id") {
         scopedUserId = null;
+        continue;
+      }
+      if (kind === "missing_status") {
+        filterStatus = false;
         continue;
       }
       if (kind === "missing_filled_at") {
@@ -862,10 +951,14 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
     }
     const error = result && result.error;
     const data = result && result.data;
-    const kind = classifySelectError(error, { userId: scopedUserId, orderByFilledAt });
+    const kind = classifySelectError(error, { userId: scopedUserId, orderByFilledAt, filterStatus });
     if (kind === "missing_table") return { rows: [], missingTable: true, error };
     if (kind === "missing_user_id") {
       scopedUserId = null;
+      continue;
+    }
+    if (kind === "missing_status") {
+      filterStatus = false;
       continue;
     }
     if (kind === "missing_filled_at") {
@@ -873,7 +966,7 @@ export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGE
       continue;
     }
     if (error) return { rows: [], missingTable: false, error };
-    return { rows: Array.isArray(data) ? data : [], missingTable: false, error: null };
+    return { rows: finalizeFetchedRows(data), missingTable: false, error: null };
   }
   return { rows: [], missingTable: false, error: { message: "retries exhausted" } };
 }
