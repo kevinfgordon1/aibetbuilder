@@ -8,6 +8,7 @@ import {
   UNHEDGED_LIMIT,
   fetchUnhedgedRfqs,
   filterMlbNflMoneylineRows,
+  isTickerBlob,
   mapUnhedgedRows,
   summarizeUnhedgedRows,
 } from "./unhedgedTape";
@@ -23,6 +24,10 @@ function StatusChip({ status, tone }) {
 function VenueChip({ venue, venueKey }) {
   const cls = venueKey === "kalshi" ? "venue-kalshi" : venueKey === "polymarket" ? "venue-poly" : "";
   return <span className={"chip " + cls}>{venue}</span>;
+}
+
+function visibleLegChips(legs) {
+  return (legs || []).filter((l) => l.text && !isTickerBlob(l.text));
 }
 
 function Tile({ k, v, sub, tone, title }) {
@@ -137,33 +142,36 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error }) 
                 <th>Legs</th>
                 <th>Contracts</th>
                 <th>RFQ</th>
-                <th>Would-quote</th>
+                <th>Would-quote / Fair</th>
                 <th>Status</th>
                 <th>Fill</th>
               </tr>
             </thead>
             <tbody>
-              {list.map((r) => (
-                <tr key={r.id} className={r.status === "filled" ? "is-filled" : undefined}>
-                  <td className="num muted">{r.timeEt}</td>
-                  <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
-                  <td>
-                    <div>{r.label}</div>
-                    {r.legs.length > 0 && (
-                      <div style={{ marginTop: 4 }}>
-                        {r.legs.map((l, i) => (
-                          <span className="leg" key={i}>{l.type ? <span className="ty">{l.type}</span> : null}{l.text}</span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="num">{r.contractsText}</td>
-                  <td className="num">{r.theirText}</td>
-                  <td className="num">{r.ourText}</td>
-                  <td><StatusChip status={r.status} tone={r.statusTone} /></td>
-                  <td className="num">{r.fillText}</td>
-                </tr>
-              ))}
+              {list.map((r) => {
+                const chips = visibleLegChips(r.legs);
+                return (
+                  <tr key={r.id} className={r.status === "filled" ? "is-filled" : undefined}>
+                    <td className="num muted">{r.timeEt}</td>
+                    <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
+                    <td>
+                      <div>{r.label}</div>
+                      {chips.length > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          {chips.map((l, i) => (
+                            <span className="leg" key={i}>{l.type ? <span className="ty">{l.type}</span> : null}{l.text}</span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="num">{r.contractsText}</td>
+                    <td className="num">{r.theirText}</td>
+                    <td className="num">{r.ourText}</td>
+                    <td><StatusChip status={r.status} tone={r.statusTone} /></td>
+                    <td className="num">{r.fillText}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

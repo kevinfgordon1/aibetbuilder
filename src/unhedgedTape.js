@@ -5,6 +5,9 @@
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american / would_quote is would_quote even if status is still
 // seen. The page summary and tape are MLB + NFL moneylines only.
+// Legs read as Kevin scans parlays: "Rockies ML +145" from ticker team
+// code + side + optional per-leg fair_american. Row our_fair_american is
+// the parlay fair (Would-quote / Fair column) — never copied onto chips.
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
@@ -50,12 +53,90 @@ const OUR_AMERICAN_KEYS = [
 ];
 const OUR_PRICE_KEYS = ["would_quote", "our_quote", "fair"];
 
+// Per-leg fair only. Row our_fair_american is the parlay fair — never copy it onto chips.
+const LEG_FAIR_AMERICAN_KEYS = ["fair_american", "our_fair_american", "true_american"];
+
 const FILL_AMERICAN_KEYS = ["fill_american", "filled_american", "fill_price_american"];
 const FILL_PRICE_KEYS = ["fill_yes_price", "fill_price", "fill", "filled_price"];
 
 const NON_ML_MARKET = /\b(spread|run[_ -]?line|total|over_under|\bou\b|prop|props)\b|kx(mlb|nfl)(spread|total)/i;
 const ML_TYPE = /^(ml|moneyline|h2h|game)$/i;
 const GAME_ML_ID = /kx(mlb|nfl)game-|aec-(mlb|nfl)-/i;
+const TICKER_BLOB = /^(kx[a-z0-9]*-|aec-(mlb|nfl|ncaaf)-)/i;
+const TEAM_CODE = /^[A-Za-z]{2,4}$/;
+
+// Short names Kevin says when he reads a parlay. Sox keep the color/city so
+// Red Sox and White Sox do not collapse. WAS/WSH is Nats in MLB, Commanders in NFL.
+const MLB_TEAM_NAMES = {
+  ARI: "D-backs", AZ: "D-backs",
+  ATL: "Braves",
+  BAL: "Orioles",
+  BOS: "Red Sox",
+  CHC: "Cubs",
+  CWS: "White Sox", CHW: "White Sox",
+  CIN: "Reds",
+  CLE: "Guardians",
+  COL: "Rockies",
+  DET: "Tigers",
+  HOU: "Astros",
+  KC: "Royals", KCR: "Royals",
+  LAA: "Angels",
+  LAD: "Dodgers",
+  MIA: "Marlins",
+  MIL: "Brewers",
+  MIN: "Twins",
+  NYM: "Mets",
+  NYY: "Yanks",
+  ATH: "A's", OAK: "A's",
+  PHI: "Phillies",
+  PIT: "Pirates",
+  SD: "Padres", SDP: "Padres",
+  SF: "Giants", SFG: "Giants",
+  SEA: "Mariners",
+  STL: "Cards",
+  TB: "Rays", TBR: "Rays",
+  TEX: "Rangers",
+  TOR: "Jays",
+  WSH: "Nats", WAS: "Nats",
+};
+
+const NFL_TEAM_NAMES = {
+  ARI: "Cardinals",
+  ATL: "Falcons",
+  BAL: "Ravens",
+  BUF: "Bills",
+  CAR: "Panthers",
+  CHI: "Bears",
+  CIN: "Bengals",
+  CLE: "Browns",
+  DAL: "Cowboys",
+  DEN: "Broncos",
+  DET: "Lions",
+  GB: "Packers", GNB: "Packers",
+  HOU: "Texans",
+  IND: "Colts",
+  JAC: "Jags", JAX: "Jags",
+  KC: "Chiefs", KCC: "Chiefs",
+  LAC: "Chargers",
+  LAR: "Rams",
+  LV: "Raiders", LVR: "Raiders",
+  MIA: "Dolphins",
+  MIN: "Vikings",
+  NE: "Patriots", NWE: "Patriots",
+  NO: "Saints", NOR: "Saints",
+  NYG: "Giants",
+  NYJ: "Jets",
+  PHI: "Eagles",
+  PIT: "Steelers",
+  SEA: "Seahawks",
+  SF: "Niners", SFO: "Niners",
+  TB: "Bucs", TAM: "Bucs",
+  TEN: "Titans",
+  WAS: "Commanders", WSH: "Commanders",
+};
+
+const MLB_CODE_ALIAS = { WAS: "WSH", CHW: "CWS", AZ: "ARI", OAK: "ATH", KCR: "KC", SDP: "SD", SFG: "SF", TBR: "TB" };
+const NFL_CODE_ALIAS = { WSH: "WAS", JAX: "JAC", GNB: "GB", NWE: "NE", NOR: "NO", LVR: "LV", SFO: "SF", TAM: "TB", KCC: "KC" };
 
 export function toNum(v) {
   if (v == null || v === "") return null;
@@ -84,6 +165,12 @@ export function formatAmerican(a) {
   if (n == null || !Number.isFinite(n)) return null;
   const whole = Math.round(n);
   return whole > 0 ? "+" + whole : String(whole);
+}
+
+// How Kevin scans a board: unicode minus, never invented from a ticker.
+export function formatScanAmerican(a) {
+  const text = formatAmerican(a);
+  return text ? text.replace(/-/g, "\u2212") : null;
 }
 
 // Explicit American fields (or integer-like odds). 0 < n < 1 is a probability,
@@ -147,21 +234,166 @@ export function formatVenue(value) {
   return String(value).trim();
 }
 
-function legChip(leg) {
-  if (leg == null) return null;
+export function isTickerBlob(value) {
+  const t = String(value == null ? "" : value).trim();
+  if (!t) return false;
+  if (TICKER_BLOB.test(t)) return true;
+  if (!t.includes("-")) return false;
+  return /KXMLB|KXNFL|KXNCAAF|KXMVE|GAME|SPREAD|TOTAL/i.test(t) && !/\s/.test(t);
+}
+
+export function normalizeTeamCode(raw, league = "") {
+  const code = String(raw == null ? "" : raw).trim().toUpperCase();
+  if (!code) return "";
+  const alias = league === "nfl" ? NFL_CODE_ALIAS[code] : MLB_CODE_ALIAS[code];
+  return alias || code;
+}
+
+export function teamDisplayName(raw, league = "") {
+  const code = normalizeTeamCode(raw, league);
+  if (!code) return "";
+  const table = league === "nfl" ? NFL_TEAM_NAMES : MLB_TEAM_NAMES;
+  if (table[code]) return table[code];
+  if (league !== "nfl" && league !== "mlb") {
+    return MLB_TEAM_NAMES[code] || NFL_TEAM_NAMES[code] || "";
+  }
+  return "";
+}
+
+function lastTickerTeamCode(ticker) {
+  const s = String(ticker == null ? "" : ticker).trim();
+  if (!s) return "";
+  const parts = s.split("-").filter(Boolean);
+  if (!parts.length) return "";
+  const last = parts[parts.length - 1];
+  return TEAM_CODE.test(last) ? last.toUpperCase() : "";
+}
+
+function codeFromToken(raw) {
+  const t = String(raw == null ? "" : raw).trim();
+  return TEAM_CODE.test(t) ? t.toUpperCase() : "";
+}
+
+function teamCodesFromList(teams, league) {
+  if (!Array.isArray(teams)) return [];
+  const out = [];
+  for (const t of teams) {
+    const code = codeFromToken(t);
+    if (!code) continue;
+    const norm = normalizeTeamCode(code, league);
+    if (norm && !out.includes(norm)) out.push(norm);
+  }
+  return out;
+}
+
+function resolveTeamCode(leg, league) {
+  if (!leg || typeof leg !== "object") return "";
+  const fromTicker = lastTickerTeamCode(leg.ticker || leg.market_ticker || "");
+  if (fromTicker) return normalizeTeamCode(fromTicker, league);
+  const fromSelection = codeFromToken(leg.selection);
+  if (fromSelection) return normalizeTeamCode(fromSelection, league);
+  const fromLabel = codeFromToken(leg.label);
+  if (fromLabel) return normalizeTeamCode(fromLabel, league);
+  return "";
+}
+
+function resolveOpponentCode(leg, league, teamCode) {
+  const codes = teamCodesFromList(leg && leg.teams, league);
+  if (codes.length < 2 || !teamCode) return "";
+  return codes.find((c) => c !== teamCode) || "";
+}
+
+function formatNamedSide(name, side) {
+  if (!name) return "";
+  return String(side || "").trim().toLowerCase() === "no" ? `${name} lose` : `${name} ML`;
+}
+
+function formatCodePhrase(raw, league, suffix) {
+  const token = String(raw == null ? "" : raw).trim();
+  if (!token) return "";
+  const name = teamDisplayName(token, league);
+  if (name) return `${name} ${suffix}`;
+  return `${token} ${suffix}`;
+}
+
+export function formatUnhedgedLegName(leg, leagueHint = "") {
+  if (leg == null) return "";
   if (typeof leg === "string") {
     const text = leg.trim();
-    return text ? { type: "", text } : null;
+    if (!text || isTickerBlob(text)) return "";
+    const phrase = /^(.*?)\s+(ML|lose)$/i.exec(text);
+    if (phrase) {
+      const suffix = /lose/i.test(phrase[2]) ? "lose" : "ML";
+      return formatCodePhrase(phrase[1], leagueHint, suffix);
+    }
+    if (TEAM_CODE.test(text)) {
+      const name = teamDisplayName(text, leagueHint);
+      if (name) return `${name} ML`;
+      if (text === text.toUpperCase()) return `${text} ML`;
+      return text;
+    }
+    return text;
   }
-  if (typeof leg !== "object") return null;
-  const type = String(leg.type || leg.side || "").trim();
-  const selection = String(leg.selection || "").trim();
-  const teams = Array.isArray(leg.teams) ? leg.teams.filter(Boolean).join("/") : "";
-  const text = String(
-    leg.label || leg.title || selection || teams || leg.market_ticker || leg.ticker || leg.symbol || leg.slug || ""
-  ).trim();
-  if (!text && !type) return null;
-  return { type, text: text || type };
+  if (typeof leg !== "object") return "";
+
+  const league = leagueHint || legLeague(leg);
+  const side = String(leg.side || "").trim().toLowerCase();
+  const teamCode = resolveTeamCode(leg, league);
+  if (teamCode) {
+    if (side === "no") {
+      const opp = resolveOpponentCode(leg, league, teamCode);
+      if (opp) {
+        const oppName = teamDisplayName(opp, league) || opp;
+        return `${oppName} ML`;
+      }
+      const teamName = teamDisplayName(teamCode, league) || teamCode;
+      return `${teamName} lose`;
+    }
+    const teamName = teamDisplayName(teamCode, league) || teamCode;
+    return `${teamName} ML`;
+  }
+
+  const human = [leg.label, leg.title, leg.selection]
+    .map((v) => String(v == null ? "" : v).trim())
+    .find((v) => v && !isTickerBlob(v));
+  if (!human) return "";
+  const phrase = /^(.*?)\s+(ML|lose)$/i.exec(human);
+  if (phrase) {
+    const suffix = /lose/i.test(phrase[2]) ? "lose" : "ML";
+    return formatCodePhrase(phrase[1], league, suffix);
+  }
+  if (TEAM_CODE.test(human)) {
+    return formatNamedSide(teamDisplayName(human, league) || human.toUpperCase(), side);
+  }
+  if (side === "yes" || side === "no" || ML_TYPE.test(String(leg.type || ""))) {
+    return formatNamedSide(human, side);
+  }
+  return human;
+}
+
+export function formatUnhedgedLeg(leg, leagueHint = "") {
+  return withLegFair(formatUnhedgedLegName(leg, leagueHint), leg);
+}
+
+export function legFairAmerican(leg) {
+  if (!leg || typeof leg !== "object") return null;
+  const stated = pickFirst(leg, LEG_FAIR_AMERICAN_KEYS);
+  if (stated == null) return null;
+  const n = coerceAmerican(stated);
+  return n == null || n === 0 ? null : n;
+}
+
+function withLegFair(name, leg) {
+  if (!name) return "";
+  const fairText = formatScanAmerican(legFairAmerican(leg));
+  return fairText ? `${name} ${fairText}` : name;
+}
+
+function legChip(leg) {
+  if (leg == null) return null;
+  const text = formatUnhedgedLeg(leg);
+  if (!text || isTickerBlob(text)) return null;
+  return { type: "", text, fairAmerican: legFairAmerican(leg) };
 }
 
 function rawLegList(row) {
@@ -229,8 +461,9 @@ export function filterMlbNflMoneylineRows(rows) {
 
 export function rowLegs(row) {
   const raw = pickFirst(row, LEGS_KEYS);
+  const league = row ? legLeague(row) : "";
   if (typeof raw === "string") {
-    const text = raw.trim();
+    const text = formatUnhedgedLeg(raw, league);
     return text ? [{ type: "", text }] : [];
   }
   if (!Array.isArray(raw)) return [];
@@ -238,11 +471,14 @@ export function rowLegs(row) {
 }
 
 export function rowLabel(row) {
-  const label = pickFirst(row, LABEL_KEYS);
-  if (label != null && String(label).trim()) return String(label).trim();
   const chips = rowLegs(row);
-  if (!chips.length) return "—";
-  return chips.map((c) => (c.type ? `${c.type} ${c.text}` : c.text).trim()).join(" · ");
+  const texts = chips.map((c) => c.text).filter((t) => t && !isTickerBlob(t));
+  if (texts.length) return texts.join(" · ");
+  const label = pickFirst(row, LABEL_KEYS);
+  if (label != null && String(label).trim() && !isTickerBlob(label)) {
+    return formatUnhedgedLeg(String(label).trim()) || String(label).trim();
+  }
+  return "—";
 }
 
 export function rowContracts(row) {
