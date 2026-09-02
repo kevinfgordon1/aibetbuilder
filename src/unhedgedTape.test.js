@@ -33,8 +33,11 @@ import {
   isMissingStatusColumn,
   legFairAmerican,
   isMissingFilledAtColumn,
+  isMissingUpdatedAtColumn,
   isMissingTableError,
   isMissingUserIdColumn,
+  rowTime,
+  unhedgedActivityTs,
   sortUnhedgedRows,
   isTickerBlob,
   filterMlbNflMoneylineRows,
@@ -71,6 +74,50 @@ assert.equal(coerceAmerican(null), null);
 assert.equal(formatEtTime("2026-09-02T16:30:00.000Z"), "Sep 2, 12:30 PM ET");
 assert.equal(formatEtTime(null), "—");
 assert.equal(formatEtTime(""), "—");
+
+// TIME ET: filled_at if present, else updated_at, else created_at. Do not invent a fill.
+assert.equal(rowTime({
+  filled_at: "2026-09-02T17:56:00.000Z",
+  updated_at: "2026-09-02T18:16:00.000Z",
+  created_at: "2026-09-02T17:00:00.000Z",
+}), "2026-09-02T17:56:00.000Z");
+assert.equal(rowTime({
+  filled_at: null,
+  updated_at: "2026-09-02T18:16:00.000Z",
+  created_at: "2026-09-02T18:10:00.000Z",
+}), "2026-09-02T18:16:00.000Z");
+assert.equal(rowTime({ created_at: "2026-09-02T18:10:00.000Z" }), "2026-09-02T18:10:00.000Z");
+assert.equal(unhedgedActivityTs({
+  filled_at: null,
+  updated_at: "2026-09-02T18:16:00.000Z",
+  created_at: "2026-09-02T18:10:00.000Z",
+}), "2026-09-02T18:16:00.000Z");
+{
+  const withFill = mapUnhedgedRow({
+    filled_at: "2026-09-02T17:56:00.000Z",
+    updated_at: "2026-09-02T18:16:00.000Z",
+    created_at: "2026-09-02T17:00:00.000Z",
+    status: "filled",
+  });
+  assert.equal(withFill.timeEt, "Sep 2, 1:56 PM ET");
+  assert.equal(withFill.filledAt, "2026-09-02T17:56:00.000Z");
+  assert.equal(withFill.updatedAt, "2026-09-02T18:16:00.000Z");
+  const noFill = mapUnhedgedRow({
+    filled_at: null,
+    updated_at: "2026-09-02T18:16:00.000Z",
+    created_at: "2026-09-02T18:10:00.000Z",
+    status: "filled",
+  });
+  assert.equal(noFill.timeEt, "Sep 2, 2:16 PM ET");
+  assert.equal(noFill.filledAt, null);
+  assert.equal(noFill.updatedAt, "2026-09-02T18:16:00.000Z");
+  const createdOnly = mapUnhedgedRow({
+    created_at: "2026-09-02T18:10:00.000Z",
+    status: "filled",
+  });
+  assert.equal(createdOnly.timeEt, "Sep 2, 2:10 PM ET");
+  assert.equal(createdOnly.filledAt, null);
+}
 
 // ── Venue ──
 assert.equal(formatVenue("kalshi"), "Kalshi");
@@ -196,6 +243,50 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(s.fetched, 400);
   assert.equal(s.filled, 2);
   assert.equal(s.seen, 1);
+}
+
+// ── Null filled_at + later created_at/updated_at sorts above an older fill stamp ──
+{
+  const mapped = mapUnhedgedRows([
+    {
+      id: "stale-156",
+      status: "filled",
+      fill_american: -110,
+      filled_at: "2026-09-02T17:56:00.000Z",
+      updated_at: "2026-09-02T17:56:00.000Z",
+      created_at: "2026-09-02T17:50:00.000Z",
+    },
+    {
+      id: "stale-157",
+      status: "filled",
+      fill_american: 200,
+      filled_at: "2026-09-02T17:57:00.000Z",
+      created_at: "2026-09-02T17:40:00.000Z",
+    },
+    {
+      id: "new-null-fill",
+      status: "filled",
+      fill_american: 452,
+      filled_at: null,
+      updated_at: "2026-09-02T18:16:00.000Z",
+      created_at: "2026-09-02T18:16:00.000Z",
+    },
+    {
+      id: "new-created-only",
+      status: "filled",
+      fill_american: 180,
+      filled_at: null,
+      created_at: "2026-09-02T18:10:00.000Z",
+    },
+  ]);
+  assert.deepEqual(mapped.map((r) => r.id), ["new-null-fill", "new-created-only", "stale-157", "stale-156"]);
+  assert.equal(mapped[0].filledAt, null);
+  assert.equal(mapped[0].timeEt, "Sep 2, 2:16 PM ET");
+  assert.equal(mapped[1].timeEt, "Sep 2, 2:10 PM ET");
+  assert.equal(mapped[2].timeEt, "Sep 2, 1:57 PM ET");
+  assert.equal(mapped[3].timeEt, "Sep 2, 1:56 PM ET");
+  const resorted = sortUnhedgedRows(mapped.slice().reverse());
+  assert.deepEqual(resorted.map((r) => r.id), ["new-null-fill", "new-created-only", "stale-157", "stale-156"]);
 }
 
 // ── Worker columns: our_quote / taker_american (status still seen) ──
@@ -941,10 +1032,14 @@ assert.equal(isMissingUserIdColumn({ code: "42703", message: 'column unhedged_rf
 assert.equal(isMissingFilledAtColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column of 'unhedged_rfqs' in the schema cache" }), true);
 assert.equal(isMissingFilledAtColumn({ code: "42703", message: 'column unhedged_rfqs.filled_at does not exist' }), true);
 assert.equal(isMissingFilledAtColumn({ code: "PGRST204", message: "Could not find the 'user_id' column" }), false);
+assert.equal(isMissingUpdatedAtColumn({ code: "PGRST204", message: "Could not find the 'updated_at' column of 'unhedged_rfqs' in the schema cache" }), true);
+assert.equal(isMissingUpdatedAtColumn({ code: "42703", message: 'column unhedged_rfqs.updated_at does not exist' }), true);
+assert.equal(isMissingUpdatedAtColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column" }), false);
 assert.equal(isMissingStatusColumn({ code: "PGRST204", message: "Could not find the 'status' column of 'unhedged_rfqs' in the schema cache" }), true);
 assert.equal(isMissingStatusColumn({ code: "42703", message: 'column unhedged_rfqs.status does not exist' }), true);
 assert.equal(isMissingStatusColumn({ code: "42703", message: 'column unhedged_rfqs.user_id does not exist' }), false);
 assert.equal(isMissingStatusColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column" }), false);
+assert.equal(isMissingStatusColumn({ code: "PGRST204", message: "Could not find the 'updated_at' column" }), false);
 
 function createSequenceClient(responses) {
   const calls = [];
@@ -987,15 +1082,15 @@ function orderIndexes(call) {
   return at;
 }
 
-function assertFilledThenCreatedBeforeLimit(call) {
+function assertUpdatedThenCreatedBeforeLimit(call) {
   assert.deepEqual(call.orders, [
-    { col: "filled_at", opts: { ascending: false, nullsFirst: false } },
+    { col: "updated_at", opts: { ascending: false, nullsFirst: false } },
     { col: "created_at", opts: { ascending: false } },
   ]);
   const orderAt = orderIndexes(call);
   const limitAt = call.ops.indexOf("limit");
-  assert.equal(orderAt.length, 2, "expected .order(filled_at) then .order(created_at)");
-  assert.ok(orderAt[0] < orderAt[1], "expected filled_at order before created_at order");
+  assert.equal(orderAt.length, 2, "expected .order(updated_at) then .order(created_at)");
+  assert.ok(orderAt[0] < orderAt[1], "expected updated_at order before created_at order");
   assert.ok(limitAt >= 0, "expected .limit()");
   assert.ok(orderAt[1] < limitAt, "expected both .order() calls before .limit()");
 }
@@ -1023,7 +1118,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.ok(orderAt < limitAt, "expected .order() before .limit()");
 }
 
-// ── Select * scoped to signed-in user_id, status=filled, filled_at desc ──
+// ── Select * scoped to signed-in user_id, status=filled, updated_at desc ──
 {
   const rows = [{ id: "1", user_id: "u1", status: "filled", fill_american: -110 }];
   const client = createSequenceClient([{ data: rows, error: null }]);
@@ -1036,7 +1131,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertStatusFilledEq(client.calls[0]);
   assert.equal((client.calls[0].eqs || []).some((e) => e.col === "venue"), false);
   assert.equal(client.calls[0].limit, 50);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
 }
 
 // ── No user_id → status=filled only, RLS allows ──
@@ -1054,10 +1149,10 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(resolveUnhedgedLimit(null), 1000);
   assert.equal(resolveUnhedgedLimit(50), 50);
   assert.equal(resolveUnhedgedLimit(5000), 1000);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
 }
 
-// ── Refresh re-fetches the same filled query (limit 1000, newest fill first) ──
+// ── Refresh re-fetches the same filled query (limit 1000, newest activity first) ──
 {
   const first = [{ id: "old", status: "filled", fill_american: -110 }];
   const second = [{ id: "new", status: "filled", fill_american: 200 }];
@@ -1074,8 +1169,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(client.calls[1].limit, 1000);
   assertStatusFilledEq(client.calls[0]);
   assertStatusFilledEq(client.calls[1]);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
-  assertFilledThenCreatedBeforeLimit(client.calls[1]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
   assert.equal(unhedgedRefreshLabel(false), "Refresh");
   assert.equal(unhedgedRefreshLabel(true), "Refreshing…");
 }
@@ -1109,15 +1204,15 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertStatusFilledEq(client.calls[0]);
   assert.equal(hasEq(client.calls[1], "user_id", "u1"), false);
   assertStatusFilledEq(client.calls[1]);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
-  assertFilledThenCreatedBeforeLimit(client.calls[1]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
 }
 
-// ── filled_at missing (PGRST204) → retry created_at only, same user_id ──
+// ── updated_at missing (PGRST204) → retry created_at only, same user_id ──
 {
   const rows = [{ id: "4", status: "filled", fill_american: -110 }];
   const client = createSequenceClient([
-    { data: null, error: { code: "PGRST204", message: "Could not find the 'filled_at' column of 'unhedged_rfqs' in the schema cache" } },
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'updated_at' column of 'unhedged_rfqs' in the schema cache" } },
     { data: rows, error: null },
   ]);
   const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
@@ -1128,15 +1223,15 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(hasEq(client.calls[1], "user_id", "u1"), true);
   assertStatusFilledEq(client.calls[0]);
   assertStatusFilledEq(client.calls[1]);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
   assertCreatedAtOnlyBeforeLimit(client.calls[1]);
 }
 
-// ── filled_at missing then user_id missing → created_at only, unscoped, still filled ──
+// ── updated_at missing then user_id missing → created_at only, unscoped, still filled ──
 {
   const rows = [{ id: "5", status: "filled", fill_american: -105 }];
   const client = createSequenceClient([
-    { data: null, error: { code: "42703", message: 'column unhedged_rfqs.filled_at does not exist' } },
+    { data: null, error: { code: "42703", message: 'column unhedged_rfqs.updated_at does not exist' } },
     { data: null, error: { code: "PGRST204", message: "Could not find the 'user_id' column" } },
     { data: rows, error: null },
   ]);
@@ -1144,7 +1239,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls.length, 3);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
   assertCreatedAtOnlyBeforeLimit(client.calls[1]);
   assertCreatedAtOnlyBeforeLimit(client.calls[2]);
   assert.equal(hasEq(client.calls[2], "user_id", "u1"), false);
@@ -1168,8 +1263,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertStatusFilledEq(client.calls[0]);
   assertNoStatusEq(client.calls[1]);
   assert.equal(hasEq(client.calls[1], "user_id", "u1"), true);
-  assertFilledThenCreatedBeforeLimit(client.calls[0]);
-  assertFilledThenCreatedBeforeLimit(client.calls[1]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
 }
 
 // ── Missing table is an empty blotter, not a throw ──
@@ -1240,7 +1335,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /visibleUnhedgedRows/);
   assert.match(page, /filterUnhedgedAnalytics/);
   assert.match(page, /summarizeUnhedgedRows/);
-  assert.match(page, /newest fill first/);
+  assert.match(page, /newest activity first/);
   assert.match(page, /Would-quote beat fill/);
   assert.match(page, /label: "All"/);
   assert.match(page, /label: "Kalshi"/);

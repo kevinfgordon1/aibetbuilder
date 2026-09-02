@@ -252,7 +252,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
         )}
         {loaded && summary.fetched >= UNHEDGED_LIMIT && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Showing filled MLB and NFL moneylines from the last {UNHEDGED_LIMIT} fetched (newest fill first). Older rows are not polled.
+            Showing filled MLB and NFL moneylines from the last {UNHEDGED_LIMIT} fetched (newest activity first). Older rows are not polled.
           </div>
         )}
       </div>
