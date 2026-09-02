@@ -5,8 +5,9 @@
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american / would_quote is would_quote even if status is still
 // seen. The page summary and tape are MLB + NFL moneylines only.
-// Legs read as Kevin scans parlays: "Rockies ML +145" from ticker team
-// code + side + optional per-leg fair_american. Row our_fair_american is
+// Legs read as Kevin scans parlays: "Rockies ML +145" from Kalshi ticker
+// team code or Poly aec-* slug (last hyphen token = code or spoken name)
+// + side + optional per-leg fair_american. Row our_fair_american is
 // the parlay fair (Would-quote / Fair column) — never copied onto chips.
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
@@ -138,6 +139,155 @@ const NFL_TEAM_NAMES = {
 const MLB_CODE_ALIAS = { WAS: "WSH", CHW: "CWS", AZ: "ARI", OAK: "ATH", KCR: "KC", SDP: "SD", SFG: "SF", TBR: "TB" };
 const NFL_CODE_ALIAS = { WSH: "WAS", JAX: "JAC", GNB: "GB", NWE: "NE", NOR: "NO", LVR: "LV", SFO: "SF", TAM: "TB", KCC: "KC" };
 
+// Spoken Poly slugs (rockies, red-sox, 49ers) plus city/nickname aliases.
+// Built onto the same short-name tables as Kalshi 2–4 letter codes.
+const MLB_SLUG_EXTRA = {
+  arizona: "ARI", diamondbacks: "ARI", dbacks: "ARI",
+  atlanta: "ATL",
+  baltimore: "BAL", orioles: "BAL",
+  boston: "BOS", "red-sox": "BOS", redsox: "BOS",
+  "chicago-cubs": "CHC",
+  "chicago-white-sox": "CWS", "white-sox": "CWS", whitesox: "CWS",
+  cincinnati: "CIN",
+  cleveland: "CLE",
+  colorado: "COL", rockies: "COL",
+  detroit: "DET",
+  houston: "HOU",
+  "kansas-city": "KC",
+  "los-angeles-angels": "LAA", anaheim: "LAA",
+  "los-angeles-dodgers": "LAD",
+  miami: "MIA",
+  milwaukee: "MIL",
+  minnesota: "MIN",
+  "new-york-mets": "NYM",
+  "new-york-yankees": "NYY", yankees: "NYY",
+  oakland: "ATH", athletics: "ATH", sacramento: "ATH",
+  philadelphia: "PHI",
+  pittsburgh: "PIT",
+  "san-diego": "SD",
+  "san-francisco": "SF",
+  seattle: "SEA",
+  "st-louis": "STL", "saint-louis": "STL", cardinals: "STL",
+  tampa: "TB", "tampa-bay": "TB",
+  texas: "TEX",
+  toronto: "TOR", "blue-jays": "TOR", bluejays: "TOR",
+  washington: "WSH", nationals: "WSH", nats: "WSH",
+};
+
+const NFL_SLUG_EXTRA = {
+  arizona: "ARI", cardinals: "ARI",
+  atlanta: "ATL",
+  baltimore: "BAL",
+  buffalo: "BUF",
+  carolina: "CAR",
+  chicago: "CHI",
+  cincinnati: "CIN",
+  cleveland: "CLE",
+  dallas: "DAL",
+  denver: "DEN",
+  detroit: "DET",
+  "green-bay": "GB",
+  houston: "HOU",
+  indianapolis: "IND",
+  jacksonville: "JAC", jaguars: "JAC",
+  "kansas-city": "KC", chiefs: "KC",
+  "los-angeles-chargers": "LAC", chargers: "LAC",
+  "los-angeles-rams": "LAR", rams: "LAR",
+  "las-vegas": "LV", oakland: "LV",
+  miami: "MIA",
+  minnesota: "MIN",
+  "new-england": "NE", patriots: "NE",
+  "new-orleans": "NO",
+  "new-york-giants": "NYG",
+  "new-york-jets": "NYJ",
+  philadelphia: "PHI", eagles: "PHI",
+  pittsburgh: "PIT",
+  seattle: "SEA",
+  "san-francisco": "SF", "49ers": "SF", "forty-niners": "SF", niners: "SF",
+  tampa: "TB", "tampa-bay": "TB", buccaneers: "TB",
+  tennessee: "TEN",
+  washington: "WAS", commanders: "WAS",
+};
+
+function normalizeSlug(raw) {
+  return String(raw == null ? "" : raw)
+    .trim()
+    .toLowerCase()
+    .replace(/['’.]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function addSlug(map, slug, code) {
+  const n = normalizeSlug(slug);
+  if (!n || map[n]) return;
+  map[n] = code;
+  const compact = n.replace(/-/g, "");
+  if (compact && !map[compact]) map[compact] = code;
+}
+
+function buildSlugMap(names, extras, league) {
+  const map = {};
+  for (const [code, name] of Object.entries(names)) {
+    const canon = league === "nfl"
+      ? (NFL_CODE_ALIAS[code] || code)
+      : (MLB_CODE_ALIAS[code] || code);
+    addSlug(map, code, canon);
+    addSlug(map, name, canon);
+  }
+  for (const [slug, code] of Object.entries(extras)) {
+    const canon = league === "nfl"
+      ? (NFL_CODE_ALIAS[code] || code)
+      : (MLB_CODE_ALIAS[code] || code);
+    addSlug(map, slug, canon);
+  }
+  return map;
+}
+
+const MLB_SLUG_TO_CODE = buildSlugMap(MLB_TEAM_NAMES, MLB_SLUG_EXTRA, "mlb");
+const NFL_SLUG_TO_CODE = buildSlugMap(NFL_TEAM_NAMES, NFL_SLUG_EXTRA, "nfl");
+
+function slugTables(league) {
+  if (league === "nfl") return [NFL_SLUG_TO_CODE];
+  if (league === "mlb") return [MLB_SLUG_TO_CODE];
+  return [MLB_SLUG_TO_CODE, NFL_SLUG_TO_CODE];
+}
+
+function lookupSlug(table, slug) {
+  if (!slug || !table) return "";
+  if (table[slug]) return table[slug];
+  const compact = slug.replace(/-/g, "");
+  return table[compact] || "";
+}
+
+// Codes (COL, KC) and spoken slugs (rockies, red-sox, 49ers) → canonical team code.
+export function resolveTeamToken(raw, league = "") {
+  const text = String(raw == null ? "" : raw).trim();
+  if (!text) return "";
+  const slug = normalizeSlug(text);
+  if (!slug) return "";
+  const tables = slugTables(league);
+  for (const table of tables) {
+    const hit = lookupSlug(table, slug);
+    if (hit) return hit;
+  }
+  const parts = slug.split("-").filter(Boolean);
+  if (parts.length > 1) {
+    const last = parts[parts.length - 1];
+    const two = parts.length >= 2 ? `${parts[parts.length - 2]}-${last}` : "";
+    for (const table of tables) {
+      if (two) {
+        const hitTwo = lookupSlug(table, two);
+        if (hitTwo) return hitTwo;
+      }
+      const hitLast = lookupSlug(table, last);
+      if (hitLast) return hitLast;
+    }
+  }
+  if (TEAM_CODE.test(text)) return normalizeTeamCode(text, league);
+  return "";
+}
+
 export function toNum(v) {
   if (v == null || v === "") return null;
   const n = typeof v === "string" ? parseFloat(v) : Number(v);
@@ -250,7 +400,7 @@ export function normalizeTeamCode(raw, league = "") {
 }
 
 export function teamDisplayName(raw, league = "") {
-  const code = normalizeTeamCode(raw, league);
+  const code = resolveTeamToken(raw, league) || normalizeTeamCode(raw, league);
   if (!code) return "";
   const table = league === "nfl" ? NFL_TEAM_NAMES : MLB_TEAM_NAMES;
   if (table[code]) return table[code];
@@ -260,40 +410,36 @@ export function teamDisplayName(raw, league = "") {
   return "";
 }
 
-function lastTickerTeamCode(ticker) {
-  const s = String(ticker == null ? "" : ticker).trim();
-  if (!s) return "";
-  const parts = s.split("-").filter(Boolean);
-  if (!parts.length) return "";
-  const last = parts[parts.length - 1];
-  return TEAM_CODE.test(last) ? last.toUpperCase() : "";
-}
-
-function codeFromToken(raw) {
-  const t = String(raw == null ? "" : raw).trim();
-  return TEAM_CODE.test(t) ? t.toUpperCase() : "";
+function teamEntryToken(t) {
+  if (t == null) return "";
+  if (typeof t === "string" || typeof t === "number") return String(t);
+  if (typeof t === "object") {
+    return pickFirst(t, ["code", "selection", "slug", "symbol", "name", "team", "id"]) || "";
+  }
+  return "";
 }
 
 function teamCodesFromList(teams, league) {
   if (!Array.isArray(teams)) return [];
   const out = [];
   for (const t of teams) {
-    const code = codeFromToken(t);
-    if (!code) continue;
-    const norm = normalizeTeamCode(code, league);
-    if (norm && !out.includes(norm)) out.push(norm);
+    const code = resolveTeamToken(teamEntryToken(t), league);
+    if (code && !out.includes(code)) out.push(code);
   }
   return out;
 }
 
 function resolveTeamCode(leg, league) {
   if (!leg || typeof leg !== "object") return "";
-  const fromTicker = lastTickerTeamCode(leg.ticker || leg.market_ticker || "");
-  if (fromTicker) return normalizeTeamCode(fromTicker, league);
-  const fromSelection = codeFromToken(leg.selection);
-  if (fromSelection) return normalizeTeamCode(fromSelection, league);
-  const fromLabel = codeFromToken(leg.label);
-  if (fromLabel) return normalizeTeamCode(fromLabel, league);
+  const fromId = resolveTeamToken(
+    pickFirst(leg, ["ticker", "market_ticker", "symbol", "slug"]),
+    league,
+  );
+  if (fromId) return fromId;
+  const fromSelection = resolveTeamToken(leg.selection, league);
+  if (fromSelection) return fromSelection;
+  const fromLabel = resolveTeamToken(leg.label, league);
+  if (fromLabel) return fromLabel;
   return "";
 }
 
@@ -326,9 +472,9 @@ export function formatUnhedgedLegName(leg, leagueHint = "") {
       const suffix = /lose/i.test(phrase[2]) ? "lose" : "ML";
       return formatCodePhrase(phrase[1], leagueHint, suffix);
     }
+    const named = teamDisplayName(text, leagueHint);
+    if (named) return `${named} ML`;
     if (TEAM_CODE.test(text)) {
-      const name = teamDisplayName(text, leagueHint);
-      if (name) return `${name} ML`;
       if (text === text.toUpperCase()) return `${text} ML`;
       return text;
     }
@@ -362,8 +508,10 @@ export function formatUnhedgedLegName(leg, leagueHint = "") {
     const suffix = /lose/i.test(phrase[2]) ? "lose" : "ML";
     return formatCodePhrase(phrase[1], league, suffix);
   }
+  const named = teamDisplayName(human, league);
+  if (named) return formatNamedSide(named, side);
   if (TEAM_CODE.test(human)) {
-    return formatNamedSide(teamDisplayName(human, league) || human.toUpperCase(), side);
+    return formatNamedSide(human.toUpperCase(), side);
   }
   if (side === "yes" || side === "no" || ML_TYPE.test(String(leg.type || ""))) {
     return formatNamedSide(human, side);

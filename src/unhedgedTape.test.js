@@ -12,6 +12,7 @@ import {
   formatEtTime,
   formatScanAmerican,
   formatUnhedgedLeg,
+  formatUnhedgedLegName,
   formatVenue,
   legFairAmerican,
   isMissingTableError,
@@ -23,6 +24,7 @@ import {
   mapUnhedgedRows,
   normalizeStatus,
   rowStatus,
+  resolveTeamToken,
   summarizeUnhedgedRows,
   teamDisplayName,
 } from "./unhedgedTape.js";
@@ -183,6 +185,20 @@ assert.equal(teamDisplayName("NYY", "mlb"), "Yanks");
 assert.equal(teamDisplayName("KC", "mlb"), "Royals");
 assert.equal(teamDisplayName("KC", "nfl"), "Chiefs");
 assert.equal(teamDisplayName("PHI", "nfl"), "Eagles");
+assert.equal(teamDisplayName("rockies", "mlb"), "Rockies");
+assert.equal(teamDisplayName("orioles", "mlb"), "Orioles");
+assert.equal(teamDisplayName("red-sox", "mlb"), "Red Sox");
+assert.equal(teamDisplayName("white-sox", "mlb"), "White Sox");
+assert.equal(teamDisplayName("nats", "mlb"), "Nats");
+assert.equal(teamDisplayName("yankees", "mlb"), "Yanks");
+assert.equal(teamDisplayName("chiefs", "nfl"), "Chiefs");
+assert.equal(teamDisplayName("eagles", "nfl"), "Eagles");
+assert.equal(teamDisplayName("49ers", "nfl"), "Niners");
+assert.equal(resolveTeamToken("COL", "mlb"), "COL");
+assert.equal(resolveTeamToken("rockies", "mlb"), "COL");
+assert.equal(resolveTeamToken("kc", "nfl"), "KC");
+assert.equal(resolveTeamToken("aec-mlb-bal-col-2026-09-02-col", "mlb"), "COL");
+assert.equal(resolveTeamToken("aec-mlb-bal-col-2026-09-02-rockies", "mlb"), "COL");
 assert.equal(
   formatUnhedgedLeg({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb" }),
   "Rockies ML",
@@ -268,6 +284,192 @@ assert.equal(legFairAmerican({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", fair_a
     legs: [{ ticker: "KXNFLGAME-26SEP09PHIKC-PHI", side: "no", league: "nfl", teams: ["phi", "kc"] }],
   });
   assert.equal(row.legs[0].text, "Chiefs ML");
+}
+
+// ── Polymarket worker legs: symbol/slug, no ticker; last token is the pick ──
+assert.equal(isTickerBlob("aec-mlb-bal-col-2026-09-02-col"), true);
+assert.equal(isTickerBlob("aec-mlb-bal-col-2026-09-02-rockies"), true);
+assert.equal(isTickerBlob("aec-nfl-phi-kc-2026-09-09-chiefs"), true);
+assert.equal(
+  formatUnhedgedLegName({ symbol: "aec-mlb-bal-col-2026-09-02-col", side: "yes", league: "mlb" }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLegName({ symbol: "aec-mlb-bal-col-2026-09-02-rockies", side: "yes", league: "mlb" }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLeg({ symbol: "aec-mlb-bal-col-2026-09-02-col", side: "yes", league: "mlb" }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLeg({ slug: "aec-mlb-bal-col-2026-09-02-rockies", side: "yes", league: "mlb" }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
+    side: "yes",
+    league: "mlb",
+  }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bal-col-2026-09-02",
+    selection: "rockies",
+    side: "yes",
+    league: "mlb",
+  }),
+  "Rockies ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bos-cws-2026-09-02-red-sox",
+    side: "yes",
+    league: "mlb",
+  }),
+  "Red Sox ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bos-cws-2026-09-02-white-sox",
+    side: "yes",
+    league: "mlb",
+  }),
+  "White Sox ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-wsh-nyy-2026-09-02-nats",
+    side: "yes",
+    league: "mlb",
+  }),
+  "Nats ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-wsh-nyy-2026-09-02-yankees",
+    side: "yes",
+    league: "mlb",
+  }),
+  "Yanks ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-nfl-phi-kc-2026-09-09-chiefs",
+    side: "yes",
+    league: "nfl",
+  }),
+  "Chiefs ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-nfl-phi-kc-2026-09-09-kc",
+    side: "yes",
+    league: "nfl",
+  }),
+  "Chiefs ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-nfl-phi-sf-2026-09-09-eagles",
+    side: "yes",
+    league: "nfl",
+  }),
+  "Eagles ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-nfl-phi-sf-2026-09-09-49ers",
+    side: "yes",
+    league: "nfl",
+  }),
+  "Niners ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bal-col-2026-09-02-rockies",
+    side: "no",
+    league: "mlb",
+    teams: ["orioles", "rockies"],
+  }),
+  "Orioles ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bal-col-2026-09-02-rockies",
+    side: "no",
+    league: "mlb",
+    teams: ["bal", "col"],
+  }),
+  "Orioles ML",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bal-col-2026-09-02-rockies",
+    side: "no",
+    league: "mlb",
+  }),
+  "Rockies lose",
+);
+assert.equal(
+  formatUnhedgedLeg({
+    symbol: "aec-mlb-bal-col-2026-09-02-rockies",
+    side: "yes",
+    league: "mlb",
+    fair_american: 145,
+  }),
+  "Rockies ML +145",
+);
+
+{
+  const row = mapUnhedgedRow({
+    id: "poly-col",
+    venue: "polymarket",
+    legs: [{
+      symbol: "aec-mlb-bal-col-2026-09-02-col",
+      side: "yes",
+      league: "mlb",
+      selection: "col",
+      teams: ["bal", "col"],
+      fair_american: 145,
+    }],
+  });
+  assert.equal(row.venue, "Polymarket");
+  assert.equal(row.legs[0].text, "Rockies ML +145");
+  assert.equal(row.label, "Rockies ML +145");
+  assert.doesNotMatch(row.label, /aec-mlb|KXMLB|BALCOL/);
+}
+
+{
+  const row = mapUnhedgedRow({
+    id: "poly-rockies",
+    venue: "poly",
+    legs: [{
+      symbol: "aec-mlb-bal-col-2026-09-02-rockies",
+      side: "yes",
+      league: "mlb",
+      selection: "rockies",
+      teams: ["orioles", "rockies"],
+    }],
+  });
+  assert.equal(row.legs[0].text, "Rockies ML");
+  assert.equal(row.label, "Rockies ML");
+}
+
+{
+  const row = mapUnhedgedRow({
+    venue: "polymarket",
+    our_fair_american: 400,
+    legs: [
+      { symbol: "aec-mlb-bal-col-2026-09-02-rockies", side: "yes", league: "mlb", selection: "rockies", fair_american: 145 },
+      { symbol: "aec-nfl-phi-kc-2026-09-09-chiefs", side: "yes", league: "nfl", selection: "chiefs", fair_american: -118 },
+    ],
+  });
+  assert.equal(row.label, "Rockies ML +145 · Chiefs ML \u2212118");
+  assert.deepEqual(row.legs.map((l) => l.text), ["Rockies ML +145", "Chiefs ML \u2212118"]);
+  assert.equal(row.ourText, "+400");
 }
 
 // ── Per-leg fair (worker fields only; row our_fair_american is the parlay) ──
