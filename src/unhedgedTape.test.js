@@ -14,8 +14,10 @@ import {
   formatUnhedgedLeg,
   formatVenue,
   legFairAmerican,
+  isMissingFilledAtColumn,
   isMissingTableError,
   isMissingUserIdColumn,
+  sortUnhedgedRows,
   isTickerBlob,
   filterMlbNflMoneylineRows,
   isMlbNflMoneylineRow,
@@ -135,6 +137,37 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   ]);
   assert.equal(mapped[0].id, "new");
   assert.equal(mapped[1].id, "old");
+}
+
+// ── Client sort: filled first by filled_at, then created_at ──
+{
+  const mapped = mapUnhedgedRows([
+    { id: "seen-new", status: "seen", created_at: "2026-09-02T16:00:00.000Z" },
+    {
+      id: "fill-later",
+      status: "filled",
+      fill_american: -110,
+      created_at: "2026-09-02T08:00:00.000Z",
+      filled_at: "2026-09-02T16:26:00.000Z",
+    },
+    {
+      id: "fill-earlier",
+      status: "filled",
+      fill_american: 200,
+      created_at: "2026-09-02T07:00:00.000Z",
+      filled_at: "2026-09-02T16:24:00.000Z",
+    },
+  ]);
+  assert.equal(mapped[0].id, "fill-later");
+  assert.equal(mapped[1].id, "fill-earlier");
+  assert.equal(mapped[2].id, "seen-new");
+  assert.equal(mapped[0].filledAt, "2026-09-02T16:26:00.000Z");
+  const resorted = sortUnhedgedRows(mapped.slice().reverse());
+  assert.deepEqual(resorted.map((r) => r.id), ["fill-later", "fill-earlier", "seen-new"]);
+  const s = summarizeUnhedgedRows(mapped, { fetched: 400 });
+  assert.equal(s.fetched, 400);
+  assert.equal(s.filled, 2);
+  assert.equal(s.seen, 1);
 }
 
 // ── Worker columns: our_quote / taker_american (status still seen) ──
@@ -365,7 +398,8 @@ assert.equal(legFairAmerican({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", fair_a
   assert.equal(s.started, 1);
   assert.equal(s.filled, 1);
   assert.equal(s.quoted, 0);
-  assert.equal(mapped[0].id, "a");
+  assert.equal(mapped[0].id, "d");
+  assert.equal(mapped[1].id, "a");
 }
 
 // ── Missing table / missing user_id column ──
@@ -375,19 +409,28 @@ assert.equal(isMissingTableError({ code: "42501", message: "permission denied" }
 assert.equal(isMissingUserIdColumn({ code: "42703", message: 'column unhedged_rfqs.user_id does not exist' }), true);
 assert.equal(isMissingUserIdColumn({ code: "PGRST204", message: "Could not find the 'user_id' column" }), true);
 assert.equal(isMissingUserIdColumn({ code: "42703", message: 'column unhedged_rfqs.venue does not exist' }), false);
+assert.equal(isMissingFilledAtColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column of 'unhedged_rfqs' in the schema cache" }), true);
+assert.equal(isMissingFilledAtColumn({ code: "42703", message: 'column unhedged_rfqs.filled_at does not exist' }), true);
+assert.equal(isMissingFilledAtColumn({ code: "PGRST204", message: "Could not find the 'user_id' column" }), false);
 
 function createSequenceClient(responses) {
   const calls = [];
   return {
     calls,
     from(table) {
-      const state = { table, select: null, eq: null, order: null, limit: null, ops: [] };
+      const state = { table, select: null, eq: null, order: null, orders: [], limit: null, ops: [] };
       calls.push(state);
       const idx = calls.length - 1;
       const chain = {
         select(cols) { state.select = cols; state.ops.push("select"); return chain; },
         eq(col, val) { state.eq = { col, val }; state.ops.push("eq"); return chain; },
-        order(col, opts) { state.order = { col, opts }; state.ops.push("order"); return chain; },
+        order(col, opts) {
+          const entry = { col, opts };
+          state.order = entry;
+          state.orders.push(entry);
+          state.ops.push("order");
+          return chain;
+        },
         limit(n) { state.limit = n; state.ops.push("limit"); return chain; },
         then(resolve, reject) {
           const r = responses[Math.min(idx, responses.length - 1)];
@@ -399,8 +442,29 @@ function createSequenceClient(responses) {
   };
 }
 
-function assertOrderBeforeLimit(call) {
-  assert.deepEqual(call.order, { col: "created_at", opts: { ascending: false } });
+function orderIndexes(call) {
+  const at = [];
+  (call.ops || []).forEach((op, i) => { if (op === "order") at.push(i); });
+  return at;
+}
+
+function assertFilledThenCreatedBeforeLimit(call) {
+  assert.deepEqual(call.orders, [
+    { col: "filled_at", opts: { ascending: false, nullsFirst: false } },
+    { col: "created_at", opts: { ascending: false } },
+  ]);
+  const orderAt = orderIndexes(call);
+  const limitAt = call.ops.indexOf("limit");
+  assert.equal(orderAt.length, 2, "expected .order(filled_at) then .order(created_at)");
+  assert.ok(orderAt[0] < orderAt[1], "expected filled_at order before created_at order");
+  assert.ok(limitAt >= 0, "expected .limit()");
+  assert.ok(orderAt[1] < limitAt, "expected both .order() calls before .limit()");
+}
+
+function assertCreatedAtOnlyBeforeLimit(call) {
+  assert.deepEqual(call.orders, [
+    { col: "created_at", opts: { ascending: false } },
+  ]);
   const orderAt = call.ops.indexOf("order");
   const limitAt = call.ops.indexOf("limit");
   assert.ok(orderAt >= 0, "expected .order()");
@@ -419,7 +483,7 @@ function assertOrderBeforeLimit(call) {
   assert.equal(client.calls[0].select, "*");
   assert.deepEqual(client.calls[0].eq, { col: "user_id", val: "u1" });
   assert.equal(client.calls[0].limit, 50);
-  assertOrderBeforeLimit(client.calls[0]);
+  assertFilledThenCreatedBeforeLimit(client.calls[0]);
 }
 
 // ── No user_id → all rows RLS allows ──
@@ -432,7 +496,7 @@ function assertOrderBeforeLimit(call) {
   assert.equal(client.calls[0].eq, null);
   assert.equal(client.calls[0].limit, UNHEDGED_LIMIT);
   assert.equal(UNHEDGED_LIMIT, 400);
-  assertOrderBeforeLimit(client.calls[0]);
+  assertFilledThenCreatedBeforeLimit(client.calls[0]);
 }
 
 // ── user_id column missing → retry without the filter ──
@@ -448,8 +512,43 @@ function assertOrderBeforeLimit(call) {
   assert.equal(client.calls.length, 2);
   assert.deepEqual(client.calls[0].eq, { col: "user_id", val: "u1" });
   assert.equal(client.calls[1].eq, null);
-  assertOrderBeforeLimit(client.calls[0]);
-  assertOrderBeforeLimit(client.calls[1]);
+  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledThenCreatedBeforeLimit(client.calls[1]);
+}
+
+// ── filled_at missing (PGRST204) → retry created_at only, same user_id ──
+{
+  const rows = [{ id: "4", status: "filled", fill_american: -110 }];
+  const client = createSequenceClient([
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'filled_at' column of 'unhedged_rfqs' in the schema cache" } },
+    { data: rows, error: null },
+  ]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
+  assert.equal(result.missingTable, false);
+  assert.deepEqual(result.rows, rows);
+  assert.equal(client.calls.length, 2);
+  assert.deepEqual(client.calls[0].eq, { col: "user_id", val: "u1" });
+  assert.deepEqual(client.calls[1].eq, { col: "user_id", val: "u1" });
+  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertCreatedAtOnlyBeforeLimit(client.calls[1]);
+}
+
+// ── filled_at missing then user_id missing → created_at only, unscoped ──
+{
+  const rows = [{ id: "5", status: "seen" }];
+  const client = createSequenceClient([
+    { data: null, error: { code: "42703", message: 'column unhedged_rfqs.filled_at does not exist' } },
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'user_id' column" } },
+    { data: rows, error: null },
+  ]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
+  assert.equal(result.missingTable, false);
+  assert.deepEqual(result.rows, rows);
+  assert.equal(client.calls.length, 3);
+  assertFilledThenCreatedBeforeLimit(client.calls[0]);
+  assertCreatedAtOnlyBeforeLimit(client.calls[1]);
+  assertCreatedAtOnlyBeforeLimit(client.calls[2]);
+  assert.deepEqual(client.calls[2].eq, null);
 }
 
 // ── Missing table is an empty blotter, not a throw ──
@@ -510,6 +609,7 @@ function assertOrderBeforeLimit(call) {
   assert.match(page, /is-filled/);
   assert.match(page, /filterMlbNflMoneylineRows/);
   assert.match(page, /summarizeUnhedgedRows/);
+  assert.match(page, /filled first/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
   assert.doesNotMatch(page, /onSubmit|postQuote|createQuote|type="submit"/);
   assert.doesNotMatch(page, /className="cl"/);
