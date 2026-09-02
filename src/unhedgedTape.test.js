@@ -134,13 +134,14 @@ function createSequenceClient(responses) {
   return {
     calls,
     from(table) {
-      const state = { table, select: null, eq: null, limit: null };
+      const state = { table, select: null, eq: null, order: null, limit: null, ops: [] };
       calls.push(state);
       const idx = calls.length - 1;
       const chain = {
-        select(cols) { state.select = cols; return chain; },
-        eq(col, val) { state.eq = { col, val }; return chain; },
-        limit(n) { state.limit = n; return chain; },
+        select(cols) { state.select = cols; state.ops.push("select"); return chain; },
+        eq(col, val) { state.eq = { col, val }; state.ops.push("eq"); return chain; },
+        order(col, opts) { state.order = { col, opts }; state.ops.push("order"); return chain; },
+        limit(n) { state.limit = n; state.ops.push("limit"); return chain; },
         then(resolve, reject) {
           const r = responses[Math.min(idx, responses.length - 1)];
           return Promise.resolve(r).then(resolve, reject);
@@ -149,6 +150,15 @@ function createSequenceClient(responses) {
       return chain;
     },
   };
+}
+
+function assertOrderBeforeLimit(call) {
+  assert.deepEqual(call.order, { col: "created_at", opts: { ascending: false } });
+  const orderAt = call.ops.indexOf("order");
+  const limitAt = call.ops.indexOf("limit");
+  assert.ok(orderAt >= 0, "expected .order()");
+  assert.ok(limitAt >= 0, "expected .limit()");
+  assert.ok(orderAt < limitAt, "expected .order() before .limit()");
 }
 
 // ── Select * scoped to signed-in user_id ──
@@ -162,6 +172,7 @@ function createSequenceClient(responses) {
   assert.equal(client.calls[0].select, "*");
   assert.deepEqual(client.calls[0].eq, { col: "user_id", val: "u1" });
   assert.equal(client.calls[0].limit, 50);
+  assertOrderBeforeLimit(client.calls[0]);
 }
 
 // ── No user_id → all rows RLS allows ──
@@ -173,6 +184,8 @@ function createSequenceClient(responses) {
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls[0].eq, null);
   assert.equal(client.calls[0].limit, UNHEDGED_LIMIT);
+  assert.equal(UNHEDGED_LIMIT, 400);
+  assertOrderBeforeLimit(client.calls[0]);
 }
 
 // ── user_id column missing → retry without the filter ──
@@ -188,6 +201,8 @@ function createSequenceClient(responses) {
   assert.equal(client.calls.length, 2);
   assert.deepEqual(client.calls[0].eq, { col: "user_id", val: "u1" });
   assert.equal(client.calls[1].eq, null);
+  assertOrderBeforeLimit(client.calls[0]);
+  assertOrderBeforeLimit(client.calls[1]);
 }
 
 // ── Missing table is an empty blotter, not a throw ──
