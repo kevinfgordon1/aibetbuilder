@@ -3,14 +3,16 @@
 // incrementally; pick known aliases and never invent a price.
 //
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
-// Fetch status=eq.filled, order updated_at desc, limit 1000. If the status
-// filter fails, client-filter filled as fallback. Do not list
-// seen / started / would_quote. Never list live / in-game RFQs — not even
-// paper. Hide skip_reason game_started, status started, or any leg that
-// already started when that field exists. Venue and would-quote-beat-fill are
-// client chips over that window — they do not change the query.
+// Date chips query the server for that window and page until exhausted
+// (1000-row PostgREST pages). Do not trim a global 1000-row fetch on the
+// client. If the status filter fails, client-filter filled as fallback. Do
+// not list seen / started / would_quote. Never list live / in-game RFQs —
+// not even paper. Hide skip_reason game_started, status started, or any leg
+// that already started when that field exists. Venue and would-quote-beat-fill
+// are client chips over the fetched date window — they do not change the query.
 // After combo-worker #40, filled_at is tape tradeTs (often earlier) or null
-// (never Date.now()). Newest activity is updated_at, not filled_at.
+// (never Date.now()). Newest activity is the latest of filled_at / updated_at /
+// created_at — a stale fill stamp must not bury a later write.
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
@@ -24,9 +26,23 @@
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
+// PostgREST page size. Date windows paginate until a short page — this is
+// not a global cap on how many fills Kevin can see.
 export const UNHEDGED_LIMIT = 1000;
+export const UNHEDGED_PAGE_SIZE = UNHEDGED_LIMIT;
+export const UNHEDGED_MAX_PAGES = 100;
 export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
 export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
+export const UNHEDGED_TZ = "America/New_York";
+export const UNHEDGED_DEFAULT_DATE_RANGE = "today";
+export const UNHEDGED_DATE_FILTERS = [
+  { key: "today", label: "Today" },
+  { key: "24h", label: "24h" },
+  { key: "7d", label: "7d" },
+  { key: "month", label: "Month" },
+  { key: "all", label: "All time" },
+];
+export const UNHEDGED_DATE_KEYS = ["today", "24h", "7d", "month", "all"];
 
 const TIME_KEYS = [
   "created_at",
@@ -382,28 +398,6 @@ export function coerceAmerican(value) {
   return Math.round(n);
 }
 
-export function rowTime(row) {
-  const filled = row && (row.filled_at || row.filledAt);
-  if (filled) return filled;
-  const updated = row && (row.updated_at || row.updatedAt);
-  if (updated) return updated;
-  const created = row && (row.created_at || row.createdAt);
-  if (created) return created;
-  return pickFirst(row, TIME_KEYS);
-}
-
-// Display / sort clock: filled_at if present, else updated_at, else created/at.
-// Null fill times must not sink a later write under an older fill stamp.
-// Do not invent a fill.
-export function unhedgedActivityTs(row) {
-  if (!row) return null;
-  return row.filledAt || row.filled_at
-    || row.updatedAt || row.updated_at
-    || row.at
-    || row.created_at || row.createdAt
-    || null;
-}
-
 export function timeMs(ts) {
   if (ts == null || ts === "") return 0;
   if (typeof ts === "number") return ts < 1e12 ? ts * 1000 : ts;
@@ -411,17 +405,293 @@ export function timeMs(ts) {
   return Number.isFinite(t) ? t : 0;
 }
 
+// Display / sort / TIME clock: latest of filled_at / updated_at / created_at
+// (ms max). Nulls ignored. A stale filled_at (early tape tradeTs / RFQ created)
+// must not bury a later updated_at. Do not invent a fill; do not invent Date.now().
+// Mapped rows also carry `at` (already this clock) so a later sort still works.
+const ACTIVITY_TS_KEYS = [
+  "filled_at",
+  "filledAt",
+  "updated_at",
+  "updatedAt",
+  "created_at",
+  "createdAt",
+  "at",
+];
+
+export function unhedgedActivityTs(row) {
+  if (!row) return null;
+  let best = null;
+  let bestMs = -1;
+  for (const key of ACTIVITY_TS_KEYS) {
+    const value = row[key];
+    if (value == null || value === "") continue;
+    const ms = timeMs(value);
+    if (!ms) continue;
+    if (ms > bestMs) {
+      bestMs = ms;
+      best = value;
+    }
+  }
+  return best;
+}
+
+export function rowTime(row) {
+  return unhedgedActivityTs(row) || pickFirst(row, TIME_KEYS);
+}
+
 export function formatEtTime(ts) {
   const ms = timeMs(ts);
   if (!ms) return "—";
   return new Date(ms).toLocaleString("en-US", {
-    timeZone: "America/New_York",
+    timeZone: UNHEDGED_TZ,
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   }) + " ET";
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+export function etDateParts(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (!Number.isFinite(d.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: UNHEDGED_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d).map((p) => [p.type, p.value]),
+  );
+  let hour = Number(parts.hour);
+  if (hour === 24) hour = 0;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour,
+    minute: Number(parts.minute),
+  };
+}
+
+export function etYmd(date) {
+  const p = etDateParts(date);
+  if (!p) return "";
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+// Instant whose America/New_York wall clock is ymd + hour:minute.
+export function etLocalToUtc(ymd, hour = 0, minute = 0) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || "").trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const wantHour = Number(hour) || 0;
+  const wantMin = Number(minute) || 0;
+  for (let utcHour = -12; utcHour <= 36; utcHour++) {
+    const ms = Date.UTC(y, m - 1, d, utcHour, wantMin, 0, 0);
+    const p = etDateParts(new Date(ms));
+    if (!p) continue;
+    if (p.year === y && p.month === m && p.day === d && p.hour === wantHour && p.minute === wantMin) {
+      return new Date(ms);
+    }
+  }
+  return new Date(`${ymd}T${pad2(wantHour)}:${pad2(wantMin)}:00-04:00`);
+}
+
+export function etDayBounds(now = new Date()) {
+  const ymd = etYmd(now);
+  const start = etLocalToUtc(ymd, 0, 0);
+  const nextProbe = new Date((start ? start.getTime() : Date.now()) + 36 * 60 * 60 * 1000);
+  const nextYmd = etYmd(nextProbe);
+  const end = etLocalToUtc(nextYmd, 0, 0);
+  return { start, end, ymd };
+}
+
+export function normalizeUnhedgedDateRange(value) {
+  const key = String(value == null ? "" : value).trim().toLowerCase();
+  if (key === "today" || key === "24h" || key === "7d" || key === "month" || key === "all") return key;
+  if (key === "alltime" || key === "all-time" || key === "any") return "all";
+  if (key === "30d" || key === "30day" || key === "30days") return "month";
+  return UNHEDGED_DEFAULT_DATE_RANGE;
+}
+
+export function unhedgedDateRangeLabel(value) {
+  const key = normalizeUnhedgedDateRange(value);
+  const hit = UNHEDGED_DATE_FILTERS.find((f) => f.key === key);
+  return hit ? hit.label : "Today";
+}
+
+// Date chips are "when the fill landed on our tape": same activity clock as
+// TIME ET (latest of filled_at / updated_at / created_at).
+// PostgREST cannot max() those columns, so the query ORs them (a row matches
+// if any stamp intersects the window) and we then keep rows whose latest
+// stamp is actually in range. Preferring filled_at alone would hide late
+// writes whose tape tradeTs is an older fill stamp.
+// today = America/New_York calendar day [start, next midnight).
+// 24h / 7d / month = rolling lookback (month = 30d). all = no bound.
+export function unhedgedDateWindow(range, now = new Date()) {
+  const preset = normalizeUnhedgedDateRange(range);
+  const at = now instanceof Date ? now : new Date(now);
+  if (preset === "all") return { preset, from: null, to: null };
+  if (preset === "today") {
+    const { start, end } = etDayBounds(at);
+    return {
+      preset,
+      from: start ? start.toISOString() : null,
+      to: end ? end.toISOString() : null,
+    };
+  }
+  const days = preset === "24h" ? 1 : preset === "7d" ? 7 : 30;
+  const from = new Date(at.getTime() - days * 24 * 60 * 60 * 1000);
+  return { preset, from: from.toISOString(), to: null };
+}
+
+export function unhedgedDateOrFilter(window, cols = ["filled_at", "updated_at", "created_at"]) {
+  if (!window || window.preset === "all" || (!window.from && !window.to)) return null;
+  const use = (cols || []).filter(Boolean);
+  if (!use.length) return null;
+  if (window.from && window.to) {
+    return use.map((c) => `and(${c}.gte.${window.from},${c}.lt.${window.to})`).join(",");
+  }
+  if (window.from) return use.map((c) => `${c}.gte.${window.from}`).join(",");
+  return use.map((c) => `${c}.lt.${window.to}`).join(",");
+}
+
+export function rowInUnhedgedDateWindow(row, window) {
+  if (!window || window.preset === "all" || (!window.from && !window.to)) return true;
+  const ts = unhedgedActivityTs(row);
+  if (ts == null || ts === "") return true;
+  const ms = timeMs(ts);
+  if (!ms) return true;
+  if (window.from) {
+    const from = Date.parse(window.from);
+    if (Number.isFinite(from) && ms < from) return false;
+  }
+  if (window.to) {
+    const to = Date.parse(window.to);
+    if (Number.isFinite(to) && ms >= to) return false;
+  }
+  return true;
+}
+
+export function filterUnhedgedRowsByDateWindow(rows, window) {
+  return (rows || []).filter((row) => rowInUnhedgedDateWindow(row, window));
+}
+
+const KALSHI_MONTH = {
+  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
+  JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12,
+};
+
+const LEG_EVENT_DATE_KEYS = [
+  "event_date",
+  "eventDate",
+  "game_date",
+  "gameDate",
+  "start_time",
+  "startTime",
+  "commence_time",
+  "commenceTime",
+  "game_start",
+  "gameStart",
+  "event_start",
+  "eventStart",
+  "starts_at",
+  "startsAt",
+  "kickoff",
+  "scheduled_start",
+  "date",
+];
+
+export function formatUnhedgedSport(league) {
+  const key = String(league == null ? "" : league).trim().toLowerCase();
+  if (key === "mlb" || key === "baseball_mlb") return "MLB";
+  if (key === "nfl" || key === "americanfootball_nfl") return "NFL";
+  if (key === "ncaaf" || key === "americanfootball_ncaaf") return "NCAAF";
+  return key ? key.toUpperCase() : "";
+}
+
+export function formatEtDateOnly(ymdOrTs) {
+  const parsed = parseUnhedgedEventStamp(ymdOrTs);
+  if (!parsed || !parsed.ymd) return "—";
+  const noon = etLocalToUtc(parsed.ymd, 12, 0);
+  if (!noon) return "—";
+  return noon.toLocaleString("en-US", {
+    timeZone: UNHEDGED_TZ,
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function formatEtEventDate(value) {
+  const parsed = parseUnhedgedEventStamp(value);
+  if (!parsed) return "—";
+  if (parsed.hasTime && parsed.iso) return formatEtTime(parsed.iso);
+  return formatEtDateOnly(parsed.ymd || parsed.iso);
+}
+
+export function parseTickerEventStamp(raw) {
+  const text = String(raw == null ? "" : raw);
+  const kalshi = /KX(?:MLB|NFL)GAME-(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})(\d{4})?/i.exec(text);
+  if (kalshi) {
+    const year = 2000 + Number(kalshi[1]);
+    const month = KALSHI_MONTH[kalshi[2].toUpperCase()];
+    const day = Number(kalshi[3]);
+    const ymd = `${year}-${pad2(month)}-${pad2(day)}`;
+    if (kalshi[4] && kalshi[4].length === 4) {
+      const hour = Number(kalshi[4].slice(0, 2));
+      const minute = Number(kalshi[4].slice(2, 4));
+      const utc = etLocalToUtc(ymd, hour, minute);
+      return { ymd, iso: utc ? utc.toISOString() : null, hasTime: true };
+    }
+    return { ymd, iso: null, hasTime: false };
+  }
+  const aec = /aec-(?:mlb|nfl)-[a-z0-9]+-[a-z0-9]+-(\d{4}-\d{2}-\d{2})/i.exec(text);
+  if (aec) return { ymd: aec[1], iso: null, hasTime: false };
+  const isoDay = /(\d{4}-\d{2}-\d{2})/.exec(text);
+  if (isoDay && /aec-/.test(text)) return { ymd: isoDay[1], iso: null, hasTime: false };
+  return null;
+}
+
+export function parseUnhedgedEventStamp(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "object" && value.ymd) return value;
+  if (typeof value === "number") {
+    const ms = timeMs(value);
+    if (!ms) return null;
+    return { ymd: etYmd(new Date(ms)), iso: new Date(ms).toISOString(), hasTime: true };
+  }
+  const text = String(value).trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return { ymd: text, iso: null, hasTime: false };
+  const fromTicker = parseTickerEventStamp(text);
+  if (fromTicker) return fromTicker;
+  const ms = timeMs(text);
+  if (!ms) return null;
+  return { ymd: etYmd(new Date(ms)), iso: new Date(ms).toISOString(), hasTime: /T|\d:\d/.test(text) };
+}
+
+export function legEventStamp(leg) {
+  if (leg == null) return parseTickerEventStamp(leg);
+  if (typeof leg === "string") return parseTickerEventStamp(leg);
+  if (typeof leg !== "object") return null;
+  const stated = pickFirst(leg, LEG_EVENT_DATE_KEYS);
+  if (stated != null && stated !== "") {
+    const parsed = parseUnhedgedEventStamp(stated);
+    if (parsed) return parsed;
+  }
+  const ticker = pickFirst(leg, ["ticker", "market_ticker", "symbol", "slug"]);
+  return parseTickerEventStamp(ticker);
 }
 
 export function venueKey(value) {
@@ -669,10 +939,17 @@ export function mapUnhedgedLeg(leg, leagueHint = "") {
   const kalshi = obj ? legKalshiAmerican(obj) : null;
   const poly = obj ? legPolyAmerican(obj) : null;
   const best = obj ? legBestOpponentAmerican(obj) : null;
+  const league = (obj && (legLeague(obj) || leagueHint)) || leagueHint || (typeof leg === "string" ? legLeague(leg) : "");
+  const event = obj ? legEventStamp(obj) : parseTickerEventStamp(leg);
   return {
     type: "",
     name,
     text: name,
+    sport: formatUnhedgedSport(league),
+    sportKey: league || "",
+    eventAt: event && event.iso ? event.iso : (event && event.ymd) || null,
+    eventYmd: event && event.ymd ? event.ymd : null,
+    eventText: formatEtEventDate(event),
     fairAmerican: fair,
     fairText: formatBreakdownAmerican(fair),
     kalshiAmerican: kalshi,
@@ -689,7 +966,7 @@ export function formatLegBreakdownLine(leg) {
     ? leg
     : mapUnhedgedLeg(leg);
   if (!b) return "";
-  const parts = [b.name, b.fairText, b.kalshiText, b.polyText];
+  const parts = [b.name, b.sport || "—", b.eventText || "—", b.fairText, b.kalshiText, b.polyText];
   if (b.bestOpponentAmerican != null) parts.push(b.bestText);
   return parts.join(" | ");
 }
@@ -955,6 +1232,7 @@ export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
     withQuote: 0,
     quoted: 0,
     filled: 0,
+    beatFill: 0,
   };
   for (const r of list) {
     const status = r && r.status;
@@ -964,6 +1242,7 @@ export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
     else if (status === "started") summary.started += 1;
     else if (status === "seen") summary.seen += 1;
     if (r && r.ourAmerican != null) summary.withQuote += 1;
+    if (wouldQuoteBeatsFill(r)) summary.beatFill += 1;
   }
   return summary;
 }
@@ -975,7 +1254,7 @@ export function formatContracts(n) {
 }
 
 export function mapUnhedgedRow(row, index = 0) {
-  const at = rowTime(row);
+  const at = rowTime(row); // latest of filled/updated/created — TIME ET + sort clock
   const venueRaw = pickFirst(row, VENUE_KEYS);
   const status = rowStatus(row);
   const filledAt = row && (row.filled_at || row.filledAt);
@@ -1099,9 +1378,9 @@ function activityTimeMs(row) {
   return timeMs(unhedgedActivityTs(row));
 }
 
-// Filled first, then newest activity (filledAt || updatedAt || created/at).
-// A null filled_at must not sink a later updated_at/created_at under an older
-// fill stamp. Do not invent a fill.
+// Filled first, then newest activity (latest of filled/updated/created).
+// A stale or null filled_at must not sink a later updated_at/created_at.
+// Do not invent a fill.
 export function sortUnhedgedRows(rows) {
   return [...(rows || [])].sort((a, b) => {
     const aFilled = a && a.status === "filled" ? 1 : 0;
@@ -1194,106 +1473,141 @@ export function isMissingStatusColumn(error) {
   );
 }
 
-async function runSelect(client, { userId, limit, orderByUpdatedAt = true, filterStatus = true }) {
+async function runSelect(client, {
+  userId,
+  limit,
+  offset = 0,
+  orderByUpdatedAt = true,
+  filterStatus = true,
+  dateWindow = null,
+  dateCols = ["filled_at", "updated_at", "created_at"],
+}) {
   let q = client.from(UNHEDGED_TABLE).select("*");
   if (userId) q = q.eq("user_id", userId);
   if (filterStatus) q = q.eq("status", "filled");
+  const orFilter = unhedgedDateOrFilter(dateWindow, dateCols);
+  if (orFilter && typeof q.or === "function") q = q.or(orFilter);
   if (typeof q.order === "function") {
-    // Newest activity first so the 1000-row window includes late writes
-    // whose filled_at is tape tradeTs (often earlier) or null. Prefer
-    // updated_at; if that column is missing, created_at only — do not fall
-    // back to filled_at desc (nulls last would bury those writes again).
+    // Newest activity first. Prefer updated_at; if that column is missing,
+    // created_at only — do not fall back to filled_at desc (nulls last would
+    // bury late writes whose tape tradeTs is earlier).
     if (orderByUpdatedAt) q = q.order("updated_at", { ascending: false, nullsFirst: false });
     q = q.order("created_at", { ascending: false });
   }
+  if (typeof q.range === "function") q = q.range(offset, offset + limit - 1);
   if (typeof q.limit === "function") q = q.limit(limit);
   return q;
 }
 
-function classifySelectError(error, { userId, orderByUpdatedAt, filterStatus }) {
+function classifySelectError(error, { userId, orderByUpdatedAt, filterStatus, dateCols }) {
   if (!error) return null;
   // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
   // matches the table-missing message fallback.
   if (userId && isMissingUserIdColumn(error)) return "missing_user_id";
   if (filterStatus && isMissingStatusColumn(error)) return "missing_status";
-  if (orderByUpdatedAt && isMissingUpdatedAtColumn(error)) return "missing_updated_at";
+  const cols = dateCols || [];
+  if (cols.includes("filled_at") && isMissingFilledAtColumn(error)) return "missing_filled_at";
+  if ((orderByUpdatedAt || cols.includes("updated_at")) && isMissingUpdatedAtColumn(error)) {
+    return "missing_updated_at";
+  }
   if (isMissingTableError(error)) return "missing_table";
   return "other";
 }
 
-function finalizeFetchedRows(data) {
-  // Query filter is the window; client filter is the rule (and the fallback).
+function finalizeFetchedRows(data, dateWindow = null) {
+  // Query filter is a superset (OR of stamps); client filter is the rule.
   // Drop live / in-game even when status=filled (skip_reason game_started).
-  return filterPregameUnhedgedRows(filterFilledUnhedgedRows(Array.isArray(data) ? data : []));
+  return filterUnhedgedRowsByDateWindow(
+    filterPregameUnhedgedRows(filterFilledUnhedgedRows(Array.isArray(data) ? data : [])),
+    dateWindow,
+  );
+}
+
+function applySelectKind(kind, flags) {
+  if (kind === "missing_user_id") flags.scopedUserId = null;
+  else if (kind === "missing_status") flags.filterStatus = false;
+  else if (kind === "missing_updated_at") {
+    flags.orderByUpdatedAt = false;
+    flags.dateCols = (flags.dateCols || []).filter((c) => c !== "updated_at");
+  } else if (kind === "missing_filled_at") {
+    flags.dateCols = (flags.dateCols || []).filter((c) => c !== "filled_at");
+  }
+  return flags;
 }
 
 // Select * for the signed-in user when user_id exists on the table; otherwise
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
-// status=eq.filled first so the 1000-row window is fills. If that filter fails
-// (missing status column), retry without it and client-filter filled.
-// Prefer updated_at desc (newest activity). If updated_at is not in the schema
-// cache (PGRST204), retry created_at only — same pattern as the old filled_at
-// fallback. Do not retry filled_at desc; that window hides null/early tape stamps.
-export async function fetchUnhedgedRfqs(client, { userId = null, limit = UNHEDGED_LIMIT } = {}) {
+// status=eq.filled. Date chips add an OR of filled_at / updated_at / created_at
+// intersecting the window (see unhedgedDateWindow). Pages of 1000 until a short
+// page so "All time" / "Month" are the full owner-scoped set, not a global 1000.
+// Prefer updated_at desc. If a date/order column is missing, drop it and retry.
+export async function fetchUnhedgedRfqs(client, {
+  userId = null,
+  limit = UNHEDGED_PAGE_SIZE,
+  dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
+  now,
+} = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" } };
   }
-  const rowLimit = resolveUnhedgedLimit(limit);
-  let scopedUserId = userId;
-  let orderByUpdatedAt = true;
-  let filterStatus = true;
-  for (let attempt = 0; attempt < 8; attempt++) {
-    let result;
-    try {
-      result = await runSelect(client, {
-        userId: scopedUserId,
-        limit: rowLimit,
-        orderByUpdatedAt,
-        filterStatus,
-      });
-    } catch (err) {
-      const kind = classifySelectError(err, {
-        userId: scopedUserId,
-        orderByUpdatedAt,
-        filterStatus,
-      });
-      if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
-      if (kind === "missing_user_id") {
-        scopedUserId = null;
+  const pageSize = resolveUnhedgedLimit(limit);
+  const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
+  const flags = {
+    scopedUserId: userId,
+    orderByUpdatedAt: true,
+    filterStatus: true,
+    dateCols: ["filled_at", "updated_at", "created_at"],
+  };
+  const all = [];
+  let offset = 0;
+  for (let page = 0; page < UNHEDGED_MAX_PAGES; page++) {
+    let pageRows = null;
+    let resolved = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const selectArgs = {
+        userId: flags.scopedUserId,
+        limit: pageSize,
+        offset,
+        orderByUpdatedAt: flags.orderByUpdatedAt,
+        filterStatus: flags.filterStatus,
+        dateWindow,
+        dateCols: flags.dateCols,
+      };
+      let result;
+      try {
+        result = await runSelect(client, selectArgs);
+      } catch (err) {
+        const kind = classifySelectError(err, selectArgs);
+        if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
+        if (kind === "missing_user_id" || kind === "missing_status" || kind === "missing_updated_at" || kind === "missing_filled_at") {
+          applySelectKind(kind, flags);
+          continue;
+        }
+        return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: err };
+      }
+      const error = result && result.error;
+      const data = result && result.data;
+      const kind = classifySelectError(error, selectArgs);
+      if (kind === "missing_table") return { rows: [], missingTable: true, error };
+      if (kind === "missing_user_id" || kind === "missing_status" || kind === "missing_updated_at" || kind === "missing_filled_at") {
+        applySelectKind(kind, flags);
         continue;
       }
-      if (kind === "missing_status") {
-        filterStatus = false;
-        continue;
+      if (error) {
+        return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error };
       }
-      if (kind === "missing_updated_at") {
-        orderByUpdatedAt = false;
-        continue;
-      }
-      return { rows: [], missingTable: false, error: err };
+      pageRows = Array.isArray(data) ? data : [];
+      resolved = true;
+      break;
     }
-    const error = result && result.error;
-    const data = result && result.data;
-    const kind = classifySelectError(error, {
-      userId: scopedUserId,
-      orderByUpdatedAt,
-      filterStatus,
-    });
-    if (kind === "missing_table") return { rows: [], missingTable: true, error };
-    if (kind === "missing_user_id") {
-      scopedUserId = null;
-      continue;
+    if (!resolved) {
+      return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: { message: "retries exhausted" } };
     }
-    if (kind === "missing_status") {
-      filterStatus = false;
-      continue;
+    all.push(...pageRows);
+    if (pageRows.length < pageSize) {
+      return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: null };
     }
-    if (kind === "missing_updated_at") {
-      orderByUpdatedAt = false;
-      continue;
-    }
-    if (error) return { rows: [], missingTable: false, error };
-    return { rows: finalizeFetchedRows(data), missingTable: false, error: null };
+    offset += pageSize;
   }
-  return { rows: [], missingTable: false, error: { message: "retries exhausted" } };
+  return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: null };
 }
