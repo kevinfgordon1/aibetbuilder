@@ -5,7 +5,9 @@
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
 // Fetch status=eq.filled, order updated_at desc, limit 1000. If the status
 // filter fails, client-filter filled as fallback. Do not list
-// seen / started / would_quote. Venue and would-quote-beat-fill are
+// seen / started / would_quote. Never list live / in-game RFQs — not even
+// paper. Hide skip_reason game_started, status started, or any leg that
+// already started when that field exists. Venue and would-quote-beat-fill are
 // client chips over that window — they do not change the query.
 // After combo-worker #40, filled_at is tape tradeTs (often earlier) or null
 // (never Date.now()). Newest activity is updated_at, not filled_at.
@@ -771,6 +773,71 @@ export function filterFilledUnhedgedRows(rows) {
   return (rows || []).filter(isFilledUnhedgedRow);
 }
 
+const SKIP_REASON_KEYS = ["skip_reason", "skipReason"];
+const LEG_STARTED_KEYS = [
+  "already_started",
+  "alreadyStarted",
+  "game_started",
+  "gameStarted",
+  "started",
+  "is_started",
+  "isStarted",
+];
+
+// Worker skip_reason for an in-game RFQ. "started" is the status alias.
+export function normalizeSkipReason(value) {
+  const raw = String(value == null ? "" : value).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (!raw) return null;
+  if (raw === "game_started" || raw === "gamestarted") return "game_started";
+  if (raw === "started" || raw === "start" || raw === "in_progress") return "started";
+  return raw;
+}
+
+export function isLiveSkipReason(value) {
+  const n = normalizeSkipReason(value);
+  return n === "game_started" || n === "started";
+}
+
+function truthyStartedFlag(value) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0 || value == null || value === "") return false;
+  const s = String(value).trim().toLowerCase();
+  if (s === "true" || s === "yes" || s === "1") return true;
+  return isLiveSkipReason(s) || normalizeStatus(s) === "started";
+}
+
+// Only when the worker (or a later column) put an explicit started flag on
+// the leg. Missing field is not live — do not infer from ticker kickoff.
+export function legAlreadyStarted(leg) {
+  if (!leg || typeof leg !== "object") return false;
+  for (const k of LEG_STARTED_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(leg, k)) continue;
+    if (truthyStartedFlag(leg[k])) return true;
+  }
+  return false;
+}
+
+export function anyLegAlreadyStarted(row) {
+  return rawLegList(row).some(legAlreadyStarted);
+}
+
+// Live / in-game: skip_reason game_started, status started, or a leg that
+// already started. Filled-after-kickoff rows keep skip_reason=game_started.
+export function isLiveUnhedgedRow(row) {
+  if (!row) return false;
+  if (isLiveSkipReason(pickFirst(row, SKIP_REASON_KEYS))) return true;
+  if (rowStatus(row) === "started") return true;
+  return anyLegAlreadyStarted(row);
+}
+
+export function isPregameUnhedgedRow(row) {
+  return !isLiveUnhedgedRow(row);
+}
+
+export function filterPregameUnhedgedRows(rows) {
+  return (rows || []).filter(isPregameUnhedgedRow);
+}
+
 export function rowLegs(row) {
   const raw = pickFirst(row, LEGS_KEYS);
   const league = row ? legLeague(row) : "";
@@ -945,9 +1012,12 @@ export function mapUnhedgedRow(row, index = 0) {
   };
 }
 
-// Filled MLB/NFL moneylines only. Seen / started / would_quote / NCAAF stay out.
+// Filled pregame MLB/NFL moneylines only. Seen / started / would_quote /
+// NCAAF / in-game (skip_reason game_started or a started leg) stay out.
 export function visibleUnhedgedRows(rows) {
-  return mapUnhedgedRows(filterMlbNflMoneylineRows(filterFilledUnhedgedRows(rows)));
+  return mapUnhedgedRows(
+    filterMlbNflMoneylineRows(filterPregameUnhedgedRows(filterFilledUnhedgedRows(rows))),
+  );
 }
 
 export const UNHEDGED_VENUE_FILTERS = ["all", "kalshi", "polymarket"];
@@ -1153,7 +1223,8 @@ function classifySelectError(error, { userId, orderByUpdatedAt, filterStatus }) 
 
 function finalizeFetchedRows(data) {
   // Query filter is the window; client filter is the rule (and the fallback).
-  return filterFilledUnhedgedRows(Array.isArray(data) ? data : []);
+  // Drop live / in-game even when status=filled (skip_reason game_started).
+  return filterPregameUnhedgedRows(filterFilledUnhedgedRows(Array.isArray(data) ? data : []));
 }
 
 // Select * for the signed-in user when user_id exists on the table; otherwise

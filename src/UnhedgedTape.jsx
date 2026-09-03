@@ -141,6 +141,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
         <span className="chip">read-only</span>
         <span className="chip">paper</span>
         <span className="chip">MLB + NFL ML</span>
+        <span className="chip">pregame</span>
         {loaded && !missingTable && (
           <span className="chip ok num">{summary.filled} filled</span>
         )}
@@ -158,7 +159,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
         ) : null}
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-        Filled RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only. No quoting from this page.
+        Filled pregame RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only. In-game and started RFQs stay off this tape. No quoting from this page.
       </div>
 
       {loaded && !missingTable && (
@@ -211,12 +212,12 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
           <div className="empty">No unhedged RFQ tape yet. The worker has not published this table.</div>
         ) : list.length === 0 ? (
           <div className="empty">
-            No filled MLB or NFL moneyline RFQs.
+            No filled pregame MLB or NFL moneyline RFQs.
             {error && error.message ? <span className="muted"> ({error.message})</span> : null}
           </div>
         ) : filtered.length === 0 ? (
           <div className="empty">
-            No filled MLB or NFL moneyline RFQs match these filters.
+            No filled pregame MLB or NFL moneyline RFQs match these filters.
           </div>
         ) : (
           <table>
@@ -252,7 +253,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
         )}
         {loaded && summary.fetched >= UNHEDGED_LIMIT && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Showing filled MLB and NFL moneylines from the last {UNHEDGED_LIMIT} fetched (newest activity first). Older rows are not polled.
+            Showing filled pregame MLB and NFL moneylines from the last {UNHEDGED_LIMIT} fetched (newest activity first). In-game rows are hidden. Older rows are not polled.
           </div>
         )}
       </div>

@@ -29,7 +29,13 @@ import {
   legPolyAmerican,
   fairAmerican,
   filterFilledUnhedgedRows,
+  filterPregameUnhedgedRows,
   isFilledUnhedgedRow,
+  isLiveSkipReason,
+  isLiveUnhedgedRow,
+  isPregameUnhedgedRow,
+  legAlreadyStarted,
+  normalizeSkipReason,
   isMissingStatusColumn,
   legFairAmerican,
   isMissingFilledAtColumn,
@@ -918,6 +924,99 @@ assert.equal(legBestOpponentAmerican({}), null);
   assert.equal(shown.some((r) => r.id === "seen" || r.status === "seen"), false);
 }
 
+// ── Live / in-game filled RFQs stay off the tape (not even paper) ──
+assert.equal(normalizeSkipReason("game_started"), "game_started");
+assert.equal(normalizeSkipReason("game-started"), "game_started");
+assert.equal(normalizeSkipReason("started"), "started");
+assert.equal(normalizeSkipReason("in_progress"), "started");
+assert.equal(normalizeSkipReason(""), null);
+assert.equal(isLiveSkipReason("game_started"), true);
+assert.equal(isLiveSkipReason("started"), true);
+assert.equal(isLiveSkipReason(null), false);
+assert.equal(isLiveSkipReason("oversized"), false);
+assert.equal(legAlreadyStarted({ league: "mlb", ticker: "KXMLBGAME-26SEP021940DETMIN-DET" }), false);
+assert.equal(legAlreadyStarted({ already_started: true }), true);
+assert.equal(legAlreadyStarted({ started: "game_started" }), true);
+assert.equal(legAlreadyStarted({ started: false }), false);
+assert.equal(legAlreadyStarted({ game_started: true }), true);
+{
+  const pregame = {
+    id: "pregame-mlb",
+    status: "filled",
+    fill_american: -110,
+    our_fair_american: 201,
+    our_quote_american: 178,
+    filled_at: "2026-09-02T16:26:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+  };
+  const tigersLive = {
+    id: "tigers-live",
+    status: "filled",
+    skip_reason: "game_started",
+    fill_american: 291,
+    our_fair_american: 304,
+    our_quote_american: 270,
+    filled_at: "2026-09-03T01:57:00.000Z",
+    legs: [{
+      league: "mlb",
+      ticker: "KXMLBGAME-26SEP021940DETMIN-DET",
+      selection: "det",
+      fair_american: -1192,
+    }, {
+      league: "mlb",
+      ticker: "KXMLBGAME-26SEP021940MIAKC-MIA",
+      selection: "mia",
+    }],
+  };
+  const startedStatus = {
+    id: "started-status",
+    status: "started",
+    skip_reason: "game_started",
+    filled_at: "2026-09-03T01:57:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021940DETMIN-DET", selection: "det" }],
+  };
+  const startedAlias = {
+    id: "started-alias",
+    status: "filled",
+    skip_reason: "started",
+    fill_american: -1192,
+    filled_at: "2026-09-03T01:57:00.000Z",
+    legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021940DETMIN-DET", selection: "det" }],
+  };
+  const legStarted = {
+    id: "leg-started",
+    status: "filled",
+    fill_american: -105,
+    filled_at: "2026-09-03T01:56:00.000Z",
+    legs: [{
+      league: "mlb",
+      ticker: "KXMLBGAME-26SEP021940DETMIN-DET",
+      selection: "det",
+      already_started: true,
+    }],
+  };
+  assert.equal(formatEtTime(tigersLive.filled_at), "Sep 2, 9:57 PM ET");
+  assert.equal(isLiveUnhedgedRow(tigersLive), true);
+  assert.equal(isPregameUnhedgedRow(tigersLive), false);
+  assert.equal(isFilledUnhedgedRow(tigersLive), true);
+  assert.equal(isLiveUnhedgedRow(pregame), false);
+  assert.equal(isPregameUnhedgedRow(pregame), true);
+  assert.equal(isLiveUnhedgedRow(startedStatus), true);
+  assert.equal(isLiveUnhedgedRow(startedAlias), true);
+  assert.equal(isLiveUnhedgedRow(legStarted), true);
+  assert.deepEqual(
+    filterPregameUnhedgedRows([pregame, tigersLive, startedStatus, startedAlias, legStarted]).map((r) => r.id),
+    ["pregame-mlb"],
+  );
+  const shown = visibleUnhedgedRows([pregame, tigersLive, startedStatus, startedAlias, legStarted]);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].id, "pregame-mlb");
+  assert.equal(shown.some((r) => r.id === "tigers-live"), false);
+  assert.equal(shown.some((r) => (r.label || "").includes("Tigers")), false);
+  assert.equal(shown.some((r) => String(r.fairText || "").includes("1192") || r.fairAmerican === -1192), false);
+  assert.equal(shown.some((r) => (r.legs || []).some((l) => l.fairAmerican === -1192)), false);
+}
+
 // ── Venue filter (client chips; fetch stays filled-only 1000) ──
 assert.equal(normalizeVenueFilter("all"), "all");
 assert.equal(normalizeVenueFilter("Kalshi"), "kalshi");
@@ -1189,6 +1288,38 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.deepEqual(result.rows.map((r) => r.id), ["filled"]);
 }
 
+// ── Live filled rows from the wire are dropped (skip_reason / started leg) ──
+{
+  const mixed = [
+    {
+      id: "tigers-live",
+      status: "filled",
+      skip_reason: "game_started",
+      fill_american: 291,
+      our_fair_american: 304,
+      filled_at: "2026-09-03T01:57:00.000Z",
+      legs: [{
+        league: "mlb",
+        ticker: "KXMLBGAME-26SEP021940DETMIN-DET",
+        selection: "det",
+        fair_american: -1192,
+      }],
+    },
+    {
+      id: "leg-started",
+      status: "filled",
+      fill_american: -105,
+      filled_at: "2026-09-03T01:56:00.000Z",
+      legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021940DETMIN-DET", already_started: true }],
+    },
+    { id: "filled", status: "filled", fill_american: -110 },
+  ];
+  const client = createSequenceClient([{ data: mixed, error: null }]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
+  assertStatusFilledEq(client.calls[0]);
+  assert.deepEqual(result.rows.map((r) => r.id), ["filled"]);
+}
+
 // ── user_id column missing → retry without the filter, keep status=filled ──
 {
   const rows = [{ id: "3", venue: "kalshi", status: "filled", fill_american: 180 }];
@@ -1329,9 +1460,11 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, />Kalshi</);
   assert.match(page, />Poly</);
   assert.match(page, /Best opp/);
-  assert.match(page, /filled MLB or NFL moneyline/);
+  assert.match(page, /filled pregame MLB or NFL moneyline/);
   assert.match(page, /We did not take these/);
   assert.match(page, /paper only/);
+  assert.match(page, /In-game and started RFQs stay off this tape/);
+  assert.match(page, />pregame</);
   assert.match(page, /visibleUnhedgedRows/);
   assert.match(page, /filterUnhedgedAnalytics/);
   assert.match(page, /summarizeUnhedgedRows/);
