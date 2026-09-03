@@ -1,5 +1,7 @@
 // Unhedged RFQ blotter — read-only filled RFQs from public.unhedged_rfqs.
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
+// Do not pass user.id into the tape query: combo-worker does not write
+// user_id, so eq('user_id', owner) would hide every worker row.
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
 // Summary + tape are MLB and NFL moneylines only. Default date chip is Today.
 // Today / 24h / 7d stay one page. Month / All time page only after that chip
@@ -348,7 +350,6 @@ export default function UnhedgedTape({ user }) {
     if (heavy) setPaging(true);
     try {
       const result = await fetchUnhedgedRfqs(supabase, {
-        userId: user && user.id,
         dateRange,
       });
       if (gen !== rowGen.current) return;
@@ -361,14 +362,13 @@ export default function UnhedgedTape({ user }) {
       if (button) setRefreshing(false);
       setPaging(false);
     }
-  }, [owner, user, dateRange]);
+  }, [owner, dateRange]);
 
   const reloadCounts = useCallback(async () => {
     if (!owner) return;
     const gen = countGen.current + 1;
     countGen.current = gen;
     const head = await countUnhedgedRfqs(supabase, {
-      userId: user && user.id,
       dateRange,
       venue: venueFilter,
       quoteBeatFill,
@@ -376,7 +376,7 @@ export default function UnhedgedTape({ user }) {
     if (gen !== countGen.current) return;
     setCounts(head);
     if (head && head.missingTable) setMissingTable(true);
-  }, [owner, user, dateRange, venueFilter, quoteBeatFill]);
+  }, [owner, dateRange, venueFilter, quoteBeatFill]);
 
   useEffect(() => { reloadRows(); }, [reloadRows]);
   useEffect(() => { reloadCounts(); }, [reloadCounts]);

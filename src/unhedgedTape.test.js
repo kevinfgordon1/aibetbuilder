@@ -1425,30 +1425,31 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.ok(orderAt < limitAt, "expected .order() before .limit()");
 }
 
-// ── Select * scoped to signed-in user_id, status=filled, updated_at desc ──
+// ── Select * is not scoped by user_id (worker rows are NULL / unset) ──
 {
-  const rows = [{ id: "1", user_id: "u1", status: "filled", fill_american: -110 }];
+  const rows = [{ id: "1", user_id: null, status: "filled", fill_american: -110 }];
   const client = createSequenceClient([{ data: rows, error: null }]);
   const result = await fetchUnhedgedRfqs(client, { userId: "u1", limit: 50 });
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls[0].table, UNHEDGED_TABLE);
   assert.equal(client.calls[0].select, "*");
-  assert.equal(hasEq(client.calls[0], "user_id", "u1"), true);
+  assert.equal(hasEq(client.calls[0], "user_id", "u1"), false);
+  assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[0]);
   assert.equal((client.calls[0].eqs || []).some((e) => e.col === "venue"), false);
   assert.equal(client.calls[0].limit, 50);
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
 }
 
-// ── No user_id → status=filled only, RLS allows ──
+// ── Passing userId still returns worker rows with no / null user_id ──
 {
   const rows = [{ id: "2", status: "filled", fill_american: 200 }];
   const client = createSequenceClient([{ data: rows, error: null }]);
-  const result = await fetchUnhedgedRfqs(client, { userId: null });
+  const result = await fetchUnhedgedRfqs(client, { userId: "kevin-id" });
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
-  assert.equal(hasEq(client.calls[0], "user_id", "u1"), false);
+  assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[0]);
   assert.equal(client.calls[0].limit, UNHEDGED_LIMIT);
   assert.equal(UNHEDGED_LIMIT, 1000);
@@ -1528,7 +1529,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.deepEqual(result.rows.map((r) => r.id), ["filled"]);
 }
 
-// ── user_id column missing → retry without the filter, keep status=filled ──
+// ── user_id is never queried, so a leftover user_id-column error still retries ──
 {
   const rows = [{ id: "3", venue: "kalshi", status: "filled", fill_american: 180 }];
   const client = createSequenceClient([
@@ -1538,16 +1539,17 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
-  assert.equal(client.calls.length, 2);
-  assert.equal(hasEq(client.calls[0], "user_id", "u1"), true);
+  // First call never eq user_id. A leftover schema error is classified and
+  // retried; both attempts stay unscoped.
+  assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[0]);
-  assert.equal(hasEq(client.calls[1], "user_id", "u1"), false);
+  assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[1]);
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
   assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
 }
 
-// ── updated_at missing (PGRST204) → retry created_at only, same user_id ──
+// ── updated_at missing (PGRST204) → retry created_at only, still no user_id ──
 {
   const rows = [{ id: "4", status: "filled", fill_american: -110 }];
   const client = createSequenceClient([
@@ -1558,15 +1560,15 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls.length, 2);
-  assert.equal(hasEq(client.calls[0], "user_id", "u1"), true);
-  assert.equal(hasEq(client.calls[1], "user_id", "u1"), true);
+  assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
+  assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[0]);
   assertStatusFilledEq(client.calls[1]);
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
   assertCreatedAtOnlyBeforeLimit(client.calls[1]);
 }
 
-// ── updated_at missing then user_id missing → created_at only, unscoped, still filled ──
+// ── updated_at missing then leftover user_id error → created_at only, unscoped ──
 {
   const rows = [{ id: "5", status: "filled", fill_american: -105 }];
   const client = createSequenceClient([
@@ -1581,7 +1583,9 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
   assertCreatedAtOnlyBeforeLimit(client.calls[1]);
   assertCreatedAtOnlyBeforeLimit(client.calls[2]);
-  assert.equal(hasEq(client.calls[2], "user_id", "u1"), false);
+  for (const call of client.calls) {
+    assert.equal((call.eqs || []).some((e) => e.col === "user_id"), false);
+  }
   assertStatusFilledEq(client.calls[2]);
 }
 
@@ -1601,7 +1605,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(client.calls.length, 2);
   assertStatusFilledEq(client.calls[0]);
   assertNoStatusEq(client.calls[1]);
-  assert.equal(hasEq(client.calls[1], "user_id", "u1"), true);
+  assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
   assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
   assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
 }
@@ -1731,6 +1735,96 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.deepEqual(result.rows.map((r) => r.id), ["today-write"]);
 }
 
+// ── Worker rows (null user_id) are visible; Today uses activity stamps ──
+// Combo-worker buildUnhedgedRow / fill patches do not set user_id. Today is
+// ET midnight–midnight. Server OR is filled_at / updated_at / created_at;
+// client keeps the latest stamp. A stale filled_at (early tape / RFQ create)
+// plus a later updated_at is Today. Stale filled_at alone is not — without
+// updated_at on the fill patch, combo-worker must set it or the row stays
+// outside Today even when Railway logs via=tape.
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const today = unhedgedDateWindow("today", now);
+  const workerToday = {
+    id: "worker-today",
+    user_id: null,
+    status: "filled",
+    venue: "kalshi",
+    fill_american: 4662,
+    filled_at: "2026-09-03T03:11:00.000Z",
+    updated_at: "2026-09-03T18:30:00.000Z",
+  };
+  const workerStaleOnly = {
+    id: "worker-stale",
+    user_id: null,
+    status: "filled",
+    venue: "kalshi",
+    fill_american: 180,
+    filled_at: "2026-09-03T03:11:00.000Z",
+  };
+  const workerOld = {
+    id: "worker-old",
+    user_id: null,
+    status: "filled",
+    venue: "kalshi",
+    fill_american: 200,
+    filled_at: "2026-09-02T16:00:00.000Z",
+    created_at: "2026-09-02T16:00:00.000Z",
+  };
+  assert.equal(rowInUnhedgedDateWindow(workerToday, today), true);
+  assert.equal(rowInUnhedgedDateWindow(workerStaleOnly, today), false);
+  assert.equal(rowInUnhedgedDateWindow(workerOld, today), false);
+
+  const fetchClient = createSequenceClient([{ data: [workerToday, workerStaleOnly, workerOld], error: null }]);
+  const fetched = await fetchUnhedgedRfqs(fetchClient, { userId: "owner-id", dateRange: "today", now });
+  assert.deepEqual(fetched.rows.map((r) => r.id), ["worker-today"]);
+  assert.equal((fetchClient.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
+  assert.match(fetchClient.calls[0].or, /filled_at\.gte\./);
+  assert.match(fetchClient.calls[0].or, /updated_at\.gte\./);
+  assert.match(fetchClient.calls[0].or, /created_at\.gte\./);
+
+  const allClient = createSequenceClient([{ data: [workerToday, workerStaleOnly, workerOld], error: null }]);
+  const allTime = await fetchUnhedgedRfqs(allClient, { userId: "owner-id", dateRange: "all" });
+  assert.deepEqual(allTime.rows.map((r) => r.id).sort(), ["worker-old", "worker-stale", "worker-today"]);
+  assert.equal((allClient.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
+  assert.equal(allClient.calls[0].or, undefined);
+
+  const countClient = createSequenceClient([
+    { data: null, count: 3, error: null },
+    { data: null, count: 2, error: null },
+    { data: [{ our_quote_american: 614, fill_american: 452 }], error: null },
+  ]);
+  const counted = await countUnhedgedRfqs(countClient, { userId: "owner-id", dateRange: "all" });
+  assert.equal(counted.filled, 3);
+  assert.equal((countClient.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
+  assert.equal((countClient.calls[0].ors || []).some((f) => /filled_at\./.test(f)), false);
+}
+
+// ── Missing updated_at: drop it from the Today OR; do not invent a stamp ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const rows = [{
+    id: "created-today",
+    user_id: null,
+    status: "filled",
+    fill_american: -110,
+    created_at: "2026-09-03T18:00:00.000Z",
+    filled_at: "2026-09-03T03:11:00.000Z",
+  }];
+  const client = createSequenceClient([
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'updated_at' column of 'unhedged_rfqs' in the schema cache" } },
+    { data: rows, error: null },
+  ]);
+  const result = await fetchUnhedgedRfqs(client, { dateRange: "today", now });
+  assert.deepEqual(result.rows.map((r) => r.id), ["created-today"]);
+  assert.equal(client.calls.length, 2);
+  assert.match(client.calls[0].or, /updated_at\.gte\./);
+  assert.doesNotMatch(client.calls[1].or, /updated_at/);
+  assert.match(client.calls[1].or, /filled_at\.gte\./);
+  assert.match(client.calls[1].or, /created_at\.gte\./);
+  assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
+}
+
 // ── Head counts: FILLED / Would-quote use count/head; beat-fill is slim cols ──
 {
   const now = etLocalToUtc("2026-09-03", 14, 40);
@@ -1755,7 +1849,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(client.calls[0].limit, null);
   assert.equal(client.calls[0].order, null);
   assertStatusFilledEq(client.calls[0]);
-  assert.equal(hasEq(client.calls[0], "user_id", "u1"), true);
+  assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
   assert.match(client.calls[0].or, /filled_at\.gte\./);
   assert.equal((client.calls[1].nots || []).some((n) => n.col === "our_quote_american" && n.op === "is" && n.val == null), true);
   assert.equal(client.calls[2].select, UNHEDGED_BEAT_FILL_COLS);
@@ -1917,6 +2011,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /unhedgedDateRangePages/);
   assert.match(page, /setPaging/);
   assert.match(page, /head query/);
+  assert.doesNotMatch(page, /userId:\s*user/);
+  assert.match(page, /Do not pass user\.id/);
   assert.match(page, /label: "All"/);
   assert.match(page, /label: "Kalshi"/);
   assert.match(page, /label: "Polymarket"/);
