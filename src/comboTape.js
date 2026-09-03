@@ -15,6 +15,11 @@
 // Skip-then-filled is tape_match=matched on the skip row (match and/or declined
 // submission). Those columns are not on main yet — missing tape is "unknown",
 // not "unfilled". tape_match=none is the only leftover no-print / unfilled.
+//
+// Venue is combo_submissions.venue when the worker writes it (kalshi |
+// polymarket). Same lock can take both. Else infer from ticker / raw /
+// kalshi_created_time. Unlabeled historical rows default to Kalshi — RFQ ids
+// are the same UUID shape on both venues.
 
 import {
   remainingFill,
@@ -173,6 +178,123 @@ export function fillRfqId(fill) {
 export function fillRowId(fill) {
   if (!fill) return null;
   return fill.fill_id || fill.id || null;
+}
+
+// Same aliases as UnhedgedTape — Kalshi / Polymarket only on this blotter.
+export const TAPE_VENUE_FILTERS = ["all", "kalshi", "polymarket"];
+const VENUE_FIELD_KEYS = ["venue", "exchange", "source", "book"];
+const KALSHI_TICKER = /\bKX(?:MLB|NFL|NCAAF|NBA|NHL|MVE|ATP|PGA)?[A-Z0-9]*\b/i;
+const POLY_SLUG = /(?:^|[^a-z0-9])(?:aec[-_]|polymarket|poly[-_])|[a-z]+-[a-z0-9]+-\d{4}-\d{2}-\d{2}/i;
+
+export function tapeVenueKey(value) {
+  const s = String(value == null ? "" : value).trim().toLowerCase();
+  if (!s) return "";
+  if (s === "kalshi" || s === "kxi" || s.startsWith("kalshi")) return "kalshi";
+  if (s === "polymarket" || s === "poly" || s === "pm" || s.startsWith("polymarket") || s.startsWith("poly")) {
+    return "polymarket";
+  }
+  return "";
+}
+
+export function formatTapeVenue(value) {
+  const key = tapeVenueKey(value);
+  if (key === "kalshi") return "Kalshi";
+  if (key === "polymarket") return "Polymarket";
+  return "";
+}
+
+export function normalizeTapeVenueFilter(value) {
+  const key = tapeVenueKey(value);
+  if (key === "kalshi" || key === "polymarket") return key;
+  return "all";
+}
+
+function pickVenueField(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const k of VENUE_FIELD_KEYS) {
+    if (obj[k] != null && obj[k] !== "") return obj[k];
+  }
+  return null;
+}
+
+function tickerHint(value) {
+  const t = String(value == null ? "" : value).trim();
+  if (!t) return "";
+  if (KALSHI_TICKER.test(t) || /^KX/i.test(t)) return "kalshi";
+  if (POLY_SLUG.test(t) && !KALSHI_TICKER.test(t)) return "polymarket";
+  return "";
+}
+
+function sourceHint(value) {
+  const s = String(value == null ? "" : value).trim().toLowerCase();
+  if (!s) return "";
+  if (s.includes("polymarket") || s.includes("poly-rfq") || s === "poly" || s.startsWith("poly")) return "polymarket";
+  if (s === "live-runner" || s.includes("kalshi")) return "kalshi";
+  return "";
+}
+
+// Prefer a persisted venue column (combo-worker writes kalshi | polymarket).
+// Else infer from ticker / raw / kalshi_created_time. Unlabeled historical
+// Combo Locks rows are Kalshi — Poly ids are the same UUID shape.
+export function inferTapeVenue(row) {
+  if (!row || typeof row !== "object") return "";
+  const bags = [row, row.raw, row.raw && row.raw.msg, row.raw && row.raw.tape].filter((x) => x && typeof x === "object");
+  for (const bag of bags) {
+    const key = tapeVenueKey(pickVenueField(bag));
+    if (key) return key;
+  }
+  for (const bag of bags) {
+    const fromTicker = tickerHint(
+      bag.market_ticker || bag.ticker || bag.combo_ticker || bag.symbol || bag.slug || bag.market_slug,
+    );
+    if (fromTicker) return fromTicker;
+  }
+  if (row.kalshi_created_time) return "kalshi";
+  for (const bag of bags) {
+    const fromSource = sourceHint(bag.source);
+    if (fromSource) return fromSource;
+  }
+  return "";
+}
+
+export function inferRfqVenue({ match, outcome, submission, fill, parlay } = {}) {
+  const sources = [submission, fill, outcome, match, parlay];
+  for (const src of sources) {
+    const key = inferTapeVenue(src);
+    if (key) return key;
+  }
+  // Same lock can take Kalshi + Poly RFQs; missing persist is historical Kalshi tape.
+  return "kalshi";
+}
+
+export function rowMatchesTapeVenue(row, venue) {
+  const wanted = normalizeTapeVenueFilter(venue);
+  if (wanted === "all") return true;
+  return (row && row.venueKey ? row.venueKey : inferTapeVenue(row)) === wanted;
+}
+
+export function filterTapeRowsByVenue(rows, venue) {
+  return (rows || []).filter((row) => rowMatchesTapeVenue(row, venue));
+}
+
+export function filterLockTapeByVenue(tape, venue) {
+  if (!tape) return tape;
+  const wanted = normalizeTapeVenueFilter(venue);
+  if (wanted === "all") return tape;
+  const rows = filterTapeRowsByVenue(tape.rows, wanted);
+  const todayRows = rows.filter((r) => isSameLocalDay(r.at));
+  const live = summarizeRows(rows);
+  const today = summarizeRows(todayRows);
+  return {
+    ...tape,
+    rows,
+    live,
+    today,
+    typicalBeat: typicalBeatText(live.beat),
+    typicalBeatTitle: typicalBeatTitle(live.beat),
+    todayBeat: typicalBeatText(today.beat),
+    todayBeatTitle: typicalBeatTitle(today.beat),
+  };
 }
 
 function normStatus(status) {
@@ -394,6 +516,7 @@ export function buildRfqRow({ match, outcome, submission, fill, filled = 0, ceil
   const ourNo = ourNoBid(outcome)
     || ourNoBid(submission)
     || (chosenFill ? toNum(chosenFill.no_price) : null);
+  const venueKey = inferRfqVenue({ match, outcome, submission, fill: chosenFill });
   return {
     rfqId: (match && match.rfq_id) || (outcome && outcome.rfq_id) || (submission && submission.rfq_id) || fillRfqId(chosenFill) || null,
     fillId: fillRowId(chosenFill),
@@ -403,6 +526,8 @@ export function buildRfqRow({ match, outcome, submission, fill, filled = 0, ceil
     ourNo,
     tapeNo: tapeNoPrice(tapeRow),
     tapeYes: tapeYesPrice(tapeRow),
+    venueKey,
+    venue: formatTapeVenue(venueKey) || "Kalshi",
     outcome,
     submission,
     fill: chosenFill,

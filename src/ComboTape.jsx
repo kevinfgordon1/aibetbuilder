@@ -8,8 +8,10 @@ import { createClient } from "@supabase/supabase-js";
 import { formatCents } from "./comboDesk";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
+  TAPE_VENUE_FILTERS,
   buildLockTape,
   buildTapeSummary,
+  filterLockTapeByVenue,
   formatAmerican,
   formatBeat,
   formatBeatTitle,
@@ -31,6 +33,11 @@ const SCOPE = [
   { key: "active", label: "Active" },
   { key: "today", label: "Today" },
   { key: "all", label: "All" },
+];
+const VENUE_CHIPS = [
+  { key: "all", label: "All" },
+  { key: "kalshi", label: "Kalshi", cls: "venue-kalshi" },
+  { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
 ];
 // Same newest-first caps as ComboLocks.jsx — do not page the firehose.
 const MATCH_LIMIT = 400;
@@ -75,6 +82,22 @@ function Tile({ k, v, sub, tone, title }) {
   );
 }
 
+function VenueChip({ venue, venueKey }) {
+  const cls = venueKey === "kalshi" ? "venue-kalshi" : venueKey === "polymarket" ? "venue-poly" : "";
+  return <span className={"chip " + cls}>{venue || "—"}</span>;
+}
+
+function LockVenueChips({ rows }) {
+  const keys = [];
+  (rows || []).forEach((r) => {
+    if (r && r.venueKey && !keys.includes(r.venueKey)) keys.push(r.venueKey);
+  });
+  if (!keys.length) return <VenueChip venue="Kalshi" venueKey="kalshi" />;
+  return keys.map((k) => (
+    <VenueChip key={k} venue={k === "polymarket" ? "Polymarket" : "Kalshi"} venueKey={k} />
+  ));
+}
+
 function SettlementChip({ settlement }) {
   const title = "Official Kalshi combo-market result. We sold NO, so yes = parlay won (we lost) and no = parlay lost (we won).";
   if (settlement) {
@@ -109,6 +132,7 @@ function RfqList({ rows }) {
       <thead>
         <tr>
           <th>Time</th>
+          <th>Venue</th>
           <th>Size</th>
           <th>Our quote</th>
           <th>Tape</th>
@@ -131,6 +155,7 @@ function RfqList({ rows }) {
           return (
             <tr key={r.rfqId || r.fillId || `${r.at}-${r.contracts}`}>
               <td>{r.at ? new Date(r.at).toLocaleTimeString() : "—"}</td>
+              <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
               <td className="num">{r.contracts != null ? r.contracts : "—"}</td>
               <td className="num" title={ourTitle}>{ourAm || "—"}</td>
               <td className="num" title={tapeTitle}>{tape}</td>
@@ -149,6 +174,7 @@ function RfqList({ rows }) {
 export default function ComboTape({ user }) {
   const owner = user && user.email === OWNER_EMAIL;
   const [scope, setScope] = useState("active");
+  const [venueFilter, setVenueFilter] = useState("all");
   const [parlays, setParlays] = useState([]);
   const [fills, setFills] = useState([]);
   const [matches, setMatches] = useState([]);
@@ -258,12 +284,22 @@ export default function ComboTape({ user }) {
     }));
   }, [parlays, fillsByParlay, matchesByParlay, outcomes, outcomeByRfq, submissionsByParlay, submissionByRfq]);
 
-  const visible = useMemo(
-    () => sortLockTapes(tapes).filter((t) => lockInScope(t, scope)),
-    [tapes, scope],
+  const venueTapes = useMemo(
+    () => tapes.map((t) => filterLockTapeByVenue(t, venueFilter)),
+    [tapes, venueFilter],
   );
 
-  const summary = useMemo(() => buildTapeSummary(tapes, { scope }), [tapes, scope]);
+  const visible = useMemo(
+    () => sortLockTapes(venueTapes).filter((t) => {
+      if (!lockInScope(t, scope)) return false;
+      if (venueFilter === "all") return true;
+      const stats = scope === "today" ? t.today : t.live;
+      return stats.matched > 0;
+    }),
+    [venueTapes, scope, venueFilter],
+  );
+
+  const summary = useMemo(() => buildTapeSummary(venueTapes, { scope }), [venueTapes, scope]);
   const skipSum = skipFillSummary(summary.rfq);
   const watcher = useMemo(() => tapeWatcherState(outcomes), [outcomes]);
   const statsFor = (t) => (scope === "today" ? t.today : t.live);
@@ -288,6 +324,12 @@ export default function ComboTape({ user }) {
         .cl .chip.settle-win{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.settle-lose{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#93c5fd}
+        .cl .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
+        .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
+        .cl .chip.btn{cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font:inherit;font-size:12px;font-weight:600}
+        .cl .chip.btn.on{background:rgba(59,130,246,.2);color:#93c5fd;border-color:rgba(59,130,246,.35)}
+        .cl .chip.btn.venue-kalshi.on{background:rgba(6,182,212,.2);color:#67e8f9;border-color:rgba(6,182,212,.35)}
+        .cl .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
         .cl .leg .ty{font-size:10px;font-weight:700;text-transform:uppercase;color:#7ea2e0;margin-right:5px}
         .cl .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0}
@@ -320,6 +362,18 @@ export default function ComboTape({ user }) {
         <div style={{ display: "flex", gap: 6 }}>
           {SCOPE.map((s) => (
             <button key={s.key} className={"btn" + (scope === s.key ? " on" : "")} onClick={() => setScope(s.key)}>{s.label}</button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {VENUE_CHIPS.filter((c) => TAPE_VENUE_FILTERS.includes(c.key)).map((c) => (
+            <button
+              key={c.key}
+              type="button"
+              className={"chip btn" + (venueFilter === c.key ? " on" : "") + (c.cls ? " " + c.cls : "")}
+              aria-pressed={venueFilter === c.key}
+              title={c.key === "all" ? "All venues" : `${c.label} quotes, skips, and fills`}
+              onClick={() => setVenueFilter(c.key)}
+            >{c.label}</button>
           ))}
         </div>
       </div>
@@ -386,6 +440,7 @@ export default function ComboTape({ user }) {
                   {open[p.id] ? "▾" : "▸"}
                 </button>
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
+                <LockVenueChips rows={t.rows} />
                 <SettlementChip settlement={t.settlement || settlementFromStored(p)} />
                 {t.archived && <span className="chip">archived</span>}
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
