@@ -11,8 +11,12 @@ import {
   americanFromProb,
   coerceAmerican,
   fetchUnhedgedRfqs,
+  countUnhedgedRfqs,
+  mergeUnhedgedSummary,
   resolveUnhedgedLimit,
   unhedgedRefreshLabel,
+  unhedgedDateRangePages,
+  unhedgedVenueOrFilter,
   filterUnhedgedAnalytics,
   filterUnhedgedRowsByQuoteBeat,
   filterUnhedgedRowsByVenue,
@@ -46,6 +50,13 @@ import {
   isMissingUpdatedAtColumn,
   isMissingTableError,
   isMissingUserIdColumn,
+  isMissingVenueColumn,
+  isMissingQuoteAmericanColumn,
+  isMissingFillAmericanColumn,
+  UNHEDGED_COUNT_SELECT_OPTS,
+  UNHEDGED_BEAT_FILL_COLS,
+  UNHEDGED_LIGHT_DATE_KEYS,
+  UNHEDGED_HEAVY_DATE_KEYS,
   rowTime,
   unhedgedActivityTs,
   unhedgedDateWindow,
@@ -389,6 +400,19 @@ assert.equal(normalizeUnhedgedDateRange("nope"), "today");
 assert.equal(UNHEDGED_DEFAULT_DATE_RANGE, "today");
 assert.equal(unhedgedDateRangeLabel("month"), "Month");
 assert.deepEqual(UNHEDGED_DATE_FILTERS.map((f) => f.key), ["today", "24h", "7d", "month", "all"]);
+assert.deepEqual(UNHEDGED_LIGHT_DATE_KEYS, ["today", "24h", "7d"]);
+assert.deepEqual(UNHEDGED_HEAVY_DATE_KEYS, ["month", "all"]);
+assert.equal(unhedgedDateRangePages("today"), false);
+assert.equal(unhedgedDateRangePages("24h"), false);
+assert.equal(unhedgedDateRangePages("7d"), false);
+assert.equal(unhedgedDateRangePages("month"), true);
+assert.equal(unhedgedDateRangePages("all"), true);
+assert.equal(unhedgedDateRangePages("30d"), true);
+assert.match(unhedgedVenueOrFilter("kalshi"), /venue\.ilike\.kalshi/);
+assert.match(unhedgedVenueOrFilter("polymarket"), /venue\.eq\.poly/);
+assert.equal(unhedgedVenueOrFilter("all"), null);
+assert.deepEqual(UNHEDGED_COUNT_SELECT_OPTS, { count: "exact", head: true });
+assert.equal(UNHEDGED_BEAT_FILL_COLS, "our_quote_american,fill_american");
 {
   const noonEt = etLocalToUtc("2026-09-03", 14, 40);
   assert.ok(noonEt);
@@ -1313,6 +1337,11 @@ assert.equal(isMissingStatusColumn({ code: "42703", message: 'column unhedged_rf
 assert.equal(isMissingStatusColumn({ code: "42703", message: 'column unhedged_rfqs.user_id does not exist' }), false);
 assert.equal(isMissingStatusColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column" }), false);
 assert.equal(isMissingStatusColumn({ code: "PGRST204", message: "Could not find the 'updated_at' column" }), false);
+assert.equal(isMissingVenueColumn({ code: "PGRST204", message: "Could not find the 'venue' column of 'unhedged_rfqs' in the schema cache" }), true);
+assert.equal(isMissingVenueColumn({ code: "42703", message: 'column unhedged_rfqs.user_id does not exist' }), false);
+assert.equal(isMissingQuoteAmericanColumn({ code: "42703", message: 'column unhedged_rfqs.our_quote_american does not exist' }), true);
+assert.equal(isMissingFillAmericanColumn({ code: "PGRST204", message: "Could not find the 'fill_american' column" }), true);
+assert.equal(isMissingFillAmericanColumn({ code: "PGRST204", message: "Could not find the 'user_id' column" }), false);
 
 function createSequenceClient(responses) {
   const calls = [];
@@ -1323,7 +1352,8 @@ function createSequenceClient(responses) {
       calls.push(state);
       const idx = calls.length - 1;
       const chain = {
-        select(cols) { state.select = cols; state.ops.push("select"); return chain; },
+        select(cols, opts) { state.select = cols; state.selectOpts = opts || null; state.ops.push("select"); return chain; },
+        not(col, op, val) { state.nots = (state.nots || []).concat({ col, op, val }); state.ops.push("not"); return chain; },
         eq(col, val) {
           const entry = { col, val };
           state.eq = entry;
@@ -1638,6 +1668,31 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.deepEqual(client.calls[1].range, { from: 1000, to: 1999 });
   assert.equal(result.rows[0].id, "p1-0");
   assert.equal(result.rows[1000].id, "p2-0");
+  assert.equal(result.paged, true);
+  assert.equal(result.truncated, false);
+}
+
+// ── Today / 24h / 7d stay one page even when the first page is full ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  for (const range of ["today", "24h", "7d"]) {
+    const page1 = Array.from({ length: 1000 }, (_, i) => ({
+      id: `${range}-${i}`,
+      status: "filled",
+      fill_american: -110,
+      updated_at: "2026-09-03T18:00:00.000Z",
+    }));
+    const page2 = [{ id: `${range}-extra`, status: "filled", fill_american: 200, updated_at: "2026-09-03T17:00:00.000Z" }];
+    const client = createSequenceClient([
+      { data: page1, error: null },
+      { data: page2, error: null },
+    ]);
+    const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: range, now });
+    assert.equal(result.rows.length, 1000, `${range} should not walk a second page`);
+    assert.equal(client.calls.length, 1, `${range} must not page Month/All-time style`);
+    assert.equal(result.truncated, true);
+    assert.equal(result.paged, false);
+  }
 }
 
 // ── Month window paginates the full set (not a 1000-cap global trim) ──
@@ -1660,6 +1715,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(client.calls[0].or, /filled_at\.gte\./);
   assert.doesNotMatch(client.calls[0].or, /filled_at\.lt\./);
   assert.deepEqual(client.calls[1].range, { from: 1000, to: 1999 });
+  assert.equal(result.paged, true);
+  assert.equal(result.truncated, false);
 }
 
 // ── Client activity clock drops stale-fill-only rows outside today after the OR fetch ──
@@ -1672,6 +1729,105 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const client = createSequenceClient([{ data: mixed, error: null }]);
   const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
   assert.deepEqual(result.rows.map((r) => r.id), ["today-write"]);
+}
+
+// ── Head counts: FILLED / Would-quote use count/head; beat-fill is slim cols ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const client = createSequenceClient([
+    { data: null, count: 12, error: null },
+    { data: null, count: 7, error: null },
+    { data: [
+      { our_quote_american: 614, fill_american: 452 },
+      { our_quote_american: 400, fill_american: 452 },
+    ], error: null },
+  ]);
+  const result = await countUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
+  assert.equal(result.filled, 12);
+  assert.equal(result.withQuote, 7);
+  assert.equal(result.beatFill, 1);
+  assert.equal(result.missingTable, false);
+  assert.equal(client.calls.length, 3);
+  assert.equal(client.calls[0].select, "*");
+  assert.deepEqual(client.calls[0].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
+  assert.deepEqual(client.calls[1].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
+  assert.equal(client.calls[0].range, undefined);
+  assert.equal(client.calls[0].limit, null);
+  assert.equal(client.calls[0].order, null);
+  assertStatusFilledEq(client.calls[0]);
+  assert.equal(hasEq(client.calls[0], "user_id", "u1"), true);
+  assert.match(client.calls[0].or, /filled_at\.gte\./);
+  assert.equal((client.calls[1].nots || []).some((n) => n.col === "our_quote_american" && n.op === "is" && n.val == null), true);
+  assert.equal(client.calls[2].select, UNHEDGED_BEAT_FILL_COLS);
+  assert.equal(client.calls[2].selectOpts, null);
+  assert.equal((client.calls[2].nots || []).some((n) => n.col === "our_quote_american"), true);
+  assert.equal((client.calls[2].nots || []).some((n) => n.col === "fill_american"), true);
+}
+
+// ── Head counts honor venue; All time has no date OR ──
+{
+  const client = createSequenceClient([
+    { data: null, count: 4, error: null },
+    { data: null, count: 3, error: null },
+    { data: [{ our_quote_american: 614, fill_american: 452 }], error: null },
+  ]);
+  const result = await countUnhedgedRfqs(client, { userId: "u1", dateRange: "all", venue: "kalshi" });
+  assert.equal(result.filled, 4);
+  assert.equal(result.withQuote, 3);
+  assert.equal(result.beatFill, 1);
+  assert.ok((client.calls[0].ors || [client.calls[0].or]).some((f) => /venue\./.test(f || "")));
+  assert.equal((client.calls[0].ors || []).some((f) => /filled_at\./.test(f)), false);
+}
+
+// ── Beat-fill chip: FILLED / Would-quote reuse the beat-fill slim count ──
+{
+  const client = createSequenceClient([
+    { data: [
+      { our_quote_american: 614, fill_american: 452 },
+      { our_quote_american: 400, fill_american: 452 },
+    ], error: null },
+  ]);
+  const result = await countUnhedgedRfqs(client, { userId: "u1", dateRange: "all", quoteBeatFill: true });
+  assert.equal(result.filled, 1);
+  assert.equal(result.withQuote, 1);
+  assert.equal(result.beatFill, 1);
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].select, UNHEDGED_BEAT_FILL_COLS);
+  assert.equal(client.calls[0].selectOpts, null);
+}
+
+// ── Month beat-fill slim-pages; FILLED stays a head count (no * download) ──
+{
+  const slim1 = Array.from({ length: 1000 }, (_, i) => ({
+    our_quote_american: i === 0 ? 614 : 400,
+    fill_american: 452,
+  }));
+  const slim2 = [{ our_quote_american: 900, fill_american: 100 }];
+  const client = createSequenceClient([
+    { data: null, count: 1001, error: null },
+    { data: null, count: 1001, error: null },
+    { data: slim1, error: null },
+    { data: slim2, error: null },
+  ]);
+  const result = await countUnhedgedRfqs(client, { userId: "u1", dateRange: "month" });
+  assert.equal(result.filled, 1001);
+  assert.equal(result.beatFill, 2);
+  assert.equal(client.calls.length, 4);
+  assert.deepEqual(client.calls[0].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
+  assert.equal(client.calls[2].select, UNHEDGED_BEAT_FILL_COLS);
+  assert.deepEqual(client.calls[3].range, { from: 1000, to: 1999 });
+}
+
+// ── mergeUnhedgedSummary prefers head counts ──
+{
+  const clientSummary = { fetched: 3, total: 3, filled: 3, withQuote: 1, beatFill: 1, seen: 0, started: 0, wouldQuote: 0, quoted: 0 };
+  const merged = mergeUnhedgedSummary(clientSummary, { filled: 40, withQuote: 12, beatFill: 5 });
+  assert.equal(merged.filled, 40);
+  assert.equal(merged.withQuote, 12);
+  assert.equal(merged.beatFill, 5);
+  assert.equal(merged.total, 3);
+  const fallback = mergeUnhedgedSummary(clientSummary, null);
+  assert.equal(fallback.filled, 3);
 }
 
 // ── Beat-fill count is for the date+venue set ──
@@ -1756,6 +1912,11 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, />Sport</);
   assert.match(page, />Event</);
   assert.match(page, /paged from the server/);
+  assert.match(page, /countUnhedgedRfqs/);
+  assert.match(page, /mergeUnhedgedSummary/);
+  assert.match(page, /unhedgedDateRangePages/);
+  assert.match(page, /setPaging/);
+  assert.match(page, /head query/);
   assert.match(page, /label: "All"/);
   assert.match(page, /label: "Kalshi"/);
   assert.match(page, /label: "Polymarket"/);
@@ -1763,7 +1924,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /quoteBeatFill/);
   assert.match(page, /unhedgedRefreshLabel/);
   assert.match(page, /onRefresh/);
-  assert.match(page, /reload\(\{ button: true \}\)/);
+  assert.match(page, /reloadRows\(\{ button: true \}\)/);
+  assert.match(page, /reloadCounts\(\)/);
   assert.match(page, /dateRange,/);
   assert.doesNotMatch(page, /Would-quote \/ Fair/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
