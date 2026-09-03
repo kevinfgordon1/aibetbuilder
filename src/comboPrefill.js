@@ -307,47 +307,113 @@ function linesEqual(a, b) {
   return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6;
 }
 
+function lineDistance(a, b) {
+  const na = Number(a), nb = Number(b);
+  if (!Number.isFinite(na) || !Number.isFinite(nb)) return Infinity;
+  return Math.abs(na - nb);
+}
+
+// Kalshi football strike grids skip some sportsbook mains (e.g. −55.5 vs 54.5/57.5).
+// Snap SPR/TOT to a real Kalshi contract within this window; never invent a ticker.
+export const STRIKE_SNAP_MAX = 3;
+
 function parseMarketLine(label) {
   const m = new RegExp(`^(.*?)\\s*(${MINUS.source})\\s*([\\d.]+)\\s*$`).exec(String(label || "").trim());
   if (!m) return null;
   return { team: m[1].trim(), sign: m[2] === "+" ? "+" : "-", line: m[3] };
 }
 
+function spreadSideMatches(parsed, sm, sport) {
+  if (!sm || sm.sign !== parsed.sign) return false;
+  const teamId = identifyTeam(parsed.team, sport);
+  const labelId = identifyTeam(sm.team, sport);
+  if (teamId && labelId && teamId === labelId) return true;
+  if (sport === "ncaaf" && nameMatchesLabel(parsed.team, sm.team)) return true;
+  if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return true;
+  return false;
+}
+
+// Pick an existing Kalshi strike: exact line wins, else nearest within STRIKE_SNAP_MAX.
+function pickNearestStrike(pool, wantLine) {
+  let exact = null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const c of pool) {
+    if (linesEqual(c.line, wantLine)) {
+      exact = c;
+      break;
+    }
+    const d = lineDistance(c.line, wantLine);
+    if (d > STRIKE_SNAP_MAX) continue;
+    if (!best || d < bestDist || (d === bestDist && Number(c.line) < Number(best.line))) {
+      best = c;
+      bestDist = d;
+    }
+  }
+  return exact || best || null;
+}
+
+function formatWantSpread(parsed) {
+  return `${parsed.sign}${parsed.line}`;
+}
+
+function formatWantTotal(parsed) {
+  return `${parsed.ou === "under" ? "u" : "o"}${parsed.line}`;
+}
+
+function noStrikeInRangeReason(kind, want, title) {
+  return `no Kalshi ${kind} within ${STRIKE_SNAP_MAX} pts of ${want} on ${title}`;
+}
+
 function matchMarket(promoLeg, game, sport = "mlb") {
   const market = promoLeg.market;
+  const title = game.title || game.key;
   if (market === "ML") {
     const sides = game.markets?.side || [];
     if (sport === "ncaaf") {
-      return sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
+      const hit = sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
+      return { market: hit };
     }
     const teamId = identifyTeam(promoLeg.name, sport);
     if (teamId) {
       const hit = sides.find((m) => identifyTeam(m.label, sport) === teamId);
-      if (hit) return hit;
+      if (hit) return { market: hit };
     }
-    return null;
+    return { market: null };
   }
   if (market === "TOT") {
     const parsed = parsePromoTotal(promoLeg.name);
-    if (!parsed) return null;
-    const want = `${parsed.ou} ${parsed.line}`;
-    return (game.markets?.total || []).find((m) => normalize(m.label) === normalize(want)) || null;
+    if (!parsed) return { market: null };
+    const pool = [];
+    for (const m of game.markets?.total || []) {
+      const tm = parsePromoTotal(m.label);
+      if (!tm || tm.ou !== parsed.ou) continue;
+      pool.push({ market: m, line: tm.line });
+    }
+    const picked = pickNearestStrike(pool, parsed.line);
+    if (picked) return { market: picked.market };
+    if (pool.length) {
+      return { market: null, reason: noStrikeInRangeReason("TOT", formatWantTotal(parsed), title) };
+    }
+    return { market: null };
   }
   if (market === "SPR") {
     const parsed = parsePromoSpread(promoLeg.name);
-    if (!parsed) return null;
-    const teamId = identifyTeam(parsed.team, sport);
+    if (!parsed) return { market: null };
+    const pool = [];
     for (const m of game.markets?.spread || []) {
       const sm = parseMarketLine(m.label);
-      if (!sm || !linesEqual(sm.line, parsed.line) || sm.sign !== parsed.sign) continue;
-      const labelId = identifyTeam(sm.team, sport);
-      if (teamId && labelId && teamId === labelId) return m;
-      if (sport === "ncaaf" && nameMatchesLabel(parsed.team, sm.team)) return m;
-      if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return m;
+      if (!spreadSideMatches(parsed, sm, sport)) continue;
+      pool.push({ market: m, line: sm.line });
     }
-    return null;
+    const picked = pickNearestStrike(pool, parsed.line);
+    if (picked) return { market: picked.market };
+    if (pool.length) {
+      return { market: null, reason: noStrikeInRangeReason("SPR", formatWantSpread(parsed), title) };
+    }
+    return { market: null };
   }
-  return null;
+  return { market: null };
 }
 
 function unmatchedEntry(leg, reason) {
@@ -376,9 +442,10 @@ export function mapPromoLegsToKalshi(promoLegs, games) {
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
-    const mkt = matchMarket(leg, game, sport);
+    const hit = matchMarket(leg, game, sport);
+    const mkt = hit?.market;
     if (!mkt) {
-      unmatched.push(unmatchedEntry(leg, `no matching ${leg.market || "market"} on ${game.title || game.key}`));
+      unmatched.push(unmatchedEntry(leg, hit?.reason || `no matching ${leg.market || "market"} on ${game.title || game.key}`));
       rows.push({ gameKey: game.key, marketVal: "" });
       continue;
     }
