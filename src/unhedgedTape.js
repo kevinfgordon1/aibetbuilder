@@ -18,6 +18,19 @@
 // the latest of filled_at / updated_at / created_at — a stale fill stamp must
 // not bury a later write.
 //
+// Owner-only tab: do not scope this table by user_id. Combo-worker
+// buildUnhedgedRow / fill patches do not write user_id (repo migrations have
+// no such column). If production added user_id, worker rows are NULL and
+// eq('user_id', owner.id) returns Today=0 / All time=0 on every venue.
+// Missing-column retry only helps when the column does not exist. The tab is
+// already owner-gated in the UI. Do not invent user_ids client-side.
+//
+// Today membership is activity (any of filled_at / updated_at / created_at
+// in the ET day). If updated_at is missing from the schema, drop it from the
+// OR and retry — do not keep OR-ing a nonexistent column. Combo-worker fill
+// patches should set updated_at; otherwise a late UPDATE whose filled_at /
+// created_at stay on the original RFQ never enters Today's OR.
+//
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
 // only — the tape does not show those). Tape is MLB + NFL moneylines only.
@@ -552,6 +565,10 @@ export function unhedgedDateRangeLabel(value) {
 // if any stamp intersects the window) and we then keep rows whose latest
 // stamp is actually in range. Preferring filled_at alone would hide late
 // writes whose tape tradeTs is an older fill stamp.
+// If updated_at is missing from the schema, drop it from the OR — do not keep
+// OR-ing a nonexistent column. Combo-worker fill patches should set
+// updated_at; a late UPDATE that leaves filled_at / created_at on the original
+// RFQ (e.g. Sep 2 11:11pm ET) will not enter Today's window without it.
 // today = America/New_York calendar day [start, next midnight).
 // 24h / 7d / month = rolling lookback (month = 30d). all = no bound.
 export function unhedgedDateWindow(range, now = new Date()) {
@@ -1524,14 +1541,15 @@ export function isMissingFillAmericanColumn(error) {
 }
 
 function applyUnhedgedFilters(q, {
-  userId,
+  userId: _userId,
   filterStatus = true,
   dateWindow = null,
   dateCols = ["filled_at", "updated_at", "created_at"],
   venue = "all",
   quoteNotNull = false,
 }) {
-  if (userId) q = q.eq("user_id", userId);
+  // Never eq user_id. Worker rows are unscoped (often NULL if the column
+  // exists). Owner gate lives in UnhedgedTape, not this query.
   if (filterStatus) q = q.eq("status", "filled");
   const orFilter = unhedgedDateOrFilter(dateWindow, dateCols);
   if (orFilter && typeof q.or === "function") q = q.or(orFilter);
@@ -1638,7 +1656,7 @@ export function mergeUnhedgedSummary(summary, counts) {
 }
 
 function classifySelectError(error, {
-  userId,
+  userId: _userId,
   orderByUpdatedAt,
   filterStatus,
   dateCols,
@@ -1648,8 +1666,10 @@ function classifySelectError(error, {
 }) {
   if (!error) return null;
   // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
-  // matches the table-missing message fallback.
-  if (userId && isMissingUserIdColumn(error)) return "missing_user_id";
+  // matches the table-missing message fallback. We do not filter by user_id,
+  // but still classify this so a leftover schema error retries unscoped
+  // instead of looking like a missing table.
+  if (isMissingUserIdColumn(error)) return "missing_user_id";
   if (filterStatus && isMissingStatusColumn(error)) return "missing_status";
   const cols = dateCols || [];
   if (cols.includes("filled_at") && isMissingFilledAtColumn(error)) return "missing_filled_at";
@@ -1727,9 +1747,11 @@ async function resolveSelectAttempt(runFn, selectArgs, flags) {
   return { result };
 }
 
-function newUnhedgedFlags(userId) {
+function newUnhedgedFlags(_userId) {
   return {
-    scopedUserId: userId,
+    // userId is accepted on fetch/count for call-site compat and ignored.
+    // Combo-worker does not write Kevin's id onto unhedged_rfqs.
+    scopedUserId: null,
     orderByUpdatedAt: true,
     filterStatus: true,
     dateCols: ["filled_at", "updated_at", "created_at"],
@@ -1765,12 +1787,14 @@ async function resolveOnce(runFn, flags, extra = {}) {
   return { error: { message: "retries exhausted" } };
 }
 
-// Select * for the signed-in user when user_id exists on the table; otherwise
-// every row RLS already allows. A missing table is an empty blotter, not a crash.
-// status=eq.filled. Date chips add an OR of filled_at / updated_at / created_at
-// intersecting the window (see unhedgedDateWindow). Today / 24h / 7d take one
-// page. Month / All time page until a short page — only after that chip is on.
-// Prefer updated_at desc. If a date/order column is missing, drop it and retry.
+// Select * of filled rows RLS already allows. Do not scope by user_id — the
+// Unhedged tab is owner-gated and combo-worker does not write user_id.
+// A missing table is an empty blotter, not a crash. status=eq.filled.
+// Date chips add an OR of filled_at / updated_at / created_at intersecting
+// the window (see unhedgedDateWindow). If updated_at is missing, drop it
+// from the OR (and from order) and retry. Today / 24h / 7d take one page.
+// Month / All time page until a short page — only after that chip is on.
+// Prefer updated_at desc. userId on the options object is ignored.
 export async function fetchUnhedgedRfqs(client, {
   userId = null,
   limit = UNHEDGED_PAGE_SIZE,
@@ -1867,8 +1891,8 @@ async function countBeatFillSlim(client, flags, { dateWindow, venue = "all", pag
   return { count: beat };
 }
 
-// Head counts for the tiles. Same date / user / status / venue filters as the
-// row pull. FILLED and Would-quote are exact head counts. Beat-fill compares
+// Head counts for the tiles. Same date / status / venue filters as the
+// row pull (no user_id). FILLED and Would-quote are exact head counts. Beat-fill compares
 // two columns so PostgREST cannot head it — we select only those two numbers
 // (not *) and count locally. When the beat-fill chip is on, FILLED and
 // Would-quote reuse that beat-fill count (the subset).
