@@ -3,16 +3,20 @@
 // incrementally; pick known aliases and never invent a price.
 //
 // The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
-// Date chips query the server for that window and page until exhausted
-// (1000-row PostgREST pages). Do not trim a global 1000-row fetch on the
-// client. If the status filter fails, client-filter filled as fallback. Do
-// not list seen / started / would_quote. Never list live / in-game RFQs —
-// not even paper. Hide skip_reason game_started, status started, or any leg
-// that already started when that field exists. Venue and would-quote-beat-fill
-// are client chips over the fetched date window — they do not change the query.
-// After combo-worker #40, filled_at is tape tradeTs (often earlier) or null
-// (never Date.now()). Newest activity is the latest of filled_at / updated_at /
-// created_at — a stale fill stamp must not bury a later write.
+// Default date chip is Today (America/New_York calendar day). Today / 24h / 7d
+// stay a single 1000-row page — do not walk Month or All time until that chip
+// is selected. Month / All time then paginate that window (1000-row PostgREST
+// pages). Tile counts use select(*, { count: "exact", head: true }) with the
+// same window / venue / beat-fill filters when PostgREST can express them —
+// never download-every-row-then-count. If the status filter fails, client-
+// filter filled as fallback. Do not list seen / started / would_quote. Never
+// list live / in-game RFQs — not even paper. Hide skip_reason game_started,
+// status started, or any leg that already started when that field exists.
+// Venue and would-quote-beat-fill chips filter the fetched date window on the
+// client; they also re-run head counts. After combo-worker #40, filled_at is
+// tape tradeTs (often earlier) or null (never Date.now()). Newest activity is
+// the latest of filled_at / updated_at / created_at — a stale fill stamp must
+// not bury a later write.
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
@@ -26,11 +30,15 @@
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
-// PostgREST page size. Date windows paginate until a short page — this is
-// not a global cap on how many fills Kevin can see.
+// PostgREST page size. Light windows (today / 24h / 7d) take one page.
+// Month / All time paginate until a short page — only after that chip is on.
 export const UNHEDGED_LIMIT = 1000;
 export const UNHEDGED_PAGE_SIZE = UNHEDGED_LIMIT;
 export const UNHEDGED_MAX_PAGES = 100;
+export const UNHEDGED_LIGHT_DATE_KEYS = ["today", "24h", "7d"];
+export const UNHEDGED_HEAVY_DATE_KEYS = ["month", "all"];
+export const UNHEDGED_COUNT_SELECT_OPTS = { count: "exact", head: true };
+export const UNHEDGED_BEAT_FILL_COLS = "our_quote_american,fill_american";
 export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
 export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
 export const UNHEDGED_TZ = "America/New_York";
@@ -525,6 +533,13 @@ export function normalizeUnhedgedDateRange(value) {
   return UNHEDGED_DEFAULT_DATE_RANGE;
 }
 
+// Month / All time are the only windows that walk past the first page.
+// Today / 24h / 7d stay a single pull so initial load and Refresh stay light.
+export function unhedgedDateRangePages(range) {
+  const key = normalizeUnhedgedDateRange(range);
+  return key === "month" || key === "all";
+}
+
 export function unhedgedDateRangeLabel(value) {
   const key = normalizeUnhedgedDateRange(value);
   const hit = UNHEDGED_DATE_FILTERS.find((f) => f.key === key);
@@ -565,6 +580,14 @@ export function unhedgedDateOrFilter(window, cols = ["filled_at", "updated_at", 
   }
   if (window.from) return use.map((c) => `${c}.gte.${window.from}`).join(",");
   return use.map((c) => `${c}.lt.${window.to}`).join(",");
+}
+
+// Server-side venue chip. ilike is case-insensitive; aliases match venueKey().
+export function unhedgedVenueOrFilter(venue) {
+  const key = normalizeVenueFilter(venue);
+  if (key === "kalshi") return "venue.ilike.kalshi*,venue.eq.kxi";
+  if (key === "polymarket") return "venue.ilike.polymarket*,venue.eq.poly,venue.eq.pm,venue.ilike.poly*";
+  return null;
 }
 
 export function rowInUnhedgedDateWindow(row, window) {
@@ -1356,8 +1379,8 @@ export function filterUnhedgedRowsByQuoteBeat(rows, beatOnly = false) {
   return (rows || []).filter(wouldQuoteBeatsFill);
 }
 
-// Client analytics over already-visible (filled MLB/NFL) rows. Fetch stays
-// filled-only 1000 — these chips do not change the query.
+// Client analytics over already-visible (filled MLB/NFL) rows. The row fetch
+// stays date-window only. Venue / beat-fill chips re-run head counts.
 
 export function resolveUnhedgedLimit(limit) {
   if (limit == null || limit === "") return UNHEDGED_LIMIT;
@@ -1473,6 +1496,51 @@ export function isMissingStatusColumn(error) {
   );
 }
 
+function isMissingNamedColumn(error, column) {
+  if (!error || !column) return false;
+  const code = String(error.code || "");
+  const msg = errorText(error);
+  if (!msg.includes(String(column).toLowerCase())) return false;
+  return (
+    code === "42703"
+    || code === "PGRST204"
+    || msg.includes("does not exist")
+    || msg.includes("not find")
+    || msg.includes("unknown")
+  );
+}
+
+export function isMissingVenueColumn(error) {
+  return isMissingNamedColumn(error, "venue");
+}
+
+export function isMissingQuoteAmericanColumn(error) {
+  return isMissingNamedColumn(error, "our_quote_american")
+    || isMissingNamedColumn(error, "would_quote_american");
+}
+
+export function isMissingFillAmericanColumn(error) {
+  return isMissingNamedColumn(error, "fill_american");
+}
+
+function applyUnhedgedFilters(q, {
+  userId,
+  filterStatus = true,
+  dateWindow = null,
+  dateCols = ["filled_at", "updated_at", "created_at"],
+  venue = "all",
+  quoteNotNull = false,
+}) {
+  if (userId) q = q.eq("user_id", userId);
+  if (filterStatus) q = q.eq("status", "filled");
+  const orFilter = unhedgedDateOrFilter(dateWindow, dateCols);
+  if (orFilter && typeof q.or === "function") q = q.or(orFilter);
+  const venueFilter = unhedgedVenueOrFilter(venue);
+  if (venueFilter && typeof q.or === "function") q = q.or(venueFilter);
+  if (quoteNotNull && typeof q.not === "function") q = q.not("our_quote_american", "is", null);
+  return q;
+}
+
 async function runSelect(client, {
   userId,
   limit,
@@ -1483,10 +1551,7 @@ async function runSelect(client, {
   dateCols = ["filled_at", "updated_at", "created_at"],
 }) {
   let q = client.from(UNHEDGED_TABLE).select("*");
-  if (userId) q = q.eq("user_id", userId);
-  if (filterStatus) q = q.eq("status", "filled");
-  const orFilter = unhedgedDateOrFilter(dateWindow, dateCols);
-  if (orFilter && typeof q.or === "function") q = q.or(orFilter);
+  q = applyUnhedgedFilters(q, { userId, filterStatus, dateWindow, dateCols });
   if (typeof q.order === "function") {
     // Newest activity first. Prefer updated_at; if that column is missing,
     // created_at only — do not fall back to filled_at desc (nulls last would
@@ -1499,7 +1564,88 @@ async function runSelect(client, {
   return q;
 }
 
-function classifySelectError(error, { userId, orderByUpdatedAt, filterStatus, dateCols }) {
+async function runCount(client, {
+  userId,
+  filterStatus = true,
+  dateWindow = null,
+  dateCols = ["filled_at", "updated_at", "created_at"],
+  venue = "all",
+  quoteNotNull = false,
+}) {
+  let q = client.from(UNHEDGED_TABLE).select("*", UNHEDGED_COUNT_SELECT_OPTS);
+  return applyUnhedgedFilters(q, {
+    userId,
+    filterStatus,
+    dateWindow,
+    dateCols,
+    venue,
+    quoteNotNull,
+  });
+}
+
+async function runBeatFillSelect(client, {
+  userId,
+  filterStatus = true,
+  dateWindow = null,
+  dateCols = ["filled_at", "updated_at", "created_at"],
+  venue = "all",
+  limit = UNHEDGED_PAGE_SIZE,
+  offset = 0,
+}) {
+  let q = client.from(UNHEDGED_TABLE).select(UNHEDGED_BEAT_FILL_COLS);
+  q = applyUnhedgedFilters(q, {
+    userId,
+    filterStatus,
+    dateWindow,
+    dateCols,
+    venue,
+    quoteNotNull: true,
+  });
+  if (typeof q.not === "function") q = q.not("fill_american", "is", null);
+  if (typeof q.range === "function") q = q.range(offset, offset + limit - 1);
+  if (typeof q.limit === "function") q = q.limit(limit);
+  return q;
+}
+
+function readHeadCount(result) {
+  const n = result && result.count;
+  if (n == null || n === "") return null;
+  const v = typeof n === "number" ? n : parseInt(n, 10);
+  return Number.isFinite(v) ? v : null;
+}
+
+function emptyUnhedgedCountResult(extra = {}) {
+  return {
+    filled: null,
+    withQuote: null,
+    beatFill: null,
+    missingTable: false,
+    error: null,
+    source: "head",
+    ...extra,
+  };
+}
+
+export function mergeUnhedgedSummary(summary, counts) {
+  const s = summary || summarizeUnhedgedRows([]);
+  if (!counts) return s;
+  return {
+    ...s,
+    filled: counts.filled != null ? counts.filled : s.filled,
+    withQuote: counts.withQuote != null ? counts.withQuote : s.withQuote,
+    beatFill: counts.beatFill != null ? counts.beatFill : s.beatFill,
+  };
+}
+
+function classifySelectError(error, {
+  userId,
+  orderByUpdatedAt,
+  filterStatus,
+  dateCols,
+  venue = "all",
+  quoteNotNull = false,
+  beatFillCols = false,
+}) {
   if (!error) return null;
   // Column-missing first: "column unhedged_rfqs.user_id does not exist" also
   // matches the table-missing message fallback.
@@ -1510,6 +1656,9 @@ function classifySelectError(error, { userId, orderByUpdatedAt, filterStatus, da
   if ((orderByUpdatedAt || cols.includes("updated_at")) && isMissingUpdatedAtColumn(error)) {
     return "missing_updated_at";
   }
+  if (venue && venue !== "all" && isMissingVenueColumn(error)) return "missing_venue";
+  if ((quoteNotNull || beatFillCols) && isMissingQuoteAmericanColumn(error)) return "missing_quote";
+  if (beatFillCols && isMissingFillAmericanColumn(error)) return "missing_fill";
   if (isMissingTableError(error)) return "missing_table";
   return "other";
 }
@@ -1531,83 +1680,278 @@ function applySelectKind(kind, flags) {
     flags.dateCols = (flags.dateCols || []).filter((c) => c !== "updated_at");
   } else if (kind === "missing_filled_at") {
     flags.dateCols = (flags.dateCols || []).filter((c) => c !== "filled_at");
+  } else if (kind === "missing_venue") {
+    flags.venue = "all";
+    flags.venueDropped = true;
+  } else if (kind === "missing_quote") {
+    flags.quoteNotNull = false;
+    flags.quoteDropped = true;
+  } else if (kind === "missing_fill") {
+    flags.beatFillCols = false;
+    flags.fillDropped = true;
   }
   return flags;
+}
+
+const RETRYABLE_SELECT_KINDS = [
+  "missing_user_id",
+  "missing_status",
+  "missing_updated_at",
+  "missing_filled_at",
+  "missing_venue",
+  "missing_quote",
+  "missing_fill",
+];
+
+async function resolveSelectAttempt(runFn, selectArgs, flags) {
+  let result;
+  try {
+    result = await runFn(selectArgs);
+  } catch (err) {
+    const kind = classifySelectError(err, selectArgs);
+    if (kind === "missing_table") return { missingTable: true, error: err };
+    if (RETRYABLE_SELECT_KINDS.includes(kind)) {
+      applySelectKind(kind, flags);
+      return { retry: true };
+    }
+    return { error: err };
+  }
+  const error = result && result.error;
+  const kind = classifySelectError(error, selectArgs);
+  if (kind === "missing_table") return { missingTable: true, error };
+  if (RETRYABLE_SELECT_KINDS.includes(kind)) {
+    applySelectKind(kind, flags);
+    return { retry: true };
+  }
+  if (error) return { error };
+  return { result };
+}
+
+function newUnhedgedFlags(userId) {
+  return {
+    scopedUserId: userId,
+    orderByUpdatedAt: true,
+    filterStatus: true,
+    dateCols: ["filled_at", "updated_at", "created_at"],
+    venue: "all",
+    venueDropped: false,
+    quoteNotNull: true,
+    quoteDropped: false,
+    beatFillCols: true,
+    fillDropped: false,
+  };
+}
+
+function selectArgsFromFlags(flags, extra = {}) {
+  return {
+    userId: flags.scopedUserId,
+    orderByUpdatedAt: flags.orderByUpdatedAt,
+    filterStatus: flags.filterStatus,
+    dateCols: flags.dateCols,
+    venue: flags.venue,
+    quoteNotNull: flags.quoteNotNull,
+    beatFillCols: flags.beatFillCols,
+    ...extra,
+  };
+}
+
+async function resolveOnce(runFn, flags, extra = {}) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const selectArgs = selectArgsFromFlags(flags, extra);
+    const step = await resolveSelectAttempt(runFn, selectArgs, flags);
+    if (step.retry) continue;
+    return step;
+  }
+  return { error: { message: "retries exhausted" } };
 }
 
 // Select * for the signed-in user when user_id exists on the table; otherwise
 // every row RLS already allows. A missing table is an empty blotter, not a crash.
 // status=eq.filled. Date chips add an OR of filled_at / updated_at / created_at
-// intersecting the window (see unhedgedDateWindow). Pages of 1000 until a short
-// page so "All time" / "Month" are the full owner-scoped set, not a global 1000.
+// intersecting the window (see unhedgedDateWindow). Today / 24h / 7d take one
+// page. Month / All time page until a short page — only after that chip is on.
 // Prefer updated_at desc. If a date/order column is missing, drop it and retry.
 export async function fetchUnhedgedRfqs(client, {
   userId = null,
   limit = UNHEDGED_PAGE_SIZE,
   dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
   now,
+  paginate,
 } = {}) {
   if (!client || typeof client.from !== "function") {
-    return { rows: [], missingTable: false, error: { message: "no client" } };
+    return { rows: [], missingTable: false, error: { message: "no client" }, truncated: false, paged: false };
   }
   const pageSize = resolveUnhedgedLimit(limit);
   const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
-  const flags = {
-    scopedUserId: userId,
-    orderByUpdatedAt: true,
-    filterStatus: true,
-    dateCols: ["filled_at", "updated_at", "created_at"],
-  };
+  const pageAll = paginate != null ? !!paginate : unhedgedDateRangePages(dateRange);
+  const maxPages = pageAll ? UNHEDGED_MAX_PAGES : 1;
+  const flags = newUnhedgedFlags(userId);
   const all = [];
   let offset = 0;
-  for (let page = 0; page < UNHEDGED_MAX_PAGES; page++) {
-    let pageRows = null;
-    let resolved = false;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const selectArgs = {
-        userId: flags.scopedUserId,
-        limit: pageSize,
-        offset,
-        orderByUpdatedAt: flags.orderByUpdatedAt,
-        filterStatus: flags.filterStatus,
-        dateWindow,
-        dateCols: flags.dateCols,
-      };
-      let result;
-      try {
-        result = await runSelect(client, selectArgs);
-      } catch (err) {
-        const kind = classifySelectError(err, selectArgs);
-        if (kind === "missing_table") return { rows: [], missingTable: true, error: err };
-        if (kind === "missing_user_id" || kind === "missing_status" || kind === "missing_updated_at" || kind === "missing_filled_at") {
-          applySelectKind(kind, flags);
-          continue;
-        }
-        return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: err };
-      }
-      const error = result && result.error;
-      const data = result && result.data;
-      const kind = classifySelectError(error, selectArgs);
-      if (kind === "missing_table") return { rows: [], missingTable: true, error };
-      if (kind === "missing_user_id" || kind === "missing_status" || kind === "missing_updated_at" || kind === "missing_filled_at") {
-        applySelectKind(kind, flags);
-        continue;
-      }
-      if (error) {
-        return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error };
-      }
-      pageRows = Array.isArray(data) ? data : [];
-      resolved = true;
-      break;
+  let lastPageLen = 0;
+  for (let page = 0; page < maxPages; page++) {
+    const step = await resolveOnce(
+      (args) => runSelect(client, args),
+      flags,
+      { limit: pageSize, offset, dateWindow },
+    );
+    if (step.missingTable) return { rows: [], missingTable: true, error: step.error, truncated: false, paged: pageAll };
+    if (step.error) {
+      return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: step.error, truncated: false, paged: pageAll };
     }
-    if (!resolved) {
-      return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: { message: "retries exhausted" } };
-    }
+    const pageRows = Array.isArray(step.result && step.result.data) ? step.result.data : [];
+    lastPageLen = pageRows.length;
     all.push(...pageRows);
     if (pageRows.length < pageSize) {
-      return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: null };
+      return {
+        rows: finalizeFetchedRows(all, dateWindow),
+        missingTable: false,
+        error: null,
+        truncated: false,
+        paged: pageAll,
+      };
     }
     offset += pageSize;
   }
-  return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: null };
+  return {
+    rows: finalizeFetchedRows(all, dateWindow),
+    missingTable: false,
+    error: null,
+    truncated: !pageAll && lastPageLen >= pageSize,
+    paged: pageAll,
+  };
+}
+
+async function countHeadOnce(client, flags, { dateWindow, quoteNotNull = false, venue = "all" }) {
+  flags.quoteNotNull = quoteNotNull;
+  flags.venue = flags.venueDropped ? "all" : venue;
+  return resolveOnce(
+    (args) => runCount(client, args),
+    flags,
+    { dateWindow, quoteNotNull: flags.quoteNotNull, venue: flags.venue },
+  );
+}
+
+async function countBeatFillSlim(client, flags, { dateWindow, venue = "all", paginate = false }) {
+  if (flags.quoteDropped || flags.fillDropped) return { count: null };
+  flags.venue = flags.venueDropped ? "all" : venue;
+  flags.quoteNotNull = true;
+  flags.beatFillCols = true;
+  const pageSize = UNHEDGED_PAGE_SIZE;
+  const maxPages = paginate ? UNHEDGED_MAX_PAGES : 1;
+  let offset = 0;
+  let beat = 0;
+  for (let page = 0; page < maxPages; page++) {
+    const step = await resolveOnce(
+      (args) => runBeatFillSelect(client, args),
+      flags,
+      {
+        dateWindow,
+        venue: flags.venue,
+        quoteNotNull: true,
+        beatFillCols: true,
+        limit: pageSize,
+        offset,
+      },
+    );
+    if (step.missingTable) return step;
+    if (step.error) return step;
+    if (flags.quoteDropped || flags.fillDropped) return { count: null };
+    const rows = Array.isArray(step.result && step.result.data) ? step.result.data : [];
+    for (const row of rows) {
+      if (wouldQuoteBeatsFill(row)) beat += 1;
+    }
+    if (rows.length < pageSize) return { count: beat };
+    offset += pageSize;
+  }
+  return { count: beat };
+}
+
+// Head counts for the tiles. Same date / user / status / venue filters as the
+// row pull. FILLED and Would-quote are exact head counts. Beat-fill compares
+// two columns so PostgREST cannot head it — we select only those two numbers
+// (not *) and count locally. When the beat-fill chip is on, FILLED and
+// Would-quote reuse that beat-fill count (the subset).
+export async function countUnhedgedRfqs(client, {
+  userId = null,
+  dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
+  now,
+  venue = "all",
+  quoteBeatFill = false,
+} = {}) {
+  if (!client || typeof client.from !== "function") {
+    return emptyUnhedgedCountResult({ error: { message: "no client" } });
+  }
+  const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
+  const venueKeyNorm = normalizeVenueFilter(venue);
+  const flags = newUnhedgedFlags(userId);
+  flags.venue = venueKeyNorm;
+  const pageBeat = unhedgedDateRangePages(dateRange);
+
+  if (quoteBeatFill) {
+    const beat = await countBeatFillSlim(client, flags, {
+      dateWindow,
+      venue: flags.venueDropped ? "all" : venueKeyNorm,
+      paginate: pageBeat,
+    });
+    if (beat.missingTable) return emptyUnhedgedCountResult({ missingTable: true, error: beat.error });
+    if (beat.error && beat.count == null) {
+      return emptyUnhedgedCountResult({ error: beat.error });
+    }
+    return {
+      filled: beat.count,
+      withQuote: beat.count,
+      beatFill: beat.count,
+      missingTable: false,
+      error: beat.error || null,
+      source: "head",
+      venueDropped: flags.venueDropped,
+    };
+  }
+
+  const filledStep = await countHeadOnce(client, flags, {
+    dateWindow,
+    quoteNotNull: false,
+    venue: flags.venueDropped ? "all" : venueKeyNorm,
+  });
+  if (filledStep.missingTable) return emptyUnhedgedCountResult({ missingTable: true, error: filledStep.error });
+  if (filledStep.error) return emptyUnhedgedCountResult({ error: filledStep.error });
+  const filled = readHeadCount(filledStep.result);
+
+  const quoteVenue = flags.venueDropped ? "all" : venueKeyNorm;
+  const quoteStep = flags.quoteDropped
+    ? { result: { count: null } }
+    : await countHeadOnce(client, flags, {
+      dateWindow,
+      quoteNotNull: true,
+      venue: quoteVenue,
+    });
+  if (quoteStep.missingTable) return emptyUnhedgedCountResult({ missingTable: true, error: quoteStep.error, filled });
+  const withQuote = flags.quoteDropped || quoteStep.error ? null : readHeadCount(quoteStep.result);
+
+  const beat = await countBeatFillSlim(client, flags, {
+    dateWindow,
+    venue: quoteVenue,
+    paginate: pageBeat,
+  });
+  if (beat.missingTable) {
+    return {
+      filled,
+      withQuote,
+      beatFill: null,
+      missingTable: true,
+      error: beat.error,
+      source: "head",
+      venueDropped: flags.venueDropped,
+    };
+  }
+  return {
+    filled,
+    withQuote,
+    beatFill: beat.count,
+    missingTable: false,
+    error: beat.error || quoteStep.error || null,
+    source: "head",
+    venueDropped: flags.venueDropped,
+  };
 }

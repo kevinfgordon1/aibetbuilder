@@ -1,23 +1,27 @@
 // Unhedged RFQ blotter — read-only filled RFQs from public.unhedged_rfqs.
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
-// Summary + tape are MLB and NFL moneylines only. Date chips refetch the
-// full window (paged). Venue and would-quote-beat-fill chips filter that set.
+// Summary + tape are MLB and NFL moneylines only. Default date chip is Today.
+// Today / 24h / 7d stay one page. Month / All time page only after that chip
+// is selected. Tiles use head counts (same window + venue + beat-fill).
 // Legs cell is a per-leg Fair / Kalshi / Poly breakdown plus sport + event date.
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
   UNHEDGED_DATE_FILTERS,
   UNHEDGED_DEFAULT_DATE_RANGE,
+  countUnhedgedRfqs,
   fetchUnhedgedRfqs,
   filterUnhedgedAnalytics,
   formatEtTime,
   isTickerBlob,
+  mergeUnhedgedSummary,
   normalizeUnhedgedDateRange,
   summarizeUnhedgedRows,
   unhedgedActivityTs,
   unhedgedDateRangeLabel,
+  unhedgedDateRangePages,
   unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
@@ -101,18 +105,23 @@ function Tile({ k, v, sub, tone, title }) {
 export function UnhedgedBlotter({
   rows,
   fetched,
+  counts,
   missingTable,
   loaded,
   error,
   onRefresh,
   refreshing,
+  paging,
   dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
   onDateRangeChange,
+  venueFilter = "all",
+  onVenueFilterChange,
+  quoteBeatFill = false,
+  onQuoteBeatFillChange,
 }) {
   const list = rows || [];
   const dateKey = normalizeUnhedgedDateRange(dateRange);
-  const [venueFilter, setVenueFilter] = useState("all");
-  const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const heavy = unhedgedDateRangePages(dateKey);
   const venueScoped = useMemo(
     () => filterUnhedgedAnalytics(list, { venue: venueFilter, quoteBeatFill: false }),
     [list, venueFilter],
@@ -125,10 +134,16 @@ export function UnhedgedBlotter({
     () => summarizeUnhedgedRows(venueScoped, { fetched: fetched == null ? list.length : fetched }),
     [venueScoped, fetched, list.length],
   );
-  const summary = useMemo(
+  const rowSummary = useMemo(
     () => summarizeUnhedgedRows(filtered, { fetched: fetched == null ? list.length : fetched }),
     [filtered, fetched, list.length],
   );
+  const useHead = counts && !(venueFilter !== "all" && counts.venueDropped);
+  const summary = useMemo(
+    () => mergeUnhedgedSummary(rowSummary, useHead ? counts : null),
+    [rowSummary, useHead, counts],
+  );
+  const beatFillCount = useHead && counts.beatFill != null ? counts.beatFill : venueSummary.beatFill;
   return (
     <div className="uh">
       <style>{`
@@ -170,19 +185,19 @@ export function UnhedgedBlotter({
         <span className="chip">paper</span>
         <span className="chip">MLB + NFL ML</span>
         <span className="chip">pregame</span>
-        {loaded && !missingTable && (
+        {loaded && !missingTable && !paging && (
           <span className="chip ok num">{summary.filled} filled</span>
         )}
         {onRefresh ? (
           <button
             type="button"
             className="chip btn"
-            disabled={!!refreshing || !loaded}
-            aria-busy={!!refreshing}
-            title="Re-fetch the filled tape. Does not reload the app."
+            disabled={!!refreshing || !!paging || !loaded}
+            aria-busy={!!refreshing || !!paging}
+            title="Re-fetch the filled tape. Does not reload the app. Today / 24h / 7d stay one page."
             onClick={onRefresh}
           >
-            {unhedgedRefreshLabel(refreshing)}
+            {unhedgedRefreshLabel(refreshing || paging)}
           </button>
         ) : null}
       </div>
@@ -199,9 +214,9 @@ export function UnhedgedBlotter({
               label={c.label}
               active={dateKey === c.key}
               onClick={() => { if (onDateRangeChange) onDateRangeChange(c.key); }}
-              title={c.key === "all"
-                ? "Every owner-scoped filled row, paged from the server"
-                : `Filled rows in this ${c.label.toLowerCase()} window, paged from the server`}
+              title={c.key === "all" || c.key === "month"
+                ? `${c.label} window — pages from the server after you pick this chip. Tile counts are a head query.`
+                : `Filled rows in this ${c.label.toLowerCase()} window (one page). Tile counts are a head query.`}
             />
           ))}
           <span className="muted" style={{ margin: "0 4px" }}>·</span>
@@ -212,49 +227,49 @@ export function UnhedgedBlotter({
               label={c.label}
               className={c.cls}
               active={venueFilter === c.key}
-              onClick={() => setVenueFilter(c.key)}
+              onClick={() => { if (onVenueFilterChange) onVenueFilterChange(c.key); }}
               title={c.key === "all" ? "All venues in this date window" : `Filled ${c.label} only`}
             />
           ))}
           <span className="muted" style={{ margin: "0 4px" }}>·</span>
           <FilterChip
-            label={`Would-quote beat fill · ${venueSummary.beatFill}`}
+            label={`Would-quote beat fill · ${beatFillCount}`}
             className="warn"
             active={quoteBeatFill}
-            onClick={() => setQuoteBeatFill((on) => !on)}
+            onClick={() => { if (onQuoteBeatFillChange) onQuoteBeatFillChange(!quoteBeatFill); }}
             title="Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Count is for the selected date window + venue. Rows missing quote or fill never pass."
           />
         </div>
       )}
 
-      {loaded && !missingTable && (
+      {loaded && !missingTable && !(paging && !counts) && (
         <div className="tiles">
           <Tile
             k="Filled"
             v={summary.filled}
             sub="someone else matched · we did not take these"
             tone={summary.filled ? "pos" : undefined}
-            title={`status=filled in the ${unhedgedDateRangeLabel(dateKey)} window + venue${quoteBeatFill ? " + beat-fill" : ""}. Matched by anyone on the venue. We are paper.`}
+            title={`status=filled in the ${unhedgedDateRangeLabel(dateKey)} window + venue${quoteBeatFill ? " + beat-fill" : ""}. Head count when the server can. Matched by anyone on the venue. We are paper.`}
           />
           <Tile
             k="Would-quote"
             v={summary.withQuote}
             sub="our_quote_american present"
             tone={summary.withQuote ? "warn" : undefined}
-            title="5% net-cost wrap — the American we would have filled at. Null is —. Count is for the selected date window + venue (+ beat-fill when that chip is on)."
+            title="5% net-cost wrap — the American we would have filled at. Null is —. Head count for the selected date window + venue (+ beat-fill when that chip is on)."
           />
           <Tile
             k="Beat fill"
-            v={venueSummary.beatFill}
+            v={beatFillCount}
             sub="would-quote better YES than the print"
-            tone={venueSummary.beatFill ? "warn" : undefined}
+            tone={beatFillCount ? "warn" : undefined}
             title="our_quote_american > fill_american in this date window + venue. Same rule as the beat-fill chip. Missing quote or fill never counts."
           />
         </div>
       )}
 
       <div className="card">
-        {!loaded ? (
+        {!loaded || paging ? (
           <div className="empty">Loading…</div>
         ) : missingTable ? (
           <div className="empty">No unhedged RFQ tape yet. The worker has not published this table.</div>
@@ -301,7 +316,7 @@ export function UnhedgedBlotter({
         )}
         {loaded && !missingTable && list.length > 0 && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Showing every filled pregame MLB and NFL moneyline in the {unhedgedDateRangeLabel(dateKey)} window (paged from the server, newest activity first). Venue and beat-fill chips filter this set. In-game rows are hidden.
+            Showing filled pregame MLB and NFL moneylines in the {unhedgedDateRangeLabel(dateKey)} window ({heavy ? "paged from the server after this chip" : "one page; Month / All time page only after you pick that chip"}, newest activity first). Tile counts are a head query. Venue and beat-fill chips filter this set. In-game rows are hidden.
           </div>
         )}
       </div>
@@ -312,37 +327,79 @@ export function UnhedgedBlotter({
 export default function UnhedgedTape({ user }) {
   const owner = user && user.email === OWNER_EMAIL;
   const [raw, setRaw] = useState([]);
+  const [counts, setCounts] = useState(null);
   const [missingTable, setMissingTable] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [paging, setPaging] = useState(false);
   const [dateRange, setDateRange] = useState(UNHEDGED_DEFAULT_DATE_RANGE);
+  const [venueFilter, setVenueFilter] = useState("all");
+  const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const rowGen = useRef(0);
+  const countGen = useRef(0);
 
-  const reload = useCallback(async ({ button } = {}) => {
+  const reloadRows = useCallback(async ({ button } = {}) => {
     if (!owner) return;
+    const gen = rowGen.current + 1;
+    rowGen.current = gen;
+    const heavy = unhedgedDateRangePages(dateRange);
     if (button) setRefreshing(true);
+    if (heavy) setPaging(true);
     try {
       const result = await fetchUnhedgedRfqs(supabase, {
         userId: user && user.id,
         dateRange,
       });
+      if (gen !== rowGen.current) return;
       setRaw(result.rows);
       setMissingTable(result.missingTable);
       setError(result.error);
       setLoaded(true);
     } finally {
+      if (gen !== rowGen.current) return;
       if (button) setRefreshing(false);
+      setPaging(false);
     }
   }, [owner, user, dateRange]);
 
-  useEffect(() => { reload(); }, [reload]);
+  const reloadCounts = useCallback(async () => {
+    if (!owner) return;
+    const gen = countGen.current + 1;
+    countGen.current = gen;
+    const head = await countUnhedgedRfqs(supabase, {
+      userId: user && user.id,
+      dateRange,
+      venue: venueFilter,
+      quoteBeatFill,
+    });
+    if (gen !== countGen.current) return;
+    setCounts(head);
+    if (head && head.missingTable) setMissingTable(true);
+  }, [owner, user, dateRange, venueFilter, quoteBeatFill]);
+
+  useEffect(() => { reloadRows(); }, [reloadRows]);
+  useEffect(() => { reloadCounts(); }, [reloadCounts]);
   useEffect(() => {
-    if (!owner || missingTable) return undefined;
-    const t = setInterval(() => { reload(); }, 20000);
+    if (!owner || missingTable || unhedgedDateRangePages(dateRange)) return undefined;
+    const t = setInterval(() => { reloadRows(); reloadCounts(); }, 20000);
     return () => clearInterval(t);
-  }, [reload, owner, missingTable]);
+  }, [reloadRows, reloadCounts, owner, missingTable, dateRange]);
 
   const rows = useMemo(() => visibleUnhedgedRows(raw), [raw]);
+
+  const onDateRangeChange = useCallback((key) => {
+    const next = normalizeUnhedgedDateRange(key);
+    if (next === dateRange) return;
+    rowGen.current += 1;
+    countGen.current += 1;
+    setDateRange(next);
+    if (unhedgedDateRangePages(next)) {
+      setPaging(true);
+      setRaw([]);
+      setCounts(null);
+    }
+  }, [dateRange]);
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
 
@@ -350,13 +407,19 @@ export default function UnhedgedTape({ user }) {
     <UnhedgedBlotter
       rows={rows}
       fetched={raw.length}
+      counts={counts}
       missingTable={missingTable}
       loaded={loaded}
       error={error}
-      onRefresh={() => { reload({ button: true }); }}
+      onRefresh={() => { reloadRows({ button: true }); reloadCounts(); }}
       refreshing={refreshing}
+      paging={paging}
       dateRange={dateRange}
-      onDateRangeChange={setDateRange}
+      onDateRangeChange={onDateRangeChange}
+      venueFilter={venueFilter}
+      onVenueFilterChange={setVenueFilter}
+      quoteBeatFill={quoteBeatFill}
+      onQuoteBeatFillChange={setQuoteBeatFill}
     />
   );
 }
