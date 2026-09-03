@@ -70,6 +70,14 @@ assert.equal(identifyTeam("Seattle Seahawks", "nfl"), "SEA");
 assert.equal(identifyTeam("Los Angeles R", "nfl"), "LAR");
 assert.equal(identifyTeam("New York J", "nfl"), "NYJ");
 assert.equal(identifyTeam("Kansas City Royals"), "KC");
+assert.equal(identifyTeam("Athletics"), "ATH");
+assert.equal(identifyTeam("Athletics ML"), "ATH");
+assert.equal(identifyTeam("A's"), "ATH");
+assert.equal(identifyTeam("A's ML"), "ATH");
+assert.equal(identifyTeam("as"), "ATH");
+assert.equal(identifyTeam("Oakland Athletics"), "ATH");
+assert.equal(identifyTeam("Oakland Athletics ML"), "ATH");
+assert.equal(identifyTeam("Sacramento Athletics"), "ATH");
 
 assert.deepEqual(parsePromoTotal("Los Angeles Angels/Atlanta Braves o8.5"), { ou: "over", line: "8.5" });
 assert.deepEqual(parsePromoTotal("Guardians/Tigers u8.5"), { ou: "under", line: "8.5" });
@@ -173,6 +181,42 @@ const totUnder = mapPromoLegsToKalshi([{
   game: "Philadelphia Phillies @ Atlanta Braves", sport: "baseball_mlb",
 }], MLB);
 assert.equal(totUnder.rows[0].marketVal, encVal("KXMLBTOTAL-26AUG071905PHIATL-9", "no"));
+
+// Live Kalshi KXMLBGAME-…ATHSEA uses yes_sub_title "A's" (apostrophe stripped → "as").
+const athSeaGame = {
+  key: "26SEP032140ATHSEA",
+  title: "A's vs Seattle",
+  date: "ATH vs SEA",
+  markets: {
+    side: [
+      gSide("KXMLBGAME-26SEP032140ATHSEA-ATH", "A's"),
+      gSide("KXMLBGAME-26SEP032140ATHSEA-SEA", "Seattle"),
+    ],
+    spread: [],
+    total: [],
+  },
+};
+const athMl = mapPromoLegsToKalshi([{
+  name: "Athletics ML", market: "ML",
+  game: "Athletics @ Seattle Mariners", sport: "baseball_mlb",
+}], [athSeaGame]);
+assert.equal(athMl.unmatched.length, 0, JSON.stringify(athMl.unmatched));
+assert.equal(athMl.rows[0].gameKey, "26SEP032140ATHSEA");
+assert.equal(athMl.rows[0].marketVal, encVal("KXMLBGAME-26SEP032140ATHSEA-ATH", "yes"));
+
+const oakAthMl = mapPromoLegsToKalshi([{
+  name: "Oakland Athletics ML", market: "ML",
+  game: "Oakland Athletics @ Seattle Mariners", sport: "baseball_mlb",
+}], [athSeaGame]);
+assert.equal(oakAthMl.unmatched.length, 0, JSON.stringify(oakAthMl.unmatched));
+assert.equal(oakAthMl.rows[0].marketVal, encVal("KXMLBGAME-26SEP032140ATHSEA-ATH", "yes"));
+
+const asPromoMl = mapPromoLegsToKalshi([{
+  name: "A's ML", market: "ML",
+  game: "A's @ Seattle Mariners", sport: "baseball_mlb",
+}], [athSeaGame]);
+assert.equal(asPromoMl.unmatched.length, 0, JSON.stringify(asPromoMl.unmatched));
+assert.equal(asPromoMl.rows[0].marketVal, encVal("KXMLBGAME-26SEP032140ATHSEA-ATH", "yes"));
 
 const kcGame = sampleGame("26AUG071905KCNYY", "KC", "NYY", "Kansas City", "New York Y");
 const kcMap = mapPromoLegsToKalshi([{
