@@ -180,7 +180,7 @@ export function fillRowId(fill) {
   return fill.fill_id || fill.id || null;
 }
 
-// Same aliases as UnhedgedTape — Kalshi / Polymarket only on this blotter.
+// Kalshi / Polymarket aliases only on this blotter.
 export const TAPE_VENUE_FILTERS = ["all", "kalshi", "polymarket"];
 const VENUE_FIELD_KEYS = ["venue", "exchange", "source", "book"];
 const KALSHI_TICKER = /\bKX(?:MLB|NFL|NCAAF|NBA|NHL|MVE|ATP|PGA)?[A-Z0-9]*\b/i;
