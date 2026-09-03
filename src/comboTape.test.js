@@ -43,6 +43,13 @@ import {
   lockSettlement,
   settlementTally,
   settlementSummaryText,
+  tapeVenueKey,
+  formatTapeVenue,
+  inferTapeVenue,
+  inferRfqVenue,
+  filterTapeRowsByVenue,
+  filterLockTapeByVenue,
+  normalizeTapeVenueFilter,
 } from "./comboTape.js";
 import { settlementCopy, settlementFromStored } from "./comboSettlement.js";
 
@@ -743,6 +750,14 @@ assert.equal(pickFillRow([
   assert.doesNotMatch(tapeUi, /score|finalized from start|kickoff settled/i);
   assert.doesNotMatch(tapeUi, /kalshi-games/);
   assert.doesNotMatch(tapeUi, /refreshSettlements/);
+  assert.match(tapeUi, /VenueChip/);
+  assert.match(tapeUi, /venue-kalshi/);
+  assert.match(tapeUi, /venue-poly/);
+  assert.match(tapeUi, /venueFilter/);
+  assert.match(tapeUi, /TAPE_VENUE_FILTERS/);
+  assert.match(tapeUi, /filterLockTapeByVenue/);
+  assert.match(tapeUi, /<th>Venue<\/th>/);
+  assert.match(tapeUi, /\.eq\("user_id", user\.id\)\.in\("status"/);
   assert.match(locks, /settlementFromStored/);
   assert.match(locks, /parlay won \(we lost\)/);
   assert.match(locks, /parlay lost \(we won\)/);
@@ -808,6 +823,88 @@ assert.equal(pickFillRow([
   assert.equal(summary.settlement.weLost, 1);
   assert.equal(summary.settlement.pending, 1);
   assert.equal(summary.settlementText, "we won 1 · we lost 1");
+}
+
+// ── venue: persisted column, then ticker / raw, else historical Kalshi ──
+assert.equal(tapeVenueKey("kalshi"), "kalshi");
+assert.equal(tapeVenueKey("KXI"), "kalshi");
+assert.equal(tapeVenueKey("Polymarket"), "polymarket");
+assert.equal(tapeVenueKey("poly"), "polymarket");
+assert.equal(tapeVenueKey("pm"), "polymarket");
+assert.equal(formatTapeVenue("kalshi"), "Kalshi");
+assert.equal(formatTapeVenue("polymarket"), "Polymarket");
+assert.equal(normalizeTapeVenueFilter("poly"), "polymarket");
+assert.equal(normalizeTapeVenueFilter("all"), "all");
+assert.equal(inferTapeVenue({ venue: "polymarket" }), "polymarket");
+assert.equal(inferTapeVenue({ venue: "kalshi" }), "kalshi");
+assert.equal(inferTapeVenue({ raw: { venue: "poly" } }), "polymarket");
+assert.equal(inferTapeVenue({ market_ticker: "KXMVECROSSCATEGORY-S2026ABC" }), "kalshi");
+assert.equal(inferTapeVenue({ ticker: "KXMLBGAME-26SEP032140ATHSEA-ATH" }), "kalshi");
+assert.equal(inferTapeVenue({ ticker: "mlb-ath-sea-2026-09-03-ath" }), "polymarket");
+assert.equal(inferTapeVenue({ kalshi_created_time: "2026-09-03T22:00:00Z" }), "kalshi");
+assert.equal(inferTapeVenue({ raw: { source: "live-runner" } }), "kalshi");
+assert.equal(inferTapeVenue({ raw: { source: "polymarket-rfq" } }), "polymarket");
+assert.equal(inferTapeVenue({}), "");
+assert.equal(inferRfqVenue({ submission: { venue: "polymarket" }, fill: { ticker: "KXMLBGAME-X" } }), "polymarket");
+assert.equal(inferRfqVenue({ fill: { ticker: "KXMLBGAME-26SEP03ATHSEA-ATH" } }), "kalshi");
+assert.equal(inferRfqVenue({}), "kalshi");
+{
+  const polyOpen = buildRfqRow({
+    submission: {
+      rfq_id: "pm-1",
+      venue: "polymarket",
+      status: "quoted",
+      is_live: true,
+      quote_id: "q-pm",
+      contracts: 20,
+    },
+  });
+  assert.equal(polyOpen.venueKey, "polymarket");
+  assert.equal(polyOpen.venue, "Polymarket");
+  const kalshiSkip = buildRfqRow({
+    submission: { rfq_id: "k-1", status: "declined", contracts: 12, created_at: "2026-09-03T12:00:00Z" },
+  });
+  assert.equal(kalshiSkip.venueKey, "kalshi");
+  assert.equal(kalshiSkip.venue, "Kalshi");
+  const fromFill = buildRfqRow({
+    fill: { fill_id: "f1", count: 10, ticker: "KXMVECROSSCATEGORY-S1", kalshi_created_time: "2026-09-03T12:00:00Z" },
+  });
+  assert.equal(fromFill.venueKey, "kalshi");
+}
+
+{
+  const tape = buildLockTape({
+    parlay: { id: "p-venue", active: true, max_contracts: 100 },
+    submissions: [
+      { rfq_id: "k-open", parlay_id: "p-venue", venue: "kalshi", status: "quoted", is_live: true, quote_id: "qk", contracts: 10, created_at: "2026-09-03T16:00:00Z" },
+      { rfq_id: "p-skip", parlay_id: "p-venue", venue: "polymarket", status: "declined", contracts: 8, created_at: "2026-09-03T16:01:00Z" },
+    ],
+  });
+  assert.equal(tape.rows.find((r) => r.rfqId === "k-open").venueKey, "kalshi");
+  assert.equal(tape.rows.find((r) => r.rfqId === "p-skip").venueKey, "polymarket");
+  assert.deepEqual(filterTapeRowsByVenue(tape.rows, "kalshi").map((r) => r.rfqId), ["k-open"]);
+  assert.deepEqual(filterTapeRowsByVenue(tape.rows, "polymarket").map((r) => r.rfqId), ["p-skip"]);
+  const onlyPoly = filterLockTapeByVenue(tape, "polymarket");
+  assert.equal(onlyPoly.rows.length, 1);
+  assert.equal(onlyPoly.rows[0].venueKey, "polymarket");
+  assert.equal(onlyPoly.live.skipped, 1);
+  assert.equal(onlyPoly.live.awaiting, 0);
+  const all = filterLockTapeByVenue(tape, "all");
+  assert.equal(all.rows.length, 2);
+}
+
+{
+  const scoped = buildLockTape({
+    parlay: { id: "p-a", active: true, max_contracts: 50 },
+    submissions: [
+      { rfq_id: "mine", parlay_id: "p-a", venue: "polymarket", status: "declined", contracts: 8, created_at: "2026-08-23T12:00:00Z" },
+    ],
+    submissionByRfq: {
+      other: { rfq_id: "other", parlay_id: "p-b", venue: "kalshi", status: "unfilled", is_live: true, quote_id: "q", contracts: 111 },
+    },
+  });
+  assert.equal(scoped.rows.some((r) => r.rfqId === "other"), false);
+  assert.equal(scoped.rows[0].venueKey, "polymarket");
 }
 
 assert.equal(isQuotingParlay({ active: true, archived_at: null }), true);
