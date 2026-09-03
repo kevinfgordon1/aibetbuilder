@@ -5,7 +5,7 @@
 // Today / 24h / 7d stay one page. Month / All time page only after that chip
 // is selected. Tiles use head counts (same window + venue + beat-fill).
 // Legs cell is a per-leg Fair / Kalshi / Poly breakdown plus sport + event date.
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
@@ -336,9 +336,13 @@ export default function UnhedgedTape({ user }) {
   const [dateRange, setDateRange] = useState(UNHEDGED_DEFAULT_DATE_RANGE);
   const [venueFilter, setVenueFilter] = useState("all");
   const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const rowGen = useRef(0);
+  const countGen = useRef(0);
 
   const reloadRows = useCallback(async ({ button } = {}) => {
     if (!owner) return;
+    const gen = rowGen.current + 1;
+    rowGen.current = gen;
     const heavy = unhedgedDateRangePages(dateRange);
     if (button) setRefreshing(true);
     if (heavy) setPaging(true);
@@ -347,11 +351,13 @@ export default function UnhedgedTape({ user }) {
         userId: user && user.id,
         dateRange,
       });
+      if (gen !== rowGen.current) return;
       setRaw(result.rows);
       setMissingTable(result.missingTable);
       setError(result.error);
       setLoaded(true);
     } finally {
+      if (gen !== rowGen.current) return;
       if (button) setRefreshing(false);
       setPaging(false);
     }
@@ -359,12 +365,15 @@ export default function UnhedgedTape({ user }) {
 
   const reloadCounts = useCallback(async () => {
     if (!owner) return;
+    const gen = countGen.current + 1;
+    countGen.current = gen;
     const head = await countUnhedgedRfqs(supabase, {
       userId: user && user.id,
       dateRange,
       venue: venueFilter,
       quoteBeatFill,
     });
+    if (gen !== countGen.current) return;
     setCounts(head);
     if (head && head.missingTable) setMissingTable(true);
   }, [owner, user, dateRange, venueFilter, quoteBeatFill]);
@@ -382,6 +391,8 @@ export default function UnhedgedTape({ user }) {
   const onDateRangeChange = useCallback((key) => {
     const next = normalizeUnhedgedDateRange(key);
     if (next === dateRange) return;
+    rowGen.current += 1;
+    countGen.current += 1;
     setDateRange(next);
     if (unhedgedDateRangePages(next)) {
       setPaging(true);
