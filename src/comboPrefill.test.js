@@ -183,12 +183,13 @@ assert.equal(kcMap.rows[0].gameKey, "26AUG071905KCNYY");
 assert.equal(kcMap.rows[0].marketVal, encVal("KXMLBGAME-26AUG071905KCNYY-KC", "yes"));
 
 const totMissingLine = mapPromoLegsToKalshi([{
-  name: "Philadelphia Phillies/Atlanta Braves o12.5", market: "TOT",
+  name: "Philadelphia Phillies/Atlanta Braves o20.5", market: "TOT",
   game: "Philadelphia Phillies @ Atlanta Braves", sport: "baseball_mlb",
 }], MLB);
 assert.equal(totMissingLine.unmatched.length, 1);
 assert.equal(totMissingLine.rows[0].gameKey, "26AUG071905PHIATL");
 assert.equal(totMissingLine.rows[0].marketVal, "");
+assert.match(totMissingLine.unmatched[0].reason, /no Kalshi TOT within 3 pts of o20\.5/);
 
 const fiveLeg = mapPromoLegsToKalshi([
   phiMl,
@@ -299,6 +300,166 @@ assert.ok(flat.some((g) => g.sport === "mlb" && g.key === "26AUG071905PHIATL"));
 assert.equal(formatGameOption(flat.find((g) => g.key === "26SEP09NESEA")), "NFL · New England vs Seattle · NE vs SEA (Sep 9)");
 assert.equal(formatGameOption(flat.find((g) => g.key === "26SEP03MASSRUTG")), "NCAAF · UMass vs Rutgers · MASS vs RUTG (Sep 3)");
 assert.equal(comboGameId(flat.find((g) => g.key === "26SEP09NESEA")), "nfl:26SEP09NESEA");
+
+// Kalshi NCAAF/NFL strike grids skip sportsbook mains. Snap SPR/TOT to a real
+// nearby strike (same team/sign or OU) within 3 pts; exact still wins; never invent.
+const missouriGame = {
+  key: "26SEP03ARPBMIZZ",
+  sport: "ncaaf",
+  title: "Arkansas-Pine Bluff vs Missouri",
+  date: "ARPB vs MIZZ (Sep 3)",
+  startTime: "2026-09-04T00:00:00Z",
+  markets: {
+    side: [
+      { ticker: "KXNCAAFGAME-26SEP03ARPBMIZZ-ARPB", side: "yes", label: "Arkansas-Pine Bluff" },
+      { ticker: "KXNCAAFGAME-26SEP03ARPBMIZZ-MIZZ", side: "yes", label: "Missouri" },
+    ],
+    spread: [
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ42", side: "yes", label: "Missouri \u221241.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ42", side: "no", label: "Arkansas-Pine Bluff +41.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ46", side: "yes", label: "Missouri \u221245.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ46", side: "no", label: "Arkansas-Pine Bluff +45.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ49", side: "yes", label: "Missouri \u221248.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ49", side: "no", label: "Arkansas-Pine Bluff +48.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ52", side: "yes", label: "Missouri \u221251.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ52", side: "no", label: "Arkansas-Pine Bluff +51.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ55", side: "yes", label: "Missouri \u221254.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ55", side: "no", label: "Arkansas-Pine Bluff +54.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ58", side: "yes", label: "Missouri \u221257.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ58", side: "no", label: "Arkansas-Pine Bluff +57.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ61", side: "yes", label: "Missouri \u221260.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ61", side: "no", label: "Arkansas-Pine Bluff +60.5" },
+    ],
+    total: [
+      { ticker: "KXNCAAFTOTAL-26SEP03ARPBMIZZ-63", side: "yes", label: "Over 62.5" },
+      { ticker: "KXNCAAFTOTAL-26SEP03ARPBMIZZ-63", side: "no", label: "Under 62.5" },
+      { ticker: "KXNCAAFTOTAL-26SEP03ARPBMIZZ-66", side: "yes", label: "Over 65.5" },
+      { ticker: "KXNCAAFTOTAL-26SEP03ARPBMIZZ-66", side: "no", label: "Under 65.5" },
+    ],
+  },
+};
+const delawareGame = {
+  key: "26SEP03MRMKDELAWARE",
+  sport: "ncaaf",
+  title: "Merrimack vs Delaware",
+  date: "MRMK vs DELAWARE (Sep 3)",
+  startTime: "2026-09-04T00:00:00Z",
+  markets: {
+    side: [
+      { ticker: "KXNCAAFGAME-26SEP03MRMKDELAWARE-MRMK", side: "yes", label: "Merrimack" },
+      { ticker: "KXNCAAFGAME-26SEP03MRMKDELAWARE-DELAWARE", side: "yes", label: "Delaware" },
+    ],
+    spread: [
+      { ticker: "KXNCAAFSPREAD-26SEP03MRMKDELAWARE-DEL31", side: "yes", label: "Delaware \u221230.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03MRMKDELAWARE-DEL31", side: "no", label: "Merrimack +30.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03MRMKDELAWARE-DEL34", side: "yes", label: "Delaware \u221233.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03MRMKDELAWARE-DEL34", side: "no", label: "Merrimack +33.5" },
+    ],
+    total: [],
+  },
+};
+const ucfGame = {
+  key: "26SEP03COOKMANUCF",
+  sport: "ncaaf",
+  title: "Bethune-Cookman vs UCF",
+  date: "COOKMAN vs UCF (Sep 3)",
+  startTime: "2026-09-04T00:00:00Z",
+  markets: {
+    side: [
+      { ticker: "KXNCAAFGAME-26SEP03COOKMANUCF-COOKMAN", side: "yes", label: "Bethune-Cookman" },
+      { ticker: "KXNCAAFGAME-26SEP03COOKMANUCF-UCF", side: "yes", label: "UCF" },
+    ],
+    spread: [
+      { ticker: "KXNCAAFSPREAD-26SEP03COOKMANUCF-UCF41", side: "yes", label: "UCF \u221240.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03COOKMANUCF-UCF41", side: "no", label: "Bethune-Cookman +40.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03COOKMANUCF-UCF44", side: "yes", label: "UCF \u221244.5" },
+      { ticker: "KXNCAAFSPREAD-26SEP03COOKMANUCF-UCF44", side: "no", label: "Bethune-Cookman +44.5" },
+    ],
+    total: [],
+  },
+};
+const COLLEGE = { mlb: [], nfl: [], ncaaf: [missouriGame, delawareGame, ucfGame] };
+
+const mizzSnap = mapPromoLegsToKalshi([{
+  name: "Missouri Tigers -55.5", market: "SPR",
+  game: "Arkansas-Pine Bluff Golden Lions @ Missouri Tigers", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(mizzSnap.unmatched.length, 0, JSON.stringify(mizzSnap.unmatched));
+assert.equal(mizzSnap.rows[0].gameKey, "26SEP03ARPBMIZZ");
+assert.equal(mizzSnap.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ55", "yes"),
+  "sportsbook −55.5 snaps to nearest Kalshi −54.5, not −57.5");
+
+const delSnap = mapPromoLegsToKalshi([{
+  name: "Delaware Blue Hens -31.5", market: "SPR",
+  game: "Merrimack Warriors @ Delaware Blue Hens", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(delSnap.unmatched.length, 0, JSON.stringify(delSnap.unmatched));
+assert.equal(delSnap.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03MRMKDELAWARE-DEL31", "yes"));
+
+const ucfSnap = mapPromoLegsToKalshi([{
+  name: "UCF Knights -43.5", market: "SPR",
+  game: "Bethune-Cookman Wildcats @ UCF Knights", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(ucfSnap.unmatched.length, 0, JSON.stringify(ucfSnap.unmatched));
+assert.equal(ucfSnap.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03COOKMANUCF-UCF44", "yes"),
+  "−43.5 is 1 pt from −44.5 and 3 from −40.5");
+
+const exactBeatsSnap = mapPromoLegsToKalshi([{
+  name: "Missouri Tigers -54.5", market: "SPR",
+  game: "Arkansas-Pine Bluff Golden Lions @ Missouri Tigers", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(exactBeatsSnap.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ55", "yes"));
+
+const totSnap = mapPromoLegsToKalshi([{
+  name: "Arkansas-Pine Bluff Golden Lions/Missouri Tigers o64.5", market: "TOT",
+  game: "Arkansas-Pine Bluff Golden Lions @ Missouri Tigers", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(totSnap.unmatched.length, 0, JSON.stringify(totSnap.unmatched));
+assert.equal(totSnap.rows[0].marketVal, encVal("KXNCAAFTOTAL-26SEP03ARPBMIZZ-66", "yes"),
+  "o64.5 snaps to nearest Kalshi Over 65.5 (1 pt), not Over 62.5 (2 pts)");
+
+const totUnderSnap = mapPromoLegsToKalshi([{
+  name: "Arkansas-Pine Bluff Golden Lions/Missouri Tigers u64.5", market: "TOT",
+  game: "Arkansas-Pine Bluff Golden Lions @ Missouri Tigers", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(totUnderSnap.rows[0].marketVal, encVal("KXNCAAFTOTAL-26SEP03ARPBMIZZ-66", "no"));
+
+const dogSnap = mapPromoLegsToKalshi([{
+  name: "Arkansas-Pine Bluff Golden Lions +55.5", market: "SPR",
+  game: "Arkansas-Pine Bluff Golden Lions @ Missouri Tigers", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(dogSnap.unmatched.length, 0, JSON.stringify(dogSnap.unmatched));
+assert.equal(dogSnap.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ55", "no"),
+  "+55.5 snaps to the +54.5 dog side of the same Kalshi contract");
+
+const farSpread = mapPromoLegsToKalshi([{
+  name: "Missouri Tigers -20.5", market: "SPR",
+  game: "Arkansas-Pine Bluff Golden Lions @ Missouri Tigers", sport: "americanfootball_ncaaf",
+}], COLLEGE);
+assert.equal(farSpread.unmatched.length, 1);
+assert.equal(farSpread.rows[0].gameKey, "26SEP03ARPBMIZZ");
+assert.equal(farSpread.rows[0].marketVal, "", "do not invent a −20.5 market");
+assert.match(farSpread.unmatched[0].reason, /no Kalshi SPR within 3 pts of -20\.5 on Arkansas-Pine Bluff vs Missouri/);
+
+const noSpreadMarkets = mapPromoLegsToKalshi([{
+  name: "Delaware Blue Hens -31.5", market: "SPR",
+  game: "Merrimack Warriors @ Delaware Blue Hens", sport: "americanfootball_ncaaf",
+}], { mlb: [], nfl: [], ncaaf: [{ ...delawareGame, markets: { ...delawareGame.markets, spread: [] } }] });
+assert.equal(noSpreadMarkets.unmatched.length, 1);
+assert.equal(noSpreadMarkets.rows[0].marketVal, "", "empty Kalshi ladder — do not invent a strike");
+assert.match(noSpreadMarkets.unmatched[0].reason, /no matching SPR on Merrimack vs Delaware/);
+
+const nflAltSnap = mapPromoLegsToKalshi([{
+  name: "Seattle Seahawks -7.5", market: "SPR",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], SPORTS);
+assert.equal(nflAltSnap.unmatched.length, 0, JSON.stringify(nflAltSnap.unmatched));
+assert.equal(nflAltSnap.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP09NESEA-SEA7", "yes"),
+  "NFL −7.5 snaps to Kalshi −6.5");
+
+const mlbMlUnchanged = mapPromoLegsToKalshi([phiMl], MLB);
+assert.equal(mlbMlUnchanged.unmatched.length, 0);
+assert.equal(mlbMlUnchanged.rows[0].marketVal, encVal("KXMLBGAME-26AUG071905PHIATL-PHI", "yes"));
 
 assert.equal(earliestCommence([
   { commence_time: "2026-08-08T01:00:00Z" },
