@@ -81,12 +81,18 @@ assert.equal(formatEtTime("2026-09-02T16:30:00.000Z"), "Sep 2, 12:30 PM ET");
 assert.equal(formatEtTime(null), "—");
 assert.equal(formatEtTime(""), "—");
 
-// TIME ET: filled_at if present, else updated_at, else created_at. Do not invent a fill.
+// TIME ET / activity clock: latest of filled_at / updated_at / created_at.
+// Nulls ignored. Do not invent a fill or Date.now().
 assert.equal(rowTime({
   filled_at: "2026-09-02T17:56:00.000Z",
   updated_at: "2026-09-02T18:16:00.000Z",
   created_at: "2026-09-02T17:00:00.000Z",
-}), "2026-09-02T17:56:00.000Z");
+}), "2026-09-02T18:16:00.000Z");
+assert.equal(unhedgedActivityTs({
+  filled_at: "2026-09-02T17:56:00.000Z",
+  updated_at: "2026-09-02T18:16:00.000Z",
+  created_at: "2026-09-02T17:00:00.000Z",
+}), "2026-09-02T18:16:00.000Z");
 assert.equal(rowTime({
   filled_at: null,
   updated_at: "2026-09-02T18:16:00.000Z",
@@ -98,6 +104,19 @@ assert.equal(unhedgedActivityTs({
   updated_at: "2026-09-02T18:16:00.000Z",
   created_at: "2026-09-02T18:10:00.000Z",
 }), "2026-09-02T18:16:00.000Z");
+assert.equal(rowTime({ filled_at: "2026-09-03T03:11:00.000Z" }), "2026-09-03T03:11:00.000Z");
+assert.equal(unhedgedActivityTs({ filled_at: "2026-09-03T03:11:00.000Z" }), "2026-09-03T03:11:00.000Z");
+assert.equal(formatEtTime("2026-09-03T03:11:00.000Z"), "Sep 2, 11:11 PM ET");
+assert.equal(unhedgedActivityTs({
+  filledAt: "2026-09-03T03:11:00.000Z",
+  updatedAt: "2026-09-03T18:30:00.000Z",
+}), "2026-09-03T18:30:00.000Z");
+assert.equal(unhedgedActivityTs({
+  filled_at: "2026-09-03T19:00:00.000Z",
+  updated_at: "2026-09-03T18:30:00.000Z",
+}), "2026-09-03T19:00:00.000Z");
+assert.equal(unhedgedActivityTs(null), null);
+assert.equal(unhedgedActivityTs({}), null);
 {
   const withFill = mapUnhedgedRow({
     filled_at: "2026-09-02T17:56:00.000Z",
@@ -105,7 +124,8 @@ assert.equal(unhedgedActivityTs({
     created_at: "2026-09-02T17:00:00.000Z",
     status: "filled",
   });
-  assert.equal(withFill.timeEt, "Sep 2, 1:56 PM ET");
+  assert.equal(withFill.timeEt, "Sep 2, 2:16 PM ET");
+  assert.equal(withFill.at, "2026-09-02T18:16:00.000Z");
   assert.equal(withFill.filledAt, "2026-09-02T17:56:00.000Z");
   assert.equal(withFill.updatedAt, "2026-09-02T18:16:00.000Z");
   const noFill = mapUnhedgedRow({
@@ -123,6 +143,12 @@ assert.equal(unhedgedActivityTs({
   });
   assert.equal(createdOnly.timeEt, "Sep 2, 2:10 PM ET");
   assert.equal(createdOnly.filledAt, null);
+  const fillOnly = mapUnhedgedRow({
+    filled_at: "2026-09-03T03:11:00.000Z",
+    status: "filled",
+  });
+  assert.equal(fillOnly.timeEt, "Sep 2, 11:11 PM ET");
+  assert.equal(fillOnly.filledAt, "2026-09-03T03:11:00.000Z");
 }
 
 // ── Venue ──
@@ -293,6 +319,48 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(mapped[3].timeEt, "Sep 2, 1:56 PM ET");
   const resorted = sortUnhedgedRows(mapped.slice().reverse());
   assert.deepEqual(resorted.map((r) => r.id), ["new-null-fill", "new-created-only", "stale-157", "stale-156"]);
+}
+
+// ── Stale filled_at + later updated_at sorts/displays as the later stamp ──
+{
+  const mapped = mapUnhedgedRows([
+    {
+      id: "seahawks-stale-fill",
+      status: "filled",
+      fill_american: 4662,
+      filled_at: "2026-09-03T03:11:00.000Z",
+      updated_at: "2026-09-03T18:30:00.000Z",
+      created_at: "2026-09-02T20:00:00.000Z",
+    },
+    {
+      id: "older-update",
+      status: "filled",
+      fill_american: 200,
+      filled_at: "2026-09-03T03:11:00.000Z",
+      updated_at: "2026-09-03T17:00:00.000Z",
+      created_at: "2026-09-02T19:00:00.000Z",
+    },
+    {
+      id: "fill-only",
+      status: "filled",
+      fill_american: 180,
+      filled_at: "2026-09-03T03:11:00.000Z",
+    },
+  ]);
+  assert.deepEqual(mapped.map((r) => r.id), ["seahawks-stale-fill", "older-update", "fill-only"]);
+  assert.equal(mapped[0].filledAt, "2026-09-03T03:11:00.000Z");
+  assert.equal(mapped[0].updatedAt, "2026-09-03T18:30:00.000Z");
+  assert.equal(mapped[0].at, "2026-09-03T18:30:00.000Z");
+  assert.equal(mapped[0].timeEt, "Sep 3, 2:30 PM ET");
+  assert.equal(formatEtTime(unhedgedActivityTs(mapped[0])), "Sep 3, 2:30 PM ET");
+  assert.equal(mapped[1].timeEt, "Sep 3, 1:00 PM ET");
+  assert.equal(mapped[2].timeEt, "Sep 2, 11:11 PM ET");
+  assert.equal(formatEtTime(unhedgedActivityTs({
+    filled_at: "2026-09-03T03:11:00.000Z",
+    updated_at: "2026-09-03T18:30:00.000Z",
+  })), "Sep 3, 2:30 PM ET");
+  const resorted = sortUnhedgedRows(mapped.slice().reverse());
+  assert.deepEqual(resorted.map((r) => r.id), ["seahawks-stale-fill", "older-update", "fill-only"]);
 }
 
 // ── Worker columns: our_quote / taker_american (status still seen) ──
@@ -1449,6 +1517,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /No unhedged RFQ tape yet/);
   assert.match(page, /This tab is private/);
   assert.match(page, /Time ET/);
+  assert.match(page, /formatEtTime\(unhedgedActivityTs\(r\) \|\| r\.at\)/);
+  assert.match(page, /unhedgedActivityTs/);
   assert.match(page, />Amount</);
   assert.match(page, /Fill price/);
   assert.match(page, /True \/ fair/);

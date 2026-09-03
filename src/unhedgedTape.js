@@ -10,7 +10,8 @@
 // already started when that field exists. Venue and would-quote-beat-fill are
 // client chips over that window — they do not change the query.
 // After combo-worker #40, filled_at is tape tradeTs (often earlier) or null
-// (never Date.now()). Newest activity is updated_at, not filled_at.
+// (never Date.now()). Newest activity is the latest of filled_at / updated_at /
+// created_at — a stale fill stamp must not bury a later write.
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
@@ -24,6 +25,8 @@
 // Missing table must become an empty state (PGRST205 / 42P01), not a throw.
 
 export const UNHEDGED_TABLE = "unhedged_rfqs";
+// Fetch window and FILLED tile cap. The count does not grow past this, which
+// can look frozen when the tape is full — raising the limit is out of scope.
 export const UNHEDGED_LIMIT = 1000;
 export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
 export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
@@ -382,33 +385,46 @@ export function coerceAmerican(value) {
   return Math.round(n);
 }
 
-export function rowTime(row) {
-  const filled = row && (row.filled_at || row.filledAt);
-  if (filled) return filled;
-  const updated = row && (row.updated_at || row.updatedAt);
-  if (updated) return updated;
-  const created = row && (row.created_at || row.createdAt);
-  if (created) return created;
-  return pickFirst(row, TIME_KEYS);
-}
-
-// Display / sort clock: filled_at if present, else updated_at, else created/at.
-// Null fill times must not sink a later write under an older fill stamp.
-// Do not invent a fill.
-export function unhedgedActivityTs(row) {
-  if (!row) return null;
-  return row.filledAt || row.filled_at
-    || row.updatedAt || row.updated_at
-    || row.at
-    || row.created_at || row.createdAt
-    || null;
-}
-
 export function timeMs(ts) {
   if (ts == null || ts === "") return 0;
   if (typeof ts === "number") return ts < 1e12 ? ts * 1000 : ts;
   const t = Date.parse(ts);
   return Number.isFinite(t) ? t : 0;
+}
+
+// Display / sort / TIME clock: latest of filled_at / updated_at / created_at
+// (ms max). Nulls ignored. A stale filled_at (early tape tradeTs / RFQ created)
+// must not bury a later updated_at. Do not invent a fill; do not invent Date.now().
+// Mapped rows also carry `at` (already this clock) so a later sort still works.
+const ACTIVITY_TS_KEYS = [
+  "filled_at",
+  "filledAt",
+  "updated_at",
+  "updatedAt",
+  "created_at",
+  "createdAt",
+  "at",
+];
+
+export function unhedgedActivityTs(row) {
+  if (!row) return null;
+  let best = null;
+  let bestMs = -1;
+  for (const key of ACTIVITY_TS_KEYS) {
+    const value = row[key];
+    if (value == null || value === "") continue;
+    const ms = timeMs(value);
+    if (!ms) continue;
+    if (ms > bestMs) {
+      bestMs = ms;
+      best = value;
+    }
+  }
+  return best;
+}
+
+export function rowTime(row) {
+  return unhedgedActivityTs(row) || pickFirst(row, TIME_KEYS);
 }
 
 export function formatEtTime(ts) {
@@ -975,7 +991,7 @@ export function formatContracts(n) {
 }
 
 export function mapUnhedgedRow(row, index = 0) {
-  const at = rowTime(row);
+  const at = rowTime(row); // latest of filled/updated/created — TIME ET + sort clock
   const venueRaw = pickFirst(row, VENUE_KEYS);
   const status = rowStatus(row);
   const filledAt = row && (row.filled_at || row.filledAt);
@@ -1099,9 +1115,9 @@ function activityTimeMs(row) {
   return timeMs(unhedgedActivityTs(row));
 }
 
-// Filled first, then newest activity (filledAt || updatedAt || created/at).
-// A null filled_at must not sink a later updated_at/created_at under an older
-// fill stamp. Do not invent a fill.
+// Filled first, then newest activity (latest of filled/updated/created).
+// A stale or null filled_at must not sink a later updated_at/created_at.
+// Do not invent a fill.
 export function sortUnhedgedRows(rows) {
   return [...(rows || [])].sort((a, b) => {
     const aFilled = a && a.status === "filled" ? 1 : 0;

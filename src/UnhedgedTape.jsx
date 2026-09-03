@@ -11,8 +11,10 @@ import {
   UNHEDGED_LIMIT,
   fetchUnhedgedRfqs,
   filterUnhedgedAnalytics,
+  formatEtTime,
   isTickerBlob,
   summarizeUnhedgedRows,
+  unhedgedActivityTs,
   unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
@@ -193,7 +195,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
             v={summary.filled}
             sub="someone else matched · we did not take these"
             tone={summary.filled ? "pos" : undefined}
-            title="status=filled — matched by anyone on the venue. We are paper."
+            title="status=filled in this fetch window (caps at 1000). Matched by anyone on the venue. We are paper."
           />
           <Tile
             k="Would-quote"
@@ -236,7 +238,7 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
               {filtered.map((r) => {
                 return (
                   <tr key={r.id}>
-                    <td className="num muted">{r.timeEt}</td>
+                    <td className="num muted">{formatEtTime(unhedgedActivityTs(r) || r.at)}</td>
                     <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
                     <td>
                       <LegBreakdown legs={r.legs} />
