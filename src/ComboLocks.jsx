@@ -236,6 +236,7 @@ export default function ComboLocks({ user, prefill = null }) {
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
   const [gamesReady, setGamesReady] = useState(false);
   const [prefillWarning, setPrefillWarning] = useState(null);
+  const [prefillNotes, setPrefillNotes] = useState(null);
   const createFormRef = useRef(null);
   const appliedNonceRef = useRef(null);
   const settleInflight = useRef(false);
@@ -375,7 +376,7 @@ export default function ComboLocks({ user, prefill = null }) {
     const nonce = prefill.nonce ?? prefill;
     if (appliedNonceRef.current === nonce) return;
     appliedNonceRef.current = nonce;
-    const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports);
+    const { rows, unmatched, notes } = mapPromoLegsToKalshi(prefill.legs, games.sports);
     const n = Math.max(rows.length, prefill.legs?.length || 0, 2);
     const next = [];
     for (let i = 0; i < n; i++) {
@@ -386,6 +387,7 @@ export default function ComboLocks({ user, prefill = null }) {
     setLegRows(next);
     setForm(formFromPrefill(prefill));
     setPrefillWarning(unmatched.length ? unmatched : null);
+    setPrefillNotes(notes && notes.length ? notes : null);
     requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, [prefill, gamesReady, games, gameIdx]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
@@ -491,6 +493,8 @@ export default function ComboLocks({ user, prefill = null }) {
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
 
+  // List every Kalshi strike Kalshi returned — no main-line filter. Prefill
+  // selects the snapped ticker; the user can still pick any other listed strike.
   const marketGroups = (gameKey, selVal) => {
     const g = gameIdx[gameKey]; if (!g) return null;
     return ["side", "spread", "total"].map((t) => (g.markets[t] || []).length ? (
@@ -523,7 +527,7 @@ export default function ComboLocks({ user, prefill = null }) {
         .cl .tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280}.cl .tile .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:3px}
         .cl .pos{color:#34d399}.cl .neg{color:#f87171}
         .cl .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:14px}
-        .cl .note{font-size:13px;padding:8px 10px;border-radius:8px;margin-top:8px}.cl .note.ok{background:rgba(16,185,129,.12);color:#6ee7b7}.cl .note.warn{background:rgba(245,158,11,.12);color:#fcd34d}
+        .cl .note{font-size:13px;padding:8px 10px;border-radius:8px;margin-top:8px}.cl .note.ok{background:rgba(16,185,129,.12);color:#6ee7b7}.cl .note.warn{background:rgba(245,158,11,.12);color:#fcd34d}.cl .note.info{background:rgba(59,130,246,.12);color:#93c5fd}
         .cl .post{background:#0c1512;color:#9ff0be;border-radius:8px;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;white-space:pre-wrap;margin-top:6px}
         .cl table{width:100%;border-collapse:collapse;font-size:13px}
         .cl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;font-weight:600;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.1)}
@@ -628,6 +632,14 @@ export default function ComboLocks({ user, prefill = null }) {
                 Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF main lines). Fill those rows by hand, then save — nothing has been inserted yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
+                </ul>
+              </div>
+            )}
+            {prefillNotes && prefillNotes.length > 0 && (
+              <div className="note info" style={{ marginBottom: 12 }}>
+                Snapped {prefillNotes.length} sportsbook line{prefillNotes.length === 1 ? "" : "s"} to the nearest Kalshi strike (Kalshi does not list that main).
+                <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                  {prefillNotes.map((n, i) => <li key={i}>{n.name} — {n.note}</li>)}
                 </ul>
               </div>
             )}

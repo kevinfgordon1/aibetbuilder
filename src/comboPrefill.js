@@ -307,55 +307,159 @@ function linesEqual(a, b) {
   return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na - nb) < 1e-6;
 }
 
+// Sportsbook mains (especially NCAAF/NFL) are often 1 pt off Kalshi's discrete
+// strike grid. Snap football SPR/TOT to the nearest same-side Kalshi market
+// within this many points. MLB stays exact-only so baseball half-runs do not
+// silently move.
+export const FOOTBALL_LINE_SNAP_MAX = 3;
+
+function allowsLineSnap(sport) {
+  return sport === "nfl" || sport === "ncaaf";
+}
+
 function parseMarketLine(label) {
   const m = new RegExp(`^(.*?)\\s*(${MINUS.source})\\s*([\\d.]+)\\s*$`).exec(String(label || "").trim());
   if (!m) return null;
   return { team: m[1].trim(), sign: m[2] === "+" ? "+" : "-", line: m[3] };
 }
 
+function signedLine(sign, line) {
+  return `${sign === "+" ? "+" : "\u2212"}${line}`;
+}
+
+function ouLine(ou, line) {
+  return `${ou === "under" ? "Under" : "Over"} ${line}`;
+}
+
+function lineCandidate(market, line, extra = {}) {
+  const num = Number(line);
+  return {
+    market,
+    line,
+    numLine: num,
+    absLine: Math.abs(num),
+    ...extra,
+  };
+}
+
+// Closer |promo − Kalshi| wins. Ties: prefer the strike closer to 0 (lower
+// magnitude), then the lower numeric strike.
+function rankLineCandidates(candidates) {
+  return candidates.slice().sort((a, b) => {
+    if (a.delta !== b.delta) return a.delta - b.delta;
+    if (a.absLine !== b.absLine) return a.absLine - b.absLine;
+    return a.numLine - b.numLine;
+  });
+}
+
+function nearestLinesDetail(candidates, formatLine) {
+  if (!candidates.length) return "";
+  const ranked = rankLineCandidates(candidates);
+  const shown = ranked.slice(0, 2).map(formatLine).join(", ");
+  return ` (nearest Kalshi ${shown}; ${ranked[0].delta.toFixed(1)} pts off)`;
+}
+
+function selectLineMarket(candidates, promoLine, sport, formatSnapNote, formatNear) {
+  if (!candidates.length) return { market: null };
+  const exact = candidates.find((c) => linesEqual(c.line, promoLine));
+  if (exact) return { market: exact.market };
+  const ranked = rankLineCandidates(candidates);
+  const best = ranked[0];
+  if (allowsLineSnap(sport) && best.delta <= FOOTBALL_LINE_SNAP_MAX + 1e-9) {
+    return { market: best.market, note: formatSnapNote(best) };
+  }
+  return { market: null, detail: nearestLinesDetail(ranked, formatNear) };
+}
+
+function spreadTeamMatches(parsed, sm, sport) {
+  const teamId = identifyTeam(parsed.team, sport);
+  const labelId = identifyTeam(sm.team, sport);
+  if (teamId && labelId && teamId === labelId) return true;
+  if (sport === "ncaaf" && nameMatchesLabel(parsed.team, sm.team)) return true;
+  if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return true;
+  return false;
+}
+
+function collectSpreadCandidates(parsed, game, sport) {
+  const promoN = Number(parsed.line);
+  if (!Number.isFinite(promoN)) return [];
+  const out = [];
+  for (const m of game.markets?.spread || []) {
+    const sm = parseMarketLine(m.label);
+    if (!sm || sm.sign !== parsed.sign) continue;
+    if (!spreadTeamMatches(parsed, sm, sport)) continue;
+    const kalshiN = Number(sm.line);
+    if (!Number.isFinite(kalshiN)) continue;
+    out.push(lineCandidate(m, sm.line, { sign: sm.sign, delta: Math.abs(kalshiN - promoN) }));
+  }
+  return out;
+}
+
+function collectTotalCandidates(parsed, game) {
+  const promoN = Number(parsed.line);
+  if (!Number.isFinite(promoN)) return [];
+  const out = [];
+  for (const m of game.markets?.total || []) {
+    const tm = parsePromoTotal(m.label);
+    if (!tm || tm.ou !== parsed.ou) continue;
+    const kalshiN = Number(tm.line);
+    if (!Number.isFinite(kalshiN)) continue;
+    out.push(lineCandidate(m, tm.line, { ou: tm.ou, delta: Math.abs(kalshiN - promoN) }));
+  }
+  return out;
+}
+
+// Returns { market, note?, detail? }. Moneyline is exact team only — never snapped.
 function matchMarket(promoLeg, game, sport = "mlb") {
   const market = promoLeg.market;
   if (market === "ML") {
     const sides = game.markets?.side || [];
     if (sport === "ncaaf") {
-      return sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
+      return { market: sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null };
     }
     const teamId = identifyTeam(promoLeg.name, sport);
     if (teamId) {
       const hit = sides.find((m) => identifyTeam(m.label, sport) === teamId);
-      if (hit) return hit;
+      if (hit) return { market: hit };
     }
-    return null;
+    return { market: null };
   }
   if (market === "TOT") {
     const parsed = parsePromoTotal(promoLeg.name);
-    if (!parsed) return null;
-    const want = `${parsed.ou} ${parsed.line}`;
-    return (game.markets?.total || []).find((m) => normalize(m.label) === normalize(want)) || null;
+    if (!parsed) return { market: null };
+    return selectLineMarket(
+      collectTotalCandidates(parsed, game),
+      parsed.line,
+      sport,
+      (best) => `mapped ${ouLine(parsed.ou, parsed.line)} \u2192 Kalshi ${ouLine(best.ou, best.line)}`,
+      (c) => ouLine(c.ou, c.line),
+    );
   }
   if (market === "SPR") {
     const parsed = parsePromoSpread(promoLeg.name);
-    if (!parsed) return null;
-    const teamId = identifyTeam(parsed.team, sport);
-    for (const m of game.markets?.spread || []) {
-      const sm = parseMarketLine(m.label);
-      if (!sm || !linesEqual(sm.line, parsed.line) || sm.sign !== parsed.sign) continue;
-      const labelId = identifyTeam(sm.team, sport);
-      if (teamId && labelId && teamId === labelId) return m;
-      if (sport === "ncaaf" && nameMatchesLabel(parsed.team, sm.team)) return m;
-      if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return m;
-    }
-    return null;
+    if (!parsed) return { market: null };
+    return selectLineMarket(
+      collectSpreadCandidates(parsed, game, sport),
+      parsed.line,
+      sport,
+      (best) => `mapped ${signedLine(parsed.sign, parsed.line)} \u2192 Kalshi ${signedLine(best.sign, best.line)}`,
+      (c) => signedLine(c.sign, c.line),
+    );
   }
-  return null;
+  return { market: null };
 }
 
 function unmatchedEntry(leg, reason) {
   return { name: leg?.name || "(unnamed leg)", reason };
 }
 
+function noteEntry(leg, note) {
+  return { name: leg?.name || "(unnamed leg)", note };
+}
+
 export function mapPromoLegsToKalshi(promoLegs, games) {
   const unmatched = [];
+  const notes = [];
   const rows = [];
   const flat = flattenComboGames(games);
   for (const leg of promoLegs || []) {
@@ -376,15 +480,16 @@ export function mapPromoLegsToKalshi(promoLegs, games) {
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
-    const mkt = matchMarket(leg, game, sport);
-    if (!mkt) {
-      unmatched.push(unmatchedEntry(leg, `no matching ${leg.market || "market"} on ${game.title || game.key}`));
+    const hit = matchMarket(leg, game, sport);
+    if (!hit?.market) {
+      unmatched.push(unmatchedEntry(leg, `no matching ${leg.market || "market"} on ${game.title || game.key}${hit?.detail || ""}`));
       rows.push({ gameKey: game.key, marketVal: "" });
       continue;
     }
-    rows.push({ gameKey: game.key, marketVal: encVal(mkt.ticker, mkt.side) });
+    if (hit.note) notes.push(noteEntry(leg, hit.note));
+    rows.push({ gameKey: game.key, marketVal: encVal(hit.market.ticker, hit.market.side) });
   }
-  return { rows, unmatched };
+  return { rows, unmatched, notes };
 }
 
 export function toDatetimeLocalValue(isoOrDate) {

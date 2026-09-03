@@ -13,6 +13,7 @@ import {
   flattenComboGames,
   formatGameOption,
   comboGameId,
+  FOOTBALL_LINE_SNAP_MAX,
 } from "./comboPrefill.js";
 
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
@@ -189,6 +190,19 @@ const totMissingLine = mapPromoLegsToKalshi([{
 assert.equal(totMissingLine.unmatched.length, 1);
 assert.equal(totMissingLine.rows[0].gameKey, "26AUG071905PHIATL");
 assert.equal(totMissingLine.rows[0].marketVal, "");
+assert.equal((totMissingLine.notes || []).length, 0, "MLB must not snap totals");
+assert.match(totMissingLine.unmatched[0].reason, /nearest Kalshi Over 9\.5/);
+// 12.5 vs 9.5 is exactly FOOTBALL_LINE_SNAP_MAX — football would snap; MLB must not.
+assert.equal(FOOTBALL_LINE_SNAP_MAX, 3);
+
+const mlbSprMissing = mapPromoLegsToKalshi([{
+  name: "Philadelphia Phillies -3.5", market: "SPR",
+  game: "Philadelphia Phillies @ Atlanta Braves", sport: "baseball_mlb",
+}], MLB);
+assert.equal(mlbSprMissing.unmatched.length, 1);
+assert.equal(mlbSprMissing.rows[0].marketVal, "");
+assert.equal((mlbSprMissing.notes || []).length, 0, "MLB must not snap spreads");
+assert.match(mlbSprMissing.unmatched[0].reason, /nearest Kalshi \u22122\.5/);
 
 const fiveLeg = mapPromoLegsToKalshi([
   phiMl,
@@ -291,6 +305,122 @@ const mixed = mapPromoLegsToKalshi([phiMl, {
 assert.equal(mixed.unmatched.length, 0, JSON.stringify(mixed.unmatched));
 assert.equal(mixed.rows[0].gameKey, "26AUG071905PHIATL");
 assert.equal(mixed.rows[1].marketVal, encVal("KXNFLGAME-26SEP09NESEA-SEA", "yes"));
+assert.equal((mixed.notes || []).length, 0);
+
+function ncaafSpreadGame(key, awayCode, homeCode, away, home, homeLines) {
+  const spread = [];
+  for (const line of homeLines) {
+    const tk = `KXNCAAFSPREAD-${key}-${homeCode}${Math.round(Number(line) + 0.5)}`;
+    spread.push({ ticker: tk, side: "yes", label: `${home} \u2212${line}` });
+    spread.push({ ticker: tk, side: "no", label: `${away} +${line}` });
+  }
+  return {
+    key,
+    sport: "ncaaf",
+    title: `${away} vs ${home}`,
+    date: `${awayCode} vs ${homeCode}`,
+    startTime: "2026-09-04T00:00:00Z",
+    markets: {
+      side: [
+        { ticker: `KXNCAAFGAME-${key}-${awayCode}`, side: "yes", label: away },
+        { ticker: `KXNCAAFGAME-${key}-${homeCode}`, side: "yes", label: home },
+      ],
+      spread,
+      total: [
+        { ticker: `KXNCAAFTOTAL-${key}-50`, side: "yes", label: "Over 49.5" },
+        { ticker: `KXNCAAFTOTAL-${key}-50`, side: "no", label: "Under 49.5" },
+      ],
+    },
+  };
+}
+
+// Live Kalshi KXNCAAFSPREAD-26SEP03ARPBMIZZ style: 41.5…54.5, 57.5… — no 55.5.
+const mizzLines = ["41.5", "45.5", "48.5", "51.5", "54.5", "57.5", "60.5"];
+const mizzGame = ncaafSpreadGame("26SEP03ARPBMIZZ", "ARPB", "MIZZ", "Arkansas-Pine Bluff", "Missouri", mizzLines);
+const delGame = ncaafSpreadGame("26SEP03MERDEL", "MER", "DEL", "Merrimack", "Delaware", ["27.5", "30.5", "33.5", "36.5"]);
+// 41.5 and 45.5 are both 2.0 from 43.5 — tie-break prefers closer to 0 (41.5).
+const ucfGame = ncaafSpreadGame("26SEP03BCUCF", "BC", "UCF", "Bethune-Cookman", "UCF", ["38.5", "41.5", "45.5", "48.5"]);
+const KEVIN_SPORTS = { mlb: MLB, nfl: [nflGame], ncaaf: [mizzGame, delGame, ucfGame] };
+
+const kevinLegs = [
+  { name: "Missouri Tigers -55.5", market: "SPR", game: "Arkansas-Pine Bluff @ Missouri Tigers", sport: "americanfootball_ncaaf" },
+  { name: "Delaware Blue Hens -31.5", market: "SPR", game: "Merrimack @ Delaware Blue Hens", sport: "americanfootball_ncaaf" },
+  { name: "UCF Knights -43.5", market: "SPR", game: "Bethune-Cookman @ UCF Knights", sport: "americanfootball_ncaaf" },
+];
+const kevin = mapPromoLegsToKalshi(kevinLegs, KEVIN_SPORTS);
+assert.equal(kevin.unmatched.length, 0, JSON.stringify(kevin.unmatched));
+assert.equal(kevin.rows.length, 3);
+assert.equal(kevin.rows[0].gameKey, "26SEP03ARPBMIZZ");
+assert.equal(kevin.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ55", "yes"));
+assert.equal(kevin.rows[1].marketVal, encVal("KXNCAAFSPREAD-26SEP03MERDEL-DEL31", "yes"));
+assert.equal(kevin.rows[2].marketVal, encVal("KXNCAAFSPREAD-26SEP03BCUCF-UCF42", "yes"));
+assert.equal(kevin.notes.length, 3);
+assert.equal(kevin.notes[0].note, "mapped \u221255.5 \u2192 Kalshi \u221254.5");
+assert.equal(kevin.notes[1].note, "mapped \u221231.5 \u2192 Kalshi \u221230.5");
+assert.equal(kevin.notes[2].note, "mapped \u221243.5 \u2192 Kalshi \u221241.5");
+
+const mizzExactGame = ncaafSpreadGame("26SEP03ARPBMIZZ", "ARPB", "MIZZ", "Arkansas-Pine Bluff", "Missouri", ["54.5", "55.5", "57.5"]);
+const exactStillWins = mapPromoLegsToKalshi([kevinLegs[0]], { ncaaf: [mizzExactGame] });
+assert.equal(exactStillWins.unmatched.length, 0, JSON.stringify(exactStillWins.unmatched));
+assert.equal(exactStillWins.rows[0].marketVal, encVal("KXNCAAFSPREAD-26SEP03ARPBMIZZ-MIZZ56", "yes"));
+assert.equal((exactStillWins.notes || []).length, 0, "exact Kalshi strike must win without a snap note");
+
+const farGame = ncaafSpreadGame("26SEP03ARPBMIZZ", "ARPB", "MIZZ", "Arkansas-Pine Bluff", "Missouri", ["33.5", "35.5", "38.5"]);
+const farMiss = mapPromoLegsToKalshi([kevinLegs[0]], { ncaaf: [farGame] });
+assert.equal(farMiss.unmatched.length, 1);
+assert.equal(farMiss.rows[0].marketVal, "");
+assert.match(farMiss.unmatched[0].reason, /no matching SPR on Arkansas-Pine Bluff vs Missouri/);
+assert.match(farMiss.unmatched[0].reason, /nearest Kalshi \u221238\.5/);
+assert.match(farMiss.unmatched[0].reason, /17\.0 pts off/);
+
+const nflSnapGame = {
+  ...nflGame,
+  markets: {
+    ...nflGame.markets,
+    spread: [
+      { ticker: "KXNFLSPREAD-26SEP09NESEA-SEA6", side: "yes", label: "Seattle \u22125.5" },
+      { ticker: "KXNFLSPREAD-26SEP09NESEA-SEA6", side: "no", label: "New England +5.5" },
+      { ticker: "KXNFLSPREAD-26SEP09NESEA-SEA8", side: "yes", label: "Seattle \u22127.5" },
+      { ticker: "KXNFLSPREAD-26SEP09NESEA-SEA8", side: "no", label: "New England +7.5" },
+    ],
+    total: [
+      { ticker: "KXNFLTOTAL-26SEP09NESEA-43", side: "yes", label: "Over 42.5" },
+      { ticker: "KXNFLTOTAL-26SEP09NESEA-43", side: "no", label: "Under 42.5" },
+      { ticker: "KXNFLTOTAL-26SEP09NESEA-46", side: "yes", label: "Over 45.5" },
+      { ticker: "KXNFLTOTAL-26SEP09NESEA-46", side: "no", label: "Under 45.5" },
+    ],
+  },
+};
+const nflSpreadSnap = mapPromoLegsToKalshi([{
+  name: "Seattle Seahawks -6.5", market: "SPR",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], { nfl: [nflSnapGame] });
+assert.equal(nflSpreadSnap.unmatched.length, 0, JSON.stringify(nflSpreadSnap.unmatched));
+assert.equal(nflSpreadSnap.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP09NESEA-SEA6", "yes"));
+assert.equal(nflSpreadSnap.notes[0].note, "mapped \u22126.5 \u2192 Kalshi \u22125.5");
+
+const nflTotSnap = mapPromoLegsToKalshi([{
+  name: "New England Patriots/Seattle Seahawks o43.5", market: "TOT",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], { nfl: [nflSnapGame] });
+assert.equal(nflTotSnap.unmatched.length, 0, JSON.stringify(nflTotSnap.unmatched));
+assert.equal(nflTotSnap.rows[0].marketVal, encVal("KXNFLTOTAL-26SEP09NESEA-43", "yes"));
+assert.equal(nflTotSnap.notes[0].note, "mapped Over 43.5 \u2192 Kalshi Over 42.5");
+
+const nflTotFar = mapPromoLegsToKalshi([{
+  name: "New England Patriots/Seattle Seahawks o60.5", market: "TOT",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], { nfl: [nflSnapGame] });
+assert.equal(nflTotFar.unmatched.length, 1);
+assert.equal(nflTotFar.rows[0].marketVal, "");
+assert.match(nflTotFar.unmatched[0].reason, /nearest Kalshi Over 45\.5/);
+
+const nflMlUnchanged = mapPromoLegsToKalshi([{
+  name: "Seattle Seahawks ML", market: "ML",
+  game: "New England Patriots @ Seattle Seahawks", sport: "americanfootball_nfl",
+}], { nfl: [nflSnapGame] });
+assert.equal(nflMlUnchanged.rows[0].marketVal, encVal("KXNFLGAME-26SEP09NESEA-SEA", "yes"));
+assert.equal((nflMlUnchanged.notes || []).length, 0);
 
 const flat = flattenComboGames(SPORTS);
 assert.ok(flat.some((g) => g.sport === "nfl" && g.key === "26SEP09NESEA"));
