@@ -39,7 +39,7 @@ const MLB_TEAMS = [
   { id: "MIN", aliases: ["minnesota twins", "minnesota", "twins", "min"] },
   { id: "NYM", aliases: ["new york mets", "ny mets", "mets", "nym", "new york m"] },
   { id: "NYY", aliases: ["new york yankees", "ny yankees", "yankees", "nyy", "new york y"] },
-  { id: "ATH", aliases: ["athletics", "oakland athletics", "oakland", "ath", "oak", "sacramento athletics", "sacramento"] },
+  { id: "ATH", aliases: ["athletics", "oakland athletics", "oakland", "ath", "oak", "sacramento athletics", "sacramento", "a's", "as", "a s"] },
   { id: "PHI", aliases: ["philadelphia phillies", "philadelphia", "phillies", "phi"] },
   { id: "PIT", aliases: ["pittsburgh pirates", "pittsburgh", "pirates", "pit"] },
   { id: "SD", aliases: ["san diego padres", "san diego", "padres", "sd", "sdp"] },
