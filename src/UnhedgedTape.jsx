@@ -1,20 +1,23 @@
 // Unhedged RFQ blotter — read-only filled RFQs from public.unhedged_rfqs.
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
 // Filled only: someone else matched on Kalshi/Poly. We did not take these.
-// Summary + tape are MLB and NFL moneylines only. Venue and
-// would-quote-beat-fill chips are client-side over the filled 1000.
-// Legs cell is a per-leg Fair / Kalshi / Poly breakdown — not a cramped chip.
+// Summary + tape are MLB and NFL moneylines only. Date chips refetch the
+// full window (paged). Venue and would-quote-beat-fill chips filter that set.
+// Legs cell is a per-leg Fair / Kalshi / Poly breakdown plus sport + event date.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
-  UNHEDGED_LIMIT,
+  UNHEDGED_DATE_FILTERS,
+  UNHEDGED_DEFAULT_DATE_RANGE,
   fetchUnhedgedRfqs,
   filterUnhedgedAnalytics,
   formatEtTime,
   isTickerBlob,
+  normalizeUnhedgedDateRange,
   summarizeUnhedgedRows,
   unhedgedActivityTs,
+  unhedgedDateRangeLabel,
   unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
@@ -59,6 +62,8 @@ function LegBreakdown({ legs }) {
       <thead>
         <tr>
           <th>Leg</th>
+          <th>Sport</th>
+          <th>Event</th>
           <th>Fair</th>
           <th>Kalshi</th>
           <th>Poly</th>
@@ -69,6 +74,8 @@ function LegBreakdown({ legs }) {
         {rows.map((l, i) => (
           <tr key={i}>
             <td>{l.name || l.text}</td>
+            <td>{l.sport || "—"}</td>
+            <td className="num muted">{l.eventText || "—"}</td>
             <td className="num fair">{l.fairText || "—"}</td>
             <td className="num">{l.kalshiText || "—"}</td>
             <td className="num">{l.polyText || "—"}</td>
@@ -91,13 +98,32 @@ function Tile({ k, v, sub, tone, title }) {
   );
 }
 
-export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, onRefresh, refreshing }) {
+export function UnhedgedBlotter({
+  rows,
+  fetched,
+  missingTable,
+  loaded,
+  error,
+  onRefresh,
+  refreshing,
+  dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
+  onDateRangeChange,
+}) {
   const list = rows || [];
+  const dateKey = normalizeUnhedgedDateRange(dateRange);
   const [venueFilter, setVenueFilter] = useState("all");
   const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const venueScoped = useMemo(
+    () => filterUnhedgedAnalytics(list, { venue: venueFilter, quoteBeatFill: false }),
+    [list, venueFilter],
+  );
   const filtered = useMemo(
-    () => filterUnhedgedAnalytics(list, { venue: venueFilter, quoteBeatFill }),
-    [list, venueFilter, quoteBeatFill],
+    () => filterUnhedgedAnalytics(venueScoped, { venue: "all", quoteBeatFill }),
+    [venueScoped, quoteBeatFill],
+  );
+  const venueSummary = useMemo(
+    () => summarizeUnhedgedRows(venueScoped, { fetched: fetched == null ? list.length : fetched }),
+    [venueScoped, fetched, list.length],
   );
   const summary = useMemo(
     () => summarizeUnhedgedRows(filtered, { fetched: fetched == null ? list.length : fetched }),
@@ -166,6 +192,19 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
 
       {loaded && !missingTable && (
         <div className="filters" role="group" aria-label="Unhedged RFQ filters">
+          <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Date</span>
+          {UNHEDGED_DATE_FILTERS.map((c) => (
+            <FilterChip
+              key={c.key}
+              label={c.label}
+              active={dateKey === c.key}
+              onClick={() => { if (onDateRangeChange) onDateRangeChange(c.key); }}
+              title={c.key === "all"
+                ? "Every owner-scoped filled row, paged from the server"
+                : `Filled rows in this ${c.label.toLowerCase()} window, paged from the server`}
+            />
+          ))}
+          <span className="muted" style={{ margin: "0 4px" }}>·</span>
           <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Venue</span>
           {VENUE_CHIPS.map((c) => (
             <FilterChip
@@ -174,16 +213,16 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
               className={c.cls}
               active={venueFilter === c.key}
               onClick={() => setVenueFilter(c.key)}
-              title={c.key === "all" ? "All venues in this filled fetch" : `Filled ${c.label} only`}
+              title={c.key === "all" ? "All venues in this date window" : `Filled ${c.label} only`}
             />
           ))}
           <span className="muted" style={{ margin: "0 4px" }}>·</span>
           <FilterChip
-            label="Would-quote beat fill"
+            label={`Would-quote beat fill · ${venueSummary.beatFill}`}
             className="warn"
             active={quoteBeatFill}
             onClick={() => setQuoteBeatFill((on) => !on)}
-            title="Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Rows missing quote or fill never pass."
+            title="Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Count is for the selected date window + venue. Rows missing quote or fill never pass."
           />
         </div>
       )}
@@ -195,14 +234,21 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
             v={summary.filled}
             sub="someone else matched · we did not take these"
             tone={summary.filled ? "pos" : undefined}
-            title="status=filled in this fetch window (caps at 1000). Matched by anyone on the venue. We are paper."
+            title={`status=filled in the ${unhedgedDateRangeLabel(dateKey)} window + venue${quoteBeatFill ? " + beat-fill" : ""}. Matched by anyone on the venue. We are paper.`}
           />
           <Tile
             k="Would-quote"
             v={summary.withQuote}
             sub="our_quote_american present"
             tone={summary.withQuote ? "warn" : undefined}
-            title="5% net-cost wrap — the American we would have filled at. Null is —."
+            title="5% net-cost wrap — the American we would have filled at. Null is —. Count is for the selected date window + venue (+ beat-fill when that chip is on)."
+          />
+          <Tile
+            k="Beat fill"
+            v={venueSummary.beatFill}
+            sub="would-quote better YES than the print"
+            tone={venueSummary.beatFill ? "warn" : undefined}
+            title="our_quote_american > fill_american in this date window + venue. Same rule as the beat-fill chip. Missing quote or fill never counts."
           />
         </div>
       )}
@@ -253,9 +299,9 @@ export function UnhedgedBlotter({ rows, fetched, missingTable, loaded, error, on
             </tbody>
           </table>
         )}
-        {loaded && summary.fetched >= UNHEDGED_LIMIT && (
+        {loaded && !missingTable && list.length > 0 && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Showing filled pregame MLB and NFL moneylines from the last {UNHEDGED_LIMIT} fetched (newest activity first). In-game rows are hidden. Older rows are not polled.
+            Showing every filled pregame MLB and NFL moneyline in the {unhedgedDateRangeLabel(dateKey)} window (paged from the server, newest activity first). Venue and beat-fill chips filter this set. In-game rows are hidden.
           </div>
         )}
       </div>
@@ -270,12 +316,16 @@ export default function UnhedgedTape({ user }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [dateRange, setDateRange] = useState(UNHEDGED_DEFAULT_DATE_RANGE);
 
   const reload = useCallback(async ({ button } = {}) => {
     if (!owner) return;
     if (button) setRefreshing(true);
     try {
-      const result = await fetchUnhedgedRfqs(supabase, { userId: user && user.id, limit: UNHEDGED_LIMIT });
+      const result = await fetchUnhedgedRfqs(supabase, {
+        userId: user && user.id,
+        dateRange,
+      });
       setRaw(result.rows);
       setMissingTable(result.missingTable);
       setError(result.error);
@@ -283,7 +333,7 @@ export default function UnhedgedTape({ user }) {
     } finally {
       if (button) setRefreshing(false);
     }
-  }, [owner, user]);
+  }, [owner, user, dateRange]);
 
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => {
@@ -305,6 +355,8 @@ export default function UnhedgedTape({ user }) {
       error={error}
       onRefresh={() => { reload({ button: true }); }}
       refreshing={refreshing}
+      dateRange={dateRange}
+      onDateRangeChange={setDateRange}
     />
   );
 }

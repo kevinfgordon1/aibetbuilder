@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import {
   UNHEDGED_TABLE,
   UNHEDGED_LIMIT,
+  UNHEDGED_PAGE_SIZE,
+  UNHEDGED_DEFAULT_DATE_RANGE,
+  UNHEDGED_DATE_FILTERS,
   americanFromProb,
   coerceAmerican,
   fetchUnhedgedRfqs,
@@ -17,6 +20,7 @@ import {
   formatAmount,
   formatCashSize,
   formatEtTime,
+  timeMs,
   formatScanAmerican,
   formatBreakdownAmerican,
   formatLegBreakdownLine,
@@ -44,6 +48,19 @@ import {
   isMissingUserIdColumn,
   rowTime,
   unhedgedActivityTs,
+  unhedgedDateWindow,
+  unhedgedDateOrFilter,
+  unhedgedDateRangeLabel,
+  rowInUnhedgedDateWindow,
+  filterUnhedgedRowsByDateWindow,
+  normalizeUnhedgedDateRange,
+  formatUnhedgedSport,
+  formatEtEventDate,
+  parseTickerEventStamp,
+  parseUnhedgedEventStamp,
+  etYmd,
+  etLocalToUtc,
+  etDayBounds,
   sortUnhedgedRows,
   isTickerBlob,
   filterMlbNflMoneylineRows,
@@ -275,6 +292,7 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   assert.equal(s.fetched, 400);
   assert.equal(s.filled, 2);
   assert.equal(s.seen, 1);
+  assert.equal(s.beatFill, 0);
 }
 
 // ── Null filled_at + later created_at/updated_at sorts above an older fill stamp ──
@@ -361,6 +379,79 @@ assert.equal(rowStatus({ fill_yes_price: 0.21 }), "filled");
   })), "Sep 3, 2:30 PM ET");
   const resorted = sortUnhedgedRows(mapped.slice().reverse());
   assert.deepEqual(resorted.map((r) => r.id), ["seahawks-stale-fill", "older-update", "fill-only"]);
+}
+
+// ── Date window: ET today / rolling lookbacks; activity clock membership ──
+assert.equal(normalizeUnhedgedDateRange("Today"), "today");
+assert.equal(normalizeUnhedgedDateRange("all-time"), "all");
+assert.equal(normalizeUnhedgedDateRange("30d"), "month");
+assert.equal(normalizeUnhedgedDateRange("nope"), "today");
+assert.equal(UNHEDGED_DEFAULT_DATE_RANGE, "today");
+assert.equal(unhedgedDateRangeLabel("month"), "Month");
+assert.deepEqual(UNHEDGED_DATE_FILTERS.map((f) => f.key), ["today", "24h", "7d", "month", "all"]);
+{
+  const noonEt = etLocalToUtc("2026-09-03", 14, 40);
+  assert.ok(noonEt);
+  assert.equal(etYmd(noonEt), "2026-09-03");
+  const bounds = etDayBounds(noonEt);
+  assert.equal(bounds.ymd, "2026-09-03");
+  assert.equal(bounds.start.toISOString(), "2026-09-03T04:00:00.000Z");
+  assert.equal(bounds.end.toISOString(), "2026-09-04T04:00:00.000Z");
+  const winter = etLocalToUtc("2026-01-15", 0, 0);
+  assert.equal(winter.toISOString(), "2026-01-15T05:00:00.000Z");
+  const today = unhedgedDateWindow("today", noonEt);
+  assert.equal(today.preset, "today");
+  assert.equal(today.from, "2026-09-03T04:00:00.000Z");
+  assert.equal(today.to, "2026-09-04T04:00:00.000Z");
+  const rolling = unhedgedDateWindow("24h", noonEt);
+  assert.equal(rolling.to, null);
+  assert.equal(timeMs(rolling.from), noonEt.getTime() - 24 * 60 * 60 * 1000);
+  const week = unhedgedDateWindow("7d", noonEt);
+  assert.equal(timeMs(week.from), noonEt.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const month = unhedgedDateWindow("month", noonEt);
+  assert.equal(timeMs(month.from), noonEt.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const all = unhedgedDateWindow("all", noonEt);
+  assert.equal(all.from, null);
+  assert.equal(all.to, null);
+  const orToday = unhedgedDateOrFilter(today);
+  assert.match(orToday, /filled_at\.gte\.2026-09-03T04:00:00.000Z/);
+  assert.match(orToday, /filled_at\.lt\.2026-09-04T04:00:00.000Z/);
+  assert.match(orToday, /updated_at\.gte\./);
+  assert.match(orToday, /created_at\.gte\./);
+  assert.equal(unhedgedDateOrFilter(all), null);
+  const or24h = unhedgedDateOrFilter(rolling, ["filled_at", "updated_at"]);
+  assert.match(or24h, /filled_at\.gte\./);
+  assert.doesNotMatch(or24h, /\.lt\./);
+}
+{
+  const today = unhedgedDateWindow("today", etLocalToUtc("2026-09-03", 14, 40));
+  const staleFillTodayWrite = {
+    id: "stale",
+    status: "filled",
+    filled_at: "2026-09-03T03:11:00.000Z",
+    updated_at: "2026-09-03T18:30:00.000Z",
+  };
+  const oldFill = {
+    id: "old",
+    status: "filled",
+    filled_at: "2026-09-02T16:00:00.000Z",
+    updated_at: "2026-09-02T16:00:00.000Z",
+  };
+  const fillOnlyYesterday = {
+    id: "fill-only",
+    status: "filled",
+    filled_at: "2026-09-03T03:11:00.000Z",
+  };
+  assert.equal(rowInUnhedgedDateWindow(staleFillTodayWrite, today), true);
+  assert.equal(rowInUnhedgedDateWindow(oldFill, today), false);
+  assert.equal(rowInUnhedgedDateWindow(fillOnlyYesterday, today), false);
+  assert.equal(rowInUnhedgedDateWindow({ id: "no-ts", status: "filled" }, today), true);
+  assert.deepEqual(
+    filterUnhedgedRowsByDateWindow([staleFillTodayWrite, oldFill, fillOnlyYesterday], today).map((r) => r.id),
+    ["stale"],
+  );
+  const week = unhedgedDateWindow("7d", etLocalToUtc("2026-09-03", 14, 40));
+  assert.equal(rowInUnhedgedDateWindow(oldFill, week), true);
 }
 
 // ── Worker columns: our_quote / taker_american (status still seen) ──
@@ -471,6 +562,17 @@ assert.equal(
   formatUnhedgedLeg({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb" }),
   "Rockies ML",
 );
+assert.equal(formatUnhedgedSport("mlb"), "MLB");
+assert.equal(formatUnhedgedSport("nfl"), "NFL");
+assert.equal(formatUnhedgedSport(""), "");
+assert.equal(parseTickerEventStamp("KXMLBGAME-26SEP021510BALCOL-COL").ymd, "2026-09-02");
+assert.equal(formatEtEventDate("KXMLBGAME-26SEP021510BALCOL-COL"), "Sep 2, 3:10 PM ET");
+assert.equal(formatEtEventDate("KXNFLGAME-26SEP09NEKC-KC"), "Sep 9");
+assert.equal(formatEtEventDate("aec-mlb-bal-col-2026-09-02-col"), "Sep 2");
+assert.equal(formatEtEventDate("aec-nfl-ne-sea-2026-09-09"), "Sep 9");
+assert.equal(formatEtEventDate("2026-09-02"), "Sep 2");
+assert.equal(formatEtEventDate(null), "—");
+assert.equal(parseUnhedgedEventStamp("2026-09-02").hasTime, false);
 assert.equal(
   formatUnhedgedLeg({
     ticker: "KXMLBGAME-26SEP021510BALCOL-COL",
@@ -500,6 +602,8 @@ assert.equal(legFairAmerican({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", fair_a
     }],
   });
   assert.equal(row.legs[0].text, "Rockies ML");
+  assert.equal(row.legs[0].sport, "MLB");
+  assert.equal(row.legs[0].eventText, "Sep 2");
   assert.equal(row.label, "Rockies ML");
   assert.doesNotMatch(row.label, /KXMLB|KXMVE|BALCOL/);
   assert.doesNotMatch(row.legs[0].text, /KXMLB|BALCOL|COL-/);
@@ -829,10 +933,12 @@ assert.equal(legBestOpponentAmerican({}), null);
   assert.equal(row.legs.length, 3);
   assert.deepEqual(row.legs.map((l) => l.name), ["Rockies ML", "Red Sox ML", "Pirates ML"]);
   assert.deepEqual(legBreakdownLines(row), [
-    "Rockies ML | +145 | \u2212110 | —",
-    "Red Sox ML | \u2212118 | — | +130",
-    "Pirates ML | \u2212133 | \u2212105 | +140 | +140",
+    "Rockies ML | MLB | Sep 2, 3:10 PM ET | +145 | \u2212110 | —",
+    "Red Sox ML | MLB | Sep 2, 3:10 PM ET | \u2212118 | — | +130",
+    "Pirates ML | MLB | Sep 2, 3:10 PM ET | \u2212133 | \u2212105 | +140 | +140",
   ]);
+  assert.equal(row.legs[0].sport, "MLB");
+  assert.equal(row.legs[0].eventText, "Sep 2, 3:10 PM ET");
   assert.equal(row.legs[0].kalshiText, "\u2212110");
   assert.equal(row.legs[0].polyText, "—");
   assert.equal(row.legs[1].kalshiText, "—");
@@ -854,8 +960,8 @@ assert.equal(legBestOpponentAmerican({}), null);
   });
   assert.equal(row.legs.length, 2);
   assert.deepEqual(legBreakdownLines(row), [
-    "Rockies ML | — | — | —",
-    "Red Sox ML | — | — | —",
+    "Rockies ML | MLB | Sep 2, 3:10 PM ET | — | — | —",
+    "Red Sox ML | MLB | Sep 2, 3:10 PM ET | — | — | —",
   ]);
   assert.equal(row.fairText, "+400");
   assert.equal(row.legs.every((l) => l.fairText === "—"), true);
@@ -869,8 +975,8 @@ assert.equal(legBestOpponentAmerican({}), null);
     ],
   };
   assert.deepEqual(legBreakdownLines(raw), [
-    "Rockies ML | +145 | — | —",
-    "Red Sox ML | \u2212118 | — | —",
+    "Rockies ML | MLB | Sep 2, 3:10 PM ET | +145 | — | —",
+    "Red Sox ML | MLB | Sep 2, 3:10 PM ET | \u2212118 | — | —",
   ]);
 }
 
@@ -1232,6 +1338,10 @@ function createSequenceClient(responses) {
           state.ops.push("order");
           return chain;
         },
+        or(filter) { state.or = filter; state.ors = (state.ors || []).concat(filter); state.ops.push("or"); return chain; },
+        gte(col, val) { state.gtes = (state.gtes || []).concat({ col, val }); state.ops.push("gte"); return chain; },
+        lt(col, val) { state.lts = (state.lts || []).concat({ col, val }); state.ops.push("lt"); return chain; },
+        range(from, to) { state.range = { from, to }; state.ranges = (state.ranges || []).concat({ from, to }); state.ops.push("range"); return chain; },
         limit(n) { state.limit = n; state.ops.push("limit"); return chain; },
         then(resolve, reject) {
           const r = responses[Math.min(idx, responses.length - 1)];
@@ -1494,6 +1604,106 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.error.code, "42501");
 }
 
+// ── Date window is server-side: today ORs filled_at/updated_at/created_at ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const rows = [{ id: "1", user_id: "u1", status: "filled", fill_american: -110, updated_at: "2026-09-03T18:30:00.000Z" }];
+  const client = createSequenceClient([{ data: rows, error: null }]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
+  assert.deepEqual(result.rows.map((r) => r.id), ["1"]);
+  assert.match(client.calls[0].or, /and\(filled_at\.gte\./);
+  assert.match(client.calls[0].or, /updated_at\.gte\./);
+  assert.match(client.calls[0].or, /created_at\.gte\./);
+  assert.match(client.calls[0].or, /filled_at\.lt\./);
+  assert.equal(client.calls[0].range.from, 0);
+  assert.equal(client.calls[0].range.to, UNHEDGED_PAGE_SIZE - 1);
+  assert.equal(client.calls[0].limit, UNHEDGED_PAGE_SIZE);
+  assert.equal(client.calls.length, 1);
+}
+
+// ── All time: no date OR, paginate past 1000 ──
+{
+  const page1 = Array.from({ length: 1000 }, (_, i) => ({ id: `p1-${i}`, status: "filled", fill_american: -110 }));
+  const page2 = Array.from({ length: 37 }, (_, i) => ({ id: `p2-${i}`, status: "filled", fill_american: 200 }));
+  const client = createSequenceClient([
+    { data: page1, error: null },
+    { data: page2, error: null },
+  ]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "all" });
+  assert.equal(result.rows.length, 1037);
+  assert.equal(client.calls.length, 2);
+  assert.equal(client.calls[0].or, undefined);
+  assert.equal(client.calls[1].or, undefined);
+  assert.deepEqual(client.calls[0].range, { from: 0, to: 999 });
+  assert.deepEqual(client.calls[1].range, { from: 1000, to: 1999 });
+  assert.equal(result.rows[0].id, "p1-0");
+  assert.equal(result.rows[1000].id, "p2-0");
+}
+
+// ── Month window paginates the full set (not a 1000-cap global trim) ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const page1 = Array.from({ length: 1000 }, (_, i) => ({
+    id: `m1-${i}`,
+    status: "filled",
+    fill_american: 180,
+    updated_at: "2026-09-01T12:00:00.000Z",
+  }));
+  const page2 = [{ id: "m2-0", status: "filled", fill_american: 190, updated_at: "2026-08-20T12:00:00.000Z" }];
+  const client = createSequenceClient([
+    { data: page1, error: null },
+    { data: page2, error: null },
+  ]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "month", now });
+  assert.equal(result.rows.length, 1001);
+  assert.equal(client.calls.length, 2);
+  assert.match(client.calls[0].or, /filled_at\.gte\./);
+  assert.doesNotMatch(client.calls[0].or, /filled_at\.lt\./);
+  assert.deepEqual(client.calls[1].range, { from: 1000, to: 1999 });
+}
+
+// ── Client activity clock drops stale-fill-only rows outside today after the OR fetch ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const mixed = [
+    { id: "today-write", status: "filled", fill_american: 4662, filled_at: "2026-09-03T03:11:00.000Z", updated_at: "2026-09-03T18:30:00.000Z" },
+    { id: "old-fill", status: "filled", fill_american: 180, filled_at: "2026-09-02T16:00:00.000Z", updated_at: "2026-09-02T16:00:00.000Z" },
+  ];
+  const client = createSequenceClient([{ data: mixed, error: null }]);
+  const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
+  assert.deepEqual(result.rows.map((r) => r.id), ["today-write"]);
+}
+
+// ── Beat-fill count is for the date+venue set ──
+{
+  const shown = visibleUnhedgedRows([
+    {
+      id: "beat",
+      status: "filled",
+      venue: "kalshi",
+      our_quote_american: 614,
+      fill_american: 452,
+      filled_at: "2026-09-02T16:26:00.000Z",
+      legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+    },
+    {
+      id: "worse",
+      status: "filled",
+      venue: "kalshi",
+      our_quote_american: 400,
+      fill_american: 452,
+      filled_at: "2026-09-02T16:24:00.000Z",
+      legs: [{ league: "mlb", ticker: "KXMLBGAME-26SEP021305ATLWSH-ATL", selection: "atl" }],
+    },
+  ]);
+  const s = summarizeUnhedgedRows(shown);
+  assert.equal(s.filled, 2);
+  assert.equal(s.beatFill, 1);
+  const beatOnly = filterUnhedgedAnalytics(shown, { quoteBeatFill: true });
+  assert.deepEqual(beatOnly.map((r) => r.id), ["beat"]);
+  assert.equal(summarizeUnhedgedRows(beatOnly).filled, 1);
+}
+
 // ── App.jsx: private tab only; Promo Builder / Combo Locks wiring untouched ──
 {
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
@@ -1540,6 +1750,12 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /summarizeUnhedgedRows/);
   assert.match(page, /newest activity first/);
   assert.match(page, /Would-quote beat fill/);
+  assert.match(page, /UNHEDGED_DATE_FILTERS/);
+  assert.match(page, /dateRange/);
+  assert.match(page, /onDateRangeChange/);
+  assert.match(page, />Sport</);
+  assert.match(page, />Event</);
+  assert.match(page, /paged from the server/);
   assert.match(page, /label: "All"/);
   assert.match(page, /label: "Kalshi"/);
   assert.match(page, /label: "Polymarket"/);
@@ -1548,7 +1764,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /unhedgedRefreshLabel/);
   assert.match(page, /onRefresh/);
   assert.match(page, /reload\(\{ button: true \}\)/);
-  assert.match(page, /limit: UNHEDGED_LIMIT/);
+  assert.match(page, /dateRange,/);
   assert.doesNotMatch(page, /Would-quote \/ Fair/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
   assert.doesNotMatch(page, /location\.reload|window\.location/);
