@@ -54,9 +54,18 @@ import {
   isMissingQuoteAmericanColumn,
   isMissingFillAmericanColumn,
   UNHEDGED_COUNT_SELECT_OPTS,
+  UNHEDGED_COUNT_SELECT,
   UNHEDGED_BEAT_FILL_COLS,
+  UNHEDGED_BLOTTER_SELECT,
+  UNHEDGED_BLOTTER_COLUMNS,
+  UNHEDGED_DATE_COLS,
+  UNHEDGED_DATE_FALLBACK_COLS,
+  UNHEDGED_AUTO_REFRESH_MS,
   UNHEDGED_LIGHT_DATE_KEYS,
   UNHEDGED_HEAVY_DATE_KEYS,
+  applyUnhedgedDateWindow,
+  unhedgedDateTs,
+  unhedgedShouldAutoRefresh,
   rowTime,
   unhedgedActivityTs,
   unhedgedDateWindow,
@@ -412,7 +421,19 @@ assert.match(unhedgedVenueOrFilter("kalshi"), /venue\.ilike\.kalshi/);
 assert.match(unhedgedVenueOrFilter("polymarket"), /venue\.eq\.poly/);
 assert.equal(unhedgedVenueOrFilter("all"), null);
 assert.deepEqual(UNHEDGED_COUNT_SELECT_OPTS, { count: "exact", head: true });
+assert.equal(UNHEDGED_COUNT_SELECT, "id");
 assert.equal(UNHEDGED_BEAT_FILL_COLS, "our_quote_american,fill_american");
+assert.deepEqual(UNHEDGED_DATE_COLS, ["filled_at"]);
+assert.deepEqual(UNHEDGED_DATE_FALLBACK_COLS, ["updated_at", "created_at"]);
+assert.equal(UNHEDGED_AUTO_REFRESH_MS, 0);
+assert.equal(unhedgedShouldAutoRefresh("visible"), false);
+assert.equal(unhedgedShouldAutoRefresh("visible", 20_000), false);
+assert.equal(unhedgedShouldAutoRefresh("visible", 90_000), true);
+assert.equal(unhedgedShouldAutoRefresh("hidden", 90_000), false);
+assert.equal(UNHEDGED_BLOTTER_SELECT.includes("*"), false);
+assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("legs"));
+assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("filled_at"));
+assert.ok(!UNHEDGED_BLOTTER_COLUMNS.includes("raw"));
 {
   const noonEt = etLocalToUtc("2026-09-03", 14, 40);
   assert.ok(noonEt);
@@ -440,12 +461,30 @@ assert.equal(UNHEDGED_BEAT_FILL_COLS, "our_quote_american,fill_american");
   const orToday = unhedgedDateOrFilter(today);
   assert.match(orToday, /filled_at\.gte\.2026-09-03T04:00:00.000Z/);
   assert.match(orToday, /filled_at\.lt\.2026-09-04T04:00:00.000Z/);
-  assert.match(orToday, /updated_at\.gte\./);
-  assert.match(orToday, /created_at\.gte\./);
+  assert.doesNotMatch(orToday, /updated_at/);
+  assert.doesNotMatch(orToday, /created_at/);
   assert.equal(unhedgedDateOrFilter(all), null);
   const or24h = unhedgedDateOrFilter(rolling, ["filled_at", "updated_at"]);
   assert.match(or24h, /filled_at\.gte\./);
+  assert.match(or24h, /updated_at\.gte\./);
   assert.doesNotMatch(or24h, /\.lt\./);
+  const chain = {
+    gtes: [],
+    lts: [],
+    ors: [],
+    gte(col, val) { this.gtes.push({ col, val }); return this; },
+    lt(col, val) { this.lts.push({ col, val }); return this; },
+    or(filter) { this.ors.push(filter); return this; },
+  };
+  applyUnhedgedDateWindow(chain, today, ["filled_at"]);
+  assert.deepEqual(chain.gtes, [{ col: "filled_at", val: today.from }]);
+  assert.deepEqual(chain.lts, [{ col: "filled_at", val: today.to }]);
+  assert.deepEqual(chain.ors, []);
+  const fallback = { gtes: [], lts: [], ors: [], gte() { return this; }, lt() { return this; }, or(f) { this.ors.push(f); return this; } };
+  applyUnhedgedDateWindow(fallback, today, ["updated_at", "created_at"]);
+  assert.equal(fallback.ors.length, 1);
+  assert.match(fallback.ors[0], /updated_at\.gte\./);
+  assert.match(fallback.ors[0], /created_at\.gte\./);
 }
 {
   const today = unhedgedDateWindow("today", etLocalToUtc("2026-09-03", 14, 40));
@@ -466,13 +505,25 @@ assert.equal(UNHEDGED_BEAT_FILL_COLS, "our_quote_american,fill_american");
     status: "filled",
     filled_at: "2026-09-03T03:11:00.000Z",
   };
-  assert.equal(rowInUnhedgedDateWindow(staleFillTodayWrite, today), true);
+  assert.equal(unhedgedDateTs(staleFillTodayWrite), "2026-09-03T03:11:00.000Z");
+  assert.equal(rowInUnhedgedDateWindow(staleFillTodayWrite, today), false);
   assert.equal(rowInUnhedgedDateWindow(oldFill, today), false);
   assert.equal(rowInUnhedgedDateWindow(fillOnlyYesterday, today), false);
+  assert.equal(rowInUnhedgedDateWindow({
+    id: "today-fill",
+    status: "filled",
+    filled_at: "2026-09-03T16:00:00.000Z",
+  }, today), true);
+  assert.equal(rowInUnhedgedDateWindow({
+    id: "null-fill-today-write",
+    status: "filled",
+    filled_at: null,
+    updated_at: "2026-09-03T18:30:00.000Z",
+  }, today), true);
   assert.equal(rowInUnhedgedDateWindow({ id: "no-ts", status: "filled" }, today), true);
   assert.deepEqual(
     filterUnhedgedRowsByDateWindow([staleFillTodayWrite, oldFill, fillOnlyYesterday], today).map((r) => r.id),
-    ["stale"],
+    [],
   );
   const week = unhedgedDateWindow("7d", etLocalToUtc("2026-09-03", 14, 40));
   assert.equal(rowInUnhedgedDateWindow(oldFill, week), true);
@@ -1389,6 +1440,19 @@ function orderIndexes(call) {
   return at;
 }
 
+function assertFilledAtThenCreatedBeforeLimit(call) {
+  assert.deepEqual(call.orders, [
+    { col: "filled_at", opts: { ascending: false, nullsFirst: false } },
+    { col: "created_at", opts: { ascending: false } },
+  ]);
+  const orderAt = orderIndexes(call);
+  const limitAt = call.ops.indexOf("limit");
+  assert.equal(orderAt.length, 2, "expected .order(filled_at) then .order(created_at)");
+  assert.ok(orderAt[0] < orderAt[1], "expected filled_at order before created_at order");
+  assert.ok(limitAt >= 0, "expected .limit()");
+  assert.ok(orderAt[1] < limitAt, "expected both .order() calls before .limit()");
+}
+
 function assertUpdatedThenCreatedBeforeLimit(call) {
   assert.deepEqual(call.orders, [
     { col: "updated_at", opts: { ascending: false, nullsFirst: false } },
@@ -1400,6 +1464,14 @@ function assertUpdatedThenCreatedBeforeLimit(call) {
   assert.ok(orderAt[0] < orderAt[1], "expected updated_at order before created_at order");
   assert.ok(limitAt >= 0, "expected .limit()");
   assert.ok(orderAt[1] < limitAt, "expected both .order() calls before .limit()");
+}
+
+function assertFilledAtWindow(call, from, to) {
+  assert.ok((call.gtes || []).some((g) => g.col === "filled_at" && (!from || g.val === from)), "expected filled_at.gte");
+  if (to) {
+    assert.ok((call.lts || []).some((g) => g.col === "filled_at" && g.val === to), "expected filled_at.lt");
+  }
+  assert.equal((call.ors || []).some((f) => /updated_at|created_at/.test(f || "")), false);
 }
 
 function hasEq(call, col, val) {
@@ -1425,7 +1497,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.ok(orderAt < limitAt, "expected .order() before .limit()");
 }
 
-// ── Select * is not scoped by user_id (worker rows are NULL / unset) ──
+// ── Slim blotter select is not scoped by user_id (worker rows are NULL / unset) ──
 {
   const rows = [{ id: "1", user_id: null, status: "filled", fill_american: -110 }];
   const client = createSequenceClient([{ data: rows, error: null }]);
@@ -1433,13 +1505,14 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls[0].table, UNHEDGED_TABLE);
-  assert.equal(client.calls[0].select, "*");
+  assert.equal(client.calls[0].select, UNHEDGED_BLOTTER_SELECT);
+  assert.doesNotMatch(client.calls[0].select, /\*/);
   assert.equal(hasEq(client.calls[0], "user_id", "u1"), false);
   assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[0]);
   assert.equal((client.calls[0].eqs || []).some((e) => e.col === "venue"), false);
   assert.equal(client.calls[0].limit, 50);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
 }
 
 // ── Passing userId still returns worker rows with no / null user_id ──
@@ -1457,7 +1530,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(resolveUnhedgedLimit(null), 1000);
   assert.equal(resolveUnhedgedLimit(50), 50);
   assert.equal(resolveUnhedgedLimit(5000), 1000);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
 }
 
 // ── Refresh re-fetches the same filled query (limit 1000, newest activity first) ──
@@ -1477,8 +1550,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(client.calls[1].limit, 1000);
   assertStatusFilledEq(client.calls[0]);
   assertStatusFilledEq(client.calls[1]);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[1]);
   assert.equal(unhedgedRefreshLabel(false), "Refresh");
   assert.equal(unhedgedRefreshLabel(true), "Refreshing…");
 }
@@ -1545,11 +1618,11 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertStatusFilledEq(client.calls[0]);
   assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[1]);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[1]);
 }
 
-// ── updated_at missing (PGRST204) → retry created_at only, still no user_id ──
+// ── updated_at missing (PGRST204) → drop it from the slim select; still order filled_at ──
 {
   const rows = [{ id: "4", status: "filled", fill_american: -110 }];
   const client = createSequenceClient([
@@ -1564,11 +1637,13 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
   assertStatusFilledEq(client.calls[0]);
   assertStatusFilledEq(client.calls[1]);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertCreatedAtOnlyBeforeLimit(client.calls[1]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[1]);
+  assert.match(client.calls[0].select, /updated_at/);
+  assert.doesNotMatch(client.calls[1].select, /updated_at/);
 }
 
-// ── updated_at missing then leftover user_id error → created_at only, unscoped ──
+// ── updated_at missing then leftover user_id error → filled_at order, unscoped ──
 {
   const rows = [{ id: "5", status: "filled", fill_american: -105 }];
   const client = createSequenceClient([
@@ -1580,9 +1655,9 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.missingTable, false);
   assert.deepEqual(result.rows, rows);
   assert.equal(client.calls.length, 3);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertCreatedAtOnlyBeforeLimit(client.calls[1]);
-  assertCreatedAtOnlyBeforeLimit(client.calls[2]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[1]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[2]);
   for (const call of client.calls) {
     assert.equal((call.eqs || []).some((e) => e.col === "user_id"), false);
   }
@@ -1606,8 +1681,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assertStatusFilledEq(client.calls[0]);
   assertNoStatusEq(client.calls[1]);
   assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[0]);
-  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[0]);
+  assertFilledAtThenCreatedBeforeLimit(client.calls[1]);
 }
 
 // ── Missing table is an empty blotter, not a throw ──
@@ -1638,17 +1713,16 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.error.code, "42501");
 }
 
-// ── Date window is server-side: today ORs filled_at/updated_at/created_at ──
+// ── Date window is server-side: today uses filled_at gte/lt (not a 3-col OR) ──
 {
   const now = etLocalToUtc("2026-09-03", 14, 40);
-  const rows = [{ id: "1", user_id: "u1", status: "filled", fill_american: -110, updated_at: "2026-09-03T18:30:00.000Z" }];
+  const today = unhedgedDateWindow("today", now);
+  const rows = [{ id: "1", user_id: "u1", status: "filled", fill_american: -110, filled_at: "2026-09-03T18:30:00.000Z" }];
   const client = createSequenceClient([{ data: rows, error: null }]);
   const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
   assert.deepEqual(result.rows.map((r) => r.id), ["1"]);
-  assert.match(client.calls[0].or, /and\(filled_at\.gte\./);
-  assert.match(client.calls[0].or, /updated_at\.gte\./);
-  assert.match(client.calls[0].or, /created_at\.gte\./);
-  assert.match(client.calls[0].or, /filled_at\.lt\./);
+  assertFilledAtWindow(client.calls[0], today.from, today.to);
+  assert.equal(client.calls[0].or, undefined);
   assert.equal(client.calls[0].range.from, 0);
   assert.equal(client.calls[0].range.to, UNHEDGED_PAGE_SIZE - 1);
   assert.equal(client.calls[0].limit, UNHEDGED_PAGE_SIZE);
@@ -1716,32 +1790,32 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "month", now });
   assert.equal(result.rows.length, 1001);
   assert.equal(client.calls.length, 2);
-  assert.match(client.calls[0].or, /filled_at\.gte\./);
-  assert.doesNotMatch(client.calls[0].or, /filled_at\.lt\./);
+  assert.ok((client.calls[0].gtes || []).some((g) => g.col === "filled_at"));
+  assert.equal((client.calls[0].lts || []).some((g) => g.col === "filled_at"), false);
+  assert.equal(client.calls[0].or, undefined);
   assert.deepEqual(client.calls[1].range, { from: 1000, to: 1999 });
   assert.equal(result.paged, true);
   assert.equal(result.truncated, false);
 }
 
-// ── Client activity clock drops stale-fill-only rows outside today after the OR fetch ──
+// ── Client date window prefers filled_at; stale fill + later write is not Today ──
 {
   const now = etLocalToUtc("2026-09-03", 14, 40);
   const mixed = [
-    { id: "today-write", status: "filled", fill_american: 4662, filled_at: "2026-09-03T03:11:00.000Z", updated_at: "2026-09-03T18:30:00.000Z" },
+    { id: "today-fill", status: "filled", fill_american: 4662, filled_at: "2026-09-03T16:00:00.000Z", updated_at: "2026-09-03T18:30:00.000Z" },
+    { id: "stale-fill-today-write", status: "filled", fill_american: 200, filled_at: "2026-09-03T03:11:00.000Z", updated_at: "2026-09-03T18:30:00.000Z" },
     { id: "old-fill", status: "filled", fill_american: 180, filled_at: "2026-09-02T16:00:00.000Z", updated_at: "2026-09-02T16:00:00.000Z" },
   ];
   const client = createSequenceClient([{ data: mixed, error: null }]);
   const result = await fetchUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
-  assert.deepEqual(result.rows.map((r) => r.id), ["today-write"]);
+  assert.deepEqual(result.rows.map((r) => r.id), ["today-fill"]);
 }
 
-// ── Worker rows (null user_id) are visible; Today uses activity stamps ──
+// ── Worker rows (null user_id) are visible; Today prefers filled_at ──
 // Combo-worker buildUnhedgedRow / fill patches do not set user_id. Today is
-// ET midnight–midnight. Server OR is filled_at / updated_at / created_at;
-// client keeps the latest stamp. A stale filled_at (early tape / RFQ create)
-// plus a later updated_at is Today. Stale filled_at alone is not — without
-// updated_at on the fill patch, combo-worker must set it or the row stays
-// outside Today even when Railway logs via=tape.
+// ET midnight–midnight. Server filter is filled_at gte/lt (cheap index).
+// A stale filled_at (early tape / RFQ create) plus a later updated_at is
+// not Today — we do not OR updated_at on every load.
 {
   const now = etLocalToUtc("2026-09-03", 14, 40);
   const today = unhedgedDateWindow("today", now);
@@ -1751,7 +1825,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
     status: "filled",
     venue: "kalshi",
     fill_american: 4662,
-    filled_at: "2026-09-03T03:11:00.000Z",
+    filled_at: "2026-09-03T16:00:00.000Z",
     updated_at: "2026-09-03T18:30:00.000Z",
   };
   const workerStaleOnly = {
@@ -1779,9 +1853,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const fetched = await fetchUnhedgedRfqs(fetchClient, { userId: "owner-id", dateRange: "today", now });
   assert.deepEqual(fetched.rows.map((r) => r.id), ["worker-today"]);
   assert.equal((fetchClient.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
-  assert.match(fetchClient.calls[0].or, /filled_at\.gte\./);
-  assert.match(fetchClient.calls[0].or, /updated_at\.gte\./);
-  assert.match(fetchClient.calls[0].or, /created_at\.gte\./);
+  assertFilledAtWindow(fetchClient.calls[0], today.from, today.to);
 
   const allClient = createSequenceClient([{ data: [workerToday, workerStaleOnly, workerOld], error: null }]);
   const allTime = await fetchUnhedgedRfqs(allClient, { userId: "owner-id", dateRange: "all" });
@@ -1800,16 +1872,17 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal((countClient.calls[0].ors || []).some((f) => /filled_at\./.test(f)), false);
 }
 
-// ── Missing updated_at: drop it from the Today OR; do not invent a stamp ──
+// ── Missing updated_at: drop it from the slim select; Today stays filled_at ──
 {
   const now = etLocalToUtc("2026-09-03", 14, 40);
+  const today = unhedgedDateWindow("today", now);
   const rows = [{
     id: "created-today",
     user_id: null,
     status: "filled",
     fill_american: -110,
     created_at: "2026-09-03T18:00:00.000Z",
-    filled_at: "2026-09-03T03:11:00.000Z",
+    filled_at: "2026-09-03T16:00:00.000Z",
   }];
   const client = createSequenceClient([
     { data: null, error: { code: "PGRST204", message: "Could not find the 'updated_at' column of 'unhedged_rfqs' in the schema cache" } },
@@ -1818,11 +1891,34 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const result = await fetchUnhedgedRfqs(client, { dateRange: "today", now });
   assert.deepEqual(result.rows.map((r) => r.id), ["created-today"]);
   assert.equal(client.calls.length, 2);
-  assert.match(client.calls[0].or, /updated_at\.gte\./);
-  assert.doesNotMatch(client.calls[1].or, /updated_at/);
-  assert.match(client.calls[1].or, /filled_at\.gte\./);
-  assert.match(client.calls[1].or, /created_at\.gte\./);
+  assertFilledAtWindow(client.calls[0], today.from, today.to);
+  assertFilledAtWindow(client.calls[1], today.from, today.to);
+  assert.match(client.calls[0].select, /updated_at/);
+  assert.doesNotMatch(client.calls[1].select, /updated_at/);
   assert.equal((client.calls[1].eqs || []).some((e) => e.col === "user_id"), false);
+}
+
+// ── Missing filled_at: fall back to updated_at / created_at OR ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const rows = [{
+    id: "updated-today",
+    status: "filled",
+    fill_american: -110,
+    updated_at: "2026-09-03T18:00:00.000Z",
+  }];
+  const client = createSequenceClient([
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'filled_at' column of 'unhedged_rfqs' in the schema cache" } },
+    { data: rows, error: null },
+  ]);
+  const result = await fetchUnhedgedRfqs(client, { dateRange: "today", now });
+  assert.deepEqual(result.rows.map((r) => r.id), ["updated-today"]);
+  assert.equal(client.calls.length, 2);
+  assert.ok((client.calls[0].gtes || []).some((g) => g.col === "filled_at"));
+  assert.match(client.calls[1].or, /updated_at\.gte\./);
+  assert.match(client.calls[1].or, /created_at\.gte\./);
+  assert.equal((client.calls[1].gtes || []).some((g) => g.col === "filled_at"), false);
+  assertUpdatedThenCreatedBeforeLimit(client.calls[1]);
 }
 
 // ── Head counts: FILLED / Would-quote use count/head; beat-fill is slim cols ──
@@ -1842,15 +1938,19 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.beatFill, 1);
   assert.equal(result.missingTable, false);
   assert.equal(client.calls.length, 3);
-  assert.equal(client.calls[0].select, "*");
+  assert.equal(client.calls[0].select, UNHEDGED_COUNT_SELECT);
+  assert.doesNotMatch(client.calls[0].select, /\*/);
   assert.deepEqual(client.calls[0].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
   assert.deepEqual(client.calls[1].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
   assert.equal(client.calls[0].range, undefined);
   assert.equal(client.calls[0].limit, null);
   assert.equal(client.calls[0].order, null);
   assertStatusFilledEq(client.calls[0]);
+  assertStatusFilledEq(client.calls[1]);
+  assertStatusFilledEq(client.calls[2]);
   assert.equal((client.calls[0].eqs || []).some((e) => e.col === "user_id"), false);
-  assert.match(client.calls[0].or, /filled_at\.gte\./);
+  assert.ok((client.calls[0].gtes || []).some((g) => g.col === "filled_at"));
+  assert.equal((client.calls[0].ors || []).some((f) => /updated_at|created_at/.test(f || "")), false);
   assert.equal((client.calls[1].nots || []).some((n) => n.col === "our_quote_american" && n.op === "is" && n.val == null), true);
   assert.equal(client.calls[2].select, UNHEDGED_BEAT_FILL_COLS);
   assert.equal(client.calls[2].selectOpts, null);
@@ -1907,9 +2007,24 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(result.filled, 1001);
   assert.equal(result.beatFill, 2);
   assert.equal(client.calls.length, 4);
+  assert.equal(client.calls[0].select, UNHEDGED_COUNT_SELECT);
   assert.deepEqual(client.calls[0].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
+  assertStatusFilledEq(client.calls[0]);
   assert.equal(client.calls[2].select, UNHEDGED_BEAT_FILL_COLS);
+  assertStatusFilledEq(client.calls[2]);
   assert.deepEqual(client.calls[3].range, { from: 1000, to: 1999 });
+}
+
+// ── Head counts never drop status=filled (would count millions of seen) ──
+{
+  const client = createSequenceClient([
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'status' column of 'unhedged_rfqs' in the schema cache" } },
+  ]);
+  const result = await countUnhedgedRfqs(client, { dateRange: "all" });
+  assert.equal(result.filled, null);
+  assert.equal(client.calls.length, 1);
+  assertStatusFilledEq(client.calls[0]);
+  assert.equal(client.calls[0].select, UNHEDGED_COUNT_SELECT);
 }
 
 // ── mergeUnhedgedSummary prefers head counts ──
@@ -2023,6 +2138,9 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /reloadRows\(\{ button: true \}\)/);
   assert.match(page, /reloadCounts\(\)/);
   assert.match(page, /dateRange,/);
+  assert.match(page, /Manual Refresh only/);
+  assert.doesNotMatch(page, /setInterval/);
+  assert.doesNotMatch(page, /20000/);
   assert.doesNotMatch(page, /Would-quote \/ Fair/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
   assert.doesNotMatch(page, /location\.reload|window\.location/);
@@ -2045,6 +2163,16 @@ function assertCreatedAtOnlyBeforeLimit(call) {
     const text = fs.readFileSync(path.join(dir, name), "utf8");
     assert.doesNotMatch(text, /UnhedgedTape|unhedgedTape|unhedged_rfqs/);
   }
+}
+
+// ── Optional index note for (status, filled_at DESC) ──
+{
+  const src = fs.readFileSync(path.join(dir, "unhedgedTape.js"), "utf8");
+  assert.match(src, /unhedged_rfqs_filled_at_idx/);
+  assert.match(src, /status, filled_at DESC/);
+  const sql = fs.readFileSync(path.join(dir, "..", "sql", "unhedged_rfqs_filled_at_idx.sql"), "utf8");
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS unhedged_rfqs_status_filled_at_idx/);
+  assert.match(sql, /\(status, filled_at DESC\)/);
 }
 
 console.log("unhedgedTape.test.js: ok");
