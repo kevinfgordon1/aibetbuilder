@@ -1,7 +1,8 @@
-// Stake-linear helpers + a yielding enumerate-then-sort scan.
-// Ranking matches App.jsx findTopParlays (full C(n,k) then sort). No heap,
-// no sampling, no PARLAY_LEG_CAP change. The sync function stays in App.jsx
-// for tests; React must call findTopParlaysChunked from an effect, never render.
+// Stake-linear helpers + a yielding unique-game parlay scan.
+// App.jsx findTopParlays stays full enumerate-then-sort (heap declined there).
+// The chunked React path streams a bounded top-k so Safari does not OOM from
+// materializing all C(n,3) objects (~1.3M at PARLAY_LEG_CAP=200). The shown
+// top-k set matches full sort (same EV ranking, no sampling).
 
 export const SCAN_YIELD_MS = 8;
 export const SCAN_MAX_PROMO_LEGS = 8;
@@ -56,24 +57,88 @@ export function promoScanEmptyState({
   return "no-results";
 }
 
+// iOS / Safari: thousands of MessageChannel ports (one per yield) have
+// crashed tabs with "A problem repeatedly occurred". Prefer a timer there.
+export function preferTimerYield(nav = typeof navigator !== "undefined" ? navigator : null) {
+  if (!nav) return false;
+  const ua = nav.userAgent || "";
+  const iOS = /iP(hone|ad|od)/.test(ua)
+    || (typeof nav.platform === "string" && nav.platform === "MacIntel" && nav.maxTouchPoints > 1);
+  const safari = /safari/i.test(ua) && !/chrome|crios|chromium|android|edg/i.test(ua);
+  return iOS || safari;
+}
+
+let yieldChannel = null;
+
 export function yieldToMain() {
   if (typeof globalThis.scheduler?.yield === "function") {
     return globalThis.scheduler.yield();
   }
+  if (typeof window !== "undefined" && preferTimerYield()) {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
   // MessageChannel is a faster yield in the browser, but Node keeps the
   // process alive if ports are left open — so only use it in a window.
+  // Reuse one pair so a long C(n,3) scan does not open thousands of ports.
   if (typeof window !== "undefined" && typeof MessageChannel === "function") {
     return new Promise((resolve) => {
-      const ch = new MessageChannel();
-      ch.port1.onmessage = () => {
-        ch.port1.close();
-        ch.port2.close();
+      if (!yieldChannel) yieldChannel = new MessageChannel();
+      yieldChannel.port1.onmessage = () => {
+        yieldChannel.port1.onmessage = null;
         resolve();
       };
-      ch.port2.postMessage(null);
+      yieldChannel.port2.postMessage(null);
     });
   }
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+// Bounded min-heap by ev. Size stays <= maxResults; finalize sorts desc.
+// Same top-k as allocate-all-then-sort — no sampling, no quality loss for
+// the cards we render (maxResults, typically 50).
+export function considerTopByEv(heap, item, maxResults) {
+  if (!item || maxResults <= 0) return heap;
+  if (heap.length < maxResults) {
+    heap.push(item);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heap[p].ev <= heap[i].ev) break;
+      const tmp = heap[p];
+      heap[p] = heap[i];
+      heap[i] = tmp;
+      i = p;
+    }
+    return heap;
+  }
+  if (item.ev > heap[0].ev) {
+    heap[0] = item;
+    let i = 0;
+    const n = heap.length;
+    while (true) {
+      const l = i * 2 + 1;
+      const r = l + 1;
+      let s = i;
+      if (l < n && heap[l].ev < heap[s].ev) s = l;
+      if (r < n && heap[r].ev < heap[s].ev) s = r;
+      if (s === i) break;
+      const tmp = heap[i];
+      heap[i] = heap[s];
+      heap[s] = tmp;
+      i = s;
+    }
+  }
+  return heap;
+}
+
+export function finalizeTopByEv(heap) {
+  return (heap || []).slice().sort((a, b) => b.ev - a.ev);
+}
+
+// Skip allocating a result object unless it can enter the top-k.
+export function shouldTake(heap, ev, maxResults) {
+  if (maxResults <= 0) return false;
+  return heap.length < maxResults || ev > heap[0].ev;
 }
 
 function throwIfAborted(signal) {
@@ -125,8 +190,9 @@ function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds) {
   return grown.slice(0, maxResults);
 }
 
-// Full enumerate-then-sort, same loops as App.jsx findTopParlays. Yields so
-// the page stays interactive during C(n,3) over ~200 legs.
+// Enumerate the same unique-game loops as App.jsx findTopParlays, but keep
+// only a bounded top-k (streaming min-heap). Yields so the page stays
+// interactive during C(n,3) over ~200 legs without allocating C(n,3) objects.
 export async function findTopParlaysChunked(
   legs,
   numLegs,
@@ -162,26 +228,25 @@ export async function findTopParlaysChunked(
     return growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds);
   }
 
-  const results = [];
+  const top = [];
   const getGame = (leg) => leg.game;
+  const takeIfTop = (r, comboLegs) => {
+    if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) return;
+    if (!shouldTake(top, r.ev, maxResults)) return;
+    considerTopByEv(top, { legs: comboLegs, ...r }, maxResults);
+  };
 
   let combos = 0;
   if (numLegs === 1) {
     for (let i = 0; i < list.length; i++) {
-      const r = calc([list[i]]);
-      if (minFinalOdds === null || r.parlayOdds >= minFinalOdds) {
-        results.push({ legs: [list[i]], ...r });
-      }
+      takeIfTop(calc([list[i]]), [list[i]]);
       if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
     }
   } else if (numLegs === 2) {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
         if (getGame(list[i]) === getGame(list[j])) continue;
-        const r = calc([list[i], list[j]]);
-        if (minFinalOdds === null || r.parlayOdds >= minFinalOdds) {
-          results.push({ legs: [list[i], list[j]], ...r });
-        }
+        takeIfTop(calc([list[i], list[j]]), [list[i], list[j]]);
         if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
       }
     }
@@ -191,18 +256,14 @@ export async function findTopParlaysChunked(
         if (getGame(list[i]) === getGame(list[j])) continue;
         for (let k = j + 1; k < list.length; k++) {
           if (getGame(list[k]) === getGame(list[i]) || getGame(list[k]) === getGame(list[j])) continue;
-          const r = calc([list[i], list[j], list[k]]);
-          if (minFinalOdds === null || r.parlayOdds >= minFinalOdds) {
-            results.push({ legs: [list[i], list[j], list[k]], ...r });
-          }
+          takeIfTop(calc([list[i], list[j], list[k]]), [list[i], list[j], list[k]]);
           if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
         }
       }
     }
   }
 
-  results.sort((a, b) => b.ev - a.ev);
-  return results.slice(0, maxResults);
+  return finalizeTopByEv(top);
 }
 
 const STAKE_LINEAR_FIELDS = [
