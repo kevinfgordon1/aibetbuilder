@@ -89,6 +89,7 @@ import {
   normalizeUnhedgedDateRange,
   formatUnhedgedSport,
   formatEtEventDate,
+  parseAecGameSlug,
   parseTickerEventStamp,
   parseUnhedgedEventStamp,
   etYmd,
@@ -719,6 +720,22 @@ assert.equal(resolveTeamToken("rockies", "mlb"), "COL");
 assert.equal(resolveTeamToken("kc", "nfl"), "KC");
 assert.equal(resolveTeamToken("aec-mlb-bal-col-2026-09-02-col", "mlb"), "COL");
 assert.equal(resolveTeamToken("aec-mlb-bal-col-2026-09-02-rockies", "mlb"), "COL");
+assert.equal(resolveTeamToken("aec-mlb-mia-kc-2026-09-03", "mlb"), "MIA");
+assert.deepEqual(parseAecGameSlug("aec-mlb-mia-kc-2026-09-03"), {
+  league: "mlb",
+  team1: "mia",
+  team2: "kc",
+  ymd: "2026-09-03",
+  pick: "",
+});
+assert.deepEqual(parseAecGameSlug("aec-mlb-bal-col-2026-09-02-rockies"), {
+  league: "mlb",
+  team1: "bal",
+  team2: "col",
+  ymd: "2026-09-02",
+  pick: "rockies",
+});
+assert.equal(parseAecGameSlug("KXMLBGAME-26SEP021510BALCOL-COL"), null);
 assert.equal(
   formatUnhedgedLeg({ ticker: "KXMLBGAME-26SEP021510BALCOL-COL", side: "yes", league: "mlb" }),
   "Rockies ML",
@@ -944,7 +961,7 @@ assert.equal(
     side: "no",
     league: "mlb",
   }),
-  "Rockies lose",
+  "Orioles ML",
 );
 assert.equal(
   formatUnhedgedLeg({
@@ -955,6 +972,74 @@ assert.equal(
   }),
   "Rockies ML +145",
 );
+
+// Persisted Poly worker legs: game slug, no pick suffix, selection is the
+// date day ("03"). teams[] is alpha-sorted and must not pick the long team.
+{
+  const yesLeg = {
+    symbol: "aec-mlb-mia-kc-2026-09-03",
+    selection: "03",
+    teams: ["kc", "mia"],
+    side: "yes",
+    league: "mlb",
+  };
+  const noLeg = { ...yesLeg, side: "no" };
+  assert.equal(formatUnhedgedLegName(yesLeg), "Marlins ML");
+  assert.equal(formatUnhedgedLegName(noLeg), "Royals ML");
+  assert.equal(formatUnhedgedLeg(yesLeg), "Marlins ML");
+  assert.equal(formatUnhedgedLeg(noLeg), "Royals ML");
+  assert.equal(
+    formatUnhedgedLegName({
+      symbol: "aec-mlb-mia-kc-2026-09-03",
+      side: "yes",
+      league: "mlb",
+    }),
+    "Marlins ML",
+  );
+  assert.equal(
+    formatUnhedgedLegName({
+      slug: "aec-mlb-mia-kc-2026-09-03",
+      selection: 3,
+      side: "no",
+      league: "mlb",
+      teams: ["kc", "mia"],
+    }),
+    "Royals ML",
+  );
+  assert.equal(
+    formatUnhedgedLegName({
+      ticker: "aec-mlb-mia-kc-2026-09-03",
+      selection: "03",
+      side: "yes",
+      league: "mlb",
+    }),
+    "Marlins ML",
+  );
+}
+
+{
+  const row = mapUnhedgedRow({
+    id: "poly-mia-kc-day",
+    venue: "polymarket",
+    legs: [{
+      symbol: "aec-mlb-mia-kc-2026-09-03",
+      side: "yes",
+      league: "mlb",
+      selection: "03",
+      teams: ["kc", "mia"],
+    }, {
+      symbol: "aec-mlb-mia-kc-2026-09-03",
+      side: "no",
+      league: "mlb",
+      selection: "03",
+      teams: ["kc", "mia"],
+    }],
+  });
+  assert.equal(row.venue, "Polymarket");
+  assert.deepEqual(row.legs.map((l) => l.text), ["Marlins ML", "Royals ML"]);
+  assert.equal(row.label, "Marlins ML · Royals ML");
+  assert.doesNotMatch(row.label, /03|aec-mlb|mia-kc/);
+}
 
 {
   const row = mapUnhedgedRow({
