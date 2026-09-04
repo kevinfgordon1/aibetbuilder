@@ -21,6 +21,10 @@ import {
   shouldRunEvScan,
   promoNeedsReload,
   evHeaderValues,
+  DEFAULT_EV_DATE_RANGE,
+  shouldComputePromoHeaderScan,
+  selectEvScanView,
+  evScanFromLegs,
 } from "./oddsLoad.js";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { rescaleParlaysForStake, rescaleFreeBetConversions } from "./promoParlayScan.js";
@@ -1323,7 +1327,7 @@ export default function App() {
   const [expandedFreeBet, setExpandedFreeBet] = useState(null);
   const [expandedEV, setExpandedEV] = useState(null);
   const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
-  const [evDateRange, setEvDateRange] = useState("any");
+  const [evDateRange, setEvDateRange] = useState(DEFAULT_EV_DATE_RANGE);
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
   const [marketScope, setMarketScope] = useState("all");
@@ -1475,20 +1479,24 @@ export default function App() {
   const liveEvScan = useMemo(() => {
     if (!fullBoardLoaded) return null;
     if (!shouldRunEvScan(loadModeForTab(activeTab))) return null;
-    const allEvLegs = buildAllLegsAllBooks(allOddsData, null, evDateRange);
-    const evBets = allEvLegs.map(l => {
-      const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
-      return { ...l, prob, ev, profit };
-    }).sort((a, b) => b.ev - a.ev);
-    const positiveEV = evBets.filter(b => b.ev > 0);
-    return { allEvLegs, evBets, positiveEV };
+    return evScanFromLegs(buildAllLegsAllBooks(allOddsData, null, evDateRange), calcEV);
   }, [fullBoardLoaded, allOddsData, evDateRange, activeTab]);
+
+  const promoHeaderEvScan = useMemo(() => {
+    if (!shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded })) return null;
+    return evScanFromLegs(buildAllLegsAllBooks(promoBoardData, null, evDateRange), calcEV);
+  }, [fullBoardLoaded, promoLoaded, promoBoardData, evDateRange]);
 
   useEffect(() => {
     if (liveEvScan) setEvScan(liveEvScan);
   }, [liveEvScan]);
 
-  const evScanView = liveEvScan || evScan;
+  const evScanView = selectEvScanView({
+    fullBoardLoaded,
+    liveEvScan,
+    cachedEvScan: evScan,
+    promoHeaderScan: promoHeaderEvScan,
+  });
   const allEvLegs = evScanView?.allEvLegs ?? [];
   const evBets = evScanView?.evBets ?? [];
   const positiveEV = evScanView?.positiveEV ?? [];
@@ -1500,7 +1508,10 @@ export default function App() {
     (activeTab === "promo" && promoLoading && !promoLoaded);
   const evHeader = evHeaderValues({
     evScan: evScanView,
-    showLoading: fullBoardLoading && (activeTab === "ev" || activeTab === "odds"),
+    dateRange: evDateRange,
+    showLoading:
+      (fullBoardLoading && (activeTab === "ev" || activeTab === "odds"))
+      || (!fullBoardLoaded && promoLoading && !promoLoaded),
   });
 
   // +EV Bets tab — single-book filter
@@ -1743,7 +1754,7 @@ export default function App() {
       </div>
 
       <div style={{ padding: "24px 32px 0", display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <StatCard label="Total Bets Analyzed" value={evHeader.total} sub="all sports & books" />
+        <StatCard label="Total Bets Analyzed" value={evHeader.total} sub={evHeader.slateSub} />
         <StatCard label="+EV Bets Found" value={evHeader.plusEv} color="#10b981" />
         <StatCard label="Best Single EV" value={evHeader.bestValue} color="#3b82f6" sub={evHeader.bestSub} />
       </div>
