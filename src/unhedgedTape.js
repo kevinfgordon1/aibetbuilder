@@ -2,32 +2,30 @@
 // Combo-worker writes this table in a parallel PR. Column names may arrive
 // incrementally; pick known aliases and never invent a price.
 //
-// Status-mode chips: Fills (status=filled) | Requests (status=seen) | All.
-// Default Fills — preserve the Kalshi filled tape. Polymarket defaults to
-// Requests (Poly filled=0; the API hides others’ quotes/tape — never invent
-// a fill). Requests are worker-persisted in-scope MLB/NFL ML RFQs. We are
-// paper. started / in-game stay hidden. Default date chip is Today
-// (America/New_York calendar day). Today / 24h / 7d stay a single 1000-row
-// page — do not walk Month or All time until that chip is selected. Month /
-// All time then paginate that window (1000-row PostgREST pages). Tile counts
-// use select(id, { count: "exact", head: true }) with the same window / venue
-// / status-mode / beat-fill filters when PostgREST can express them — never
-// download-every-row-then-count. Head paths never drop the status filter
-// (Fills=filled, Requests=seen) — a missing status column is an error, not
-// a scan of millions of other rows. If the status filter fails on a row
-// fetch, client-filter the selected mode as fallback. Never list live /
-// in-game RFQs — not even paper. Hide skip_reason game_started, status
-// started, or any leg that already started when that field exists. Venue
-// is also pushed server-side so a seen firehose on All venues cannot bury
-// Polymarket requests. Beat-fill only applies when a fill price exists
-// (requests therefore never pass). After combo-worker #40, filled_at is
-// tape tradeTs (often earlier) or null (never Date.now()). Fills TIME ET
-// is the latest of filled_at / updated_at / created_at — a stale fill stamp
-// must not bury a later write. Requests TIME ET is created_at (RFQ time).
-// Date-window *queries*: Fills prefer filled_at so Postgres can use
-// (status, filled_at DESC); Requests use created_at; All ORs both. Fall
-// back to updated_at / created_at only when filled_at is missing from the
-// schema. See sql/unhedged_rfqs_filled_at_idx.sql.
+// Venue chip picks the row set. All / Kalshi stay filled-only (Kalshi tape).
+// Polymarket queries status=seen (open requests we can see) — Poly has no
+// fill tape, so never invent a fill. started / in-game stay hidden. We are
+// paper. Default date chip is Today (America/New_York calendar day). Today /
+// 24h / 7d stay a single 1000-row page — do not walk Month or All time until
+// that chip is selected. Month / All time then paginate that window
+// (1000-row PostgREST pages). Tile counts use select(id, { count: "exact",
+// head: true }) with the same window / venue / status / beat-fill filters
+// when PostgREST can express them — never download-every-row-then-count.
+// Head paths never drop the status filter (filled on All/Kalshi, seen on
+// Polymarket) — a missing status column is an error, not a scan of millions
+// of other rows. If the status filter fails on a row fetch, client-filter
+// the selected mode as fallback. Never list live / in-game RFQs — not even
+// paper. Hide skip_reason game_started, status started, or any leg that
+// already started when that field exists. Venue is pushed server-side.
+// Beat-fill only applies when a fill price exists (Poly requests never
+// pass). After combo-worker #40, filled_at is tape tradeTs (often earlier)
+// or null (never Date.now()). Fills TIME ET is the latest of filled_at /
+// updated_at / created_at — a stale fill stamp must not bury a later write.
+// Poly request TIME ET is created_at (RFQ time). Date-window *queries*:
+// Fills prefer filled_at so Postgres can use (status, filled_at DESC);
+// Poly seen uses created_at. Fall back to updated_at / created_at only
+// when filled_at is missing from the schema. See
+// sql/unhedged_rfqs_filled_at_idx.sql.
 //
 // Owner-only tab: do not scope this table by user_id. Combo-worker
 // buildUnhedgedRow / fill patches do not write user_id (repo migrations have
@@ -36,18 +34,19 @@
 // Missing-column retry only helps when the column does not exist. The tab is
 // already owner-gated in the UI. Do not invent user_ids client-side.
 //
-// Today membership: Fills use filled_at in the ET day; Requests use
-// created_at. Display TIME for fills still uses the latest of filled_at /
-// updated_at / created_at. Requests display created_at. If filled_at is
-// missing from the schema, fall back to updated_at / created_at (OR) and
-// retry — do not keep filtering a nonexistent column. Combo-worker fill
-// patches should set filled_at; a stale tape tradeTs can hide a late write
-// from Today's cheap filled_at window (Refresh still shows All time).
+// Today membership: All/Kalshi use filled_at in the ET day; Polymarket
+// seen uses created_at. Display TIME for fills still uses the latest of
+// filled_at / updated_at / created_at. Poly requests display created_at.
+// If filled_at is missing from the schema, fall back to updated_at /
+// created_at (OR) and retry — do not keep filtering a nonexistent column.
+// Combo-worker fill patches should set filled_at; a stale tape tradeTs
+// can hide a late write from Today's cheap filled_at window (Refresh
+// still shows All time).
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
-// only). Requests mode lists those seen rows (would-quote column). Tape
-// is MLB + NFL moneylines only.
+// only). Polymarket lists those seen rows (would-quote column). Tape is
+// MLB + NFL moneylines only.
 // Legs: spoken name via formatUnhedgedLegName. Per-leg invert fair and
 // venue opponent Americans live on a breakdown row — never crammed onto
 // the name, never copied from the row parlay our_fair_american.
@@ -110,13 +109,8 @@ export const UNHEDGED_DATE_FILTERS = [
   { key: "all", label: "All time" },
 ];
 export const UNHEDGED_DATE_KEYS = ["today", "24h", "7d", "month", "all"];
-export const UNHEDGED_STATUS_MODES = ["fills", "requests", "all"];
+export const UNHEDGED_STATUS_MODES = ["fills", "requests"];
 export const UNHEDGED_DEFAULT_STATUS_MODE = "fills";
-export const UNHEDGED_STATUS_FILTERS = [
-  { key: "fills", label: "Fills" },
-  { key: "requests", label: "Requests" },
-  { key: "all", label: "All" },
-];
 
 const TIME_KEYS = [
   "created_at",
@@ -614,29 +608,29 @@ export function normalizeStatusMode(value) {
   const key = String(value == null ? "" : value).trim().toLowerCase();
   if (key === "fills" || key === "filled" || key === "fill") return "fills";
   if (key === "requests" || key === "request" || key === "seen") return "requests";
-  if (key === "all") return "all";
   return UNHEDGED_DEFAULT_STATUS_MODE;
 }
 
-export function unhedgedStatusModeLabel(value) {
-  const key = normalizeStatusMode(value);
-  const hit = UNHEDGED_STATUS_FILTERS.find((f) => f.key === key);
-  return hit ? hit.label : "Fills";
-}
-
-// Fills stay the blotter default (Kalshi tape). Polymarket has no fill
-// prices from the venue, so that chip opens on Requests.
-export function defaultStatusModeForVenue(venue) {
+// Venue chip is the mode. Polymarket → seen requests. All / Kalshi → filled.
+export function statusModeForVenue(venue) {
   return normalizeVenueFilter(venue) === "polymarket" ? "requests" : "fills";
 }
 
+export function defaultStatusModeForVenue(venue) {
+  return statusModeForVenue(venue);
+}
+
+export function resolveUnhedgedStatusMode({ venue = "all", statusMode } = {}) {
+  if (statusMode != null && String(statusMode).trim() !== "") {
+    return normalizeStatusMode(statusMode);
+  }
+  return statusModeForVenue(venue);
+}
+
 // Worker persists in-scope RFQs as status=seen (even when priced).
-// started is live — never a Requests row. All = filled + seen.
+// started is live — never a Requests row. All / Kalshi = filled only.
 export function unhedgedStatusValues(mode) {
-  const key = normalizeStatusMode(mode);
-  if (key === "requests") return ["seen"];
-  if (key === "all") return ["filled", "seen"];
-  return ["filled"];
+  return normalizeStatusMode(mode) === "requests" ? ["seen"] : ["filled"];
 }
 
 export function applyUnhedgedStatusFilter(q, mode) {
@@ -653,10 +647,9 @@ export function applyUnhedgedStatusFilter(q, mode) {
 }
 
 export function unhedgedDateColsForMode(mode) {
-  const key = normalizeStatusMode(mode);
-  if (key === "requests") return UNHEDGED_REQUEST_DATE_COLS.slice();
-  if (key === "all") return ["filled_at", "created_at"];
-  return UNHEDGED_DATE_COLS.slice();
+  return normalizeStatusMode(mode) === "requests"
+    ? UNHEDGED_REQUEST_DATE_COLS.slice()
+    : UNHEDGED_DATE_COLS.slice();
 }
 
 // Month / All time are the only windows that walk past the first page.
@@ -741,10 +734,9 @@ export function unhedgedVenueOrFilter(venue) {
   return null;
 }
 
-// Query/membership stamp. Fills: filled_at first. Requests: created_at.
-// All: fills use filled_at, requests use created_at. updated_at only when
-// the preferred stamp is null (row-level) so a schema-fallback fetch still
-// filters.
+// Query/membership stamp. Fills: filled_at first. Poly seen: created_at.
+// updated_at only when the preferred stamp is null (row-level) so a
+// schema-fallback fetch still filters.
 export function unhedgedDateTs(row, mode = UNHEDGED_DEFAULT_STATUS_MODE) {
   if (!row) return null;
   const key = normalizeStatusMode(mode);
@@ -754,17 +746,6 @@ export function unhedgedDateTs(row, mode = UNHEDGED_DEFAULT_STATUS_MODE) {
   if (key === "requests") {
     if (created != null && created !== "") return created;
     if (updated != null && updated !== "") return updated;
-    return unhedgedActivityTs(row);
-  }
-  if (key === "all") {
-    if (isFilledUnhedgedRow(row)) {
-      if (filled != null && filled !== "") return filled;
-    } else if (created != null && created !== "") {
-      return created;
-    }
-    if (filled != null && filled !== "") return filled;
-    if (updated != null && updated !== "") return updated;
-    if (created != null && created !== "") return created;
     return unhedgedActivityTs(row);
   }
   if (filled != null && filled !== "") return filled;
@@ -1270,9 +1251,8 @@ export function filterRequestUnhedgedRows(rows) {
 
 export function rowMatchesStatusMode(row, mode) {
   const key = normalizeStatusMode(mode);
-  if (key === "fills") return isFilledUnhedgedRow(row);
   if (key === "requests") return isRequestUnhedgedRow(row);
-  return isFilledUnhedgedRow(row) || isRequestUnhedgedRow(row);
+  return isFilledUnhedgedRow(row);
 }
 
 export function filterUnhedgedRowsByStatusMode(rows, mode) {
@@ -1524,13 +1504,14 @@ export function mapUnhedgedRow(row, index = 0) {
   };
 }
 
-// Pregame MLB/NFL moneylines in the selected status mode. Default Fills
-// hides seen / started / would_quote. Requests lists status=seen (priced
-// rows map to would_quote). NCAAF / in-game stay out. Never invent a fill.
-export function visibleUnhedgedRows(rows, { statusMode = UNHEDGED_DEFAULT_STATUS_MODE } = {}) {
+// Pregame MLB/NFL moneylines. Default / All / Kalshi = filled only.
+// Polymarket = status=seen (priced rows map to would_quote). NCAAF /
+// in-game stay out. Never invent a fill.
+export function visibleUnhedgedRows(rows, { statusMode, venue } = {}) {
+  const mode = resolveUnhedgedStatusMode({ venue, statusMode });
   return mapUnhedgedRows(
     filterMlbNflMoneylineRows(
-      filterPregameUnhedgedRows(filterUnhedgedRowsByStatusMode(rows, statusMode)),
+      filterPregameUnhedgedRows(filterUnhedgedRowsByStatusMode(rows, mode)),
     ),
   );
 }
@@ -1763,7 +1744,7 @@ function applyUnhedgedFilters(q, {
   // Never eq user_id. Worker rows are unscoped (often NULL if the column
   // exists). Owner gate lives in UnhedgedTape, not this query.
   // Always keep a status filter so we never scan millions of other rows.
-  // Fills=filled, Requests=seen, All=filled+seen. Never include started.
+  // All/Kalshi=filled. Polymarket=seen. Never include started.
   if (filterStatus) q = applyUnhedgedStatusFilter(q, statusMode);
   q = applyUnhedgedDateWindow(q, dateWindow, dateCols);
   const venueFilter = unhedgedVenueOrFilter(venue);
@@ -2081,14 +2062,13 @@ async function resolveOnce(runFn, flags, extra = {}) {
 
 // Slim select of rows RLS already allows. Do not scope by user_id —
 // the Unhedged tab is owner-gated and combo-worker does not write user_id.
-// A missing table is an empty blotter, not a crash. status=eq.filled
-// (Fills) or status=eq.seen (Requests) or in (filled,seen) (All).
-// Date chips filter filled_at on Fills and created_at on Requests
-// (see unhedgedDateWindow). If filled_at is missing, fall back to
-// updated_at / created_at and retry. Today / 24h / 7d take one page.
-// Month / All time page until a short page — only after that chip is on.
-// userId on the options object is ignored. Venue is server-side so a
-// seen firehose cannot bury Polymarket requests.
+// A missing table is an empty blotter, not a crash. All / Kalshi:
+// status=eq.filled. Polymarket: status=eq.seen. Date chips filter
+// filled_at on fills and created_at on Poly seen (see unhedgedDateWindow).
+// If filled_at is missing, fall back to updated_at / created_at and retry.
+// Today / 24h / 7d take one page. Month / All time page until a short
+// page — only after that chip is on. userId on the options object is
+// ignored. Venue is server-side.
 export async function fetchUnhedgedRfqs(client, {
   userId = null,
   limit = UNHEDGED_PAGE_SIZE,
@@ -2096,7 +2076,7 @@ export async function fetchUnhedgedRfqs(client, {
   now,
   paginate,
   venue = "all",
-  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
+  statusMode,
 } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" }, truncated: false, paged: false };
@@ -2105,7 +2085,7 @@ export async function fetchUnhedgedRfqs(client, {
   const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
   const pageAll = paginate != null ? !!paginate : unhedgedDateRangePages(dateRange);
   const maxPages = pageAll ? UNHEDGED_MAX_PAGES : 1;
-  const mode = normalizeStatusMode(statusMode);
+  const mode = resolveUnhedgedStatusMode({ venue, statusMode });
   const flags = newUnhedgedFlags(userId, { statusMode: mode, venue });
   const all = [];
   let offset = 0;
@@ -2206,14 +2186,14 @@ export async function countUnhedgedRfqs(client, {
   now,
   venue = "all",
   quoteBeatFill = false,
-  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
+  statusMode,
 } = {}) {
   if (!client || typeof client.from !== "function") {
     return emptyUnhedgedCountResult({ error: { message: "no client" } });
   }
   const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
   const venueKeyNorm = normalizeVenueFilter(venue);
-  const mode = normalizeStatusMode(statusMode);
+  const mode = resolveUnhedgedStatusMode({ venue: venueKeyNorm, statusMode });
   const pageBeat = unhedgedDateRangePages(dateRange);
   const quoteVenue = venueKeyNorm;
 
@@ -2302,24 +2282,6 @@ export async function countUnhedgedRfqs(client, {
   if (filledStep.error) return emptyUnhedgedCountResult({ error: filledStep.error });
   const filled = readHeadCount(filledStep.result);
 
-  let requests = 0;
-  let requestError = null;
-  if (mode === "all") {
-    const requestFlags = flagsFor("requests");
-    requestFlags.venueDropped = fillFlags.venueDropped;
-    requestFlags.venue = fillFlags.venueDropped ? "all" : venueKeyNorm;
-    const requestStep = await countHeadOnce(client, requestFlags, {
-      dateWindow,
-      quoteNotNull: false,
-      venue: requestFlags.venue,
-    });
-    if (requestStep.missingTable) {
-      return emptyUnhedgedCountResult({ missingTable: true, error: requestStep.error, filled });
-    }
-    requestError = requestStep.error || null;
-    requests = requestError ? null : readHeadCount(requestStep.result);
-  }
-
   const quoteFlags = flagsFor(mode);
   quoteFlags.venueDropped = fillFlags.venueDropped;
   quoteFlags.quoteDropped = fillFlags.quoteDropped;
@@ -2332,7 +2294,7 @@ export async function countUnhedgedRfqs(client, {
       venue: quoteFlags.venue,
     });
   if (quoteStep.missingTable) {
-    return emptyUnhedgedCountResult({ missingTable: true, error: quoteStep.error, filled, requests });
+    return emptyUnhedgedCountResult({ missingTable: true, error: quoteStep.error, filled, requests: 0 });
   }
   const withQuote = quoteFlags.quoteDropped || quoteStep.error ? null : readHeadCount(quoteStep.result);
 
@@ -2344,7 +2306,7 @@ export async function countUnhedgedRfqs(client, {
   if (beat.missingTable) {
     return {
       filled,
-      requests,
+      requests: 0,
       withQuote,
       beatFill: null,
       missingTable: true,
@@ -2355,11 +2317,11 @@ export async function countUnhedgedRfqs(client, {
   }
   return {
     filled,
-    requests,
+    requests: 0,
     withQuote,
     beatFill: beat.count,
     missingTable: false,
-    error: beat.error || quoteStep.error || requestError || null,
+    error: beat.error || quoteStep.error || null,
     source: "head",
     venueDropped: fillFlags.venueDropped,
   };

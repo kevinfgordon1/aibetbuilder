@@ -9,11 +9,12 @@ import {
   UNHEDGED_DEFAULT_DATE_RANGE,
   UNHEDGED_DATE_FILTERS,
   UNHEDGED_DEFAULT_STATUS_MODE,
-  UNHEDGED_STATUS_FILTERS,
   UNHEDGED_REQUEST_DATE_COLS,
   americanFromProb,
   applyUnhedgedStatusFilter,
   defaultStatusModeForVenue,
+  resolveUnhedgedStatusMode,
+  statusModeForVenue,
   coerceAmerican,
   fetchUnhedgedRfqs,
   countUnhedgedRfqs,
@@ -440,24 +441,28 @@ assert.equal(normalizeUnhedgedDateRange("30d"), "month");
 assert.equal(normalizeUnhedgedDateRange("nope"), "today");
 assert.equal(UNHEDGED_DEFAULT_DATE_RANGE, "today");
 assert.equal(UNHEDGED_DEFAULT_STATUS_MODE, "fills");
-assert.deepEqual(UNHEDGED_STATUS_FILTERS.map((f) => f.key), ["fills", "requests", "all"]);
-assert.deepEqual(UNHEDGED_STATUS_FILTERS.map((f) => f.label), ["Fills", "Requests", "All"]);
 assert.equal(normalizeStatusMode("Requests"), "requests");
 assert.equal(normalizeStatusMode("seen"), "requests");
 assert.equal(normalizeStatusMode("filled"), "fills");
+assert.equal(normalizeStatusMode("all"), "fills");
 assert.equal(normalizeStatusMode("nope"), "fills");
 assert.deepEqual(unhedgedStatusValues("fills"), ["filled"]);
 assert.deepEqual(unhedgedStatusValues("requests"), ["seen"]);
-assert.deepEqual(unhedgedStatusValues("all"), ["filled", "seen"]);
+assert.deepEqual(unhedgedStatusValues("all"), ["filled"]);
 assert.deepEqual(unhedgedDateColsForMode("fills"), ["filled_at"]);
 assert.deepEqual(unhedgedDateColsForMode("requests"), ["created_at"]);
-assert.deepEqual(unhedgedDateColsForMode("all"), ["filled_at", "created_at"]);
 assert.deepEqual(UNHEDGED_REQUEST_DATE_COLS, ["created_at"]);
+assert.equal(statusModeForVenue("polymarket"), "requests");
+assert.equal(statusModeForVenue("poly"), "requests");
+assert.equal(statusModeForVenue("all"), "fills");
+assert.equal(statusModeForVenue("kalshi"), "fills");
+assert.equal(statusModeForVenue(""), "fills");
 assert.equal(defaultStatusModeForVenue("polymarket"), "requests");
-assert.equal(defaultStatusModeForVenue("poly"), "requests");
-assert.equal(defaultStatusModeForVenue("all"), "fills");
 assert.equal(defaultStatusModeForVenue("kalshi"), "fills");
-assert.equal(defaultStatusModeForVenue(""), "fills");
+assert.equal(resolveUnhedgedStatusMode({ venue: "polymarket" }), "requests");
+assert.equal(resolveUnhedgedStatusMode({ venue: "all" }), "fills");
+assert.equal(resolveUnhedgedStatusMode({ venue: "kalshi" }), "fills");
+assert.equal(resolveUnhedgedStatusMode({ venue: "polymarket", statusMode: "fills" }), "fills");
 {
   const seenEq = { eqs: [], eq(col, val) { this.eqs.push({ col, val }); return this; } };
   applyUnhedgedStatusFilter(seenEq, "requests");
@@ -465,9 +470,6 @@ assert.equal(defaultStatusModeForVenue(""), "fills");
   const fillEq = { eqs: [], eq(col, val) { this.eqs.push({ col, val }); return this; } };
   applyUnhedgedStatusFilter(fillEq, "fills");
   assert.deepEqual(fillEq.eqs, [{ col: "status", val: "filled" }]);
-  const allIn = { ins: [], in(col, vals) { this.ins.push({ col, vals }); return this; } };
-  applyUnhedgedStatusFilter(allIn, "all");
-  assert.deepEqual(allIn.ins, [{ col: "status", vals: ["filled", "seen"] }]);
 }
 assert.equal(unhedgedDateRangeLabel("month"), "Month");
 assert.deepEqual(UNHEDGED_DATE_FILTERS.map((f) => f.key), ["today", "24h", "7d", "month", "all"]);
@@ -1262,13 +1264,14 @@ assert.equal(legBestOpponentAmerican({}), null);
   assert.deepEqual(filterRequestUnhedgedRows([seen, started, would, filledMlb]).map((r) => r.id), ["seen", "would"]);
   assert.deepEqual(filterUnhedgedRowsByStatusMode([seen, started, would, filledMlb], "fills").map((r) => r.id), ["filled-mlb"]);
   assert.deepEqual(filterUnhedgedRowsByStatusMode([seen, started, would, filledMlb], "requests").map((r) => r.id), ["seen", "would"]);
-  assert.deepEqual(filterUnhedgedRowsByStatusMode([seen, started, would, filledMlb], "all").map((r) => r.id), ["seen", "would", "filled-mlb"]);
-  const requestShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { statusMode: "requests" });
+  const requestShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { venue: "polymarket" });
   assert.deepEqual(requestShown.map((r) => r.id), ["seen", "would"]);
   assert.equal(requestShown.every((r) => r.fillText === "—"), true);
   assert.equal(requestShown.find((r) => r.id === "would").ourAmerican, 150);
-  const allShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { statusMode: "all" });
-  assert.deepEqual(allShown.map((r) => r.id), ["filled-mlb", "seen", "would"]);
+  const kalshiShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { venue: "kalshi" });
+  assert.deepEqual(kalshiShown.map((r) => r.id), ["filled-mlb"]);
+  const allVenueShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { venue: "all" });
+  assert.deepEqual(allVenueShown.map((r) => r.id), ["filled-mlb"]);
 }
 
 // ── Live / in-game filled RFQs stay off the tape (not even paper) ──
@@ -1590,12 +1593,6 @@ function assertStatusSeenEq(call) {
   assert.equal(hasEq(call, "status", "seen"), true, "expected .eq('status', 'seen')");
 }
 
-function assertStatusInFilledSeen(call) {
-  assert.ok(call.in, "expected .in('status', ...)");
-  assert.equal(call.in.col, "status");
-  assert.deepEqual(call.in.vals, ["filled", "seen"]);
-}
-
 function assertCreatedAtWindow(call, from, to) {
   assert.ok((call.gtes || []).some((g) => g.col === "created_at" && (!from || g.val === from)), "expected created_at.gte");
   if (to) {
@@ -1692,7 +1689,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.deepEqual(result.rows.map((r) => r.id), ["filled"]);
 }
 
-// ── Requests mode: status=seen, created_at window, keep priced seen rows ──
+// ── Polymarket venue: status=seen, created_at window, keep priced seen rows ──
 {
   const now = etLocalToUtc("2026-09-03", 14, 40);
   const today = unhedgedDateWindow("today", now);
@@ -1723,7 +1720,6 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const result = await fetchUnhedgedRfqs(client, {
     dateRange: "today",
     now,
-    statusMode: "requests",
     venue: "polymarket",
   });
   assertStatusSeenEq(client.calls[0]);
@@ -1732,7 +1728,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.ok((client.calls[0].ors || [client.calls[0].or]).some((f) => /venue\./.test(f || "")));
   assertCreatedAtOnlyBeforeLimit(client.calls[0]);
   assert.deepEqual(result.rows.map((r) => r.id), ["seen-priced", "seen-plain"]);
-  const shown = visibleUnhedgedRows(result.rows, { statusMode: "requests" });
+  const shown = visibleUnhedgedRows(result.rows, { venue: "polymarket" });
   assert.equal(shown.length, 2);
   assert.equal(shown[0].ourAmerican, 178);
   assert.equal(shown[0].fairAmerican, 201);
@@ -1743,17 +1739,20 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(shown[1].fillText, "—");
 }
 
-// ── All status mode uses status in (filled, seen) ──
+// ── All / Kalshi venue stay status=filled (Kalshi tape) ──
 {
   const mixed = [
     { id: "seen", status: "seen", created_at: "2026-09-03T16:00:00.000Z" },
     { id: "filled", status: "filled", fill_american: -110, filled_at: "2026-09-03T16:00:00.000Z" },
     { id: "started", status: "started", created_at: "2026-09-03T16:30:00.000Z" },
   ];
-  const client = createSequenceClient([{ data: mixed, error: null }]);
-  const result = await fetchUnhedgedRfqs(client, { dateRange: "all", statusMode: "all" });
-  assertStatusInFilledSeen(client.calls[0]);
-  assert.deepEqual(result.rows.map((r) => r.id).sort(), ["filled", "seen"]);
+  for (const venue of ["all", "kalshi"]) {
+    const client = createSequenceClient([{ data: mixed, error: null }]);
+    const result = await fetchUnhedgedRfqs(client, { dateRange: "all", venue });
+    assertStatusFilledEq(client.calls[0]);
+    assert.equal(hasEq(client.calls[0], "status", "seen"), false);
+    assert.deepEqual(result.rows.map((r) => r.id), ["filled"]);
+  }
 }
 
 // ── Live filled rows from the wire are dropped (skip_reason / started leg) ──
@@ -2226,7 +2225,6 @@ function assertCreatedAtOnlyBeforeLimit(call) {
     dateRange: "today",
     now,
     venue: "polymarket",
-    statusMode: "requests",
   });
   assert.equal(result.filled, 0);
   assert.equal(result.requests, 22);
@@ -2248,7 +2246,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   ]);
   const result = await countUnhedgedRfqs(client, {
     dateRange: "all",
-    statusMode: "requests",
+    venue: "polymarket",
     quoteBeatFill: true,
   });
   assert.equal(result.filled, 0);
@@ -2263,7 +2261,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const client = createSequenceClient([
     { data: null, error: { code: "PGRST204", message: "Could not find the 'status' column of 'unhedged_rfqs' in the schema cache" } },
   ]);
-  const result = await countUnhedgedRfqs(client, { dateRange: "all", statusMode: "requests" });
+  const result = await countUnhedgedRfqs(client, { dateRange: "all", venue: "polymarket" });
   assert.equal(result.requests, null);
   assert.equal(client.calls.length, 1);
   assertStatusSeenEq(client.calls[0]);
@@ -2344,12 +2342,12 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /Fill price/);
   assert.match(page, /True \/ fair/);
   assert.match(page, />Would-quote</);
-  assert.match(page, /UNHEDGED_STATUS_FILTERS/);
-  assert.match(page, /c\.key === "fills"/);
-  assert.match(page, /c\.key === "requests"/);
-  assert.match(page, /statusMode/);
-  assert.match(page, /defaultStatusModeForVenue/);
-  assert.match(page, /fill prices are unavailable/);
+  assert.doesNotMatch(page, /UNHEDGED_STATUS_FILTERS/);
+  assert.doesNotMatch(page, /label: "Fills"/);
+  assert.doesNotMatch(page, /label: "Requests"/);
+  assert.match(page, /statusModeForVenue/);
+  assert.match(page, /open Polymarket requests/);
+  assert.match(page, /No seen pregame MLB or NFL moneyline RFQ requests/);
   assert.match(page, /isTickerBlob/);
   assert.match(page, /LegBreakdown/);
   assert.match(page, /className="legs"/);
@@ -2384,7 +2382,6 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /label: "Kalshi"/);
   assert.match(page, /label: "Polymarket"/);
   assert.match(page, /venueFilter/);
-  assert.match(page, /statusMode/);
   assert.match(page, /quoteBeatFill/);
   assert.match(page, /unhedgedRefreshLabel/);
   assert.match(page, /onRefresh/);
