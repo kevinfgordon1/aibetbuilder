@@ -8,7 +8,7 @@
 // Summary + tape are MLB and NFL moneylines only. Default date chip is Today.
 // Today / 24h / 7d stay one page. Month / All time page only after that chip
 // is selected. Tiles use head counts (same window + venue + status + beat-fill).
-// Legs cell is a per-leg Fair / Kalshi / Poly breakdown plus sport + event date.
+// Legs cell is a per-leg Our fair / Kalshi opp / Poly opp breakdown plus sport + event date.
 // Manual Refresh only — do not poll. Row pull is a slim column list; fills
 // filter filled_at, Poly seen filters created_at.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,6 +49,14 @@ const VENUE_CHIPS = [
   { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
 ];
 
+const LEG_FAIR_TITLE = "Our fair = invert of best opponent ask (+ fee) for this pick";
+const LEG_KALSHI_OPP_TITLE = "Kalshi opp = opponent moneyline ask on Kalshi (+ applicable fee)";
+const LEG_POLY_OPP_TITLE = "Poly opp = opponent ask on Polymarket";
+const LEG_BEST_OPP_TITLE = "Best opp ask = best fee-included opponent American used to invert Our fair";
+const ROW_FAIR_TITLE = "Our fair for the parlay — invert product of best opponent asks (+ fee)";
+const ROW_QUOTE_TITLE = "Would-quote = 5% net-cost wrap; the American we would have filled at";
+const LEG_ODDS_NOTE = "Per-leg Kalshi/Poly are opponent asks; Our fair is the invert for this pick.";
+
 function FilterChip({ label, active, onClick, className, title, busy }) {
   return (
     <button
@@ -79,10 +87,10 @@ function LegBreakdown({ legs }) {
           <th>Leg</th>
           <th>Sport</th>
           <th>Event</th>
-          <th>Fair</th>
-          <th>Kalshi</th>
-          <th>Poly</th>
-          {showBest ? <th>Best opp</th> : null}
+          <th title={LEG_FAIR_TITLE}>Our fair</th>
+          <th title={LEG_KALSHI_OPP_TITLE}>Kalshi opp</th>
+          <th title={LEG_POLY_OPP_TITLE}>Poly opp</th>
+          {showBest ? <th title={LEG_BEST_OPP_TITLE}>Best opp ask</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -91,10 +99,10 @@ function LegBreakdown({ legs }) {
             <td>{l.name || l.text}</td>
             <td>{l.sport || "—"}</td>
             <td className="num muted">{l.eventText || "—"}</td>
-            <td className="num fair">{l.fairText || "—"}</td>
-            <td className="num">{l.kalshiText || "—"}</td>
-            <td className="num">{l.polyText || "—"}</td>
-            {showBest ? <td className="num">{l.bestText || "—"}</td> : null}
+            <td className="num fair" title={LEG_FAIR_TITLE}>{l.fairText || "—"}</td>
+            <td className="num" title={LEG_KALSHI_OPP_TITLE}>{l.kalshiText || "—"}</td>
+            <td className="num" title={LEG_POLY_OPP_TITLE}>{l.polyText || "—"}</td>
+            {showBest ? <td className="num" title={LEG_BEST_OPP_TITLE}>{l.bestText || "—"}</td> : null}
           </tr>
         ))}
       </tbody>
@@ -184,6 +192,7 @@ export function UnhedgedBlotter({
         .uh .filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px}
         .uh .legs{width:auto;min-width:100%;margin:2px 0 0;border-collapse:collapse;font-size:12px}
         .uh .legs th{padding:2px 10px 2px 0;border-bottom:1px solid rgba(255,255,255,0.08);font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;font-weight:600}
+        .uh .legs th[title],.uh .legs td[title],.uh th[title]{cursor:help}
         .uh .legs td{padding:3px 10px 3px 0;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle}
         .uh .legs tr:last-child td{border-bottom:none}
         .uh .empty{color:#6b7280;font-size:14px;padding:8px 2px}
@@ -232,6 +241,7 @@ export function UnhedgedBlotter({
           ? "Polymarket open combo RFQ requests (status=seen). Would-quote is what we would have quoted — paper only. We did not take these."
           : "Filled pregame RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only."}
         {" "}In-game and started RFQs stay off this tape. No quoting from this page.
+        {" "}{LEG_ODDS_NOTE}
       </div>
       {polyRequests ? (
         <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
@@ -357,8 +367,8 @@ export function UnhedgedBlotter({
                 <th>Amount</th>
                 <th>Taker / RFQ</th>
                 <th>Fill price</th>
-                <th>True / fair</th>
-                <th>Would-quote</th>
+                <th title={ROW_FAIR_TITLE}>Our fair</th>
+                <th title={ROW_QUOTE_TITLE}>Would-quote</th>
               </tr>
             </thead>
             <tbody>
@@ -373,8 +383,8 @@ export function UnhedgedBlotter({
                     <td className="num">{r.amountText}</td>
                     <td className="num">{r.theirText}</td>
                     <td className="num">{r.fillText}</td>
-                    <td className="num fair">{r.fairText}</td>
-                    <td className="num">{r.ourText}</td>
+                    <td className="num fair" title={ROW_FAIR_TITLE}>{r.fairText}</td>
+                    <td className="num" title={ROW_QUOTE_TITLE}>{r.ourText}</td>
                   </tr>
                 );
               })}
