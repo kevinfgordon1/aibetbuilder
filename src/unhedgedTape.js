@@ -187,6 +187,10 @@ const ML_TYPE = /^(ml|moneyline|h2h|game)$/i;
 const GAME_ML_ID = /kx(mlb|nfl)game-|aec-(mlb|nfl)-/i;
 const TICKER_BLOB = /^(kx[a-z0-9]*-|aec-(mlb|nfl|ncaaf)-)/i;
 const TEAM_CODE = /^[A-Za-z]{2,4}$/;
+const NUMERIC_TOKEN = /^\d+$/;
+// aec-{mlb|nfl}-{t1}-{t2}-{YYYY-MM-DD}[-{pick}] — Poly game slug. t1 is the
+// long/yes team (outcomes[0]); optional pick is a code or spoken suffix.
+const AEC_GAME_SLUG = /aec-(mlb|nfl)-([a-z0-9]+)-([a-z0-9]+)-(\d{4}-\d{2}-\d{2})(?:-([a-z0-9]+(?:-[a-z0-9]+)*))?/i;
 
 // Short names Kevin says when he reads a parlay. Sox keep the color/city so
 // Red Sox and White Sox do not collapse. WAS/WSH is Nats in MLB, Commanders in NFL.
@@ -382,6 +386,38 @@ function lookupSlug(table, slug) {
   return table[compact] || "";
 }
 
+function isNumericTeamToken(raw) {
+  const text = String(raw == null ? "" : raw).trim();
+  return !!text && NUMERIC_TOKEN.test(text);
+}
+
+// Poly game slugs: aec-{mlb|nfl}-{t1}-{t2}-{YYYY-MM-DD}[-{pick}].
+// Long/yes team is t1 (slug order = Poly outcomes[0]), not sorted teams[].
+export function parseAecGameSlug(raw) {
+  const text = String(raw == null ? "" : raw).trim();
+  if (!text) return null;
+  const m = AEC_GAME_SLUG.exec(text);
+  if (!m) return null;
+  return {
+    league: m[1].toLowerCase(),
+    team1: m[2].toLowerCase(),
+    team2: m[3].toLowerCase(),
+    ymd: m[4],
+    pick: m[5] ? m[5].toLowerCase() : "",
+  };
+}
+
+function aecGameFromLeg(leg) {
+  if (leg == null) return parseAecGameSlug(leg);
+  if (typeof leg === "string") return parseAecGameSlug(leg);
+  if (typeof leg !== "object") return null;
+  for (const key of ["symbol", "slug", "ticker", "market_ticker"]) {
+    const parsed = parseAecGameSlug(leg[key]);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 // Codes (COL, KC) and spoken slugs (rockies, red-sox, 49ers) → canonical team code.
 export function resolveTeamToken(raw, league = "") {
   const text = String(raw == null ? "" : raw).trim();
@@ -405,6 +441,16 @@ export function resolveTeamToken(raw, league = "") {
       const hitLast = lookupSlug(table, last);
       if (hitLast) return hitLast;
     }
+  }
+  const aec = parseAecGameSlug(text);
+  if (aec) {
+    const aecLeague = league || aec.league;
+    if (aec.pick) {
+      const fromPick = resolveTeamToken(aec.pick, aecLeague);
+      if (fromPick) return fromPick;
+    }
+    const fromLong = resolveTeamToken(aec.team1, aecLeague);
+    if (fromLong) return fromLong;
   }
   if (TEAM_CODE.test(text)) return normalizeTeamCode(text, league);
   return "";
@@ -843,8 +889,8 @@ export function parseTickerEventStamp(raw) {
     }
     return { ymd, iso: null, hasTime: false };
   }
-  const aec = /aec-(?:mlb|nfl)-[a-z0-9]+-[a-z0-9]+-(\d{4}-\d{2}-\d{2})/i.exec(text);
-  if (aec) return { ymd: aec[1], iso: null, hasTime: false };
+  const aec = AEC_GAME_SLUG.exec(text);
+  if (aec) return { ymd: aec[4], iso: null, hasTime: false };
   const isoDay = /(\d{4}-\d{2}-\d{2})/.exec(text);
   if (isoDay && /aec-/.test(text)) return { ymd: isoDay[1], iso: null, hasTime: false };
   return null;
@@ -944,6 +990,24 @@ function teamCodesFromList(teams, league) {
 
 function resolveTeamCode(leg, league) {
   if (!leg || typeof leg !== "object") return "";
+  const aec = aecGameFromLeg(leg);
+  const aecLeague = league || (aec && aec.league) || "";
+
+  // Poly game slugs: a bad persisted selection (date day "03") must not win.
+  // Prefer a real team selection, else pick suffix, else slug long team (t1).
+  if (aec) {
+    if (leg.selection != null && String(leg.selection).trim() !== "" && !isNumericTeamToken(leg.selection)) {
+      const fromSelection = resolveTeamToken(leg.selection, aecLeague);
+      if (fromSelection) return fromSelection;
+    }
+    if (aec.pick) {
+      const fromPick = resolveTeamToken(aec.pick, aecLeague);
+      if (fromPick) return fromPick;
+    }
+    const fromLong = resolveTeamToken(aec.team1, aecLeague);
+    if (fromLong) return fromLong;
+  }
+
   const fromId = resolveTeamToken(
     pickFirst(leg, ["ticker", "market_ticker", "symbol", "slug"]),
     league,
@@ -957,6 +1021,16 @@ function resolveTeamCode(leg, league) {
 }
 
 function resolveOpponentCode(leg, league, teamCode) {
+  const aec = aecGameFromLeg(leg);
+  if (aec && teamCode) {
+    const aecLeague = league || aec.league;
+    const t1 = resolveTeamToken(aec.team1, aecLeague);
+    const t2 = resolveTeamToken(aec.team2, aecLeague);
+    if (t1 && t2) {
+      if (t1 === teamCode) return t2;
+      if (t2 === teamCode) return t1;
+    }
+  }
   const codes = teamCodesFromList(leg && leg.teams, league);
   if (codes.length < 2 || !teamCode) return "";
   return codes.find((c) => c !== teamCode) || "";
@@ -1014,7 +1088,7 @@ export function formatUnhedgedLegName(leg, leagueHint = "") {
 
   const human = [leg.label, leg.title, leg.selection]
     .map((v) => String(v == null ? "" : v).trim())
-    .find((v) => v && !isTickerBlob(v));
+    .find((v) => v && !isTickerBlob(v) && !isNumericTeamToken(v));
   if (!human) return "";
   const phrase = /^(.*?)\s+(ML|lose)$/i.exec(human);
   if (phrase) {
