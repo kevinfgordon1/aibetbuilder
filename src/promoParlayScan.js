@@ -116,13 +116,14 @@ export async function findTopParlaysChunked(
   const results = [];
   const getGame = (leg) => leg.game;
 
+  let combos = 0;
   if (numLegs === 1) {
     for (let i = 0; i < list.length; i++) {
       const r = calc([list[i]]);
       if (minFinalOdds === null || r.parlayOdds >= minFinalOdds) {
         results.push({ legs: [list[i]], ...r });
       }
-      await maybeYield(state, yieldMs, yieldFn, signal);
+      if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
     }
   } else if (numLegs === 2) {
     for (let i = 0; i < list.length; i++) {
@@ -132,8 +133,8 @@ export async function findTopParlaysChunked(
         if (minFinalOdds === null || r.parlayOdds >= minFinalOdds) {
           results.push({ legs: [list[i], list[j]], ...r });
         }
+        if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
       }
-      await maybeYield(state, yieldMs, yieldFn, signal);
     }
   } else if (numLegs === 3) {
     for (let i = 0; i < list.length; i++) {
@@ -145,9 +146,9 @@ export async function findTopParlaysChunked(
           if (minFinalOdds === null || r.parlayOdds >= minFinalOdds) {
             results.push({ legs: [list[i], list[j], list[k]], ...r });
           }
+          if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
         }
       }
-      await maybeYield(state, yieldMs, yieldFn, signal);
     }
   }
 

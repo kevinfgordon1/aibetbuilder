@@ -182,4 +182,21 @@ function namesOf(parlays) {
   );
 }
 
+// ── Chunked 3-leg scan keeps the event loop moving (no multi-second stall)
+{
+  const legs = Array.from({ length: 36 }, (_, i) => mkLeg(`L${i}`, `G${i} @ X`, 110 + i, -110));
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  let maxGap = 0;
+  let last = Date.now();
+  const ping = setInterval(() => {
+    const now = Date.now();
+    maxGap = Math.max(maxGap, now - last);
+    last = now;
+  }, 5);
+  const ranked = await findTopParlaysChunked(legs, 3, calc, { maxResults: 10, yieldMs: 8 });
+  clearInterval(ping);
+  assert.equal(ranked.length, 10);
+  assert.ok(maxGap < 120, `event-loop stall was ${maxGap}ms`);
+}
+
 console.log("promoParlayScan.test.js: ok");
