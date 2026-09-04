@@ -33,7 +33,12 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /const parlayLegPool = useMemo\(/);
   assert.match(app, /const topParlays = useMemo\(/);
   assert.match(app, /const topNoSweats = useMemo\(/);
-  assert.match(app, /const scannedFreeBetConversions = useMemo\(/);
+  assert.match(app, /calcFreeBetParlayEV/);
+  assert.doesNotMatch(app, /const scannedFreeBetConversions = useMemo/);
+  assert.match(app, /const topFreeBets = useMemo\(/);
+  assert.match(app, /const topFreeBetsWithLock = useMemo\(/);
+  assert.match(app, /promoScanInputKey/);
+  assert.match(app, /promoType === "freebet"/);
   const resetDeps = app.match(/setExpandedFreeBet\(null\);\s*\}, \[([^\]]+)\]/);
   assert.ok(resetDeps, "promo page reset effect");
   assert.doesNotMatch(resetDeps[1], /\bboostPct\b/);
@@ -65,6 +70,8 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /scanCompletedForCurrent/);
   assert.match(app, /boostEmptyState === "no-results"/);
   assert.match(app, /boostEmptyState === "scanning"/);
+  assert.match(app, /freeBetEmptyState === "no-results"/);
+  assert.match(app, /freeBetEmptyState === "scanning"/);
   assert.doesNotMatch(
     app,
     /topParlaysWithHedge\.length === 0 && !promoScanBusy/,
@@ -74,6 +81,11 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
     app,
     /topNoSweatsWithLock\.length === 0 && !promoScanBusy/,
     "No Results must not key off busy=false + empty nosweats",
+  );
+  assert.doesNotMatch(
+    app,
+    /topFreeBetsWithLock\.length === 0 && !promoScanBusy/,
+    "No Results must not key off busy=false + empty freebets",
   );
   assert.match(app, /if \(!promoLoaded\) \{\s*setPromoScanBusy\(false\);\s*return;/);
   assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
