@@ -7,6 +7,55 @@ export const SCAN_YIELD_MS = 8;
 export const SCAN_MAX_PROMO_LEGS = 8;
 export const SCAN_GROW_FROM_3_SEEDS = 50;
 
+// Identity of the boost/nosweat scan inputs, including pool contents. Used so
+// the UI can tell "never scanned this slate" from "scan finished with []".
+export function promoScanInputKey({
+  promoType,
+  numLegs,
+  scanBoostPct,
+  parsedMinFinal,
+  refundPct,
+  creditConversionPct,
+  pool,
+}) {
+  const list = pool || [];
+  let fp = list.length;
+  for (let i = 0; i < list.length; i++) {
+    const l = list[i];
+    const s = `${l.game ?? ""}\0${l.name ?? ""}`;
+    for (let j = 0; j < s.length; j++) {
+      fp = ((fp << 5) - fp + s.charCodeAt(j)) | 0;
+    }
+  }
+  return [
+    promoType,
+    numLegs,
+    scanBoostPct,
+    parsedMinFinal ?? "",
+    refundPct,
+    creditConversionPct,
+    list.length,
+    fp,
+  ].join("|");
+}
+
+// Empty-state for Promo Builder parlay results. "No Results Found" is only
+// valid after a scan has completed for the *current* inputs. First paint
+// (busy=false, parlays=[], no completion yet) must show scanning, not empty.
+export function promoScanEmptyState({
+  promoLoaded,
+  promoLoading,
+  scanBusy,
+  scanCompletedForCurrent,
+  resultCount,
+}) {
+  if (resultCount > 0) return "results";
+  if (!promoLoaded || promoLoading || scanBusy || !scanCompletedForCurrent) {
+    return "scanning";
+  }
+  return "no-results";
+}
+
 export function yieldToMain() {
   if (typeof globalThis.scheduler?.yield === "function") {
     return globalThis.scheduler.yield();

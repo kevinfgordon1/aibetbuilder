@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -53,6 +53,95 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
     assert.doesNotMatch(block, /findTopParlays\(/, "findTopParlays must not run inside useMemo");
     assert.doesNotMatch(block, /findTopParlaysChunked\(/, "chunked scan must not run inside useMemo");
   }
+}
+
+// ── App does not render No Results when busy is false and no scan has
+//    completed yet for boost mode (first-paint / post-odds race).
+{
+  assert.match(app, /promoScanEmptyState/);
+  assert.match(app, /promoScanInputKey/);
+  assert.match(app, /lastCompletedScanKey/);
+  assert.match(app, /scanCompletedForCurrent/);
+  assert.match(app, /boostEmptyState === "no-results"/);
+  assert.match(app, /boostEmptyState === "scanning"/);
+  assert.doesNotMatch(
+    app,
+    /topParlaysWithHedge\.length === 0 && !promoScanBusy/,
+    "No Results must not key off busy=false + empty parlays",
+  );
+  assert.doesNotMatch(
+    app,
+    /topNoSweatsWithLock\.length === 0 && !promoScanBusy/,
+    "No Results must not key off busy=false + empty nosweats",
+  );
+  assert.match(app, /if \(!promoLoaded\) \{\s*setPromoScanBusy\(false\);\s*return;/);
+  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
+  assert.match(app, /if \(gen !== promoScanGen\.current\) return;/);
+  assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
+  assert.equal(
+    promoScanEmptyState({
+      promoLoaded: true,
+      promoLoading: false,
+      scanBusy: false,
+      scanCompletedForCurrent: false,
+      resultCount: 0,
+    }),
+    "scanning",
+    "first paint: busy false + empty + no completed scan → scanning, not No Results",
+  );
+}
+
+// ── Empty-state machine: loading / running / done-empty / keep prior results
+{
+  assert.equal(promoScanEmptyState({
+    promoLoaded: false, promoLoading: true, scanBusy: false,
+    scanCompletedForCurrent: false, resultCount: 0,
+  }), "scanning");
+  assert.equal(promoScanEmptyState({
+    promoLoaded: true, promoLoading: false, scanBusy: true,
+    scanCompletedForCurrent: false, resultCount: 0,
+  }), "scanning");
+  assert.equal(promoScanEmptyState({
+    promoLoaded: true, promoLoading: false, scanBusy: false,
+    scanCompletedForCurrent: true, resultCount: 0,
+  }), "no-results");
+  assert.equal(promoScanEmptyState({
+    promoLoaded: true, promoLoading: false, scanBusy: false,
+    scanCompletedForCurrent: true, resultCount: 3,
+  }), "results");
+  assert.equal(promoScanEmptyState({
+    promoLoaded: true, promoLoading: false, scanBusy: true,
+    scanCompletedForCurrent: false, resultCount: 4,
+  }), "results", "keep prior cards while a newer pool is scanning");
+  assert.equal(promoScanEmptyState({
+    promoLoaded: true, promoLoading: true, scanBusy: false,
+    scanCompletedForCurrent: true, resultCount: 0,
+  }), "scanning", "promoLoading with empty results is not No Results");
+}
+
+// ── Pool fill must change the scan key so a completed [] is not reused
+{
+  const base = {
+    promoType: "boost", numLegs: 3, scanBoostPct: 30,
+    parsedMinFinal: null, refundPct: 100, creditConversionPct: 70,
+  };
+  const emptyKey = promoScanInputKey({ ...base, pool: [] });
+  const filledKey = promoScanInputKey({
+    ...base,
+    pool: [
+      { game: "A @ B", name: "A ML" },
+      { game: "C @ D", name: "C ML" },
+      { game: "E @ F", name: "E ML" },
+    ],
+  });
+  assert.notEqual(emptyKey, filledKey);
+  assert.equal(
+    promoScanEmptyState({
+      promoLoaded: true, promoLoading: false, scanBusy: false,
+      scanCompletedForCurrent: emptyKey === filledKey, resultCount: 0,
+    }),
+    "scanning",
+  );
 }
 
 // ── Boost EV / profit scale linearly with stake

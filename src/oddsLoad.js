@@ -1,6 +1,5 @@
 // Promo Builder vs +EV / Odds Board load plans.
-// Promo fetches all featured boards (header Today slate on first visit / hard
-// refresh) plus selected-sport event odds. No futures, no +EV-tab 20k-leg scan.
+// Promo fetches selected featured sports only (no futures, no 20k-leg EV scan).
 
 export const EVENT_ODDS_LOOKBACK_MS = 30 * 60 * 1000;
 
@@ -27,15 +26,13 @@ export function buildOddsQueryPlan({
   lookbackMs = EVENT_ODDS_LOOKBACK_MS,
 } = {}) {
   const isFull = mode === "full";
-  const allFeatured = [...(featuredSportKeys || [])];
-  const promoEvents = sportKeysForPromoLoad(promoSports, featuredSportKeys);
+  const sports = isFull
+    ? [...(featuredSportKeys || [])]
+    : sportKeysForPromoLoad(promoSports, featuredSportKeys);
   return {
     mode: isFull ? "full" : "promo",
-    // Promo still skips futures / the +EV-tab scan, but featured boards are
-    // the full slate so header StatCards can show Today's numbers on first
-    // visit / hard refresh without opening +EV or Odds.
-    featuredSports: allFeatured,
-    eventSports: isFull ? allFeatured : promoEvents,
+    featuredSports: sports,
+    eventSports: sports,
     eventSince: isFull ? null : new Date(now.getTime() - lookbackMs).toISOString(),
     futures: isFull,
     futuresKeys: isFull ? [...(futuresKeys || [])] : [],
@@ -47,21 +44,10 @@ export function shouldRunEvScan(mode) {
   return mode === "full";
 }
 
-// Header +EV slate. Promo hard-refresh uses this against the promo board so
-// the three StatCards populate without waiting for a full-board fetch.
 export const DEFAULT_EV_DATE_RANGE = "today";
 
-export function evHeaderSlateLabel(dateRange = DEFAULT_EV_DATE_RANGE) {
-  return dateRange === "today" ? "today's slate" : "all sports & books";
-}
-
-export function shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded }) {
-  return !fullBoardLoaded && !!promoLoaded;
-}
-
-export function selectEvScanView({ fullBoardLoaded, liveEvScan, cachedEvScan, promoHeaderScan }) {
-  if (fullBoardLoaded) return liveEvScan || cachedEvScan || null;
-  return liveEvScan || cachedEvScan || promoHeaderScan || null;
+export function selectEvScanView({ liveEvScan, cachedEvScan }) {
+  return liveEvScan || cachedEvScan || null;
 }
 
 export function evScanFromLegs(allEvLegs, calcEV) {
@@ -109,32 +95,3 @@ export async function queryOddsCaches(client, plan) {
   };
 }
 
-export function evHeaderShowLoading({
-  fullBoardLoaded,
-  fullBoardLoading,
-  promoLoaded,
-  promoLoading,
-  activeTab,
-} = {}) {
-  const initialOddsInFlight = !fullBoardLoaded && !promoLoaded && !!promoLoading;
-  const fullBoardInFlight = !!fullBoardLoading && (activeTab === "ev" || activeTab === "odds");
-  return initialOddsInFlight || fullBoardInFlight;
-}
-
-export function evHeaderValues({ evScan, showLoading, dateRange = DEFAULT_EV_DATE_RANGE }) {
-  const slateSub = evHeaderSlateLabel(dateRange);
-  if (showLoading) {
-    return { total: "...", plusEv: "...", bestValue: "...", bestSub: "", slateSub };
-  }
-  if (!evScan) {
-    return { total: "—", plusEv: "—", bestValue: "—", bestSub: "", slateSub };
-  }
-  const best = evScan.evBets[0];
-  return {
-    total: evScan.allEvLegs.length,
-    plusEv: evScan.positiveEV.length,
-    bestValue: best ? `+$${best.ev.toFixed(2)}` : "--",
-    bestSub: best ? best.name : "",
-    slateSub,
-  };
-}
