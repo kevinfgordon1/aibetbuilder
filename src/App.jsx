@@ -147,7 +147,7 @@ const PARLAY_LEG_CAP = 200;
 // Fallback stake when the debounced amount is 0/empty. Stake-only tweaks
 // rescale a cached scan — they do not re-run findTopParlays.
 const PROMO_SCAN_STAKE = 100;
-const PROMO_SCAN_DEBOUNCE_MS = 200;
+const PROMO_SCAN_DEBOUNCE_MS = 150;
 
 function isWithinDateRange(commence_time, range) {
   const now = new Date();
