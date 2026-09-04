@@ -7,6 +7,8 @@
 // Today / 24h / 7d stay one page. Month / All time page only after that chip
 // is selected. Tiles use head counts (same window + venue + beat-fill).
 // Legs cell is a per-leg Fair / Kalshi / Poly breakdown plus sport + event date.
+// Manual Refresh only — do not poll. Row pull is a slim column list; date
+// windows filter filled_at (index: status, filled_at DESC).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
@@ -196,7 +198,7 @@ export function UnhedgedBlotter({
             className="chip btn"
             disabled={!!refreshing || !!paging || !loaded}
             aria-busy={!!refreshing || !!paging}
-            title="Re-fetch the filled tape. Does not reload the app. Today / 24h / 7d stay one page."
+            title="Re-fetch the filled tape. Manual only — this page does not auto-refresh. Does not reload the app. Today / 24h / 7d stay one page."
             onClick={onRefresh}
           >
             {unhedgedRefreshLabel(refreshing || paging)}
@@ -380,11 +382,8 @@ export default function UnhedgedTape({ user }) {
 
   useEffect(() => { reloadRows(); }, [reloadRows]);
   useEffect(() => { reloadCounts(); }, [reloadCounts]);
-  useEffect(() => {
-    if (!owner || missingTable || unhedgedDateRangePages(dateRange)) return undefined;
-    const t = setInterval(() => { reloadRows(); reloadCounts(); }, 20000);
-    return () => clearInterval(t);
-  }, [reloadRows, reloadCounts, owner, missingTable, dateRange]);
+  // Manual Refresh only. Do not poll: public.unhedged_rfqs has millions of
+  // seen rows and a 20s fetch+count was melting Today (~1.5k filled).
 
   const rows = useMemo(() => visibleUnhedgedRows(raw), [raw]);
 
