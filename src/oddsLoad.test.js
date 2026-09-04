@@ -13,6 +13,11 @@ import {
   promoNeedsReload,
   queryOddsCaches,
   evHeaderValues,
+  DEFAULT_EV_DATE_RANGE,
+  evHeaderSlateLabel,
+  shouldComputePromoHeaderScan,
+  selectEvScanView,
+  evScanFromLegs,
 } from "./oddsLoad.js";
 import { TRUSTED_BOOK_KEYS, SPORT_KEYS } from "../lib/promo-ev.js";
 
@@ -186,11 +191,18 @@ function fullPlan() {
 
 // ── Header stats: snapshot or em-dash, never a fake 0 from a skipped scan
 {
+  assert.equal(DEFAULT_EV_DATE_RANGE, "today");
+  assert.equal(evHeaderSlateLabel("today"), "today's slate");
+  assert.equal(evHeaderSlateLabel("any"), "all sports & books");
+  assert.equal(evHeaderSlateLabel("24h"), "all sports & books");
   assert.deepEqual(evHeaderValues({ evScan: null, showLoading: false }), {
-    total: "—", plusEv: "—", bestValue: "—", bestSub: "",
+    total: "—", plusEv: "—", bestValue: "—", bestSub: "", slateSub: "today's slate",
   });
   assert.deepEqual(evHeaderValues({ evScan: null, showLoading: true }), {
-    total: "...", plusEv: "...", bestValue: "...", bestSub: "",
+    total: "...", plusEv: "...", bestValue: "...", bestSub: "", slateSub: "today's slate",
+  });
+  assert.deepEqual(evHeaderValues({ evScan: null, showLoading: false, dateRange: "any" }), {
+    total: "—", plusEv: "—", bestValue: "—", bestSub: "", slateSub: "all sports & books",
   });
   const scan = {
     allEvLegs: [{}, {}, {}],
@@ -198,8 +210,51 @@ function fullPlan() {
     positiveEV: [{}],
   };
   assert.deepEqual(evHeaderValues({ evScan: scan, showLoading: false }), {
-    total: 3, plusEv: 1, bestValue: "+$4.20", bestSub: "Yankees ML",
+    total: 3, plusEv: 1, bestValue: "+$4.20", bestSub: "Yankees ML", slateSub: "today's slate",
   });
+}
+
+// ── Promo-board header scan until full board is loaded
+{
+  assert.equal(shouldComputePromoHeaderScan({ fullBoardLoaded: false, promoLoaded: true }), true);
+  assert.equal(shouldComputePromoHeaderScan({ fullBoardLoaded: false, promoLoaded: false }), false);
+  assert.equal(shouldComputePromoHeaderScan({ fullBoardLoaded: true, promoLoaded: true }), false);
+
+  const promoScan = { allEvLegs: [1], evBets: [{ ev: 1, name: "Promo" }], positiveEV: [] };
+  const fullScan = { allEvLegs: [1, 2], evBets: [{ ev: 9, name: "Full" }], positiveEV: [{}] };
+  assert.equal(
+    selectEvScanView({ fullBoardLoaded: false, liveEvScan: null, cachedEvScan: null, promoHeaderScan: promoScan }),
+    promoScan,
+  );
+  assert.equal(
+    selectEvScanView({ fullBoardLoaded: true, liveEvScan: fullScan, cachedEvScan: null, promoHeaderScan: promoScan }),
+    fullScan,
+  );
+  assert.equal(
+    selectEvScanView({ fullBoardLoaded: true, liveEvScan: null, cachedEvScan: fullScan, promoHeaderScan: promoScan }),
+    fullScan,
+  );
+  assert.equal(
+    selectEvScanView({ fullBoardLoaded: true, liveEvScan: null, cachedEvScan: null, promoHeaderScan: promoScan }),
+    null,
+  );
+}
+
+// ── evScanFromLegs ranks by EV and counts +EV
+{
+  const legs = [
+    { name: "A", dk: 100, bestOpp: -110 },
+    { name: "B", dk: 120, bestOpp: -110 },
+  ];
+  const out = evScanFromLegs(legs, (dk, opp) => ({
+    prob: 0.5,
+    ev: dk === 120 ? 3 : -1,
+    profit: dk,
+  }));
+  assert.equal(out.allEvLegs.length, 2);
+  assert.equal(out.evBets[0].name, "B");
+  assert.equal(out.evBets[0].ev, 3);
+  assert.equal(out.positiveEV.length, 1);
 }
 
 // ── sportKeysForPromoLoad keeps featured order
@@ -231,7 +286,11 @@ function fullPlan() {
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /from "\.\/oddsLoad\.js"/);
   assert.match(app, /buildAllLegsForBook\(promoOddsData,/);
-  assert.match(app, /if \(!shouldRunEvScan\(loadModeForTab\(activeTab\)\)\) return null;\s*const allEvLegs = buildAllLegsAllBooks\(allOddsData,/);
+  assert.match(app, /if \(!shouldRunEvScan\(loadModeForTab\(activeTab\)\)\) return null;/);
+  assert.match(app, /buildAllLegsAllBooks\(allOddsData,/);
+  assert.match(app, /buildAllLegsAllBooks\(promoBoardData,/);
+  assert.match(app, /shouldComputePromoHeaderScan\(\{ fullBoardLoaded, promoLoaded \}\)/);
+  assert.match(app, /selectEvScanView\(/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);
@@ -242,7 +301,9 @@ function fullPlan() {
   assert.match(app, /const DEFAULT_PROMO_DATE_RANGE = "7d"/);
   assert.match(app, /\[promoDateRange, setPromoDateRange\] = useState\(DEFAULT_PROMO_DATE_RANGE\)/);
   assert.match(app, /\[promoSports, setPromoSports\] = useState\(new Set\(DEFAULT_PROMO_SPORT_KEYS\)\)/);
-  assert.match(app, /\[evDateRange, setEvDateRange\] = useState\("any"\)/);
+  assert.match(app, /\[evDateRange, setEvDateRange\] = useState\(DEFAULT_EV_DATE_RANGE\)/);
+  assert.doesNotMatch(app, /\[evDateRange, setEvDateRange\] = useState\("any"\)/);
+  assert.match(app, /sub=\{evHeader\.slateSub\}/);
   assert.match(app, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
 }
 

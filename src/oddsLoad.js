@@ -44,6 +44,32 @@ export function shouldRunEvScan(mode) {
   return mode === "full";
 }
 
+// Header +EV slate. Promo hard-refresh uses this against the promo board so
+// the three StatCards populate without waiting for a full-board fetch.
+export const DEFAULT_EV_DATE_RANGE = "today";
+
+export function evHeaderSlateLabel(dateRange = DEFAULT_EV_DATE_RANGE) {
+  return dateRange === "today" ? "today's slate" : "all sports & books";
+}
+
+export function shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded }) {
+  return !fullBoardLoaded && !!promoLoaded;
+}
+
+export function selectEvScanView({ fullBoardLoaded, liveEvScan, cachedEvScan, promoHeaderScan }) {
+  if (fullBoardLoaded) return liveEvScan || cachedEvScan || null;
+  return liveEvScan || cachedEvScan || promoHeaderScan || null;
+}
+
+export function evScanFromLegs(allEvLegs, calcEV) {
+  const legs = allEvLegs || [];
+  const evBets = legs.map((l) => {
+    const { prob, ev, profit } = calcEV(l.dk, l.bestOpp);
+    return { ...l, prob, ev, profit };
+  }).sort((a, b) => b.ev - a.ev);
+  return { allEvLegs: legs, evBets, positiveEV: evBets.filter((b) => b.ev > 0) };
+}
+
 export function shouldFetchFullBoard({ tab, fullBoardLoaded, forceRefresh }) {
   if (tab !== "ev" && tab !== "odds") return false;
   if (forceRefresh) return true;
@@ -80,12 +106,13 @@ export async function queryOddsCaches(client, plan) {
   };
 }
 
-export function evHeaderValues({ evScan, showLoading }) {
+export function evHeaderValues({ evScan, showLoading, dateRange = DEFAULT_EV_DATE_RANGE }) {
+  const slateSub = evHeaderSlateLabel(dateRange);
   if (showLoading) {
-    return { total: "...", plusEv: "...", bestValue: "...", bestSub: "" };
+    return { total: "...", plusEv: "...", bestValue: "...", bestSub: "", slateSub };
   }
   if (!evScan) {
-    return { total: "—", plusEv: "—", bestValue: "—", bestSub: "" };
+    return { total: "—", plusEv: "—", bestValue: "—", bestSub: "", slateSub };
   }
   const best = evScan.evBets[0];
   return {
@@ -93,5 +120,6 @@ export function evHeaderValues({ evScan, showLoading }) {
     plusEv: evScan.positiveEV.length,
     bestValue: best ? `+$${best.ev.toFixed(2)}` : "--",
     bestSub: best ? best.name : "",
+    slateSub,
   };
 }
