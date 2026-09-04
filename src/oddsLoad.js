@@ -1,5 +1,6 @@
 // Promo Builder vs +EV / Odds Board load plans.
-// Promo fetches selected featured sports only (no futures, no 20k-leg EV scan).
+// Promo fetches all featured boards (header Today slate on first visit / hard
+// refresh) plus selected-sport event odds. No futures, no +EV-tab 20k-leg scan.
 
 export const EVENT_ODDS_LOOKBACK_MS = 30 * 60 * 1000;
 
@@ -26,13 +27,15 @@ export function buildOddsQueryPlan({
   lookbackMs = EVENT_ODDS_LOOKBACK_MS,
 } = {}) {
   const isFull = mode === "full";
-  const sports = isFull
-    ? [...(featuredSportKeys || [])]
-    : sportKeysForPromoLoad(promoSports, featuredSportKeys);
+  const allFeatured = [...(featuredSportKeys || [])];
+  const promoEvents = sportKeysForPromoLoad(promoSports, featuredSportKeys);
   return {
     mode: isFull ? "full" : "promo",
-    featuredSports: sports,
-    eventSports: sports,
+    // Promo still skips futures / the +EV-tab scan, but featured boards are
+    // the full slate so header StatCards can show Today's numbers on first
+    // visit / hard refresh without opening +EV or Odds.
+    featuredSports: allFeatured,
+    eventSports: isFull ? allFeatured : promoEvents,
     eventSince: isFull ? null : new Date(now.getTime() - lookbackMs).toISOString(),
     futures: isFull,
     futuresKeys: isFull ? [...(futuresKeys || [])] : [],
@@ -104,6 +107,18 @@ export async function queryOddsCaches(client, plan) {
     events: eventRes,
     futures: futuresRes || { data: [], error: null },
   };
+}
+
+export function evHeaderShowLoading({
+  fullBoardLoaded,
+  fullBoardLoading,
+  promoLoaded,
+  promoLoading,
+  activeTab,
+} = {}) {
+  const initialOddsInFlight = !fullBoardLoaded && !promoLoaded && !!promoLoading;
+  const fullBoardInFlight = !!fullBoardLoading && (activeTab === "ev" || activeTab === "odds");
+  return initialOddsInFlight || fullBoardInFlight;
 }
 
 export function evHeaderValues({ evScan, showLoading, dateRange = DEFAULT_EV_DATE_RANGE }) {
