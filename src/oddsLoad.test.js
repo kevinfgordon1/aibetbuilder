@@ -13,6 +13,7 @@ import {
   promoNeedsReload,
   queryOddsCaches,
   evHeaderValues,
+  evHeaderShowLoading,
   DEFAULT_EV_DATE_RANGE,
   evHeaderSlateLabel,
   shouldComputePromoHeaderScan,
@@ -80,10 +81,10 @@ function fullPlan() {
   assert.equal(loadModeForTab("odds"), "full");
 }
 
-// ── Promo-only plan: selected sports, no futures, no EV scan
+// ── Promo-only plan: all featured boards (header Today slate), selected events, no futures / +EV-tab scan
 {
   const plan = promoPlan(new Set(["baseball_mlb"]));
-  assert.deepEqual(plan.featuredSports, ["baseball_mlb"]);
+  assert.deepEqual(plan.featuredSports, SPORT_KEYS);
   assert.deepEqual(plan.eventSports, ["baseball_mlb"]);
   assert.equal(plan.futures, false);
   assert.deepEqual(plan.futuresKeys, []);
@@ -93,7 +94,7 @@ function fullPlan() {
 
   let evCalled = false;
   if (plan.computeEv) evCalled = true;
-  assert.equal(evCalled, false, "promo-only load path does not call buildAllLegsAllBooks");
+  assert.equal(evCalled, false, "promo-only load path does not run the full-board +EV-tab scan");
 }
 
 // ── All 6 featured sports still skip futures
@@ -104,11 +105,12 @@ function fullPlan() {
   assert.equal(plan.computeEv, false);
 }
 
-// ── Promo sports subset
+// ── Promo events stay scoped; featured boards stay the full slate for header cards
 {
   const plan = promoPlan(new Set(["baseball_mlb", "americanfootball_nfl"]));
-  assert.deepEqual(plan.featuredSports, ["baseball_mlb", "americanfootball_nfl"]);
-  assert.ok(!plan.featuredSports.includes("basketball_nba"));
+  assert.deepEqual(plan.eventSports, ["baseball_mlb", "americanfootball_nfl"]);
+  assert.ok(!plan.eventSports.includes("basketball_nba"));
+  assert.ok(plan.featuredSports.includes("basketball_nba"));
 }
 
 // ── Full board plan matches today's all-sports + futures + EV
@@ -128,7 +130,7 @@ function fullPlan() {
   await queryOddsCaches(client, promoPlan(new Set(["baseball_mlb"])));
   assert.equal(client.calls.length, 2);
   assert.equal(client.calls[0].table, "odds_cache");
-  assert.deepEqual(client.calls[0].in, { col: "sport", vals: ["baseball_mlb"] });
+  assert.deepEqual(client.calls[0].in, { col: "sport", vals: SPORT_KEYS });
   assert.equal(client.calls[1].table, "event_odds_cache");
   assert.deepEqual(client.calls[1].in, { col: "sport", vals: ["baseball_mlb"] });
   assert.equal(client.calls[1].gte.col, "commence_time");
@@ -136,14 +138,13 @@ function fullPlan() {
   assert.ok(!client.calls.some((c) => c.in && FUTURES_KEYS.some((k) => c.in.vals.includes(k))));
 }
 
-// ── queryOddsCaches: promo subset queries only those sport keys
+// ── queryOddsCaches: promo events stay scoped; featured is the full slate
 {
   const client = createMockClient();
   const sports = ["basketball_nba", "icehockey_nhl"];
   await queryOddsCaches(client, promoPlan(new Set(sports)));
-  for (const call of client.calls) {
-    assert.deepEqual(call.in.vals, sports);
-  }
+  assert.deepEqual(client.calls[0].in.vals, SPORT_KEYS);
+  assert.deepEqual(client.calls[1].in.vals, sports);
 }
 
 // ── queryOddsCaches: full board includes futures, no commence_time floor
@@ -257,6 +258,37 @@ function fullPlan() {
   assert.equal(out.positiveEV.length, 1);
 }
 
+// ── First visit / hard refresh on Promo: "..." only while odds fetch, then real numbers
+{
+  assert.equal(evHeaderShowLoading({
+    fullBoardLoaded: false, fullBoardLoading: false, promoLoaded: false, promoLoading: true, activeTab: "promo",
+  }), true);
+  assert.equal(evHeaderShowLoading({
+    fullBoardLoaded: false, fullBoardLoading: false, promoLoaded: true, promoLoading: false, activeTab: "promo",
+  }), false);
+  assert.equal(shouldFetchFullBoard({ tab: "promo", fullBoardLoaded: false, forceRefresh: false }), false);
+
+  const promoScan = evScanFromLegs(
+    [
+      { name: "Yankees ML", dk: 110, bestOpp: -120 },
+      { name: "Cubs ML", dk: -105, bestOpp: 100 },
+    ],
+    (dk) => ({ prob: 0.5, ev: dk === 110 ? 6.5 : -0.4, profit: 100 }),
+  );
+  const view = selectEvScanView({
+    fullBoardLoaded: false, liveEvScan: null, cachedEvScan: null, promoHeaderScan: promoScan,
+  });
+  const header = evHeaderValues({ evScan: view, showLoading: false, dateRange: DEFAULT_EV_DATE_RANGE });
+  assert.equal(typeof header.total, "number");
+  assert.equal(typeof header.plusEv, "number");
+  assert.notEqual(header.total, "—");
+  assert.notEqual(header.plusEv, "—");
+  assert.notEqual(header.bestValue, "—");
+  assert.match(header.bestValue, /^\+\$/);
+  assert.equal(header.bestSub, "Yankees ML");
+  assert.equal(header.slateSub, "today's slate");
+}
+
 // ── sportKeysForPromoLoad keeps featured order
 {
   assert.deepEqual(sportKeysForPromoLoad(new Set(["icehockey_nhl", "baseball_mlb"]), SPORT_KEYS), [
@@ -291,6 +323,8 @@ function fullPlan() {
   assert.match(app, /buildAllLegsAllBooks\(promoBoardData,/);
   assert.match(app, /shouldComputePromoHeaderScan\(\{ fullBoardLoaded, promoLoaded \}\)/);
   assert.match(app, /selectEvScanView\(/);
+  assert.match(app, /evHeaderShowLoading\(/);
+  assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);

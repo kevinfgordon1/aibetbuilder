@@ -21,6 +21,7 @@ import {
   shouldRunEvScan,
   promoNeedsReload,
   evHeaderValues,
+  evHeaderShowLoading,
   DEFAULT_EV_DATE_RANGE,
   shouldComputePromoHeaderScan,
   selectEvScanView,
@@ -1395,7 +1396,7 @@ export default function App() {
     const eventRows = events.data || [];
     setOddsSource({ featured: featuredRows, events: eventRows });
     setPromoBoardData(applyTransformed(featuredRows, eventRows));
-    setPromoLoadedSports(new Set(plan.featuredSports));
+    setPromoLoadedSports(new Set(plan.eventSports));
     setFetchedAt(featuredRows[0]?.fetched_at);
     setPromoLoaded(true);
     setPromoLoading(false);
@@ -1509,9 +1510,13 @@ export default function App() {
   const evHeader = evHeaderValues({
     evScan: evScanView,
     dateRange: evDateRange,
-    showLoading:
-      (fullBoardLoading && (activeTab === "ev" || activeTab === "odds"))
-      || (!fullBoardLoaded && promoLoading && !promoLoaded),
+    showLoading: evHeaderShowLoading({
+      fullBoardLoaded,
+      fullBoardLoading,
+      promoLoaded,
+      promoLoading,
+      activeTab,
+    }),
   });
 
   // +EV Bets tab — single-book filter
