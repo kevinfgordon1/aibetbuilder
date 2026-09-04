@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -30,7 +30,6 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /rescaleParlaysForStake/);
   assert.match(app, /const promoLegs = useMemo\(/);
   assert.match(app, /const parlayLegPool = useMemo\(/);
-  assert.match(app, /const scannedBoostParlays = useMemo\(/);
   assert.match(app, /const topParlays = useMemo\(/);
   assert.match(app, /const topNoSweats = useMemo\(/);
   assert.match(app, /const scannedFreeBetConversions = useMemo\(/);
@@ -40,6 +39,20 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.doesNotMatch(resetDeps[1], /\bstake\b/);
   assert.match(resetDeps[1], /promoBook/);
   assert.match(resetDeps[1], /numLegs/);
+}
+
+// ── Heavy scan is async + chunked, never inside useMemo / render
+{
+  assert.match(app, /findTopParlaysChunked/);
+  assert.match(app, /scanning…/);
+  assert.match(app, /setPromoScanBusy\(true\)/);
+  assert.doesNotMatch(app, /const scannedBoostParlays = useMemo/);
+  assert.doesNotMatch(app, /const scannedNoSweats = useMemo/);
+  const memoBlocks = [...app.matchAll(/useMemo\(\(\) => \{([\s\S]*?)\}, \[/g)].map((m) => m[1]);
+  for (const block of memoBlocks) {
+    assert.doesNotMatch(block, /findTopParlays\(/, "findTopParlays must not run inside useMemo");
+    assert.doesNotMatch(block, /findTopParlaysChunked\(/, "chunked scan must not run inside useMemo");
+  }
 }
 
 // ── Boost EV / profit scale linearly with stake
@@ -112,6 +125,78 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.equal(rescaleParlaysForStake(parlays, 100, 100), parlays);
   assert.deepEqual(rescaleParlaysForStake([], 100, 50), []);
   assert.equal(rescaleParlaysForStake(parlays, 0, 50), parlays);
+}
+
+function mkLeg(name, game, dk, bestOpp) {
+  return {
+    name, dk, bestOpp, game,
+    commence_time: new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString(),
+    sport: "baseball_mlb",
+  };
+}
+
+function namesOf(parlays) {
+  return parlays.map((p) => p.legs.map((l) => l.name).sort());
+}
+
+// ── Chunked scan matches sync findTopParlays ranking (3-leg + 4-leg grow)
+{
+  const legs = [
+    mkLeg("A ML", "A @ B", 150, 100),
+    mkLeg("C ML", "C @ D", 140, 105),
+    mkLeg("E ML", "E @ F", 120, 110),
+    mkLeg("G ML", "G @ H", 110, 120),
+    mkLeg("I ML", "I @ J", 105, 115),
+    mkLeg("K ML", "K @ L", -105, 125),
+  ];
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  const sync3 = findTopParlays(legs, 3, 30, 100, 10);
+  const async3 = await findTopParlaysChunked(legs, 3, calc, { maxResults: 10, yieldMs: 0 });
+  assert.deepEqual(namesOf(async3), namesOf(sync3));
+  for (let i = 0; i < sync3.length; i++) {
+    assert.ok(Math.abs(async3[i].ev - sync3[i].ev) < 1e-9);
+  }
+  const sync4 = findTopParlays(legs, 4, 30, 100, 5);
+  const async4 = await findTopParlaysChunked(legs, 4, calc, { maxResults: 5, yieldMs: 0 });
+  assert.deepEqual(namesOf(async4), namesOf(sync4));
+}
+
+// ── Yields during a 3-leg scan; abort stops work
+{
+  const legs = Array.from({ length: 16 }, (_, i) => mkLeg(`L${i}`, `G${i} @ X`, 100 + i, -110));
+  let yields = 0;
+  const calc = (ls) => calcParlayEV(ls, 0, 100);
+  const out = await findTopParlaysChunked(legs, 3, calc, {
+    maxResults: 8,
+    yieldMs: 0,
+    yieldFn: async () => { yields++; },
+  });
+  assert.ok(out.length >= 1);
+  assert.ok(yields >= 1, "chunked scan must yield to the event loop");
+
+  const ac = new AbortController();
+  ac.abort();
+  await assert.rejects(
+    () => findTopParlaysChunked(legs, 3, calc, { signal: ac.signal, yieldMs: 0 }),
+    (err) => err.name === "AbortError",
+  );
+}
+
+// ── Chunked 3-leg scan keeps the event loop moving (no multi-second stall)
+{
+  const legs = Array.from({ length: 36 }, (_, i) => mkLeg(`L${i}`, `G${i} @ X`, 110 + i, -110));
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  let maxGap = 0;
+  let last = Date.now();
+  const ping = setInterval(() => {
+    const now = Date.now();
+    maxGap = Math.max(maxGap, now - last);
+    last = now;
+  }, 5);
+  const ranked = await findTopParlaysChunked(legs, 3, calc, { maxResults: 10, yieldMs: 8 });
+  clearInterval(ping);
+  assert.equal(ranked.length, 10);
+  assert.ok(maxGap < 120, `event-loop stall was ${maxGap}ms`);
 }
 
 console.log("promoParlayScan.test.js: ok");
