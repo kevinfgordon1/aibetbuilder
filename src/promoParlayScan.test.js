@@ -3,13 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
 const { calcParlayEV, findTopParlays } = require("../lib/promo-ev.js");
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
+const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
 
 // ── App.jsx keeps enumerate-then-sort findTopParlays (heap declined)
 {
@@ -20,6 +21,12 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /return results\.slice\(0, maxResults\)/);
   assert.doesNotMatch(app, /EvMinHeap|scanParlayCombos/);
   assert.match(app, /const PARLAY_LEG_CAP = 200/);
+  // Chunked React path streams top-k so Safari does not allocate C(n,3).
+  assert.match(scanSrc, /considerTopByEv/);
+  assert.match(scanSrc, /finalizeTopByEv/);
+  assert.match(scanSrc, /shouldTake/);
+  assert.match(scanSrc, /preferTimerYield/);
+  assert.doesNotMatch(scanSrc, /results\.push\(\{ legs: \[list\[i\], list\[j\], list\[k\]\]/);
 }
 
 // ── Debounce + memo + page-reset deps (no boost/stake churn)
@@ -33,12 +40,7 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /const parlayLegPool = useMemo\(/);
   assert.match(app, /const topParlays = useMemo\(/);
   assert.match(app, /const topNoSweats = useMemo\(/);
-  assert.match(app, /calcFreeBetParlayEV/);
-  assert.doesNotMatch(app, /const scannedFreeBetConversions = useMemo/);
-  assert.match(app, /const topFreeBets = useMemo\(/);
-  assert.match(app, /const topFreeBetsWithLock = useMemo\(/);
-  assert.match(app, /promoScanInputKey/);
-  assert.match(app, /promoType === "freebet"/);
+  assert.match(app, /const scannedFreeBetConversions = useMemo\(/);
   const resetDeps = app.match(/setExpandedFreeBet\(null\);\s*\}, \[([^\]]+)\]/);
   assert.ok(resetDeps, "promo page reset effect");
   assert.doesNotMatch(resetDeps[1], /\bboostPct\b/);
@@ -70,8 +72,6 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /scanCompletedForCurrent/);
   assert.match(app, /boostEmptyState === "no-results"/);
   assert.match(app, /boostEmptyState === "scanning"/);
-  assert.match(app, /freeBetEmptyState === "no-results"/);
-  assert.match(app, /freeBetEmptyState === "scanning"/);
   assert.doesNotMatch(
     app,
     /topParlaysWithHedge\.length === 0 && !promoScanBusy/,
@@ -81,11 +81,6 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
     app,
     /topNoSweatsWithLock\.length === 0 && !promoScanBusy/,
     "No Results must not key off busy=false + empty nosweats",
-  );
-  assert.doesNotMatch(
-    app,
-    /topFreeBetsWithLock\.length === 0 && !promoScanBusy/,
-    "No Results must not key off busy=false + empty freebets",
   );
   assert.match(app, /if \(!promoLoaded\) \{\s*setPromoScanBusy\(false\);\s*return;/);
   assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
@@ -299,6 +294,52 @@ function namesOf(parlays) {
   clearInterval(ping);
   assert.equal(ranked.length, 10);
   assert.ok(maxGap < 120, `event-loop stall was ${maxGap}ms`);
+}
+
+// ── Streaming top-k stays bounded and matches full-sort top-k
+{
+  const heap = [];
+  assert.equal(shouldTake(heap, 1, 3), true);
+  considerTopByEv(heap, { ev: 1 }, 3);
+  considerTopByEv(heap, { ev: 5 }, 3);
+  considerTopByEv(heap, { ev: 3 }, 3);
+  assert.equal(shouldTake(heap, heap[0].ev, 3), false);
+  assert.equal(shouldTake(heap, heap[0].ev + 0.01, 3), true);
+}
+
+{
+  const heap = [];
+  for (let i = 0; i < 5000; i++) {
+    considerTopByEv(heap, { ev: i, id: i }, 8);
+    assert.ok(heap.length <= 8, "top-k heap must never grow past maxResults");
+  }
+  const top = finalizeTopByEv(heap);
+  assert.equal(top.length, 8);
+  assert.deepEqual(top.map((x) => x.id), [4999, 4998, 4997, 4996, 4995, 4994, 4993, 4992]);
+}
+
+{
+  const legs = Array.from({ length: 28 }, (_, i) => mkLeg(`L${i}`, `G${i} @ X`, 100 + i * 3, -110 + (i % 7)));
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  const sync = findTopParlays(legs, 3, 30, 100, 12);
+  const streamed = await findTopParlaysChunked(legs, 3, calc, { maxResults: 12, yieldMs: 0 });
+  assert.deepEqual(namesOf(streamed), namesOf(sync));
+  for (let i = 0; i < sync.length; i++) {
+    assert.ok(Math.abs(streamed[i].ev - sync[i].ev) < 1e-9);
+  }
+}
+
+{
+  assert.equal(preferTimerYield(), false, "Node / no UA → timer yield off");
+  assert.equal(preferTimerYield({
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  }), true, "iPhone Safari uses timer yield");
+  assert.equal(preferTimerYield({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+  }), true, "desktop Safari uses timer yield");
+  assert.equal(preferTimerYield({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  }), false, "Chrome stays on MessageChannel");
 }
 
 console.log("promoParlayScan.test.js: ok");
