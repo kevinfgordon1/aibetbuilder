@@ -1661,6 +1661,16 @@ export function unhedgedRefreshLabel(refreshing) {
   return refreshing ? "Refreshing…" : "Refresh";
 }
 
+// Blotter card body. Any in-flight row refetch (initial, venue, date) is
+// loading — never the empty "No … RFQs" copy. paging is the fetch flag.
+export function unhedgedBlotterListKind({ loaded, paging, missingTable, rowCount = 0, filteredCount = 0 } = {}) {
+  if (!loaded || paging) return "loading";
+  if (missingTable) return "missing";
+  if (!rowCount) return "empty";
+  if (!filteredCount) return "filtered-empty";
+  return "rows";
+}
+
 export function filterUnhedgedAnalytics(rows, { venue = "all", quoteBeatFill = false } = {}) {
   return filterUnhedgedRowsByQuoteBeat(filterUnhedgedRowsByVenue(rows, venue), quoteBeatFill);
 }
