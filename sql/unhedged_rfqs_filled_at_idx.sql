@@ -12,3 +12,13 @@
 
 CREATE INDEX IF NOT EXISTS unhedged_rfqs_status_filled_at_idx
   ON public.unhedged_rfqs (status, filled_at DESC);
+
+-- Optional companion for Requests mode (status=seen, created_at window).
+-- The site queries created_at when the Show chip is Requests. Apply in the
+-- SQL editor if Today/Requests is slow against a large seen population.
+--
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS unhedged_rfqs_status_created_at_idx
+--   ON public.unhedged_rfqs (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS unhedged_rfqs_status_created_at_idx
+  ON public.unhedged_rfqs (status, created_at DESC);

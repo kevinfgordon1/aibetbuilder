@@ -2,26 +2,32 @@
 // Combo-worker writes this table in a parallel PR. Column names may arrive
 // incrementally; pick known aliases and never invent a price.
 //
-// The page is filled-only: someone else matched on Kalshi/Poly. We are paper.
-// Default date chip is Today (America/New_York calendar day). Today / 24h / 7d
-// stay a single 1000-row page — do not walk Month or All time until that chip
-// is selected. Month / All time then paginate that window (1000-row PostgREST
-// pages). Tile counts use select(id, { count: "exact", head: true }) with the
-// same window / venue / beat-fill filters when PostgREST can express them —
-// never download-every-row-then-count, and never count seen rows. If the
-// status filter fails on a row fetch, client-filter filled as fallback. Count
-// / head paths keep status=filled — a missing status column is an error, not
-// a scan of millions of seen rows. Do not list seen / started / would_quote.
-// Never list live / in-game RFQs — not even paper. Hide skip_reason
-// game_started, status started, or any leg that already started when that
-// field exists. Venue and would-quote-beat-fill chips filter the fetched date
-// window on the client; they also re-run head counts. After combo-worker #40,
-// filled_at is tape tradeTs (often earlier) or null (never Date.now()).
-// Newest *display* activity is the latest of filled_at / updated_at /
-// created_at — a stale fill stamp must not bury a later write in TIME ET.
-// Date-window *queries* prefer filled_at alone so Postgres can use
-// (status, filled_at DESC); fall back to updated_at / created_at only when
-// filled_at is missing from the schema. See sql/unhedged_rfqs_filled_at_idx.sql.
+// Status-mode chips: Fills (status=filled) | Requests (status=seen) | All.
+// Default Fills — preserve the Kalshi filled tape. Polymarket defaults to
+// Requests (Poly filled=0; the API hides others’ quotes/tape — never invent
+// a fill). Requests are worker-persisted in-scope MLB/NFL ML RFQs. We are
+// paper. started / in-game stay hidden. Default date chip is Today
+// (America/New_York calendar day). Today / 24h / 7d stay a single 1000-row
+// page — do not walk Month or All time until that chip is selected. Month /
+// All time then paginate that window (1000-row PostgREST pages). Tile counts
+// use select(id, { count: "exact", head: true }) with the same window / venue
+// / status-mode / beat-fill filters when PostgREST can express them — never
+// download-every-row-then-count. Head paths never drop the status filter
+// (Fills=filled, Requests=seen) — a missing status column is an error, not
+// a scan of millions of other rows. If the status filter fails on a row
+// fetch, client-filter the selected mode as fallback. Never list live /
+// in-game RFQs — not even paper. Hide skip_reason game_started, status
+// started, or any leg that already started when that field exists. Venue
+// is also pushed server-side so a seen firehose on All venues cannot bury
+// Polymarket requests. Beat-fill only applies when a fill price exists
+// (requests therefore never pass). After combo-worker #40, filled_at is
+// tape tradeTs (often earlier) or null (never Date.now()). Fills TIME ET
+// is the latest of filled_at / updated_at / created_at — a stale fill stamp
+// must not bury a later write. Requests TIME ET is created_at (RFQ time).
+// Date-window *queries*: Fills prefer filled_at so Postgres can use
+// (status, filled_at DESC); Requests use created_at; All ORs both. Fall
+// back to updated_at / created_at only when filled_at is missing from the
+// schema. See sql/unhedged_rfqs_filled_at_idx.sql.
 //
 // Owner-only tab: do not scope this table by user_id. Combo-worker
 // buildUnhedgedRow / fill patches do not write user_id (repo migrations have
@@ -30,16 +36,18 @@
 // Missing-column retry only helps when the column does not exist. The tab is
 // already owner-gated in the UI. Do not invent user_ids client-side.
 //
-// Today membership for the query is filled_at in the ET day. Display TIME
-// still uses the latest of filled_at / updated_at / created_at. If filled_at
-// is missing from the schema, fall back to updated_at / created_at (OR) and
+// Today membership: Fills use filled_at in the ET day; Requests use
+// created_at. Display TIME for fills still uses the latest of filled_at /
+// updated_at / created_at. Requests display created_at. If filled_at is
+// missing from the schema, fall back to updated_at / created_at (OR) and
 // retry — do not keep filtering a nonexistent column. Combo-worker fill
 // patches should set filled_at; a stale tape tradeTs can hide a late write
 // from Today's cheap filled_at window (Refresh still shows All time).
 //
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
-// only — the tape does not show those). Tape is MLB + NFL moneylines only.
+// only). Requests mode lists those seen rows (would-quote column). Tape
+// is MLB + NFL moneylines only.
 // Legs: spoken name via formatUnhedgedLegName. Per-leg invert fair and
 // venue opponent Americans live on a breakdown row — never crammed onto
 // the name, never copied from the row parlay our_fair_american.
@@ -76,13 +84,16 @@ export const UNHEDGED_BLOTTER_COLUMNS = [
   "our_quote_american",
   "our_fair_american",
   "fill_american",
+  "taker_american",
   "contracts",
   "cash_size",
 ];
 export const UNHEDGED_BLOTTER_SELECT = UNHEDGED_BLOTTER_COLUMNS.join(",");
-// Cheap date window: filled_at only (indexable). Fallback when that column
-// is missing from the schema — not when a row's filled_at is stale.
+// Cheap date window: Fills use filled_at (indexable). Requests use
+// created_at. Fallback when the preferred column is missing from the
+// schema — not when a row's stamp is stale.
 export const UNHEDGED_DATE_COLS = ["filled_at"];
+export const UNHEDGED_REQUEST_DATE_COLS = ["created_at"];
 export const UNHEDGED_DATE_FALLBACK_COLS = ["updated_at", "created_at"];
 // Manual Refresh only. A 20s poll of fetch+counts was melting Today against
 // millions of seen rows. Do not auto-refresh in the background.
@@ -99,6 +110,13 @@ export const UNHEDGED_DATE_FILTERS = [
   { key: "all", label: "All time" },
 ];
 export const UNHEDGED_DATE_KEYS = ["today", "24h", "7d", "month", "all"];
+export const UNHEDGED_STATUS_MODES = ["fills", "requests", "all"];
+export const UNHEDGED_DEFAULT_STATUS_MODE = "fills";
+export const UNHEDGED_STATUS_FILTERS = [
+  { key: "fills", label: "Fills" },
+  { key: "requests", label: "Requests" },
+  { key: "all", label: "All" },
+];
 
 const TIME_KEYS = [
   "created_at",
@@ -496,6 +514,17 @@ export function rowTime(row) {
   return unhedgedActivityTs(row) || pickFirst(row, TIME_KEYS);
 }
 
+// Fills keep the activity clock (stale tape tradeTs must not bury a later
+// write). Requests use created_at — the RFQ time, not a later price write.
+export function unhedgedDisplayTs(row) {
+  if (!row) return null;
+  const status = row.status || rowStatus(row);
+  if (status === "filled") return unhedgedActivityTs(row) || pickFirst(row, TIME_KEYS);
+  const created = row.createdAt || row.created_at;
+  if (created != null && created !== "") return created;
+  return unhedgedActivityTs(row) || pickFirst(row, TIME_KEYS);
+}
+
 export function formatEtTime(ts) {
   const ms = timeMs(ts);
   if (!ms) return "—";
@@ -581,6 +610,55 @@ export function normalizeUnhedgedDateRange(value) {
   return UNHEDGED_DEFAULT_DATE_RANGE;
 }
 
+export function normalizeStatusMode(value) {
+  const key = String(value == null ? "" : value).trim().toLowerCase();
+  if (key === "fills" || key === "filled" || key === "fill") return "fills";
+  if (key === "requests" || key === "request" || key === "seen") return "requests";
+  if (key === "all") return "all";
+  return UNHEDGED_DEFAULT_STATUS_MODE;
+}
+
+export function unhedgedStatusModeLabel(value) {
+  const key = normalizeStatusMode(value);
+  const hit = UNHEDGED_STATUS_FILTERS.find((f) => f.key === key);
+  return hit ? hit.label : "Fills";
+}
+
+// Fills stay the blotter default (Kalshi tape). Polymarket has no fill
+// prices from the venue, so that chip opens on Requests.
+export function defaultStatusModeForVenue(venue) {
+  return normalizeVenueFilter(venue) === "polymarket" ? "requests" : "fills";
+}
+
+// Worker persists in-scope RFQs as status=seen (even when priced).
+// started is live — never a Requests row. All = filled + seen.
+export function unhedgedStatusValues(mode) {
+  const key = normalizeStatusMode(mode);
+  if (key === "requests") return ["seen"];
+  if (key === "all") return ["filled", "seen"];
+  return ["filled"];
+}
+
+export function applyUnhedgedStatusFilter(q, mode) {
+  if (!q) return q;
+  const values = unhedgedStatusValues(mode);
+  if (values.length === 1) {
+    if (typeof q.eq === "function") return q.eq("status", values[0]);
+    return q;
+  }
+  if (typeof q.in === "function") return q.in("status", values);
+  if (typeof q.or === "function") return q.or(values.map((s) => `status.eq.${s}`).join(","));
+  if (typeof q.eq === "function") return q.eq("status", values[0]);
+  return q;
+}
+
+export function unhedgedDateColsForMode(mode) {
+  const key = normalizeStatusMode(mode);
+  if (key === "requests") return UNHEDGED_REQUEST_DATE_COLS.slice();
+  if (key === "all") return ["filled_at", "created_at"];
+  return UNHEDGED_DATE_COLS.slice();
+}
+
 // Month / All time are the only windows that walk past the first page.
 // Today / 24h / 7d stay a single pull so initial load and Refresh stay light.
 export function unhedgedDateRangePages(range) {
@@ -663,22 +741,41 @@ export function unhedgedVenueOrFilter(venue) {
   return null;
 }
 
-// Query/membership stamp: filled_at first. updated_at / created_at only when
-// filled_at is null (row-level) so a schema-fallback fetch still filters.
-export function unhedgedDateTs(row) {
+// Query/membership stamp. Fills: filled_at first. Requests: created_at.
+// All: fills use filled_at, requests use created_at. updated_at only when
+// the preferred stamp is null (row-level) so a schema-fallback fetch still
+// filters.
+export function unhedgedDateTs(row, mode = UNHEDGED_DEFAULT_STATUS_MODE) {
   if (!row) return null;
+  const key = normalizeStatusMode(mode);
   const filled = row.filled_at || row.filledAt;
-  if (filled != null && filled !== "") return filled;
   const updated = row.updated_at || row.updatedAt;
-  if (updated != null && updated !== "") return updated;
   const created = row.created_at || row.createdAt;
+  if (key === "requests") {
+    if (created != null && created !== "") return created;
+    if (updated != null && updated !== "") return updated;
+    return unhedgedActivityTs(row);
+  }
+  if (key === "all") {
+    if (isFilledUnhedgedRow(row)) {
+      if (filled != null && filled !== "") return filled;
+    } else if (created != null && created !== "") {
+      return created;
+    }
+    if (filled != null && filled !== "") return filled;
+    if (updated != null && updated !== "") return updated;
+    if (created != null && created !== "") return created;
+    return unhedgedActivityTs(row);
+  }
+  if (filled != null && filled !== "") return filled;
+  if (updated != null && updated !== "") return updated;
   if (created != null && created !== "") return created;
   return unhedgedActivityTs(row);
 }
 
-export function rowInUnhedgedDateWindow(row, window) {
+export function rowInUnhedgedDateWindow(row, window, mode = UNHEDGED_DEFAULT_STATUS_MODE) {
   if (!window || window.preset === "all" || (!window.from && !window.to)) return true;
-  const ts = unhedgedDateTs(row);
+  const ts = unhedgedDateTs(row, mode);
   if (ts == null || ts === "") return true;
   const ms = timeMs(ts);
   if (!ms) return true;
@@ -693,8 +790,8 @@ export function rowInUnhedgedDateWindow(row, window) {
   return true;
 }
 
-export function filterUnhedgedRowsByDateWindow(rows, window) {
-  return (rows || []).filter((row) => rowInUnhedgedDateWindow(row, window));
+export function filterUnhedgedRowsByDateWindow(rows, window, mode = UNHEDGED_DEFAULT_STATUS_MODE) {
+  return (rows || []).filter((row) => rowInUnhedgedDateWindow(row, window, mode));
 }
 
 const KALSHI_MONTH = {
@@ -1159,6 +1256,29 @@ export function filterFilledUnhedgedRows(rows) {
   return (rows || []).filter(isFilledUnhedgedRow);
 }
 
+// Requests = status=seen on the wire (mapping may promote priced rows to
+// would_quote). Exclude fills and live/started. Do not invent a fill.
+export function isRequestUnhedgedRow(row) {
+  if (!row || isFilledUnhedgedRow(row) || isLiveUnhedgedRow(row)) return false;
+  const status = rowStatus(row);
+  return status === "seen" || status === "would_quote" || status === "quoted";
+}
+
+export function filterRequestUnhedgedRows(rows) {
+  return (rows || []).filter(isRequestUnhedgedRow);
+}
+
+export function rowMatchesStatusMode(row, mode) {
+  const key = normalizeStatusMode(mode);
+  if (key === "fills") return isFilledUnhedgedRow(row);
+  if (key === "requests") return isRequestUnhedgedRow(row);
+  return isFilledUnhedgedRow(row) || isRequestUnhedgedRow(row);
+}
+
+export function filterUnhedgedRowsByStatusMode(rows, mode) {
+  return (rows || []).filter((row) => rowMatchesStatusMode(row, mode));
+}
+
 const SKIP_REASON_KEYS = ["skip_reason", "skipReason"];
 const LEG_STARTED_KEYS = [
   "already_started",
@@ -1341,6 +1461,7 @@ export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
     withQuote: 0,
     quoted: 0,
     filled: 0,
+    requests: 0,
     beatFill: 0,
   };
   for (const r of list) {
@@ -1350,6 +1471,7 @@ export function summarizeUnhedgedRows(rows, { fetched = null } = {}) {
     else if (status === "would_quote") summary.wouldQuote += 1;
     else if (status === "started") summary.started += 1;
     else if (status === "seen") summary.seen += 1;
+    if (r && isRequestUnhedgedRow(r)) summary.requests += 1;
     if (r && r.ourAmerican != null) summary.withQuote += 1;
     if (wouldQuoteBeatsFill(r)) summary.beatFill += 1;
   }
@@ -1368,6 +1490,7 @@ export function mapUnhedgedRow(row, index = 0) {
   const status = rowStatus(row);
   const filledAt = row && (row.filled_at || row.filledAt);
   const updatedAt = row && (row.updated_at || row.updatedAt);
+  const createdAt = row && (row.created_at || row.createdAt);
   const contracts = rowContracts(row);
   const cashSize = rowCashSize(row);
   const quote = ourQuoteAmerican(row);
@@ -1378,7 +1501,8 @@ export function mapUnhedgedRow(row, index = 0) {
     at,
     filledAt: filledAt || null,
     updatedAt: updatedAt || null,
-    timeEt: formatEtTime(at),
+    createdAt: createdAt || null,
+    timeEt: formatEtTime(status === "filled" ? at : (createdAt || at)),
     venue: formatVenue(venueRaw),
     venueKey: venueKey(venueRaw),
     label: rowLabel(row),
@@ -1400,11 +1524,14 @@ export function mapUnhedgedRow(row, index = 0) {
   };
 }
 
-// Filled pregame MLB/NFL moneylines only. Seen / started / would_quote /
-// NCAAF / in-game (skip_reason game_started or a started leg) stay out.
-export function visibleUnhedgedRows(rows) {
+// Pregame MLB/NFL moneylines in the selected status mode. Default Fills
+// hides seen / started / would_quote. Requests lists status=seen (priced
+// rows map to would_quote). NCAAF / in-game stay out. Never invent a fill.
+export function visibleUnhedgedRows(rows, { statusMode = UNHEDGED_DEFAULT_STATUS_MODE } = {}) {
   return mapUnhedgedRows(
-    filterMlbNflMoneylineRows(filterPregameUnhedgedRows(filterFilledUnhedgedRows(rows))),
+    filterMlbNflMoneylineRows(
+      filterPregameUnhedgedRows(filterUnhedgedRowsByStatusMode(rows, statusMode)),
+    ),
   );
 }
 
@@ -1567,6 +1694,21 @@ export function isMissingUpdatedAtColumn(error) {
   );
 }
 
+export function isMissingCreatedAtColumn(error) {
+  if (!error) return false;
+  const code = String(error.code || "");
+  const msg = errorText(error);
+  if (!msg.includes("created_at")) return false;
+  if (msg.includes("filled_at") || msg.includes("updated_at")) return false;
+  return (
+    code === "42703"
+    || code === "PGRST204"
+    || msg.includes("does not exist")
+    || msg.includes("not find")
+    || msg.includes("unknown")
+  );
+}
+
 export function isMissingStatusColumn(error) {
   if (!error) return false;
   const code = String(error.code || "");
@@ -1612,6 +1754,7 @@ export function isMissingFillAmericanColumn(error) {
 function applyUnhedgedFilters(q, {
   userId: _userId,
   filterStatus = true,
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
   dateWindow = null,
   dateCols = UNHEDGED_DATE_COLS,
   venue = "all",
@@ -1619,8 +1762,9 @@ function applyUnhedgedFilters(q, {
 }) {
   // Never eq user_id. Worker rows are unscoped (often NULL if the column
   // exists). Owner gate lives in UnhedgedTape, not this query.
-  // Always prefer status=filled so we never scan millions of seen rows.
-  if (filterStatus) q = q.eq("status", "filled");
+  // Always keep a status filter so we never scan millions of other rows.
+  // Fills=filled, Requests=seen, All=filled+seen. Never include started.
+  if (filterStatus) q = applyUnhedgedStatusFilter(q, statusMode);
   q = applyUnhedgedDateWindow(q, dateWindow, dateCols);
   const venueFilter = unhedgedVenueOrFilter(venue);
   if (venueFilter && typeof q.or === "function") q = q.or(venueFilter);
@@ -1634,23 +1778,26 @@ async function runSelect(client, {
   offset = 0,
   orderByFilledAt = true,
   orderByUpdatedAt = false,
+  orderByCreatedAt = true,
   filterStatus = true,
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
   dateWindow = null,
   dateCols = UNHEDGED_DATE_COLS,
   selectCols = UNHEDGED_BLOTTER_COLUMNS,
+  venue = "all",
 }) {
   const cols = Array.isArray(selectCols) && selectCols.length
     ? selectCols.join(",")
     : UNHEDGED_BLOTTER_SELECT;
   let q = client.from(UNHEDGED_TABLE).select(cols);
-  q = applyUnhedgedFilters(q, { userId, filterStatus, dateWindow, dateCols });
+  q = applyUnhedgedFilters(q, { userId, filterStatus, statusMode, dateWindow, dateCols, venue });
   if (typeof q.order === "function") {
-    // Newest fill first when filled_at exists — matches
-    // (status, filled_at DESC). If filled_at is missing, updated_at then
-    // created_at. Do not invent Date.now().
+    // Fills: newest fill first when filled_at exists — matches
+    // (status, filled_at DESC). Requests / All: created_at (RFQ time).
+    // If filled_at is missing, updated_at then created_at. Do not invent Date.now().
     if (orderByFilledAt) q = q.order("filled_at", { ascending: false, nullsFirst: false });
     else if (orderByUpdatedAt) q = q.order("updated_at", { ascending: false, nullsFirst: false });
-    q = q.order("created_at", { ascending: false });
+    if (orderByCreatedAt) q = q.order("created_at", { ascending: false });
   }
   if (typeof q.range === "function") q = q.range(offset, offset + limit - 1);
   if (typeof q.limit === "function") q = q.limit(limit);
@@ -1660,17 +1807,19 @@ async function runSelect(client, {
 async function runCount(client, {
   userId,
   filterStatus = true,
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
   dateWindow = null,
   dateCols = UNHEDGED_DATE_COLS,
   venue = "all",
   quoteNotNull = false,
 }) {
-  // Never select("*") here. head:true + id returns no bodies; status=filled
-  // (applied below) keeps seen rows out of the count.
+  // Never select("*") here. head:true + id returns no bodies; the status
+  // filter (applied below) keeps the other population out of the count.
   let q = client.from(UNHEDGED_TABLE).select(UNHEDGED_COUNT_SELECT, UNHEDGED_COUNT_SELECT_OPTS);
   return applyUnhedgedFilters(q, {
     userId,
     filterStatus,
+    statusMode,
     dateWindow,
     dateCols,
     venue,
@@ -1681,6 +1830,7 @@ async function runCount(client, {
 async function runBeatFillSelect(client, {
   userId,
   filterStatus = true,
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
   dateWindow = null,
   dateCols = UNHEDGED_DATE_COLS,
   venue = "all",
@@ -1691,6 +1841,7 @@ async function runBeatFillSelect(client, {
   q = applyUnhedgedFilters(q, {
     userId,
     filterStatus,
+    statusMode,
     dateWindow,
     dateCols,
     venue,
@@ -1712,6 +1863,7 @@ function readHeadCount(result) {
 function emptyUnhedgedCountResult(extra = {}) {
   return {
     filled: null,
+    requests: null,
     withQuote: null,
     beatFill: null,
     missingTable: false,
@@ -1727,6 +1879,7 @@ export function mergeUnhedgedSummary(summary, counts) {
   return {
     ...s,
     filled: counts.filled != null ? counts.filled : s.filled,
+    requests: counts.requests != null ? counts.requests : s.requests,
     withQuote: counts.withQuote != null ? counts.withQuote : s.withQuote,
     beatFill: counts.beatFill != null ? counts.beatFill : s.beatFill,
   };
@@ -1736,6 +1889,7 @@ function classifySelectError(error, {
   userId: _userId,
   orderByFilledAt,
   orderByUpdatedAt,
+  orderByCreatedAt,
   filterStatus,
   dateCols,
   selectCols,
@@ -1751,7 +1905,8 @@ function classifySelectError(error, {
   // instead of looking like a missing table.
   if (isMissingUserIdColumn(error)) return "missing_user_id";
   if (filterStatus && isMissingStatusColumn(error)) {
-    // Count/head must not retry without status — that would count seen rows.
+    // Count/head must not retry without status — that would count the wrong
+    // population (millions of seen rows on a Fills head, or every status).
     return allowMissingStatus ? "missing_status" : "other";
   }
   const cols = dateCols || [];
@@ -1761,6 +1916,10 @@ function classifySelectError(error, {
   if ((orderByUpdatedAt || cols.includes("updated_at") || selected.includes("updated_at"))
     && isMissingUpdatedAtColumn(error)) {
     return "missing_updated_at";
+  }
+  if ((orderByCreatedAt || cols.includes("created_at") || selected.includes("created_at"))
+    && isMissingCreatedAtColumn(error)) {
+    return "missing_created_at";
   }
   if (venue && venue !== "all" && isMissingVenueColumn(error)) return "missing_venue";
   if ((quoteNotNull || beatFillCols) && isMissingQuoteAmericanColumn(error)) return "missing_quote";
@@ -1774,12 +1933,15 @@ function classifySelectError(error, {
   return "other";
 }
 
-function finalizeFetchedRows(data, dateWindow = null) {
+function finalizeFetchedRows(data, dateWindow = null, statusMode = UNHEDGED_DEFAULT_STATUS_MODE) {
   // Query filter is a superset (OR of stamps); client filter is the rule.
   // Drop live / in-game even when status=filled (skip_reason game_started).
   return filterUnhedgedRowsByDateWindow(
-    filterPregameUnhedgedRows(filterFilledUnhedgedRows(Array.isArray(data) ? data : [])),
+    filterPregameUnhedgedRows(
+      filterUnhedgedRowsByStatusMode(Array.isArray(data) ? data : [], statusMode),
+    ),
     dateWindow,
+    statusMode,
   );
 }
 
@@ -1796,11 +1958,22 @@ function applySelectKind(kind, flags, error = null) {
     dropSelectCol(flags, "updated_at");
   } else if (kind === "missing_filled_at") {
     flags.orderByFilledAt = false;
-    flags.orderByUpdatedAt = true;
+    dropSelectCol(flags, "filled_at");
+    flags.dateCols = (flags.dateCols || []).filter((c) => c !== "filled_at");
     // Schema fallback only — do not keep an empty date filter (that would
     // scan every filled row, or worse, every seen row if status also drops).
-    flags.dateCols = UNHEDGED_DATE_FALLBACK_COLS.slice();
-    dropSelectCol(flags, "filled_at");
+    if (!flags.dateCols.length) {
+      flags.orderByUpdatedAt = true;
+      flags.dateCols = UNHEDGED_DATE_FALLBACK_COLS.slice();
+    }
+  } else if (kind === "missing_created_at") {
+    flags.orderByCreatedAt = false;
+    flags.dateCols = (flags.dateCols || []).filter((c) => c !== "created_at");
+    dropSelectCol(flags, "created_at");
+    if (!flags.dateCols.length) {
+      flags.orderByUpdatedAt = true;
+      flags.dateCols = ["updated_at"];
+    }
   } else if (kind === "missing_select_col") {
     const selected = flags.selectCols || [];
     const drop = selected.find((c) => c && isMissingNamedColumn(error, c));
@@ -1824,6 +1997,7 @@ const RETRYABLE_SELECT_KINDS = [
   "missing_status",
   "missing_updated_at",
   "missing_filled_at",
+  "missing_created_at",
   "missing_select_col",
   "missing_venue",
   "missing_quote",
@@ -1854,18 +2028,21 @@ async function resolveSelectAttempt(runFn, selectArgs, flags) {
   return { result };
 }
 
-function newUnhedgedFlags(_userId) {
+function newUnhedgedFlags(_userId, { statusMode = UNHEDGED_DEFAULT_STATUS_MODE, venue = "all" } = {}) {
+  const mode = normalizeStatusMode(statusMode);
   return {
     // userId is accepted on fetch/count for call-site compat and ignored.
     // Combo-worker does not write Kevin's id onto unhedged_rfqs.
     scopedUserId: null,
-    orderByFilledAt: true,
+    statusMode: mode,
+    orderByFilledAt: mode === "fills",
     orderByUpdatedAt: false,
+    orderByCreatedAt: true,
     filterStatus: true,
     allowMissingStatus: true,
-    dateCols: UNHEDGED_DATE_COLS.slice(),
+    dateCols: unhedgedDateColsForMode(mode),
     selectCols: UNHEDGED_BLOTTER_COLUMNS.slice(),
-    venue: "all",
+    venue: normalizeVenueFilter(venue),
     venueDropped: false,
     quoteNotNull: true,
     quoteDropped: false,
@@ -1879,7 +2056,9 @@ function selectArgsFromFlags(flags, extra = {}) {
     userId: flags.scopedUserId,
     orderByFilledAt: flags.orderByFilledAt,
     orderByUpdatedAt: flags.orderByUpdatedAt,
+    orderByCreatedAt: flags.orderByCreatedAt !== false,
     filterStatus: flags.filterStatus,
+    statusMode: flags.statusMode || UNHEDGED_DEFAULT_STATUS_MODE,
     allowMissingStatus: flags.allowMissingStatus !== false,
     dateCols: flags.dateCols,
     selectCols: flags.selectCols,
@@ -1900,19 +2079,24 @@ async function resolveOnce(runFn, flags, extra = {}) {
   return { error: { message: "retries exhausted" } };
 }
 
-// Slim select of filled rows RLS already allows. Do not scope by user_id —
+// Slim select of rows RLS already allows. Do not scope by user_id —
 // the Unhedged tab is owner-gated and combo-worker does not write user_id.
-// A missing table is an empty blotter, not a crash. status=eq.filled.
-// Date chips filter filled_at (see unhedgedDateWindow). If filled_at is
-// missing, fall back to updated_at / created_at and retry. Today / 24h / 7d
-// take one page. Month / All time page until a short page — only after that
-// chip is on. Prefer filled_at desc. userId on the options object is ignored.
+// A missing table is an empty blotter, not a crash. status=eq.filled
+// (Fills) or status=eq.seen (Requests) or in (filled,seen) (All).
+// Date chips filter filled_at on Fills and created_at on Requests
+// (see unhedgedDateWindow). If filled_at is missing, fall back to
+// updated_at / created_at and retry. Today / 24h / 7d take one page.
+// Month / All time page until a short page — only after that chip is on.
+// userId on the options object is ignored. Venue is server-side so a
+// seen firehose cannot bury Polymarket requests.
 export async function fetchUnhedgedRfqs(client, {
   userId = null,
   limit = UNHEDGED_PAGE_SIZE,
   dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
   now,
   paginate,
+  venue = "all",
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
 } = {}) {
   if (!client || typeof client.from !== "function") {
     return { rows: [], missingTable: false, error: { message: "no client" }, truncated: false, paged: false };
@@ -1921,7 +2105,8 @@ export async function fetchUnhedgedRfqs(client, {
   const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
   const pageAll = paginate != null ? !!paginate : unhedgedDateRangePages(dateRange);
   const maxPages = pageAll ? UNHEDGED_MAX_PAGES : 1;
-  const flags = newUnhedgedFlags(userId);
+  const mode = normalizeStatusMode(statusMode);
+  const flags = newUnhedgedFlags(userId, { statusMode: mode, venue });
   const all = [];
   let offset = 0;
   let lastPageLen = 0;
@@ -1933,14 +2118,14 @@ export async function fetchUnhedgedRfqs(client, {
     );
     if (step.missingTable) return { rows: [], missingTable: true, error: step.error, truncated: false, paged: pageAll };
     if (step.error) {
-      return { rows: finalizeFetchedRows(all, dateWindow), missingTable: false, error: step.error, truncated: false, paged: pageAll };
+      return { rows: finalizeFetchedRows(all, dateWindow, mode), missingTable: false, error: step.error, truncated: false, paged: pageAll };
     }
     const pageRows = Array.isArray(step.result && step.result.data) ? step.result.data : [];
     lastPageLen = pageRows.length;
     all.push(...pageRows);
     if (pageRows.length < pageSize) {
       return {
-        rows: finalizeFetchedRows(all, dateWindow),
+        rows: finalizeFetchedRows(all, dateWindow, mode),
         missingTable: false,
         error: null,
         truncated: false,
@@ -1950,7 +2135,7 @@ export async function fetchUnhedgedRfqs(client, {
     offset += pageSize;
   }
   return {
-    rows: finalizeFetchedRows(all, dateWindow),
+    rows: finalizeFetchedRows(all, dateWindow, mode),
     missingTable: false,
     error: null,
     truncated: !pageAll && lastPageLen >= pageSize,
@@ -1964,7 +2149,12 @@ async function countHeadOnce(client, flags, { dateWindow, quoteNotNull = false, 
   return resolveOnce(
     (args) => runCount(client, args),
     flags,
-    { dateWindow, quoteNotNull: flags.quoteNotNull, venue: flags.venue },
+    {
+      dateWindow,
+      quoteNotNull: flags.quoteNotNull,
+      venue: flags.venue,
+      statusMode: flags.statusMode,
+    },
   );
 }
 
@@ -2003,30 +2193,51 @@ async function countBeatFillSlim(client, flags, { dateWindow, venue = "all", pag
   return { count: beat };
 }
 
-// Head counts for the tiles. Same date / status / venue filters as the
-// row pull (no user_id). FILLED and Would-quote are exact head counts. Beat-fill compares
-// two columns so PostgREST cannot head it — we select only those two numbers
-// (not *) and count locally. When the beat-fill chip is on, FILLED and
-// Would-quote reuse that beat-fill count (the subset).
+// Head counts for the tiles. Same date / status-mode / venue filters as the
+// row pull (no user_id). Mode tiles and Would-quote are exact head counts.
+// Beat-fill compares two columns so PostgREST cannot head it — we select
+// only those two numbers (not *) and count locally, and only when a fill
+// price can exist (Fills / All). When the beat-fill chip is on, FILLED and
+// Would-quote reuse that beat-fill count (the subset). Requests never pass
+// beat-fill (no fill price).
 export async function countUnhedgedRfqs(client, {
   userId = null,
   dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
   now,
   venue = "all",
   quoteBeatFill = false,
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
 } = {}) {
   if (!client || typeof client.from !== "function") {
     return emptyUnhedgedCountResult({ error: { message: "no client" } });
   }
   const dateWindow = unhedgedDateWindow(dateRange, now || new Date());
   const venueKeyNorm = normalizeVenueFilter(venue);
-  const flags = newUnhedgedFlags(userId);
-  // Head paths must never drop status=filled (would count millions of seen).
-  flags.allowMissingStatus = false;
-  flags.venue = venueKeyNorm;
+  const mode = normalizeStatusMode(statusMode);
   const pageBeat = unhedgedDateRangePages(dateRange);
+  const quoteVenue = venueKeyNorm;
+
+  function flagsFor(modeKey) {
+    const flags = newUnhedgedFlags(userId, { statusMode: modeKey, venue: venueKeyNorm });
+    // Head paths must never drop the status filter.
+    flags.allowMissingStatus = false;
+    return flags;
+  }
 
   if (quoteBeatFill) {
+    if (mode === "requests") {
+      return {
+        filled: 0,
+        requests: 0,
+        withQuote: 0,
+        beatFill: 0,
+        missingTable: false,
+        error: null,
+        source: "head",
+        venueDropped: false,
+      };
+    }
+    const flags = flagsFor("fills");
     const beat = await countBeatFillSlim(client, flags, {
       dateWindow,
       venue: flags.venueDropped ? "all" : venueKeyNorm,
@@ -2038,6 +2249,7 @@ export async function countUnhedgedRfqs(client, {
     }
     return {
       filled: beat.count,
+      requests: 0,
       withQuote: beat.count,
       beatFill: beat.count,
       missingTable: false,
@@ -2047,49 +2259,108 @@ export async function countUnhedgedRfqs(client, {
     };
   }
 
-  const filledStep = await countHeadOnce(client, flags, {
+  if (mode === "requests") {
+    const flags = flagsFor("requests");
+    const requestStep = await countHeadOnce(client, flags, {
+      dateWindow,
+      quoteNotNull: false,
+      venue: flags.venueDropped ? "all" : venueKeyNorm,
+    });
+    if (requestStep.missingTable) return emptyUnhedgedCountResult({ missingTable: true, error: requestStep.error });
+    if (requestStep.error) return emptyUnhedgedCountResult({ error: requestStep.error });
+    const requests = readHeadCount(requestStep.result);
+    const quoteStep = flags.quoteDropped
+      ? { result: { count: null } }
+      : await countHeadOnce(client, flags, {
+        dateWindow,
+        quoteNotNull: true,
+        venue: flags.venueDropped ? "all" : quoteVenue,
+      });
+    if (quoteStep.missingTable) {
+      return emptyUnhedgedCountResult({ missingTable: true, error: quoteStep.error, requests, filled: 0 });
+    }
+    const withQuote = flags.quoteDropped || quoteStep.error ? null : readHeadCount(quoteStep.result);
+    return {
+      filled: 0,
+      requests,
+      withQuote,
+      beatFill: 0,
+      missingTable: false,
+      error: quoteStep.error || null,
+      source: "head",
+      venueDropped: flags.venueDropped,
+    };
+  }
+
+  const fillFlags = flagsFor("fills");
+  const filledStep = await countHeadOnce(client, fillFlags, {
     dateWindow,
     quoteNotNull: false,
-    venue: flags.venueDropped ? "all" : venueKeyNorm,
+    venue: fillFlags.venueDropped ? "all" : venueKeyNorm,
   });
   if (filledStep.missingTable) return emptyUnhedgedCountResult({ missingTable: true, error: filledStep.error });
   if (filledStep.error) return emptyUnhedgedCountResult({ error: filledStep.error });
   const filled = readHeadCount(filledStep.result);
 
-  const quoteVenue = flags.venueDropped ? "all" : venueKeyNorm;
-  const quoteStep = flags.quoteDropped
+  let requests = 0;
+  let requestError = null;
+  if (mode === "all") {
+    const requestFlags = flagsFor("requests");
+    requestFlags.venueDropped = fillFlags.venueDropped;
+    requestFlags.venue = fillFlags.venueDropped ? "all" : venueKeyNorm;
+    const requestStep = await countHeadOnce(client, requestFlags, {
+      dateWindow,
+      quoteNotNull: false,
+      venue: requestFlags.venue,
+    });
+    if (requestStep.missingTable) {
+      return emptyUnhedgedCountResult({ missingTable: true, error: requestStep.error, filled });
+    }
+    requestError = requestStep.error || null;
+    requests = requestError ? null : readHeadCount(requestStep.result);
+  }
+
+  const quoteFlags = flagsFor(mode);
+  quoteFlags.venueDropped = fillFlags.venueDropped;
+  quoteFlags.quoteDropped = fillFlags.quoteDropped;
+  quoteFlags.venue = fillFlags.venueDropped ? "all" : quoteVenue;
+  const quoteStep = quoteFlags.quoteDropped
     ? { result: { count: null } }
-    : await countHeadOnce(client, flags, {
+    : await countHeadOnce(client, quoteFlags, {
       dateWindow,
       quoteNotNull: true,
-      venue: quoteVenue,
+      venue: quoteFlags.venue,
     });
-  if (quoteStep.missingTable) return emptyUnhedgedCountResult({ missingTable: true, error: quoteStep.error, filled });
-  const withQuote = flags.quoteDropped || quoteStep.error ? null : readHeadCount(quoteStep.result);
+  if (quoteStep.missingTable) {
+    return emptyUnhedgedCountResult({ missingTable: true, error: quoteStep.error, filled, requests });
+  }
+  const withQuote = quoteFlags.quoteDropped || quoteStep.error ? null : readHeadCount(quoteStep.result);
 
-  const beat = await countBeatFillSlim(client, flags, {
+  const beat = await countBeatFillSlim(client, fillFlags, {
     dateWindow,
-    venue: quoteVenue,
+    venue: fillFlags.venueDropped ? "all" : quoteVenue,
     paginate: pageBeat,
   });
   if (beat.missingTable) {
     return {
       filled,
+      requests,
       withQuote,
       beatFill: null,
       missingTable: true,
       error: beat.error,
       source: "head",
-      venueDropped: flags.venueDropped,
+      venueDropped: fillFlags.venueDropped,
     };
   }
   return {
     filled,
+    requests,
     withQuote,
     beatFill: beat.count,
     missingTable: false,
-    error: beat.error || quoteStep.error || null,
+    error: beat.error || quoteStep.error || requestError || null,
     source: "head",
-    venueDropped: flags.venueDropped,
+    venueDropped: fillFlags.venueDropped,
   };
 }

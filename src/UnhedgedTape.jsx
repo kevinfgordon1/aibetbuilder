@@ -1,31 +1,39 @@
-// Unhedged RFQ blotter — read-only filled RFQs from public.unhedged_rfqs.
+// Unhedged RFQ blotter — read-only RFQs from public.unhedged_rfqs.
 // Private tab (same owner gate as Combo Locks / Miss tape). No quoting UI.
 // Do not pass user.id into the tape query: combo-worker does not write
 // user_id, so eq('user_id', owner) would hide every worker row.
-// Filled only: someone else matched on Kalshi/Poly. We did not take these.
+// Status chips: Fills (someone else matched) | Requests (status=seen,
+// would-quote) | All. Default Fills (Kalshi tape). Polymarket defaults to
+// Requests — Poly cannot show fill prices. We did not take these (paper).
 // Summary + tape are MLB and NFL moneylines only. Default date chip is Today.
 // Today / 24h / 7d stay one page. Month / All time page only after that chip
-// is selected. Tiles use head counts (same window + venue + beat-fill).
+// is selected. Tiles use head counts (same window + venue + status + beat-fill).
 // Legs cell is a per-leg Fair / Kalshi / Poly breakdown plus sport + event date.
-// Manual Refresh only — do not poll. Row pull is a slim column list; date
-// windows filter filled_at (index: status, filled_at DESC).
+// Manual Refresh only — do not poll. Row pull is a slim column list; Fills
+// filter filled_at, Requests filter created_at.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
   UNHEDGED_DATE_FILTERS,
   UNHEDGED_DEFAULT_DATE_RANGE,
+  UNHEDGED_DEFAULT_STATUS_MODE,
+  UNHEDGED_STATUS_FILTERS,
   countUnhedgedRfqs,
+  defaultStatusModeForVenue,
   fetchUnhedgedRfqs,
   filterUnhedgedAnalytics,
   formatEtTime,
   isTickerBlob,
   mergeUnhedgedSummary,
+  normalizeStatusMode,
   normalizeUnhedgedDateRange,
+  normalizeVenueFilter,
   summarizeUnhedgedRows,
   unhedgedActivityTs,
   unhedgedDateRangeLabel,
   unhedgedDateRangePages,
+  unhedgedDisplayTs,
   unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
@@ -42,6 +50,13 @@ const VENUE_CHIPS = [
   { key: "kalshi", label: "Kalshi", cls: "venue-kalshi" },
   { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
 ];
+
+function formatRowStatus(status) {
+  if (status === "filled") return "Filled";
+  if (status === "would_quote" || status === "quoted") return "Would-quote";
+  if (status === "started") return "Started";
+  return "Request";
+}
 
 function FilterChip({ label, active, onClick, className, title }) {
   return (
@@ -120,12 +135,18 @@ export function UnhedgedBlotter({
   onDateRangeChange,
   venueFilter = "all",
   onVenueFilterChange,
+  statusMode = UNHEDGED_DEFAULT_STATUS_MODE,
+  onStatusModeChange,
   quoteBeatFill = false,
   onQuoteBeatFillChange,
 }) {
   const list = rows || [];
   const dateKey = normalizeUnhedgedDateRange(dateRange);
+  const modeKey = normalizeStatusMode(statusMode);
   const heavy = unhedgedDateRangePages(dateKey);
+  const showFills = modeKey === "fills" || modeKey === "all";
+  const showRequests = modeKey === "requests" || modeKey === "all";
+  const polyRequestNote = venueFilter === "polymarket" && modeKey === "requests";
   const venueScoped = useMemo(
     () => filterUnhedgedAnalytics(list, { venue: venueFilter, quoteBeatFill: false }),
     [list, venueFilter],
@@ -189,8 +210,11 @@ export function UnhedgedBlotter({
         <span className="chip">paper</span>
         <span className="chip">MLB + NFL ML</span>
         <span className="chip">pregame</span>
-        {loaded && !missingTable && !paging && (
+        {loaded && !missingTable && !paging && showFills && (
           <span className="chip ok num">{summary.filled} filled</span>
+        )}
+        {loaded && !missingTable && !paging && showRequests && (
+          <span className="chip warn num">{summary.requests} requests</span>
         )}
         {onRefresh ? (
           <button
@@ -198,7 +222,7 @@ export function UnhedgedBlotter({
             className="chip btn"
             disabled={!!refreshing || !!paging || !loaded}
             aria-busy={!!refreshing || !!paging}
-            title="Re-fetch the filled tape. Manual only — this page does not auto-refresh. Does not reload the app. Today / 24h / 7d stay one page."
+            title="Re-fetch the tape. Manual only — this page does not auto-refresh. Does not reload the app. Today / 24h / 7d stay one page."
             onClick={onRefresh}
           >
             {unhedgedRefreshLabel(refreshing || paging)}
@@ -206,8 +230,18 @@ export function UnhedgedBlotter({
         ) : null}
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-        Filled pregame RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only. In-game and started RFQs stay off this tape. No quoting from this page.
+        {modeKey === "requests"
+          ? "Seen pregame MLB/NFL combo RFQs the worker already priced or recorded. Would-quote is what we would have quoted — paper only. We did not take these."
+          : modeKey === "all"
+            ? "Filled matches plus seen RFQ requests. We did not take these — paper only."
+            : "Filled pregame RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only."}
+        {" "}In-game and started RFQs stay off this tape. No quoting from this page.
       </div>
+      {polyRequestNote ? (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+          Polymarket does not expose others’ quotes or tape, so fill prices are unavailable from the venue. Would-quote is still what we would have quoted.
+        </div>
+      ) : null}
 
       {loaded && !missingTable && (
         <div className="filters" role="group" aria-label="Unhedged RFQ filters">
@@ -224,6 +258,21 @@ export function UnhedgedBlotter({
             />
           ))}
           <span className="muted" style={{ margin: "0 4px" }}>·</span>
+          <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Show</span>
+          {UNHEDGED_STATUS_FILTERS.map((c) => (
+            <FilterChip
+              key={c.key}
+              label={c.label}
+              active={modeKey === c.key}
+              onClick={() => { if (onStatusModeChange) onStatusModeChange(c.key); }}
+              title={c.key === "fills"
+                ? "status=filled — someone else matched. Kalshi tape."
+                : c.key === "requests"
+                  ? "status=seen RFQ requests. Would-quote is what we would have quoted. Fill price is — unless the venue published one."
+                  : "Filled matches plus seen requests in this date window + venue."}
+            />
+          ))}
+          <span className="muted" style={{ margin: "0 4px" }}>·</span>
           <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Venue</span>
           {VENUE_CHIPS.map((c) => (
             <FilterChip
@@ -232,7 +281,11 @@ export function UnhedgedBlotter({
               className={c.cls}
               active={venueFilter === c.key}
               onClick={() => { if (onVenueFilterChange) onVenueFilterChange(c.key); }}
-              title={c.key === "all" ? "All venues in this date window" : `Filled ${c.label} only`}
+              title={c.key === "all"
+                ? "All venues in this date window. Defaults to Fills."
+                : c.key === "polymarket"
+                  ? "Polymarket only. Defaults to Requests — fill prices are not available from the venue."
+                  : `Kalshi only. Defaults to Fills.`}
             />
           ))}
           <span className="muted" style={{ margin: "0 4px" }}>·</span>
@@ -240,35 +293,53 @@ export function UnhedgedBlotter({
             label={`Would-quote beat fill · ${beatFillCount}`}
             className="warn"
             active={quoteBeatFill}
-            onClick={() => { if (onQuoteBeatFillChange) onQuoteBeatFillChange(!quoteBeatFill); }}
-            title="Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Count is for the selected date window + venue. Rows missing quote or fill never pass."
+            onClick={() => {
+              if (modeKey === "requests") return;
+              if (onQuoteBeatFillChange) onQuoteBeatFillChange(!quoteBeatFill);
+            }}
+            title={modeKey === "requests"
+              ? "Beat-fill needs a fill price. Requests do not have one — the filter stays off."
+              : "Show only rows where our would-quote is a better buy-side YES than the print (higher American, e.g. +614 vs +452 or −110 vs −150). Count is for the selected date window + venue. Rows missing quote or fill never pass."}
           />
         </div>
       )}
 
       {loaded && !missingTable && !(paging && !counts) && (
         <div className="tiles">
-          <Tile
-            k="Filled"
-            v={summary.filled}
-            sub="someone else matched · we did not take these"
-            tone={summary.filled ? "pos" : undefined}
-            title={`status=filled in the ${unhedgedDateRangeLabel(dateKey)} window + venue${quoteBeatFill ? " + beat-fill" : ""}. Head count when the server can. Matched by anyone on the venue. We are paper.`}
-          />
+          {showFills ? (
+            <Tile
+              k="Filled"
+              v={summary.filled}
+              sub="someone else matched · we did not take these"
+              tone={summary.filled ? "pos" : undefined}
+              title={`status=filled in the ${unhedgedDateRangeLabel(dateKey)} window + venue${quoteBeatFill ? " + beat-fill" : ""}. Head count when the server can. Matched by anyone on the venue. We are paper.`}
+            />
+          ) : null}
+          {showRequests ? (
+            <Tile
+              k="Requests"
+              v={summary.requests}
+              sub="status=seen · would-quote when priced"
+              tone={summary.requests ? "warn" : undefined}
+              title={`status=seen in the ${unhedgedDateRangeLabel(dateKey)} window + venue (created_at). Head count when the server can. Paper only — we did not quote live.`}
+            />
+          ) : null}
           <Tile
             k="Would-quote"
             v={summary.withQuote}
             sub="our_quote_american present"
             tone={summary.withQuote ? "warn" : undefined}
-            title="5% net-cost wrap — the American we would have filled at. Null is —. Head count for the selected date window + venue (+ beat-fill when that chip is on)."
+            title="5% net-cost wrap — the American we would have filled at. Null is —. Head count for the selected date window + venue + status (+ beat-fill when that chip is on)."
           />
-          <Tile
-            k="Beat fill"
-            v={beatFillCount}
-            sub="would-quote better YES than the print"
-            tone={beatFillCount ? "warn" : undefined}
-            title="our_quote_american > fill_american in this date window + venue. Same rule as the beat-fill chip. Missing quote or fill never counts."
-          />
+          {showFills ? (
+            <Tile
+              k="Beat fill"
+              v={beatFillCount}
+              sub="would-quote better YES than the print"
+              tone={beatFillCount ? "warn" : undefined}
+              title="our_quote_american > fill_american in this date window + venue. Same rule as the beat-fill chip. Missing quote or fill never counts."
+            />
+          ) : null}
         </div>
       )}
 
@@ -279,21 +350,31 @@ export function UnhedgedBlotter({
           <div className="empty">No unhedged RFQ tape yet. The worker has not published this table.</div>
         ) : list.length === 0 ? (
           <div className="empty">
-            No filled pregame MLB or NFL moneyline RFQs.
+            {modeKey === "requests"
+              ? "No seen pregame MLB or NFL moneyline RFQs."
+              : modeKey === "all"
+                ? "No pregame MLB or NFL moneyline RFQs."
+                : "No filled pregame MLB or NFL moneyline RFQs."}
             {error && error.message ? <span className="muted"> ({error.message})</span> : null}
           </div>
         ) : filtered.length === 0 ? (
           <div className="empty">
-            No filled pregame MLB or NFL moneyline RFQs match these filters.
+            {modeKey === "requests"
+              ? "No seen pregame MLB or NFL moneyline RFQs match these filters."
+              : modeKey === "all"
+                ? "No pregame MLB or NFL moneyline RFQs match these filters."
+                : "No filled pregame MLB or NFL moneyline RFQs match these filters."}
           </div>
         ) : (
           <table>
             <thead>
               <tr>
                 <th>Time ET</th>
+                <th>Status</th>
                 <th>Venue</th>
                 <th>Legs</th>
                 <th>Amount</th>
+                <th>Taker / RFQ</th>
                 <th>Fill price</th>
                 <th>True / fair</th>
                 <th>Would-quote</th>
@@ -303,12 +384,14 @@ export function UnhedgedBlotter({
               {filtered.map((r) => {
                 return (
                   <tr key={r.id}>
-                    <td className="num muted">{formatEtTime(unhedgedActivityTs(r) || r.at)}</td>
+                    <td className="num muted">{formatEtTime(unhedgedDisplayTs(r) || unhedgedActivityTs(r) || r.at)}</td>
+                    <td><span className={"chip " + (r.statusTone || "")}>{formatRowStatus(r.status)}</span></td>
                     <td><VenueChip venue={r.venue} venueKey={r.venueKey} /></td>
                     <td>
                       <LegBreakdown legs={r.legs} />
                     </td>
                     <td className="num">{r.amountText}</td>
+                    <td className="num">{r.theirText}</td>
                     <td className="num">{r.fillText}</td>
                     <td className="num fair">{r.fairText}</td>
                     <td className="num">{r.ourText}</td>
@@ -320,7 +403,7 @@ export function UnhedgedBlotter({
         )}
         {loaded && !missingTable && list.length > 0 && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            Showing filled pregame MLB and NFL moneylines in the {unhedgedDateRangeLabel(dateKey)} window ({heavy ? "paged from the server after this chip" : "one page; Month / All time page only after you pick that chip"}, newest activity first). Tile counts are a head query. Venue and beat-fill chips filter this set. In-game rows are hidden.
+            Showing {modeKey === "requests" ? "seen" : modeKey === "all" ? "filled and seen" : "filled"} pregame MLB and NFL moneylines in the {unhedgedDateRangeLabel(dateKey)} window ({heavy ? "paged from the server after this chip" : "one page; Month / All time page only after you pick that chip"}, {modeKey === "requests" ? "newest created_at first" : "newest activity first"}). Tile counts are a head query. Venue and beat-fill chips filter this set. In-game rows are hidden. Fill price is — when the venue does not publish one.
           </div>
         )}
       </div>
@@ -339,6 +422,7 @@ export default function UnhedgedTape({ user }) {
   const [paging, setPaging] = useState(false);
   const [dateRange, setDateRange] = useState(UNHEDGED_DEFAULT_DATE_RANGE);
   const [venueFilter, setVenueFilter] = useState("all");
+  const [statusMode, setStatusMode] = useState(UNHEDGED_DEFAULT_STATUS_MODE);
   const [quoteBeatFill, setQuoteBeatFill] = useState(false);
   const rowGen = useRef(0);
   const countGen = useRef(0);
@@ -353,6 +437,8 @@ export default function UnhedgedTape({ user }) {
     try {
       const result = await fetchUnhedgedRfqs(supabase, {
         dateRange,
+        venue: venueFilter,
+        statusMode,
       });
       if (gen !== rowGen.current) return;
       setRaw(result.rows);
@@ -364,7 +450,7 @@ export default function UnhedgedTape({ user }) {
       if (button) setRefreshing(false);
       setPaging(false);
     }
-  }, [owner, dateRange]);
+  }, [owner, dateRange, venueFilter, statusMode]);
 
   const reloadCounts = useCallback(async () => {
     if (!owner) return;
@@ -374,31 +460,54 @@ export default function UnhedgedTape({ user }) {
       dateRange,
       venue: venueFilter,
       quoteBeatFill,
+      statusMode,
     });
     if (gen !== countGen.current) return;
     setCounts(head);
     if (head && head.missingTable) setMissingTable(true);
-  }, [owner, dateRange, venueFilter, quoteBeatFill]);
+  }, [owner, dateRange, venueFilter, quoteBeatFill, statusMode]);
 
   useEffect(() => { reloadRows(); }, [reloadRows]);
   useEffect(() => { reloadCounts(); }, [reloadCounts]);
   // Manual Refresh only. Do not poll: public.unhedged_rfqs has millions of
   // seen rows and a 20s fetch+count was melting Today (~1.5k filled).
 
-  const rows = useMemo(() => visibleUnhedgedRows(raw), [raw]);
+  const rows = useMemo(() => visibleUnhedgedRows(raw, { statusMode }), [raw, statusMode]);
 
-  const onDateRangeChange = useCallback((key) => {
-    const next = normalizeUnhedgedDateRange(key);
-    if (next === dateRange) return;
+  const bumpFetch = useCallback((heavy) => {
     rowGen.current += 1;
     countGen.current += 1;
-    setDateRange(next);
-    if (unhedgedDateRangePages(next)) {
+    if (heavy) {
       setPaging(true);
       setRaw([]);
       setCounts(null);
     }
-  }, [dateRange]);
+  }, []);
+
+  const onDateRangeChange = useCallback((key) => {
+    const next = normalizeUnhedgedDateRange(key);
+    if (next === dateRange) return;
+    bumpFetch(unhedgedDateRangePages(next));
+    setDateRange(next);
+  }, [dateRange, bumpFetch]);
+
+  const onVenueFilterChange = useCallback((key) => {
+    const next = normalizeVenueFilter(key);
+    if (next === venueFilter) return;
+    const nextMode = defaultStatusModeForVenue(next);
+    bumpFetch(unhedgedDateRangePages(dateRange));
+    setVenueFilter(next);
+    setStatusMode(nextMode);
+    if (nextMode === "requests") setQuoteBeatFill(false);
+  }, [venueFilter, dateRange, bumpFetch]);
+
+  const onStatusModeChange = useCallback((key) => {
+    const next = normalizeStatusMode(key);
+    if (next === statusMode) return;
+    bumpFetch(unhedgedDateRangePages(dateRange));
+    setStatusMode(next);
+    if (next === "requests") setQuoteBeatFill(false);
+  }, [statusMode, dateRange, bumpFetch]);
 
   if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
 
@@ -416,7 +525,9 @@ export default function UnhedgedTape({ user }) {
       dateRange={dateRange}
       onDateRangeChange={onDateRangeChange}
       venueFilter={venueFilter}
-      onVenueFilterChange={setVenueFilter}
+      onVenueFilterChange={onVenueFilterChange}
+      statusMode={statusMode}
+      onStatusModeChange={onStatusModeChange}
       quoteBeatFill={quoteBeatFill}
       onQuoteBeatFillChange={setQuoteBeatFill}
     />

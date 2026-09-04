@@ -8,7 +8,12 @@ import {
   UNHEDGED_PAGE_SIZE,
   UNHEDGED_DEFAULT_DATE_RANGE,
   UNHEDGED_DATE_FILTERS,
+  UNHEDGED_DEFAULT_STATUS_MODE,
+  UNHEDGED_STATUS_FILTERS,
+  UNHEDGED_REQUEST_DATE_COLS,
   americanFromProb,
+  applyUnhedgedStatusFilter,
+  defaultStatusModeForVenue,
   coerceAmerican,
   fetchUnhedgedRfqs,
   countUnhedgedRfqs,
@@ -38,7 +43,10 @@ import {
   fairAmerican,
   filterFilledUnhedgedRows,
   filterPregameUnhedgedRows,
+  filterRequestUnhedgedRows,
+  filterUnhedgedRowsByStatusMode,
   isFilledUnhedgedRow,
+  isRequestUnhedgedRow,
   isLiveSkipReason,
   isLiveUnhedgedRow,
   isPregameUnhedgedRow,
@@ -48,6 +56,7 @@ import {
   legFairAmerican,
   isMissingFilledAtColumn,
   isMissingUpdatedAtColumn,
+  isMissingCreatedAtColumn,
   isMissingTableError,
   isMissingUserIdColumn,
   isMissingVenueColumn,
@@ -65,9 +74,12 @@ import {
   UNHEDGED_HEAVY_DATE_KEYS,
   applyUnhedgedDateWindow,
   unhedgedDateTs,
+  unhedgedStatusValues,
   unhedgedShouldAutoRefresh,
   rowTime,
   unhedgedActivityTs,
+  unhedgedDisplayTs,
+  unhedgedDateColsForMode,
   unhedgedDateWindow,
   unhedgedDateOrFilter,
   unhedgedDateRangeLabel,
@@ -88,6 +100,7 @@ import {
   mapUnhedgedRow,
   mapUnhedgedRows,
   normalizeStatus,
+  normalizeStatusMode,
   normalizeVenueFilter,
   ourQuoteAmerican,
   rowStatus,
@@ -154,6 +167,25 @@ assert.equal(unhedgedActivityTs({
 }), "2026-09-03T19:00:00.000Z");
 assert.equal(unhedgedActivityTs(null), null);
 assert.equal(unhedgedActivityTs({}), null);
+assert.equal(unhedgedDisplayTs({
+  status: "seen",
+  created_at: "2026-09-03T16:00:00.000Z",
+  updated_at: "2026-09-03T18:30:00.000Z",
+}), "2026-09-03T16:00:00.000Z");
+assert.equal(unhedgedDisplayTs({
+  status: "would_quote",
+  createdAt: "2026-09-03T16:00:00.000Z",
+  updatedAt: "2026-09-03T18:30:00.000Z",
+}), "2026-09-03T16:00:00.000Z");
+assert.equal(unhedgedDisplayTs({
+  status: "filled",
+  filled_at: "2026-09-03T03:11:00.000Z",
+  updated_at: "2026-09-03T18:30:00.000Z",
+}), "2026-09-03T18:30:00.000Z");
+assert.equal(formatEtTime(unhedgedDisplayTs({
+  status: "seen",
+  created_at: "2026-09-03T16:00:00.000Z",
+})), "Sep 3, 12:00 PM ET");
 {
   const withFill = mapUnhedgedRow({
     filled_at: "2026-09-02T17:56:00.000Z",
@@ -407,6 +439,36 @@ assert.equal(normalizeUnhedgedDateRange("all-time"), "all");
 assert.equal(normalizeUnhedgedDateRange("30d"), "month");
 assert.equal(normalizeUnhedgedDateRange("nope"), "today");
 assert.equal(UNHEDGED_DEFAULT_DATE_RANGE, "today");
+assert.equal(UNHEDGED_DEFAULT_STATUS_MODE, "fills");
+assert.deepEqual(UNHEDGED_STATUS_FILTERS.map((f) => f.key), ["fills", "requests", "all"]);
+assert.deepEqual(UNHEDGED_STATUS_FILTERS.map((f) => f.label), ["Fills", "Requests", "All"]);
+assert.equal(normalizeStatusMode("Requests"), "requests");
+assert.equal(normalizeStatusMode("seen"), "requests");
+assert.equal(normalizeStatusMode("filled"), "fills");
+assert.equal(normalizeStatusMode("nope"), "fills");
+assert.deepEqual(unhedgedStatusValues("fills"), ["filled"]);
+assert.deepEqual(unhedgedStatusValues("requests"), ["seen"]);
+assert.deepEqual(unhedgedStatusValues("all"), ["filled", "seen"]);
+assert.deepEqual(unhedgedDateColsForMode("fills"), ["filled_at"]);
+assert.deepEqual(unhedgedDateColsForMode("requests"), ["created_at"]);
+assert.deepEqual(unhedgedDateColsForMode("all"), ["filled_at", "created_at"]);
+assert.deepEqual(UNHEDGED_REQUEST_DATE_COLS, ["created_at"]);
+assert.equal(defaultStatusModeForVenue("polymarket"), "requests");
+assert.equal(defaultStatusModeForVenue("poly"), "requests");
+assert.equal(defaultStatusModeForVenue("all"), "fills");
+assert.equal(defaultStatusModeForVenue("kalshi"), "fills");
+assert.equal(defaultStatusModeForVenue(""), "fills");
+{
+  const seenEq = { eqs: [], eq(col, val) { this.eqs.push({ col, val }); return this; } };
+  applyUnhedgedStatusFilter(seenEq, "requests");
+  assert.deepEqual(seenEq.eqs, [{ col: "status", val: "seen" }]);
+  const fillEq = { eqs: [], eq(col, val) { this.eqs.push({ col, val }); return this; } };
+  applyUnhedgedStatusFilter(fillEq, "fills");
+  assert.deepEqual(fillEq.eqs, [{ col: "status", val: "filled" }]);
+  const allIn = { ins: [], in(col, vals) { this.ins.push({ col, vals }); return this; } };
+  applyUnhedgedStatusFilter(allIn, "all");
+  assert.deepEqual(allIn.ins, [{ col: "status", vals: ["filled", "seen"] }]);
+}
 assert.equal(unhedgedDateRangeLabel("month"), "Month");
 assert.deepEqual(UNHEDGED_DATE_FILTERS.map((f) => f.key), ["today", "24h", "7d", "month", "all"]);
 assert.deepEqual(UNHEDGED_LIGHT_DATE_KEYS, ["today", "24h", "7d"]);
@@ -433,6 +495,8 @@ assert.equal(unhedgedShouldAutoRefresh("hidden", 90_000), false);
 assert.equal(UNHEDGED_BLOTTER_SELECT.includes("*"), false);
 assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("legs"));
 assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("filled_at"));
+assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("created_at"));
+assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("taker_american"));
 assert.ok(!UNHEDGED_BLOTTER_COLUMNS.includes("raw"));
 {
   const noonEt = etLocalToUtc("2026-09-03", 14, 40);
@@ -527,6 +591,26 @@ assert.ok(!UNHEDGED_BLOTTER_COLUMNS.includes("raw"));
   );
   const week = unhedgedDateWindow("7d", etLocalToUtc("2026-09-03", 14, 40));
   assert.equal(rowInUnhedgedDateWindow(oldFill, week), true);
+  const seenToday = {
+    id: "seen-today",
+    status: "seen",
+    created_at: "2026-09-03T16:00:00.000Z",
+    filled_at: null,
+  };
+  const seenYesterday = {
+    id: "seen-old",
+    status: "seen",
+    created_at: "2026-09-02T16:00:00.000Z",
+    filled_at: null,
+  };
+  assert.equal(unhedgedDateTs(seenToday, "requests"), "2026-09-03T16:00:00.000Z");
+  assert.equal(rowInUnhedgedDateWindow(seenToday, today, "requests"), true);
+  assert.equal(rowInUnhedgedDateWindow(seenYesterday, today, "requests"), false);
+  assert.equal(rowInUnhedgedDateWindow(seenToday, today, "fills"), true); // no filled_at → fallback
+  assert.deepEqual(
+    filterUnhedgedRowsByDateWindow([seenToday, seenYesterday], today, "requests").map((r) => r.id),
+    ["seen-today"],
+  );
 }
 
 // ── Worker columns: our_quote / taker_american (status still seen) ──
@@ -1171,6 +1255,20 @@ assert.equal(legBestOpponentAmerican({}), null);
   assert.equal(shown[0].ourAmerican, 178);
   assert.equal(shown[0].amountText, "40 · $25");
   assert.equal(shown.some((r) => r.id === "seen" || r.status === "seen"), false);
+  assert.equal(isRequestUnhedgedRow(seen), true);
+  assert.equal(isRequestUnhedgedRow(would), true);
+  assert.equal(isRequestUnhedgedRow(started), false);
+  assert.equal(isRequestUnhedgedRow(filledMlb), false);
+  assert.deepEqual(filterRequestUnhedgedRows([seen, started, would, filledMlb]).map((r) => r.id), ["seen", "would"]);
+  assert.deepEqual(filterUnhedgedRowsByStatusMode([seen, started, would, filledMlb], "fills").map((r) => r.id), ["filled-mlb"]);
+  assert.deepEqual(filterUnhedgedRowsByStatusMode([seen, started, would, filledMlb], "requests").map((r) => r.id), ["seen", "would"]);
+  assert.deepEqual(filterUnhedgedRowsByStatusMode([seen, started, would, filledMlb], "all").map((r) => r.id), ["seen", "would", "filled-mlb"]);
+  const requestShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { statusMode: "requests" });
+  assert.deepEqual(requestShown.map((r) => r.id), ["seen", "would"]);
+  assert.equal(requestShown.every((r) => r.fillText === "—"), true);
+  assert.equal(requestShown.find((r) => r.id === "would").ourAmerican, 150);
+  const allShown = visibleUnhedgedRows([seen, started, would, filledMlb, filledNcaaf], { statusMode: "all" });
+  assert.deepEqual(allShown.map((r) => r.id), ["filled-mlb", "seen", "would"]);
 }
 
 // ── Live / in-game filled RFQs stay off the tape (not even paper) ──
@@ -1316,6 +1414,8 @@ assert.equal(wouldQuoteBeatsFill({ ourAmerican: 614, fillAmerican: 452 }), true)
 assert.equal(wouldQuoteBeatsFill({ ourAmerican: 452, fillAmerican: 614 }), false);
 assert.equal(wouldQuoteBeatsFill({ ourAmerican: null, fillAmerican: 452, our_quote_american: 900 }), false);
 assert.equal(wouldQuoteBeatsFill({}), false);
+assert.equal(wouldQuoteBeatsFill({ status: "seen", our_quote_american: 614 }), false);
+assert.equal(wouldQuoteBeatsFill({ status: "seen", our_quote_american: 614, fill_american: null }), false);
 {
   const beatPlus = {
     id: "beat-plus",
@@ -1383,6 +1483,9 @@ assert.equal(isMissingFilledAtColumn({ code: "PGRST204", message: "Could not fin
 assert.equal(isMissingUpdatedAtColumn({ code: "PGRST204", message: "Could not find the 'updated_at' column of 'unhedged_rfqs' in the schema cache" }), true);
 assert.equal(isMissingUpdatedAtColumn({ code: "42703", message: 'column unhedged_rfqs.updated_at does not exist' }), true);
 assert.equal(isMissingUpdatedAtColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column" }), false);
+assert.equal(isMissingCreatedAtColumn({ code: "PGRST204", message: "Could not find the 'created_at' column of 'unhedged_rfqs' in the schema cache" }), true);
+assert.equal(isMissingCreatedAtColumn({ code: "42703", message: 'column unhedged_rfqs.created_at does not exist' }), true);
+assert.equal(isMissingCreatedAtColumn({ code: "PGRST204", message: "Could not find the 'filled_at' column" }), false);
 assert.equal(isMissingStatusColumn({ code: "PGRST204", message: "Could not find the 'status' column of 'unhedged_rfqs' in the schema cache" }), true);
 assert.equal(isMissingStatusColumn({ code: "42703", message: 'column unhedged_rfqs.status does not exist' }), true);
 assert.equal(isMissingStatusColumn({ code: "42703", message: 'column unhedged_rfqs.user_id does not exist' }), false);
@@ -1419,6 +1522,7 @@ function createSequenceClient(responses) {
           state.ops.push("order");
           return chain;
         },
+        in(col, vals) { state.in = { col, vals }; state.ins = (state.ins || []).concat({ col, vals }); state.ops.push("in"); return chain; },
         or(filter) { state.or = filter; state.ors = (state.ors || []).concat(filter); state.ops.push("or"); return chain; },
         gte(col, val) { state.gtes = (state.gtes || []).concat({ col, val }); state.ops.push("gte"); return chain; },
         lt(col, val) { state.lts = (state.lts || []).concat({ col, val }); state.ops.push("lt"); return chain; },
@@ -1480,6 +1584,24 @@ function hasEq(call, col, val) {
 
 function assertStatusFilledEq(call) {
   assert.equal(hasEq(call, "status", "filled"), true, "expected .eq('status', 'filled')");
+}
+
+function assertStatusSeenEq(call) {
+  assert.equal(hasEq(call, "status", "seen"), true, "expected .eq('status', 'seen')");
+}
+
+function assertStatusInFilledSeen(call) {
+  assert.ok(call.in, "expected .in('status', ...)");
+  assert.equal(call.in.col, "status");
+  assert.deepEqual(call.in.vals, ["filled", "seen"]);
+}
+
+function assertCreatedAtWindow(call, from, to) {
+  assert.ok((call.gtes || []).some((g) => g.col === "created_at" && (!from || g.val === from)), "expected created_at.gte");
+  if (to) {
+    assert.ok((call.lts || []).some((g) => g.col === "created_at" && g.val === to), "expected created_at.lt");
+  }
+  assert.equal((call.gtes || []).some((g) => g.col === "filled_at"), false);
 }
 
 function assertNoStatusEq(call) {
@@ -1568,6 +1690,70 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const result = await fetchUnhedgedRfqs(client, { userId: "u1" });
   assertStatusFilledEq(client.calls[0]);
   assert.deepEqual(result.rows.map((r) => r.id), ["filled"]);
+}
+
+// ── Requests mode: status=seen, created_at window, keep priced seen rows ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const today = unhedgedDateWindow("today", now);
+  const mixed = [
+    {
+      id: "seen-priced",
+      status: "seen",
+      venue: "polymarket",
+      our_quote_american: 178,
+      our_fair_american: 201,
+      taker_american: 190,
+      created_at: "2026-09-03T16:00:00.000Z",
+      filled_at: null,
+      legs: [{ league: "mlb", symbol: "aec-mlb-bal-col-2026-09-02-col", selection: "col" }],
+    },
+    {
+      id: "seen-plain",
+      status: "seen",
+      venue: "polymarket",
+      created_at: "2026-09-03T15:00:00.000Z",
+      filled_at: null,
+      legs: [{ league: "mlb", symbol: "aec-mlb-bal-col-2026-09-02-col", selection: "col" }],
+    },
+    { id: "filled", status: "filled", fill_american: -110, filled_at: "2026-09-03T16:00:00.000Z" },
+    { id: "started", status: "started", created_at: "2026-09-03T16:30:00.000Z" },
+  ];
+  const client = createSequenceClient([{ data: mixed, error: null }]);
+  const result = await fetchUnhedgedRfqs(client, {
+    dateRange: "today",
+    now,
+    statusMode: "requests",
+    venue: "polymarket",
+  });
+  assertStatusSeenEq(client.calls[0]);
+  assert.equal(hasEq(client.calls[0], "status", "filled"), false);
+  assertCreatedAtWindow(client.calls[0], today.from, today.to);
+  assert.ok((client.calls[0].ors || [client.calls[0].or]).some((f) => /venue\./.test(f || "")));
+  assertCreatedAtOnlyBeforeLimit(client.calls[0]);
+  assert.deepEqual(result.rows.map((r) => r.id), ["seen-priced", "seen-plain"]);
+  const shown = visibleUnhedgedRows(result.rows, { statusMode: "requests" });
+  assert.equal(shown.length, 2);
+  assert.equal(shown[0].ourAmerican, 178);
+  assert.equal(shown[0].fairAmerican, 201);
+  assert.equal(shown[0].theirAmerican, 190);
+  assert.equal(shown[0].fillText, "—");
+  assert.equal(shown[0].timeEt, "Sep 3, 12:00 PM ET");
+  assert.equal(shown[1].ourText, "—");
+  assert.equal(shown[1].fillText, "—");
+}
+
+// ── All status mode uses status in (filled, seen) ──
+{
+  const mixed = [
+    { id: "seen", status: "seen", created_at: "2026-09-03T16:00:00.000Z" },
+    { id: "filled", status: "filled", fill_american: -110, filled_at: "2026-09-03T16:00:00.000Z" },
+    { id: "started", status: "started", created_at: "2026-09-03T16:30:00.000Z" },
+  ];
+  const client = createSequenceClient([{ data: mixed, error: null }]);
+  const result = await fetchUnhedgedRfqs(client, { dateRange: "all", statusMode: "all" });
+  assertStatusInFilledSeen(client.calls[0]);
+  assert.deepEqual(result.rows.map((r) => r.id).sort(), ["filled", "seen"]);
 }
 
 // ── Live filled rows from the wire are dropped (skip_reason / started leg) ──
@@ -1934,6 +2120,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   ]);
   const result = await countUnhedgedRfqs(client, { userId: "u1", dateRange: "today", now });
   assert.equal(result.filled, 12);
+  assert.equal(result.requests, 0);
   assert.equal(result.withQuote, 7);
   assert.equal(result.beatFill, 1);
   assert.equal(result.missingTable, false);
@@ -2027,16 +2214,73 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(client.calls[0].select, UNHEDGED_COUNT_SELECT);
 }
 
+// ── Requests head counts use status=seen + created_at; beat-fill is 0 ──
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const today = unhedgedDateWindow("today", now);
+  const client = createSequenceClient([
+    { data: null, count: 22, error: null },
+    { data: null, count: 8, error: null },
+  ]);
+  const result = await countUnhedgedRfqs(client, {
+    dateRange: "today",
+    now,
+    venue: "polymarket",
+    statusMode: "requests",
+  });
+  assert.equal(result.filled, 0);
+  assert.equal(result.requests, 22);
+  assert.equal(result.withQuote, 8);
+  assert.equal(result.beatFill, 0);
+  assert.equal(client.calls.length, 2);
+  assertStatusSeenEq(client.calls[0]);
+  assertStatusSeenEq(client.calls[1]);
+  assertCreatedAtWindow(client.calls[0], today.from, today.to);
+  assert.ok((client.calls[0].ors || [client.calls[0].or]).some((f) => /venue\./.test(f || "")));
+  assert.equal(client.calls[0].select, UNHEDGED_COUNT_SELECT);
+  assert.deepEqual(client.calls[0].selectOpts, UNHEDGED_COUNT_SELECT_OPTS);
+}
+
+// ── Requests + beat-fill chip: all tiles 0 (no fill price) ──
+{
+  const client = createSequenceClient([
+    { data: [{ our_quote_american: 614, fill_american: 452 }], error: null },
+  ]);
+  const result = await countUnhedgedRfqs(client, {
+    dateRange: "all",
+    statusMode: "requests",
+    quoteBeatFill: true,
+  });
+  assert.equal(result.filled, 0);
+  assert.equal(result.requests, 0);
+  assert.equal(result.withQuote, 0);
+  assert.equal(result.beatFill, 0);
+  assert.equal(client.calls.length, 0);
+}
+
+// ── Head counts never drop status=seen in Requests mode ──
+{
+  const client = createSequenceClient([
+    { data: null, error: { code: "PGRST204", message: "Could not find the 'status' column of 'unhedged_rfqs' in the schema cache" } },
+  ]);
+  const result = await countUnhedgedRfqs(client, { dateRange: "all", statusMode: "requests" });
+  assert.equal(result.requests, null);
+  assert.equal(client.calls.length, 1);
+  assertStatusSeenEq(client.calls[0]);
+}
+
 // ── mergeUnhedgedSummary prefers head counts ──
 {
-  const clientSummary = { fetched: 3, total: 3, filled: 3, withQuote: 1, beatFill: 1, seen: 0, started: 0, wouldQuote: 0, quoted: 0 };
-  const merged = mergeUnhedgedSummary(clientSummary, { filled: 40, withQuote: 12, beatFill: 5 });
+  const clientSummary = { fetched: 3, total: 3, filled: 3, requests: 0, withQuote: 1, beatFill: 1, seen: 0, started: 0, wouldQuote: 0, quoted: 0 };
+  const merged = mergeUnhedgedSummary(clientSummary, { filled: 40, requests: 9, withQuote: 12, beatFill: 5 });
   assert.equal(merged.filled, 40);
+  assert.equal(merged.requests, 9);
   assert.equal(merged.withQuote, 12);
   assert.equal(merged.beatFill, 5);
   assert.equal(merged.total, 3);
   const fallback = mergeUnhedgedSummary(clientSummary, null);
   assert.equal(fallback.filled, 3);
+  assert.equal(fallback.requests, 0);
 }
 
 // ── Beat-fill count is for the date+venue set ──
@@ -2092,12 +2336,20 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /No unhedged RFQ tape yet/);
   assert.match(page, /This tab is private/);
   assert.match(page, /Time ET/);
-  assert.match(page, /formatEtTime\(unhedgedActivityTs\(r\) \|\| r\.at\)/);
+  assert.match(page, /formatEtTime\(unhedgedDisplayTs\(r\) \|\| unhedgedActivityTs\(r\) \|\| r\.at\)/);
+  assert.match(page, /unhedgedDisplayTs/);
   assert.match(page, /unhedgedActivityTs/);
   assert.match(page, />Amount</);
+  assert.match(page, /Taker \/ RFQ/);
   assert.match(page, /Fill price/);
   assert.match(page, /True \/ fair/);
   assert.match(page, />Would-quote</);
+  assert.match(page, /UNHEDGED_STATUS_FILTERS/);
+  assert.match(page, /c\.key === "fills"/);
+  assert.match(page, /c\.key === "requests"/);
+  assert.match(page, /statusMode/);
+  assert.match(page, /defaultStatusModeForVenue/);
+  assert.match(page, /fill prices are unavailable/);
   assert.match(page, /isTickerBlob/);
   assert.match(page, /LegBreakdown/);
   assert.match(page, /className="legs"/);
@@ -2132,6 +2384,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /label: "Kalshi"/);
   assert.match(page, /label: "Polymarket"/);
   assert.match(page, /venueFilter/);
+  assert.match(page, /statusMode/);
   assert.match(page, /quoteBeatFill/);
   assert.match(page, /unhedgedRefreshLabel/);
   assert.match(page, /onRefresh/);
@@ -2173,6 +2426,8 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const sql = fs.readFileSync(path.join(dir, "..", "sql", "unhedged_rfqs_filled_at_idx.sql"), "utf8");
   assert.match(sql, /CREATE INDEX IF NOT EXISTS unhedged_rfqs_status_filled_at_idx/);
   assert.match(sql, /\(status, filled_at DESC\)/);
+  assert.match(sql, /CREATE INDEX IF NOT EXISTS unhedged_rfqs_status_created_at_idx/);
+  assert.match(sql, /\(status, created_at DESC\)/);
 }
 
 console.log("unhedgedTape.test.js: ok");
