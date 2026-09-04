@@ -23,6 +23,7 @@ import {
   evHeaderValues,
 } from "./oddsLoad.js";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions } from "./promoParlayScan.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -140,6 +141,11 @@ const MAX_PROMO_LEGS = 8;
 // How many top 3-leg seeds to grow from. Extra work is ~seeds × leftover
 // candidates per added leg — similar budget to today's 3-leg scan.
 const GROW_FROM_3_SEEDS = 50;
+const PARLAY_LEG_CAP = 200;
+// Fallback stake when the debounced amount is 0/empty. Stake-only tweaks
+// rescale a cached scan — they do not re-run findTopParlays.
+const PROMO_SCAN_STAKE = 100;
+const PROMO_SCAN_DEBOUNCE_MS = 200;
 
 function isWithinDateRange(commence_time, range) {
   const now = new Date();
@@ -672,6 +678,15 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
 
   results.sort((a, b) => b.ev - a.ev);
   return results.slice(0, maxResults);
+}
+
+function useDebouncedValue(value, delayMs = PROMO_SCAN_DEBOUNCE_MS) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
 }
 
 function findTopFreeBetConversions(legs, freeBetAmount, maxResults = 10) {
@@ -1434,7 +1449,7 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-  }, [promoBook, promoSports, promoDateRange, promoType, boostPct, stake, creditConversionPct, refundPct, numLegs, minFinalOdds, minLegOdds, marketScope, excludedPromoLegs, matchingBookKeys]);
+  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, minLegOdds, marketScope, excludedPromoLegs, matchingBookKeys]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1493,25 +1508,69 @@ export default function App() {
   const evFilterBooks = ALL_BOOKS.filter(b => evBooksAvailable.has(b.key) || b.key === evBookFilter);
   const filteredEvBets = evBookFilter === "all" ? evBets : evBets.filter(b => b.bookKey === evBookFilter);
 
-  const promoSportFilter = promoSports.size === SPORTS.length ? null : [...promoSports];
+  const scanBoostPct = useDebouncedValue(boostPct, PROMO_SCAN_DEBOUNCE_MS);
+  const scanStake = useDebouncedValue(stake, PROMO_SCAN_DEBOUNCE_MS);
+  const scanStakeRef = useRef(scanStake);
+  scanStakeRef.current = scanStake;
+
+  const promoSportFilter = useMemo(
+    () => (promoSports.size === SPORTS.length ? null : [...promoSports]),
+    [promoSports],
+  );
   const isParlayPromo = promoType === "boost" || promoType === "nosweat";
   const parsedMinLeg = (isParlayPromo && minLegOdds !== "") ? Number(minLegOdds) : null;
-  const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
-  const promoLegsScoped = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
-    : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
-    : promoLegsAll;
-  const promoLegs = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
   const parsedMinFinal = (isParlayPromo && minFinalOdds !== "") ? Number(minFinalOdds) : null;
-  const PARLAY_LEG_CAP = 200;
-  const parlayLegPool = isParlayPromo
-    ? [...promoLegs]
-        .sort((a, b) => (ourTrueProb(b.bestOpp) - impliedProb(b.dk)) - (ourTrueProb(a.bestOpp) - impliedProb(a.dk)))
-        .slice(0, PARLAY_LEG_CAP)
-    : promoLegs;
-  const topParlays = promoType === "boost" ? findTopParlays(parlayLegPool, numLegs, boostPct, stake, 50, parsedMinFinal) : [];
-  const topNoSweats = promoType === "nosweat"
-    ? findTopParlays(parlayLegPool, numLegs, 0, stake, 50, parsedMinFinal, (ls) => calcNoSweatFromLegs(ls, stake, refundPct, creditConversionPct))
-    : [];
+
+  const promoLegs = useMemo(() => {
+    const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
+    const promoLegsScoped = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
+      : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
+      : promoLegsAll;
+    return filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
+  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, marketScope, excludedPromoLegs]);
+
+  const parlayLegPool = useMemo(() => {
+    if (!isParlayPromo) return promoLegs;
+    return [...promoLegs]
+      .sort((a, b) => (ourTrueProb(b.bestOpp) - impliedProb(b.dk)) - (ourTrueProb(a.bestOpp) - impliedProb(a.dk)))
+      .slice(0, PARLAY_LEG_CAP);
+  }, [promoLegs, isParlayPromo]);
+
+  const scannedBoostParlays = useMemo(() => {
+    if (promoType !== "boost") return { parlays: [], atStake: PROMO_SCAN_STAKE };
+    const raw = Number(scanStakeRef.current);
+    const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
+    return { parlays: findTopParlays(parlayLegPool, numLegs, scanBoostPct, atStake, 50, parsedMinFinal), atStake };
+    // scanStake omitted on purpose: stake-only changes rescale below, no C(n,k) rescan.
+  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal]);
+
+  const topParlays = useMemo(
+    () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
+    [scannedBoostParlays, stake],
+  );
+
+  const scannedNoSweats = useMemo(() => {
+    if (promoType !== "nosweat") return { parlays: [], atStake: PROMO_SCAN_STAKE };
+    const raw = Number(scanStakeRef.current);
+    const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
+    return {
+      parlays: findTopParlays(
+        parlayLegPool,
+        numLegs,
+        0,
+        atStake,
+        50,
+        parsedMinFinal,
+        (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct),
+      ),
+      atStake,
+    };
+  }, [promoType, parlayLegPool, numLegs, parsedMinFinal, refundPct, creditConversionPct]);
+
+  const topNoSweats = useMemo(
+    () => rescaleParlaysForStake(scannedNoSweats.parlays, scannedNoSweats.atStake, stake),
+    [scannedNoSweats, stake],
+  );
 
   const topNoSweatsWithLock = useMemo(() => {
     return topNoSweats.map(p => {
@@ -1537,7 +1596,15 @@ export default function App() {
     });
   }, [topParlays, stake, boostPct]);
 
-  const topFreeBetConversions = promoType === "freebet" ? findTopFreeBetConversions(promoLegs, stake, 50) : [];
+  const scannedFreeBetConversions = useMemo(() => {
+    if (promoType !== "freebet") return [];
+    return findTopFreeBetConversions(promoLegs, PROMO_SCAN_STAKE, 50);
+  }, [promoType, promoLegs]);
+
+  const topFreeBetConversions = useMemo(
+    () => rescaleFreeBetConversions(scannedFreeBetConversions, PROMO_SCAN_STAKE, stake),
+    [scannedFreeBetConversions, stake],
+  );
 
   useEffect(() => {
     if (activeTab !== "combo") setComboPrefill(null);
@@ -2016,6 +2083,10 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0 && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
+              )}
 
               {/* ─── PROFIT BOOST RESULTS ─── */}
               {promoType === "boost" && (
