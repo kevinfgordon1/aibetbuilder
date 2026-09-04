@@ -213,6 +213,12 @@ function fullPlan() {
   assert.deepEqual(evHeaderValues({ evScan: scan, showLoading: false }), {
     total: 3, plusEv: 1, bestValue: "+$4.20", bestSub: "Yankees ML", slateSub: "today's slate",
   });
+  assert.deepEqual(evHeaderValues({
+    evScan: { allEvLegs: [], evBets: [], positiveEV: [] },
+    showLoading: false,
+  }), {
+    total: 0, plusEv: 0, bestValue: "--", bestSub: "", slateSub: "today's slate",
+  });
 }
 
 // ── Promo-board header scan until full board is loaded
@@ -322,9 +328,11 @@ function fullPlan() {
   assert.match(app, /buildAllLegsAllBooks\(allOddsData,/);
   assert.match(app, /buildAllLegsAllBooks\(promoBoardData,/);
   assert.match(app, /shouldComputePromoHeaderScan\(\{ fullBoardLoaded, promoLoaded \}\)/);
+  assert.match(app, /setPromoHeaderEvScan/);
   assert.match(app, /selectEvScanView\(/);
   assert.match(app, /evHeaderShowLoading\(/);
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
+  assert.match(app, /shouldComputePromoHeaderScan\(\{ fullBoardLoaded, promoLoaded \}\) && !promoHeaderEvScan/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);

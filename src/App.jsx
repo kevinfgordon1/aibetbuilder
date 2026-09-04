@@ -28,7 +28,7 @@ import {
   evScanFromLegs,
 } from "./oddsLoad.js";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
-import { rescaleParlaysForStake, rescaleFreeBetConversions } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked } from "./promoParlayScan.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -643,6 +643,8 @@ function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFina
   return grown.slice(0, maxResults);
 }
 
+// Sync enumerate-then-sort (heap declined). Do not call from render —
+// Promo Builder uses findTopParlaysChunked in an effect instead.
 function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFinalOdds = null, evCalc = null) {
   const calc = evCalc || ((ls) => calcParlayEV(ls, boostPct, stake));
   if (numLegs > 3 && numLegs <= MAX_PROMO_LEGS) {
@@ -1347,8 +1349,13 @@ export default function App() {
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
   const [evScan, setEvScan] = useState(null);
+  const [promoHeaderEvScan, setPromoHeaderEvScan] = useState(null);
+  const [scannedBoostParlays, setScannedBoostParlays] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
+  const [scannedNoSweats, setScannedNoSweats] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
+  const [promoScanBusy, setPromoScanBusy] = useState(false);
   const promoFetchGen = useRef(0);
   const fullFetchGen = useRef(0);
+  const promoScanGen = useRef(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1483,9 +1490,19 @@ export default function App() {
     return evScanFromLegs(buildAllLegsAllBooks(allOddsData, null, evDateRange), calcEV);
   }, [fullBoardLoaded, allOddsData, evDateRange, activeTab]);
 
-  const promoHeaderEvScan = useMemo(() => {
-    if (!shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded })) return null;
-    return evScanFromLegs(buildAllLegsAllBooks(promoBoardData, null, evDateRange), calcEV);
+  // Header Today slate from the promo board — after first paint, never during
+  // the C(n,3) parlay scan. Cards stay "..." until this effect writes numbers.
+  useEffect(() => {
+    if (!shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded })) {
+      setPromoHeaderEvScan(null);
+      return;
+    }
+    let cancelled = false;
+    const id = setTimeout(() => {
+      if (cancelled) return;
+      setPromoHeaderEvScan(evScanFromLegs(buildAllLegsAllBooks(promoBoardData, null, evDateRange), calcEV));
+    }, 0);
+    return () => { cancelled = true; clearTimeout(id); };
   }, [fullBoardLoaded, promoLoaded, promoBoardData, evDateRange]);
 
   useEffect(() => {
@@ -1516,7 +1533,7 @@ export default function App() {
       promoLoaded,
       promoLoading,
       activeTab,
-    }),
+    }) || (shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded }) && !promoHeaderEvScan),
   });
 
   // +EV Bets tab — single-book filter
@@ -1552,36 +1569,44 @@ export default function App() {
       .slice(0, PARLAY_LEG_CAP);
   }, [promoLegs, isParlayPromo]);
 
-  const scannedBoostParlays = useMemo(() => {
-    if (promoType !== "boost") return { parlays: [], atStake: PROMO_SCAN_STAKE };
+  // Heavy C(n,k) scan is async + chunked. Never call findTopParlays during render.
+  // Stake-only changes rescale below (scanStake omitted on purpose).
+  useEffect(() => {
+    if (promoType !== "boost" && promoType !== "nosweat") {
+      setPromoScanBusy(false);
+      return;
+    }
+    const gen = ++promoScanGen.current;
     const raw = Number(scanStakeRef.current);
     const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
-    return { parlays: findTopParlays(parlayLegPool, numLegs, scanBoostPct, atStake, 50, parsedMinFinal), atStake };
-    // scanStake omitted on purpose: stake-only changes rescale below, no C(n,k) rescan.
-  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal]);
+    const calc = promoType === "nosweat"
+      ? (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct)
+      : (ls) => calcParlayEV(ls, scanBoostPct, atStake);
+    const ac = new AbortController();
+    setPromoScanBusy(true);
+    findTopParlaysChunked(parlayLegPool, numLegs, calc, {
+      maxResults: 50,
+      minFinalOdds: parsedMinFinal,
+      signal: ac.signal,
+    }).then((parlays) => {
+      if (gen !== promoScanGen.current) return;
+      if (promoType === "boost") setScannedBoostParlays({ parlays, atStake });
+      else setScannedNoSweats({ parlays, atStake });
+      setPromoScanBusy(false);
+    }).catch((err) => {
+      if (err?.name === "AbortError") return;
+      console.error("[promo scan]", err);
+      if (gen === promoScanGen.current) setPromoScanBusy(false);
+    });
+    return () => {
+      ac.abort();
+    };
+  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
     [scannedBoostParlays, stake],
   );
-
-  const scannedNoSweats = useMemo(() => {
-    if (promoType !== "nosweat") return { parlays: [], atStake: PROMO_SCAN_STAKE };
-    const raw = Number(scanStakeRef.current);
-    const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
-    return {
-      parlays: findTopParlays(
-        parlayLegPool,
-        numLegs,
-        0,
-        atStake,
-        50,
-        parsedMinFinal,
-        (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct),
-      ),
-      atStake,
-    };
-  }, [promoType, parlayLegPool, numLegs, parsedMinFinal, refundPct, creditConversionPct]);
 
   const topNoSweats = useMemo(
     () => rescaleParlaysForStake(scannedNoSweats.parlays, scannedNoSweats.atStake, stake),
@@ -2100,18 +2125,29 @@ export default function App() {
                 </div>
               </div>
 
-              {promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0 && (
+              {((promoType === "boost" || promoType === "nosweat") && promoScanBusy && (promoType === "boost" ? topParlaysWithHedge.length : topNoSweatsWithLock.length) > 0
+                || (promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0)) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
+              )}
+              {((promoType === "boost" && promoScanBusy && topParlaysWithHedge.length === 0)
+                || (promoType === "nosweat" && promoScanBusy && topNoSweatsWithLock.length === 0)) && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>scanning…</div>
               )}
 
               {/* ─── PROFIT BOOST RESULTS ─── */}
               {promoType === "boost" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {topParlaysWithHedge.length === 0 && (
+                  {topParlaysWithHedge.length === 0 && !promoScanBusy && (
                     <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
                       <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
+                    </div>
+                  )}
+                  {topParlaysWithHedge.length === 0 && promoScanBusy && (
+                    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", marginBottom: 8 }}>scanning…</div>
+                      <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
                   {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
@@ -2222,11 +2258,17 @@ export default function App() {
               {/* ─── NO SWEAT RESULTS ─── */}
               {promoType === "nosweat" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {topNoSweatsWithLock.length === 0 && (
+                  {topNoSweatsWithLock.length === 0 && !promoScanBusy && (
                     <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
                       <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
+                    </div>
+                  )}
+                  {topNoSweatsWithLock.length === 0 && promoScanBusy && (
+                    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", marginBottom: 8 }}>scanning…</div>
+                      <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
                   {topNoSweatsWithLock.slice(0, promoPage).map((p, i) => {
