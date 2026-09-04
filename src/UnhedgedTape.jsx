@@ -31,6 +31,7 @@ import {
   unhedgedDateRangeLabel,
   unhedgedDateRangePages,
   unhedgedDisplayTs,
+  unhedgedBlotterListKind,
   unhedgedRefreshLabel,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
@@ -48,12 +49,13 @@ const VENUE_CHIPS = [
   { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
 ];
 
-function FilterChip({ label, active, onClick, className, title }) {
+function FilterChip({ label, active, onClick, className, title, busy }) {
   return (
     <button
       type="button"
       className={"chip btn" + (active ? " on" : "") + (className ? " " + className : "")}
       aria-pressed={active}
+      aria-busy={busy ? true : undefined}
       title={title}
       onClick={onClick}
     >
@@ -154,6 +156,14 @@ export function UnhedgedBlotter({
     [rowSummary, useHead, counts],
   );
   const beatFillCount = useHead && counts.beatFill != null ? counts.beatFill : venueSummary.beatFill;
+  const listKind = unhedgedBlotterListKind({
+    loaded,
+    paging,
+    missingTable,
+    rowCount: list.length,
+    filteredCount: filtered.length,
+  });
+  const rowsBusy = listKind === "loading";
   return (
     <div className="uh">
       <style>{`
@@ -177,6 +187,9 @@ export function UnhedgedBlotter({
         .uh .legs td{padding:3px 10px 3px 0;border-bottom:1px solid rgba(255,255,255,0.04);vertical-align:middle}
         .uh .legs tr:last-child td{border-bottom:none}
         .uh .empty{color:#6b7280;font-size:14px;padding:8px 2px}
+        .uh .empty.loading{display:flex;align-items:center;gap:8px}
+        .uh .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.15);border-top-color:#93c5fd;border-radius:50%;animation:uh-spin .7s linear infinite;flex:0 0 auto}
+        @keyframes uh-spin{to{transform:rotate(360deg)}}
         .uh .muted{color:#6b7280}
         .uh .fair{color:#93c5fd}
         .uh .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:0 0 12px}
@@ -195,22 +208,22 @@ export function UnhedgedBlotter({
         <span className="chip">paper</span>
         <span className="chip">MLB + NFL ML</span>
         <span className="chip">pregame</span>
-        {loaded && !missingTable && !paging && !polyRequests && (
+        {loaded && !missingTable && !rowsBusy && !polyRequests && (
           <span className="chip ok num">{summary.filled} filled</span>
         )}
-        {loaded && !missingTable && !paging && polyRequests && (
+        {loaded && !missingTable && !rowsBusy && polyRequests && (
           <span className="chip warn num">{summary.requests} requests</span>
         )}
         {onRefresh ? (
           <button
             type="button"
             className="chip btn"
-            disabled={!!refreshing || !!paging || !loaded}
-            aria-busy={!!refreshing || !!paging}
+            disabled={!!refreshing || rowsBusy}
+            aria-busy={!!refreshing || rowsBusy}
             title="Re-fetch the tape. Manual only — this page does not auto-refresh. Does not reload the app. Today / 24h / 7d stay one page."
             onClick={onRefresh}
           >
-            {unhedgedRefreshLabel(refreshing || paging)}
+            {unhedgedRefreshLabel(refreshing || rowsBusy)}
           </button>
         ) : null}
       </div>
@@ -227,13 +240,14 @@ export function UnhedgedBlotter({
       ) : null}
 
       {loaded && !missingTable && (
-        <div className="filters" role="group" aria-label="Unhedged RFQ filters">
+        <div className="filters" role="group" aria-label="Unhedged RFQ filters" aria-busy={rowsBusy || undefined}>
           <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Date</span>
           {UNHEDGED_DATE_FILTERS.map((c) => (
             <FilterChip
               key={c.key}
               label={c.label}
               active={dateKey === c.key}
+              busy={rowsBusy}
               onClick={() => { if (onDateRangeChange) onDateRangeChange(c.key); }}
               title={c.key === "all" || c.key === "month"
                 ? `${c.label} window — pages from the server after you pick this chip. Tile counts are a head query.`
@@ -248,6 +262,7 @@ export function UnhedgedBlotter({
               label={c.label}
               className={c.cls}
               active={venueFilter === c.key}
+              busy={rowsBusy}
               onClick={() => { if (onVenueFilterChange) onVenueFilterChange(c.key); }}
               title={c.key === "all"
                 ? "All venues — filled tape only."
@@ -261,6 +276,7 @@ export function UnhedgedBlotter({
             label={`Would-quote beat fill · ${beatFillCount}`}
             className="warn"
             active={quoteBeatFill}
+            busy={rowsBusy}
             onClick={() => {
               if (polyRequests) return;
               if (onQuoteBeatFillChange) onQuoteBeatFillChange(!quoteBeatFill);
@@ -272,7 +288,7 @@ export function UnhedgedBlotter({
         </div>
       )}
 
-      {loaded && !missingTable && !(paging && !counts) && (
+      {loaded && !missingTable && !rowsBusy && (
         <div className="tiles">
           {polyRequests ? (
             <Tile
@@ -310,19 +326,22 @@ export function UnhedgedBlotter({
         </div>
       )}
 
-      <div className="card">
-        {!loaded || paging ? (
-          <div className="empty">Loading…</div>
-        ) : missingTable ? (
+      <div className="card" aria-busy={rowsBusy || undefined}>
+        {listKind === "loading" ? (
+          <div className="empty loading">
+            <span className="spin" aria-hidden="true" />
+            Loading…
+          </div>
+        ) : listKind === "missing" ? (
           <div className="empty">No unhedged RFQ tape yet. The worker has not published this table.</div>
-        ) : list.length === 0 ? (
+        ) : listKind === "empty" ? (
           <div className="empty">
             {polyRequests
               ? "No seen pregame MLB or NFL moneyline RFQ requests."
               : "No filled pregame MLB or NFL moneyline RFQs."}
             {error && error.message ? <span className="muted"> ({error.message})</span> : null}
           </div>
-        ) : filtered.length === 0 ? (
+        ) : listKind === "filtered-empty" ? (
           <div className="empty">
             {polyRequests
               ? "No seen pregame MLB or NFL moneyline RFQ requests match these filters."
@@ -362,7 +381,7 @@ export function UnhedgedBlotter({
             </tbody>
           </table>
         )}
-        {loaded && !missingTable && list.length > 0 && (
+        {listKind === "rows" && (
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
             Showing {polyRequests ? "seen" : "filled"} pregame MLB and NFL moneylines in the {unhedgedDateRangeLabel(dateKey)} window ({heavy ? "paged from the server after this chip" : "one page; Month / All time page only after you pick that chip"}, {polyRequests ? "newest created_at first" : "newest activity first"}). Tile counts are a head query. Venue and beat-fill chips filter this set. In-game rows are hidden.
           </div>
@@ -391,9 +410,8 @@ export default function UnhedgedTape({ user }) {
     if (!owner) return;
     const gen = rowGen.current + 1;
     rowGen.current = gen;
-    const heavy = unhedgedDateRangePages(dateRange);
     if (button) setRefreshing(true);
-    if (heavy) setPaging(true);
+    setPaging(true);
     try {
       const result = await fetchUnhedgedRfqs(supabase, {
         dateRange,
@@ -435,8 +453,8 @@ export default function UnhedgedTape({ user }) {
   const bumpFetch = useCallback((heavy) => {
     rowGen.current += 1;
     countGen.current += 1;
+    setPaging(true);
     if (heavy) {
-      setPaging(true);
       setRaw([]);
       setCounts(null);
     }

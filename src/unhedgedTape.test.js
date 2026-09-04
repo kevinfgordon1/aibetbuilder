@@ -21,6 +21,7 @@ import {
   mergeUnhedgedSummary,
   resolveUnhedgedLimit,
   unhedgedRefreshLabel,
+  unhedgedBlotterListKind,
   unhedgedDateRangePages,
   unhedgedVenueOrFilter,
   filterUnhedgedAnalytics,
@@ -1760,6 +1761,17 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.equal(unhedgedRefreshLabel(true), "Refreshing…");
 }
 
+// In-flight row refetch is loading, never the empty RFQ copy.
+{
+  assert.equal(unhedgedBlotterListKind({ loaded: false, paging: false }), "loading");
+  assert.equal(unhedgedBlotterListKind({ loaded: true, paging: true, rowCount: 0 }), "loading");
+  assert.equal(unhedgedBlotterListKind({ loaded: true, paging: true, rowCount: 4, filteredCount: 0 }), "loading");
+  assert.equal(unhedgedBlotterListKind({ loaded: true, paging: false, missingTable: true }), "missing");
+  assert.equal(unhedgedBlotterListKind({ loaded: true, paging: false, rowCount: 0 }), "empty");
+  assert.equal(unhedgedBlotterListKind({ loaded: true, paging: false, rowCount: 3, filteredCount: 0 }), "filtered-empty");
+  assert.equal(unhedgedBlotterListKind({ loaded: true, paging: false, rowCount: 3, filteredCount: 2 }), "rows");
+}
+
 // ── Seen rows from the wire are dropped even if the query leaked them ──
 {
   const mixed = [
@@ -2460,6 +2472,14 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /mergeUnhedgedSummary/);
   assert.match(page, /unhedgedDateRangePages/);
   assert.match(page, /setPaging/);
+  assert.match(page, /setPaging\(true\)/);
+  assert.match(page, /unhedgedBlotterListKind/);
+  assert.match(page, /className="empty loading"/);
+  assert.match(page, /className="spin"/);
+  assert.match(page, /listKind === "loading"/);
+  assert.match(page, /listKind === "empty"/);
+  assert.match(page, /aria-busy=\{rowsBusy/);
+  assert.doesNotMatch(page, /if \(heavy\) setPaging/);
   assert.match(page, /head query/);
   assert.doesNotMatch(page, /userId:\s*user/);
   assert.match(page, /Do not pass user\.id/);
