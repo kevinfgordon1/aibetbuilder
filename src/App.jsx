@@ -20,10 +20,7 @@ import {
   shouldFetchPromoOdds,
   shouldRunEvScan,
   promoNeedsReload,
-  evHeaderValues,
-  evHeaderShowLoading,
   DEFAULT_EV_DATE_RANGE,
-  shouldComputePromoHeaderScan,
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
@@ -716,16 +713,6 @@ function findTopFreeBetConversions(legs, freeBetAmount, maxResults = 10) {
   return results.slice(0, maxResults);
 }
 
-function StatCard({ label, value, sub, color }) {
-  return (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "20px 24px", flex: 1, minWidth: 160 }}>
-      <div style={{ fontSize: 12, fontWeight: 500, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1.2, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color: color || "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
-}
-
 function EVBadge({ ev }) {
   const color = ev > 10 ? "#10b981" : ev > 5 ? "#f59e0b" : ev > 0 ? "#6b7280" : "#ef4444";
   const bg = ev > 10 ? "rgba(16,185,129,0.12)" : ev > 5 ? "rgba(245,158,11,0.12)" : ev > 0 ? "rgba(107,114,128,0.12)" : "rgba(239,68,68,0.12)";
@@ -1349,7 +1336,6 @@ export default function App() {
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
   const [evScan, setEvScan] = useState(null);
-  const [promoHeaderEvScan, setPromoHeaderEvScan] = useState(null);
   const [scannedBoostParlays, setScannedBoostParlays] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
   const [scannedNoSweats, setScannedNoSweats] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
   const [promoScanBusy, setPromoScanBusy] = useState(false);
@@ -1491,30 +1477,13 @@ export default function App() {
     return evScanFromLegs(buildAllLegsAllBooks(allOddsData, null, evDateRange), calcEV);
   }, [fullBoardLoaded, allOddsData, evDateRange, activeTab]);
 
-  // Header Today slate from the promo board — after first paint, never during
-  // the C(n,3) parlay scan. Cards stay "..." until this effect writes numbers.
-  useEffect(() => {
-    if (!shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded })) {
-      setPromoHeaderEvScan(null);
-      return;
-    }
-    let cancelled = false;
-    const id = setTimeout(() => {
-      if (cancelled) return;
-      setPromoHeaderEvScan(evScanFromLegs(buildAllLegsAllBooks(promoBoardData, null, evDateRange), calcEV));
-    }, 0);
-    return () => { cancelled = true; clearTimeout(id); };
-  }, [fullBoardLoaded, promoLoaded, promoBoardData, evDateRange]);
-
   useEffect(() => {
     if (liveEvScan) setEvScan(liveEvScan);
   }, [liveEvScan]);
 
   const evScanView = selectEvScanView({
-    fullBoardLoaded,
     liveEvScan,
     cachedEvScan: evScan,
-    promoHeaderScan: promoHeaderEvScan,
   });
   const allEvLegs = evScanView?.allEvLegs ?? [];
   const evBets = evScanView?.evBets ?? [];
@@ -1525,17 +1494,6 @@ export default function App() {
   const showFullPageSpinner =
     ((activeTab === "ev" || activeTab === "odds") && fullBoardLoading) ||
     (activeTab === "promo" && promoLoading && !promoLoaded);
-  const evHeader = evHeaderValues({
-    evScan: evScanView,
-    dateRange: evDateRange,
-    showLoading: evHeaderShowLoading({
-      fullBoardLoaded,
-      fullBoardLoading,
-      promoLoaded,
-      promoLoading,
-      activeTab,
-    }) || (shouldComputePromoHeaderScan({ fullBoardLoaded, promoLoaded }) && !promoHeaderEvScan),
-  });
 
   // +EV Bets tab — single-book filter
   const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
@@ -1827,12 +1785,6 @@ export default function App() {
             <button onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Sign in with Google</button>
           )}
         </div>
-      </div>
-
-      <div style={{ padding: "24px 32px 0", display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <StatCard label="Total Bets Analyzed" value={evHeader.total} sub={evHeader.slateSub} />
-        <StatCard label="+EV Bets Found" value={evHeader.plusEv} color="#10b981" />
-        <StatCard label="Best Single EV" value={evHeader.bestValue} color="#3b82f6" sub={evHeader.bestSub} />
       </div>
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
