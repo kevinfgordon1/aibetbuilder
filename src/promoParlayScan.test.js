@@ -24,6 +24,7 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
 
 // ── Debounce + memo + page-reset deps (no boost/stake churn)
 {
+  assert.match(app, /const PROMO_SCAN_DEBOUNCE_MS = 150/);
   assert.match(app, /useDebouncedValue\(boostPct/);
   assert.match(app, /useDebouncedValue\(stake/);
   assert.match(app, /scanBoostPct/);
