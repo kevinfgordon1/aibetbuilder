@@ -1,8 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import ComboLocks, { OWNER_EMAIL } from "./ComboLocks";
+import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
+import UserProfile from "./UserProfile";
+import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, comboLockHash, profileHash } from "./comboAccess";
+import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs } from "./userProfile";
 import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
@@ -113,8 +116,8 @@ const DATE_RANGES = [
   { val: "any", label: "Any" },
 ];
 
-// Promo Builder first-load fallback. Sports/date are not persisted;
-// +EV and Odds Board keep their own state.
+// Promo Builder first-load fallback. Signed-in profile prefs override sports
+// and default book; +EV and Odds Board keep their own session state.
 const DEFAULT_PROMO_SPORT_KEYS = ["baseball_mlb", "americanfootball_ncaaf"];
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
@@ -1322,6 +1325,8 @@ export default function App() {
   const [fullBoardLoaded, setFullBoardLoaded] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
+  const [focusLockId, setFocusLockId] = useState(null);
+  const [profilePrefs, setProfilePrefs] = useState(() => defaultProfilePrefs());
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
@@ -1357,6 +1362,68 @@ export default function App() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const loaded = loadProfilePrefs(user, {
+      allowedSports: new Set(SPORT_KEYS),
+      allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+    });
+    setProfilePrefs(loaded);
+    if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
+    if (loaded.promoBook) setPromoBook(loaded.promoBook);
+  }, [user && user.id]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    const applyHash = () => {
+      const parsed = parseAppHash(window.location.hash);
+      if (parsed.tab === "combo") {
+        if (canSeeComboLocks(user)) {
+          setActiveTab("combo");
+          setFocusLockId(parsed.lockId);
+        } else {
+          window.history.replaceState(null, "", window.location.pathname + window.location.search);
+          setActiveTab((t) => (t === "combo" ? "promo" : t));
+        }
+        return;
+      }
+      if (parsed.tab === "profile") {
+        if (user) setActiveTab("profile");
+        else window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    };
+    applyHash();
+    window.addEventListener("hashchange", applyHash);
+    return () => window.removeEventListener("hashchange", applyHash);
+  }, [user, authLoading]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (activeTab === "combo" && !canSeeComboLocks(user)) {
+      setActiveTab("promo");
+      setFocusLockId(null);
+    }
+    if (activeTab === "profile" && !user) setActiveTab("promo");
+    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) {
+      setActiveTab("promo");
+    }
+  }, [activeTab, user, authLoading]);
+
+  useEffect(() => {
+    if (activeTab === "combo" && canSeeComboLocks(user)) {
+      const parsed = parseAppHash(window.location.hash);
+      if (parsed.tab !== "combo") {
+        window.history.replaceState(null, "", comboLockHash(focusLockId));
+      }
+    } else if (activeTab === "profile" && user) {
+      if (parseAppHash(window.location.hash).tab !== "profile") {
+        window.history.replaceState(null, "", profileHash());
+      }
+    } else if (parseAppHash(window.location.hash).tab === "combo" || parseAppHash(window.location.hash).tab === "profile") {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, [activeTab, user, focusLockId]);
 
   const applyTransformed = (featuredRows, eventRows) => {
     const featured = featuredRows.map(row => transformOddsData(row.data, row.sport));
@@ -1697,7 +1764,7 @@ export default function App() {
   };
 
   const sendToComboLocks = (p) => {
-    if (user?.email !== OWNER_EMAIL) return;
+    if (!canSeeComboLocks(user)) return;
     const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
     let fair = "";
     if (p.combinedProb > 0 && p.combinedProb < 1) {
@@ -1809,7 +1876,9 @@ export default function App() {
           )}
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <img src={user.user_metadata?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)" }} />
+              <button type="button" onClick={() => setActiveTab("profile")} title="Profile" style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                <img src={user.user_metadata?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)" }} />
+              </button>
               <button onClick={signOut} style={{ background: "rgba(255,255,255,0.06)", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign Out</button>
             </div>
           ) : (
@@ -1834,12 +1903,17 @@ export default function App() {
           window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
           logEvent(user, 'tab_switched', { tab: 'odds_board' });
         }}>Odds Board</button>
-        {user?.email === OWNER_EMAIL && (
+        {canSeeComboLocks(user) && (
+          <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
+        )}
+        {canSeeOwnerTools(user) && (
           <>
-            <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
             <button style={tabStyle("missTape")} onClick={() => setActiveTab("missTape")}>Miss tape</button>
             <button style={tabStyle("unhedged")} onClick={() => setActiveTab("unhedged")}>Unhedged RFQs</button>
           </>
+        )}
+        {user && (
+          <button style={tabStyle("profile")} onClick={() => setActiveTab("profile")}>Profile</button>
         )}
       </div>
 
@@ -1868,11 +1942,39 @@ export default function App() {
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
 
-          {activeTab === "combo" && user?.email === OWNER_EMAIL && <ComboLocks user={user} prefill={comboPrefill} />}
+          {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} />}
 
-          {activeTab === "missTape" && user?.email === OWNER_EMAIL && <ComboTape user={user} />}
+          {activeTab === "missTape" && canSeeOwnerTools(user) && <ComboTape user={user} />}
 
-          {activeTab === "unhedged" && user?.email === OWNER_EMAIL && <UnhedgedTape user={user} />}
+          {activeTab === "unhedged" && canSeeOwnerTools(user) && <UnhedgedTape user={user} />}
+
+          {activeTab === "profile" && user && (
+            <UserProfile
+              user={user}
+              prefs={profilePrefs}
+              onSavePrefs={(next) => {
+                const saved = saveProfilePrefs(user, next, {
+                  allowedSports: new Set(SPORT_KEYS),
+                  allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+                });
+                setProfilePrefs(saved);
+                if (saved.sports && saved.sports.length) setPromoSports(new Set(saved.sports));
+                if (saved.promoBook) setPromoBook(saved.promoBook);
+              }}
+              sportsOptions={SPORTS}
+              bookOptions={ALL_BOOKS.map((b) => ({ ...b, trusted: TRUSTED_BOOK_KEYS.has(b.key) }))}
+              matchingBookKeys={matchingBookKeys}
+              onToggleMatchingBook={toggleMatchingBook}
+              canSeeLocks={canSeeComboLocks(user)}
+              isOwner
+              onOpenLock={(id, hash) => {
+                if (!canSeeComboLocks(user)) return;
+                setFocusLockId(id);
+                setActiveTab("combo");
+                if (hash) window.history.replaceState(null, "", hash);
+              }}
+            />
+          )}
 
           {activeTab === "ev" && (
             <div>
@@ -2234,7 +2336,7 @@ export default function App() {
                             <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
 
-                          {user?.email === OWNER_EMAIL && (
+                          {canSeeComboLocks(user) && (
                             <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                             </div>
@@ -2284,7 +2386,7 @@ export default function App() {
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                               <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
                             </div>
-                            {user?.email === OWNER_EMAIL && (
+                            {canSeeComboLocks(user) && (
                               <div style={{ marginTop: 12 }}>
                                 <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                               </div>
