@@ -15,7 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { buildParlayDesk, formatLoss, skipLabel, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
-import { lockProfile, formatTargetLine, formatFillProgress, signedMoney } from "./comboLockProfile";
+import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
 import { settleLegs, uniqueEspnQueries, underlyingCopy, sourceLabel } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks } from "./comboAccess";
@@ -121,8 +121,18 @@ function RiskProfile({ parlay, filled }) {
     <div className="profile">
       <div className="tile">
         <div className="k">Current (unhedged)</div>
-        <div className="v num">{profile.current.text}</div>
-        <div className="sub">If it hits {signedMoney(profile.current.hit)} · if it loses {signedMoney(profile.current.miss)}</div>
+        <div className="v num">
+          <span className="muted">risk </span>
+          <span className="neg">{moneyAbs(profile.current.risk)}</span>
+          <span className="muted"> for </span>
+          <span className="pos">{moneyAbs(profile.current.profit)}</span>
+          <span className="muted"> profit</span>
+        </div>
+        <div className="sub">
+          If it hits <span className="pos">{signedMoney(profile.current.hit)}</span>
+          {" · "}
+          if it loses <span className="neg">{signedMoney(profile.current.miss)}</span>
+        </div>
       </div>
       <div className="tile">
         <div className="k">Target (after RFQ fills)</div>
@@ -729,7 +739,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .tile .sub{font-size:12px;color:#8a8f98;margin-top:4px;line-height:1.4}
         .cl .profile{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 4px}
         .cl .profile .tile .v{font-size:15px;line-height:1.35}
-        .cl .pos{color:#34d399}.cl .neg{color:#f87171}
+        .cl .pos{color:#34d399}.cl .neg{color:#f87171}.cl .muted{color:#8a8f98}
         .cl .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:14px}
         .cl .note{font-size:13px;padding:8px 10px;border-radius:8px;margin-top:8px}.cl .note.ok{background:rgba(16,185,129,.12);color:#6ee7b7}.cl .note.warn{background:rgba(245,158,11,.12);color:#fcd34d}
         .cl .post{background:#0c1512;color:#9ff0be;border-radius:8px;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;white-space:pre-wrap;margin-top:6px}
