@@ -130,11 +130,22 @@ export function resolveComboTicker({ parlay, fills = [], outcomes = [], matches 
   return null;
 }
 
-// History Outcome: official stored result, else awaiting once a combo ticker exists, else dash.
-export function historyOutcome({ parlay, liveResult, fills = [], outcomes = [], matches = [], submissions = [] } = {}) {
+// History Outcome: official combo result, else stamped underlying (Kalshi legs / ESPN),
+// else awaiting a combo ticker, else pending legs, else dash. Never invents a score.
+export function historyOutcome({ parlay, liveResult, fills = [], outcomes = [], matches = [], submissions = [], filled = 0 } = {}) {
   const stored = settlementFromStored(parlay) || settlementCopy(liveResult);
   if (stored) return { kind: "result", settlement: stored };
+  const underlying = parlay && String(parlay.underlying_result || "").trim().toLowerCase();
+  if (underlying === "won" || underlying === "lost" || underlying === "push") {
+    return {
+      kind: "underlying",
+      outcome: underlying,
+      filled: (Number(filled) || 0) > 0,
+      source: parlay.underlying_source || null,
+    };
+  }
   const ticker = resolveComboTicker({ parlay, fills, outcomes, matches, submissions });
   if (ticker) return { kind: "awaiting", ticker };
+  if (parlay && Array.isArray(parlay.legs) && parlay.legs.length >= 2) return { kind: "pending" };
   return { kind: "none" };
 }
