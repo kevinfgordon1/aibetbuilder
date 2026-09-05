@@ -147,6 +147,8 @@ assert.equal(PROFILE_PREFS_KEY, "aibetbuilder.profilePrefs");
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(ui, /canSeeLocks/);
   assert.match(ui, /isOwner/);
+  assert.match(ui, /canSeeOwnerTools\(user\)/);
+  assert.match(ui, /WhatsNewComposer/);
   assert.match(ui, /buildComboStatement/);
   assert.match(ui, /applyStatementFilters/);
   assert.match(ui, /onOpenLock/);

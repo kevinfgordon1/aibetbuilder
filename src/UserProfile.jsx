@@ -3,8 +3,9 @@
 // never mention the feature otherwise. Statement filters are not gated again.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { canSeeComboLocks, comboLockHash } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import { identityFromUser, profileDisplayName } from "./userProfile";
+import WhatsNewComposer from "./WhatsNewComposer";
 import {
   STATEMENT_DATE_FILTERS,
   STATEMENT_DEFAULT_DATE_RANGE,
@@ -32,6 +33,9 @@ export default function UserProfile({
   canSeeLocks = false,
   isOwner = true,
   onOpenLock,
+  announcement = null,
+  onAnnouncementPublished,
+  onAnnouncementUnpublished,
 }) {
   const ident = useMemo(() => identityFromUser(user), [user]);
   const [draftName, setDraftName] = useState(prefs?.displayName || ident.name || "");
@@ -162,7 +166,8 @@ export default function UserProfile({
         .up .card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:20px;margin-bottom:16px}
         .up h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#6b7280;margin:0 0 12px}
         .up label{display:block;font-size:12px;font-weight:600;color:#8a8f98;margin:0 0 6px}
-        .up input,.up select{width:100%;padding:9px 10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#12141a;color:#e8eaed;font:inherit}
+        .up input,.up select,.up textarea{width:100%;padding:9px 10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#12141a;color:#e8eaed;font:inherit}
+        .up textarea{min-height:110px;resize:vertical}
         .up .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer}
         .up .btn:disabled{opacity:.45;cursor:default}
         .up .btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
@@ -233,6 +238,15 @@ export default function UserProfile({
           {savedFlash && <span className="muted">Saved — Promo Builder will use these defaults.</span>}
         </div>
       </div>
+
+      {canSeeOwnerTools(user) && (
+        <WhatsNewComposer
+          client={supabase}
+          current={announcement}
+          onPublished={onAnnouncementPublished}
+          onUnpublished={onAnnouncementUnpublished}
+        />
+      )}
 
       {showPnl && (
         <div className="card">
