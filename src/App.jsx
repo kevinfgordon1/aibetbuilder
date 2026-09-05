@@ -1850,11 +1850,12 @@ export default function App() {
       )}
 
       {showOddsLoadError && (
-        <div style={{ padding: "60px 32px", textAlign: "center", color: "#9ca3af" }}>
+        <div data-guard-allow="true" style={{ padding: "60px 32px", textAlign: "center", color: "#9ca3af" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 15, color: "#e8eaed", fontWeight: 600, marginBottom: 8 }}>Couldn’t load live odds</div>
           <div style={{ fontSize: 13, maxWidth: 480, margin: "0 auto 20px", lineHeight: 1.5 }}>{oddsLoadError}</div>
           <button
+            type="button"
             onClick={() => { fetchOdds({ forceRefresh: true }); logEvent(user, 'odds_refreshed', { trigger: 'retry' }); }}
             style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", borderRadius: 8, color: "#60a5fa", padding: "10px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
           >Retry</button>

@@ -284,6 +284,7 @@ function fullPlan() {
   assert.match(app, /setOddsLoadError/);
   assert.match(app, /showOddsLoadError/);
   assert.match(app, />Retry</);
+  assert.match(app, /showOddsLoadError && \(\s*<div data-guard-allow="true"/);
   assert.match(app, /events\.error \? \[\] : \(events\.data \|\| \[\]\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);
