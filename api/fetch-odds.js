@@ -46,6 +46,7 @@ const EVENT_HORIZON_MS = 24 * 60 * 60 * 1000;
 //   us2 — Hard Rock Bet, theScore Bet (formerly ESPN Bet), Bally Bet,
 //          BetAnything, betPARX, Fliff
 //   us_ex — Kalshi, Novig, ProphetX, BetOpenly, Polymarket
+//   eu  — Pinnacle (public-site odds; The Odds API may delay them)
 // All six current leagues use 2-way h2h (no Draw), so moneyline EV computes
 // directly. The is_three_way detection downstream stays as defensive cover for
 // any future 3-way sport (e.g. soccer) but is inert for this set.
@@ -56,7 +57,7 @@ module.exports = async (req, res) => {
     // Leagues run concurrently (independent). MLB's per-event alt-line loop below
     // stays sequential to respect The Odds API rate limits.
     await Promise.all(SPORTS.map(async (sport) => {
-      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=h2h,spreads,totals&oddsFormat=american`;
+      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=h2h,spreads,totals&oddsFormat=american`;
       const response = await fetch(url);
       if (!response.ok) {
         console.error(`Failed to fetch ${sport}: ${response.status}`);
@@ -89,7 +90,7 @@ module.exports = async (req, res) => {
         // Sequential to stay under rate limits; ~15 MLB games ≈ a few seconds.
         for (const game of eventsInWindow) {
           try {
-            const evUrl = `https://api.the-odds-api.com/v4/sports/${sport}/events/${game.id}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=${marketsParam}&oddsFormat=american`;
+            const evUrl = `https://api.the-odds-api.com/v4/sports/${sport}/events/${game.id}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=${marketsParam}&oddsFormat=american`;
             const evResp = await fetch(evUrl);
             if (!evResp.ok) {
               console.error(`Failed event odds ${sport}/${game.id}: ${evResp.status}`);

@@ -259,7 +259,7 @@ module.exports = async (req, res) => {
     const results = [];
     await Promise.all(FUTURES_SPORTS.map(async (sport) => {
       try {
-        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex&markets=outrights,outrights_lay&oddsFormat=american`;
+        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=outrights,outrights_lay&oddsFormat=american`;
         const response = await fetch(url);
         if (!response.ok) {
           console.error(`Failed to fetch futures ${sport}: ${response.status}`);
