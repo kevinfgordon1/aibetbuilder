@@ -12,6 +12,10 @@ import {
   shouldFetchPromoOdds,
   promoNeedsReload,
   queryOddsCaches,
+  withTimeout,
+  featuredRowsUsable,
+  describeOddsLoadError,
+  timeoutError,
   DEFAULT_EV_DATE_RANGE,
   selectEvScanView,
   evScanFromLegs,
@@ -40,6 +44,7 @@ function createMockClient() {
         select(cols) { state.select = cols; return chain; },
         in(col, vals) { state.in = { col, vals: [...vals] }; return chain; },
         gte(col, val) { state.gte = { col, val }; return chain; },
+        abortSignal(signal) { state.signal = signal; return chain; },
         then(resolve, reject) {
           return Promise.resolve({ data: [], error: null }).then(resolve, reject);
         },
@@ -274,6 +279,12 @@ function fullPlan() {
   assert.match(app, /selectEvScanView\(/);
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
+  assert.match(app, /featuredRowsUsable\(featured\)/);
+  assert.match(app, /describeOddsLoadError/);
+  assert.match(app, /setOddsLoadError/);
+  assert.match(app, /showOddsLoadError/);
+  assert.match(app, />Retry</);
+  assert.match(app, /events\.error \? \[\] : \(events\.data \|\| \[\]\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);
   assert.match(app, /setPromoBoardData/);
@@ -286,6 +297,99 @@ function fullPlan() {
   assert.match(app, /\[evDateRange, setEvDateRange\] = useState\(DEFAULT_EV_DATE_RANGE\)/);
   assert.doesNotMatch(app, /\[evDateRange, setEvDateRange\] = useState\("any"\)/);
   assert.match(app, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
+}
+
+function hangThen() {
+  return new Promise(() => {});
+}
+
+function createHangClient() {
+  const calls = [];
+  return {
+    calls,
+    from(table) {
+      const state = { table, select: null, in: null, gte: null, signal: null };
+      calls.push(state);
+      const chain = {
+        select(cols) { state.select = cols; return chain; },
+        in(col, vals) { state.in = { col, vals: [...vals] }; return chain; },
+        gte(col, val) { state.gte = { col, val }; return chain; },
+        abortSignal(signal) { state.signal = signal; return chain; },
+        then(resolve, reject) { return hangThen().then(resolve, reject); },
+      };
+      return chain;
+    },
+  };
+}
+
+function createPartialHangClient(hangTable) {
+  return {
+    from(table) {
+      const chain = {
+        select() { return chain; },
+        in() { return chain; },
+        gte() { return chain; },
+        abortSignal() { return chain; },
+        then(resolve, reject) {
+          if (table === hangTable) return hangThen().then(resolve, reject);
+          return Promise.resolve({
+            data: [{ sport: "baseball_mlb", data: [], fetched_at: "2026-09-05T15:00:00.000Z" }],
+            error: null,
+          }).then(resolve, reject);
+        },
+      };
+      return chain;
+    },
+  };
+}
+
+// ── withTimeout: hang becomes TimeoutError and does not wait
+{
+  const t0 = Date.now();
+  let threw = null;
+  try {
+    await withTimeout(() => hangThen(), { timeoutMs: 40, label: "hang-test" });
+  } catch (err) {
+    threw = err;
+  }
+  assert.ok(threw, "withTimeout must reject a hung query");
+  assert.equal(threw.name, "TimeoutError");
+  assert.ok(Date.now() - t0 < 500, "timeout must not wait on the hanging query");
+}
+
+// ── queryOddsCaches: both tables hanging → timedOut, featured unusable
+{
+  const t0 = Date.now();
+  const out = await queryOddsCaches(createHangClient(), promoPlan(new Set(["baseball_mlb"])), { timeoutMs: 40 });
+  assert.ok(Date.now() - t0 < 500, "promo hang must abort, not spin forever");
+  assert.equal(out.featured.timedOut, true);
+  assert.equal(out.events.timedOut, true);
+  assert.equal(featuredRowsUsable(out.featured), false);
+  assert.match(describeOddsLoadError(out.featured.error), /timed out/i);
+  assert.match(describeOddsLoadError(out.featured.error), /not The Odds API quota/i);
+}
+
+// ── event_odds_cache hang: featured still usable (Promo can render main lines)
+{
+  const t0 = Date.now();
+  const out = await queryOddsCaches(
+    createPartialHangClient("event_odds_cache"),
+    promoPlan(new Set(["baseball_mlb"])),
+    { timeoutMs: 40 },
+  );
+  assert.ok(Date.now() - t0 < 500);
+  assert.equal(featuredRowsUsable(out.featured), true);
+  assert.equal(out.featured.data[0].sport, "baseball_mlb");
+  assert.equal(out.events.timedOut, true);
+  assert.deepEqual(out.events.data, []);
+}
+
+// ── describeOddsLoadError surfaces quota / auth distinctly
+{
+  assert.match(describeOddsLoadError(timeoutError("odds_cache", 12)), /timed out/i);
+  assert.match(describeOddsLoadError({ message: "Invalid API key" }), /anon key|access denied/i);
+  assert.match(describeOddsLoadError({ message: "429 rate limit" }), /quota|rate limit/i);
+  assert.equal(describeOddsLoadError(null), null);
 }
 
 console.log("oddsLoad.test.js: ok");

@@ -20,6 +20,8 @@ import {
   shouldFetchPromoOdds,
   shouldRunEvScan,
   promoNeedsReload,
+  featuredRowsUsable,
+  describeOddsLoadError,
   DEFAULT_EV_DATE_RANGE,
   selectEvScanView,
   evScanFromLegs,
@@ -1311,6 +1313,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [promoLoading, setPromoLoading] = useState(true);
+  const [oddsLoadError, setOddsLoadError] = useState(null);
   const [promoLoaded, setPromoLoaded] = useState(false);
   const [promoLoadedSports, setPromoLoadedSports] = useState(null);
   const [promoBoardData, setPromoBoardData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
@@ -1363,6 +1366,7 @@ export default function App() {
   const loadPromoBoard = async () => {
     const gen = ++promoFetchGen.current;
     setExcludedPromoLegs(new Set());
+    setOddsLoadError(null);
     setPromoLoading(true);
     const plan = buildOddsQueryPlan({
       mode: "promo",
@@ -1370,39 +1374,60 @@ export default function App() {
       featuredSportKeys: SPORT_KEYS,
       futuresKeys: FUTURES_KEYS,
     });
-    const { featured, events } = await queryOddsCaches(supabase, plan);
-    if (gen !== promoFetchGen.current) return;
-    const featuredRows = featured.data;
-    if (featured.error || !featuredRows) { setPromoLoading(false); return; }
-    const eventRows = events.data || [];
-    setOddsSource({ featured: featuredRows, events: eventRows });
-    setPromoBoardData(applyTransformed(featuredRows, eventRows));
-    setPromoLoadedSports(new Set(plan.eventSports));
-    setFetchedAt(featuredRows[0]?.fetched_at);
-    setPromoLoaded(true);
-    setPromoLoading(false);
-    window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
+    try {
+      const { featured, events } = await queryOddsCaches(supabase, plan);
+      if (gen !== promoFetchGen.current) return;
+      if (!featuredRowsUsable(featured)) {
+        setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
+        return;
+      }
+      const featuredRows = featured.data;
+      // Alt-line events are best-effort: a hung event_odds_cache must not
+      // block Promo — featured main lines are enough to use the builder.
+      const eventRows = events.error ? [] : (events.data || []);
+      setOddsSource({ featured: featuredRows, events: eventRows });
+      setPromoBoardData(applyTransformed(featuredRows, eventRows));
+      setPromoLoadedSports(new Set(plan.eventSports));
+      setFetchedAt(featuredRows[0]?.fetched_at);
+      setPromoLoaded(true);
+      window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
+    } catch (err) {
+      if (gen !== promoFetchGen.current) return;
+      setOddsLoadError(describeOddsLoadError(err) || "Could not load live odds.");
+    } finally {
+      if (gen === promoFetchGen.current) setPromoLoading(false);
+    }
   };
 
   const loadFullBoard = async () => {
     const gen = ++fullFetchGen.current;
+    setOddsLoadError(null);
     setFullBoardLoading(true);
     const plan = buildOddsQueryPlan({
       mode: "full",
       featuredSportKeys: SPORT_KEYS,
       futuresKeys: FUTURES_KEYS,
     });
-    const { featured, events, futures } = await queryOddsCaches(supabase, plan);
-    if (gen !== fullFetchGen.current) return;
-    const featuredRows = featured.data;
-    if (featured.error || !featuredRows) { setFullBoardLoading(false); return; }
-    const eventRows = events.data || [];
-    setAllOddsData(applyTransformed(featuredRows, eventRows));
-    setFuturesData((futures.data || []).map(row => transformFuturesData(row.data, row.sport)));
-    setFetchedAt(featuredRows[0]?.fetched_at);
-    setFullBoardLoaded(true);
-    setFullBoardLoading(false);
-    window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
+    try {
+      const { featured, events, futures } = await queryOddsCaches(supabase, plan);
+      if (gen !== fullFetchGen.current) return;
+      if (!featuredRowsUsable(featured)) {
+        setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
+        return;
+      }
+      const featuredRows = featured.data;
+      const eventRows = events.error ? [] : (events.data || []);
+      setAllOddsData(applyTransformed(featuredRows, eventRows));
+      setFuturesData((futures.error ? [] : (futures.data || [])).map(row => transformFuturesData(row.data, row.sport)));
+      setFetchedAt(featuredRows[0]?.fetched_at);
+      setFullBoardLoaded(true);
+      window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
+    } catch (err) {
+      if (gen !== fullFetchGen.current) return;
+      setOddsLoadError(describeOddsLoadError(err) || "Could not load live odds.");
+    } finally {
+      if (gen === fullFetchGen.current) setFullBoardLoading(false);
+    }
   };
 
   const fetchOdds = async ({ forceRefresh = true } = {}) => {
@@ -1479,8 +1504,13 @@ export default function App() {
     ? fullBoardLoading
     : activeTab === "promo" ? promoLoading : false;
   const showFullPageSpinner =
-    ((activeTab === "ev" || activeTab === "odds") && fullBoardLoading) ||
-    (activeTab === "promo" && promoLoading && !promoLoaded);
+    ((activeTab === "ev" || activeTab === "odds") && fullBoardLoading && !oddsLoadError) ||
+    (activeTab === "promo" && promoLoading && !promoLoaded && !oddsLoadError);
+  const showOddsLoadError =
+    !!oddsLoadError && (
+      (activeTab === "promo" && !promoLoaded) ||
+      ((activeTab === "ev" || activeTab === "odds") && !fullBoardLoaded)
+    );
 
   // +EV Bets tab — single-book filter
   const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
@@ -1819,7 +1849,19 @@ export default function App() {
         </div>
       )}
 
-      {!showFullPageSpinner && (
+      {showOddsLoadError && (
+        <div style={{ padding: "60px 32px", textAlign: "center", color: "#9ca3af" }}>
+          <div style={{ fontSize: 24, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontSize: 15, color: "#e8eaed", fontWeight: 600, marginBottom: 8 }}>Couldn’t load live odds</div>
+          <div style={{ fontSize: 13, maxWidth: 480, margin: "0 auto 20px", lineHeight: 1.5 }}>{oddsLoadError}</div>
+          <button
+            onClick={() => { fetchOdds({ forceRefresh: true }); logEvent(user, 'odds_refreshed', { trigger: 'retry' }); }}
+            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", borderRadius: 8, color: "#60a5fa", padding: "10px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+          >Retry</button>
+        </div>
+      )}
+
+      {!showFullPageSpinner && !showOddsLoadError && (
         <div style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
