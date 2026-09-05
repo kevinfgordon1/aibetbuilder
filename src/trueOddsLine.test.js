@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   outcomeSize,
   formatAmericanOdds,
+  formatPromoTotalBookOdds,
   formatAvailableDollars,
   formatAvailableSizeClause,
   formatTrueOddsBookLine,
@@ -65,6 +66,30 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   );
   assert.equal(formatAmericanOdds(120), "+120");
   assert.equal(formatAmericanOdds(-120), "-120");
+}
+
+// ── American odds: +plus / −minus, never "+-105"
+{
+  assert.equal(formatAmericanOdds(120), "+120");
+  assert.equal(formatAmericanOdds(-105), "-105");
+  assert.equal(formatAmericanOdds(-101), "-101");
+  assert.equal(formatAmericanOdds("+120"), "+120");
+  assert.equal(formatAmericanOdds("-105"), "-105");
+  assert.equal(formatAmericanOdds("+-105"), "-105");
+  assert.equal(formatAmericanOdds(null), "—");
+  assert.equal(formatAmericanOdds(0), "—");
+  for (const sample of [120, -105, -101, "+120", "-101", "+-105"]) {
+    assert.ok(!formatAmericanOdds(sample).includes("+-"), `no +- prefix for ${sample}`);
+  }
+}
+
+// ── Promo Total sportsbook cell: boosted finals, screenshot Pinnacle -105 → -101
+{
+  assert.equal(formatPromoTotalBookOdds(-101), "-101");
+  assert.equal(formatPromoTotalBookOdds(150), "+150");
+  assert.notEqual(formatPromoTotalBookOdds(-101), "+-105");
+  assert.notEqual(formatPromoTotalBookOdds(-101), "-105");
+  assert.ok(!formatPromoTotalBookOdds(-101).includes("+-"));
 }
 
 // ── transformOddsData: Novig bet_limit rides through as bestOppSize
