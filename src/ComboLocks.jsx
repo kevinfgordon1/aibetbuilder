@@ -1,5 +1,6 @@
 // Combo Locks — private tab for the Kalshi combo RFQ auto-quoter.
-// Gated to OWNER_EMAIL in App.jsx; this component also refuses to render for anyone else.
+// Gated by canSeeComboLocks (OWNER_EMAIL + VITE_COMBO_LOCKS_ALLOWLIST). This
+// component returns null for anyone else — no copy that names the feature.
 // Backed by Supabase (combo_parlays / combo_settings / combo_submissions) so the
 // always-on worker reads the same active parlays. NO live prices — the lock uses
 // only the user's own numbers.
@@ -17,9 +18,10 @@ import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlem
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney } from "./comboLockProfile";
 import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
 import { settleLegs, uniqueEspnQueries, underlyingCopy, sourceLabel } from "./comboLegResult";
+import { OWNER_EMAIL, canSeeComboLocks } from "./comboAccess";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
-export const OWNER_EMAIL = "kev120909@gmail.com";
+export { OWNER_EMAIL };
 
 /* ── engine (mirrors worker engine.js exactly) ── */
 // The fill odds you enter are the odds you SELL at AFTER your maker fee — already baked in.
@@ -306,7 +308,7 @@ const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 const HISTORY_BUFFER_HOURS = 6;
 const historyMoveAt = (startsAtIso) => (startsAtIso ? new Date(new Date(startsAtIso).getTime() + HISTORY_BUFFER_HOURS * 3600 * 1000) : null);
 
-export default function ComboLocks({ user, prefill = null }) {
+export default function ComboLocks({ user, prefill = null, focusLockId = null }) {
   const [games, setGames] = useState(SAMPLE);
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
@@ -334,7 +336,7 @@ export default function ComboLocks({ user, prefill = null }) {
 
   const gameList = useMemo(() => flattenComboGames(games.sports), [games]);
   const gameIdx = useMemo(() => indexComboGames(games.sports), [games]);
-  const owner = user && user.email === OWNER_EMAIL;
+  const owner = canSeeComboLocks(user);
 
   const loadGames = useCallback(async () => {
     try { const r = await fetch("/api/kalshi-games", { headers: { accept: "application/json" } });
@@ -544,6 +546,15 @@ export default function ComboLocks({ user, prefill = null }) {
   }, [prefill, gamesReady, games, gameIdx]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
   useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
+  useEffect(() => {
+    if (!focusLockId) return;
+    setOpenParlays((o) => ({ ...o, [focusLockId]: true, ["arch-" + focusLockId]: true }));
+    const t = window.setTimeout(() => {
+      const el = document.getElementById("lock-" + focusLockId);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [focusLockId, parlays, archived]);
 
   const findMarket = (g, ticker, side) => { for (const t of ["side", "spread", "total"]) { const m = (g.markets[t] || []).find((x) => x.ticker === ticker && x.side === side); if (m) return { ...m, type: t }; } return null; };
   const readLegs = useCallback(() => legRows.map((r) => {
@@ -683,7 +694,7 @@ export default function ComboLocks({ user, prefill = null }) {
     setForm({ ...DEFAULT_FORM });
   };
 
-  if (!owner) return <div style={{ color: "#6b7280", padding: 40 }}>This tab is private.</div>;
+  if (!owner) return null;
 
   const marketGroups = (gameKey, selVal) => {
     const g = gameIdx[gameKey]; if (!g) return null;
@@ -761,7 +772,7 @@ export default function ComboLocks({ user, prefill = null }) {
       <h3>Active — waiting to be filled</h3>
       <div className="card">
         {waiting.length === 0 ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
-          <div className="parlay" key={p.id}>
+          <div className="parlay" key={p.id} id={"lock-" + p.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
               <span style={{ fontWeight: 700 }}>{p.label}</span>
@@ -796,7 +807,7 @@ export default function ComboLocks({ user, prefill = null }) {
         ) : filledParlays.map((p) => {
           const desk = deskByParlay[p.id];
           return (
-            <div className="parlay" key={p.id}>
+            <div className="parlay" key={p.id} id={"lock-" + p.id}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                 <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
@@ -956,7 +967,7 @@ export default function ComboLocks({ user, prefill = null }) {
             ); })}</tbody></table>
         )}
         {archived.map((a) => openParlays["arch-" + a.id] ? (
-          <div className="parlay" key={"arch-card-" + a.id} style={{ marginTop: 10 }}>
+          <div className="parlay" key={"arch-card-" + a.id} id={"lock-" + a.id} style={{ marginTop: 10 }}>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>{a.label}</div>
             <OutcomeChip out={lockOutcome(a, realFills[a.id] || 0)} filled={(realFills[a.id] || 0) > 0} />
             <RiskProfile parlay={a} filled={realFills[a.id] || 0} />
