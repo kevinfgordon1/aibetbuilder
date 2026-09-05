@@ -7,7 +7,7 @@ import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, comboLockHash, profileHash } from "./comboAccess";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
-import { ANNOUNCEMENT, shouldShowWhatsNew } from "./whatsNew";
+import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
 import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
@@ -1355,6 +1355,8 @@ export default function App() {
   const [profilePrefs, setProfilePrefs] = useState(() => defaultProfilePrefs());
   const [profilePrefsReady, setProfilePrefsReady] = useState(false);
   const [whatsNewSessionDismissed, setWhatsNewSessionDismissed] = useState(false);
+  const [whatsNew, setWhatsNew] = useState(null);
+  const [whatsNewReady, setWhatsNewReady] = useState(false);
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
@@ -1396,6 +1398,8 @@ export default function App() {
       setProfilePrefs(defaultProfilePrefs());
       setProfilePrefsReady(false);
       setWhatsNewSessionDismissed(false);
+      setWhatsNew(null);
+      setWhatsNewReady(false);
       return;
     }
     const loaded = loadProfilePrefs(user, {
@@ -1405,8 +1409,20 @@ export default function App() {
     setProfilePrefs(loaded);
     setProfilePrefsReady(true);
     setWhatsNewSessionDismissed(false);
+    setWhatsNewReady(false);
     if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
     if (loaded.promoBook) setPromoBook(loaded.promoBook);
+    let cancelled = false;
+    fetchActiveAnnouncement(supabase).then((ann) => {
+      if (cancelled) return;
+      setWhatsNew(ann);
+      setWhatsNewReady(true);
+    }).catch(() => {
+      if (cancelled) return;
+      setWhatsNew(null);
+      setWhatsNewReady(true);
+    });
+    return () => { cancelled = true; };
   }, [user && user.id]);
 
   useEffect(() => {
@@ -2003,6 +2019,12 @@ export default function App() {
               onToggleMatchingBook={toggleMatchingBook}
               canSeeLocks={canSeeComboLocks(user)}
               isOwner
+              announcement={whatsNew}
+              onAnnouncementPublished={(ann) => {
+                setWhatsNew(ann);
+                setWhatsNewSessionDismissed(false);
+              }}
+              onAnnouncementUnpublished={() => setWhatsNew(null)}
               onOpenLock={(id, hash) => {
                 if (!canSeeComboLocks(user)) return;
                 setFocusLockId(id);
@@ -2844,13 +2866,13 @@ export default function App() {
         AI Bet Builder — aibetbuilder.io — For informational purposes only. Not financial advice. Please gamble responsibly.
       </div>
 
-      {user && profilePrefsReady && !whatsNewSessionDismissed && shouldShowWhatsNew(ANNOUNCEMENT, profilePrefs) && (
+      {user && profilePrefsReady && whatsNewReady && !whatsNewSessionDismissed && shouldShowWhatsNew(whatsNew, profilePrefs) && (
         <WhatsNewModal
-          announcement={ANNOUNCEMENT}
+          announcement={whatsNew}
           onDismiss={() => {
             setWhatsNewSessionDismissed(true);
             try {
-              const saved = saveProfilePrefs(user, { ...profilePrefs, seenAnnouncementId: ANNOUNCEMENT.id }, {
+              const saved = saveProfilePrefs(user, { ...profilePrefs, seenAnnouncementId: whatsNew.id }, {
                 allowedSports: new Set(SPORT_KEYS),
                 allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
               });
