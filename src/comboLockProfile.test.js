@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   currentUnhedged,
   targetHedge,
@@ -7,6 +10,7 @@ import {
   formatTargetLine,
   formatFillProgress,
   signedMoney,
+  moneyAbs,
 } from "./comboLockProfile.js";
 
 // Ari + Jax — Kevin's example: risk $100 for $650 profit, ~$5 either way at 750 @ +610
@@ -66,6 +70,20 @@ assert.equal(formatFillProgress(lockProfile({ parlay_stake: 100, parlay_american
 assert.equal(currentUnhedged({}), null);
 assert.equal(signedMoney(5.63), "+$5.63");
 assert.equal(signedMoney(-100), "-$100.00");
+assert.equal(moneyAbs(100), "$100");
+assert.equal(moneyAbs(650), "$650");
 assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contracts: 0 }).hit, 650);
+
+{
+  const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  assert.match(locksSrc, /moneyAbs\(profile\.current\.risk\)/);
+  assert.match(locksSrc, /moneyAbs\(profile\.current\.profit\)/);
+  assert.match(locksSrc, /<span className="neg">\{moneyAbs\(profile\.current\.risk\)\}<\/span>/);
+  assert.match(locksSrc, /<span className="pos">\{moneyAbs\(profile\.current\.profit\)\}<\/span>/);
+  assert.match(locksSrc, /If it hits <span className="pos">\{signedMoney\(profile\.current\.hit\)\}<\/span>/);
+  assert.match(locksSrc, /if it loses <span className="neg">\{signedMoney\(profile\.current\.miss\)\}<\/span>/);
+  assert.match(locksSrc, /\.cl \.pos\{color:#34d399\}\.cl \.neg\{color:#f87171\}\.cl \.muted\{color:#8a8f98\}/);
+  assert.doesNotMatch(locksSrc, /className="v num">\{profile\.current\.text\}/);
+}
 
 console.log("comboLockProfile.test.js ok");
