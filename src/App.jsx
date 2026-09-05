@@ -5,7 +5,9 @@ import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, comboLockHash, profileHash } from "./comboAccess";
-import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs } from "./userProfile";
+import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote } from "./userProfile";
+import WhatsNewModal from "./WhatsNewModal";
+import { ANNOUNCEMENT, shouldShowWhatsNew } from "./whatsNew";
 import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
@@ -1334,6 +1336,8 @@ export default function App() {
   const [comboPrefill, setComboPrefill] = useState(null);
   const [focusLockId, setFocusLockId] = useState(null);
   const [profilePrefs, setProfilePrefs] = useState(() => defaultProfilePrefs());
+  const [profilePrefsReady, setProfilePrefsReady] = useState(false);
+  const [whatsNewSessionDismissed, setWhatsNewSessionDismissed] = useState(false);
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
@@ -1371,12 +1375,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setProfilePrefs(defaultProfilePrefs());
+      setProfilePrefsReady(false);
+      setWhatsNewSessionDismissed(false);
+      return;
+    }
     const loaded = loadProfilePrefs(user, {
       allowedSports: new Set(SPORT_KEYS),
       allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
     });
     setProfilePrefs(loaded);
+    setProfilePrefsReady(true);
+    setWhatsNewSessionDismissed(false);
     if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
     if (loaded.promoBook) setPromoBook(loaded.promoBook);
   }, [user && user.id]);
@@ -1960,13 +1971,14 @@ export default function App() {
               user={user}
               prefs={profilePrefs}
               onSavePrefs={(next) => {
-                const saved = saveProfilePrefs(user, next, {
+                const saved = saveProfilePrefs(user, { ...profilePrefs, ...next }, {
                   allowedSports: new Set(SPORT_KEYS),
                   allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
                 });
                 setProfilePrefs(saved);
                 if (saved.sports && saved.sports.length) setPromoSports(new Set(saved.sports));
                 if (saved.promoBook) setPromoBook(saved.promoBook);
+                persistProfilePrefsRemote(supabase, user, saved);
               }}
               sportsOptions={SPORTS}
               bookOptions={ALL_BOOKS.map((b) => ({ ...b, trusted: TRUSTED_BOOK_KEYS.has(b.key) }))}
@@ -2814,6 +2826,25 @@ export default function App() {
       <div style={{ padding: "20px 32px", borderTop: "1px solid rgba(255,255,255,0.06)", textAlign: "center", fontSize: 11, color: "#4b5563" }}>
         AI Bet Builder — aibetbuilder.io — For informational purposes only. Not financial advice. Please gamble responsibly.
       </div>
+
+      {user && profilePrefsReady && !whatsNewSessionDismissed && shouldShowWhatsNew(ANNOUNCEMENT, profilePrefs) && (
+        <WhatsNewModal
+          announcement={ANNOUNCEMENT}
+          onDismiss={() => {
+            setWhatsNewSessionDismissed(true);
+            try {
+              const saved = saveProfilePrefs(user, { ...profilePrefs, seenAnnouncementId: ANNOUNCEMENT.id }, {
+                allowedSports: new Set(SPORT_KEYS),
+                allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+              });
+              setProfilePrefs(saved);
+              persistProfilePrefsRemote(supabase, user, saved);
+            } catch {
+              // Session dismiss already applied so the modal cannot trap them.
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

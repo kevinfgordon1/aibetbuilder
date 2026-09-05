@@ -12,6 +12,9 @@ import {
   seedProfilePrefs,
   loadProfilePrefs,
   saveProfilePrefs,
+  persistProfilePrefsRemote,
+  mergeProfilePrefSources,
+  PROFILE_PREFS_META_KEY,
   profileDisplayName,
   profilePrefsStorageKey,
 } from "./userProfile.js";
@@ -39,6 +42,7 @@ const googleUser = {
 
 assert.deepEqual(defaultProfilePrefs().sports, DEFAULT_PROFILE_SPORTS);
 assert.equal(defaultProfilePrefs().promoBook, DEFAULT_PROFILE_BOOK);
+assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
 
 {
   const seeded = seedProfilePrefs(googleUser, null, { allowedSports, allowedBooks });
@@ -57,6 +61,7 @@ assert.equal(defaultProfilePrefs().promoBook, DEFAULT_PROFILE_BOOK);
   assert.equal(saved.displayName, "KG");
   assert.deepEqual(saved.sports, ["americanfootball_nfl"]);
   assert.equal(saved.promoBook, "fanduel");
+  assert.equal(saved.seenAnnouncementId, "");
 }
 
 {
@@ -69,12 +74,67 @@ assert.equal(defaultProfilePrefs().promoBook, DEFAULT_PROFILE_BOOK);
     displayName: "Kevin",
     sports: ["baseball_mlb"],
     promoBook: "fanduel",
+    seenAnnouncementId: "blast-1",
   }, { storage, allowedSports, allowedBooks });
   assert.equal(store.has(profilePrefsStorageKey("uid-kevin")), true);
   const loaded = loadProfilePrefs(googleUser, { storage, allowedSports, allowedBooks });
   assert.equal(loaded.displayName, "Kevin");
   assert.deepEqual(loaded.sports, ["baseball_mlb"]);
   assert.equal(loaded.promoBook, "fanduel");
+  assert.equal(loaded.seenAnnouncementId, "blast-1");
+}
+
+{
+  const merged = mergeProfilePrefSources(
+    { seenAnnouncementId: "local-old", sports: ["baseball_mlb"] },
+    { seenAnnouncementId: "remote-new", promoBook: "fanduel" },
+  );
+  assert.equal(merged.seenAnnouncementId, "remote-new");
+  assert.deepEqual(merged.sports, ["baseball_mlb"]);
+  assert.equal(merged.promoBook, "fanduel");
+}
+
+{
+  const remoteUser = {
+    ...googleUser,
+    user_metadata: {
+      ...googleUser.user_metadata,
+      [PROFILE_PREFS_META_KEY]: { seenAnnouncementId: "from-supabase" },
+    },
+  };
+  const store = new Map();
+  const storage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, v); },
+  };
+  const loaded = loadProfilePrefs(remoteUser, { storage, allowedSports, allowedBooks });
+  assert.equal(loaded.seenAnnouncementId, "from-supabase");
+}
+
+{
+  let payload = null;
+  const client = {
+    auth: {
+      updateUser: async (body) => {
+        payload = body;
+        return { data: { user: googleUser }, error: null };
+      },
+    },
+  };
+  const result = await persistProfilePrefsRemote(client, googleUser, {
+    displayName: "Kevin",
+    sports: ["baseball_mlb"],
+    promoBook: "fanduel",
+    seenAnnouncementId: "blast-1",
+  });
+  assert.equal(result.persisted, true);
+  assert.equal(payload.data[PROFILE_PREFS_META_KEY].seenAnnouncementId, "blast-1");
+}
+
+{
+  const client = { auth: { updateUser: async () => { throw new Error("offline"); } } };
+  const result = await persistProfilePrefsRemote(client, googleUser, { seenAnnouncementId: "x" });
+  assert.equal(result.persisted, false);
 }
 
 assert.equal(profileDisplayName(googleUser, { displayName: "" }), "Kevin Gordon");
