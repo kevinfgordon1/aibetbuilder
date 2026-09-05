@@ -29,5 +29,8 @@
     "api/scan-ev-parlays.js": {
       "maxDuration": 60
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/s/:path*", "destination": "/api/share?p=:path*" }
+  ]
 }

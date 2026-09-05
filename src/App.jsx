@@ -4,7 +4,9 @@ import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, comboLockHash, profileHash } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual } from "./comboAccess";
+import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel } from "./shareCard";
+import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
@@ -1352,6 +1354,9 @@ export default function App() {
   const [fetchedAt, setFetchedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
   const [focusLockId, setFocusLockId] = useState(null);
+  const [focusCardId, setFocusCardId] = useState(null);
+  const [routeNotice, setRouteNotice] = useState(null);
+  const focusedCardApplied = useRef(null);
   const [profilePrefs, setProfilePrefs] = useState(() => defaultProfilePrefs());
   const [profilePrefsReady, setProfilePrefsReady] = useState(false);
   const [whatsNewSessionDismissed, setWhatsNewSessionDismissed] = useState(false);
@@ -1428,20 +1433,36 @@ export default function App() {
   useEffect(() => {
     if (authLoading) return;
     const applyHash = () => {
-      const parsed = parseAppHash(window.location.hash);
-      if (parsed.tab === "combo") {
-        if (canSeeComboLocks(user)) {
-          setActiveTab("combo");
-          setFocusLockId(parsed.lockId);
-        } else {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
-          setActiveTab((t) => (t === "combo" ? "promo" : t));
-        }
+      const resolved = resolveAppHash(parseAppHash(window.location.hash), user);
+      setRouteNotice(resolved.notice);
+      if (!resolved.allowed) {
+        const safe = serializeAppHash({ tab: "promo" });
+        window.history.replaceState(null, "", safe);
+        setActiveTab("promo");
+        setFocusLockId(null);
+        setFocusCardId(null);
         return;
       }
-      if (parsed.tab === "profile") {
-        if (user) setActiveTab("profile");
-        else window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setActiveTab(resolved.tab || "promo");
+      setFocusLockId(resolved.tab === "combo" ? resolved.lockId : null);
+      if (resolved.tab === "promo") {
+        if (resolved.cardId) {
+          const decoded = decodePromoCardId(resolved.cardId);
+          if (decoded) {
+            if (decoded.promoType) setPromoType(decoded.promoType);
+            if (decoded.book) setPromoBook(decoded.book);
+            if (Number.isFinite(decoded.stake) && decoded.stake > 0) setStake(decoded.stake);
+          }
+          setFocusCardId(resolved.cardId);
+          focusedCardApplied.current = null;
+        } else {
+          setFocusCardId(null);
+        }
+      } else if (resolved.tab === "ev") {
+        setFocusCardId(resolved.cardId || null);
+        focusedCardApplied.current = resolved.cardId ? null : focusedCardApplied.current;
+      } else {
+        setFocusCardId(null);
       }
     };
     applyHash();
@@ -1462,19 +1483,19 @@ export default function App() {
   }, [activeTab, user, authLoading]);
 
   useEffect(() => {
-    if (activeTab === "combo" && canSeeComboLocks(user)) {
-      const parsed = parseAppHash(window.location.hash);
-      if (parsed.tab !== "combo") {
-        window.history.replaceState(null, "", comboLockHash(focusLockId));
-      }
-    } else if (activeTab === "profile" && user) {
-      if (parseAppHash(window.location.hash).tab !== "profile") {
-        window.history.replaceState(null, "", profileHash());
-      }
-    } else if (parseAppHash(window.location.hash).tab === "combo" || parseAppHash(window.location.hash).tab === "profile") {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    if (authLoading) return;
+    if (activeTab === "combo" && !canSeeComboLocks(user)) return;
+    if (activeTab === "profile" && !user) return;
+    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) return;
+    const desired = serializeAppHash({
+      tab: activeTab || "promo",
+      lockId: activeTab === "combo" ? focusLockId : null,
+      cardId: (activeTab === "promo" || activeTab === "ev") ? focusCardId : null,
+    });
+    if (!hashesEqual(window.location.hash, desired)) {
+      window.history.replaceState(null, "", desired || (window.location.pathname + window.location.search));
     }
-  }, [activeTab, user, focusLockId]);
+  }, [activeTab, user, focusLockId, focusCardId, authLoading]);
 
   const applyTransformed = (featuredRows, eventRows) => {
     const featured = featuredRows.map(row => transformOddsData(row.data, row.sport));
@@ -1635,6 +1656,14 @@ export default function App() {
   const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
   const evFilterBooks = ALL_BOOKS.filter(b => evBooksAvailable.has(b.key) || b.key === evBookFilter);
   const filteredEvBets = evBookFilter === "all" ? evBets : evBets.filter(b => b.bookKey === evBookFilter);
+  const evDisplayBets = useMemo(() => {
+    const list = filteredEvBets.slice(0, 30);
+    if (activeTab !== "ev" || !focusCardId) return list;
+    const idx = filteredEvBets.findIndex((b) => encodeEvCardId(b) === focusCardId);
+    if (idx < 0 || idx < 30) return list;
+    const hit = filteredEvBets[idx];
+    return [hit, ...list.filter((b) => encodeEvCardId(b) !== focusCardId)].slice(0, 30);
+  }, [filteredEvBets, activeTab, focusCardId]);
 
   const scanBoostPct = useDebouncedValue(boostPct, PROMO_SCAN_DEBOUNCE_MS);
   const scanStake = useDebouncedValue(stake, PROMO_SCAN_DEBOUNCE_MS);
@@ -1804,6 +1833,35 @@ export default function App() {
     if (activeTab !== "combo") setComboPrefill(null);
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!focusCardId || focusedCardApplied.current === focusCardId) return;
+    if (activeTab === "promo") {
+      const list = promoType === "boost" ? topParlaysWithHedge
+        : promoType === "nosweat" ? topNoSweatsWithLock
+          : topFreeBetsWithLock;
+      const idx = list.findIndex((p) => encodePromoCardId({ promoType, book: promoBook, stake, legs: p.legs }) === focusCardId);
+      if (idx < 0) return;
+      focusedCardApplied.current = focusCardId;
+      if (idx >= promoPage) setPromoPage(idx + 1);
+      if (promoType === "freebet") setExpandedFreeBet(idx);
+      else setExpandedPromo(idx);
+      const t = window.setTimeout(() => {
+        document.getElementById("pick-" + focusCardId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+      return () => window.clearTimeout(t);
+    }
+    if (activeTab === "ev") {
+      const idx = evDisplayBets.findIndex((b) => encodeEvCardId(b) === focusCardId);
+      if (idx < 0) return;
+      focusedCardApplied.current = focusCardId;
+      setExpandedEV(idx);
+      const t = window.setTimeout(() => {
+        document.getElementById("ev-" + focusCardId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+      return () => window.clearTimeout(t);
+    }
+  }, [activeTab, focusCardId, promoType, promoBook, stake, promoPage, topParlaysWithHedge, topNoSweatsWithLock, topFreeBetsWithLock, evDisplayBets]);
+
   const excludePromoLeg = (leg) => {
     const key = promoLegIdentity(leg);
     setExcludedPromoLegs(prev => {
@@ -1940,16 +1998,19 @@ export default function App() {
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <button style={tabStyle("promo")} onClick={() => {
+          setFocusCardId(null);
           setActiveTab("promo");
           window.gtag?.('event', 'tab_switched', { tab: 'promo_builder' });
           logEvent(user, 'tab_switched', { tab: 'promo_builder' });
         }}>Promo Builder</button>
         <button style={tabStyle("ev")} onClick={() => {
+          setFocusCardId(null);
           setActiveTab("ev");
           window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' });
           logEvent(user, 'tab_switched', { tab: 'ev_bets' });
         }}>+EV Bets</button>
         <button style={tabStyle("odds")} onClick={() => {
+          setFocusCardId(null);
           setActiveTab("odds");
           window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
           logEvent(user, 'tab_switched', { tab: 'odds_board' });
@@ -1967,6 +2028,15 @@ export default function App() {
           <button style={tabStyle("profile")} onClick={() => setActiveTab("profile")}>Profile</button>
         )}
       </div>
+
+      {routeNotice && (
+        <div data-guard-allow="true" style={{ margin: "12px 32px 0", padding: "12px 16px", borderRadius: 10, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <span>{routeNotice === "signin" ? "Sign in to open this link." : "You don’t have access to this page."}</span>
+          {routeNotice === "signin" && !user && (
+            <button type="button" onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign in with Google</button>
+          )}
+        </div>
+      )}
 
       {showFullPageSpinner && (
         <div style={{ padding: "60px 32px", textAlign: "center", color: "#4b5563" }}>
@@ -2079,17 +2149,29 @@ export default function App() {
                     {evBookFilter === "all" ? "No bets available right now." : `No bets found for ${getBookLabel(evBookFilter)} right now.`}
                   </div>
                 )}
-                {filteredEvBets.slice(0, 30).map((b, i) => {
+                {evDisplayBets.map((b, i) => {
                   const bookImplied = impliedProb(b.dk);
                   const edge = b.prob - bookImplied;
                   const isExpanded = expandedEV === i;
                   const profit = (dkDecimal(b.dk) - 1) * 100;
                   const trueProbAm = probToAmerican(b.prob);
                   const adjustmentNote = getAdjustmentNote(b.bestOppBook);
+                  const evId = encodeEvCardId(b);
+                  const evShareModel = buildShareCardModel({
+                    kind: "ev",
+                    badge: b.ev > 0 ? "+EV" : "EV",
+                    bookLabel: getBookLabel(b.bookKey),
+                    ev: b.ev,
+                    odds: formatOdds(b.dk),
+                    title: b.name,
+                    subtitle: `${b.market} — ${b.game}`,
+                    legs: [{ name: b.name, market: b.market, game: b.game }],
+                  });
                   return (
-                    <div key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
+                    <div key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
                       onClick={() => {
                         setExpandedEV(isExpanded ? null : i);
+                        setFocusCardId(isExpanded ? null : evId);
                         if (!isExpanded) {
                           window.gtag?.('event', 'ev_bet_expanded', { rank: i + 1 });
                           logEvent(user, 'ev_bet_expanded', { rank: i + 1, bet: b.name, book: b.bookKey });
@@ -2104,6 +2186,9 @@ export default function App() {
                           </div>
                           <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(b.commence_time)}</div>
                           <div style={{ fontSize: 11, color: "#3b82f6", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
+                          <div style={{ marginTop: 8 }}>
+                            <ShareCardActions tab="ev" cardId={evId} model={evShareModel} showImage={b.ev > 0} />
+                          </div>
                         </div>
                         <div style={{ textAlign: "center" }}><BookBadge bookKey={b.bookKey} /></div>
                         <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(b.dk)}</div>
@@ -2368,11 +2453,22 @@ export default function App() {
                     const trueParlayOdds = probToAmerican(p.combinedProb);
                     const isSingle = p.legs.length === 1;
                     const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
+                    const promoId = encodePromoCardId({ promoType: "boost", book: promoBook, stake, legs: p.legs });
+                    const promoShareModel = buildShareCardModel({
+                      kind: "promo",
+                      badge: i === 0 ? "BEST PICK" : "PICK",
+                      bookLabel: activePromoBookData.label,
+                      ev: p.ev,
+                      odds: formatOdds(boostedOdds),
+                      stake,
+                      legs: p.legs,
+                    });
 
                     return (
-                      <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div key={promoId} id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
+                          setFocusCardId(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'boost', book: promoBook, legs: p.legs.map(l => l.name) });
@@ -2395,11 +2491,12 @@ export default function App() {
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
 
-                          {canSeeComboLocks(user) && (
-                            <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || p.ev > 0} />
+                            {canSeeComboLocks(user) && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
-                            </div>
-                          )}
+                            )}
+                          </div>
 
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
@@ -2490,11 +2587,22 @@ export default function App() {
                     const trueParlayOdds = probToAmerican(p.combinedProb);
                     const isSingle = p.legs.length === 1;
                     const evColor = p.ev > 0 ? "#10b981" : "#ef4444";
+                    const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
+                    const promoShareModel = buildShareCardModel({
+                      kind: "promo",
+                      badge: i === 0 ? "BEST PICK" : "PICK",
+                      bookLabel: activePromoBookData.label,
+                      ev: p.ev,
+                      odds: formatOdds(p.parlayOdds),
+                      stake,
+                      legs: p.legs,
+                    });
 
                     return (
-                      <div key={i} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div key={promoId} id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
+                          setFocusCardId(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'nosweat' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'nosweat', book: promoBook, legs: p.legs.map(l => l.name) });
@@ -2522,6 +2630,9 @@ export default function App() {
                             <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
+                          <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || p.ev > 0} />
+                          </div>
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
                               <GuaranteedBadge
@@ -2676,11 +2787,22 @@ export default function App() {
                     const leg = p.legs?.[0];
                     const lock = showLock ? p.lock : null;
                     const adjustmentNote = showLock ? getAdjustmentNote(leg?.bestOppBook) : null;
+                    const promoId = encodePromoCardId({ promoType: "freebet", book: promoBook, stake, legs: p.legs });
+                    const promoShareModel = buildShareCardModel({
+                      kind: "promo",
+                      badge: i === 0 ? (showLock ? "BEST CONVERSION" : "BEST PICK") : "PICK",
+                      bookLabel: activePromoBookData.label,
+                      ev: p.ev,
+                      odds: formatOdds(p.parlayOdds),
+                      stake,
+                      legs: p.legs,
+                    });
 
                     return (
-                      <div key={i} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div key={promoId} id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedFreeBet(isExpanded ? null : i);
+                          setFocusCardId(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet', book: promoBook, legs: (p.legs || []).map(l => l.name) });
@@ -2746,6 +2868,9 @@ export default function App() {
                               {isSingle && <PromoTrueOddsSubline leg={leg} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
+                          <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || p.ev > 0} />
+                          </div>
                         </div>
 
                         {isExpanded && (
