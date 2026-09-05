@@ -34,7 +34,8 @@ import {
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
-import { formatTrueOddsBookLine, formatAvailableSizeClause, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
+import { formatTrueOddsBookLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
+import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi } from "./promoBookDepth.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1245,14 +1246,30 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
   );
 }
 
-function PromoTrueOddsSubline({ leg, style }) {
+function PromoTrueOddsSubline({ leg, style, live = false }) {
+  const [ladder, setLadder] = useState(null);
+  useEffect(() => {
+    if (!live || !venueHasDepthApi(leg?.bestOppBook)) return;
+    let cancelled = false;
+    fetchPromoBookDepth([leg]).then((map) => {
+      if (cancelled) return;
+      const levels = map[depthCacheKey(leg)];
+      setLadder(Array.isArray(levels) ? levels : []);
+    });
+    return () => { cancelled = true; };
+  }, [live, leg?.bestOppBook, leg?.sport, leg?.game, leg?.bestOppName, leg?.name, leg?.market]);
+
   if (!leg?.bestOppBook) return null;
   const bookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || leg.bestOppBook;
   const note = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
+  const trail = formatDepthTrail(ladder, { topAmerican: leg.bestOpp, max: 2 });
   return (
     <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, ...style }}>
-      {formatTrueOddsBookLine({ odds: leg.bestOpp, bookLabel, size: leg.bestOppSize })}
-      {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
+      <div>
+        {formatTrueOddsBookLine({ odds: leg.bestOpp, bookLabel, size: leg.bestOppSize })}
+        {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
+      </div>
+      {trail ? <div style={{ color: "#4b5563", marginTop: 2 }}>{trail}</div> : null}
     </div>
   );
 }
@@ -1282,7 +1299,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption }) {
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
                 {formatOdds(tpAm)} ({(tp * 100).toFixed(1)}%)
               </div>
-              <PromoTrueOddsSubline leg={l} />
+              <PromoTrueOddsSubline leg={l} live />
             </div>
             <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
             <div style={{ textAlign: "center" }}>
@@ -2354,7 +2371,7 @@ export default function App() {
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           {canSeeComboLocks(user) && (
                             <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
@@ -2482,7 +2499,7 @@ export default function App() {
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
                               <GuaranteedBadge
@@ -2524,7 +2541,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{p.legs[0].bestOppName}</div>
-                                      <PromoTrueOddsSubline leg={p.legs[0]} />
+                                      <PromoTrueOddsSubline leg={p.legs[0]} live />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${p.lock.hedgeStake.toFixed(2)}</div>
@@ -2704,7 +2721,7 @@ export default function App() {
                                 <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                                 <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${(p.ev ?? 0).toFixed(2)}</strong></span>
                               </div>
-                              {isSingle && <PromoTrueOddsSubline leg={leg} style={{ fontSize: 11, marginTop: 6 }} />}
+                              {isSingle && <PromoTrueOddsSubline leg={leg} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
                         </div>
@@ -2733,7 +2750,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
-                                      <PromoTrueOddsSubline leg={leg} />
+                                      <PromoTrueOddsSubline leg={leg} live />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${(lock?.hedgeStake ?? 0).toFixed(2)}</div>

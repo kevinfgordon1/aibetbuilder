@@ -6,6 +6,8 @@ import {
   formatAvailableDollars,
   formatAvailableSizeClause,
   formatTrueOddsBookLine,
+  formatDepthTrail,
+  restLevelsFromLadder,
 } from "./trueOddsLine.js";
 import { transformOddsData, transformEventOddsData } from "./oddsTransform.js";
 import { createRequire } from "node:module";
@@ -66,6 +68,36 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   );
   assert.equal(formatAmericanOdds(120), "+120");
   assert.equal(formatAmericanOdds(-120), "-120");
+}
+
+// ── depth trail: next 1–2 worse levels; no depth → empty (top line unchanged)
+{
+  const top = formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 });
+  assert.equal(top, "+104 on ProphetX · $54 currently available");
+  assert.equal(formatDepthTrail(null, { topAmerican: 104 }), "");
+  assert.equal(formatDepthTrail([], { topAmerican: 104 }), "");
+  assert.equal(formatDepthTrail([{ american: 104, size: 54 }], { topAmerican: 104 }), "", "top-only book → no trail");
+  assert.equal(
+    formatDepthTrail(
+      [{ american: 104, size: 54 }, { american: 100, size: 420 }, { american: -105, size: 1100 }],
+      { topAmerican: 104 },
+    ),
+    "then +100 · $420 · then -105 · $1,100",
+  );
+  assert.equal(
+    formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 }),
+    "+104 on ProphetX · $54 currently available",
+    "adding depth must not change the top line",
+  );
+  const rest = restLevelsFromLadder(
+    [{ american: 104, size: 54 }, { american: 100, size: 420 }, { american: -105, size: 1100 }, { american: -110, size: 9 }],
+    { topAmerican: 104, max: 2 },
+  );
+  assert.equal(rest.length, 2);
+  assert.equal(rest[0].american, 100);
+  assert.equal(rest[1].american, -105);
+  assert.equal(formatDepthTrail([{ american: 100, size: 0 }], { topAmerican: 104 }), "");
+  assert.equal(formatDepthTrail([{ american: 110, size: 80 }], { topAmerican: 104 }), "", "better-than-top is not rest");
 }
 
 // ── American odds: +plus / −minus, never "+-105"

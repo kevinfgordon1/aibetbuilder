@@ -57,8 +57,10 @@ module.exports = async (req, res) => {
     // Leagues run concurrently (independent). MLB's per-event alt-line loop below
     // stays sequential to respect The Odds API rate limits.
     await Promise.all(SPORTS.map(async (sport) => {
-      // includeBetLimits: exchange books (Novig, ProphetX, Kalshi, Polymarket, …)
-      // attach a `bet_limit` dollar size on each outcome. Same call, no extra fetch.
+      // includeBetLimits: exchange books attach one `bet_limit` per outcome — top-of-book
+      // size only. The Odds API has no depth / order-book parameter (no extra levels).
+      // Do not add per-game depth fetches here; that would multiply cron quota.
+      // Rest levels are on-demand via /api/book-depth when a Promo card is viewed.
       const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=h2h,spreads,totals&oddsFormat=american&includeBetLimits=true`;
       const response = await fetch(url);
       if (!response.ok) {

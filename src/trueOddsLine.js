@@ -38,3 +38,39 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size } = {}) {
   const book = bookLabel || "Book";
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}`;
 }
+
+// Rest of book past the displayed top (best American first). Never invents levels.
+// `topAmerican` is the already-shown price; only strictly worse prices are kept.
+export function restLevelsFromLadder(levels, { topAmerican, max = 2 } = {}) {
+  const cap = Number.isFinite(max) && max > 0 ? Math.min(8, Math.floor(max)) : 2;
+  const clean = [];
+  const seen = new Set();
+  for (const raw of levels || []) {
+    const american = typeof raw?.american === "number" ? raw.american : Number(raw?.american);
+    const size = typeof raw?.size === "number" ? raw.size : parseFloat(raw?.size);
+    if (!isFinite(american) || american === 0 || !isFinite(size) || size <= 0) continue;
+    if (seen.has(american)) continue;
+    seen.add(american);
+    clean.push({ american, size });
+  }
+  clean.sort((a, b) => b.american - a.american);
+  let rest = clean;
+  if (topAmerican != null && isFinite(Number(topAmerican))) {
+    rest = clean.filter((l) => l.american < Number(topAmerican));
+  } else {
+    rest = clean.slice(1);
+  }
+  return rest.slice(0, cap);
+}
+
+export function formatDepthTrail(levels, { topAmerican, max = 2 } = {}) {
+  const rest = restLevelsFromLadder(levels, { topAmerican, max });
+  if (!rest.length) return "";
+  return rest
+    .map((l) => {
+      const dollars = formatAvailableDollars(l.size);
+      return dollars ? `then ${formatAmericanOdds(l.american)} · ${dollars}` : null;
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
