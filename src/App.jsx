@@ -32,7 +32,7 @@ import {
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
-import { formatTrueOddsBookLine, formatAvailableSizeClause, outcomeSize } from "./trueOddsLine.js";
+import { formatTrueOddsBookLine, formatAvailableSizeClause, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -350,8 +350,7 @@ function dkDecimal(odds) {
 }
 
 function formatOdds(odds) {
-  if (!odds) return "—";
-  return odds > 0 ? `+${odds}` : `${odds}`;
+  return formatAmericanOdds(odds);
 }
 
 // Compact dollar formatter for exchange top-of-book size ($595, $2.0k, $1.2M).
@@ -1279,7 +1278,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption }) {
             </div>
             <div style={{ textAlign: "center" }}>
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
-                {tpAm > 0 ? "+" : ""}{tpAm} ({(tp * 100).toFixed(1)}%)
+                {formatOdds(tpAm)} ({(tp * 100).toFixed(1)}%)
               </div>
               <PromoTrueOddsSubline leg={l} />
             </div>
@@ -2340,7 +2339,7 @@ export default function App() {
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
-                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
+                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} style={{ fontSize: 11, marginTop: 6 }} />}
@@ -2377,9 +2376,9 @@ export default function App() {
                                     {isSingle ? "Total" : "Parlay Total"} <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>
                                   </div>
                                   <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                    {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                                    {formatOdds(trueParlayOdds)} ({(p.combinedProb * 100).toFixed(1)}%)
                                   </div>
-                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>+{p.parlayOdds}</div>
+                                  <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatPromoTotalBookOdds(boostedOdds)}</div>
                                   <div style={{ textAlign: "center" }}>
                                     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: p.ev >= 0 ? "#10b981" : "#ef4444" }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
                                     <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>(with boost)</div>
@@ -2468,7 +2467,7 @@ export default function App() {
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
                             <span>On a loss: <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash</span>
-                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
+                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} style={{ fontSize: 11, marginTop: 6 }} />}
@@ -2562,7 +2561,7 @@ export default function App() {
                                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                                       <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{isSingle ? "Total" : "Parlay Total"}</div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                        {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                                        {formatOdds(trueParlayOdds)} ({(p.combinedProb * 100).toFixed(1)}%)
                                       </div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
@@ -2690,7 +2689,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
-                                <span>True Odds: <strong style={{ color: "#f59e0b" }}>{trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds}</strong></span>
+                                <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                                 <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${(p.ev ?? 0).toFixed(2)}</strong></span>
                               </div>
                               {isSingle && <PromoTrueOddsSubline leg={leg} style={{ fontSize: 11, marginTop: 6 }} />}
@@ -2771,7 +2770,7 @@ export default function App() {
                                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                                       <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{isSingle ? "Total" : "Parlay Total"}</div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                        {trueParlayOdds > 0 ? "+" : ""}{trueParlayOdds} ({(p.combinedProb * 100).toFixed(1)}%)
+                                        {formatOdds(trueParlayOdds)} ({(p.combinedProb * 100).toFixed(1)}%)
                                       </div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{p.ev >= 0 ? "+" : ""}${p.ev.toFixed(2)}</div>

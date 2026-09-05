@@ -10,9 +10,17 @@ export function outcomeSize(outcome) {
   return n;
 }
 
+// American odds: +120 / -105 / -101. Never "+-105" (a leading + on a negative).
 export function formatAmericanOdds(odds) {
-  if (!odds) return "—";
-  return odds > 0 ? `+${odds}` : `${odds}`;
+  if (odds == null || odds === "") return "—";
+  const n = typeof odds === "number" ? odds : Number(String(odds).trim().replace(/^\+/, ""));
+  if (!isFinite(n) || n === 0) return "—";
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+// Promo Builder Total-row sportsbook cell: boosted final odds, not raw book odds.
+export function formatPromoTotalBookOdds(boostedOdds) {
+  return formatAmericanOdds(boostedOdds);
 }
 
 export function formatAvailableDollars(size) {
