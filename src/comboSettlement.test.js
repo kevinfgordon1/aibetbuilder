@@ -179,6 +179,38 @@ assert.equal(resolveComboTicker({
   });
   assert.equal(dash.kind, "none");
 }
+{
+  const underlying = historyOutcome({
+    parlay: { id: "p1", underlying_result: "lost", underlying_source: "espn", legs: [{}, {}] },
+    fills: [],
+  });
+  assert.equal(underlying.kind, "underlying");
+  assert.equal(underlying.outcome, "lost");
+  assert.equal(underlying.filled, false);
+  assert.equal(underlying.source, "espn");
+}
+{
+  const officialWins = historyOutcome({
+    parlay: { id: "p1", kalshi_result: "no", underlying_result: "won" },
+    fills: [],
+  });
+  assert.equal(officialWins.kind, "result");
+  assert.equal(officialWins.settlement.weWon, true);
+}
+{
+  const pending = historyOutcome({
+    parlay: {
+      id: "p1",
+      kalshi_result: null,
+      legs: [
+        { ticker: "KXNFLGAME-26SEP13ARILAC-ARI", side: "yes" },
+        { ticker: "KXNFLGAME-26SEP13CLEJAC-JAC", side: "yes" },
+      ],
+    },
+    fills: [],
+  });
+  assert.equal(pending.kind, "pending");
+}
 
 const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
 assert.match(locksSrc, /historyOutcome/);
@@ -189,6 +221,13 @@ assert.match(locksSrc, /submissions/);
 assert.match(locksSrc, /market_ticker/);
 assert.match(locksSrc, /filledById && filledById\[row\.id\]\) > 0/);
 assert.match(locksSrc, /\(archived \|\| \[\]\)\.forEach/);
+assert.match(locksSrc, /RiskProfile/);
+assert.match(locksSrc, /AttemptHistory/);
+assert.match(locksSrc, /espn-scores/);
+assert.match(locksSrc, /underlying_result/);
+assert.match(locksSrc, /Current \(unhedged\)/);
+assert.match(locksSrc, /target TBD/);
+assert.doesNotMatch(locksSrc, /UNHEDGED_RFQ_LIVE/);
 assert.doesNotMatch(locksSrc, /POST \/markets|createMarket|mve_collection.*POST/);
 assert.doesNotMatch(locksSrc, /legs\.map\(\(l\) => l\.ticker\).*combo_ticker/);
 
