@@ -2,6 +2,8 @@
 // trustedBookKeys gates getBestOdds / opp-count helpers. Offer-side bookOdds
 // still iterate allBooks so an unchecked matching book can price the promo.
 
+import { outcomeSize } from "./trueOddsLine.js";
+
 export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBooks) {
   const moneylines = [];
   const spreads = [];
@@ -21,11 +23,13 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       const market = book.markets.find(m => m.key === marketKey);
       if (!market) return null;
       const outcome = market.outcomes.find(o => o.name === teamName);
-      return outcome ? outcome[prop] : null;
+      if (!outcome) return null;
+      if (prop === "size") return outcomeSize(outcome);
+      return outcome[prop] ?? null;
     };
 
     const getBestOdds = (marketKey, teamName) => {
-      let best = null, bestBook = null;
+      let best = null, bestBook = null, bestSize = null;
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === marketKey);
@@ -34,22 +38,22 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         if (!outcome) return;
         const val = outcome.price;
         if (val === null || val === undefined) return;
-        if (best === null || val > best) { best = val; bestBook = book.key; }
+        if (best === null || val > best) { best = val; bestBook = book.key; bestSize = outcomeSize(outcome); }
       });
-      return { best, bestBook };
+      return { best, bestBook, bestSize };
     };
 
     const getBestSpreadOddsAtLine = (teamName, targetPoint) => {
-      let best = null, bestBook = null;
+      let best = null, bestBook = null, bestSize = null;
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === "spreads");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName && o.point === targetPoint);
         if (!outcome) return;
-        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; }
+        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; bestSize = outcomeSize(outcome); }
       });
-      return { best, bestBook };
+      return { best, bestBook, bestSize };
     };
 
     const countSpreadLinesAtPoint = (teamName, targetPoint) => {
@@ -65,16 +69,16 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
     };
 
     const getBestTotalOddsAtLine = (side, targetPoint) => {
-      let best = null, bestBook = null;
+      let best = null, bestBook = null, bestSize = null;
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === "totals");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === side && o.point === targetPoint);
         if (!outcome) return;
-        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; }
+        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; bestSize = outcomeSize(outcome); }
       });
-      return { best, bestBook };
+      return { best, bestBook, bestSize };
     };
 
     const countTotalLinesAtPoint = (side, targetPoint) => {
@@ -106,6 +110,8 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       bookOdds[b.key] = {
         ml_away: getOdds(b.key, "h2h", away),
         ml_home: getOdds(b.key, "h2h", home),
+        ml_away_size: getOdds(b.key, "h2h", away, "size"),
+        ml_home_size: getOdds(b.key, "h2h", home, "size"),
         spr_away: getOdds(b.key, "spreads", away),
         spr_away_line: getOdds(b.key, "spreads", away, "point"),
         spr_home: getOdds(b.key, "spreads", home),
@@ -132,6 +138,8 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       is_three_way: isThreeWay,
       best_away_book: bestAwayML.bestBook,
       best_home_book: bestHomeML.bestBook,
+      best_away_size: bestAwayML.bestSize ?? null,
+      best_home_size: bestHomeML.bestSize ?? null,
       ml_opp_count_away: countMLLines(home),
       ml_opp_count_home: countMLLines(away),
     });
@@ -151,23 +159,27 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       const oppAwayLookup = getBestSpreadOddsAtLine(home, -awayPoint);
       let bestOppForAway = oppAwayLookup.best;
       let bestOppForAwayBook = oppAwayLookup.bestBook;
+      let bestOppForAwaySize = oppAwayLookup.bestSize ?? null;
       const oppCountForAway = countSpreadLinesAtPoint(home, -awayPoint);
-      if (bestOppForAway === null) { bestOppForAway = homeOutcome.price; bestOppForAwayBook = b.key; }
+      if (bestOppForAway === null) { bestOppForAway = homeOutcome.price; bestOppForAwayBook = b.key; bestOppForAwaySize = outcomeSize(homeOutcome); }
 
       const oppHomeLookup = getBestSpreadOddsAtLine(away, -homePoint);
       let bestOppForHome = oppHomeLookup.best;
       let bestOppForHomeBook = oppHomeLookup.bestBook;
+      let bestOppForHomeSize = oppHomeLookup.bestSize ?? null;
       const oppCountForHome = countSpreadLinesAtPoint(away, -homePoint);
-      if (bestOppForHome === null) { bestOppForHome = awayOutcome.price; bestOppForHomeBook = b.key; }
+      if (bestOppForHome === null) { bestOppForHome = awayOutcome.price; bestOppForHomeBook = b.key; bestOppForHomeSize = outcomeSize(awayOutcome); }
 
       spreads.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
         away_odds: awayOutcome.price, home_odds: homeOutcome.price,
+        away_size: outcomeSize(awayOutcome), home_size: outcomeSize(homeOutcome),
         away_line: fmtPoint(awayPoint), home_line: fmtPoint(homePoint),
         away_point: awayPoint, home_point: homePoint,
         bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
         bestOpp_away_book: bestOppForAwayBook, bestOpp_home_book: bestOppForHomeBook,
+        bestOpp_away_size: bestOppForAwaySize, bestOpp_home_size: bestOppForHomeSize,
         bestOppCount_away: oppCountForAway || 1,
         bestOppName_away: `${home} ${fmtPoint(-awayPoint)}`,
         bestOppCount_home: oppCountForHome || 1,
@@ -188,21 +200,25 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       const oppOverLookup = getBestTotalOddsAtLine("Under", line);
       let bestOppForOver = oppOverLookup.best;
       let bestOppForOverBook = oppOverLookup.bestBook;
+      let bestOppForOverSize = oppOverLookup.bestSize ?? null;
       const oppCountForOver = countTotalLinesAtPoint("Under", line);
-      if (bestOppForOver === null) { bestOppForOver = underOutcome.price; bestOppForOverBook = b.key; }
+      if (bestOppForOver === null) { bestOppForOver = underOutcome.price; bestOppForOverBook = b.key; bestOppForOverSize = outcomeSize(underOutcome); }
 
       const oppUnderLookup = getBestTotalOddsAtLine("Over", line);
       let bestOppForUnder = oppUnderLookup.best;
       let bestOppForUnderBook = oppUnderLookup.bestBook;
+      let bestOppForUnderSize = oppUnderLookup.bestSize ?? null;
       const oppCountForUnder = countTotalLinesAtPoint("Over", line);
-      if (bestOppForUnder === null) { bestOppForUnder = overOutcome.price; bestOppForUnderBook = b.key; }
+      if (bestOppForUnder === null) { bestOppForUnder = overOutcome.price; bestOppForUnderBook = b.key; bestOppForUnderSize = outcomeSize(overOutcome); }
 
       totals.push({
         away, home, commence_time, bookOdds, sport: sportKey,
         best_away, best_home, book: b.key,
         line, over_odds: overOutcome.price, under_odds: underOutcome.price,
+        over_size: outcomeSize(overOutcome), under_size: outcomeSize(underOutcome),
         bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
         bestOpp_over_book: bestOppForOverBook, bestOpp_under_book: bestOppForUnderBook,
+        bestOpp_over_size: bestOppForOverSize, bestOpp_under_size: bestOppForUnderSize,
         bestOppCount_over: oppCountForOver || 1,
         bestOppName_over: `${away}/${home} u${line}`,
         bestOppCount_under: oppCountForUnder || 1,
@@ -231,7 +247,7 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
   const fmtPoint = (p) => (p > 0 ? `+${p}` : `${p}`);
 
   const bestSpreadAt = (teamName, point) => {
-    let best = null, bestBook = null, count = 0;
+    let best = null, bestBook = null, bestSize = null, count = 0;
     bookmakers.forEach(b => {
       if (!trustedBookKeys.has(b.key)) return;
       const m = (b.markets || []).find(mk => mk.key === "alternate_spreads");
@@ -239,13 +255,13 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
       const o = m.outcomes.find(x => x.name === teamName && x.point === point);
       if (!o || o.price == null) return;
       count++;
-      if (best === null || o.price > best) { best = o.price; bestBook = b.key; }
+      if (best === null || o.price > best) { best = o.price; bestBook = b.key; bestSize = outcomeSize(o); }
     });
-    return { best, bestBook, count };
+    return { best, bestBook, bestSize, count };
   };
 
   const bestTotalAt = (side, point) => {
-    let best = null, bestBook = null, count = 0;
+    let best = null, bestBook = null, bestSize = null, count = 0;
     bookmakers.forEach(b => {
       if (!trustedBookKeys.has(b.key)) return;
       const m = (b.markets || []).find(mk => mk.key === "alternate_totals");
@@ -253,13 +269,13 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
       const o = m.outcomes.find(x => x.name === side && x.point === point);
       if (!o || o.price == null) return;
       count++;
-      if (best === null || o.price > best) { best = o.price; bestBook = b.key; }
+      if (best === null || o.price > best) { best = o.price; bestBook = b.key; bestSize = outcomeSize(o); }
     });
-    return { best, bestBook, count };
+    return { best, bestBook, bestSize, count };
   };
 
   const bestTeamTotalAt = (team, side, point) => {
-    let best = null, bestBook = null, count = 0;
+    let best = null, bestBook = null, bestSize = null, count = 0;
     bookmakers.forEach(b => {
       if (!trustedBookKeys.has(b.key)) return;
       (b.markets || []).forEach(m => {
@@ -267,10 +283,10 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
         const o = m.outcomes.find(x => x.name === side && x.description === team && x.point === point);
         if (!o || o.price == null) return;
         count++;
-        if (best === null || o.price > best) { best = o.price; bestBook = b.key; }
+        if (best === null || o.price > best) { best = o.price; bestBook = b.key; bestSize = outcomeSize(o); }
       });
     });
-    return { best, bestBook, count };
+    return { best, bestBook, bestSize, count };
   };
 
   allBooks.forEach(b => {
@@ -284,23 +300,28 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
       const homePts = new Map();
       sprM.outcomes.forEach(o => {
         if (!isHalf(o.point) || o.price == null) return;
-        if (o.name === away) awayPts.set(o.point, o.price);
-        else if (o.name === home) homePts.set(o.point, o.price);
+        const rec = { price: o.price, size: outcomeSize(o) };
+        if (o.name === away) awayPts.set(o.point, rec);
+        else if (o.name === home) homePts.set(o.point, rec);
       });
-      awayPts.forEach((awayOdds, P) => {
-        const homeOdds = homePts.get(-P);
-        if (homeOdds == null) return;
+      awayPts.forEach((awayRec, P) => {
+        const homeRec = homePts.get(-P);
+        if (!homeRec) return;
+        const awayOdds = awayRec.price, homeOdds = homeRec.price;
         const oppA = bestSpreadAt(home, -P);
         const oppH = bestSpreadAt(away, P);
         run_lines.push({
           away, home, commence_time, sport: sportKey, book: b.key, is_alt: true,
           away_odds: awayOdds, home_odds: homeOdds,
+          away_size: awayRec.size, home_size: homeRec.size,
           away_line: fmtPoint(P), home_line: fmtPoint(-P),
           away_point: P, home_point: -P,
           bestOpp_away: oppA.best != null ? oppA.best : homeOdds,
           bestOpp_away_book: oppA.best != null ? oppA.bestBook : b.key,
+          bestOpp_away_size: oppA.best != null ? oppA.bestSize : homeRec.size,
           bestOpp_home: oppH.best != null ? oppH.best : awayOdds,
           bestOpp_home_book: oppH.best != null ? oppH.bestBook : b.key,
+          bestOpp_home_size: oppH.best != null ? oppH.bestSize : awayRec.size,
           bestOppCount_away: oppA.count || 1, bestOppName_away: `${home} ${fmtPoint(-P)}`,
           bestOppCount_home: oppH.count || 1, bestOppName_home: `${away} ${fmtPoint(P)}`,
         });
@@ -312,22 +333,25 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
       const byLine = new Map();
       totM.outcomes.forEach(o => {
         if (!isHalf(o.point) || o.price == null) return;
-        const cur = byLine.get(o.point) || { line: o.point, over: null, under: null };
-        if (o.name === "Over") cur.over = o.price;
-        else if (o.name === "Under") cur.under = o.price;
+        const cur = byLine.get(o.point) || { line: o.point, over: null, under: null, overSize: null, underSize: null };
+        if (o.name === "Over") { cur.over = o.price; cur.overSize = outcomeSize(o); }
+        else if (o.name === "Under") { cur.under = o.price; cur.underSize = outcomeSize(o); }
         byLine.set(o.point, cur);
       });
-      byLine.forEach(({ line, over, under }) => {
+      byLine.forEach(({ line, over, under, overSize, underSize }) => {
         if (over == null || under == null) return;
         const oppO = bestTotalAt("Under", line);
         const oppU = bestTotalAt("Over", line);
         totals.push({
           away, home, commence_time, sport: sportKey, book: b.key, is_alt: true,
           line, over_odds: over, under_odds: under,
+          over_size: overSize, under_size: underSize,
           bestOpp_over: oppO.best != null ? oppO.best : under,
           bestOpp_over_book: oppO.best != null ? oppO.bestBook : b.key,
+          bestOpp_over_size: oppO.best != null ? oppO.bestSize : underSize,
           bestOpp_under: oppU.best != null ? oppU.best : over,
           bestOpp_under_book: oppU.best != null ? oppU.bestBook : b.key,
+          bestOpp_under_size: oppU.best != null ? oppU.bestSize : overSize,
           bestOppCount_over: oppO.count || 1, bestOppName_over: `${away}/${home} u${line}`,
           bestOppCount_under: oppU.count || 1, bestOppName_under: `${away}/${home} o${line}`,
           match: true,
@@ -342,23 +366,26 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
         m.outcomes.forEach(o => {
           if (!isHalf(o.point) || o.price == null || !o.description) return;
           const key = `${o.description}|${o.point}`;
-          const cur = byTeamLine.get(key) || { team: o.description, line: o.point, over: null, under: null };
-          if (o.name === "Over") cur.over = o.price;
-          else if (o.name === "Under") cur.under = o.price;
+          const cur = byTeamLine.get(key) || { team: o.description, line: o.point, over: null, under: null, overSize: null, underSize: null };
+          if (o.name === "Over") { cur.over = o.price; cur.overSize = outcomeSize(o); }
+          else if (o.name === "Under") { cur.under = o.price; cur.underSize = outcomeSize(o); }
           byTeamLine.set(key, cur);
         });
       });
-      byTeamLine.forEach(({ team, line, over, under }) => {
+      byTeamLine.forEach(({ team, line, over, under, overSize, underSize }) => {
         if (over == null || under == null) return;
         const oppO = bestTeamTotalAt(team, "Under", line);
         const oppU = bestTeamTotalAt(team, "Over", line);
         team_totals.push({
           away, home, commence_time, sport: sportKey, book: b.key, team, line, is_alt: true,
           over_odds: over, under_odds: under,
+          over_size: overSize, under_size: underSize,
           bestOpp_over: oppO.best != null ? oppO.best : under,
           bestOpp_over_book: oppO.best != null ? oppO.bestBook : b.key,
+          bestOpp_over_size: oppO.best != null ? oppO.bestSize : underSize,
           bestOpp_under: oppU.best != null ? oppU.best : over,
           bestOpp_under_book: oppU.best != null ? oppU.bestBook : b.key,
+          bestOpp_under_size: oppU.best != null ? oppU.bestSize : overSize,
           bestOppCount_over: oppO.count || 1, bestOppName_over: `${team} u${line}`,
           bestOppCount_under: oppU.count || 1, bestOppName_under: `${team} o${line}`,
         });

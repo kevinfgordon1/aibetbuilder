@@ -57,7 +57,9 @@ module.exports = async (req, res) => {
     // Leagues run concurrently (independent). MLB's per-event alt-line loop below
     // stays sequential to respect The Odds API rate limits.
     await Promise.all(SPORTS.map(async (sport) => {
-      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=h2h,spreads,totals&oddsFormat=american`;
+      // includeBetLimits: exchange books (Novig, ProphetX, Kalshi, Polymarket, …)
+      // attach a `bet_limit` dollar size on each outcome. Same call, no extra fetch.
+      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=h2h,spreads,totals&oddsFormat=american&includeBetLimits=true`;
       const response = await fetch(url);
       if (!response.ok) {
         console.error(`Failed to fetch ${sport}: ${response.status}`);
@@ -90,7 +92,7 @@ module.exports = async (req, res) => {
         // Sequential to stay under rate limits; ~15 MLB games ≈ a few seconds.
         for (const game of eventsInWindow) {
           try {
-            const evUrl = `https://api.the-odds-api.com/v4/sports/${sport}/events/${game.id}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=${marketsParam}&oddsFormat=american`;
+            const evUrl = `https://api.the-odds-api.com/v4/sports/${sport}/events/${game.id}/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=us,us2,us_ex,eu&markets=${marketsParam}&oddsFormat=american&includeBetLimits=true`;
             const evResp = await fetch(evUrl);
             if (!evResp.ok) {
               console.error(`Failed event odds ${sport}/${game.id}: ${evResp.status}`);
