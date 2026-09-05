@@ -1,8 +1,11 @@
 // User profile identity + editable Promo defaults.
 // Seeded from Google/Gmail sign-in (name, email, avatar). Prefs persist per
-// auth uid in localStorage. Billing / exchange-key vault is parked.
+// auth uid in localStorage and on the Supabase user (user_metadata) so
+// dismissed announcements follow the account across devices.
+// Billing / exchange-key vault is parked.
 
 export const PROFILE_PREFS_KEY = "aibetbuilder.profilePrefs";
+export const PROFILE_PREFS_META_KEY = "aibetbuilderPrefs";
 
 export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_ncaaf"];
 export const DEFAULT_PROFILE_BOOK = "draftkings";
@@ -30,7 +33,31 @@ export function defaultProfilePrefs() {
     displayName: "",
     sports: DEFAULT_PROFILE_SPORTS.slice(),
     promoBook: DEFAULT_PROFILE_BOOK,
+    seenAnnouncementId: "",
   };
+}
+
+export function persistableProfilePrefs(prefs) {
+  const next = normalizeProfilePrefs(prefs);
+  return {
+    displayName: next.displayName,
+    sports: next.sports,
+    promoBook: next.promoBook,
+    seenAnnouncementId: next.seenAnnouncementId,
+  };
+}
+
+export function mergeProfilePrefSources(local, remote) {
+  const a = local && typeof local === "object" ? local : {};
+  const b = remote && typeof remote === "object" ? remote : {};
+  const out = { ...a };
+  if (typeof b.displayName === "string" && b.displayName.trim()) out.displayName = b.displayName;
+  if (Array.isArray(b.sports) && b.sports.length) out.sports = b.sports;
+  if (typeof b.promoBook === "string" && b.promoBook) out.promoBook = b.promoBook;
+  if (typeof b.seenAnnouncementId === "string" && b.seenAnnouncementId.trim()) {
+    out.seenAnnouncementId = b.seenAnnouncementId.trim();
+  }
+  return out;
 }
 
 function sanitizeSports(sports, allowedKeys) {
@@ -54,10 +81,12 @@ export function normalizeProfilePrefs(raw, { allowedSports, allowedBooks } = {})
   const sports = sanitizeSports(src.sports, allowedSports);
   const book = typeof src.promoBook === "string" ? src.promoBook : base.promoBook;
   const books = allowedBooks instanceof Set ? allowedBooks : new Set(allowedBooks || []);
+  const seen = typeof src.seenAnnouncementId === "string" ? src.seenAnnouncementId.trim() : "";
   return {
     displayName: typeof src.displayName === "string" ? src.displayName.trim() : "",
     sports,
     promoBook: books.size && !books.has(book) ? DEFAULT_PROFILE_BOOK : (book || DEFAULT_PROFILE_BOOK),
+    seenAnnouncementId: seen,
   };
 }
 
@@ -79,7 +108,9 @@ export function loadProfilePrefs(user, { storage, allowedSports, allowedBooks } 
   } catch {
     parsed = null;
   }
-  return seedProfilePrefs(user, parsed, { allowedSports, allowedBooks });
+  const remote = user && user.user_metadata && user.user_metadata[PROFILE_PREFS_META_KEY];
+  const merged = mergeProfilePrefSources(parsed, remote);
+  return seedProfilePrefs(user, merged, { allowedSports, allowedBooks });
 }
 
 export function saveProfilePrefs(user, prefs, { storage, allowedSports, allowedBooks } = {}) {
@@ -89,16 +120,28 @@ export function saveProfilePrefs(user, prefs, { storage, allowedSports, allowedB
   try {
     const store = storage ?? globalThis.localStorage;
     if (store) {
-      store.setItem(profilePrefsStorageKey(ident.id), JSON.stringify({
-        displayName: next.displayName,
-        sports: next.sports,
-        promoBook: next.promoBook,
-      }));
+      store.setItem(profilePrefsStorageKey(ident.id), JSON.stringify(persistableProfilePrefs(next)));
     }
   } catch {
     // quota / privacy mode
   }
   return next;
+}
+
+export async function persistProfilePrefsRemote(client, user, prefs) {
+  const ident = identityFromUser(user);
+  if (!ident.id || !client || !client.auth || typeof client.auth.updateUser !== "function") {
+    return { persisted: false };
+  }
+  try {
+    const { error } = await client.auth.updateUser({
+      data: { [PROFILE_PREFS_META_KEY]: persistableProfilePrefs(prefs) },
+    });
+    if (error) return { persisted: false, error };
+    return { persisted: true };
+  } catch (error) {
+    return { persisted: false, error };
+  }
 }
 
 export function profileDisplayName(user, prefs) {
