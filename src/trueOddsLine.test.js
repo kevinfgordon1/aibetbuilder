@@ -204,3 +204,5 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(yankees.bestOpp, -130);
   assert.equal(yankees.bestOppSize, 2100);
 }
+
+console.log("trueOddsLine.test.js ok");
