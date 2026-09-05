@@ -41,7 +41,7 @@ CREATE POLICY whats_new_announcements_select_published
   TO authenticated
   USING (
     enabled = true
-    OR lower(coalesce(auth.jwt() ->> 'email', '')) = 'kev120909@gmail.com'
+    OR lower(coalesce((select auth.jwt() ->> 'email'), '')) = 'kev120909@gmail.com'
   );
 
 DROP POLICY IF EXISTS whats_new_announcements_insert_owner ON public.whats_new_announcements;
@@ -49,12 +49,12 @@ CREATE POLICY whats_new_announcements_insert_owner
   ON public.whats_new_announcements
   FOR INSERT
   TO authenticated
-  WITH CHECK (lower(coalesce(auth.jwt() ->> 'email', '')) = 'kev120909@gmail.com');
+  WITH CHECK (lower(coalesce((select auth.jwt() ->> 'email'), '')) = 'kev120909@gmail.com');
 
 DROP POLICY IF EXISTS whats_new_announcements_update_owner ON public.whats_new_announcements;
 CREATE POLICY whats_new_announcements_update_owner
   ON public.whats_new_announcements
   FOR UPDATE
   TO authenticated
-  USING (lower(coalesce(auth.jwt() ->> 'email', '')) = 'kev120909@gmail.com')
-  WITH CHECK (lower(coalesce(auth.jwt() ->> 'email', '')) = 'kev120909@gmail.com');
+  USING (lower(coalesce((select auth.jwt() ->> 'email'), '')) = 'kev120909@gmail.com')
+  WITH CHECK (lower(coalesce((select auth.jwt() ->> 'email'), '')) = 'kev120909@gmail.com');

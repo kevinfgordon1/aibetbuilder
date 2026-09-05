@@ -241,6 +241,7 @@ function mockClient({ rows = [], updateError = null, insertError = null } = {}) 
   assert.match(sql, /kev120909@gmail.com/);
   assert.match(sql, /enabled = true/);
   assert.match(sql, /whats_new_announcements_active_published_at_idx/);
+  assert.match(sql, /\(select auth\.jwt\(\) ->> 'email'\)/);
 }
 
 console.log("whatsNew.test.js ok");
