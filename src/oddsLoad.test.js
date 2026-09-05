@@ -279,6 +279,11 @@ function fullPlan() {
   assert.match(app, /selectEvScanView\(/);
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
+  assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
+  const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");
+  assert.match(fetchOddsFn, /res\.status\(200\)\.json\(\{ success: true, results \}\)/);
+  assert.match(fetchOddsFn, /results\.push\(\{ sport, games: data\.length \}\)/);
+  assert.match(fetchOddsFn, /Promo Builder never calls this/);
   assert.match(app, /featuredRowsUsable\(featured\)/);
   assert.match(app, /describeOddsLoadError/);
   assert.match(app, /setOddsLoadError/);
