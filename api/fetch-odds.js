@@ -1,5 +1,13 @@
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
 
+// Vercel cron / manual GET. Pulls The Odds API, upserts odds_cache +
+// event_odds_cache, then returns a *receipt* — { success, results: [{ sport, games }] }.
+// `games` is a count, not a game/odds array. Promo Builder never calls this
+// route; it reads the cache tables from the browser via queryOddsCaches.
+// Changing this JSON to include full odds would not unblock the UI and would
+// blow the cron payload. Empty/failed Odds API pulls log and skip that sport;
+// they still 200 with whatever sports did upsert.
+
 // Daily game lines. Futures/championship markets are handled by the separate
 // /api/fetch-futures function so the two pulls run as independent, shorter jobs.
 const SPORTS = [
