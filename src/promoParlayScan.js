@@ -15,6 +15,7 @@ export function promoScanInputKey({
   numLegs,
   scanBoostPct,
   parsedMinFinal,
+  parsedMaxFinal,
   refundPct,
   creditConversionPct,
   pool,
@@ -33,11 +34,19 @@ export function promoScanInputKey({
     numLegs,
     scanBoostPct,
     parsedMinFinal ?? "",
+    parsedMaxFinal ?? "",
     refundPct,
     creditConversionPct,
     list.length,
     fp,
   ].join("|");
+}
+
+// Same American-numeric convention as App.jsx / promo-ev min+max filters.
+export function passesOddsBounds(odds, minOdds, maxOdds) {
+  if (minOdds !== null && odds < minOdds) return false;
+  if (maxOdds !== null && odds > maxOdds) return false;
+  return true;
 }
 
 // Empty-state for Promo Builder parlay results. "No Results Found" is only
@@ -161,7 +170,7 @@ function parlayLegKey(p) {
   return p.legs.map((l) => `${l.game}\0${l.name}`).sort().join("\n");
 }
 
-function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds) {
+function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds) {
   const seen = new Set();
   const grown = [];
   for (const seed of seeds) {
@@ -180,7 +189,7 @@ function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds) {
       current = best;
     }
     if (failed || current.legs.length !== numLegs) continue;
-    if (minFinalOdds !== null && current.parlayOdds < minFinalOdds) continue;
+    if (!passesOddsBounds(current.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
     const key = parlayLegKey(current);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -200,6 +209,7 @@ export async function findTopParlaysChunked(
   {
     maxResults = 10,
     minFinalOdds = null,
+    maxFinalOdds = null,
     signal = null,
     yieldMs = SCAN_YIELD_MS,
     yieldFn = yieldToMain,
@@ -218,6 +228,7 @@ export async function findTopParlaysChunked(
     const seeds = await findTopParlaysChunked(list, 3, calc, {
       maxResults: seedCount,
       minFinalOdds: null,
+      maxFinalOdds: null,
       signal,
       yieldMs,
       yieldFn,
@@ -225,13 +236,13 @@ export async function findTopParlaysChunked(
       growFrom3Seeds,
     });
     throwIfAborted(signal);
-    return growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds);
+    return growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds);
   }
 
   const top = [];
   const getGame = (leg) => leg.game;
   const takeIfTop = (r, comboLegs) => {
-    if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) return;
+    if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) return;
     if (!shouldTake(top, r.ev, maxResults)) return;
     considerTopByEv(top, { legs: comboLegs, ...r }, maxResults);
   };

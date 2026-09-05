@@ -121,14 +121,17 @@ const MARKET_SCOPES = [
   { val: "alt", label: "Alt" },
 ];
 
-function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, minLegOdds, numLegs }) {
+function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs }) {
   const selected = SPORTS.filter(s => promoSports.has(s.key)).map(s => s.label);
   const sportsPart = selected.length === SPORTS.length ? "All sports" : selected.join(", ");
   const datePart = DATE_RANGES.find(d => d.val === promoDateRange)?.label || promoDateRange;
   const marketPart = marketScope === "main" ? "mains" : marketScope === "alt" ? "alts" : "all";
   const parts = [sportsPart, datePart, marketPart];
-  if ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
-  if ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && numLegs >= 2 && minLegOdds !== "") parts.push(`legs ${minLegOdds}`);
+  const isOddsPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
+  if (isOddsPromo && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
+  if (isOddsPromo && maxFinalOdds !== "") parts.push(`max ${maxFinalOdds}`);
+  if (isOddsPromo && numLegs >= 2 && minLegOdds !== "") parts.push(`legs ${minLegOdds}`);
+  if (isOddsPromo && numLegs >= 2 && maxLegOdds !== "") parts.push(`legs max ${maxLegOdds}`);
   return parts.join(" · ");
 }
 
@@ -444,7 +447,14 @@ function resolveOpp({ trustedOpp, trustedBook, trustedCount, sameBookOpp, sameBo
   return { bestOpp: null, bestOppBook: trustedBook || null, bestOppCount: trustedCount || 0, sameBookFallback: false };
 }
 
-function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any") {
+// Same American-numeric convention as min: odds >= min and odds <= max.
+function passesOddsBounds(odds, minOdds, maxOdds) {
+  if (minOdds !== null && odds < minOdds) return false;
+  if (maxOdds !== null && odds > maxOdds) return false;
+  return true;
+}
+
+function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any", maxLegOdds = null) {
   const legs = [];
   const now = new Date();
 
@@ -457,9 +467,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       const awayOdds = g.bookOdds?.[book]?.ml_away;
       const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
-      if (minLegOdds === null || awayOdds >= minLegOdds)
+      if (passesOddsBounds(awayOdds, minLegOdds, maxLegOdds))
         legs.push({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, sameBookOpp: homeOdds, sameBookKey: book }) });
-      if (minLegOdds === null || homeOdds >= minLegOdds)
+      if (passesOddsBounds(homeOdds, minLegOdds, maxLegOdds))
         legs.push({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, sameBookOpp: awayOdds, sameBookKey: book }) });
     });
   }
@@ -476,8 +486,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (awayOdds == null || homeOdds == null) return;
       const ak = `${g.away}@${g.home}_away_${g.away_line}`;
       const hk = `${g.away}@${g.home}_home_${g.home_line}`;
-      if (!seen.has(ak) && (minLegOdds === null || awayOdds >= minLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, sameBookOpp: homeOdds, sameBookKey: book }) }); }
-      if (!seen.has(hk) && (minLegOdds === null || homeOdds >= minLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, sameBookOpp: awayOdds, sameBookKey: book }) }); }
+      if (!seen.has(ak) && passesOddsBounds(awayOdds, minLegOdds, maxLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, sameBookOpp: homeOdds, sameBookKey: book }) }); }
+      if (!seen.has(hk) && passesOddsBounds(homeOdds, minLegOdds, maxLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, sameBookOpp: awayOdds, sameBookKey: book }) }); }
     });
   }
 
@@ -493,8 +503,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_over_${g.line}`;
       const uk = `${g.away}@${g.home}_under_${g.line}`;
-      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, sameBookOpp: underOdds, sameBookKey: book }) }); }
-      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, sameBookOpp: overOdds, sameBookKey: book }) }); }
+      if (!seen.has(ok) && passesOddsBounds(overOdds, minLegOdds, maxLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, sameBookOpp: underOdds, sameBookKey: book }) }); }
+      if (!seen.has(uk) && passesOddsBounds(underOdds, minLegOdds, maxLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, sameBookOpp: overOdds, sameBookKey: book }) }); }
     });
   }
 
@@ -510,8 +520,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_TT_${g.team}_o_${g.line}`;
       const uk = `${g.away}@${g.home}_TT_${g.team}_u_${g.line}`;
-      if (!seen.has(ok) && (minLegOdds === null || overOdds >= minLegOdds)) { seen.add(ok); legs.push({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, sameBookOpp: underOdds, sameBookKey: book }) }); }
-      if (!seen.has(uk) && (minLegOdds === null || underOdds >= minLegOdds)) { seen.add(uk); legs.push({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, sameBookOpp: overOdds, sameBookKey: book }) }); }
+      if (!seen.has(ok) && passesOddsBounds(overOdds, minLegOdds, maxLegOdds)) { seen.add(ok); legs.push({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, sameBookOpp: underOdds, sameBookKey: book }) }); }
+      if (!seen.has(uk) && passesOddsBounds(underOdds, minLegOdds, maxLegOdds)) { seen.add(uk); legs.push({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, sameBookOpp: overOdds, sameBookKey: book }) }); }
     });
   }
 
@@ -595,12 +605,12 @@ function parlayLegKey(p) {
 
 // 4+ legs: take top 3-leg parlays, then greedily add one unused-game leg at a
 // time ranked by calcParlayEV. Same book/filters as the caller already applied
-// to `legs`. minFinalOdds is applied to the finished N-leg, not the 3-leg seed
-// (a short 3-leg can still grow into a long enough parlay).
-function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFinalOdds, evCalc) {
+// to `legs`. minFinalOdds / maxFinalOdds are applied to the finished N-leg, not
+// the 3-leg seed (a short 3-leg can still grow into a long enough parlay).
+function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFinalOdds, maxFinalOdds, evCalc) {
   const calc = evCalc || ((ls) => calcParlayEV(ls, boostPct, stake));
   const seedCount = Math.max(maxResults, GROW_FROM_3_SEEDS);
-  const seeds = findTopParlays(legs, 3, boostPct, stake, seedCount, null, evCalc);
+  const seeds = findTopParlays(legs, 3, boostPct, stake, seedCount, null, null, evCalc);
   const seen = new Set();
   const grown = [];
   for (const seed of seeds) {
@@ -620,7 +630,7 @@ function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFina
       current = best;
     }
     if (failed || current.legs.length !== numLegs) continue;
-    if (minFinalOdds !== null && current.parlayOdds < minFinalOdds) continue;
+    if (!passesOddsBounds(current.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
     const key = parlayLegKey(current);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -632,10 +642,10 @@ function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFina
 
 // Sync enumerate-then-sort (heap declined). Do not call from render —
 // Promo Builder uses findTopParlaysChunked in an effect instead.
-function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFinalOdds = null, evCalc = null) {
+function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFinalOdds = null, maxFinalOdds = null, evCalc = null) {
   const calc = evCalc || ((ls) => calcParlayEV(ls, boostPct, stake));
   if (numLegs > 3 && numLegs <= MAX_PROMO_LEGS) {
-    return growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFinalOdds, evCalc);
+    return growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFinalOdds, maxFinalOdds, evCalc);
   }
 
   const results = [];
@@ -644,7 +654,7 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   if (numLegs === 1) {
     legs.forEach(l => {
       const r = calc([l]);
-      if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) return;
+      if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) return;
       results.push({ legs: [l], ...r });
     });
   } else if (numLegs === 2) {
@@ -652,7 +662,7 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
       for (let j = i + 1; j < legs.length; j++) {
         if (getGame(legs[i]) === getGame(legs[j])) continue;
         const r = calc([legs[i], legs[j]]);
-        if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) continue;
+        if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
         results.push({ legs: [legs[i], legs[j]], ...r });
       }
     }
@@ -663,7 +673,7 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
         for (let k = j + 1; k < legs.length; k++) {
           if (getGame(legs[k]) === getGame(legs[i]) || getGame(legs[k]) === getGame(legs[j])) continue;
           const r = calc([legs[i], legs[j], legs[k]]);
-          if (minFinalOdds !== null && r.parlayOdds < minFinalOdds) continue;
+          if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
           results.push({ legs: [legs[i], legs[j], legs[k]], ...r });
         }
       }
@@ -1284,7 +1294,9 @@ export default function App() {
   const [stake, setStake] = useState(100);
   const [numLegs, setNumLegs] = useState(3);
   const [minFinalOdds, setMinFinalOdds] = useState("");
+  const [maxFinalOdds, setMaxFinalOdds] = useState("");
   const [minLegOdds, setMinLegOdds] = useState("");
+  const [maxLegOdds, setMaxLegOdds] = useState("");
   const [promoDateRange, setPromoDateRange] = useState(DEFAULT_PROMO_DATE_RANGE);
   const [promoPage, setPromoPage] = useState(5);
   const [expandedPromo, setExpandedPromo] = useState(null);
@@ -1423,7 +1435,7 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, minLegOdds, marketScope, excludedPromoLegs, matchingBookKeys]);
+  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, excludedPromoLegs, matchingBookKeys]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1486,15 +1498,17 @@ export default function App() {
   );
   const isParlayPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
   const parsedMinLeg = (isParlayPromo && minLegOdds !== "") ? Number(minLegOdds) : null;
+  const parsedMaxLeg = (isParlayPromo && maxLegOdds !== "") ? Number(maxLegOdds) : null;
   const parsedMinFinal = (isParlayPromo && minFinalOdds !== "") ? Number(minFinalOdds) : null;
+  const parsedMaxFinal = (isParlayPromo && maxFinalOdds !== "") ? Number(maxFinalOdds) : null;
 
   const promoLegs = useMemo(() => {
-    const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange);
+    const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
     const promoLegsScoped = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
       : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
       : promoLegsAll;
     return filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
-  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, marketScope, excludedPromoLegs]);
+  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -1509,11 +1523,12 @@ export default function App() {
       numLegs,
       scanBoostPct,
       parsedMinFinal,
+      parsedMaxFinal,
       refundPct,
       creditConversionPct,
       pool: parlayLegPool,
     }),
-    [promoType, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct, parlayLegPool],
+    [promoType, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool],
   );
   const scanCompletedForCurrent = lastCompletedScanKey === currentPromoScanKey;
 
@@ -1544,6 +1559,7 @@ export default function App() {
     findTopParlaysChunked(parlayLegPool, numLegs, calc, {
       maxResults: 50,
       minFinalOdds: parsedMinFinal,
+      maxFinalOdds: parsedMaxFinal,
       signal: ac.signal,
     }).then((parlays) => {
       if (gen !== promoScanGen.current) return;
@@ -1568,7 +1584,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2058,7 +2074,7 @@ export default function App() {
                     <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
                     {!promoFiltersOpen && (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", lineHeight: 1.2 }}>
-                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, minLegOdds, numLegs })}
+                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs })}
                       </span>
                     )}
                   </div>
@@ -2100,9 +2116,17 @@ export default function App() {
                         <label style={labelStyle}>Min Final Odds</label>
                         <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
+                      {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && controlBox(<>
+                        <label style={labelStyle}>Max Final Odds</label>
+                        <input type="number" value={maxFinalOdds} onChange={(e) => setMaxFinalOdds(e.target.value)} placeholder="e.g. 800" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
                       {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && numLegs >= 2 && controlBox(<>
                         <label style={labelStyle}>Min Leg Odds</label>
                         <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
+                      {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && numLegs >= 2 && controlBox(<>
+                        <label style={labelStyle}>Max Leg Odds</label>
+                        <input type="number" value={maxLegOdds} onChange={(e) => setMaxLegOdds(e.target.value)} placeholder="e.g. 200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
                     </>
                   )}

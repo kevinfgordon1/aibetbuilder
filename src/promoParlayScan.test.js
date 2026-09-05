@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -52,6 +52,10 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.doesNotMatch(resetDeps[1], /\bstake\b/);
   assert.match(resetDeps[1], /promoBook/);
   assert.match(resetDeps[1], /numLegs/);
+  assert.match(resetDeps[1], /maxFinalOdds/);
+  assert.match(resetDeps[1], /maxLegOdds/);
+  assert.match(resetDeps[1], /minFinalOdds/);
+  assert.match(resetDeps[1], /minLegOdds/);
 }
 
 // ── Heavy scan is async + chunked, never inside useMemo / render
@@ -95,7 +99,7 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
     "No Results must not key off busy=false + empty freebets",
   );
   assert.match(app, /if \(!promoLoaded\) \{\s*setPromoScanBusy\(false\);\s*return;/);
-  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
+  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
   assert.match(app, /if \(gen !== promoScanGen\.current\) return;/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
   assert.equal(
@@ -143,7 +147,7 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
 {
   const base = {
     promoType: "boost", numLegs: 3, scanBoostPct: 30,
-    parsedMinFinal: null, refundPct: 100, creditConversionPct: 70,
+    parsedMinFinal: null, parsedMaxFinal: null, refundPct: 100, creditConversionPct: 70,
   };
   const emptyKey = promoScanInputKey({ ...base, pool: [] });
   const filledKey = promoScanInputKey({
@@ -352,6 +356,86 @@ function namesOf(parlays) {
   assert.equal(preferTimerYield({
     userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   }), false, "Chrome stays on MessageChannel");
+}
+
+// ── Max final odds: American-numeric (same convention as min)
+{
+  assert.equal(passesOddsBounds(150, null, 200), true);
+  assert.equal(passesOddsBounds(300, null, 200), false, "longer than +200 is over max");
+  assert.equal(passesOddsBounds(-150, null, 200), true, "favorite is under a +200 max");
+  assert.equal(passesOddsBounds(-200, null, -110), true, "shorter favorite passes max -110");
+  assert.equal(passesOddsBounds(100, null, -110), false, "+100 is over a -110 max");
+  assert.equal(passesOddsBounds(-150, -200, 200), true);
+  assert.equal(passesOddsBounds(300, -200, 200), false);
+}
+
+{
+  const base = {
+    promoType: "boost", numLegs: 3, scanBoostPct: 30,
+    parsedMinFinal: null, parsedMaxFinal: null, refundPct: 100, creditConversionPct: 70,
+    pool: [{ game: "A @ B", name: "A ML" }],
+  };
+  const noMax = promoScanInputKey(base);
+  const withMax = promoScanInputKey({ ...base, parsedMaxFinal: 400 });
+  assert.notEqual(noMax, withMax, "changing max final odds must change the scan key");
+}
+
+{
+  const legs = [
+    mkLeg("Dog ML", "A @ B", 300, -110),
+    mkLeg("Mid ML", "C @ D", 150, -120),
+    mkLeg("Fav ML", "E @ F", -150, 130),
+  ];
+  const calc = (ls) => calcParlayEV(ls, 0, 100);
+  const all = await findTopParlaysChunked(legs, 1, calc, { maxResults: 10, yieldMs: 0 });
+  assert.equal(all.length, 3);
+  const capped = await findTopParlaysChunked(legs, 1, calc, {
+    maxResults: 10, maxFinalOdds: 200, yieldMs: 0,
+  });
+  assert.deepEqual(capped.map((p) => p.legs[0].name).sort(), ["Fav ML", "Mid ML"]);
+  assert.ok(capped.every((p) => p.parlayOdds <= 200));
+  const syncCapped = findTopParlays(legs, 1, 0, 100, 10, null, 200);
+  assert.deepEqual(namesOf(capped), namesOf(syncCapped));
+}
+
+{
+  const future = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
+  const mk = (name, game) => ({
+    name, dk: -110, bestOpp: 120, game, commence_time: future, sport: "baseball_mlb",
+  });
+  const legs = [
+    mk("A ML", "A @ B"),
+    mk("C ML", "C @ D"),
+    mk("E ML", "E @ F"),
+    mk("G ML", "G @ H"),
+  ];
+  const calc = (ls) => calcParlayEV(ls, 0, 100);
+  const three = await findTopParlaysChunked(legs, 3, calc, { maxResults: 10, yieldMs: 0 });
+  const threeOdds = three[0].parlayOdds;
+  const fourOpen = await findTopParlaysChunked(legs, 4, calc, { maxResults: 10, yieldMs: 0 });
+  assert.ok(fourOpen.length >= 1);
+  const fourCapped = await findTopParlaysChunked(legs, 4, calc, {
+    maxResults: 10, maxFinalOdds: threeOdds, yieldMs: 0,
+  });
+  assert.equal(fourCapped.length, 0, "4-leg longer than the 3-leg seed is over maxFinalOdds");
+  const threeCapped = await findTopParlaysChunked(legs, 3, calc, {
+    maxResults: 10, maxFinalOdds: threeOdds, yieldMs: 0,
+  });
+  assert.ok(threeCapped.length >= 1, "3-leg at the max bound is kept");
+}
+
+{
+  assert.match(app, /<label style=\{labelStyle\}>Max Final Odds<\/label>/);
+  assert.match(app, /<label style=\{labelStyle\}>Max Leg Odds<\/label>/);
+  assert.match(app, /const \[maxFinalOdds, setMaxFinalOdds\] = useState\(""\)/);
+  assert.match(app, /const \[maxLegOdds, setMaxLegOdds\] = useState\(""\)/);
+  assert.match(app, /parsedMaxFinal/);
+  assert.match(app, /parsedMaxLeg/);
+  assert.match(app, /buildAllLegsForBook\(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg\)/);
+  assert.match(app, /maxFinalOdds: parsedMaxFinal/);
+  assert.match(app, /parts\.push\(`max \$\{maxFinalOdds\}`\)/);
+  assert.match(app, /parts\.push\(`legs max \$\{maxLegOdds\}`\)/);
+  assert.doesNotMatch(app, /function StatCard/);
 }
 
 console.log("promoParlayScan.test.js: ok");
