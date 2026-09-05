@@ -61,6 +61,7 @@ const ALL_BOOKS = [
   { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: null },
   { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
   { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
+  { key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: "https://www.pinnacle.com/favicon.ico" },
   { key: "lowvig", label: "LowVig", color: "#8b5cf6", bg: "rgba(139,92,246,0.15)", logo: null },
   { key: "betus", label: "BetUS", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", logo: null },
   { key: "betanysports", label: "BetAnything", color: "#14b8a6", bg: "rgba(20,184,166,0.15)", logo: null },
@@ -74,7 +75,7 @@ const ALL_BOOKS = [
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
   "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-  "kalshi", "novig", "prophetx", "polymarket",
+  "pinnacle", "kalshi", "novig", "prophetx", "polymarket",
 ]);
 
 const ADJUSTED_BOOK_NOTES = {
@@ -1876,7 +1877,7 @@ export default function App() {
           {activeTab === "ev" && (
             <div>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Kalshi, Novig, ProphetX, Polymarket). Kalshi, ProphetX, and Polymarket prices are fee-adjusted. Use the filter below to narrow to a single sportsbook.
+                All bets ranked by EV across all sportsbooks and sports. True probability from best opposing odds at matching lines among trusted books (DK, FD, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Pinnacle, Kalshi, Novig, ProphetX, Polymarket). Kalshi, ProphetX, and Polymarket prices are fee-adjusted. Use the filter below to narrow to a single sportsbook.
               </div>
               <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
                 {controlBox(<>

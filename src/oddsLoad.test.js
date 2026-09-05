@@ -253,8 +253,9 @@ function fullPlan() {
   assert.deepEqual(listed, [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-    "kalshi", "novig", "prophetx", "polymarket",
+    "pinnacle", "kalshi", "novig", "prophetx", "polymarket",
   ]);
+  assert.equal(TRUSTED_BOOK_KEYS.has("pinnacle"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("betanysports"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betopenly"), false);
   assert.match(ev, /this EV-scanner copy always uses the full TRUSTED_BOOK_KEYS set/);
@@ -284,6 +285,16 @@ function fullPlan() {
   assert.match(fetchOddsFn, /res\.status\(200\)\.json\(\{ success: true, results \}\)/);
   assert.match(fetchOddsFn, /results\.push\(\{ sport, games: data\.length \}\)/);
   assert.match(fetchOddsFn, /Promo Builder never calls this/);
+  const fetchRegions = [...fetchOddsFn.matchAll(/regions=([^&]+)/g)].map((m) => m[1]);
+  assert.ok(fetchRegions.length >= 2, "featured + per-event odds must both set regions");
+  for (const regions of fetchRegions) {
+    assert.match(regions, /\bus\b/);
+    assert.match(regions, /\bus2\b/);
+    assert.match(regions, /\bus_ex\b/);
+    assert.match(regions, /\beu\b/);
+  }
+  const fetchFuturesFn = fs.readFileSync(path.join(dir, "../api/fetch-futures.js"), "utf8");
+  assert.match(fetchFuturesFn, /regions=us,us2,us_ex,eu/);
   assert.match(app, /featuredRowsUsable\(featured\)/);
   assert.match(app, /describeOddsLoadError/);
   assert.match(app, /setOddsLoadError/);
