@@ -198,8 +198,10 @@ function mkLeg(name, game, dk, bestOpp, extra = {}) {
   // Debounce FB $ the same way as stake (PROMO_SCAN_DEBOUNCE_MS).
   assert.match(app, /useDebouncedValue\(stake,\s*PROMO_SCAN_DEBOUNCE_MS\)/);
   assert.match(app, /const PROMO_SCAN_DEBOUNCE_MS = 150/);
-  // Min final / min leg filters apply to freebet.
+  // Min/max final / min/max leg filters apply to freebet.
   assert.match(app, /promoType === "freebet"\) && numLegs >= 2 && controlBox\(<>\s*<label style=\{labelStyle\}>Min Leg Odds<\/label>/);
+  assert.match(app, /promoType === "freebet"\) && numLegs >= 2 && controlBox\(<>\s*<label style=\{labelStyle\}>Max Leg Odds<\/label>/);
+  assert.match(app, /<label style=\{labelStyle\}>Max Final Odds<\/label>/);
 }
 
 // ── No sync free-bet scan in render
