@@ -13,6 +13,8 @@ import {
   comboLockHash,
   profileHash,
   clearComboHash,
+  serializeAppHash,
+  resolveAppHash,
 } from "./comboAccess.js";
 
 assert.equal(OWNER_EMAIL, "kev120909@gmail.com");
@@ -47,15 +49,24 @@ assert.equal(canSeeComboLocks({ email: "tester@gmail.com" }, { VITE_COMBO_LOCKS_
 assert.equal(canSeeComboLocks({ id: "uid-99", email: "x@y.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-99" }), true);
 assert.equal(canSeeOwnerTools({ email: "tester@gmail.com" }), false);
 
-assert.deepEqual(parseAppHash("#profile"), { tab: "profile", lockId: null });
-assert.deepEqual(parseAppHash("#combo"), { tab: "combo", lockId: null });
-assert.deepEqual(parseAppHash("#combo/lock-1"), { tab: "combo", lockId: "lock-1" });
-assert.deepEqual(parseAppHash(""), { tab: null, lockId: null });
-assert.deepEqual(parseAppHash("#odds"), { tab: null, lockId: null });
+assert.deepEqual(parseAppHash("#profile"), { tab: "profile", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#combo"), { tab: "combo", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#combo/lock-1"), { tab: "combo", lockId: "lock-1", cardId: null });
+assert.deepEqual(parseAppHash(""), { tab: null, lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#odds"), { tab: "odds", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#promo"), { tab: "promo", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#ev/abc"), { tab: "ev", lockId: null, cardId: "abc" });
+assert.equal(serializeAppHash({ tab: "odds" }), "#odds");
 assert.equal(comboLockHash("p1"), "#combo/p1");
 assert.equal(profileHash(), "#profile");
 assert.equal(clearComboHash("#combo/p1"), "");
 assert.equal(clearComboHash("#profile"), "#profile");
+{
+  const denied = resolveAppHash(parseAppHash("#combo/hidden"), { email: "stranger@gmail.com" });
+  assert.equal(denied.tab, "promo");
+  assert.equal(denied.lockId, null);
+  assert.equal(denied.notice, "noaccess");
+}
 
 {
   const dir = path.dirname(fileURLToPath(import.meta.url));

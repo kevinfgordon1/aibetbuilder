@@ -18,7 +18,8 @@ import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlem
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
 import { settleLegs, uniqueEspnQueries, underlyingCopy, sourceLabel } from "./comboLegResult";
-import { OWNER_EMAIL, canSeeComboLocks } from "./comboAccess";
+import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
+import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export { OWNER_EMAIL };
@@ -82,6 +83,33 @@ const QUOTE_CHIP = {
   kill: { bg: "rgba(239,68,68,.18)", color: "#fca5a5", mark: "⛔ ", title: "Kill-switch engaged — the live worker posts nothing." },
   ceiling: { bg: "rgba(139,92,246,.22)", color: "#c4b5fd", mark: "", title: "Ceiling reached — remaining fill is 0, so the worker stopped quoting this combo." },
 };
+function CopyLockLink({ lockId }) {
+  const [status, setStatus] = useState("");
+  if (!lockId) return null;
+  return (
+    <button
+      type="button"
+      className="btn mini"
+      title={"Copy " + comboLockHash(lockId)}
+      onClick={async (e) => {
+        e.stopPropagation();
+        const url = absoluteShareUrl({
+          origin: window.location.origin,
+          tab: "combo",
+          lockId,
+        });
+        try {
+          const result = await copyTextToClipboard(url);
+          setStatus(result === "copied" ? "Copied" : "Failed");
+        } catch (_) {
+          setStatus("Failed");
+        }
+        window.setTimeout(() => setStatus(""), 1600);
+      }}
+    >{status || "Copy link"}</button>
+  );
+}
+
 function QuoteChip({ quote }) {
   if (!quote) return null;
   const s = QUOTE_CHIP[quote.key] || QUOTE_CHIP.watching;
@@ -794,6 +822,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 return <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
               {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
               <span style={{ flex: 1 }} />
+              <CopyLockLink lockId={p.id} />
               {p.active === false && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
               <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history — the worker stops watching it">Move to history</button>
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
@@ -826,6 +855,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <QuoteChip quote={desk && desk.quote} />
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
                 <span style={{ flex: 1 }} />
+                <CopyLockLink lockId={p.id} />
                 {p.active === false && desk && desk.fill.left > 0 && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
                 <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history now">Move to history</button>
               </div>

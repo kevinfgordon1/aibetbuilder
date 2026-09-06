@@ -64,29 +64,75 @@ export function canSeeOwnerTools(user) {
   return String(user.email).trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
 }
 
+/** Public + gated tab slugs written into the hash. Aliases normalize on parse. */
+export const APP_HASH_TABS = Object.freeze({
+  promo: "promo",
+  ev: "ev",
+  odds: "odds",
+  combo: "combo",
+  missTape: "missTape",
+  miss: "missTape",
+  "miss-tape": "missTape",
+  unhedged: "unhedged",
+  profile: "profile",
+});
+
+export function emptyAppRoute() {
+  return { tab: null, lockId: null, cardId: null };
+}
+
+function decodeHashSeg(seg) {
+  try {
+    return decodeURIComponent(seg);
+  } catch (_) {
+    return seg;
+  }
+}
+
 export function parseAppHash(hash) {
   const raw = String(hash == null ? "" : hash).replace(/^#/, "").trim();
-  if (!raw) return { tab: null, lockId: null };
-  if (raw === "profile") return { tab: "profile", lockId: null };
-  if (raw === "combo") return { tab: "combo", lockId: null };
-  const combo = /^combo\/([^/?#]+)$/.exec(raw);
-  if (combo) {
-    try {
-      return { tab: "combo", lockId: decodeURIComponent(combo[1]) };
-    } catch (_) {
-      return { tab: "combo", lockId: combo[1] };
-    }
+  if (!raw) return emptyAppRoute();
+  const parts = raw.split("/").filter((p) => p !== "");
+  const slug = parts[0];
+  const tab = APP_HASH_TABS[slug] || null;
+  if (!tab) return emptyAppRoute();
+  const rest = parts.slice(1);
+  if (tab === "combo") {
+    if (!rest.length) return { tab: "combo", lockId: null, cardId: null };
+    return { tab: "combo", lockId: decodeHashSeg(rest[0]), cardId: null };
   }
-  return { tab: null, lockId: null };
+  if (tab === "promo" || tab === "ev") {
+    if (!rest.length) return { tab, lockId: null, cardId: null };
+    return { tab, lockId: null, cardId: decodeHashSeg(rest.join("/")) };
+  }
+  return { tab, lockId: null, cardId: null };
+}
+
+export function serializeAppHash({ tab = null, lockId = null, cardId = null } = {}) {
+  const resolved = APP_HASH_TABS[tab] || null;
+  if (!resolved) return "";
+  if (resolved === "combo") {
+    if (!lockId) return "#combo";
+    return "#combo/" + encodeURIComponent(String(lockId));
+  }
+  if (resolved === "promo" || resolved === "ev") {
+    if (!cardId) return "#" + resolved;
+    return "#" + resolved + "/" + encodeURIComponent(String(cardId));
+  }
+  if (resolved === "missTape") return "#missTape";
+  return "#" + resolved;
 }
 
 export function comboLockHash(lockId) {
-  if (!lockId) return "#combo";
-  return "#combo/" + encodeURIComponent(String(lockId));
+  return serializeAppHash({ tab: "combo", lockId });
 }
 
 export function profileHash() {
-  return "#profile";
+  return serializeAppHash({ tab: "profile" });
+}
+
+export function tabHash(tab, extra = {}) {
+  return serializeAppHash({ tab, ...extra });
 }
 
 /** Strip a Combo Locks hash without advertising the feature. */
@@ -94,4 +140,58 @@ export function clearComboHash(hash) {
   const parsed = parseAppHash(hash);
   if (parsed.tab === "combo") return "";
   return hash == null ? "" : String(hash);
+}
+
+/**
+ * Gate a parsed hash for the current user. Combo / owner tabs never keep
+ * lock ids or land on those views unless the user is allowed. Denied links
+ * fall back to Promo with a soft sign-in / no-access notice — no lock copy.
+ */
+export function resolveAppHash(parsed, user) {
+  const route = parsed && typeof parsed === "object" ? parsed : emptyAppRoute();
+  const tab = route.tab;
+  if (!tab) {
+    return { tab: "promo", lockId: null, cardId: null, notice: null, allowed: true };
+  }
+  if (tab === "combo") {
+    if (canSeeComboLocks(user)) {
+      return { tab: "combo", lockId: route.lockId || null, cardId: null, notice: null, allowed: true };
+    }
+    return {
+      tab: "promo",
+      lockId: null,
+      cardId: null,
+      notice: user ? "noaccess" : "signin",
+      allowed: false,
+    };
+  }
+  if (tab === "missTape" || tab === "unhedged") {
+    if (canSeeOwnerTools(user)) {
+      return { tab, lockId: null, cardId: null, notice: null, allowed: true };
+    }
+    return {
+      tab: "promo",
+      lockId: null,
+      cardId: null,
+      notice: user ? "noaccess" : "signin",
+      allowed: false,
+    };
+  }
+  if (tab === "profile") {
+    if (user) return { tab: "profile", lockId: null, cardId: null, notice: null, allowed: true };
+    return { tab: "promo", lockId: null, cardId: null, notice: "signin", allowed: false };
+  }
+  return {
+    tab,
+    lockId: null,
+    cardId: route.cardId || null,
+    notice: null,
+    allowed: true,
+  };
+}
+
+export function hashesEqual(a, b) {
+  const left = serializeAppHash(typeof a === "string" ? parseAppHash(a) : (a || {}));
+  const right = serializeAppHash(typeof b === "string" ? parseAppHash(b) : (b || {}));
+  return left === right;
 }
