@@ -77,9 +77,17 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
   assert.match(oneLeg.displayLegs[0].pmBlend.flag, /\$333\.33 hedge/);
 
-  const multi = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
-  assert.equal(multi.displayLegs[0].pmBlend.mode, "payout");
-  assert.equal(multi.displayLegs[0].lowLiquidity, true);
+  const covers500 = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
+  assert.equal(covers500.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(covers500.displayLegs[0].lowLiquidity, false, "$600 face at −200 covers the $500 bar");
+
+  const multiShort = applyBlendToLegs(
+    [{ ...kevin, bestOppSize: 200 }],
+    {},
+    { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
+  );
+  assert.equal(multiShort.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(multiShort.displayLegs[0].lowLiquidity, true, "$300 face stays short of $500");
 }
 
 {
