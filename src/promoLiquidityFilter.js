@@ -1,5 +1,5 @@
 // Promo Builder "Hide low liquidity" Extra Filter.
-// Session-only (same as Markets / date / odds bounds). Default off.
+// Session-only (same as Markets / date / odds bounds). Default on.
 //
 // Reuses pickHasLowLiquidity / applyPmBlendToLeg — no second definition.
 // Multi-leg: incomplete $500-profit walk (win excl. stake, #96).
