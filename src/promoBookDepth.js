@@ -1,6 +1,8 @@
 // Browser client for /api/book-depth. Cache + inflight dedupe so expanding
 // BEST PICK twice does not re-hit venues. Sportsbooks never call the API.
 
+import { blendAskLadderToPayout } from "./blendAskLadder.js";
+
 export const DEPTH_VENUES = new Set(["kalshi", "polymarket", "prophetx", "novig"]);
 const TTL_MS = 45 * 1000;
 const cache = new Map();
@@ -85,4 +87,20 @@ export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
 export function _resetPromoBookDepthCache() {
   cache.clear();
   inflight.clear();
+}
+
+// Overlay bestOpp with VWAP-to-$1,000-face when a real ladder exists.
+// No ladder / empty book → leave the Odds-API top untouched (never invent).
+export function applyBlendToLegs(legs, laddersByKey) {
+  const blends = {};
+  const displayLegs = (legs || []).map((leg) => {
+    const key = depthCacheKey(leg);
+    const levels = laddersByKey && laddersByKey[key];
+    if (!Array.isArray(levels) || !levels.length) return leg;
+    const blend = blendAskLadderToPayout(levels);
+    if (!blend || blend.american == null) return leg;
+    blends[key] = blend;
+    return { ...leg, bestOpp: blend.american };
+  });
+  return { displayLegs, blends };
 }

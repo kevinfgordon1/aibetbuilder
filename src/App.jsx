@@ -42,8 +42,8 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
-import { formatTrueOddsBookLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
-import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi } from "./promoBookDepth.js";
+import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
+import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1290,27 +1290,83 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
   );
 }
 
-function PromoTrueOddsSubline({ leg, style, live = false }) {
-  const [ladder, setLadder] = useState(null);
+function usePromoDepthBlend(legs, live) {
+  const [ladders, setLadders] = useState(null);
+  const wantedKey = (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook)).map(depthCacheKey).join("\n");
   useEffect(() => {
+    if (!live) {
+      setLadders(null);
+      return;
+    }
+    const wanted = (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook));
+    if (!wanted.length) {
+      setLadders({});
+      return;
+    }
+    let cancelled = false;
+    fetchPromoBookDepth(wanted).then((map) => {
+      if (!cancelled) setLadders(map || {});
+    });
+    return () => { cancelled = true; };
+  }, [live, wantedKey]);
+  return useMemo(() => {
+    const map = ladders || {};
+    const { displayLegs, blends } = applyBlendToLegs(legs, map);
+    return { ladders: map, blends, displayLegs, ready: ladders != null };
+  }, [legs, ladders]);
+}
+
+function overlayParlayMetrics(p, displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }) {
+  const prev = p.legs || [];
+  const next = displayLegs || prev;
+  const changed = prev.some((l, i) => next[i] && next[i].bestOpp !== l.bestOpp);
+  if (!changed) return p;
+  if (promoType === "nosweat") return { ...p, ...calcNoSweatFromLegs(next, stake, refundPct, creditConversionPct) };
+  if (promoType === "freebet") return { ...p, ...calcFreeBetParlayEV(next, stake) };
+  return { ...p, ...calcParlayEV(next, boostPct, stake) };
+}
+
+function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditConversionPct, children }) {
+  const overlay = usePromoDepthBlend(p.legs, live);
+  const view = useMemo(
+    () => overlayParlayMetrics(p, overlay.displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }),
+    [p, overlay.displayLegs, promoType, stake, boostPct, refundPct, creditConversionPct],
+  );
+  return children(view, overlay);
+}
+
+function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp }) {
+  const [fetched, setFetched] = useState(null);
+  useEffect(() => {
+    if (levelsProp !== undefined) return;
     if (!live || !venueHasDepthApi(leg?.bestOppBook)) return;
     let cancelled = false;
     fetchPromoBookDepth([leg]).then((map) => {
       if (cancelled) return;
       const levels = map[depthCacheKey(leg)];
-      setLadder(Array.isArray(levels) ? levels : []);
+      setFetched(Array.isArray(levels) ? levels : []);
     });
     return () => { cancelled = true; };
-  }, [live, leg?.bestOppBook, leg?.sport, leg?.game, leg?.bestOppName, leg?.name, leg?.market]);
+  }, [live, levelsProp, leg?.bestOppBook, leg?.sport, leg?.game, leg?.bestOppName, leg?.name, leg?.market]);
 
   if (!leg?.bestOppBook) return null;
   const bookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || leg.bestOppBook;
   const note = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
-  const trail = formatDepthTrail(ladder, { topAmerican: leg.bestOpp, max: 2 });
+  const ladder = levelsProp !== undefined ? levelsProp : fetched;
+  const line = formatTrueOddsWithBlend({
+    odds: leg.bestOpp,
+    bookLabel,
+    size: leg.bestOppSize,
+    levels: ladder,
+  });
+  const trailTop = Array.isArray(ladder) && ladder.length
+    ? ladder[0].american
+    : leg.bestOpp;
+  const trail = formatDepthTrail(ladder, { topAmerican: trailTop, max: 2 });
   return (
     <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, ...style }}>
       <div>
-        {formatTrueOddsBookLine({ odds: leg.bestOpp, bookLabel, size: leg.bestOppSize })}
+        {line.text}
         {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
       </div>
       {trail ? <div style={{ color: "#4b5563", marginTop: 2 }}>{trail}</div> : null}
@@ -1318,8 +1374,11 @@ function PromoTrueOddsSubline({ leg, style, live = false }) {
   );
 }
 
-function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption }) {
-  const rows = legs || [];
+function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders }) {
+  const overlay = usePromoDepthBlend(legs, ladders === undefined);
+  const resolved = ladders !== undefined ? { ...applyBlendToLegs(legs, ladders), ladders } : overlay;
+  const rows = resolved.displayLegs || [];
+  const ladderMap = resolved.ladders || {};
   return (
     <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
@@ -1333,6 +1392,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption }) {
         const bookImpl = impliedProb(l.dk);
         const edge = tp - bookImpl;
         const tpAm = probToAmerican(tp);
+        const levels = ladderMap[depthCacheKey(l)];
         return (
           <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < rows.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
             <div>
@@ -1343,7 +1403,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption }) {
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
                 {formatOdds(tpAm)} ({(tp * 100).toFixed(1)}%)
               </div>
-              <PromoTrueOddsSubline leg={l} live />
+              <PromoTrueOddsSubline leg={l} live={ladders === undefined} levels={levels} />
             </div>
             <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
             <div style={{ textAlign: "center" }}>
@@ -2504,26 +2564,29 @@ export default function App() {
                   )}
                   {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
                     const isExpanded = expandedPromo === i;
-                    const trueParlayOdds = probToAmerican(p.combinedProb);
                     const isSingle = p.legs.length === 1;
                     const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
                     const promoId = encodePromoCardId({ promoType: "boost", book: promoBook, stake, legs: p.legs });
+
+                    return (
+                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="boost" stake={stake} boostPct={boostPct}>
+                      {(view, overlay) => {
+                    const trueParlayOdds = probToAmerican(view.combinedProb);
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
                       promoType: "boost",
                       bookLabel: activePromoBookData.label,
-                      ev: p.ev,
-                      evPct: stake ? (p.ev / stake) * 100 : null,
+                      ev: view.ev,
+                      evPct: stake ? (view.ev / stake) * 100 : null,
                       odds: formatOdds(boostedOdds),
                       parlayOdds: formatOdds(p.parlayOdds),
                       stake,
                       boostPct,
                       legs: p.legs,
                     });
-
                     return (
-                      <div key={promoId} id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
                           setFocusCardId(isExpanded ? null : promoId);
@@ -2538,19 +2601,19 @@ export default function App() {
                               <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                             </div>
-                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: p.ev > 0 ? "#10b981" : "#ef4444" }}>+${p.ev.toFixed(2)} EV</div>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: view.ev > 0 ? "#10b981" : "#ef4444" }}>+${view.ev.toFixed(2)} EV</div>
                           </div>
                           <PromoParlayLegChips legs={p.legs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: "#10b981" }}>+{(p.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <span>EV: <strong style={{ color: "#10b981" }}>+{(view.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || p.ev > 0} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
                             {canSeeComboLocks(user) && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                             )}
@@ -2573,7 +2636,8 @@ export default function App() {
                           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
                             onClick={e => e.stopPropagation()}>
                             <PromoExpandedLegsTable
-                              legs={p.legs}
+                              legs={overlay.displayLegs}
+                              ladders={overlay.ladders}
                               bookLabel={activePromoBookData.label}
                               edgeCaption="(without boost)"
                               footer={
@@ -2582,23 +2646,23 @@ export default function App() {
                                     {isSingle ? "Total" : "Parlay Total"} <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>
                                   </div>
                                   <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                    {formatOdds(trueParlayOdds)} ({(p.combinedProb * 100).toFixed(1)}%)
+                                    {formatOdds(trueParlayOdds)} ({(view.combinedProb * 100).toFixed(1)}%)
                                   </div>
                                   <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatPromoTotalBookOdds(boostedOdds)}</div>
                                   <div style={{ textAlign: "center" }}>
-                                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: p.ev >= 0 ? "#10b981" : "#ef4444" }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
+                                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: view.ev >= 0 ? "#10b981" : "#ef4444" }}>{view.ev >= 0 ? "+" : ""}{(view.ev / stake * 100).toFixed(1)}%</div>
                                     <div style={{ fontSize: 10, color: "#4b5563", marginTop: 2 }}>(with boost)</div>
                                   </div>
                                 </div>
                               }
                             />
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-                              <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * p.combinedProb).toFixed(2)}</strong></div>
-                              <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - p.combinedProb)).toFixed(2)}</strong></div>
-                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong></div>
+                              <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * view.combinedProb).toFixed(2)}</strong></div>
+                              <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - view.combinedProb)).toFixed(2)}</strong></div>
+                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${view.ev.toFixed(2)}</strong></div>
                             </div>
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${p.ev.toFixed(2)}</strong> on a ${stake} bet.
+                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${view.ev.toFixed(2)}</strong> on a ${stake} bet.
                             </div>
                             {canSeeComboLocks(user) && (
                               <div style={{ marginTop: 12 }}>
@@ -2608,6 +2672,9 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                    );
+                      }}
+                      </PromoPickView>
                     );
                   })}
 
@@ -2642,17 +2709,21 @@ export default function App() {
                   )}
                   {topNoSweatsWithLock.slice(0, promoPage).map((p, i) => {
                     const isExpanded = expandedPromo === i;
-                    const trueParlayOdds = probToAmerican(p.combinedProb);
                     const isSingle = p.legs.length === 1;
-                    const evColor = p.ev > 0 ? "#10b981" : "#ef4444";
                     const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
+
+                    return (
+                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
+                      {(view, overlay) => {
+                    const trueParlayOdds = probToAmerican(view.combinedProb);
+                    const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
                       promoType: "nosweat",
                       bookLabel: activePromoBookData.label,
-                      ev: p.ev,
-                      evPct: stake ? (p.ev / stake) * 100 : null,
+                      ev: view.ev,
+                      evPct: stake ? (view.ev / stake) * 100 : null,
                       odds: formatOdds(p.parlayOdds),
                       stake,
                       refundPct,
@@ -2662,9 +2733,8 @@ export default function App() {
                       winProfit: p.winProfit,
                       legs: p.legs,
                     });
-
                     return (
-                      <div key={promoId} id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
                           setFocusCardId(isExpanded ? null : promoId);
@@ -2680,7 +2750,7 @@ export default function App() {
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{p.ev > 0 ? "+" : ""}${p.ev.toFixed(2)} EV</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
                               {p.isGuaranteed && (
                                 <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>${p.lock.lockedProfit.toFixed(2)} guaranteed</div>
                               )}
@@ -2692,11 +2762,11 @@ export default function App() {
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
                             <span>On a loss: <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash</span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}{(view.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || p.ev > 0} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
                           </div>
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
@@ -2740,7 +2810,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{p.legs[0].bestOppName}</div>
-                                      <PromoTrueOddsSubline leg={p.legs[0]} live />
+                                      <PromoTrueOddsSubline leg={p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${p.lock.hedgeStake.toFixed(2)}</div>
@@ -2783,27 +2853,28 @@ export default function App() {
                             ) : (
                               <>
                                 <PromoExpandedLegsTable
-                                  legs={p.legs}
+                                  legs={overlay.displayLegs}
+                                  ladders={overlay.ladders}
                                   bookLabel={activePromoBookData.label}
                                   footer={
                                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                                       <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{isSingle ? "Total" : "Parlay Total"}</div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                        {formatOdds(trueParlayOdds)} ({(p.combinedProb * 100).toFixed(1)}%)
+                                        {formatOdds(trueParlayOdds)} ({(view.combinedProb * 100).toFixed(1)}%)
                                       </div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</div>
-                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{p.ev >= 0 ? "+" : ""}{(p.ev / stake * 100).toFixed(1)}%</div>
+                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{view.ev >= 0 ? "+" : ""}{(view.ev / stake * 100).toFixed(1)}%</div>
                                     </div>
                                   }
                                 />
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-                                  <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * p.combinedProb).toFixed(2)}</strong></div>
-                                  <div>Lose → <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash <span style={{ color: "#6b7280" }}>(net {p.loseNet >= 0 ? "+" : "−"}${Math.abs(p.loseNet).toFixed(0)})</span> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>{p.loseNet * (1 - p.combinedProb) >= 0 ? "+" : "−"}${Math.abs(p.loseNet * (1 - p.combinedProb)).toFixed(2)}</strong></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${p.ev.toFixed(2)}</strong></div>
+                                  <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * view.combinedProb).toFixed(2)}</strong></div>
+                                  <div>Lose → <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash <span style={{ color: "#6b7280" }}>(net {p.loseNet >= 0 ? "+" : "−"}${Math.abs(p.loseNet).toFixed(0)})</span> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>{p.loseNet * (1 - view.combinedProb) >= 0 ? "+" : "−"}${Math.abs(p.loseNet * (1 - view.combinedProb)).toFixed(2)}</strong></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong></div>
                                   <div style={{ marginTop: 6 }}>We treat site credit as {creditConversionPct}% cash: ${p.refund.toFixed(0)} refund = ${p.creditValue.toFixed(0)}.</div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${p.ev.toFixed(2)}</strong> on a ${stake} cash stake.
+                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${stake} cash stake.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
                                 </div>
                               </>
@@ -2811,6 +2882,9 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                    );
+                      }}
+                      </PromoPickView>
                     );
                   })}
 
@@ -2847,20 +2921,25 @@ export default function App() {
                     const isExpanded = expandedFreeBet === i;
                     const isSingle = p.legs?.length === 1;
                     const showLock = isSingle && !!p.lock?.valid;
-                    const trueParlayOdds = probToAmerican(p.combinedProb);
-                    const evColor = p.ev > 0 ? "#10b981" : "#ef4444";
                     const fbAmount = stake;
                     const leg = p.legs?.[0];
                     const lock = showLock ? p.lock : null;
                     const adjustmentNote = showLock ? getAdjustmentNote(leg?.bestOppBook) : null;
                     const promoId = encodePromoCardId({ promoType: "freebet", book: promoBook, stake, legs: p.legs });
+
+                    return (
+                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="freebet" stake={stake}>
+                      {(view, overlay) => {
+                    const trueParlayOdds = probToAmerican(view.combinedProb);
+                    const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
+                    const hedgeLeg = overlay.displayLegs?.[0] || leg;
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? (showLock ? "BEST CONVERSION" : "BEST PICK") : "PICK",
                       promoType: "freebet",
                       bookLabel: activePromoBookData.label,
-                      ev: p.ev,
-                      evPct: stake ? (p.ev / stake) * 100 : null,
+                      ev: view.ev,
+                      evPct: stake ? (view.ev / stake) * 100 : null,
                       odds: formatOdds(p.parlayOdds),
                       stake,
                       winProfit: p.winProfit,
@@ -2868,9 +2947,8 @@ export default function App() {
                       guaranteedCash: lock?.guaranteedCash,
                       legs: p.legs,
                     });
-
                     return (
-                      <div key={promoId} id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedFreeBet(isExpanded ? null : i);
                           setFocusCardId(isExpanded ? null : promoId);
@@ -2891,7 +2969,7 @@ export default function App() {
                                 <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>guaranteed cash · {((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</div>
                               </div>
                             ) : (
-                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{p.ev > 0 ? "+" : ""}${p.ev.toFixed(2)} EV</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
                             )}
                           </div>
 
@@ -2915,7 +2993,7 @@ export default function App() {
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{getBookLabel(leg?.bestOppBook)}</span>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: leg?.bestOpp > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(leg?.bestOpp)}</span>
+                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: hedgeLeg?.bestOpp > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(hedgeLeg?.bestOpp)}</span>
                                   </div>
                                   <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${(lock?.hedgeStake ?? 0).toFixed(2)} hedge stake</div>
                                   {adjustmentNote && <div style={{ fontSize: 10, color: "#06b6d4", marginTop: 2 }}>({adjustmentNote})</div>}
@@ -2924,7 +3002,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>Game: <strong style={{ color: "#e8eaed" }}>{leg?.game}</strong></span>
                                 <span>Conversion: <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${(p.ev ?? 0).toFixed(2)}</strong></span>
+                                <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
                               </div>
                             </>
                           ) : (
@@ -2934,13 +3012,13 @@ export default function App() {
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
                                 <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${(p.ev ?? 0).toFixed(2)}</strong></span>
+                                <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
                               </div>
-                              {isSingle && <PromoTrueOddsSubline leg={leg} live={i === 0 || isExpanded} style={{ fontSize: 11, marginTop: 6 }} />}
+                              {isSingle && <PromoTrueOddsSubline leg={leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || p.ev > 0} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
                           </div>
                           {showLock && (
                             <div onClick={e => e.stopPropagation()}>
@@ -2980,7 +3058,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
-                                      <PromoTrueOddsSubline leg={leg} live />
+                                      <PromoTrueOddsSubline leg={leg} live levels={overlay.ladders[depthCacheKey(leg)]} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${(lock?.hedgeStake ?? 0).toFixed(2)}</div>
@@ -3023,26 +3101,27 @@ export default function App() {
                             ) : (
                               <>
                                 <PromoExpandedLegsTable
-                                  legs={p.legs}
+                                  legs={overlay.displayLegs}
+                                  ladders={overlay.ladders}
                                   bookLabel={activePromoBookData.label}
                                   footer={
                                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                                       <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{isSingle ? "Total" : "Parlay Total"}</div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
-                                        {formatOdds(trueParlayOdds)} ({(p.combinedProb * 100).toFixed(1)}%)
+                                        {formatOdds(trueParlayOdds)} ({(view.combinedProb * 100).toFixed(1)}%)
                                       </div>
                                       <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</div>
-                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{p.ev >= 0 ? "+" : ""}${p.ev.toFixed(2)}</div>
+                                      <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: evColor }}>{view.ev >= 0 ? "+" : ""}${view.ev.toFixed(2)}</div>
                                     </div>
                                   }
                                 />
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-                                  <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(p.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * p.combinedProb).toFixed(2)}</strong></div>
-                                  <div>Lose <strong style={{ color: "#6b7280" }}>$0</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - p.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>$0</strong> <span style={{ color: "#6b7280" }}>(free bet, no cash at risk)</span></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${p.ev.toFixed(2)}</strong></div>
+                                  <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * view.combinedProb).toFixed(2)}</strong></div>
+                                  <div>Lose <strong style={{ color: "#6b7280" }}>$0</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>$0</strong> <span style={{ color: "#6b7280" }}>(free bet, no cash at risk)</span></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong></div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(p.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{p.ev > 0 ? "+" : ""}${p.ev.toFixed(2)}</strong> on a ${fbAmount} free bet.
+                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${fbAmount} free bet.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg free bets cannot be locked on both sides at once."}
                                 </div>
                               </>
@@ -3050,6 +3129,9 @@ export default function App() {
                           </div>
                         )}
                       </div>
+                    );
+                      }}
+                      </PromoPickView>
                     );
                   })}
 

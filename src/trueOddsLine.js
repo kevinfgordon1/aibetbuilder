@@ -2,6 +2,18 @@
 // Size is never invented — only `size` (direct Kalshi/Polymarket) or `bet_limit`
 // (The Odds API includeBetLimits) when a finite positive number is present.
 
+import {
+  blendAskLadderToPayout,
+  formatBlendedPayoutFlag,
+  TARGET_PAYOUT_USD,
+} from "./blendAskLadder.js";
+
+export {
+  blendAskLadderToPayout,
+  formatBlendedPayoutFlag,
+  TARGET_PAYOUT_USD,
+};
+
 export function outcomeSize(outcome) {
   if (!outcome || typeof outcome !== "object") return null;
   const raw = outcome.size ?? outcome.bet_limit;
@@ -34,9 +46,23 @@ export function formatAvailableSizeClause(size) {
   return dollars ? ` · ${dollars} currently available` : "";
 }
 
-export function formatTrueOddsBookLine({ odds, bookLabel, size } = {}) {
+export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}) {
   const book = bookLabel || "Book";
-  return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}`;
+  const flag = blendFlag ? ` · ${blendFlag}` : "";
+  return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
+}
+
+// When a real ask ladder exists, show VWAP-to-$1,000-face instead of the thin top.
+// Top `$ currently available` stays the top level; trail stays next worse prices.
+export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels } = {}) {
+  const blend = Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null;
+  const shownOdds = blend?.american ?? odds;
+  const flag = blend ? (blend.flag || formatBlendedPayoutFlag(blend)) : "";
+  return {
+    text: formatTrueOddsBookLine({ odds: shownOdds, bookLabel, size, blendFlag: flag }),
+    blend,
+    odds: shownOdds,
+  };
 }
 
 // Rest of book past the displayed top (best American first). Never invents levels.
