@@ -8,10 +8,14 @@
 //   payout target. Example: $100 stake, +200 boosted 100% → $400 win;
 //   opp −200 needs $333.33.
 // Multi-leg (numLegs ≥ 2):
-//   VWAP-walk until FACE PAYOUT reaches TARGET_PAYOUT_USD ($500).
+//   VWAP-walk until PROFIT (win excluding the original stake) reaches
+//   TARGET_PAYOUT_USD ($500). "Payout" in UI copy is this profit, not
+//   face/total return (stake + win).
 //
 // Size on depth levels is DOLLAR STAKE (price × contracts). See lib/book-depth.js.
-// Face payout = stake / impliedProb = stake × decimalOdds.
+// Profit = stake × (decimalOdds − 1):
+//   american > 0: stake × (american / 100)
+//   american < 0: stake × (100 / |american|)
 // Never invents levels. Sportsbooks are left untouched.
 // True odds / true win prob / EV use the blended VWAP American, not the thin top.
 
@@ -42,6 +46,20 @@ export function americanToDecimal(american) {
   if (!isFinite(n) || n === 0) return null;
   if (n > 0) return 1 + n / 100;
   return 1 + 100 / Math.abs(n);
+}
+
+// Profit excluding stake per $1 staked. Face/total return is this + 1.
+export function americanToProfitMultiple(american) {
+  const d = americanToDecimal(american);
+  if (d == null || d <= 1) return null;
+  return d - 1;
+}
+
+export function stakeToProfit(stake, american) {
+  const s = Number(stake);
+  const m = americanToProfitMultiple(american);
+  if (!(s > 0) || m == null) return null;
+  return s * m;
 }
 
 export function formatPayoutDollars(n) {
@@ -95,7 +113,11 @@ function normalizeLevels(levels) {
 
 function finishBlend({ stakeFilled, payoutFilled, levelsUsed, complete, targetPayout, targetStake, mode }) {
   if (!(payoutFilled > 0) || !(stakeFilled > 0)) return null;
-  const impliedProb = stakeFilled / payoutFilled;
+  // Payout-mode `payoutFilled` is profit (excl. stake). Hedge-mode keeps face
+  // (stake / impliedProb) so VWAP is still stake / face either way.
+  const face = mode === "payout" ? stakeFilled + payoutFilled : payoutFilled;
+  if (!(face > 0)) return null;
+  const impliedProb = stakeFilled / face;
   const american = impliedProbToAmerican(impliedProb);
   if (american == null) return null;
   const blend = {
@@ -127,11 +149,13 @@ export function blendAskLadderToPayout(levels, { targetPayout = TARGET_PAYOUT_US
   for (const lvl of ladder) {
     const remaining = target - payoutFilled;
     if (remaining <= 1e-9) break;
-    const levelPayout = lvl.size / lvl.p;
-    if (!(levelPayout > 0)) continue;
-    const takePayout = Math.min(levelPayout, remaining);
-    const takeStake = takePayout * lvl.p;
-    payoutFilled += takePayout;
+    // profit = stake × (1 − p) / p  (= stake × (decimalOdds − 1))
+    const profitPerStake = (1 - lvl.p) / lvl.p;
+    if (!(profitPerStake > 0)) continue;
+    const levelProfit = lvl.size * profitPerStake;
+    const takeProfit = Math.min(levelProfit, remaining);
+    const takeStake = takeProfit / profitPerStake;
+    payoutFilled += takeProfit;
     stakeFilled += takeStake;
     levelsUsed += 1;
   }
