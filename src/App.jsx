@@ -25,6 +25,13 @@ import {
   marketScopeSummary,
 } from "./promoMarketScope.js";
 import {
+  HIDE_LOW_LIQUIDITY_LABEL,
+  LIQUIDITY_FILTER_ALL_LABEL,
+  liquidityFilterSummary,
+  filterLowLiquidityLegs,
+  filterLowLiquidityPicks,
+} from "./promoLiquidityFilter.js";
+import {
   loadModeForTab,
   buildOddsQueryPlan,
   queryOddsCaches,
@@ -140,12 +147,14 @@ const DATE_RANGES = [
 const DEFAULT_PROMO_SPORT_KEYS = DEFAULT_PROFILE_SPORTS;
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
-function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs }) {
+function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity }) {
   const selected = SPORTS.filter(s => promoSports.has(s.key)).map(s => s.label);
   const sportsPart = selected.length === SPORTS.length ? "All sports" : selected.join(", ");
   const datePart = DATE_RANGES.find(d => d.val === promoDateRange)?.label || promoDateRange;
   const marketPart = marketScopeSummary(marketScope);
   const parts = [sportsPart, datePart, marketPart];
+  const liqPart = liquidityFilterSummary(hideLowLiquidity);
+  if (liqPart) parts.push(liqPart);
   const isOddsPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
   if (isOddsPromo && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
   if (isOddsPromo && maxFinalOdds !== "") parts.push(`max ${maxFinalOdds}`);
@@ -1353,7 +1362,8 @@ function attachNoSweatLockToPick(p, nextStake) {
 
 function rankPromoPicks(picks, ctx, attachLock) {
   const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx)));
-  return Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : tagged;
+  const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : tagged;
+  return filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
 }
 
 function usePromoDepthBlend(legs, live, ctx = {}) {
@@ -1527,6 +1537,7 @@ export default function App() {
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
   const [marketScope, setMarketScope] = useState("all");
+  const [hideLowLiquidity, setHideLowLiquidity] = useState(false);
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1786,7 +1797,7 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, excludedPromoLegs, matchingBookKeys]);
+  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, hideLowLiquidity, excludedPromoLegs, matchingBookKeys]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1874,11 +1885,15 @@ export default function App() {
     || scanMinLegOdds !== minLegOdds
     || scanMaxLegOdds !== maxLegOdds;
 
+  // Multi-leg: drop thin PM legs from the scan pool ($500 profit walk, stake-independent).
+  // 1-leg: leave the pool; rankPromoPicks drops incomplete-hedge picks after blend.
+  const dropThinPoolLegs = hideLowLiquidity && Number(numLegs) >= 2;
   const promoLegs = useMemo(() => {
     const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
     const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
-    return filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
-  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs]);
+    const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
+    return filterLowLiquidityLegs(promoLegsKept, dropThinPoolLegs, { promoType, numLegs });
+  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -1969,20 +1984,20 @@ export default function App() {
   const topNoSweatsWithLock = useMemo(() => {
     return rankPromoPicks(
       topNoSweats,
-      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct },
+      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity },
       (p) => attachNoSweatLockToPick(p, stake),
     );
-  }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct]);
+  }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity]);
 
   const topParlaysWithHedge = useMemo(() => {
     // 1-leg: top-only blend to required hedge $, prefer a full fill, lock from quoted opp.
     // Multi-leg: $500 payout blend (profit excluding stake); lock badge stays off (no simultaneous lock).
     return rankPromoPicks(
       topParlays,
-      { promoType: "boost", numLegs, stake, boostPct },
+      { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity },
       (p) => attachBoostLockToPick(p, stake),
     );
-  }, [topParlays, numLegs, stake, boostPct]);
+  }, [topParlays, numLegs, stake, boostPct, hideLowLiquidity]);
 
   const topFreeBets = useMemo(
     () => rescaleParlaysForStake(scannedFreeBets.parlays, scannedFreeBets.atStake, stake),
@@ -1992,10 +2007,10 @@ export default function App() {
   const topFreeBetsWithLock = useMemo(() => {
     return rankPromoPicks(
       topFreeBets,
-      { promoType: "freebet", numLegs, stake },
+      { promoType: "freebet", numLegs, stake, hideLowLiquidity },
       (p) => attachFreeBetLock(p, stake),
     );
-  }, [topFreeBets, numLegs, stake]);
+  }, [topFreeBets, numLegs, stake, hideLowLiquidity]);
 
   const boostEmptyState = promoScanEmptyState({
     promoLoaded,
@@ -2558,7 +2573,7 @@ export default function App() {
                     <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
                     {!promoFiltersOpen && (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", lineHeight: 1.2 }}>
-                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs })}
+                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity })}
                       </span>
                     )}
                   </div>
@@ -2587,6 +2602,15 @@ export default function App() {
                             {opt.label}
                           </button>
                         ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Liquidity</label>
+                        <button type="button" onClick={() => setHideLowLiquidity(false)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: !hideLowLiquidity ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: !hideLowLiquidity ? "#3b82f6" : "#6b7280" }}>
+                          {LIQUIDITY_FILTER_ALL_LABEL}
+                        </button>
+                        <button type="button" onClick={() => setHideLowLiquidity(true)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: hideLowLiquidity ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: hideLowLiquidity ? "#3b82f6" : "#6b7280" }}>
+                          {HIDE_LOW_LIQUIDITY_LABEL}
+                        </button>
                       </>)}
                       {controlBox(<>
                         <label style={labelStyle}>Matching books</label>

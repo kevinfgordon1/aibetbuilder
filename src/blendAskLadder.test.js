@@ -5,6 +5,8 @@ import {
   blendAskLadderToPayout,
   blendAskLadderToStake,
   formatBlendedPayoutFlag,
+  formatBlendedHedgeFlag,
+  blendDidWalk,
   payoutTargetLabel,
   americanToImpliedProb,
   impliedProbToAmerican,
@@ -45,7 +47,8 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(full.bestOpp, -200);
   assert.equal(full.pmBlend.mode, "hedge");
   assert.ok(full.pmBlend.complete);
-  assert.match(full.pmBlend.flag, /blended to \$333\.33 hedge/);
+  assert.equal(full.pmBlend.levelsUsed, 1);
+  assert.equal(full.pmBlend.flag, "", "top size alone fills the hedge — no blend tag");
 
   const short = applyPmBlendToLeg(
     { dk: 200, bestOpp: -200, bestOppBook: "novig", bestOppSize: 100 },
@@ -80,6 +83,8 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.notEqual(walked.bestOpp, -200, "VWAP to $333.33 walks into −250");
   assert.equal(walked.pmBlend.mode, "hedge");
   assert.ok(walked.pmBlend.complete);
+  assert.ok(walked.pmBlend.levelsUsed > 1);
+  assert.match(walked.pmBlend.flag, /blended to \$333\.33 hedge/);
 }
 
 // 1-leg no-sweat: H = (winProfit + stake − creditValue) / d_h
@@ -130,7 +135,8 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   );
   // profit at −200: 1000 × 0.5 = 500
   assert.equal(covers500.lowLiquidity, false);
-  assert.equal(covers500.pmBlend.flag, "blended to $500 payout");
+  assert.equal(covers500.pmBlend.levelsUsed, 1);
+  assert.equal(covers500.pmBlend.flag, "", "single-level $500 fill is not a blend");
 
   const deep = applyPmBlendToLeg(
     { dk: -110, bestOpp: 100, bestOppBook: "kalshi", bestOppSize: 600 },
@@ -138,7 +144,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 },
   );
   assert.equal(deep.lowLiquidity, false);
-  assert.equal(deep.pmBlend.flag, "blended to $500 payout");
+  assert.equal(deep.pmBlend.flag, "");
 }
 
 // Sportsbooks unchanged — no blend, no low-liq flag
@@ -224,6 +230,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.ok(Math.abs(blend.payoutFilled - 500) < 1e-6);
   assert.ok(Math.abs(blend.stakeFilled - 400) < 1e-6);
   assert.equal(blend.complete, true);
+  assert.ok(blend.levelsUsed > 1);
   assert.equal(blend.flag, "blended to $500 payout");
   assert.equal(formatBlendedPayoutFlag(blend), "blended to $500 payout");
 }
@@ -330,6 +337,41 @@ assert.equal(blendAskLadderToStake([], { targetStake: 333 }), null);
   );
   assert.ok(walk.complete);
   assert.equal(walk.mode, "hedge");
+  assert.ok(walk.levelsUsed > 1);
+  assert.match(walk.flag, /blended to .* hedge/);
+}
+
+// ── Ole Miss-style: deep top alone fills $500 profit — no "blended to $500" tag
+{
+  const oleMiss = blendAskLadderToPayout([{ american: -111, size: 1896 }]);
+  assert.equal(oleMiss.complete, true);
+  assert.equal(oleMiss.levelsUsed, 1);
+  assert.equal(oleMiss.american, -111);
+  assert.ok(oleMiss.payoutFilled + 0.5 >= TARGET_PAYOUT_USD);
+  assert.equal(blendDidWalk(oleMiss), false);
+  assert.equal(oleMiss.flag, "");
+  assert.equal(formatBlendedPayoutFlag(oleMiss), "");
+  assert.equal(formatBlendedPayoutFlag(oleMiss, -111), "");
+
+  const applied = applyPmBlendToLeg(
+    { dk: -110, bestOpp: -111, bestOppBook: "novig", bestOppSize: 1896 },
+    [{ american: -111, size: 1896 }],
+    { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 },
+  );
+  assert.equal(applied.lowLiquidity, false);
+  assert.equal(applied.bestOpp, -111);
+  assert.equal(applied.pmBlend.flag, "");
+}
+
+{
+  const singleHedge = blendAskLadderToStake(
+    [{ american: -200, size: 400 }],
+    { targetStake: 500 / 1.5 },
+  );
+  assert.ok(singleHedge.complete);
+  assert.equal(singleHedge.levelsUsed, 1);
+  assert.equal(formatBlendedHedgeFlag(singleHedge), "");
+  assert.equal(blendDidWalk(singleHedge, -200), false);
 }
 
 {
