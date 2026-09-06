@@ -7,7 +7,7 @@ import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
-import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote } from "./userProfile";
+import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
 import { recommendedFillFromFair } from "./comboPrefill";
@@ -137,7 +137,7 @@ const DATE_RANGES = [
 
 // Promo Builder first-load fallback. Signed-in profile prefs override sports
 // and default book; +EV and Odds Board keep their own session state.
-const DEFAULT_PROMO_SPORT_KEYS = ["baseball_mlb", "americanfootball_ncaaf"];
+const DEFAULT_PROMO_SPORT_KEYS = DEFAULT_PROFILE_SPORTS;
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
 function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs }) {

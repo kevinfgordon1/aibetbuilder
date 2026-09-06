@@ -7,7 +7,8 @@
 export const PROFILE_PREFS_KEY = "aibetbuilder.profilePrefs";
 export const PROFILE_PREFS_META_KEY = "aibetbuilderPrefs";
 
-export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_ncaaf"];
+// First-time / unsaved prefs only. Saved sports win once the user customizes.
+export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"];
 export const DEFAULT_PROFILE_BOOK = "draftkings";
 
 export function profilePrefsStorageKey(userId) {
