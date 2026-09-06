@@ -144,6 +144,33 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(empty.blend, null);
   const trail = formatDepthTrail(levels, { topAmerican: 200 });
   assert.equal(trail, "then +100 · $400");
+
+  const hedgeLine = formatTrueOddsWithBlend({
+    odds: -200,
+    bookLabel: "Kalshi",
+    size: 400,
+    levels: [{ american: -200, size: 400 }],
+    blend: {
+      american: -200,
+      flag: "blended to $333.33 hedge",
+      lowLiquidity: false,
+    },
+  });
+  assert.equal(hedgeLine.odds, -200);
+  assert.match(hedgeLine.text, /blended to \$333\.33 hedge/);
+  assert.equal(hedgeLine.lowLiquidity, false);
+  const shortHedge = formatTrueOddsWithBlend({
+    odds: -200,
+    bookLabel: "Novig",
+    size: 100,
+    blend: {
+      american: -200,
+      flag: "blended · $100 of $333.33 hedge available",
+      lowLiquidity: true,
+    },
+  });
+  assert.equal(shortHedge.lowLiquidity, true);
+  assert.match(shortHedge.text, /of \$333\.33 hedge available/);
 }
 
 // ── American odds: +plus / −minus, never "+-105"

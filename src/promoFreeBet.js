@@ -58,7 +58,10 @@ export function attachFreeBetLock(parlay, freeBetAmount) {
   if (!parlay?.legs || parlay.legs.length !== 1) {
     return { ...parlay, lock: null, isGuaranteed: false };
   }
-  const lock = calcFreeBetConversion(parlay.legs[0].dk, parlay.legs[0].bestOpp, freeBetAmount);
+  const hedgeAmerican = parlay.legs[0].bestOppQuoted != null
+    ? parlay.legs[0].bestOppQuoted
+    : parlay.legs[0].bestOpp;
+  const lock = calcFreeBetConversion(parlay.legs[0].dk, hedgeAmerican, freeBetAmount);
   if (!lock?.valid) {
     return { ...parlay, lock: null, isGuaranteed: false };
   }

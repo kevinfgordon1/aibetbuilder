@@ -58,6 +58,26 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   });
   assert.equal(over.displayLegs[0].bestOpp, 122);
   assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $1,000 payout");
+
+  const kevin = {
+    dk: 200,
+    bestOpp: -200,
+    bestOppBook: "kalshi",
+    bestOppSize: 400,
+    sport: "mlb",
+    game: "A @ B",
+    name: "A ML",
+    bestOppName: "B ML",
+    market: "ML",
+  };
+  const oneLeg = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 });
+  assert.equal(oneLeg.displayLegs[0].pmBlend.mode, "hedge");
+  assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
+  assert.match(oneLeg.displayLegs[0].pmBlend.flag, /\$333\.33 hedge/);
+
+  const multi = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
+  assert.equal(multi.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(multi.displayLegs[0].lowLiquidity, true);
 }
 
 {

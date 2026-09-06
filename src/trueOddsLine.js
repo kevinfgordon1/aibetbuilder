@@ -52,16 +52,20 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
 }
 
-// When a real ask ladder exists, show VWAP-to-$1,000-face instead of the thin top.
-// Top `$ currently available` stays the top level; trail stays next worse prices.
-export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels } = {}) {
-  const blend = Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null;
+// Precomputed `blend` wins (1-leg hedge $ or multi-leg $1,000 payout).
+// If `blend` is omitted, a raw ladder still defaults to the $1,000-payout walk.
+// Passing `blend: null` means "do not re-walk" (sportsbook / no PM book).
+export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: blendIn } = {}) {
+  const blend = blendIn !== undefined
+    ? blendIn
+    : (Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null);
   const shownOdds = blend?.american ?? odds;
   const flag = blend ? (blend.flag || formatBlendedPayoutFlag(blend)) : "";
   return {
     text: formatTrueOddsBookLine({ odds: shownOdds, bookLabel, size, blendFlag: flag }),
     blend,
     odds: shownOdds,
+    lowLiquidity: !!(blend && blend.lowLiquidity),
   };
 }
 

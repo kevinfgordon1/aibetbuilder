@@ -44,6 +44,12 @@ import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
+import {
+  applyPmBlendToLeg,
+  preferCompletePmHedge,
+  pickHasLowLiquidity,
+  LOW_LIQUIDITY_LABEL,
+} from "./blendAskLadder.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -238,7 +244,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
     promoOdds,
     promoSelection: leg.name,
     hedgeBookLabel,
-    hedgeOdds: leg.bestOpp,
+    hedgeOdds: quotedOppAmerican(leg),
     hedgeSelection: leg.bestOppName,
     hedgeIsExchange: !!hedgeBook?.exchange,
     hedgeAvailableSize: leg.bestOppSize,
@@ -1261,6 +1267,7 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
               <ExcludeLegButton leg={l} onExclude={onExclude} />
             </div>
             <PromoLegStartTime commence_time={l.commence_time} />
+            {l.lowLiquidity && <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", marginTop: 4 }}>{LOW_LIQUIDITY_LABEL}</div>}
           </div>
         ))}
         {!isExpanded && legs.length > 3 && (
@@ -1284,15 +1291,74 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
           </div>
           <PromoLegStartTime commence_time={l.commence_time} />
+          {l.lowLiquidity && <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", marginTop: 4 }}>{LOW_LIQUIDITY_LABEL}</div>}
         </div>
       ))}
     </div>
   );
 }
 
-function usePromoDepthBlend(legs, live) {
+function quotedOppAmerican(leg) {
+  const n = Number(leg && (leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp));
+  return Number.isFinite(n) && n !== 0 ? n : null;
+}
+
+function LowLiquidityFlag({ show, style }) {
+  if (!show) return null;
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+        color: "#f59e0b",
+        background: "rgba(245,158,11,0.12)",
+        border: "1px solid rgba(245,158,11,0.28)",
+        borderRadius: 4,
+        padding: "2px 6px",
+        ...style,
+      }}
+      title={LOW_LIQUIDITY_LABEL}
+    >
+      {LOW_LIQUIDITY_LABEL}
+    </span>
+  );
+}
+
+function attachPmBlendToPick(p, ctx) {
+  const nLegs = (p.legs || []).length;
+  const { displayLegs } = applyBlendToLegs(p.legs || [], {}, { ...ctx, numLegs: nLegs });
+  const next = overlayParlayMetrics(p, displayLegs, ctx);
+  return { ...next, legs: displayLegs };
+}
+
+function attachBoostLockToPick(p, nextStake) {
+  if (!p.legs || p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
+  const lock = calcBoostLock(quotedOppAmerican(p.legs[0]), nextStake, p.boostedProfit);
+  return { ...p, lock, isGuaranteed: lock.valid };
+}
+
+function attachNoSweatLockToPick(p, nextStake) {
+  if (!p.legs || p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
+  const lock = calcNoSweatLock({
+    winProfit: p.winProfit,
+    stake: nextStake,
+    creditValue: p.creditValue,
+    hedgeDecimal: dkDecimal(quotedOppAmerican(p.legs[0])),
+  });
+  return { ...p, lock, isGuaranteed: lock.valid };
+}
+
+function rankPromoPicks(picks, ctx, attachLock) {
+  const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx)));
+  return Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : tagged;
+}
+
+function usePromoDepthBlend(legs, live, ctx = {}) {
   const [ladders, setLadders] = useState(null);
   const wantedKey = (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook)).map(depthCacheKey).join("\n");
+  const ctxKey = [ctx.promoType, ctx.numLegs, ctx.stake, ctx.boostPct, ctx.refundPct, ctx.creditConversionPct, ctx.boostedProfit, ctx.winProfit, ctx.creditValue].join("|");
   useEffect(() => {
     if (!live) {
       setLadders(null);
@@ -1311,9 +1377,9 @@ function usePromoDepthBlend(legs, live) {
   }, [live, wantedKey]);
   return useMemo(() => {
     const map = ladders || {};
-    const { displayLegs, blends } = applyBlendToLegs(legs, map);
-    return { ladders: map, blends, displayLegs, ready: ladders != null };
-  }, [legs, ladders]);
+    const { displayLegs, blends } = applyBlendToLegs(legs, map, ctx);
+    return { ladders: map, blends, displayLegs, ready: ladders != null, ctx };
+  }, [legs, ladders, ctxKey]);
 }
 
 function overlayParlayMetrics(p, displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }) {
@@ -1327,7 +1393,18 @@ function overlayParlayMetrics(p, displayLegs, { promoType, stake, boostPct, refu
 }
 
 function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditConversionPct, children }) {
-  const overlay = usePromoDepthBlend(p.legs, live);
+  const ctx = useMemo(() => ({
+    promoType,
+    numLegs: (p.legs || []).length,
+    stake,
+    boostPct,
+    refundPct,
+    creditConversionPct,
+    boostedProfit: p.boostedProfit,
+    winProfit: p.winProfit,
+    creditValue: p.creditValue,
+  }), [p.legs, p.boostedProfit, p.winProfit, p.creditValue, promoType, stake, boostPct, refundPct, creditConversionPct]);
+  const overlay = usePromoDepthBlend(p.legs, live, ctx);
   const view = useMemo(
     () => overlayParlayMetrics(p, overlay.displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }),
     [p, overlay.displayLegs, promoType, stake, boostPct, refundPct, creditConversionPct],
@@ -1335,7 +1412,7 @@ function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditC
   return children(view, overlay);
 }
 
-function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp }) {
+function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, blendCtx }) {
   const [fetched, setFetched] = useState(null);
   useEffect(() => {
     if (levelsProp !== undefined) return;
@@ -1353,30 +1430,35 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp }) 
   const bookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || leg.bestOppBook;
   const note = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
   const ladder = levelsProp !== undefined ? levelsProp : fetched;
+  const blendedLeg = applyPmBlendToLeg(leg, Array.isArray(ladder) ? ladder : null, blendCtx || {});
   const line = formatTrueOddsWithBlend({
-    odds: leg.bestOpp,
+    odds: quotedOppAmerican(leg) ?? leg.bestOpp,
     bookLabel,
     size: leg.bestOppSize,
     levels: ladder,
+    blend: blendedLeg.pmBlend,
   });
   const trailTop = Array.isArray(ladder) && ladder.length
     ? ladder[0].american
-    : leg.bestOpp;
+    : (quotedOppAmerican(leg) ?? leg.bestOpp);
   const trail = formatDepthTrail(ladder, { topAmerican: trailTop, max: 2 });
   return (
     <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, ...style }}>
       <div>
         {line.text}
         {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
+        <LowLiquidityFlag show={line.lowLiquidity} style={{ marginLeft: 6 }} />
       </div>
       {trail ? <div style={{ color: "#4b5563", marginTop: 2 }}>{trail}</div> : null}
     </div>
   );
 }
 
-function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders }) {
-  const overlay = usePromoDepthBlend(legs, ladders === undefined);
-  const resolved = ladders !== undefined ? { ...applyBlendToLegs(legs, ladders), ladders } : overlay;
+function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders, blendCtx }) {
+  const overlay = usePromoDepthBlend(legs, ladders === undefined, blendCtx);
+  const resolved = ladders !== undefined
+    ? { ...applyBlendToLegs(legs, ladders, blendCtx || {}), ladders, ctx: blendCtx }
+    : overlay;
   const rows = resolved.displayLegs || [];
   const ladderMap = resolved.ladders || {};
   return (
@@ -1403,7 +1485,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders 
               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#f59e0b" }}>
                 {formatOdds(tpAm)} ({(tp * 100).toFixed(1)}%)
               </div>
-              <PromoTrueOddsSubline leg={l} live={ladders === undefined} levels={levels} />
+              <PromoTrueOddsSubline leg={l} live={ladders === undefined} levels={levels} blendCtx={blendCtx || resolved.ctx} />
             </div>
             <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatOdds(l.dk)}</div>
             <div style={{ textAlign: "center" }}>
@@ -1883,28 +1965,22 @@ export default function App() {
   );
 
   const topNoSweatsWithLock = useMemo(() => {
-    return topNoSweats.map(p => {
-      if (p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
-      const lock = calcNoSweatLock({
-        winProfit: p.winProfit,
-        stake,
-        creditValue: p.creditValue,
-        hedgeDecimal: dkDecimal(p.legs[0].bestOpp),
-      });
-      return { ...p, lock, isGuaranteed: lock.valid };
-    });
-  }, [topNoSweats, stake]);
+    return rankPromoPicks(
+      topNoSweats,
+      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct },
+      (p) => attachNoSweatLockToPick(p, stake),
+    );
+  }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct]);
 
   const topParlaysWithHedge = useMemo(() => {
-    return topParlays.map(p => {
-      // A true simultaneous lock only exists for single-leg boosts. With n legs there are
-      // n hedge stakes but 2^n outcomes, which cannot all be equalized at once — so the
-      // Guaranteed Profit badge is restricted to 1-leg boosts.
-      if (p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
-      const lock = calcBoostLock(p.legs[0].bestOpp, stake, p.boostedProfit);
-      return { ...p, lock, isGuaranteed: lock.valid };
-    });
-  }, [topParlays, stake, boostPct]);
+    // 1-leg: top-only blend to required hedge $, prefer a full fill, lock from quoted opp.
+    // Multi-leg: $1,000 payout blend; lock badge stays off (no simultaneous lock).
+    return rankPromoPicks(
+      topParlays,
+      { promoType: "boost", numLegs, stake, boostPct },
+      (p) => attachBoostLockToPick(p, stake),
+    );
+  }, [topParlays, numLegs, stake, boostPct]);
 
   const topFreeBets = useMemo(
     () => rescaleParlaysForStake(scannedFreeBets.parlays, scannedFreeBets.atStake, stake),
@@ -1912,8 +1988,12 @@ export default function App() {
   );
 
   const topFreeBetsWithLock = useMemo(() => {
-    return topFreeBets.map((p) => attachFreeBetLock(p, stake));
-  }, [topFreeBets, stake]);
+    return rankPromoPicks(
+      topFreeBets,
+      { promoType: "freebet", numLegs, stake },
+      (p) => attachFreeBetLock(p, stake),
+    );
+  }, [topFreeBets, numLegs, stake]);
 
   const boostEmptyState = promoScanEmptyState({
     promoLoaded,
@@ -2600,17 +2680,18 @@ export default function App() {
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
+                              <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: view.ev > 0 ? "#10b981" : "#ef4444" }}>+${view.ev.toFixed(2)} EV</div>
                           </div>
-                          <PromoParlayLegChips legs={p.legs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
+                          <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: "#10b981" }}>+{(view.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
@@ -2638,6 +2719,7 @@ export default function App() {
                             <PromoExpandedLegsTable
                               legs={overlay.displayLegs}
                               ladders={overlay.ladders}
+                              blendCtx={overlay.ctx}
                               bookLabel={activePromoBookData.label}
                               edgeCaption="(without boost)"
                               footer={
@@ -2748,6 +2830,7 @@ export default function App() {
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
+                              <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
                               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
@@ -2756,7 +2839,7 @@ export default function App() {
                               )}
                             </div>
                           </div>
-                          <PromoParlayLegChips legs={p.legs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
+                          <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
@@ -2764,7 +2847,7 @@ export default function App() {
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}{(view.ev / stake * 100).toFixed(1)}%</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
                           </div>
@@ -2810,7 +2893,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{p.legs[0].bestOppName}</div>
-                                      <PromoTrueOddsSubline leg={p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} />
+                                      <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${p.lock.hedgeStake.toFixed(2)}</div>
@@ -2855,6 +2938,7 @@ export default function App() {
                                 <PromoExpandedLegsTable
                                   legs={overlay.displayLegs}
                                   ladders={overlay.ladders}
+                                  blendCtx={overlay.ctx}
                                   bookLabel={activePromoBookData.label}
                                   footer={
                                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
@@ -2962,6 +3046,7 @@ export default function App() {
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#8b5cf6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? (showLock ? "★ Best Conversion" : "★ Best Pick") : `Option ${i + 1}`}</div>
+                              <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
                             {showLock ? (
                               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
@@ -2993,7 +3078,7 @@ export default function App() {
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{getBookLabel(leg?.bestOppBook)}</span>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: hedgeLeg?.bestOpp > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(hedgeLeg?.bestOpp)}</span>
+                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: (quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp) > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)}</span>
                                   </div>
                                   <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${(lock?.hedgeStake ?? 0).toFixed(2)} hedge stake</div>
                                   {adjustmentNote && <div style={{ fontSize: 10, color: "#06b6d4", marginTop: 2 }}>({adjustmentNote})</div>}
@@ -3007,14 +3092,14 @@ export default function App() {
                             </>
                           ) : (
                             <>
-                              <PromoParlayLegChips legs={p.legs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
+                              <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
                                 <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                                 <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
                               </div>
-                              {isSingle && <PromoTrueOddsSubline leg={leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} style={{ fontSize: 11, marginTop: 6 }} />}
+                              {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
@@ -3058,7 +3143,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
-                                      <PromoTrueOddsSubline leg={leg} live levels={overlay.ladders[depthCacheKey(leg)]} />
+                                      <PromoTrueOddsSubline leg={hedgeLeg || leg} live levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${(lock?.hedgeStake ?? 0).toFixed(2)}</div>
@@ -3089,9 +3174,9 @@ export default function App() {
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                                   <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
                                   <div>Hedge stake = (free bet decimal − 1) × free bet $ ÷ hedge decimal</div>
-                                  <div>= ({dkDecimal(leg?.dk).toFixed(3)} − 1) × ${fbAmount} ÷ {dkDecimal(leg?.bestOpp).toFixed(3)}</div>
+                                  <div>= ({dkDecimal(leg?.dk).toFixed(3)} − 1) × ${fbAmount} ÷ {dkDecimal(quotedOppAmerican(leg) ?? leg?.bestOpp).toFixed(3)}</div>
                                   <div>= <strong style={{ color: "#10b981" }}>${(lock?.hedgeStake ?? 0).toFixed(2)}</strong></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Guaranteed cash = ${(lock?.hedgeStake ?? 0).toFixed(2)} × ({dkDecimal(leg?.bestOpp).toFixed(3)} − 1) = <strong style={{ color: "#10b981" }}>${(lock?.guaranteedCash ?? 0).toFixed(2)}</strong></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Guaranteed cash = ${(lock?.hedgeStake ?? 0).toFixed(2)} × ({dkDecimal(quotedOppAmerican(leg) ?? leg?.bestOpp).toFixed(3)} − 1) = <strong style={{ color: "#10b981" }}>${(lock?.guaranteedCash ?? 0).toFixed(2)}</strong></div>
                                   <div>Conversion rate = ${(lock?.guaranteedCash ?? 0).toFixed(2)} ÷ ${fbAmount} = <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.04)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.1)" }}>
@@ -3103,6 +3188,7 @@ export default function App() {
                                 <PromoExpandedLegsTable
                                   legs={overlay.displayLegs}
                                   ladders={overlay.ladders}
+                                  blendCtx={overlay.ctx}
                                   bookLabel={activePromoBookData.label}
                                   footer={
                                     <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
