@@ -1,6 +1,8 @@
 // Browser client for /api/book-depth. Cache + inflight dedupe so expanding
 // BEST PICK twice does not re-hit venues. Sportsbooks never call the API.
 
+import { applyPmBlendToLegs } from "./blendAskLadder.js";
+
 export const DEPTH_VENUES = new Set(["kalshi", "polymarket", "prophetx", "novig"]);
 const TTL_MS = 45 * 1000;
 const cache = new Map();
@@ -85,4 +87,10 @@ export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
 export function _resetPromoBookDepthCache() {
   cache.clear();
   inflight.clear();
+}
+
+// Overlay bestOpp from a real ladder or top-of-book size. Never invents books.
+// ctx.numLegs === 1 → walk to required hedge $; otherwise $1,000 face payout.
+export function applyBlendToLegs(legs, laddersByKey, ctx = {}) {
+  return applyPmBlendToLegs(legs, laddersByKey, ctx);
 }

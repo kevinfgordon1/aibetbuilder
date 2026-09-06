@@ -6,8 +6,10 @@ import {
   formatAvailableDollars,
   formatAvailableSizeClause,
   formatTrueOddsBookLine,
+  formatTrueOddsWithBlend,
   formatDepthTrail,
   restLevelsFromLadder,
+  blendAskLadderToPayout,
 } from "./trueOddsLine.js";
 import { transformOddsData, transformEventOddsData } from "./oddsTransform.js";
 import { createRequire } from "node:module";
@@ -98,6 +100,77 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(rest[1].american, -105);
   assert.equal(formatDepthTrail([{ american: 100, size: 0 }], { topAmerican: 104 }), "");
   assert.equal(formatDepthTrail([{ american: 110, size: 80 }], { topAmerican: 104 }), "", "better-than-top is not rest");
+}
+
+// ── blended $1,000-face VWAP on the true-odds line
+{
+  const levels = [
+    { american: 200, size: 100 },
+    { american: 100, size: 400 },
+  ];
+  const blend = blendAskLadderToPayout(levels);
+  assert.equal(blend.american, 122);
+  assert.equal(blend.flag, "blended to $1,000 payout");
+  const line = formatTrueOddsWithBlend({
+    odds: 200,
+    bookLabel: "Kalshi",
+    size: 100,
+    levels,
+  });
+  assert.equal(line.odds, 122);
+  assert.equal(
+    line.text,
+    "+122 on Kalshi · $100 currently available · blended to $1,000 payout",
+  );
+  const short = formatTrueOddsWithBlend({
+    odds: 150,
+    bookLabel: "Polymarket",
+    size: 50,
+    levels: [{ american: 150, size: 50 }],
+  });
+  assert.equal(short.odds, 150);
+  assert.equal(
+    short.text,
+    "+150 on Polymarket · $50 currently available · blended · $125 of $1,000 payout available",
+  );
+  const empty = formatTrueOddsWithBlend({
+    odds: 104,
+    bookLabel: "Kalshi",
+    size: 54,
+    levels: [],
+  });
+  assert.equal(empty.odds, 104);
+  assert.equal(empty.text, "+104 on Kalshi · $54 currently available");
+  assert.equal(empty.blend, null);
+  const trail = formatDepthTrail(levels, { topAmerican: 200 });
+  assert.equal(trail, "then +100 · $400");
+
+  const hedgeLine = formatTrueOddsWithBlend({
+    odds: -200,
+    bookLabel: "Kalshi",
+    size: 400,
+    levels: [{ american: -200, size: 400 }],
+    blend: {
+      american: -200,
+      flag: "blended to $333.33 hedge",
+      lowLiquidity: false,
+    },
+  });
+  assert.equal(hedgeLine.odds, -200);
+  assert.match(hedgeLine.text, /blended to \$333\.33 hedge/);
+  assert.equal(hedgeLine.lowLiquidity, false);
+  const shortHedge = formatTrueOddsWithBlend({
+    odds: -200,
+    bookLabel: "Novig",
+    size: 100,
+    blend: {
+      american: -200,
+      flag: "blended · $100 of $333.33 hedge available",
+      lowLiquidity: true,
+    },
+  });
+  assert.equal(shortHedge.lowLiquidity, true);
+  assert.match(shortHedge.text, /of \$333\.33 hedge available/);
 }
 
 // ── American odds: +plus / −minus, never "+-105"

@@ -2,6 +2,18 @@
 // Size is never invented — only `size` (direct Kalshi/Polymarket) or `bet_limit`
 // (The Odds API includeBetLimits) when a finite positive number is present.
 
+import {
+  blendAskLadderToPayout,
+  formatBlendedPayoutFlag,
+  TARGET_PAYOUT_USD,
+} from "./blendAskLadder.js";
+
+export {
+  blendAskLadderToPayout,
+  formatBlendedPayoutFlag,
+  TARGET_PAYOUT_USD,
+};
+
 export function outcomeSize(outcome) {
   if (!outcome || typeof outcome !== "object") return null;
   const raw = outcome.size ?? outcome.bet_limit;
@@ -34,9 +46,27 @@ export function formatAvailableSizeClause(size) {
   return dollars ? ` · ${dollars} currently available` : "";
 }
 
-export function formatTrueOddsBookLine({ odds, bookLabel, size } = {}) {
+export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}) {
   const book = bookLabel || "Book";
-  return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}`;
+  const flag = blendFlag ? ` · ${blendFlag}` : "";
+  return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
+}
+
+// Precomputed `blend` wins (1-leg hedge $ or multi-leg $1,000 payout).
+// If `blend` is omitted, a raw ladder still defaults to the $1,000-payout walk.
+// Passing `blend: null` means "do not re-walk" (sportsbook / no PM book).
+export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: blendIn } = {}) {
+  const blend = blendIn !== undefined
+    ? blendIn
+    : (Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null);
+  const shownOdds = blend?.american ?? odds;
+  const flag = blend ? (blend.flag || formatBlendedPayoutFlag(blend)) : "";
+  return {
+    text: formatTrueOddsBookLine({ odds: shownOdds, bookLabel, size, blendFlag: flag }),
+    blend,
+    odds: shownOdds,
+    lowLiquidity: !!(blend && blend.lowLiquidity),
+  };
 }
 
 // Rest of book past the displayed top (best American first). Never invents levels.

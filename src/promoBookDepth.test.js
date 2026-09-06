@@ -4,9 +4,10 @@ import {
   fetchPromoBookDepth,
   legsNeedingDepth,
   venueHasDepthApi,
+  applyBlendToLegs,
   _resetPromoBookDepthCache,
 } from "./promoBookDepth.js";
-import { formatTrueOddsBookLine, formatDepthTrail } from "./trueOddsLine.js";
+import { formatTrueOddsBookLine, formatTrueOddsWithBlend, formatDepthTrail } from "./trueOddsLine.js";
 
 _resetPromoBookDepthCache();
 
@@ -33,6 +34,50 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   const top = formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 });
   assert.equal(top, "+104 on ProphetX · $54 currently available");
   assert.equal(formatDepthTrail([], { topAmerican: 104 }), "", "no depth → unchanged (no trail)");
+}
+
+{
+  const blended = formatTrueOddsWithBlend({
+    odds: 104,
+    bookLabel: "Kalshi",
+    size: 54,
+    levels: [
+      { american: 200, size: 100 },
+      { american: 100, size: 400 },
+    ],
+  });
+  assert.equal(blended.odds, 122);
+  assert.match(blended.text, /blended to \$1,000 payout/);
+  const none = applyBlendToLegs([pxLeg], {});
+  assert.equal(none.displayLegs[0].bestOpp, 104, "no ladder → keep top");
+  const over = applyBlendToLegs([pxLeg], {
+    [depthCacheKey(pxLeg)]: [
+      { american: 200, size: 100 },
+      { american: 100, size: 400 },
+    ],
+  });
+  assert.equal(over.displayLegs[0].bestOpp, 122);
+  assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $1,000 payout");
+
+  const kevin = {
+    dk: 200,
+    bestOpp: -200,
+    bestOppBook: "kalshi",
+    bestOppSize: 400,
+    sport: "mlb",
+    game: "A @ B",
+    name: "A ML",
+    bestOppName: "B ML",
+    market: "ML",
+  };
+  const oneLeg = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 });
+  assert.equal(oneLeg.displayLegs[0].pmBlend.mode, "hedge");
+  assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
+  assert.match(oneLeg.displayLegs[0].pmBlend.flag, /\$333\.33 hedge/);
+
+  const multi = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
+  assert.equal(multi.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(multi.displayLegs[0].lowLiquidity, true);
 }
 
 {
