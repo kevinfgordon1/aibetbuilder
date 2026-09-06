@@ -1537,7 +1537,7 @@ export default function App() {
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
   const [marketScope, setMarketScope] = useState("all");
-  const [hideLowLiquidity, setHideLowLiquidity] = useState(false);
+  const [hideLowLiquidity, setHideLowLiquidity] = useState(true);
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
