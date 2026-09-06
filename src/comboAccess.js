@@ -58,6 +58,16 @@ export function canSeeComboLocks(user, env) {
   return userTokens(user).some((t) => allowed.has(t));
 }
 
+/**
+ * Profile Combo Locks P/L / statement / history.
+ * Same allowlist as the Combo Locks tab (canSeeComboLocks). isOwner is the
+ * signed-in user's own profile — default false so a public/other-player
+ * profile cannot leak lock P/L even when the subject is Kevin.
+ */
+export function profileShowsComboPnl(user, { isOwner = false } = {}, env) {
+  return !!(isOwner && canSeeComboLocks(user, env));
+}
+
 /** Miss tape / Unhedged stay owner-only — do not expand Combo Locks via these. */
 export function canSeeOwnerTools(user) {
   if (!user || !user.email) return false;

@@ -2278,7 +2278,7 @@ export default function App() {
               matchingBookKeys={matchingBookKeys}
               onToggleMatchingBook={toggleMatchingBook}
               canSeeLocks={canSeeComboLocks(user)}
-              isOwner
+              isOwner={Boolean(user)}
               announcement={whatsNew}
               onAnnouncementPublished={(ann) => {
                 setWhatsNew(ann);
