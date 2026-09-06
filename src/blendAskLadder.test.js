@@ -5,7 +5,9 @@ import {
   blendAskLadderToPayout,
   blendAskLadderToStake,
   formatBlendedPayoutFlag,
+  payoutTargetLabel,
   americanToImpliedProb,
+  impliedProbToAmerican,
   requiredBoostHedgeStake,
   requiredFreeBetHedgeStake,
   requiredNoSweatHedgeStake,
@@ -14,9 +16,11 @@ import {
   applyPmBlendToLegs,
   preferCompletePmHedge,
   isPmBlendVenue,
+  trueOppAmerican,
 } from "./blendAskLadder.js";
 
-assert.equal(TARGET_PAYOUT_USD, 1000);
+assert.equal(TARGET_PAYOUT_USD, 500);
+assert.equal(payoutTargetLabel(), "$500");
 assert.equal(LOW_LIQUIDITY_LABEL, "Low liquidity");
 assert.equal(isPmBlendVenue("kalshi"), true);
 assert.equal(isPmBlendVenue("pinnacle"), false);
@@ -60,7 +64,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(pxShort.lowLiquidity, true, "ProphetX top-only shortfall flags");
 }
 
-// 1-leg walk VWAP uses hedge $, not the thin top (and not $1,000 payout)
+// 1-leg walk VWAP uses hedge $, not the thin top (and not the $500 payout bar)
 {
   const walked = applyPmBlendToLeg(
     { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 100 },
@@ -96,17 +100,26 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(short.pmBlend.mode, "hedge");
 }
 
-// ── multi-leg still uses $1,000 payout (not the hedge $)
+// ── multi-leg uses $500 payout (not the hedge $)
 {
   const multi = applyPmBlendToLeg(
-    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 400 },
+    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 200 },
     null,
     { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
   );
   assert.equal(multi.pmBlend.mode, "payout");
-  // face at −200: 400 / (200/300) = 600 < 1000
+  // face at −200: 200 / (200/300) = 300 < 500
   assert.equal(multi.lowLiquidity, true);
-  assert.match(multi.pmBlend.flag, /of \$1,000 payout available/);
+  assert.match(multi.pmBlend.flag, /of \$500 payout available/);
+
+  const covers500 = applyPmBlendToLeg(
+    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 400 },
+    null,
+    { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
+  );
+  // face at −200: 400 / (200/300) = 600 ≥ 500
+  assert.equal(covers500.lowLiquidity, false);
+  assert.equal(covers500.pmBlend.flag, "blended to $500 payout");
 
   const deep = applyPmBlendToLeg(
     { dk: -110, bestOpp: 100, bestOppBook: "kalshi", bestOppSize: 600 },
@@ -114,7 +127,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 },
   );
   assert.equal(deep.lowLiquidity, false);
-  assert.equal(deep.pmBlend.flag, "blended to $1,000 payout");
+  assert.equal(deep.pmBlend.flag, "blended to $500 payout");
 }
 
 // Sportsbooks unchanged — no blend, no low-liq flag
@@ -170,7 +183,9 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const { displayLegs } = applyPmBlendToLegs([raw], {
     ["kalshi|mlb|A @ B|B ML|ML"]: levels,
   }, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30 });
-  assert.equal(displayLegs[0].bestOpp, 122, "boost path uses VWAP not +200 top");
+  assert.equal(displayLegs[0].bestOpp, 150, "boost path uses $500 VWAP not +200 top");
+  assert.notEqual(displayLegs[0].bestOpp, 200);
+  assert.equal(trueOppAmerican(displayLegs[0]), 150);
   const evTop = calcParlayEV([{ ...raw, bestOpp: 200 }], 30, 100);
   const evBlend = calcParlayEV(displayLegs, 30, 100);
   assert.notEqual(evBlend, evTop);
@@ -186,16 +201,16 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(ranked[1].ev, 40);
 }
 
-// ── known $1,000-payout ladder (multi-leg helper)
+// ── known $500-payout ladder (multi-leg helper)
 {
   const blend = blendAskLadderToPayout([
     { american: 200, size: 100 },
     { american: 100, size: 400 },
   ]);
-  assert.equal(blend.american, 122);
+  assert.equal(blend.american, 150);
   assert.equal(blend.complete, true);
-  assert.equal(blend.flag, "blended to $1,000 payout");
-  assert.equal(formatBlendedPayoutFlag(blend), "blended to $1,000 payout");
+  assert.equal(blend.flag, "blended to $500 payout");
+  assert.equal(formatBlendedPayoutFlag(blend), "blended to $500 payout");
 }
 
 {
@@ -212,7 +227,57 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const short = blendAskLadderToPayout([{ american: 150, size: 50 }]);
   assert.equal(short.american, 150);
   assert.equal(short.complete, false);
-  assert.equal(short.flag, "blended · $125 of $1,000 payout available");
+  assert.equal(short.flag, "blended · $125 of $500 payout available");
+}
+
+// ── Missouri-style Novig: thin top +223 must not drive true odds / EV
+{
+  const levels = [
+    { american: 223, size: 80 },
+    { american: 180, size: 50 },
+    { american: 150, size: 14 },
+  ];
+  const blend = blendAskLadderToPayout(levels);
+  assert.ok(blend.payoutFilled + 0.5 < TARGET_PAYOUT_USD, "short of $500 → low liquidity");
+  assert.equal(blend.complete, false);
+  assert.notEqual(blend.american, 223, "VWAP of the walk ≠ thin top");
+  assert.match(blend.flag, /of \$500 payout available/);
+
+  const raw = {
+    dk: -110,
+    bestOpp: 223,
+    bestOppBook: "novig",
+    bestOppSize: 80,
+    sport: "americanfootball_ncaaf",
+    game: "Missouri @ Rival",
+    name: "Missouri ML",
+    bestOppName: "Rival ML",
+    market: "ML",
+  };
+  const { displayLegs } = applyPmBlendToLegs([raw], {
+    ["novig|americanfootball_ncaaf|Missouri @ Rival|Rival ML|ML"]: levels,
+  }, { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 });
+  assert.equal(displayLegs[0].bestOppQuoted, 223);
+  assert.notEqual(displayLegs[0].bestOpp, 223);
+  assert.equal(displayLegs[0].bestOpp, blend.american);
+  assert.equal(trueOppAmerican(displayLegs[0]), blend.american);
+  const ourFromTop = 1 - americanToImpliedProb(223);
+  const ourFromBlend = 1 - americanToImpliedProb(displayLegs[0].bestOpp);
+  assert.notEqual(impliedProbToAmerican(ourFromTop), impliedProbToAmerican(ourFromBlend));
+  function calcParlayEV(legs, boostPct, stake) {
+    const dkDecimal = (o) => (o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o));
+    const trueProb = (o) => (o < 0 ? Math.abs(o) / (Math.abs(o) + 100) : 100 / (o + 100));
+    const ourTrue = (o) => 1 - trueProb(o);
+    let parlayDec = 1;
+    let combinedProb = 1;
+    legs.forEach((l) => {
+      parlayDec *= dkDecimal(l.dk);
+      combinedProb *= ourTrue(l.bestOpp);
+    });
+    const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
+    return (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
+  }
+  assert.notEqual(calcParlayEV(displayLegs, 30, 100), calcParlayEV([{ ...raw, bestOpp: 223 }], 30, 100));
 }
 
 assert.equal(blendAskLadderToPayout(null), null);

@@ -52,17 +52,35 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
 }
 
-// Precomputed `blend` wins (1-leg hedge $ or multi-leg $1,000 payout).
-// If `blend` is omitted, a raw ladder still defaults to the $1,000-payout walk.
+// Precomputed `blend` wins (1-leg hedge $ or multi-leg $500 payout).
+// If `blend` is omitted, a raw ladder still defaults to the $500-payout walk.
 // Passing `blend: null` means "do not re-walk" (sportsbook / no PM book).
+// Primary line is the blended VWAP American; top size / thin top stay secondary.
 export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: blendIn } = {}) {
   const blend = blendIn !== undefined
     ? blendIn
     : (Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null);
   const shownOdds = blend?.american ?? odds;
   const flag = blend ? (blend.flag || formatBlendedPayoutFlag(blend)) : "";
+  const text = formatTrueOddsBookLine({
+    odds: shownOdds,
+    bookLabel,
+    size: blend ? null : size,
+    blendFlag: flag,
+  });
+  let secondary = "";
+  if (blend) {
+    const bits = [];
+    if (odds != null && Number(odds) !== 0 && isFinite(Number(odds))) {
+      bits.push(`top ${formatAmericanOdds(odds)}`);
+    }
+    const dollars = formatAvailableDollars(size);
+    if (dollars) bits.push(`${dollars} currently available`);
+    secondary = bits.join(" · ");
+  }
   return {
-    text: formatTrueOddsBookLine({ odds: shownOdds, bookLabel, size, blendFlag: flag }),
+    text,
+    secondary,
     blend,
     odds: shownOdds,
     lowLiquidity: !!(blend && blend.lowLiquidity),

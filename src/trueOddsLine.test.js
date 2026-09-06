@@ -102,26 +102,25 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(formatDepthTrail([{ american: 110, size: 80 }], { topAmerican: 104 }), "", "better-than-top is not rest");
 }
 
-// ── blended $1,000-face VWAP on the true-odds line
+// ── blended $500-face VWAP on the true-odds line (blended price first; top secondary)
 {
   const levels = [
     { american: 200, size: 100 },
     { american: 100, size: 400 },
   ];
   const blend = blendAskLadderToPayout(levels);
-  assert.equal(blend.american, 122);
-  assert.equal(blend.flag, "blended to $1,000 payout");
+  assert.equal(blend.american, 150);
+  assert.equal(blend.flag, "blended to $500 payout");
   const line = formatTrueOddsWithBlend({
     odds: 200,
     bookLabel: "Kalshi",
     size: 100,
     levels,
   });
-  assert.equal(line.odds, 122);
-  assert.equal(
-    line.text,
-    "+122 on Kalshi · $100 currently available · blended to $1,000 payout",
-  );
+  assert.equal(line.odds, 150);
+  assert.notEqual(line.odds, 200, "true-odds line uses VWAP, not thin top");
+  assert.equal(line.text, "+150 on Kalshi · blended to $500 payout");
+  assert.equal(line.secondary, "top +200 · $100 currently available");
   const short = formatTrueOddsWithBlend({
     odds: 150,
     bookLabel: "Polymarket",
@@ -131,8 +130,9 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(short.odds, 150);
   assert.equal(
     short.text,
-    "+150 on Polymarket · $50 currently available · blended · $125 of $1,000 payout available",
+    "+150 on Polymarket · blended · $125 of $500 payout available",
   );
+  assert.equal(short.secondary, "top +150 · $50 currently available");
   const empty = formatTrueOddsWithBlend({
     odds: 104,
     bookLabel: "Kalshi",

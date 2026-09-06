@@ -46,8 +46,9 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(blended.odds, 122);
-  assert.match(blended.text, /blended to \$1,000 payout/);
+  assert.equal(blended.odds, 150);
+  assert.match(blended.text, /blended to \$500 payout/);
+  assert.notEqual(blended.odds, 104, "true odds ≠ thin top when VWAP differs");
   const none = applyBlendToLegs([pxLeg], {});
   assert.equal(none.displayLegs[0].bestOpp, 104, "no ladder → keep top");
   const over = applyBlendToLegs([pxLeg], {
@@ -56,8 +57,9 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(over.displayLegs[0].bestOpp, 122);
-  assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $1,000 payout");
+  assert.equal(over.displayLegs[0].bestOpp, 150);
+  assert.notEqual(over.displayLegs[0].bestOpp, pxLeg.bestOpp);
+  assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $500 payout");
 
   const kevin = {
     dk: 200,
@@ -75,9 +77,17 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
   assert.match(oneLeg.displayLegs[0].pmBlend.flag, /\$333\.33 hedge/);
 
-  const multi = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
-  assert.equal(multi.displayLegs[0].pmBlend.mode, "payout");
-  assert.equal(multi.displayLegs[0].lowLiquidity, true);
+  const covers500 = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
+  assert.equal(covers500.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(covers500.displayLegs[0].lowLiquidity, false, "$600 face at −200 covers the $500 bar");
+
+  const multiShort = applyBlendToLegs(
+    [{ ...kevin, bestOppSize: 200 }],
+    {},
+    { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
+  );
+  assert.equal(multiShort.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(multiShort.displayLegs[0].lowLiquidity, true, "$300 face stays short of $500");
 }
 
 {
