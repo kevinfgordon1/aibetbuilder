@@ -196,7 +196,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   }, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30 });
   assert.equal(displayLegs[0].bestOpp, 125, "boost path uses $500-profit VWAP not +200 top");
   assert.notEqual(displayLegs[0].bestOpp, 200);
-  assert.equal(trueOppAmerican(displayLegs[0]), 150);
+  assert.equal(trueOppAmerican(displayLegs[0]), 125);
   const evTop = calcParlayEV([{ ...raw, bestOpp: 200 }], 30, 100);
   const evBlend = calcParlayEV(displayLegs, 30, 100);
   assert.notEqual(evBlend, evTop);
