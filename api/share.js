@@ -16,6 +16,35 @@ const TAB_LABEL = {
   profile: 'Profile',
 };
 
+const PROMO_TYPE_LABEL = {
+  boost: 'Profit Boost',
+  nosweat: 'No Sweat',
+  freebet: 'Free Bet',
+};
+
+const BOOK_LABEL = {
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  williamhill_us: 'Caesars',
+  betmgm: 'BetMGM',
+  betrivers: 'BetRivers',
+  fanatics: 'Fanatics',
+  hardrockbet: 'Hard Rock',
+  espnbet: 'theScore Bet',
+  bovada: 'Bovada',
+  mybookieag: 'MyBookie',
+  betonlineag: 'BetOnline',
+  pinnacle: 'Pinnacle',
+  lowvig: 'LowVig',
+  betus: 'BetUS',
+  betanysports: 'BetAnything',
+  kalshi: 'Kalshi',
+  novig: 'Novig',
+  prophetx: 'ProphetX',
+  polymarket: 'Polymarket',
+  betopenly: 'BetOpenly',
+};
+
 const GATED = new Set(['combo', 'missTape', 'miss', 'miss-tape', 'unhedged', 'profile']);
 
 function esc(s) {
@@ -32,6 +61,72 @@ function parseSharePath(p) {
   const tab = parts[0] || 'promo';
   const rest = parts.slice(1).join('/');
   return { tab, rest, raw: raw || 'promo' };
+}
+
+function bookLabel(key) {
+  const k = String(key || '').toLowerCase();
+  if (BOOK_LABEL[k]) return BOOK_LABEL[k];
+  if (!k) return '';
+  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function parsePromoShareId(cardId) {
+  const raw = String(cardId == null ? '' : cardId).trim();
+  if (!raw) return null;
+  const parts = raw.split('.');
+  if (parts.length < 4) return null;
+  const hash = parts.pop();
+  const stakePart = parts.pop();
+  const book = parts.pop();
+  const promoType = parts.join('.');
+  if (!PROMO_TYPE_LABEL[promoType] || !book || !hash) return null;
+  const stake = Number(stakePart);
+  if (!Number.isFinite(stake)) return null;
+  return { promoType, book, stake, hash };
+}
+
+function parseEvShareId(cardId) {
+  const raw = String(cardId == null ? '' : cardId).trim();
+  if (!raw) return null;
+  const dot = raw.indexOf('.');
+  if (dot <= 0) return null;
+  const book = raw.slice(0, dot);
+  const hash = raw.slice(dot + 1);
+  if (!book || !hash) return null;
+  return { book, hash };
+}
+
+function shareOgCopy({ tab, rest }) {
+  if (tab === 'promo') {
+    const parsed = parsePromoShareId(rest);
+    if (parsed) {
+      const promo = PROMO_TYPE_LABEL[parsed.promoType];
+      const book = bookLabel(parsed.book);
+      const title = 'AI Bet Builder — ' + book + ' ' + promo;
+      return {
+        title,
+        description: 'Open this ' + book + ' ' + promo + ' pick on AI Bet Builder.',
+      };
+    }
+    return {
+      title: 'AI Bet Builder — Promo pick',
+      description: 'Open this promo pick on AI Bet Builder.',
+    };
+  }
+  if (tab === 'ev') {
+    const parsed = parseEvShareId(rest);
+    const book = parsed ? bookLabel(parsed.book) : '';
+    return {
+      title: book ? 'AI Bet Builder — ' + book + ' +EV pick' : 'AI Bet Builder — +EV pick',
+      description: book
+        ? 'Open this ' + book + ' +EV pick on AI Bet Builder.'
+        : 'Open this +EV pick on AI Bet Builder.',
+    };
+  }
+  return {
+    title: 'AI Bet Builder — ' + (TAB_LABEL[tab] || 'Pick'),
+    description: 'Open this pick on AI Bet Builder.',
+  };
 }
 
 function originFromReq(req) {
@@ -51,14 +146,13 @@ function handler(req, res) {
   }
   const parsed = parseSharePath(path);
   const gated = GATED.has(parsed.tab);
-  const title = gated
-    ? 'AI Bet Builder'
-    : ('AI Bet Builder — ' + (TAB_LABEL[parsed.tab] || 'Pick'));
+  const og = shareOgCopy({ tab: parsed.tab, rest: parsed.rest });
+  const title = gated ? 'AI Bet Builder' : og.title;
   const description = gated
     ? 'Sign in to continue.'
     : (q.t || q.title)
       ? String(Array.isArray(q.t) ? q.t[0] : q.t)
-      : 'Open this pick on AI Bet Builder.';
+      : og.description;
   const origin = originFromReq(req);
   const dest = origin + '/#' + parsed.raw;
   const page = `<!DOCTYPE html>
@@ -90,5 +184,5 @@ function handler(req, res) {
   res.end(page);
 }
 
-handler._helpers = { parseSharePath, esc, GATED, TAB_LABEL };
+handler._helpers = { parseSharePath, esc, GATED, TAB_LABEL, shareOgCopy, parsePromoShareId, bookLabel };
 module.exports = handler;
