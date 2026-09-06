@@ -1976,7 +1976,7 @@ export default function App() {
 
   const topParlaysWithHedge = useMemo(() => {
     // 1-leg: top-only blend to required hedge $, prefer a full fill, lock from quoted opp.
-    // Multi-leg: $500 payout blend; lock badge stays off (no simultaneous lock).
+    // Multi-leg: $500 payout blend (profit excluding stake); lock badge stays off (no simultaneous lock).
     return rankPromoPicks(
       topParlays,
       { promoType: "boost", numLegs, stake, boostPct },

@@ -12,6 +12,7 @@ import {
   requiredFreeBetHedgeStake,
   requiredNoSweatHedgeStake,
   boostedProfitFromLeg,
+  stakeToProfit,
   applyPmBlendToLeg,
   applyPmBlendToLegs,
   preferCompletePmHedge,
@@ -100,7 +101,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(short.pmBlend.mode, "hedge");
 }
 
-// ── multi-leg uses $500 payout (not the hedge $)
+// ── multi-leg uses $500 profit excl. stake (not hedge $, not face/total return)
 {
   const multi = applyPmBlendToLeg(
     { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 200 },
@@ -108,16 +109,26 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
   );
   assert.equal(multi.pmBlend.mode, "payout");
-  // face at −200: 200 / (200/300) = 300 < 500
+  // profit at −200: 200 × (100/200) = 100 < 500  (old face 300 was the bug)
   assert.equal(multi.lowLiquidity, true);
   assert.match(multi.pmBlend.flag, /of \$500 payout available/);
+  assert.match(multi.pmBlend.flag, /\$100 of \$500/);
 
-  const covers500 = applyPmBlendToLeg(
+  const stillShortAt400 = applyPmBlendToLeg(
     { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 400 },
     null,
     { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
   );
-  // face at −200: 400 / (200/300) = 600 ≥ 500
+  // profit at −200: 400 × 0.5 = 200 < 500 (old face 600 incorrectly cleared the bar)
+  assert.equal(stillShortAt400.lowLiquidity, true);
+  assert.match(stillShortAt400.pmBlend.flag, /\$200 of \$500/);
+
+  const covers500 = applyPmBlendToLeg(
+    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 1000 },
+    null,
+    { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
+  );
+  // profit at −200: 1000 × 0.5 = 500
   assert.equal(covers500.lowLiquidity, false);
   assert.equal(covers500.pmBlend.flag, "blended to $500 payout");
 
@@ -183,7 +194,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const { displayLegs } = applyPmBlendToLegs([raw], {
     ["kalshi|mlb|A @ B|B ML|ML"]: levels,
   }, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30 });
-  assert.equal(displayLegs[0].bestOpp, 150, "boost path uses $500 VWAP not +200 top");
+  assert.equal(displayLegs[0].bestOpp, 125, "boost path uses $500-profit VWAP not +200 top");
   assert.notEqual(displayLegs[0].bestOpp, 200);
   assert.equal(trueOppAmerican(displayLegs[0]), 150);
   const evTop = calcParlayEV([{ ...raw, bestOpp: 200 }], 30, 100);
@@ -201,13 +212,17 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(ranked[1].ev, 40);
 }
 
-// ── known $500-payout ladder (multi-leg helper)
+// ── known $500-profit ladder (multi-leg helper)
+// +200 × $100 → $200 profit; need $300 more at +100 → $300 stake.
+// VWAP p = 400 / (400+500) = 4/9 → +125 (old face walk stopped at +150).
 {
   const blend = blendAskLadderToPayout([
     { american: 200, size: 100 },
     { american: 100, size: 400 },
   ]);
-  assert.equal(blend.american, 150);
+  assert.equal(blend.american, 125);
+  assert.ok(Math.abs(blend.payoutFilled - 500) < 1e-6);
+  assert.ok(Math.abs(blend.stakeFilled - 400) < 1e-6);
   assert.equal(blend.complete, true);
   assert.equal(blend.flag, "blended to $500 payout");
   assert.equal(formatBlendedPayoutFlag(blend), "blended to $500 payout");
@@ -227,7 +242,31 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const short = blendAskLadderToPayout([{ american: 150, size: 50 }]);
   assert.equal(short.american, 150);
   assert.equal(short.complete, false);
-  assert.equal(short.flag, "blended · $125 of $500 payout available");
+  // profit = 50 × 1.50 = 75 (old face 125 was stake × decimalOdds)
+  assert.equal(short.flag, "blended · $75 of $500 payout available");
+  assert.ok(Math.abs(short.payoutFilled - 75) < 1e-6);
+}
+
+// ── Nationals +1.5 Novig (Kevin, 2026-09-06): $62 @ +117 is $72.54 profit, not $135 face
+{
+  assert.ok(Math.abs(stakeToProfit(62, 117) - 72.54) < 1e-9);
+  const nationals = blendAskLadderToPayout([{ american: 117, size: 62 }]);
+  assert.equal(nationals.american, 117, "single level → VWAP stays +117");
+  assert.equal(nationals.complete, false);
+  assert.equal(nationals.lowLiquidity, true);
+  assert.ok(Math.abs(nationals.payoutFilled - 72.54) < 1e-6);
+  assert.ok(Math.abs(nationals.stakeFilled - 62) < 1e-6);
+  assert.equal(nationals.flag, "blended · $73 of $500 payout available");
+  assert.notEqual(nationals.flag, "blended · $135 of $500 payout available");
+
+  const applied = applyPmBlendToLeg(
+    { dk: -110, bestOpp: 117, bestOppBook: "novig", bestOppSize: 62 },
+    [{ american: 117, size: 62 }],
+    { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 },
+  );
+  assert.equal(applied.bestOpp, 117);
+  assert.equal(applied.lowLiquidity, true);
+  assert.equal(applied.pmBlend.flag, "blended · $73 of $500 payout available");
 }
 
 // ── Missouri-style Novig: thin top +223 must not drive true odds / EV
@@ -295,8 +334,11 @@ assert.equal(blendAskLadderToStake([], { targetStake: 333 }), null);
 
 {
   const p104 = americanToImpliedProb(104);
-  const face1 = 54 / p104;
-  assert.ok(face1 < 200);
+  const profit104 = 54 * (1 - p104) / p104;
+  assert.ok(Math.abs(profit104 - stakeToProfit(54, 104)) < 1e-9);
+  assert.ok(profit104 < 200);
+  assert.ok(stakeToProfit(62, 117) < 80);
+  assert.ok(stakeToProfit(62, 117) > 72);
 }
 
 console.log("blendAskLadder.test.js ok");

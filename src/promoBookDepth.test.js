@@ -46,7 +46,7 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(blended.odds, 150);
+  assert.equal(blended.odds, 125);
   assert.match(blended.text, /blended to \$500 payout/);
   assert.notEqual(blended.odds, 104, "true odds ≠ thin top when VWAP differs");
   const none = applyBlendToLegs([pxLeg], {});
@@ -57,7 +57,7 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(over.displayLegs[0].bestOpp, 150);
+  assert.equal(over.displayLegs[0].bestOpp, 125);
   assert.notEqual(over.displayLegs[0].bestOpp, pxLeg.bestOpp);
   assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $500 payout");
 
@@ -77,9 +77,13 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
   assert.match(oneLeg.displayLegs[0].pmBlend.flag, /\$333\.33 hedge/);
 
-  const covers500 = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 });
+  const covers500 = applyBlendToLegs(
+    [{ ...kevin, bestOppSize: 1000 }],
+    {},
+    { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
+  );
   assert.equal(covers500.displayLegs[0].pmBlend.mode, "payout");
-  assert.equal(covers500.displayLegs[0].lowLiquidity, false, "$600 face at −200 covers the $500 bar");
+  assert.equal(covers500.displayLegs[0].lowLiquidity, false, "$500 profit at −200 needs $1,000 stake");
 
   const multiShort = applyBlendToLegs(
     [{ ...kevin, bestOppSize: 200 }],
@@ -87,7 +91,7 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
     { promoType: "boost", numLegs: 2, stake: 100, boostPct: 100 },
   );
   assert.equal(multiShort.displayLegs[0].pmBlend.mode, "payout");
-  assert.equal(multiShort.displayLegs[0].lowLiquidity, true, "$300 face stays short of $500");
+  assert.equal(multiShort.displayLegs[0].lowLiquidity, true, "$100 profit at −200 stays short of $500");
 }
 
 {

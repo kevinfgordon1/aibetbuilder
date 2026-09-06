@@ -52,8 +52,8 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
 }
 
-// Precomputed `blend` wins (1-leg hedge $ or multi-leg $500 payout).
-// If `blend` is omitted, a raw ladder still defaults to the $500-payout walk.
+// Precomputed `blend` wins (1-leg hedge $ or multi-leg $500 profit excl. stake).
+// If `blend` is omitted, a raw ladder still defaults to the $500-profit walk.
 // Passing `blend: null` means "do not re-walk" (sportsbook / no PM book).
 // Primary line is the blended VWAP American; top size / thin top stay secondary.
 export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: blendIn } = {}) {
