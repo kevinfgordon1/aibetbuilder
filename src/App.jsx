@@ -20,6 +20,11 @@ import {
   toggleMatchingBookKey,
 } from "./promoMatchingBooks.js";
 import {
+  MARKET_SCOPES,
+  scopePromoLegs,
+  marketScopeSummary,
+} from "./promoMarketScope.js";
+import {
   loadModeForTab,
   buildOddsQueryPlan,
   queryOddsCaches,
@@ -128,17 +133,11 @@ const DATE_RANGES = [
 const DEFAULT_PROMO_SPORT_KEYS = ["baseball_mlb", "americanfootball_ncaaf"];
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
-const MARKET_SCOPES = [
-  { val: "all", label: "All" },
-  { val: "main", label: "Main" },
-  { val: "alt", label: "Alt" },
-];
-
 function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs }) {
   const selected = SPORTS.filter(s => promoSports.has(s.key)).map(s => s.label);
   const sportsPart = selected.length === SPORTS.length ? "All sports" : selected.join(", ");
   const datePart = DATE_RANGES.find(d => d.val === promoDateRange)?.label || promoDateRange;
-  const marketPart = marketScope === "main" ? "mains" : marketScope === "alt" ? "alts" : "all";
+  const marketPart = marketScopeSummary(marketScope);
   const parts = [sportsPart, datePart, marketPart];
   const isOddsPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
   if (isOddsPromo && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
@@ -1733,9 +1732,7 @@ export default function App() {
 
   const promoLegs = useMemo(() => {
     const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
-    const promoLegsScoped = marketScope === "main" ? promoLegsAll.filter(l => !l.isAlt)
-      : marketScope === "alt" ? promoLegsAll.filter(l => l.isAlt)
-      : promoLegsAll;
+    const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
     return filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
   }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs]);
 
