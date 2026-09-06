@@ -48,6 +48,7 @@ import {
   applyPmBlendToLeg,
   preferCompletePmHedge,
   pickHasLowLiquidity,
+  trueOppAmerican,
   LOW_LIQUIDITY_LABEL,
 } from "./blendAskLadder.js";
 
@@ -1449,6 +1450,7 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
         {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
         <LowLiquidityFlag show={line.lowLiquidity} style={{ marginLeft: 6 }} />
       </div>
+      {line.secondary ? <div style={{ color: "#4b5563", marginTop: 2 }}>{line.secondary}</div> : null}
       {trail ? <div style={{ color: "#4b5563", marginTop: 2 }}>{trail}</div> : null}
     </div>
   );
@@ -1470,7 +1472,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders,
         <div style={{ textAlign: "center" }}>Edge</div>
       </div>
       {rows.map((l, li) => {
-        const tp = ourTrueProb(l.bestOpp);
+        const tp = ourTrueProb(trueOppAmerican(l) ?? l.bestOpp);
         const bookImpl = impliedProb(l.dk);
         const edge = tp - bookImpl;
         const tpAm = probToAmerican(tp);
@@ -1974,7 +1976,7 @@ export default function App() {
 
   const topParlaysWithHedge = useMemo(() => {
     // 1-leg: top-only blend to required hedge $, prefer a full fill, lock from quoted opp.
-    // Multi-leg: $1,000 payout blend; lock badge stays off (no simultaneous lock).
+    // Multi-leg: $500 payout blend; lock badge stays off (no simultaneous lock).
     return rankPromoPicks(
       topParlays,
       { promoType: "boost", numLegs, stake, boostPct },

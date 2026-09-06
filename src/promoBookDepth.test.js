@@ -46,8 +46,9 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(blended.odds, 122);
-  assert.match(blended.text, /blended to \$1,000 payout/);
+  assert.equal(blended.odds, 150);
+  assert.match(blended.text, /blended to \$500 payout/);
+  assert.notEqual(blended.odds, 104, "true odds ≠ thin top when VWAP differs");
   const none = applyBlendToLegs([pxLeg], {});
   assert.equal(none.displayLegs[0].bestOpp, 104, "no ladder → keep top");
   const over = applyBlendToLegs([pxLeg], {
@@ -56,8 +57,9 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(over.displayLegs[0].bestOpp, 122);
-  assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $1,000 payout");
+  assert.equal(over.displayLegs[0].bestOpp, 150);
+  assert.notEqual(over.displayLegs[0].bestOpp, pxLeg.bestOpp);
+  assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $500 payout");
 
   const kevin = {
     dk: 200,

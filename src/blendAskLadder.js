@@ -4,16 +4,18 @@
 // --------------
 // 1-leg Profit Boost / Free Bet / No Sweat:
 //   Compute the exact hedge STAKE $ for a perfect lock from the quoted opp,
-//   then VWAP-walk the book until that hedge $ is filled. Not $1,000 payout.
-//   Example: $100 stake, +200 boosted 100% → $400 win; opp −200 needs $333.33.
+//   then VWAP-walk the book until that hedge $ is filled. Not the multi-leg
+//   payout target. Example: $100 stake, +200 boosted 100% → $400 win;
+//   opp −200 needs $333.33.
 // Multi-leg (numLegs ≥ 2):
-//   VWAP-walk until FACE PAYOUT reaches $1,000 (prior rule).
+//   VWAP-walk until FACE PAYOUT reaches TARGET_PAYOUT_USD ($500).
 //
 // Size on depth levels is DOLLAR STAKE (price × contracts). See lib/book-depth.js.
 // Face payout = stake / impliedProb = stake × decimalOdds.
 // Never invents levels. Sportsbooks are left untouched.
+// True odds / true win prob / EV use the blended VWAP American, not the thin top.
 
-export const TARGET_PAYOUT_USD = 1000;
+export const TARGET_PAYOUT_USD = 500;
 export const PM_BLEND_VENUES = new Set(["kalshi", "polymarket", "novig", "prophetx"]);
 export const LOW_LIQUIDITY_LABEL = "Low liquidity";
 const COMPLETE_EPS = 0.5;
@@ -54,12 +56,17 @@ export function formatHedgeDollars(n) {
   return `$${n.toFixed(2)}`;
 }
 
+export function payoutTargetLabel(target = TARGET_PAYOUT_USD) {
+  return formatPayoutDollars(target) || `$${TARGET_PAYOUT_USD}`;
+}
+
 export function formatBlendedPayoutFlag(blend) {
   if (!blend || blend.american == null) return "";
-  if (blend.complete) return "blended to $1,000 payout";
+  const target = payoutTargetLabel(blend.targetPayout ?? TARGET_PAYOUT_USD);
+  if (blend.complete) return `blended to ${target} payout`;
   const filled = formatPayoutDollars(blend.payoutFilled);
-  if (!filled) return "blended · $0 of $1,000 payout available";
-  return `blended · ${filled} of $1,000 payout available`;
+  if (!filled) return `blended · $0 of ${target} payout available`;
+  return `blended · ${filled} of ${target} payout available`;
 }
 
 export function formatBlendedHedgeFlag(blend) {
@@ -238,6 +245,14 @@ function requiredHedgeForLeg(leg, ctx) {
     ? ctx.boostedProfit
     : boostedProfitFromLeg(leg, stake, ctx.boostPct);
   return requiredBoostHedgeStake(stake, boostedProfit, quoted);
+}
+
+// Blended VWAP when the book was walked; otherwise the quoted bestOpp.
+export function trueOppAmerican(leg) {
+  const blended = leg && leg.pmBlend && leg.pmBlend.american;
+  if (blended != null && isFinite(Number(blended)) && Number(blended) !== 0) return Number(blended);
+  const n = Number(leg && leg.bestOpp);
+  return Number.isFinite(n) && n !== 0 ? n : null;
 }
 
 export function applyPmBlendToLeg(leg, levels, ctx = {}) {
