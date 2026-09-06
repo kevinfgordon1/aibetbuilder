@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const handler = require('./share.js');
-const { parseSharePath, esc } = handler._helpers;
+const { parseSharePath, esc, shareOgCopy } = handler._helpers;
 
 assert.deepEqual(parseSharePath('promo/boost.draftkings.100.abc'), {
   tab: 'promo', rest: 'boost.draftkings.100.abc', raw: 'promo/boost.draftkings.100.abc',
@@ -30,9 +30,25 @@ function run(query, url) {
   const { status, body } = run({ p: 'promo/boost.draftkings.100.k3' });
   assert.equal(status, 200);
   assert.match(body, /og:title/);
-  assert.match(body, /Promo pick/);
+  assert.match(body, /DraftKings Profit Boost/);
   assert.match(body, /#promo\/boost\.draftkings\.100\.k3/);
   assert.doesNotMatch(body, /lock-/);
+}
+
+{
+  const { body } = run({ p: 'promo/nosweat.fanduel.50.abc' });
+  assert.match(body, /FanDuel No Sweat/);
+  assert.match(body, /Open this FanDuel No Sweat pick/);
+}
+
+{
+  const { body } = run({ p: 'promo/freebet.betmgm.25.xyz' });
+  assert.match(body, /BetMGM Free Bet/);
+}
+
+{
+  const og = shareOgCopy({ tab: 'promo', rest: 'boost.draftkings.100.k3' });
+  assert.equal(og.title, 'AI Bet Builder — DraftKings Profit Boost');
 }
 
 {
@@ -46,7 +62,7 @@ function run(query, url) {
 
 {
   const { body } = run({}, '/s/ev/draftkings.abc');
-  assert.match(body, /\+EV pick/);
+  assert.match(body, /DraftKings \+EV pick/);
   assert.match(body, /#ev\/draftkings\.abc/);
 }
 

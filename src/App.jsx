@@ -2162,10 +2162,15 @@ export default function App() {
                     badge: b.ev > 0 ? "+EV" : "EV",
                     bookLabel: getBookLabel(b.bookKey),
                     ev: b.ev,
+                    evPct: b.ev,
                     odds: formatOdds(b.dk),
+                    stake: 100,
                     title: b.name,
-                    subtitle: `${b.market} — ${b.game}`,
-                    legs: [{ name: b.name, market: b.market, game: b.game }],
+                    market: b.market,
+                    trueProb: b.prob,
+                    implied: bookImplied,
+                    edge,
+                    legs: [{ name: b.name, market: b.market, game: b.game, dk: b.dk }],
                   });
                   return (
                     <div key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
@@ -2457,10 +2462,14 @@ export default function App() {
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
+                      promoType: "boost",
                       bookLabel: activePromoBookData.label,
                       ev: p.ev,
+                      evPct: stake ? (p.ev / stake) * 100 : null,
                       odds: formatOdds(boostedOdds),
+                      parlayOdds: formatOdds(p.parlayOdds),
                       stake,
+                      boostPct,
                       legs: p.legs,
                     });
 
@@ -2591,10 +2600,17 @@ export default function App() {
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
+                      promoType: "nosweat",
                       bookLabel: activePromoBookData.label,
                       ev: p.ev,
+                      evPct: stake ? (p.ev / stake) * 100 : null,
                       odds: formatOdds(p.parlayOdds),
                       stake,
+                      refundPct,
+                      creditConversionPct,
+                      refund: p.refund,
+                      creditValue: p.creditValue,
+                      winProfit: p.winProfit,
                       legs: p.legs,
                     });
 
@@ -2791,10 +2807,15 @@ export default function App() {
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? (showLock ? "BEST CONVERSION" : "BEST PICK") : "PICK",
+                      promoType: "freebet",
                       bookLabel: activePromoBookData.label,
                       ev: p.ev,
+                      evPct: stake ? (p.ev / stake) * 100 : null,
                       odds: formatOdds(p.parlayOdds),
                       stake,
+                      winProfit: p.winProfit,
+                      conversionRate: lock?.conversionRate,
+                      guaranteedCash: lock?.guaranteedCash,
                       legs: p.legs,
                     });
 
