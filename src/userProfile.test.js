@@ -182,7 +182,8 @@ assert.equal(PROFILE_PREFS_KEY, "aibetbuilder.profilePrefs");
   const ui = fs.readFileSync(path.join(dir, "UserProfile.jsx"), "utf8");
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(ui, /canSeeLocks/);
-  assert.match(ui, /isOwner/);
+  assert.match(ui, /isOwner = false/);
+  assert.match(ui, /profileShowsComboPnl/);
   assert.match(ui, /canSeeOwnerTools\(user\)/);
   assert.match(ui, /WhatsNewComposer/);
   assert.match(ui, /buildComboStatement/);
@@ -202,6 +203,8 @@ assert.equal(PROFILE_PREFS_KEY, "aibetbuilder.profilePrefs");
   assert.match(app, /loadProfilePrefs/);
   assert.match(app, /saveProfilePrefs/);
   assert.match(app, /UserProfile/);
+  assert.match(app, /canSeeLocks=\{canSeeComboLocks\(user\)\}/);
+  assert.match(app, /isOwner=\{Boolean\(user\)\}/);
 }
 
 console.log("userProfile.test.js ok");

@@ -1,9 +1,10 @@
 // Signed-in user profile. Identity is Google/Gmail; prefs are local defaults
-// for Promo Builder. Combo Locks P/L is allowlist-only (canSeeComboLocks) —
-// never mention the feature otherwise. Statement filters are not gated again.
+// for Promo Builder. Combo Locks P/L uses profileShowsComboPnl (own profile
+// + canSeeComboLocks). isOwner / canSeeLocks default false so public or
+// non-allowlisted profiles never mention the feature or fetch combo_*.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
+import { canSeeOwnerTools, comboLockHash, profileShowsComboPnl } from "./comboAccess";
 import { identityFromUser, profileDisplayName } from "./userProfile";
 import WhatsNewComposer from "./WhatsNewComposer";
 import {
@@ -31,7 +32,7 @@ export default function UserProfile({
   matchingBookKeys,
   onToggleMatchingBook,
   canSeeLocks = false,
-  isOwner = true,
+  isOwner = false,
   onOpenLock,
   announcement = null,
   onAnnouncementPublished,
@@ -58,7 +59,7 @@ export default function UserProfile({
     setDraftBook(prefs?.promoBook || "draftkings");
   }, [prefs, ident.name]);
 
-  const showPnl = !!(isOwner && canSeeLocks && canSeeComboLocks(user));
+  const showPnl = profileShowsComboPnl(user, { isOwner: isOwner && canSeeLocks });
 
   const loadStatement = useCallback(async () => {
     if (!showPnl || !user?.id) {
