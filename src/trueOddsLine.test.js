@@ -148,17 +148,50 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   const hedgeLine = formatTrueOddsWithBlend({
     odds: -200,
     bookLabel: "Kalshi",
-    size: 400,
-    levels: [{ american: -200, size: 400 }],
+    size: 100,
+    levels: [{ american: -200, size: 100 }, { american: -250, size: 300 }],
     blend: {
-      american: -200,
+      american: -220,
       flag: "blended to $333.33 hedge",
+      levelsUsed: 2,
+      complete: true,
       lowLiquidity: false,
     },
   });
-  assert.equal(hedgeLine.odds, -200);
+  assert.equal(hedgeLine.odds, -220);
   assert.match(hedgeLine.text, /blended to \$333\.33 hedge/);
+  assert.equal(hedgeLine.secondary, "top -200 · $100 currently available");
   assert.equal(hedgeLine.lowLiquidity, false);
+
+  // Ole Miss: −111 · $1,896 top alone covers $500 profit — no blend tag
+  const oleMiss = formatTrueOddsWithBlend({
+    odds: -111,
+    bookLabel: "Novig",
+    size: 1896,
+    levels: [{ american: -111, size: 1896 }],
+  });
+  assert.equal(oleMiss.odds, -111);
+  assert.equal(oleMiss.blend.complete, true);
+  assert.equal(oleMiss.blend.flag, "");
+  assert.equal(oleMiss.text, "-111 on Novig · $1,896 currently available");
+  assert.doesNotMatch(oleMiss.text, /blended/);
+  assert.equal(oleMiss.secondary, "");
+
+  const topOnlyHedge = formatTrueOddsWithBlend({
+    odds: -200,
+    bookLabel: "Kalshi",
+    size: 400,
+    blend: {
+      american: -200,
+      flag: "blended to $333.33 hedge",
+      levelsUsed: 1,
+      complete: true,
+      lowLiquidity: false,
+    },
+  });
+  assert.equal(topOnlyHedge.text, "-200 on Kalshi · $400 currently available");
+  assert.doesNotMatch(topOnlyHedge.text, /blended/);
+  assert.equal(topOnlyHedge.secondary, "");
   const shortHedge = formatTrueOddsWithBlend({
     odds: -200,
     bookLabel: "Novig",

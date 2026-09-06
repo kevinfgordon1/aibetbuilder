@@ -75,7 +75,7 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   const oneLeg = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 });
   assert.equal(oneLeg.displayLegs[0].pmBlend.mode, "hedge");
   assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
-  assert.match(oneLeg.displayLegs[0].pmBlend.flag, /\$333\.33 hedge/);
+  assert.equal(oneLeg.displayLegs[0].pmBlend.flag, "", "top-only hedge fill is not a blend");
 
   const covers500 = applyBlendToLegs(
     [{ ...kevin, bestOppSize: 1000 }],

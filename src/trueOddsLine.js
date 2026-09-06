@@ -4,12 +4,14 @@
 
 import {
   blendAskLadderToPayout,
+  blendDidWalk,
   formatBlendedPayoutFlag,
   TARGET_PAYOUT_USD,
 } from "./blendAskLadder.js";
 
 export {
   blendAskLadderToPayout,
+  blendDidWalk,
   formatBlendedPayoutFlag,
   TARGET_PAYOUT_USD,
 };
@@ -61,15 +63,19 @@ export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: 
     ? blendIn
     : (Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null);
   const shownOdds = blend?.american ?? odds;
-  const flag = blend ? (blend.flag || formatBlendedPayoutFlag(blend)) : "";
+  // Complete fill on the top level alone is not a blend — no flag, no "top …" subline.
+  const displayAsBlend = !!(blend && (!blend.complete || blendDidWalk(blend, odds)));
+  const flag = displayAsBlend
+    ? (blend.flag || formatBlendedPayoutFlag(blend, odds))
+    : "";
   const text = formatTrueOddsBookLine({
     odds: shownOdds,
     bookLabel,
-    size: blend ? null : size,
+    size: displayAsBlend ? null : size,
     blendFlag: flag,
   });
   let secondary = "";
-  if (blend) {
+  if (displayAsBlend) {
     const bits = [];
     if (odds != null && Number(odds) !== 0 && isFinite(Number(odds))) {
       bits.push(`top ${formatAmericanOdds(odds)}`);
