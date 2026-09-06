@@ -40,6 +40,11 @@ const googleUser = {
   assert.equal(ident.provider, "google");
 }
 
+assert.deepEqual(DEFAULT_PROFILE_SPORTS, [
+  "baseball_mlb",
+  "americanfootball_nfl",
+  "americanfootball_ncaaf",
+]);
 assert.deepEqual(defaultProfilePrefs().sports, DEFAULT_PROFILE_SPORTS);
 assert.equal(defaultProfilePrefs().promoBook, DEFAULT_PROFILE_BOOK);
 assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
@@ -50,6 +55,23 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
   assert.deepEqual(seeded.sports, DEFAULT_PROFILE_SPORTS);
   assert.equal(seeded.promoBook, "draftkings");
   assert.equal(seeded.identity.email, "kev120909@gmail.com");
+}
+
+{
+  const missing = normalizeProfilePrefs({}, { allowedSports, allowedBooks });
+  assert.deepEqual(missing.sports, DEFAULT_PROFILE_SPORTS);
+  const empty = normalizeProfilePrefs({ sports: [] }, { allowedSports, allowedBooks });
+  assert.deepEqual(empty.sports, DEFAULT_PROFILE_SPORTS);
+}
+
+{
+  const store = new Map();
+  const storage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, v); },
+  };
+  const firstLoad = loadProfilePrefs(googleUser, { storage, allowedSports, allowedBooks });
+  assert.deepEqual(firstLoad.sports, DEFAULT_PROFILE_SPORTS);
 }
 
 {
@@ -82,6 +104,20 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
   assert.deepEqual(loaded.sports, ["baseball_mlb"]);
   assert.equal(loaded.promoBook, "fanduel");
   assert.equal(loaded.seenAnnouncementId, "blast-1");
+}
+
+{
+  const store = new Map();
+  const storage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, v); },
+  };
+  saveProfilePrefs(googleUser, {
+    sports: ["baseball_mlb", "americanfootball_ncaaf"],
+    promoBook: "draftkings",
+  }, { storage, allowedSports, allowedBooks });
+  const loaded = loadProfilePrefs(googleUser, { storage, allowedSports, allowedBooks });
+  assert.deepEqual(loaded.sports, ["baseball_mlb", "americanfootball_ncaaf"]);
 }
 
 {
