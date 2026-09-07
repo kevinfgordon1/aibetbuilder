@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   sportFromTicker,
   dateKeyFromGameKey,
@@ -18,6 +21,7 @@ import {
   legFromEspnGame,
   settleLegs,
   sourceLabel,
+  outcomeChrome,
 } from "./comboLegResult.js";
 
 assert.equal(sportFromTicker("KXNFLGAME-26SEP13ARILAC-ARI", "nfl:26SEP13ARILAC"), "nfl");
@@ -62,6 +66,71 @@ assert.equal(underlyingCopy("lost", { filled: true }).text, "parlay lost");
 assert.equal(underlyingCopy("push").text, "push");
 assert.equal(sourceLabel("espn"), "ESPN scoreboard");
 assert.equal(sourceLabel("kalshi_legs"), "Kalshi legs");
+assert.equal(sourceLabel("kalshi_combo"), "Kalshi combo");
+assert.equal(sourceLabel("unknown"), null);
+
+{
+  const chrome = outcomeChrome({ kind: "underlying", outcome: "won", source: "espn" });
+  assert.equal(chrome.text, "risk won");
+  assert.equal(chrome.tone, "win");
+  assert.equal(chrome.source, "espn");
+  assert.equal(chrome.sourceText, "ESPN scoreboard");
+  assert.equal(chrome.official, false);
+}
+{
+  const chrome = outcomeChrome({ kind: "underlying", outcome: "lost", source: "kalshi_legs" });
+  assert.equal(chrome.text, "risk lost");
+  assert.equal(chrome.tone, "lose");
+  assert.equal(chrome.sourceText, "Kalshi legs");
+}
+{
+  const chrome = outcomeChrome({ kind: "underlying", outcome: "won", filled: true, source: "espn" });
+  assert.equal(chrome.text, "parlay won");
+  assert.equal(chrome.tone, "lose");
+}
+{
+  const chrome = outcomeChrome({ kind: "underlying", outcome: "lost" }, { filled: true });
+  assert.equal(chrome.text, "parlay lost");
+  assert.equal(chrome.tone, "win");
+}
+{
+  const chrome = outcomeChrome({
+    kind: "result",
+    settlement: { text: "parlay lost (we won)", weWon: true, result: "no" },
+  });
+  assert.equal(chrome.text, "parlay lost (we won)");
+  assert.equal(chrome.tone, "win");
+  assert.equal(chrome.source, "kalshi_combo");
+  assert.equal(chrome.sourceText, "Kalshi combo");
+  assert.equal(chrome.official, true);
+}
+{
+  const chrome = outcomeChrome({
+    kind: "result",
+    settlement: { text: "parlay won (we lost)", weWon: false, result: "yes" },
+  });
+  assert.equal(chrome.text, "parlay won (we lost)");
+  assert.equal(chrome.tone, "lose");
+  assert.equal(chrome.sourceText, "Kalshi combo");
+}
+{
+  const push = outcomeChrome({ kind: "underlying", outcome: "push", source: "espn" });
+  assert.equal(push.text, "push");
+  assert.equal(push.tone, "wait");
+  assert.equal(push.sourceText, "ESPN scoreboard");
+}
+{
+  const pending = outcomeChrome({ kind: "pending" });
+  assert.equal(pending.text, "pending");
+  assert.equal(pending.sourceText, null);
+}
+{
+  const awaiting = outcomeChrome({ kind: "awaiting", ticker: "KXMVE-WAIT" });
+  assert.equal(awaiting.text, "awaiting settlement");
+  assert.equal(awaiting.sourceText, null);
+}
+assert.equal(outcomeChrome({ kind: "none" }), null);
+assert.equal(outcomeChrome(null), null);
 
 const jaxGame = {
   sport: "nfl",
@@ -376,6 +445,18 @@ assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
   assert.equal(fromEspn.legs[0].status, "won");
   assert.equal(fromEspn.legs[1].status, "lost");
   assert.equal(fromEspn.legs[2].status, "lost");
+}
+
+{
+  const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  assert.match(locksSrc, /outcomeChrome/);
+  assert.match(locksSrc, /chip src/);
+  assert.match(locksSrc, /className="arch-head"/);
+  assert.match(locksSrc, /Hide history" : "History"/);
+  assert.match(locksSrc, /Show attempt history/);
+  assert.doesNotMatch(locksSrc, /History \+ profile/);
+  const tapeSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboTape.jsx"), "utf8");
+  assert.doesNotMatch(tapeSrc, /outcomeChrome|arch-head/);
 }
 
 console.log("comboLegResult.test.js ok");

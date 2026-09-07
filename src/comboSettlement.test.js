@@ -214,9 +214,12 @@ assert.equal(resolveComboTicker({
 
 const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
 assert.match(locksSrc, /historyOutcome/);
-assert.match(locksSrc, /SettlementChip awaiting/);
-assert.match(locksSrc, /out\.kind === "result"/);
-assert.match(locksSrc, /out\.kind === "awaiting"/);
+assert.match(locksSrc, /awaiting settlement/);
+assert.match(locksSrc, /outcomeChrome/);
+assert.match(locksSrc, /chip src/);
+assert.match(locksSrc, /arch-head/);
+assert.match(locksSrc, /Hide history" : "History"/);
+assert.doesNotMatch(locksSrc, /History \+ profile/);
 assert.match(locksSrc, /submissions/);
 assert.match(locksSrc, /market_ticker/);
 assert.match(locksSrc, /filledById && filledById\[row\.id\]\) > 0/);

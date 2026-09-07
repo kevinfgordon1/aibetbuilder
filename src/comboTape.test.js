@@ -758,7 +758,7 @@ assert.equal(pickFillRow([
   assert.match(tapeUi, /filterLockTapeByVenue/);
   assert.match(tapeUi, /<th>Venue<\/th>/);
   assert.match(tapeUi, /\.eq\("user_id", user\.id\)\.in\("status"/);
-  assert.match(locks, /settlementFromStored/);
+  assert.match(locks, /historyOutcome/);
   assert.match(locks, /parlay won \(we lost\)/);
   assert.match(locks, /parlay lost \(we won\)/);
 }

@@ -338,3 +338,56 @@ export function sourceLabel(source) {
   if (source === "kalshi_combo") return "Kalshi combo";
   return null;
 }
+
+// Card chrome for a historyOutcome(): outcome copy + source chip, at a glance.
+// Official combo ticker → parlay won/lost + Kalshi combo. Underlying stamp →
+// risk won/lost (or parlay won/lost when filled) + Kalshi legs / ESPN.
+export function outcomeChrome(out, { filled = false } = {}) {
+  if (!out || out.kind === "none") return null;
+  if (out.kind === "result") {
+    const settlement = out.settlement;
+    if (!settlement) return null;
+    return {
+      kind: "result",
+      text: settlement.text,
+      tone: settlement.weWon ? "win" : "lose",
+      source: "kalshi_combo",
+      sourceText: sourceLabel("kalshi_combo"),
+      official: true,
+    };
+  }
+  if (out.kind === "awaiting") {
+    return {
+      kind: "awaiting",
+      text: "awaiting settlement",
+      tone: "wait",
+      source: null,
+      sourceText: null,
+      official: false,
+    };
+  }
+  if (out.kind === "underlying") {
+    const copy = underlyingCopy(out.outcome, { filled: out.filled || filled });
+    if (!copy) return null;
+    const source = out.source || null;
+    return {
+      kind: "underlying",
+      text: copy.text,
+      tone: copy.tone,
+      source,
+      sourceText: sourceLabel(source),
+      official: false,
+    };
+  }
+  if (out.kind === "pending") {
+    return {
+      kind: "pending",
+      text: "pending",
+      tone: "wait",
+      source: null,
+      sourceText: null,
+      official: false,
+    };
+  }
+  return null;
+}
