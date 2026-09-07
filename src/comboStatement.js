@@ -28,7 +28,7 @@ export const STATEMENT_RESULT_FILTERS = [
   { key: "won", label: "Won" },
   { key: "lost", label: "Lost" },
   { key: "pending", label: "Pending" },
-  { key: "would_have", label: "Would-have" },
+  { key: "would_have", label: "Risk" },
 ];
 
 const SPORT_LABEL = {
@@ -166,7 +166,7 @@ export function normalizeStatementKind(value) {
 export function normalizeStatementResult(value) {
   const key = String(value == null ? "" : value).trim().toLowerCase().replace(/[-\s]+/g, "_");
   if (key === "won" || key === "lost" || key === "pending" || key === "would_have") return key;
-  if (key === "wouldhave" || key === "would") return "would_have";
+  if (key === "wouldhave" || key === "would" || key === "risk") return "would_have";
   return "all";
 }
 

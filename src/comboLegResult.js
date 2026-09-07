@@ -140,12 +140,12 @@ export function underlyingCopy(outcome, { filled = false } = {}) {
   if (outcome === "won") {
     return filled
       ? { outcome, text: "parlay won", tone: "lose" }
-      : { outcome, text: "would-have-won", tone: "win" };
+      : { outcome, text: "risk won", tone: "win" };
   }
   if (outcome === "lost") {
     return filled
       ? { outcome, text: "parlay lost", tone: "win" }
-      : { outcome, text: "would-have-lost", tone: "lose" };
+      : { outcome, text: "risk lost", tone: "lose" };
   }
   if (outcome === "push") return { outcome, text: "push", tone: "wait" };
   if (outcome === "pending") return { outcome, text: "pending", tone: "wait" };

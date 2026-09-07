@@ -52,9 +52,10 @@ assert.equal(combineLegResults([{ status: "won" }, { status: "won" }]).outcome, 
 assert.equal(combineLegResults([{ status: "won" }, { status: "lost" }]).outcome, "lost");
 assert.equal(combineLegResults([{ status: "won" }, { status: "pending" }]).outcome, "pending");
 assert.equal(combineLegResults([{ status: "won" }, { status: "push" }]).outcome, "push");
-assert.equal(underlyingCopy("won").text, "would-have-won");
-assert.equal(underlyingCopy("lost").text, "would-have-lost");
+assert.equal(underlyingCopy("won").text, "risk won");
+assert.equal(underlyingCopy("lost").text, "risk lost");
 assert.equal(underlyingCopy("won", { filled: true }).text, "parlay won");
+assert.equal(underlyingCopy("lost", { filled: true }).text, "parlay lost");
 assert.equal(underlyingCopy("push").text, "push");
 assert.equal(sourceLabel("espn"), "ESPN scoreboard");
 assert.equal(sourceLabel("kalshi_legs"), "Kalshi legs");
