@@ -943,6 +943,16 @@ assert.equal(inferRfqVenue({}), "kalshi");
   });
   assert.equal(kalshiCap.skip.text, "skipped · cap reached");
 
+  const underfunded = classifyMiss({
+    submission: { rfq_id: "k-funds", status: "declined", skip_reason: "insufficient_balance", contracts: 20 },
+  });
+  assert.equal(underfunded.bucket, "skipped");
+  assert.equal(underfunded.skip.text, "skipped · insufficient funds");
+  assert.equal(formatSkipReason(underfunded), "skipped · insufficient funds");
+  assert.equal(formatSkipReason(classifyMiss({
+    submission: { rfq_id: "k-funds-syn", status: "declined", skip_reason: "insufficient_funds" },
+  })), "skipped · insufficient funds");
+
   const unknown = classifyMiss({
     submission: { rfq_id: "pm-new", venue: "polymarket", status: "declined", skip_reason: "poly_future_code" },
   });
