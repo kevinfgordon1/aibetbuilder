@@ -107,10 +107,17 @@ function slimScoreboard(data, sport, date) {
   return events.map((ev) => slimEvent(ev, sport, date)).filter(Boolean);
 }
 
-async function fetchScoreboard(sport, date) {
+function scoreboardUrl(sport, date) {
   const base = ESPN[sport];
-  if (!base) return [];
-  const url = `${base}?dates=${encodeURIComponent(date)}`;
+  if (!base) return null;
+  // Saturday NCAAF slates exceed ESPN's default page; include FCS (Mercyhurst).
+  const extra = sport === 'ncaaf' ? '&limit=300' : '';
+  return `${base}?dates=${encodeURIComponent(date)}${extra}`;
+}
+
+async function fetchScoreboard(sport, date) {
+  const url = scoreboardUrl(sport, date);
+  if (!url) return [];
   const data = await fetchJson(url);
   return slimScoreboard(data, sport, date);
 }
@@ -134,4 +141,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._helpers = { queriesFromReq, slimEvent, slimScoreboard, DATE_RE, ESPN };
+module.exports._helpers = { queriesFromReq, slimEvent, slimScoreboard, DATE_RE, ESPN, scoreboardUrl };
