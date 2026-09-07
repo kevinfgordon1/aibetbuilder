@@ -7,6 +7,9 @@ import {
   parseTotalLabel,
   espnQueryForLeg,
   uniqueEspnQueries,
+  needsUnderlyingStamp,
+  namesMatch,
+  gameKeyMatchesEspn,
   legFromKalshiMarket,
   combineLegResults,
   underlyingCopy,
@@ -181,6 +184,198 @@ assert.equal(legFromEspnGame(jaxLeg, jaxGame).status, "won");
     espnGames: [{ ...ariGame, completed: false, homeScore: null, awayScore: null }],
   });
   assert.equal(pending.outcome, "pending");
+}
+
+assert.equal(needsUnderlyingStamp({
+  kalshi_result: null,
+  underlying_result: null,
+  legs: [{}, {}],
+}), true);
+assert.equal(needsUnderlyingStamp({
+  kalshi_result: "no",
+  underlying_result: null,
+  legs: [{}, {}],
+}), false);
+assert.equal(needsUnderlyingStamp({
+  kalshi_result: null,
+  underlying_result: "lost",
+  legs: [{}, {}],
+}), false);
+assert.equal(needsUnderlyingStamp({ combo_ticker: null, legs: [{}] }), false);
+
+assert.equal(namesMatch("Missouri St.", "Missouri State Bears"), true);
+assert.equal(namesMatch("New Mexico St.", "New Mexico State Aggies"), true);
+assert.equal(namesMatch("St. Louis", "St. Louis Cardinals"), true);
+assert.equal(namesMatch("St. Louis", "Missouri State Bears"), false);
+
+// Production NCAAF blanks (2026-09-05). Scores from ESPN scoreboard, not invented.
+const hawaiiMl = {
+  ticker: "KXNCAAFGAME-26SEP05UNLVHAW-HAW",
+  side: "yes",
+  type: "side",
+  label: "Hawai'i",
+  gameKey: "ncaaf:26SEP05UNLVHAW",
+};
+const wyomingMl = {
+  ticker: "KXNCAAFGAME-26SEP05WYOCSU-WYO",
+  side: "yes",
+  type: "side",
+  label: "Wyoming",
+  gameKey: "ncaaf:26SEP05WYOCSU",
+};
+const clemLsuOver = {
+  ticker: "KXNCAAFTOTAL-26SEP05CLEMLSU-50",
+  side: "yes",
+  type: "total",
+  label: "Over 49.5",
+  gameKey: "ncaaf:26SEP05CLEMLSU",
+};
+const baylorSpread = {
+  ticker: "KXNCAAFSPREAD-26SEP05BAYAUB-AUB8",
+  side: "no",
+  type: "spread",
+  label: "Baylor +7.5",
+  gameKey: "ncaaf:26SEP05BAYAUB",
+};
+const mercyhurstSpread = {
+  ticker: "KXNCAAFSPREAD-26SEP05MHUNMSU-NMSU29",
+  side: "no",
+  type: "spread",
+  label: "Mercyhurst +28.5",
+  gameKey: "ncaaf:26SEP05MHUNMSU",
+};
+const missouriStSpread = {
+  ticker: "KXNCAAFSPREAD-26SEP05MOSUTXAM-TXAM42",
+  side: "no",
+  type: "spread",
+  label: "Missouri St. +41.5",
+  gameKey: "ncaaf:26SEP05MOSUTXAM",
+};
+
+const espnSep5 = [
+  {
+    sport: "ncaaf",
+    date: "20260905",
+    home: "Hawai'i Rainbow Warriors",
+    homeAbbr: "HAW",
+    away: "UNLV Rebels",
+    awayAbbr: "UNLV",
+    homeScore: 6,
+    awayScore: 21,
+    completed: true,
+  },
+  {
+    sport: "ncaaf",
+    date: "20260905",
+    home: "Colorado State Rams",
+    homeAbbr: "CSU",
+    away: "Wyoming Cowboys",
+    awayAbbr: "WYO",
+    homeScore: 35,
+    awayScore: 13,
+    completed: true,
+  },
+  {
+    sport: "ncaaf",
+    date: "20260905",
+    home: "LSU Tigers",
+    homeAbbr: "LSU",
+    away: "Clemson Tigers",
+    awayAbbr: "CLEM",
+    homeScore: 51,
+    awayScore: 10,
+    completed: true,
+  },
+  {
+    sport: "ncaaf",
+    date: "20260905",
+    home: "Auburn Tigers",
+    homeAbbr: "AUB",
+    away: "Baylor Bears",
+    awayAbbr: "BAY",
+    homeScore: 17,
+    awayScore: 16,
+    completed: true,
+  },
+  {
+    sport: "ncaaf",
+    date: "20260905",
+    home: "New Mexico State Aggies",
+    homeAbbr: "NMSU",
+    away: "Mercyhurst Lakers",
+    awayAbbr: "MERC",
+    homeScore: 51,
+    awayScore: 14,
+    completed: true,
+  },
+  {
+    sport: "ncaaf",
+    date: "20260905",
+    home: "Texas A&M Aggies",
+    homeAbbr: "TA&M",
+    away: "Missouri State Bears",
+    awayAbbr: "MOST",
+    homeScore: 50,
+    awayScore: 0,
+    completed: true,
+  },
+];
+
+assert.equal(gameKeyMatchesEspn("ncaaf:26SEP05MOSUTXAM", espnSep5[5], "ncaaf", missouriStSpread.ticker), true);
+assert.equal(gameKeyMatchesEspn("ncaaf:26SEP05MHUNMSU", espnSep5[4], "ncaaf", mercyhurstSpread.ticker), true);
+assert.equal(findEspnGame(missouriStSpread, espnSep5).homeAbbr, "TA&M");
+assert.equal(findEspnGame(mercyhurstSpread, espnSep5).awayAbbr, "MERC");
+assert.equal(matchEspnSide("Missouri St.", espnSep5[5], "ncaaf"), "away");
+assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
+
+{
+  const fromKalshi = settleLegs({
+    legs: [hawaiiMl, wyomingMl, clemLsuOver],
+    kalshiMarkets: {
+      "KXNCAAFGAME-26SEP05UNLVHAW-HAW": { status: "finalized", result: "no" },
+      "KXNCAAFGAME-26SEP05WYOCSU-WYO": { status: "finalized", result: "no" },
+      "KXNCAAFTOTAL-26SEP05CLEMLSU-50": { status: "finalized", result: "yes" },
+    },
+  });
+  assert.equal(fromKalshi.outcome, "lost");
+  assert.equal(fromKalshi.source, "kalshi_legs");
+}
+
+{
+  const fromKalshi = settleLegs({
+    legs: [baylorSpread, mercyhurstSpread, missouriStSpread],
+    kalshiMarkets: {
+      "KXNCAAFSPREAD-26SEP05BAYAUB-AUB8": { status: "finalized", result: "no" },
+      "KXNCAAFSPREAD-26SEP05MHUNMSU-NMSU29": { status: "finalized", result: "yes" },
+      "KXNCAAFSPREAD-26SEP05MOSUTXAM-TXAM42": { status: "finalized", result: "yes" },
+    },
+  });
+  assert.equal(fromKalshi.outcome, "lost");
+  assert.equal(fromKalshi.source, "kalshi_legs");
+  assert.equal(fromKalshi.legs[0].status, "won");
+  assert.equal(fromKalshi.legs[1].status, "lost");
+  assert.equal(fromKalshi.legs[2].status, "lost");
+}
+
+{
+  const fromEspn = settleLegs({
+    legs: [hawaiiMl, wyomingMl, clemLsuOver],
+    espnGames: espnSep5,
+  });
+  assert.equal(fromEspn.outcome, "lost");
+  assert.equal(fromEspn.source, "espn");
+}
+
+{
+  const fromEspn = settleLegs({
+    legs: [baylorSpread, mercyhurstSpread, missouriStSpread],
+    espnGames: espnSep5,
+  });
+  assert.equal(fromEspn.outcome, "lost");
+  assert.equal(fromEspn.source, "espn");
+  assert.equal(fromEspn.legs[0].status, "won");
+  assert.equal(fromEspn.legs[1].status, "lost");
+  assert.equal(fromEspn.legs[2].status, "lost");
 }
 
 console.log("comboLegResult.test.js ok");

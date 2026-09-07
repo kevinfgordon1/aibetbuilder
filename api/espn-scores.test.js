@@ -15,6 +15,8 @@ assert.deepEqual(h.queriesFromReq({ query: { queries: 'mlb:notadate,evil:2026090
 assert.equal(h.ESPN.mlb.includes('espn.com'), true);
 assert.equal(h.ESPN.nfl.includes('espn.com'), true);
 assert.equal(h.ESPN.ncaaf.includes('college-football'), true);
+assert.match(h.scoreboardUrl('ncaaf', '20260905'), /dates=20260905.*limit=300/);
+assert.equal(h.scoreboardUrl('mlb', '20260903').includes('limit='), false);
 
 const ev = {
   competitions: [{

@@ -225,6 +225,8 @@ assert.match(locksSrc, /RiskProfile/);
 assert.match(locksSrc, /AttemptHistory/);
 assert.match(locksSrc, /espn-scores/);
 assert.match(locksSrc, /underlying_result/);
+assert.match(locksSrc, /needsUnderlyingStamp/);
+assert.match(locksSrc, /!candidates\.length && !foundTickers\.length && !needUnderlying\.length/);
 assert.match(locksSrc, /Current \(unhedged\)/);
 assert.match(locksSrc, /target TBD/);
 assert.doesNotMatch(locksSrc, /UNHEDGED_RFQ_LIVE/);

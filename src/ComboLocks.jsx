@@ -10,6 +10,7 @@
 // classification. Risk/profit uses parlay_stake + fill_american + max_contracts.
 // Unfilled outcomes: official Kalshi combo ticker, else Kalshi single-game legs,
 // else ESPN public scoreboard (/api/espn-scores). Never invents scores.
+// Blank underlying_result rows re-settle on Combo Locks page load / poll — no SQL backfill.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
@@ -17,7 +18,7 @@ import { buildParlayDesk, formatLoss, skipLabel, skipReasonOf, formatCents, tape
 import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
-import { settleLegs, uniqueEspnQueries, underlyingCopy, sourceLabel } from "./comboLegResult";
+import { settleLegs, uniqueEspnQueries, underlyingCopy, sourceLabel, needsUnderlyingStamp } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 
@@ -421,7 +422,13 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (row.kalshi_result === "yes" || row.kalshi_result === "no") return;
       if (ticker) candidates.push({ row, ticker });
     });
-    if (!candidates.length && !foundTickers.length) return;
+    const needUnderlying = [];
+    [...(living || []), ...(archived || [])].forEach((row) => {
+      if (needsUnderlyingStamp(row)) needUnderlying.push(row);
+    });
+    // Unfilled locks often have no combo ticker. Still stamp risk won / risk lost
+    // from Kalshi single-game legs or ESPN — do not wait for a combo market.
+    if (!candidates.length && !foundTickers.length && !needUnderlying.length) return;
     const tickers = [...new Set(candidates.map((c) => c.ticker))];
     settleInflight.current = true;
     try {
@@ -452,16 +459,14 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
           }
         }
       }
-      const needUnderlying = [];
-      [...(living || []), ...(archived || [])].forEach((row) => {
-        if (!row) return;
-        if (row.kalshi_result === "yes" || row.kalshi_result === "no") return;
-        if (row.underlying_result === "won" || row.underlying_result === "lost" || row.underlying_result === "push") return;
-        if (!Array.isArray(row.legs) || row.legs.length < 2) return;
-        needUnderlying.push(row);
-      });
       if (needUnderlying.length) {
-        const tickers = [...new Set(needUnderlying.flatMap((p) => (p.legs || []).map((l) => l && l.ticker).filter(Boolean)))].slice(0, 50);
+        const started = needUnderlying.filter((p) => {
+          if (!p.starts_at) return true;
+          const t = Date.parse(p.starts_at);
+          return !Number.isFinite(t) || t <= Date.now();
+        });
+        const tickerRows = started.length ? started : needUnderlying;
+        const tickers = [...new Set(tickerRows.flatMap((p) => (p.legs || []).map((l) => l && l.ticker).filter(Boolean)))].slice(0, 50);
         const markets = {};
         for (let i = 0; i < tickers.length; i += 25) {
           const batch = tickers.slice(i, i + 25);
@@ -472,13 +477,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
           }
         }
         let espnGames = [];
-        const now = Date.now();
-        const past = needUnderlying.filter((p) => {
-          if (!p.starts_at) return true;
-          const t = Date.parse(p.starts_at);
-          return !Number.isFinite(t) || t <= now;
-        });
-        const queries = uniqueEspnQueries(past).slice(0, 12);
+        const queries = uniqueEspnQueries(started).slice(0, 12);
         if (queries.length) {
           try {
             const er = await fetch("/api/espn-scores?queries=" + encodeURIComponent(queries.map((q) => q.sport + ":" + q.date).join(",")), { headers: { accept: "application/json" } });

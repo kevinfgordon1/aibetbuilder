@@ -14,6 +14,18 @@ const ESPN_ABBR = {
   mlb: { CWS: "CHW", ATH: "ATH", AZ: "ARI", WSH: "WSH" },
 };
 
+// Kalshi NCAAF ticker codes vs ESPN abbreviations (FCS + A&M, St. schools).
+const NCAAF_ABBR_ALIASES = {
+  TXAM: ["TAMU", "TA&M", "TAM"],
+  TAMU: ["TXAM", "TA&M", "TAM"],
+  "TA&M": ["TXAM", "TAMU", "TAM"],
+  TAM: ["TXAM", "TAMU", "TA&M"],
+  MOSU: ["MOST"],
+  MOST: ["MOSU"],
+  MHU: ["MERC"],
+  MERC: ["MHU"],
+};
+
 export function normSide(v) {
   return String(v == null ? "" : v).trim().toLowerCase();
 }
@@ -76,6 +88,15 @@ export function espnQueryForLeg(leg) {
   const date = dateKeyFromGameKey(leg.gameKey || rawGameKey(leg.gameKey, leg.ticker));
   if (!sport || !date) return null;
   return { sport, date };
+}
+
+export function needsUnderlyingStamp(row) {
+  if (!row) return false;
+  const kr = normSide(row.kalshi_result);
+  if (kr === "yes" || kr === "no") return false;
+  const ur = normSide(row.underlying_result);
+  if (ur === "won" || ur === "lost" || ur === "push") return false;
+  return Array.isArray(row.legs) && row.legs.length >= 2;
 }
 
 export function uniqueEspnQueries(parlays = []) {
@@ -165,17 +186,26 @@ function teamCodes(raw, sport) {
     codes.add(id);
     codes.add(espnAbbr(id, sport));
   }
-  const upper = String(raw || "").toUpperCase().replace(/[^A-Z]/g, "");
-  if (upper.length >= 2 && upper.length <= 4) {
-    codes.add(upper);
-    codes.add(espnAbbr(upper, sport));
+  const rawUpper = String(raw || "").toUpperCase();
+  const letters = rawUpper.replace(/[^A-Z]/g, "");
+  for (const token of [rawUpper, letters]) {
+    if (token.length >= 2 && token.length <= 4) {
+      for (const v of abbrVariants(token, sport)) codes.add(v);
+    }
   }
   return codes;
 }
 
+// "Missouri St." ↔ "Missouri State"; do not rewrite leading St. (St. Louis).
+function foldCollegeTokens(s) {
+  const n = normalize(s);
+  if (!n) return n;
+  return n.split(" ").map((tok, i) => (tok === "st" && i > 0 ? "state" : tok)).join(" ");
+}
+
 export function namesMatch(a, b) {
-  const na = normalize(a);
-  const nb = normalize(b);
+  const na = foldCollegeTokens(a);
+  const nb = foldCollegeTokens(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
   if (na.length >= 4 && nb.includes(na)) return true;
@@ -212,6 +242,8 @@ function abbrVariants(abbr, sport) {
   if (a === "ARI") out.add("AZ");
   if (a === "WSH") out.add("WAS");
   if (a === "TAMU") out.add("TXAM");
+  const extra = sport === "ncaaf" ? (NCAAF_ABBR_ALIASES[a] || []) : [];
+  extra.forEach((v) => out.add(v));
   out.add(espnAbbr(a, sport));
   return [...out].filter((v) => v && v.length >= 2);
 }
