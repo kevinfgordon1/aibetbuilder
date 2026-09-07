@@ -907,6 +907,72 @@ assert.equal(inferRfqVenue({}), "kalshi");
   assert.equal(scoped.rows[0].venueKey, "polymarket");
 }
 
+{
+  const fromSub = classifyMiss({
+    submission: {
+      rfq_id: "pm-skip",
+      venue: "polymarket",
+      status: "declined",
+      skip_reason: "no_lock_overlap:leg_count",
+      contracts: 8,
+    },
+  });
+  assert.equal(fromSub.bucket, "skipped");
+  assert.equal(fromSub.skip.text, "skipped · different leg count");
+  assert.equal(formatSkipReason(fromSub), "skipped · different leg count");
+
+  const merged = classifyMiss({
+    match: { rfq_id: "pm-2", contracts: 80 },
+    submission: {
+      rfq_id: "pm-2",
+      venue: "polymarket",
+      status: "declined",
+      skip_reason: "game_started",
+    },
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(merged.bucket, "skipped");
+  assert.equal(merged.skip.text, "skipped · game started");
+  assert.doesNotMatch(formatSkipReason(merged), /^skipped 80$|^skipped oversized/);
+
+  const kalshiCap = classifyMiss({
+    submission: { rfq_id: "k-cap", status: "declined", skip_reason: "limit_reached", contracts: 12 },
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(kalshiCap.skip.text, "skipped · cap reached");
+
+  const unknown = classifyMiss({
+    submission: { rfq_id: "pm-new", venue: "polymarket", status: "declined", skip_reason: "poly_future_code" },
+  });
+  assert.equal(formatSkipReason(unknown), "skipped · poly_future_code");
+
+  const noise = classifyMiss({
+    submission: {
+      rfq_id: "poly-agg:no_shared_game:p1:1",
+      venue: "polymarket",
+      status: "declined",
+      skip_reason: "no_lock_overlap:no_shared_game x9",
+    },
+  });
+  assert.equal(formatSkipReason(noise), "skipped · no shared game ×9");
+
+  const row = buildRfqRow({
+    submission: {
+      rfq_id: "pm-3",
+      venue: "polymarket",
+      status: "declined",
+      skip_reason: "no_lock_overlap:same_games_no_match",
+      contracts: 6,
+      created_at: "2026-09-07T16:00:00Z",
+    },
+  });
+  assert.equal(row.venueKey, "polymarket");
+  assert.equal(row.venue, "Polymarket");
+  assert.equal(formatSkipReason(row), "skipped · same games, no match");
+}
+
 assert.equal(isQuotingParlay({ active: true, archived_at: null }), true);
 assert.equal(isQuotingParlay({ active: false, archived_at: null }), false);
 assert.equal(isQuotingParlay({ active: true, archived_at: "2026-08-22T00:00:00Z" }), false);

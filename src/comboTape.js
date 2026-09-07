@@ -11,6 +11,7 @@
 // from the NO price (1 − NO), never guessed when tape columns are empty.
 // Miss-tape display is that YES / parlay American (e.g. 0.90 NO → +900), not cents.
 // Miss labels reuse comboDesk skipLabel / tapeNoPrice / tapeMatch.
+// skipLabel reads combo_submissions.skip_reason (mapped code, else raw).
 //
 // Skip-then-filled is tape_match=matched on the skip row (match and/or declined
 // submission). Those columns are not on main yet — missing tape is "unknown",
@@ -26,6 +27,7 @@ import {
   tapeNoPrice,
   tapeMatch,
   skipLabel,
+  skipReasonOf,
   outcomesForParlay,
 } from "./comboDesk.js";
 import { settlementFromStored } from "./comboSettlement.js";
@@ -494,7 +496,13 @@ export function classifyMiss({ match, outcome, submission, fill, filled = 0, cei
     }
     return { bucket: "no_taker", reason: "quoted · no take", missed: true };
   }
-  const skipRow = match || submission;
+  // skip_reason lives on combo_submissions. A match-only row would otherwise
+  // fall through to generic "skipped" even when the declined twin has a code.
+  const skipRow = {
+    ...(match || {}),
+    ...(submission || {}),
+    skip_reason: skipReasonOf(submission) || skipReasonOf(match) || undefined,
+  };
   const skip = skipLabel(skipRow, { filled, ceiling, hedgeCap: ceiling });
   const tape = skipTapeSource(match, submission);
   const skipFill = skipFillState(tape);
