@@ -9,7 +9,7 @@
 //
 // GET /api/espn-scores?queries=mlb:20260903,nfl:20260913
 // Returns only games ESPN has scored. We do not invent scores or winners.
-// Combo Locks stamps would-have-won / lost / push from these + Kalshi legs.
+// Combo Locks stamps risk won / risk lost / push from these + Kalshi legs.
 // ─────────────────────────────────────────────────────────────────────────
 'use strict';
 

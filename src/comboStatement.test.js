@@ -12,6 +12,7 @@ import {
   formatStatementPnl,
   lockStatementLine,
   normalizeStatementDateRange,
+  normalizeStatementResult,
   sportsFromParlay,
   statementCsv,
   statementCsvFilename,
@@ -58,8 +59,17 @@ const ariJax = {
   });
   assert.equal(underlyingLost.bucket, "unfilled");
   assert.equal(underlyingLost.pnl, -100);
-  assert.equal(underlyingLost.resultLabel, "would-have-lost");
+  assert.equal(underlyingLost.resultLabel, "risk lost");
   assert.equal(underlyingLost.source, "espn");
+}
+
+{
+  const underlyingWon = lockStatementLine({
+    parlay: { ...ariJax, underlying_result: "won", underlying_source: "espn" },
+    filled: 0,
+  });
+  assert.equal(underlyingWon.bucket, "unfilled");
+  assert.equal(underlyingWon.resultLabel, "risk won");
 }
 
 {
@@ -107,6 +117,8 @@ assert.equal(STATEMENT_DEFAULT_DATE_RANGE, "all");
 assert.deepEqual(STATEMENT_DATE_FILTERS.map((c) => c.key), ["today", "7d", "30d", "all"]);
 assert.deepEqual(STATEMENT_KIND_FILTERS.map((c) => c.key), ["all", "locked_fill", "unfilled", "open"]);
 assert.deepEqual(STATEMENT_RESULT_FILTERS.map((c) => c.key), ["all", "won", "lost", "pending", "would_have"]);
+assert.equal(STATEMENT_RESULT_FILTERS.find((c) => c.key === "would_have").label, "Risk");
+assert.equal(normalizeStatementResult("risk"), "would_have");
 assert.equal(normalizeStatementDateRange("30d"), "30d");
 assert.equal(normalizeStatementDateRange("month"), "30d");
 assert.equal(normalizeStatementDateRange("nope"), "all");
