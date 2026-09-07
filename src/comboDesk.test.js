@@ -6,6 +6,8 @@ import {
   formatCents,
   formatLoss,
   skipLabel,
+  skipReasonOf,
+  formatStoredSkipReason,
   lastSkip,
   lastLoss,
   lastRelevant,
@@ -83,6 +85,30 @@ assert.equal(lastLoss([{ outcome: "executed" }]), null);
   assert.equal(small.text, "skipped 10");
 }
 {
+  assert.equal(skipReasonOf({ skip_reason: "game_started" }), "game_started");
+  assert.equal(skipReasonOf({ skipReason: "limit_reached" }), "limit_reached");
+  assert.equal(skipReasonOf({ raw: { skip_reason: "oversized" } }), "oversized");
+  assert.equal(formatStoredSkipReason("game_started"), "game started");
+  assert.equal(formatStoredSkipReason("no_lock_overlap:leg_count"), "different leg count");
+  assert.equal(formatStoredSkipReason("no_lock_overlap:same_games_no_match"), "same games, no match");
+  assert.equal(formatStoredSkipReason("no_lock_overlap:no_shared_game x12"), "no shared game ×12");
+  assert.equal(formatStoredSkipReason("no_lock_overlap:mystery_code"), "no_lock_overlap:mystery_code");
+  const started = skipLabel({ skip_reason: "game_started", contracts: 80 }, { filled: 40, ceiling: 100 });
+  assert.equal(started.kind, "skipped");
+  assert.equal(started.text, "skipped · game started");
+  const overlap = skipLabel({ skip_reason: "no_lock_overlap:same_games_no_match", contracts: 8 });
+  assert.equal(overlap.text, "skipped · same games, no match");
+  const noise = skipLabel({ skip_reason: "no_lock_overlap:no_shared_game x7" });
+  assert.equal(noise.text, "skipped · no shared game ×7");
+  const unknown = skipLabel({ skip_reason: "poly_new_guard" });
+  assert.equal(unknown.text, "skipped · poly_new_guard");
+  const cap = skipLabel({ skip_reason: "limit_reached", contracts: 20 }, { filled: 40, ceiling: 100 });
+  assert.equal(cap.text, "skipped · cap reached");
+  const storedOversize = skipLabel({ skip_reason: "oversized", contracts: 250 }, { filled: 40, ceiling: 100 });
+  assert.equal(storedOversize.kind, "oversized");
+  assert.match(storedOversize.text, /skipped oversized 250/);
+}
+{
   const skip = lastSkip({
     matches: [
       { rfq_id: "quoted-1", matched_at: "2026-08-13T14:00:00Z", contracts: 20 },
@@ -98,6 +124,17 @@ assert.equal(lastLoss([{ outcome: "executed" }]), null);
   assert.match(skip.text, /250/);
 }
 assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:00Z" }], outcomeByRfq: { q: { outcome: "posted" } } }), null);
+{
+  const skip = lastSkip({
+    matches: [{ rfq_id: "poly-1", matched_at: "2026-09-07T16:00:00Z", contracts: 80 }],
+    submissions: [{ rfq_id: "poly-1", status: "declined", skip_reason: "game_started", contracts: 80 }],
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(skip.rfqId, "poly-1");
+  assert.equal(skip.kind, "skipped");
+  assert.equal(skip.text, "skipped · game started");
+}
 
 // ── last relevant prefers the newer of skip vs loss ──
 {
@@ -133,6 +170,9 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
       { rfq_id: "lost-1", matched_at: "2026-08-13T12:00:00Z", contracts: 20 },
       { rfq_id: "skip-1", matched_at: "2026-08-13T13:00:00Z", contracts: 80 },
     ],
+    submissions: [
+      { rfq_id: "skip-1", status: "declined", skip_reason: "no_lock_overlap:same_games_no_match", contracts: 80 },
+    ],
     outcomes: [
       { parlay_id: "p1", rfq_id: "lost-1", outcome: "lost", loss_reason: "outbid", tape_no_price: 0.91, tape_match: "matched", posted_at: "2026-08-13T12:01:00Z" },
     ],
@@ -142,7 +182,8 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   });
   assert.equal(desk.fill.left, 60);
   assert.equal(desk.quote.key, "watching");
-  assert.equal(desk.skip.kind, "oversized");
+  assert.equal(desk.skip.kind, "skipped");
+  assert.equal(desk.skip.text, "skipped · same games, no match");
   assert.equal(desk.loss.text, "outbid at 91¢");
   assert.equal(desk.awaiting, false);
 }

@@ -2,8 +2,10 @@
 // (combo_parlays, combo_fills, combo_matches, quote_outcomes).
 //
 // Skips are matched RFQs the worker did not quote (especially oversized ones —
-// Kalshi makers cannot partial-fill). Losses and tape clearing prices come from
-// quote-watcher (loss_reason + tape_no_price, or raw.tape fallback).
+// Kalshi makers cannot partial-fill). combo_submissions.skip_reason (Poly
+// combo-worker #57, Kalshi skip-tape) maps to a short label; unknown codes
+// show raw. Losses and tape clearing prices come from quote-watcher
+// (loss_reason + tape_no_price, or raw.tape fallback).
 
 function toNum(v) {
   if (v == null || v === "") return null;
@@ -80,32 +82,124 @@ export function formatLoss(outcome) {
   return LOSS_LABEL[reason] || reason;
 }
 
+const SKIP_REASON_KEYS = ["skip_reason", "skipReason"];
+
+// combo-worker persist codes (Kalshi classifySkip + Poly polySkipReason).
+// Prefix `no_lock_overlap:` is the near-miss / noise family. ` xN` is the
+// hourly aggregate count (no_shared_game / no_rfq_tokens).
+const SKIP_REASON_LABELS = {
+  oversized: "oversized",
+  rfq_too_large: "oversized",
+  limit_reached: "cap reached",
+  limitreached: "cap reached",
+  game_started: "game started",
+  started: "game started",
+  no_lock_overlap: "no lock overlap",
+  "no_lock_overlap:leg_count": "different leg count",
+  "no_lock_overlap:same_games_no_match": "same games, no match",
+  "no_lock_overlap:missing_team": "missing team",
+  "no_lock_overlap:doubleheader": "doubleheader",
+  "no_lock_overlap:no_shared_game": "no shared game",
+  "no_lock_overlap:no_rfq_tokens": "no RFQ tokens",
+  leg_count: "different leg count",
+  same_games_no_match: "same games, no match",
+  missing_team: "missing team",
+  doubleheader: "doubleheader",
+  no_shared_game: "no shared game",
+  no_rfq_tokens: "no RFQ tokens",
+};
+
+export function skipReasonOf(row) {
+  if (!row || typeof row !== "object") return null;
+  const bags = [row, row.raw && typeof row.raw === "object" ? row.raw : null];
+  for (const bag of bags) {
+    if (!bag) continue;
+    for (const k of SKIP_REASON_KEYS) {
+      if (bag[k] == null || bag[k] === "") continue;
+      const s = String(bag[k]).trim();
+      if (s) return s;
+    }
+  }
+  return null;
+}
+
+function normalizeSkipReasonKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/-/g, "_");
+}
+
+export function parseSkipReason(value) {
+  const raw = value == null ? "" : String(value).trim();
+  if (!raw) return { raw: "", key: "", count: null };
+  const counted = raw.match(/^(.*?)\s+[x×](\d+)\s*$/i);
+  const base = counted ? counted[1].trim() : raw;
+  const count = counted ? Number(counted[2]) : null;
+  return { raw, key: normalizeSkipReasonKey(base), count: Number.isFinite(count) ? count : null };
+}
+
+export function formatStoredSkipReason(value) {
+  const parsed = parseSkipReason(value);
+  if (!parsed.key) return null;
+  const suffix = parsed.key.startsWith("no_lock_overlap:")
+    ? parsed.key.slice("no_lock_overlap:".length)
+    : "";
+  const mapped = SKIP_REASON_LABELS[parsed.key]
+    || (suffix ? SKIP_REASON_LABELS[suffix] : null);
+  if (!mapped) return parsed.raw;
+  if (parsed.count != null && parsed.count > 1) return `${mapped} ×${parsed.count}`;
+  return mapped;
+}
+
+function oversizedSkipText(contracts, rem) {
+  const need = rem.left > 0 ? rem.left : rem.ceiling;
+  const size = contracts != null
+    ? (Number.isInteger(contracts) ? String(contracts) : String(contracts))
+    : null;
+  if (size && need > 0) return `skipped oversized ${size} (need ≤${need})`;
+  if (size) return `skipped oversized ${size} (cannot partial-fill)`;
+  return "skipped oversized";
+}
+
 export function skipLabel(row, { filled, ceiling, hedgeCap } = {}) {
+  const stored = skipReasonOf(row);
+  const parsed = parseSkipReason(stored);
+  const oversizedStored = parsed.key === "oversized" || parsed.key === "rfq_too_large";
   const contracts = toNum(row && row.contracts);
   const rem = remainingFill({ filled, ceiling });
   const perFill = toNum(hedgeCap);
   const tooBigForRemain = contracts != null && rem.left > 0 && contracts > rem.left;
   const tooBigForCeil = contracts != null && rem.ceiling > 0 && contracts > rem.ceiling;
   const tooBigForHedge = contracts != null && perFill != null && perFill > 0 && contracts > perFill;
-  if (tooBigForRemain || tooBigForCeil || tooBigForHedge) {
-    const need = rem.left > 0 ? rem.left : rem.ceiling;
-    const size = Number.isInteger(contracts) ? String(contracts) : String(contracts);
-    return {
-      kind: "oversized",
-      text: need > 0
-        ? `skipped oversized ${size} (need ≤${need})`
-        : `skipped oversized ${size} (cannot partial-fill)`,
-    };
+  // Stored skip_reason wins over the size heuristic so Poly game_started /
+  // no_lock_overlap rows are not relabeled oversized just because the RFQ
+  // is larger than remaining fill. Kalshi rows without a reason keep the
+  // existing cannot-partial-fill copy.
+  if (oversizedStored || (!stored && (tooBigForRemain || tooBigForCeil || tooBigForHedge))) {
+    return { kind: "oversized", text: oversizedSkipText(contracts, rem), reason: stored || "oversized" };
+  }
+  if (stored) {
+    const label = formatStoredSkipReason(stored);
+    const text = label && /^skipped\b/i.test(label) ? label : `skipped · ${label || stored}`;
+    return { kind: "skipped", text, reason: stored };
   }
   if (contracts != null) return { kind: "skipped", text: `skipped ${contracts}` };
   return { kind: "skipped", text: "skipped" };
 }
 
-export function lastSkip({ matches = [], outcomeByRfq = {}, filled, ceiling, hedgeCap } = {}) {
+export function lastSkip({ matches = [], submissions = [], outcomeByRfq = {}, filled, ceiling, hedgeCap } = {}) {
+  const subByRfq = {};
+  (submissions || []).forEach((s) => {
+    if (s && s.rfq_id) subByRfq[s.rfq_id] = s;
+  });
   const skips = (matches || []).filter((m) => m && m.rfq_id && !outcomeByRfq[m.rfq_id]);
   if (!skips.length) return null;
   const last = [...skips].sort((a, b) => tsMs(b.matched_at) - tsMs(a.matched_at))[0];
-  const label = skipLabel(last, { filled, ceiling, hedgeCap });
+  const twin = subByRfq[last.rfq_id];
+  const label = skipLabel({
+    ...last,
+    ...(twin || {}),
+    skip_reason: skipReasonOf(twin) || skipReasonOf(last),
+    contracts: last.contracts != null ? last.contracts : (twin && twin.contracts),
+  }, { filled, ceiling, hedgeCap });
   return {
     at: last.matched_at || null,
     rfqId: last.rfq_id,
@@ -148,13 +242,14 @@ export function buildParlayDesk({
   quoted = 0,
   kill = false,
   matches = [],
+  submissions = [],
   outcomes = [],
   outcomeByRfq = {},
 } = {}) {
   const ceiling = parlay && parlay.max_contracts != null ? parlay.max_contracts : 0;
   const fill = remainingFill({ filled, ceiling });
   const quote = quotingState({ active: parlay && parlay.active, kill, filled, ceiling });
-  const skip = lastSkip({ matches, outcomeByRfq, filled, ceiling, hedgeCap: ceiling });
+  const skip = lastSkip({ matches, submissions, outcomeByRfq, filled, ceiling, hedgeCap: ceiling });
   const parlayOutcomes = outcomesForParlay(outcomes, { parlayId: parlay && parlay.id, matches });
   const loss = lastLoss(parlayOutcomes);
   return {

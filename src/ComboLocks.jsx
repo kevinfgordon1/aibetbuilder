@@ -13,7 +13,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { buildParlayDesk, formatLoss, skipLabel, formatCents, tapeNoPrice } from "./comboDesk";
+import { buildParlayDesk, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
@@ -248,13 +248,15 @@ function DeskChips({ desk, thin }) {
     </div>
   );
 }
-function MatchedRfqTable({ matches, outcomeByRfq, desk }) {
+function MatchedRfqTable({ matches, submissions, outcomeByRfq, desk }) {
   const rows = matches || [];
   const quotedN = rows.filter((m) => outcomeByRfq[m.rfq_id]).length;
   const lostN = rows.filter((m) => (outcomeByRfq[m.rfq_id] || {}).outcome === "lost").length;
   const skippedN = rows.length - quotedN;
   const outMap = { executed: ["#6ee7b7", "filled"], accepted: ["#93c5fd", "accepted"], lost: ["#fca5a5", "lost"], posted: ["#9aa3b2", "awaiting"] };
   const fillCtx = desk ? { filled: desk.fill.filled, ceiling: desk.fill.ceiling, hedgeCap: desk.fill.ceiling } : {};
+  const subByRfq = {};
+  (submissions || []).forEach((s) => { if (s && s.rfq_id) subByRfq[s.rfq_id] = s; });
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
@@ -266,7 +268,13 @@ function MatchedRfqTable({ matches, outcomeByRfq, desk }) {
             const oc = outcomeByRfq[m.rfq_id];
             const req = m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${m.contracts != null ? m.contracts : "—"} contracts`;
             const lockable = m.locks === true ? "✓ yes" : m.locks === false ? "no" : "—";
-            const skip = !oc ? skipLabel(m, fillCtx) : null;
+            const twin = subByRfq[m.rfq_id];
+            const skip = !oc ? skipLabel({
+              ...m,
+              ...(twin || {}),
+              skip_reason: skipReasonOf(twin) || skipReasonOf(m),
+              contracts: m.contracts != null ? m.contracts : (twin && twin.contracts),
+            }, fillCtx) : null;
             const [ocCol, ocLbl] = oc ? (outMap[oc.outcome] || ["#c3c6cc", oc.outcome]) : [skip && skip.kind === "oversized" ? "#fcd34d" : "#6b7280", skip ? skip.text : "skipped"];
             const why = oc && oc.outcome === "lost" ? (formatLoss(oc) || "checking…") : (skip && skip.kind === "oversized" ? "cannot partial-fill" : "");
             const tape = oc ? formatCents(tapeNoPrice(oc)) : null;
@@ -628,21 +636,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const toggleOpen = (id) => setOpenParlays((o) => ({ ...o, [id]: !o[id] }));
   // rfq_id -> the quote outcome we recorded for it (only exists for RFQs we actually quoted).
   const outcomeByRfq = useMemo(() => { const m = {}; (outcomes || []).forEach((o) => { if (o.rfq_id) m[o.rfq_id] = o; }); return m; }, [outcomes]);
-    const deskByParlay = useMemo(() => {
-    const out = {};
-    (parlays || []).forEach((p) => {
-      out[p.id] = buildParlayDesk({
-        parlay: p,
-        filled: realFills[p.id] || 0,
-        quoted: quoted[p.id] || 0,
-        kill,
-        matches: matchesByParlay[p.id] || [],
-        outcomes,
-        outcomeByRfq,
-      });
-    });
-    return out;
-  }, [parlays, realFills, quoted, kill, matchesByParlay, outcomes, outcomeByRfq]);
   const submissionsByParlay = useMemo(() => {
     const m = {};
     (submissions || []).forEach((row) => {
@@ -651,6 +644,22 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     });
     return m;
   }, [submissions]);
+  const deskByParlay = useMemo(() => {
+    const out = {};
+    (parlays || []).forEach((p) => {
+      out[p.id] = buildParlayDesk({
+        parlay: p,
+        filled: realFills[p.id] || 0,
+        quoted: quoted[p.id] || 0,
+        kill,
+        matches: matchesByParlay[p.id] || [],
+        submissions: submissionsByParlay[p.id] || [],
+        outcomes,
+        outcomeByRfq,
+      });
+    });
+    return out;
+  }, [parlays, realFills, quoted, kill, matchesByParlay, submissionsByParlay, outcomes, outcomeByRfq]);
   const fillsByParlay = useMemo(() => {
     const m = {};
     (comboFills || []).forEach((f) => {
@@ -833,7 +842,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             <RiskProfile parlay={p} filled={realFills[p.id] || 0} />
             <DeskChips desk={deskByParlay[p.id]} />
             <AttemptHistory attempts={attemptsByParlay[p.id]} />
-            {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
+            {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
           </div>
         ))}
         {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>Note: {realUnattr} real combo contract(s) filled couldn’t be tied to a specific parlay (Kalshi fills carry no quote id) — counted but shown unattributed.</div>}
@@ -865,7 +874,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <DeskChips desk={desk} thin />
               <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
               <AttemptHistory attempts={attemptsByParlay[p.id]} />
-              {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
+              {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
             </div>
           );
         })}

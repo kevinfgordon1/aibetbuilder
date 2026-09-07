@@ -34,6 +34,18 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(skip.label, /skipped/);
 }
 {
+  const poly = attemptFromTapeRow({
+    bucket: "skipped",
+    reason: "skipped",
+    skip: { kind: "skipped", text: "skipped · game started" },
+    venue: "Polymarket",
+    venueKey: "polymarket",
+  });
+  assert.equal(poly.key, "skipped");
+  assert.equal(poly.label, "skipped · game started");
+  assert.equal(poly.venueKey, "polymarket");
+}
+{
   const c = attemptFromTapeRow({ bucket: "no_taker", reason: "cancelled" });
   assert.equal(c.key, "cancelled");
 }
@@ -74,6 +86,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     submissions: [
       { parlay_id: "p-tex", rfq_id: "r1", status: "declined", skip_reason: "oversized", contracts: 400, created_at: "2026-09-04T18:00:00Z" },
       { parlay_id: "p-tex", rfq_id: "r2", status: "unfilled", quote_id: "q1", is_live: false, contracts: 80, created_at: "2026-09-04T19:00:00Z" },
+      { parlay_id: "p-tex", rfq_id: "r3", venue: "polymarket", status: "declined", skip_reason: "no_lock_overlap:leg_count", contracts: 8, created_at: "2026-09-04T19:30:00Z" },
     ],
     now: Date.parse("2026-09-05T12:00:00Z"),
   });
@@ -83,6 +96,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.ok(hist.events.some((e) => e.key === "unfilled" || e.key === "skipped"));
   assert.ok(hist.events.some((e) => e.key === "expired"));
   assert.equal(hist.events.some((e) => e.key === "filled"), false);
+  const polySkip = hist.events.find((e) => e.row && e.row.rfqId === "r3");
+  assert.ok(polySkip);
+  assert.equal(polySkip.label, "skipped · different leg count");
+  assert.equal(polySkip.venueKey, "polymarket");
 }
 
 {
