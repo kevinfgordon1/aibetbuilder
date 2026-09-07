@@ -10,15 +10,16 @@
 // classification. Risk/profit uses parlay_stake + fill_american + max_contracts.
 // Unfilled outcomes: official Kalshi combo ticker, else Kalshi single-game legs,
 // else ESPN public scoreboard (/api/espn-scores). Never invents scores.
+// Archived cards show outcome + source chips on chrome; one tap opens attempt history.
 // Blank underlying_result rows re-settle on Combo Locks page load / poll — no SQL backfill.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { buildParlayDesk, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
-import { resolveComboTicker, settlementCopy, settlementFromStored, marketSettlement, historyOutcome } from "./comboSettlement";
+import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
-import { settleLegs, uniqueEspnQueries, underlyingCopy, sourceLabel, needsUnderlyingStamp } from "./comboLegResult";
+import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 
@@ -116,32 +117,33 @@ function QuoteChip({ quote }) {
   const s = QUOTE_CHIP[quote.key] || QUOTE_CHIP.watching;
   return <span className="chip" style={{ background: s.bg, color: s.color }} title={s.title}>{s.mark}{quote.label}</span>;
 }
-function SettlementChip({ settlement, filled, awaiting }) {
-  const title = "Official Kalshi combo-market result. We sold NO, so yes = parlay won (we lost) and no = parlay lost (we won).";
-  if (settlement) {
-    return <span className={"chip " + (settlement.weWon ? "settle-win" : "settle-lose")} title={title}>{settlement.text}</span>;
+function outcomeChipClass(chrome) {
+  if (!chrome) return "settle-wait";
+  if (chrome.tone === "win") return "settle-win";
+  if (chrome.tone === "lose") return "settle-lose";
+  if (chrome.text === "push") return "settle-push";
+  return "settle-wait";
+}
+function outcomeChipTitle(chrome) {
+  if (!chrome) return "";
+  if (chrome.official) {
+    return "Official Kalshi combo-market result. We sold NO, so yes = parlay won (we lost) and no = parlay lost (we won).";
   }
-  if (!filled && !awaiting) return null;
-  return <span className="chip settle-wait" title="Waiting for Kalshi to determine this combo market.">awaiting settlement</span>;
+  if (chrome.kind === "awaiting") return "Waiting for Kalshi to determine this combo market.";
+  if (chrome.kind === "pending") return "Waiting for official Kalshi single-game results or ESPN final scores. We do not invent scores.";
+  if (chrome.sourceText) return `Underlying result from ${chrome.sourceText}. Not an official Kalshi combo ticker.`;
+  return "Underlying game result.";
 }
 function OutcomeChip({ out, filled }) {
-  if (!out || out.kind === "none") return null;
-  if (out.kind === "result") return <SettlementChip settlement={out.settlement} filled={filled} />;
-  if (out.kind === "awaiting") return <SettlementChip awaiting />;
-  if (out.kind === "underlying") {
-    const copy = underlyingCopy(out.outcome, { filled: out.filled || filled });
-    if (!copy) return null;
-    const cls = copy.tone === "win" ? "settle-win" : copy.tone === "lose" ? "settle-lose" : "settle-wait";
-    const src = sourceLabel(out.source);
-    const title = src
-      ? `Underlying result from ${src}. Not an official Kalshi combo ticker.`
-      : "Underlying game result.";
-    return <span className={"chip " + cls} title={title}>{copy.text}{src ? ` · ${src}` : ""}</span>;
-  }
-  if (out.kind === "pending") {
-    return <span className="chip settle-wait" title="Waiting for official Kalshi single-game results or ESPN final scores. We do not invent scores.">pending</span>;
-  }
-  return null;
+  const chrome = outcomeChrome(out, { filled });
+  if (!chrome) return null;
+  const title = outcomeChipTitle(chrome);
+  return (
+    <span className="outcome-pair">
+      <span className={"chip " + outcomeChipClass(chrome)} title={title}>{chrome.text}</span>
+      {chrome.sourceText ? <span className="chip src" title={title}>{chrome.sourceText}</span> : null}
+    </span>
+  );
 }
 function RiskProfile({ parlay, filled }) {
   const profile = lockProfile(parlay, filled);
@@ -393,9 +395,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     } catch (_) {}
     setGames(SAMPLE); setSrcLive(false); setGamesReady(true);
   }, []);
-  const cardSettlement = useCallback((p) => {
-    return settlementFromStored(p) || settlementCopy(liveSettlement[p && p.id] && liveSettlement[p.id].result);
-  }, [liveSettlement]);
   const refreshSettlements = useCallback(async ({ living, archived, fills, outcomes, matchesByParlay, submissions, filledById }) => {
     if (settleInflight.current) return;
     const tickerOf = (row) => resolveComboTicker({
@@ -800,6 +799,13 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .chip.settle-lose{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#93c5fd}
         .cl .chip.settle-push{background:rgba(251,191,36,.14);color:#fcd34d}
+        .cl .chip.src{background:rgba(255,255,255,.05);color:#9aa3b2}
+        .cl .outcome-pair{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+        .cl .arch-head{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:0}
+        .cl .arch-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+        .cl .arch-caret{color:#93c5fd;font-size:14px;width:12px}
+        .cl .arch-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#8a8f98}
+        .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
         .cl .info::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);border:6px solid transparent;border-top-color:#0c1016;opacity:0;transition:opacity .12s;z-index:31}
@@ -858,8 +864,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                 <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
-                <SettlementChip settlement={cardSettlement(p)} filled />
-                {!cardSettlement(p) && <OutcomeChip out={lockOutcome(p, desk && desk.fill.filled)} filled />}
+                <OutcomeChip out={lockOutcome(p, desk && desk.fill.filled)} filled />
                 <QuoteChip quote={desk && desk.quote} />
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
                 <span style={{ flex: 1 }} />
@@ -1001,27 +1006,48 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
       <h3>History — games over</h3>
       <div className="card">
-        {archived.length === 0 ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : (
-          <table><thead><tr><th>Archived</th><th>Parlay</th><th>Have</th><th>Fill</th><th>Mode</th><th>Cap</th><th>Outcome</th><th>Game start</th></tr></thead>
-            <tbody>{archived.map((a) => {
-              const out = lockOutcome(a, realFills[a.id] || 0);
-              return (
-              <tr key={a.id}><td>{a.archived_at ? new Date(a.archived_at).toLocaleString() : "—"}</td><td>
-                <div style={{ fontWeight: 600 }}>{a.label}</div>
-                <button className="btn mini" onClick={() => toggleOpen("arch-" + a.id)} style={{ marginTop: 4, padding: "2px 8px" }}>{openParlays["arch-" + a.id] ? "Hide history" : "History + profile"}</button>
-              </td><td>{fmtAm(a.parlay_american)} · ${a.parlay_stake}</td><td>{fmtAm(a.fill_american)}</td><td>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</td><td>{a.max_contracts}</td>
-                <td>{out.kind === "result" ? <SettlementChip settlement={out.settlement} /> : out.kind === "awaiting" ? <SettlementChip awaiting /> : <OutcomeChip out={out} filled={(realFills[a.id] || 0) > 0} />}</td>
-                <td>{a.starts_at ? new Date(a.starts_at).toLocaleString() : "—"}</td></tr>
-            ); })}</tbody></table>
-        )}
-        {archived.map((a) => openParlays["arch-" + a.id] ? (
-          <div className="parlay" key={"arch-card-" + a.id} id={"lock-" + a.id} style={{ marginTop: 10 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>{a.label}</div>
-            <OutcomeChip out={lockOutcome(a, realFills[a.id] || 0)} filled={(realFills[a.id] || 0) > 0} />
-            <RiskProfile parlay={a} filled={realFills[a.id] || 0} />
-            <AttemptHistory attempts={attemptsByParlay[a.id]} />
-          </div>
-        ) : null)}
+        {archived.length === 0 ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : archived.map((a) => {
+          const filledN = realFills[a.id] || 0;
+          const out = lockOutcome(a, filledN);
+          const openKey = "arch-" + a.id;
+          const open = !!openParlays[openKey];
+          return (
+            <div className={"parlay" + (open ? " arch-open" : "")} key={a.id} id={"lock-" + a.id}>
+              <button
+                type="button"
+                className="arch-head"
+                onClick={() => toggleOpen(openKey)}
+                aria-expanded={open}
+                title={open ? "Hide attempt history" : "Show attempt history"}
+              >
+                <div className="arch-top">
+                  <span className="arch-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+                  <span style={{ fontWeight: 700 }}>{a.label}</span>
+                  <OutcomeChip out={out} filled={filledN > 0} />
+                  <span style={{ flex: 1 }} />
+                  <span className="chip">{open ? "Hide history" : "History"}</span>
+                </div>
+                <div className="arch-meta">
+                  <span className="chip num">have {fmtAm(a.parlay_american)} · ${a.parlay_stake}</span>
+                  <span className="chip fill num">fill {fmtAm(a.fill_american)}</span>
+                  <span>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</span>
+                  <span>cap {a.max_contracts}</span>
+                  <span>archived {a.archived_at ? new Date(a.archived_at).toLocaleString() : "—"}</span>
+                  {a.starts_at ? <span>start {new Date(a.starts_at).toLocaleString()}</span> : null}
+                </div>
+              </button>
+              {open ? (
+                <>
+                  {(a.legs || []).length > 0 && (
+                    <div style={{ marginTop: 8 }}>{(a.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
+                  )}
+                  <RiskProfile parlay={a} filled={filledN} />
+                  <AttemptHistory attempts={attemptsByParlay[a.id]} />
+                </>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
 
       <h3>Submitted bets — history</h3>
