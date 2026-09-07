@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   quotingEnded,
   attemptFromTapeRow,
@@ -130,6 +133,15 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.equal(vis.shown[0].key, "armed");
   assert.equal(vis.shown.length, 60);
   assert.equal(vis.extra, 21);
+}
+
+{
+  const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  // Living cards: history starts collapsed behind hist-<id>; archive stays always-open once the card expands.
+  assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle \}\)/);
+  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
+  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} \/>/);
+  assert.match(locksSrc, /className="hist-head"/);
 }
 
 console.log("comboLockHistory.test.js ok");

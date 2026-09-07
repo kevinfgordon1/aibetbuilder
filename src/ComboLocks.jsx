@@ -11,6 +11,7 @@
 // Unfilled outcomes: official Kalshi combo ticker, else Kalshi single-game legs,
 // else ESPN public scoreboard (/api/espn-scores). Never invents scores.
 // Archived cards show outcome + source chips on chrome; one tap opens attempt history.
+// Living cards keep chips + risk profile visible; attempt history starts collapsed (one tap).
 // Blank underlying_result rows re-settle on Combo Locks page load / poll — no SQL backfill.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
@@ -196,27 +197,48 @@ const ATTEMPT_COLOR = {
   skipped: "#fcd34d", cancelled: "#fca5a5", expired: "#9aa3b2",
   unfilled: "#fcd34d", filled: "#6ee7b7",
 };
-function AttemptHistory({ attempts }) {
+function AttemptHistory({ attempts, open = true, onToggle }) {
   if (!attempts) return null;
   const { shown, extra } = visibleAttempts(attempts.events);
+  const toggleable = typeof onToggle === "function";
+  const expanded = toggleable ? !!open : true;
+  const heading = "History — every attempt (not fills only)";
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
-      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
-        History — every attempt (not fills only)
-      </div>
-      {shown.length === 0 ? <div className="empty">No attempts recorded.</div> : (
-        <table><thead><tr><th>Time</th><th>Status</th><th>Size</th><th>Venue</th></tr></thead>
-          <tbody>{shown.map((e, i) => (
-            <tr key={(e.at || e.key) + "-" + e.reason + "-" + i}>
-              <td>{e.at ? new Date(e.at).toLocaleString() : "—"}</td>
-              <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
-              <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
-              <td>{e.venueKey === "polymarket" ? "Polymarket" : (e.venue || "—")}</td>
-            </tr>
-          ))}</tbody>
-        </table>
+      {toggleable ? (
+        <button
+          type="button"
+          className="hist-head"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          title={expanded ? "Hide attempt history" : "Show attempt history"}
+        >
+          <span className="arch-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+          <span>{heading}</span>
+          <span className="chip">{expanded ? "Hide history" : "History"}</span>
+        </button>
+      ) : (
+        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
+          {heading}
+        </div>
       )}
-      {extra > 0 && <div className="empty">Showing newest {shown.length} rows. {extra} older omitted.</div>}
+      {expanded ? (
+        <>
+          {shown.length === 0 ? <div className="empty">No attempts recorded.</div> : (
+            <table><thead><tr><th>Time</th><th>Status</th><th>Size</th><th>Venue</th></tr></thead>
+              <tbody>{shown.map((e, i) => (
+                <tr key={(e.at || e.key) + "-" + e.reason + "-" + i}>
+                  <td>{e.at ? new Date(e.at).toLocaleString() : "—"}</td>
+                  <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
+                  <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
+                  <td>{e.venueKey === "polymarket" ? "Polymarket" : (e.venue || "—")}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          )}
+          {extra > 0 && <div className="empty">Showing newest {shown.length} rows. {extra} older omitted.</div>}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -372,7 +394,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
   const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
   const [matchesByParlay, setMatchesByParlay] = useState({}); // parlay_id -> [combo_matches rows]
-  const [openParlays, setOpenParlays] = useState({});         // parlay_id -> expanded (drilldown open)?
+  const [openParlays, setOpenParlays] = useState({});         // id / hist-<id> / arch-<id> -> expanded?
   const [legRows, setLegRows] = useState(() => emptyLegRows(prefill?.legs?.length));
   const [form, setForm] = useState(() => formFromPrefill(prefill));
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
@@ -592,7 +614,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
   useEffect(() => {
     if (!focusLockId) return;
-    setOpenParlays((o) => ({ ...o, [focusLockId]: true, ["arch-" + focusLockId]: true }));
+    setOpenParlays((o) => ({ ...o, [focusLockId]: true, ["hist-" + focusLockId]: true, ["arch-" + focusLockId]: true }));
     const t = window.setTimeout(() => {
       const el = document.getElementById("lock-" + focusLockId);
       if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -805,6 +827,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .arch-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
         .cl .arch-caret{color:#93c5fd;font-size:14px;width:12px}
         .cl .arch-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#8a8f98}
+        .cl .hist-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#6b7280;font:inherit;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;padding:0;margin-bottom:6px}
+        .cl .hist-head .chip{margin-left:auto;text-transform:none;letter-spacing:0}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
@@ -846,7 +870,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             <FillProgress desk={deskByParlay[p.id]} />
             <RiskProfile parlay={p} filled={realFills[p.id] || 0} />
             <DeskChips desk={deskByParlay[p.id]} />
-            <AttemptHistory attempts={attemptsByParlay[p.id]} />
+            <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
             {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
           </div>
         ))}
@@ -877,7 +901,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <RiskProfile parlay={p} filled={desk ? desk.fill.filled : (realFills[p.id] || 0)} />
               <DeskChips desk={desk} thin />
               <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
-              <AttemptHistory attempts={attemptsByParlay[p.id]} />
+              <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
               {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
             </div>
           );
