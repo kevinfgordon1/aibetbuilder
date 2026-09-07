@@ -93,6 +93,11 @@ assert.equal(lastLoss([{ outcome: "executed" }]), null);
   assert.equal(formatStoredSkipReason("no_lock_overlap:same_games_no_match"), "same games, no match");
   assert.equal(formatStoredSkipReason("no_lock_overlap:no_shared_game x12"), "no shared game ×12");
   assert.equal(formatStoredSkipReason("no_lock_overlap:mystery_code"), "no_lock_overlap:mystery_code");
+  assert.equal(formatStoredSkipReason("insufficient_balance"), "insufficient funds");
+  assert.equal(formatStoredSkipReason("insufficient_funds"), "insufficient funds");
+  assert.equal(formatStoredSkipReason("insufficient-balance"), "insufficient funds");
+  assert.equal(formatStoredSkipReason("underfunded"), "insufficient funds");
+  assert.equal(formatStoredSkipReason("low_balance"), "insufficient funds");
   const started = skipLabel({ skip_reason: "game_started", contracts: 80 }, { filled: 40, ceiling: 100 });
   assert.equal(started.kind, "skipped");
   assert.equal(started.text, "skipped · game started");
@@ -104,6 +109,11 @@ assert.equal(lastLoss([{ outcome: "executed" }]), null);
   assert.equal(unknown.text, "skipped · poly_new_guard");
   const cap = skipLabel({ skip_reason: "limit_reached", contracts: 20 }, { filled: 40, ceiling: 100 });
   assert.equal(cap.text, "skipped · cap reached");
+  const funds = skipLabel({ skip_reason: "insufficient_balance", contracts: 12 }, { filled: 40, ceiling: 100 });
+  assert.equal(funds.kind, "skipped");
+  assert.equal(funds.text, "skipped · insufficient funds");
+  const fundsSyn = skipLabel({ skip_reason: "insufficient_funds" });
+  assert.equal(fundsSyn.text, "skipped · insufficient funds");
   const storedOversize = skipLabel({ skip_reason: "oversized", contracts: 250 }, { filled: 40, ceiling: 100 });
   assert.equal(storedOversize.kind, "oversized");
   assert.match(storedOversize.text, /skipped oversized 250/);
@@ -134,6 +144,16 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   assert.equal(skip.rfqId, "poly-1");
   assert.equal(skip.kind, "skipped");
   assert.equal(skip.text, "skipped · game started");
+}
+{
+  const skip = lastSkip({
+    matches: [{ rfq_id: "k-funds", matched_at: "2026-09-07T17:00:00Z", contracts: 20 }],
+    submissions: [{ rfq_id: "k-funds", status: "declined", skip_reason: "insufficient_balance", contracts: 20 }],
+    filled: 40,
+    ceiling: 100,
+  });
+  assert.equal(skip.rfqId, "k-funds");
+  assert.equal(skip.text, "skipped · insufficient funds");
 }
 
 // ── last relevant prefers the newer of skip vs loss ──

@@ -86,12 +86,19 @@ const SKIP_REASON_KEYS = ["skip_reason", "skipReason"];
 
 // combo-worker persist codes (Kalshi classifySkip + Poly polySkipReason).
 // Prefix `no_lock_overlap:` is the near-miss / noise family. ` xN` is the
-// hourly aggregate count (no_shared_game / no_rfq_tokens).
+// hourly aggregate count (no_shared_game / no_rfq_tokens). Funding skips
+// use insufficient_balance (primary); accept close synonyms if written.
 const SKIP_REASON_LABELS = {
   oversized: "oversized",
   rfq_too_large: "oversized",
   limit_reached: "cap reached",
   limitreached: "cap reached",
+  insufficient_balance: "insufficient funds",
+  insufficient_funds: "insufficient funds",
+  insufficientbalance: "insufficient funds",
+  insufficientfunds: "insufficient funds",
+  underfunded: "insufficient funds",
+  low_balance: "insufficient funds",
   game_started: "game started",
   started: "game started",
   no_lock_overlap: "no lock overlap",

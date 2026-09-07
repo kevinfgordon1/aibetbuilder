@@ -103,6 +103,26 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
 }
 
 {
+  const hist = buildLockAttempts({
+    parlay: {
+      id: "p-funds",
+      active: true,
+      created_at: "2026-09-07T12:00:00Z",
+      starts_at: "2026-09-07T22:00:00Z",
+      max_contracts: 100,
+    },
+    submissions: [
+      { parlay_id: "p-funds", rfq_id: "r-bal", status: "declined", skip_reason: "insufficient_balance", contracts: 20, created_at: "2026-09-07T16:00:00Z" },
+    ],
+    now: Date.parse("2026-09-07T17:00:00Z"),
+  });
+  const fundsSkip = hist.events.find((e) => e.row && e.row.rfqId === "r-bal");
+  assert.ok(fundsSkip);
+  assert.equal(fundsSkip.key, "skipped");
+  assert.equal(fundsSkip.label, "skipped · insufficient funds");
+}
+
+{
   const vis = visibleAttempts([
     { key: "armed", at: "a" },
     ...Array.from({ length: 80 }, (_, i) => ({ key: "skipped", at: String(i), reason: "x" + i })),
