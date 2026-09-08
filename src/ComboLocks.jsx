@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { buildParlayDesk, comboDeskChrome, comboSectionKind, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { applyComboDeskPoll, buildParlayDesk, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { attemptSummaryFilled, attemptSummaryLine, buildLockAttempts, visibleAttempts } from "./comboLockHistory";
@@ -398,6 +398,12 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [parlays, setParlays] = useState([]);
   const [kill, setKill] = useState(false);
   const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
+  const [deskReady, setDeskReady] = useState(false);
+  const [deskError, setDeskError] = useState(null);
+  const parlaysRef = useRef([]);
+  const killRef = useRef(false);
+  const parlaysReadyRef = useRef(false);
+  const settingsReadyRef = useRef(false);
   const [history, setHistory] = useState([]);
   const [archived, setArchived] = useState([]);
   const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
@@ -554,54 +560,119 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const reload = useCallback(async () => {
     if (!owner) return;
     try {
-    const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }, { data: mrows }] = await Promise.all([
-      // All LIVING parlays (not yet archived), whether the worker is actively watching them
-      // (active=true) or paused after recording a quote (active=false). Loading both means a
-      // parlay can never fall through the gap between the Active and History lists again.
-      supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
-      supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
-      supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["quoted", "declined", "filled", "unfilled", "shadow"]).order("created_at", { ascending: false }).limit(50),
-      supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
-      // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
-      supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false),
-      // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
-      supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live").or("status.eq.filled,is_live.eq.true"),
-      // How many RFQs matched each parlay (from the read-only watcher).
-      supabase.from("combo_match_counts").select("*"),
-      // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
-      supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(200),
-      // Every RFQ that matched a parlay — for the per-lock drilldown.
-      supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(400),
-    ]);
-    const livingRows = p || [];
-    const archivedRows = ar || [];
-    // Per-lock attempts (quoted / skipped / unfilled), including skip-tape market_ticker.
-    const livingSubReqs = livingRows.slice(0, 20).map((row) =>
-      supabase.from("combo_submissions").select("*").eq("user_id", user.id).eq("parlay_id", row.id).neq("status", "shadow").order("created_at", { ascending: false }).limit(80)
-    );
-    const archivedIds = archivedRows.map((row) => row.id).filter(Boolean);
-    const [{ data: archivedSubs }, ...livingSubRes] = await Promise.all([
-      archivedIds.length
-        ? supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("parlay_id", archivedIds).neq("status", "shadow").order("created_at", { ascending: false }).limit(400)
-        : Promise.resolve({ data: [] }),
-      ...livingSubReqs,
-    ]);
-    setParlays(livingRows); setKill(!!(s && s.kill_switch)); setHistory(h || []); setArchived(archivedRows);
-    const mcMap = {}; (mc || []).forEach((r) => { mcMap[r.parlay_id] = r; }); setMatchCounts(mcMap);
-    setOutcomes(oc || []);
-    const subRows = [
-      ...livingSubRes.flatMap((r) => (r && r.data) || []),
-      ...(archivedSubs || []),
-    ];
-    setSubmissions(subRows);
-    const mbp = {}; (mrows || []).forEach((m) => { (mbp[m.parlay_id] = mbp[m.parlay_id] || []).push(m); }); setMatchesByParlay(mbp);
-    const rf = {}; let un = 0;
-    (fills || []).forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
-    setComboFills(fills || []);
-    setRealFills(rf); setRealUnattr(un);
-    const q = {}; (booked || []).forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
-    setQuoted(q);
-    refreshSettlements({ living: p || [], archived: ar || [], fills: fills || [], outcomes: oc || [], matchesByParlay: mbp, submissions: subRows, filledById: rf });
+      const settled = await Promise.allSettled([
+        // All LIVING parlays (not yet archived), whether the worker is actively watching them
+        // (active=true) or paused after recording a quote (active=false). Loading both means a
+        // parlay can never fall through the gap between the Active and History lists again.
+        supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
+        supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
+        supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["quoted", "declined", "filled", "unfilled", "shadow"]).order("created_at", { ascending: false }).limit(50),
+        supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
+        // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
+        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false),
+        // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
+        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live").or("status.eq.filled,is_live.eq.true"),
+        // How many RFQs matched each parlay (from the read-only watcher).
+        supabase.from("combo_match_counts").select("*"),
+        // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
+        supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(200),
+        // Every RFQ that matched a parlay — for the per-lock drilldown.
+        supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(400),
+      ]);
+      const [parlaysRes, settingsRes, historyRes, archivedRes, fillsRes, bookedRes, mcRes, ocRes, mrowsRes] = settled.map(comboSettledQuery);
+      const poll = applyComboDeskPoll({
+        parlaysRes,
+        settingsRes,
+        prevParlays: parlaysRef.current,
+        prevKill: killRef.current,
+        parlaysReady: parlaysReadyRef.current,
+        settingsReady: settingsReadyRef.current,
+      });
+      if (poll.applyParlays) {
+        parlaysRef.current = poll.parlays;
+        setParlays(poll.parlays);
+      }
+      if (poll.applyKill) {
+        killRef.current = poll.kill;
+        setKill(poll.kill);
+      }
+      parlaysReadyRef.current = poll.parlaysReady;
+      settingsReadyRef.current = poll.settingsReady;
+      setDeskReady(poll.deskReady);
+      setDeskError(poll.errorNote);
+
+      const takeList = (res) => (comboListQueryOk(res) ? res.data : null);
+      const historyRows = takeList(historyRes);
+      if (historyRows) setHistory(historyRows);
+      const archivedRows = takeList(archivedRes);
+      if (archivedRows) setArchived(archivedRows);
+      const mcRows = takeList(mcRes);
+      if (mcRows) {
+        const mcMap = {};
+        mcRows.forEach((r) => { mcMap[r.parlay_id] = r; });
+        setMatchCounts(mcMap);
+      }
+      const ocRows = takeList(ocRes);
+      if (ocRows) setOutcomes(ocRows);
+      const fillRows = takeList(fillsRes);
+      if (fillRows) {
+        const rf = {}; let un = 0;
+        fillRows.forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
+        setComboFills(fillRows);
+        setRealFills(rf); setRealUnattr(un);
+      }
+      const bookedRows = takeList(bookedRes);
+      if (bookedRows) {
+        const q = {};
+        bookedRows.forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
+        setQuoted(q);
+      }
+      const matchRows = takeList(mrowsRes);
+      const mbp = {};
+      if (matchRows) {
+        matchRows.forEach((m) => { (mbp[m.parlay_id] = mbp[m.parlay_id] || []).push(m); });
+        setMatchesByParlay(mbp);
+      }
+
+      if (!poll.applyParlays) return;
+      const livingRows = poll.parlays;
+      const archivedForSubs = archivedRows || [];
+      // Per-lock attempts (quoted / skipped / unfilled), including skip-tape market_ticker.
+      const livingSubReqs = livingRows.slice(0, 20).map((row) =>
+        supabase.from("combo_submissions").select("*").eq("user_id", user.id).eq("parlay_id", row.id).neq("status", "shadow").order("created_at", { ascending: false }).limit(80)
+      );
+      const archivedIds = archivedForSubs.map((row) => row.id).filter(Boolean);
+      const subSettled = await Promise.allSettled([
+        archivedIds.length
+          ? supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("parlay_id", archivedIds).neq("status", "shadow").order("created_at", { ascending: false }).limit(400)
+          : Promise.resolve({ data: [] }),
+        ...livingSubReqs,
+      ]);
+      const [archivedSubRes, ...livingSubRes] = subSettled.map(comboSettledQuery);
+      const livingSubsOk = livingSubReqs.length === 0 || livingSubRes.every(comboListQueryOk);
+      const livingSubRows = livingSubRes.flatMap((r) => (comboListQueryOk(r) ? r.data : []));
+      const archivedSubRows = comboListQueryOk(archivedSubRes) ? archivedSubRes.data : [];
+      if (livingSubsOk) {
+        const subRows = [...livingSubRows, ...archivedSubRows];
+        setSubmissions(subRows);
+        refreshSettlements({
+          living: livingRows,
+          archived: archivedForSubs,
+          fills: fillRows || [],
+          outcomes: ocRows || [],
+          matchesByParlay: matchRows ? mbp : {},
+          submissions: subRows,
+          filledById: fillRows ? fillRows.reduce((rf, f) => {
+            const c = Number(f.count || 0);
+            if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c;
+            return rf;
+          }, {}) : {},
+        });
+      }
+    } catch (_) {
+      setDeskError(parlaysReadyRef.current || settingsReadyRef.current
+        ? "Couldn't refresh locks / kill-switch — showing last known desk."
+        : "Couldn't load locks / kill-switch. Retrying…");
     } finally {
       setDeskLoading(false);
     }
@@ -689,7 +760,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         parlay: p,
         filled: realFills[p.id] || 0,
         quoted: quoted[p.id] || 0,
-        kill: deskLoading ? false : kill,
+        kill: deskReady && !deskLoading ? kill : false,
         matches: matchesByParlay[p.id] || [],
         submissions: submissionsByParlay[p.id] || [],
         outcomes,
@@ -697,7 +768,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       });
     });
     return out;
-  }, [parlays, realFills, quoted, kill, deskLoading, matchesByParlay, submissionsByParlay, outcomes, outcomeByRfq]);
+  }, [parlays, realFills, quoted, kill, deskLoading, deskReady, matchesByParlay, submissionsByParlay, outcomes, outcomeByRfq]);
   const fillsByParlay = useMemo(() => {
     const m = {};
     (comboFills || []).forEach((f) => {
@@ -756,8 +827,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   // Reactivate a parlay the worker paused (active=false) — it resumes watching for RFQs.
   const reactivateParlay = async (id) => { await supabase.from("combo_parlays").update({ active: true }).eq("id", id); reload(); };
   const toggleKill = async () => {
-    if (deskLoading) return;
-    const next = !kill; setKill(next);
+    if (deskLoading || !deskReady) return;
+    const next = !kill;
+    killRef.current = next;
+    setKill(next);
     await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() });
   };
 
@@ -784,10 +857,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
   if (!owner) return null;
 
-  const deskChrome = comboDeskChrome({ deskLoading, kill });
-  const waitingKind = comboSectionKind(deskLoading, waiting.length);
-  const filledKind = comboSectionKind(deskLoading, filledParlays.length);
-  const archivedKind = comboSectionKind(deskLoading, archived.length);
+  const deskChrome = comboDeskChrome({ deskLoading, deskReady, kill, deskError });
+  const waitingKind = comboSectionKind({ deskLoading, deskReady, count: waiting.length });
+  const filledKind = comboSectionKind({ deskLoading, deskReady, count: filledParlays.length });
+  const archivedKind = comboSectionKind({ deskLoading, deskReady, count: archived.length });
 
   const marketGroups = (gameKey, selVal) => {
     const g = gameIdx[gameKey]; if (!g) return null;
@@ -875,14 +948,16 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         <div style={{ fontSize: 18, fontWeight: 700 }}>Combo Locks</div>
         <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }}>games: {srcLive ? "live" : "sample"}</span>
         {deskLoading && <span className="chip">loading desk…</span>}
+        {!deskLoading && deskError && <span className="chip">refresh failed</span>}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: "#8a8f98", fontWeight: 600 }}>Kill-switch</span>
-        <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || undefined} title={deskLoading ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
+        <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
       </div>
+      {deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
       {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
 
       <h3>Active — waiting to be filled</h3>
-      <div className="card" aria-busy={deskLoading || undefined}>
+      <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {waitingKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : waitingKind === "empty" ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
           <div className="parlay" key={p.id} id={"lock-" + p.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -914,7 +989,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       </div>
 
       <h3>Filled — awaiting settlement</h3>
-      <div className="card" aria-busy={deskLoading || undefined}>
+      <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {filledKind === "loading" ? (
           <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
         ) : filledKind === "empty" ? (
@@ -1067,7 +1142,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       </div>
 
       <h3>History — games over</h3>
-      <div className="card" aria-busy={deskLoading || undefined}>
+      <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : archivedKind === "empty" ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : archived.map((a) => {
           const filledN = realFills[a.id] || 0;
           const out = lockOutcome(a, filledN);

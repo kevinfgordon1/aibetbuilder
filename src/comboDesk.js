@@ -243,22 +243,77 @@ export function outcomesForParlay(outcomes, { parlayId, matches = [] } = {}) {
   return (outcomes || []).filter((o) => o && (o.parlay_id === parlayId || (o.rfq_id && rfqs.has(o.rfq_id))));
 }
 
-// First settings+parlays fetch. Kill banner / red toggle / empty Active copy
-// only after this settles — never flash "kill engaged" or "Nothing waiting"
-// from the pre-fetch defaults.
-export function comboDeskChrome({ deskLoading, kill } = {}) {
-  const ready = deskLoading !== true;
+// First settings+parlays fetch AND later 20s polls. Soft-fail (error or null
+// data) must keep the last known desk — never treat a failed read as
+// kill_switch=true or as an empty Active list.
+export function comboSettledQuery(result) {
+  if (result && result.status === "fulfilled") {
+    const value = result.value || {};
+    return { data: value.data, error: value.error || null };
+  }
+  const reason = result && result.reason;
+  if (reason && typeof reason === "object") return { data: null, error: reason };
+  return { data: null, error: { message: String(reason || "request failed") } };
+}
+
+export function comboListQueryOk(res) {
+  return !!(res && !res.error && Array.isArray(res.data));
+}
+
+export function comboSettingsQueryOk(res) {
+  return !!(res && !res.error);
+}
+
+export function applyComboDeskPoll({
+  parlaysRes,
+  settingsRes,
+  prevParlays = [],
+  prevKill = false,
+  parlaysReady = false,
+  settingsReady = false,
+} = {}) {
+  const parlaysOk = comboListQueryOk(parlaysRes);
+  const settingsOk = comboSettingsQueryOk(settingsRes);
+  const nextParlaysReady = parlaysReady === true || parlaysOk;
+  const nextSettingsReady = settingsReady === true || settingsOk;
+  const failed = !parlaysOk || !settingsOk;
+  let errorNote = null;
+  if (failed) {
+    const bits = [];
+    if (!parlaysOk) bits.push("locks");
+    if (!settingsOk) bits.push("kill-switch");
+    errorNote = (parlaysReady || settingsReady)
+      ? `Couldn't refresh ${bits.join(" / ")} — showing last known desk.`
+      : `Couldn't load ${bits.join(" / ")}. Retrying…`;
+  }
+  return {
+    parlays: parlaysOk ? parlaysRes.data : (prevParlays || []),
+    kill: settingsOk ? !!(settingsRes.data && settingsRes.data.kill_switch) : !!prevKill,
+    applyParlays: parlaysOk,
+    applyKill: settingsOk,
+    parlaysReady: nextParlaysReady,
+    settingsReady: nextSettingsReady,
+    deskReady: nextParlaysReady && nextSettingsReady,
+    failed,
+    errorNote,
+  };
+}
+
+export function comboDeskChrome({ deskLoading, deskReady, kill, deskError } = {}) {
+  const ready = deskReady === true && deskLoading !== true;
   return {
     ready,
     showKillBanner: ready && !!kill,
     killSwitchOn: ready && !!kill,
     killSwitchDisabled: !ready,
+    deskError: deskError || null,
   };
 }
 
-export function comboSectionKind(deskLoading, count) {
-  if (deskLoading) return "loading";
-  return (count || 0) > 0 ? "rows" : "empty";
+export function comboSectionKind({ deskLoading, deskReady, count } = {}) {
+  if ((count || 0) > 0) return "rows";
+  if (deskLoading || deskReady !== true) return "loading";
+  return "empty";
 }
 
 export function buildParlayDesk({
