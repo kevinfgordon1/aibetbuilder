@@ -199,6 +199,10 @@ const ATTEMPT_COLOR = {
   skipped: "#fcd34d", cancelled: "#fca5a5", expired: "#9aa3b2",
   unfilled: "#fcd34d", filled: "#6ee7b7",
 };
+function VenueChip({ venue, venueKey }) {
+  const cls = venueKey === "kalshi" ? "venue-kalshi" : venueKey === "polymarket" ? "venue-poly" : "";
+  return <span className={"chip " + cls}>{venue || "—"}</span>;
+}
 function AttemptSummary({ attempts }) {
   const parts = attemptSummaryParts(attempts);
   if (!parts.skip && !parts.miss) return null;
@@ -258,7 +262,7 @@ function AttemptHistory({ attempts, open = true, onToggle, showSummary = true })
                     : (e.at ? new Date(e.at).toLocaleString() : "—")}</td>
                   <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
                   <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
-                  <td>{e.venueKey === "polymarket" ? "Polymarket" : (e.venue || "—")}</td>
+                  <td><VenueChip venue={e.venue} venueKey={e.venueKey} /></td>
                 </tr>
               ))}</tbody>
             </table>
@@ -319,6 +323,8 @@ function matchedRfqOutcome(row, oc, skip) {
   return ["#6b7280", (row && (row.reason || row.bucket)) || "skipped"];
 }
 
+// Venue chip uses tape row venue / venueKey from comboTape.inferRfqVenue
+// (combo_submissions.venue when the worker writes kalshi | polymarket).
 function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, desk }) {
   const counts = matchedRfqCounts(attempts);
   const tapeRows = [...((attempts && attempts.tape && attempts.tape.rows) || [])]
@@ -339,7 +345,7 @@ function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, de
         <div className="empty" style={{ paddingTop: 0, paddingBottom: 6 }}>Quote-watcher is parked. Rows and counts come from History (combo_submissions / combo_fills), not watcher combo_matches.</div>
       ) : null}
       {counts.total === 0 ? <div className="empty">{empty}</div> : (
-        <table><thead><tr><th>Time</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
+        <table><thead><tr><th>Time</th><th>Venue</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
           <tbody>{tapeRows.map((row) => {
             const m = (row.rfqId && matchByRfq[row.rfqId]) || null;
             const oc = (row.rfqId && outcomeByRfq[row.rfqId]) || row.outcome || null;
@@ -366,6 +372,7 @@ function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, de
             return (
               <tr key={row.rfqId || row.fillId || `${row.at}-${row.contracts}`}>
                 <td>{row.at ? new Date(row.at).toLocaleTimeString() : "—"}</td>
+                <td><VenueChip venue={row.venue} venueKey={row.venueKey} /></td>
                 <td className="num">{req}</td>
                 <td className="num" style={{ color: locks === true ? "#6ee7b7" : locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
                 <td className="num">{worst != null ? money(worst) : "—"}</td>
@@ -972,6 +979,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#93c5fd}
         .cl .chip.settle-push{background:rgba(251,191,36,.14);color:#fcd34d}
         .cl .chip.src{background:rgba(255,255,255,.05);color:#9aa3b2}
+        .cl .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
+        .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
         .cl .outcome-pair{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
         .cl .arch-head{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:0}
         .cl .arch-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
