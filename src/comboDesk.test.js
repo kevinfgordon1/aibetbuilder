@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   remainingFill,
   quotingState,
@@ -12,6 +13,12 @@ import {
   lastLoss,
   lastRelevant,
   outcomesForParlay,
+  comboDeskChrome,
+  comboSectionKind,
+  comboSettledQuery,
+  comboListQueryOk,
+  comboSettingsQueryOk,
+  applyComboDeskPoll,
   buildParlayDesk,
 } from "./comboDesk.js";
 
@@ -32,6 +39,115 @@ import {
   const r = remainingFill({ filled: 0, ceiling: 0 });
   assert.equal(r.left, 0);
   assert.equal(r.pct, 0);
+}
+
+// ── first-fetch chrome: no fake kill / empty Active until settings+parlays settle ──
+{
+  const loading = comboDeskChrome({ deskLoading: true, deskReady: false, kill: true });
+  assert.equal(loading.ready, false);
+  assert.equal(loading.showKillBanner, false);
+  assert.equal(loading.killSwitchOn, false);
+  assert.equal(loading.killSwitchDisabled, true);
+  assert.equal(comboSectionKind({ deskLoading: true, deskReady: false, count: 0 }), "loading");
+  assert.equal(comboSectionKind({ deskLoading: true, deskReady: false, count: 3 }), "rows");
+}
+{
+  const live = comboDeskChrome({ deskLoading: false, deskReady: true, kill: true });
+  assert.equal(live.ready, true);
+  assert.equal(live.showKillBanner, true);
+  assert.equal(live.killSwitchOn, true);
+  assert.equal(live.killSwitchDisabled, false);
+  assert.equal(comboSectionKind({ deskLoading: false, deskReady: true, count: 0 }), "empty");
+  assert.equal(comboSectionKind({ deskLoading: false, deskReady: true, count: 2 }), "rows");
+}
+{
+  const off = comboDeskChrome({ deskLoading: false, deskReady: true, kill: false });
+  assert.equal(off.showKillBanner, false);
+  assert.equal(off.killSwitchOn, false);
+  assert.equal(comboSectionKind({ deskLoading: false, deskReady: true, count: 0 }), "empty");
+}
+
+// ── soft-fail poll: keep last known locks + kill; never invent kill-on / empty ──
+{
+  assert.equal(comboListQueryOk({ data: null, error: { message: "jwt" } }), false);
+  assert.equal(comboListQueryOk({ data: [], error: null }), true);
+  assert.equal(comboSettingsQueryOk({ data: null, error: null }), true);
+  assert.equal(comboSettingsQueryOk({ data: null, error: { message: "jwt" } }), false);
+  assert.deepEqual(comboSettledQuery({ status: "rejected", reason: { message: "timeout" } }), {
+    data: null,
+    error: { message: "timeout" },
+  });
+  assert.deepEqual(comboSettledQuery({ status: "fulfilled", value: { data: [], error: null } }), {
+    data: [],
+    error: null,
+  });
+}
+{
+  const prev = [{ id: "ari-jax", label: "Ari+Jax" }];
+  const out = applyComboDeskPoll({
+    parlaysRes: { data: null, error: { message: "jwt expired" } },
+    settingsRes: { data: null, error: { message: "jwt expired" } },
+    prevParlays: prev,
+    prevKill: false,
+    parlaysReady: true,
+    settingsReady: true,
+  });
+  assert.equal(out.applyParlays, false);
+  assert.equal(out.applyKill, false);
+  assert.equal(out.kill, false);
+  assert.equal(out.parlays[0].id, "ari-jax");
+  assert.equal(out.deskReady, true);
+  assert.match(out.errorNote, /last known/);
+  assert.equal(comboDeskChrome({ deskLoading: false, deskReady: true, kill: out.kill }).showKillBanner, false);
+  assert.equal(comboSectionKind({ deskLoading: false, deskReady: true, count: out.parlays.length }), "rows");
+}
+{
+  const first = applyComboDeskPoll({
+    parlaysRes: { data: null, error: { message: "timeout" } },
+    settingsRes: { data: null, error: { message: "timeout" } },
+    prevParlays: [],
+    prevKill: false,
+    parlaysReady: false,
+    settingsReady: false,
+  });
+  assert.equal(first.kill, false);
+  assert.equal(first.deskReady, false);
+  assert.match(first.errorNote, /Retrying/);
+  assert.equal(comboDeskChrome({ deskLoading: false, deskReady: false, kill: true }).showKillBanner, false);
+  assert.equal(comboSectionKind({ deskLoading: false, deskReady: false, count: 0 }), "loading");
+}
+{
+  const noRow = applyComboDeskPoll({
+    parlaysRes: { data: [], error: null },
+    settingsRes: { data: null, error: null },
+    prevKill: true,
+  });
+  assert.equal(noRow.applyKill, true);
+  assert.equal(noRow.kill, false);
+  assert.equal(noRow.deskReady, true);
+  assert.equal(noRow.errorNote, null);
+}
+{
+  const liveKill = applyComboDeskPoll({
+    parlaysRes: { data: [{ id: "1" }], error: null },
+    settingsRes: { data: { kill_switch: true }, error: null },
+  });
+  assert.equal(liveKill.kill, true);
+  assert.equal(liveKill.deskReady, true);
+  assert.equal(comboDeskChrome({ deskLoading: false, deskReady: true, kill: true }).showKillBanner, true);
+}
+{
+  const settingsOnly = applyComboDeskPoll({
+    parlaysRes: { data: null, error: { message: "soft fail" } },
+    settingsRes: { data: { kill_switch: true }, error: null },
+    prevParlays: [],
+    prevKill: false,
+  });
+  assert.equal(settingsOnly.applyParlays, false);
+  assert.equal(settingsOnly.kill, true);
+  assert.equal(settingsOnly.deskReady, false);
+  assert.equal(comboDeskChrome({ deskLoading: false, deskReady: false, kill: true }).showKillBanner, false);
+  assert.equal(comboSectionKind({ deskLoading: false, deskReady: false, count: 0 }), "loading");
 }
 
 // ── quoting on/off ──
@@ -216,6 +332,33 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   });
   assert.equal(desk.quote.key, "ceiling");
   assert.equal(desk.fill.left, 0);
+}
+
+// ── ComboLocks.jsx wires first-fetch chrome (no fake kill / empty Active) ──
+{
+  const page = readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
+  assert.match(page, /const \[kill, setKill\] = useState\(false\)/);
+  assert.match(page, /useState\(true\); \/\/ first settings\+parlays fetch/);
+  assert.doesNotMatch(page, /useState\(true\); \/\/ safe default until settings load/);
+  assert.match(page, /comboDeskChrome/);
+  assert.match(page, /comboSectionKind/);
+  assert.match(page, /applyComboDeskPoll/);
+  assert.match(page, /Promise\.allSettled/);
+  assert.match(page, /comboSettledQuery/);
+  assert.match(page, /deskChrome\.showKillBanner/);
+  assert.match(page, /deskChrome\.killSwitchOn/);
+  assert.match(page, /deskChrome\.killSwitchDisabled/);
+  assert.match(page, /deskChrome\.deskError/);
+  assert.match(page, /waitingKind === "loading"/);
+  assert.match(page, /waitingKind === "empty"/);
+  assert.match(page, /Loading locks/);
+  assert.match(page, /className="empty loading"/);
+  assert.match(page, /setDeskLoading\(false\)/);
+  assert.match(page, /setDeskError/);
+  assert.doesNotMatch(page, /setKill\(\!\!\(s && s\.kill_switch\)\)/);
+  assert.doesNotMatch(page, /livingRows = p \|\| \[\]/);
+  assert.match(page, /if \(deskLoading \|\| !deskReady\) return;/);
+  assert.match(page, /kill: deskReady && !deskLoading \? kill : false/);
 }
 
 console.log("comboDesk.test.js ok");
