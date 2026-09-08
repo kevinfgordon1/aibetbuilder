@@ -47,6 +47,8 @@ import {
   unhedgedViewForDateRange,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
+import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
+import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
@@ -188,6 +190,11 @@ export function UnhedgedBlotter({
     filteredCount: filtered.length,
   });
   const rowsBusy = listKind === "loading";
+  const sourceHealth = dataSourceStatus({
+    error,
+    lastKnown: loaded && list.length > 0,
+    context: "unhedged",
+  });
   return (
     <div className="uh">
       <style>{`
@@ -252,7 +259,9 @@ export function UnhedgedBlotter({
           </button>
         ) : null}
         {live ? <span className="chip ok" title="Current updates when a quote fills — no hard refresh.">live</span> : null}
+        {sourceHealth.show ? <DataSourceChip status={sourceHealth} /> : null}
       </div>
+      {sourceHealth.show ? <DataSourceBanner status={sourceHealth} style={{ margin: "0 0 12px" }} /> : null}
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
         {viewKey === "current"
           ? (polyRequests
@@ -384,7 +393,7 @@ export function UnhedgedBlotter({
             {polyRequests
               ? "No seen pregame MLB or NFL moneyline RFQ requests."
               : "No filled pregame MLB or NFL moneyline RFQs."}
-            {error && error.message ? <span className="muted"> ({error.message})</span> : null}
+            {!sourceHealth.show && error && error.message ? <span className="muted"> ({error.message})</span> : null}
           </div>
         ) : listKind === "filtered-empty" ? (
           <div className="empty">
@@ -473,7 +482,10 @@ export default function UnhedgedTape({ user }) {
         venue: venueFilter,
       });
       if (gen !== rowGen.current) return;
-      if (silent && result.error && !(result.rows && result.rows.length)) return;
+      if (silent && result.error && !(result.rows && result.rows.length)) {
+        if (isSupabaseUnhealthy(result.error)) setError(result.error);
+        return;
+      }
       setRaw(result.rows);
       setMissingTable(result.missingTable);
       setError(result.error);

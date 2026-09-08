@@ -7,6 +7,10 @@
 // show raw. Losses and tape clearing prices come from quote-watcher
 // (loss_reason + tape_no_price, or raw.tape fallback).
 
+import { comboDeskCatchNote, comboDeskErrorNote, isSupabaseUnhealthy } from "./dataSourceHealth.js";
+
+export { comboDeskCatchNote };
+
 function toNum(v) {
   if (v == null || v === "") return null;
   const n = typeof v === "string" ? parseFloat(v) : Number(v);
@@ -277,15 +281,20 @@ export function applyComboDeskPoll({
   const nextParlaysReady = parlaysReady === true || parlaysOk;
   const nextSettingsReady = settingsReady === true || settingsOk;
   const failed = !parlaysOk || !settingsOk;
-  let errorNote = null;
-  if (failed) {
-    const bits = [];
-    if (!parlaysOk) bits.push("locks");
-    if (!settingsOk) bits.push("kill-switch");
-    errorNote = (parlaysReady || settingsReady)
-      ? `Couldn't refresh ${bits.join(" / ")} — showing last known desk.`
-      : `Couldn't load ${bits.join(" / ")}. Retrying…`;
-  }
+  const errors = [
+    !parlaysOk ? (parlaysRes && parlaysRes.error) : null,
+    !settingsOk ? (settingsRes && settingsRes.error) : null,
+  ].filter(Boolean);
+  const sourceUnhealthy = failed && errors.some(isSupabaseUnhealthy);
+  const bits = [];
+  if (!parlaysOk) bits.push("locks");
+  if (!settingsOk) bits.push("kill-switch");
+  const errorNote = comboDeskErrorNote({
+    failed,
+    bits,
+    hadReady: !!(parlaysReady || settingsReady),
+    errors,
+  });
   return {
     parlays: parlaysOk ? parlaysRes.data : (prevParlays || []),
     kill: settingsOk ? !!(settingsRes.data && settingsRes.data.kill_switch) : !!prevKill,
@@ -296,10 +305,12 @@ export function applyComboDeskPoll({
     deskReady: nextParlaysReady && nextSettingsReady,
     failed,
     errorNote,
+    sourceUnhealthy,
+    healthError: sourceUnhealthy ? (errors.find(isSupabaseUnhealthy) || null) : null,
   };
 }
 
-export function comboDeskChrome({ deskLoading, deskReady, kill, deskError } = {}) {
+export function comboDeskChrome({ deskLoading, deskReady, kill, deskError, sourceUnhealthy } = {}) {
   const ready = deskReady === true && deskLoading !== true;
   return {
     ready,
@@ -307,6 +318,7 @@ export function comboDeskChrome({ deskLoading, deskReady, kill, deskError } = {}
     killSwitchOn: ready && !!kill,
     killSwitchDisabled: !ready,
     deskError: deskError || null,
+    sourceUnhealthy: !!sourceUnhealthy,
   };
 }
 

@@ -2514,6 +2514,10 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   const page = fs.readFileSync(path.join(dir, "UnhedgedTape.jsx"), "utf8");
   assert.match(page, /className="uh"/);
   assert.match(page, /Unhedged RFQs/);
+  assert.match(page, /DataSourceBanner/);
+  assert.match(page, /dataSourceStatus/);
+  assert.match(page, /context: "unhedged"/);
+  assert.match(page, /isSupabaseUnhealthy\(result\.error\)/);
   assert.match(page, /read-only/);
   assert.match(page, /No unhedged RFQ tape yet/);
   assert.match(page, /This tab is private/);
