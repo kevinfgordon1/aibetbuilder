@@ -135,11 +135,25 @@ export function featuredRowsUsable(featured) {
   return !!(featured && !featured.error && Array.isArray(featured.data));
 }
 
+export function isSupabaseDownError(err) {
+  if (!err) return false;
+  const status = err.status ?? err.statusCode ?? err.code;
+  if (status === 520 || status === 521 || status === 522 || status === 523 || status === 524
+    || status === "520" || status === "521" || status === "522" || status === "523" || status === "524") {
+    return true;
+  }
+  const msg = `${err.message || ""} ${err.details || ""} ${err.hint || ""}`;
+  return /520|521|522|523|524|cloudflare|origin (is )?down|connection (terminated|timeout|reset|refused)|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|Failed to fetch|fetch failed/i.test(msg);
+}
+
 export function describeOddsLoadError(err) {
   if (!err) return null;
   const msg = err.message || String(err);
+  if (isSupabaseDownError(err)) {
+    return "Couldn't reach the odds cache — Supabase / PostgREST is down (Cloudflare 520/522 or connection timeout). This is not The Odds API quota. Tap Retry after the database recovers.";
+  }
   if (err.name === "TimeoutError" || err.name === "AbortError" || /timed out/i.test(msg)) {
-    return "Live odds timed out waiting for the odds cache. This is not The Odds API quota — the cache request never finished. Tap Retry.";
+    return "Live odds timed out waiting for the odds cache (Supabase / PostgREST). This is not The Odds API quota — the cache request never finished. If Retry keeps failing, the database is likely still down.";
   }
   if (/401|403|JWT|invalid api key|invalid API key/i.test(msg)) {
     return "Odds cache access denied. Check the Supabase anon key.";

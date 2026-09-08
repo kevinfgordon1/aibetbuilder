@@ -15,6 +15,7 @@ import {
   withTimeout,
   featuredRowsUsable,
   describeOddsLoadError,
+  isSupabaseDownError,
   timeoutError,
   DEFAULT_EV_DATE_RANGE,
   selectEvScanView,
@@ -282,10 +283,12 @@ function fullPlan() {
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");
+  const fetchOddsJob = fs.readFileSync(path.join(dir, "../lib/odds-fetch-job.js"), "utf8");
   assert.match(fetchOddsFn, /res\.status\(200\)\.json\(\{ success: true, results \}\)/);
-  assert.match(fetchOddsFn, /results\.push\(\{ sport, games: data\.length \}\)/);
+  assert.match(fetchOddsJob, /games: row\.data\.length/);
   assert.match(fetchOddsFn, /Promo Builder never calls this/);
-  const fetchRegions = [...fetchOddsFn.matchAll(/regions=([^&]+)/g)].map((m) => m[1]);
+  assert.match(fetchOddsFn, /cacheUnreachable/);
+  const fetchRegions = [...fetchOddsJob.matchAll(/regions=([^&]+)/g)].map((m) => m[1]);
   assert.ok(fetchRegions.length >= 2, "featured + per-event odds must both set regions");
   for (const regions of fetchRegions) {
     assert.match(regions, /\bus\b/);
@@ -404,9 +407,14 @@ function createPartialHangClient(hangTable) {
 // ── describeOddsLoadError surfaces quota / auth distinctly
 {
   assert.match(describeOddsLoadError(timeoutError("odds_cache", 12)), /timed out/i);
+  assert.match(describeOddsLoadError(timeoutError("odds_cache", 12)), /Supabase/i);
   assert.match(describeOddsLoadError({ message: "Invalid API key" }), /anon key|access denied/i);
   assert.match(describeOddsLoadError({ message: "429 rate limit" }), /quota|rate limit/i);
   assert.equal(describeOddsLoadError(null), null);
+  assert.equal(isSupabaseDownError({ status: 522, message: "error code: 522" }), true);
+  assert.equal(isSupabaseDownError({ message: "Connection terminated due to connection timeout" }), true);
+  assert.match(describeOddsLoadError({ status: 520, message: "error code: 520" }), /Supabase/i);
+  assert.match(describeOddsLoadError({ status: 520, message: "error code: 520" }), /not The Odds API quota/i);
 }
 
 console.log("oddsLoad.test.js: ok");
