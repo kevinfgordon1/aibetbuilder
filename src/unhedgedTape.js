@@ -43,6 +43,12 @@
 // can hide a late write from Today's cheap filled_at window (Refresh
 // still shows All time).
 //
+// Current = light windows (Today / 24h / 7d): live fill tape. History =
+// Month / All time (paged). Current must react when a row is stamped
+// filled — realtime on status=filled plus a cheap visible-tab poll of the
+// same slim filled/seen query. Do not bring back a 20s select("*") of
+// millions of seen rows. Hidden tab does not poll. History does not poll.
+//
 // Worker statuses: seen, started, would_quote, filled. A row with
 // our_quote_american is would_quote even if status is still seen (mapping
 // only). Polymarket lists those seen rows (would-quote column). Tape is
@@ -94,9 +100,18 @@ export const UNHEDGED_BLOTTER_SELECT = UNHEDGED_BLOTTER_COLUMNS.join(",");
 export const UNHEDGED_DATE_COLS = ["filled_at"];
 export const UNHEDGED_REQUEST_DATE_COLS = ["created_at"];
 export const UNHEDGED_DATE_FALLBACK_COLS = ["updated_at", "created_at"];
-// Manual Refresh only. A 20s poll of fetch+counts was melting Today against
-// millions of seen rows. Do not auto-refresh in the background.
+// Full-tape auto-refresh stays off (0). Current uses UNHEDGED_LIVE_POLL_MS
+// for a slim visible-tab poll — never a 20s select("*") of seen rows.
 export const UNHEDGED_AUTO_REFRESH_MS = 0;
+export const UNHEDGED_LIVE_POLL_MS = 15_000;
+export const UNHEDGED_LIVE_DEBOUNCE_MS = 350;
+export const UNHEDGED_REALTIME_FILTER = "status=eq.filled";
+export const UNHEDGED_VIEWS = ["current", "history"];
+export const UNHEDGED_DEFAULT_VIEW = "current";
+export const UNHEDGED_VIEW_FILTERS = [
+  { key: "current", label: "Current" },
+  { key: "history", label: "History" },
+];
 export const UNHEDGED_STATUSES = ["seen", "started", "would_quote", "quoted", "filled"];
 export const UNHEDGED_ML_LEAGUES = ["mlb", "nfl"];
 export const UNHEDGED_TZ = "America/New_York";
@@ -711,11 +726,104 @@ export function unhedgedDateRangeLabel(value) {
   return hit ? hit.label : "Today";
 }
 
-// Manual Refresh only unless a caller opts into a slow visible-tab poll.
-// Never poll a hidden tab; never poll faster than 60s.
+// Legacy helper: the old full fetch+count poll must stay ≥60s (or off).
+// Current live updates use unhedgedShouldLivePoll instead.
 export function unhedgedShouldAutoRefresh(visibilityState, intervalMs = UNHEDGED_AUTO_REFRESH_MS) {
   if (intervalMs == null || intervalMs < 60_000) return false;
   return visibilityState === "visible";
+}
+
+export function normalizeUnhedgedView(value) {
+  const key = String(value == null ? "" : value).trim().toLowerCase();
+  if (key === "history" || key === "hist" || key === "archive") return "history";
+  if (key === "current" || key === "live" || key === "open") return "current";
+  return UNHEDGED_DEFAULT_VIEW;
+}
+
+// Current = one-page live windows. History = paged Month / All time.
+export function unhedgedViewForDateRange(range) {
+  return unhedgedDateRangePages(range) ? "history" : "current";
+}
+
+export function dateRangeForUnhedgedView(view, currentRange) {
+  const next = normalizeUnhedgedView(view);
+  const range = normalizeUnhedgedDateRange(currentRange);
+  if (next === "history") return unhedgedDateRangePages(range) ? range : "month";
+  return unhedgedDateRangePages(range) ? UNHEDGED_DEFAULT_DATE_RANGE : range;
+}
+
+// Current tape only. Hidden tab never polls. History (Month / All) never
+// polls — those windows page. Interval must stay ≥5s.
+export function unhedgedShouldLivePoll(visibilityState, dateRange, intervalMs = UNHEDGED_LIVE_POLL_MS) {
+  if (visibilityState !== "visible") return false;
+  if (intervalMs == null || intervalMs < 5_000) return false;
+  return !unhedgedDateRangePages(dateRange);
+}
+
+export function unhedgedRealtimeListenSpec() {
+  return {
+    schema: "public",
+    table: UNHEDGED_TABLE,
+    filter: UNHEDGED_REALTIME_FILTER,
+  };
+}
+
+export function unhedgedLivePayloadRow(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const row = payload.new || payload.record || null;
+  return row && typeof row === "object" ? row : null;
+}
+
+export function unhedgedLivePayloadPrev(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const row = payload.old || payload.previous || null;
+  return row && typeof row === "object" ? row : null;
+}
+
+export function rowMatchesUnhedgedLiveView(row, { venue = "all", dateRange = UNHEDGED_DEFAULT_DATE_RANGE, now } = {}) {
+  if (!row) return false;
+  if (isLiveUnhedgedRow(row)) return false;
+  const mode = resolveUnhedgedStatusMode({ venue });
+  if (!rowMatchesStatusMode(row, mode)) return false;
+  if (!rowMatchesVenueFilter(row, venue)) return false;
+  const window = unhedgedDateWindow(dateRange, now || new Date());
+  return rowInUnhedgedDateWindow(row, window, mode);
+}
+
+// Realtime filter is status=filled so seen-firehose inserts never arrive.
+// Fills view: a new/updated filled row in the window. Requests (Poly
+// Current): a fill of a row we may already be listing — drop it.
+export function unhedgedLiveChangeTouchesView(payload, ctx = {}) {
+  const next = unhedgedLivePayloadRow(payload);
+  const prev = unhedgedLivePayloadPrev(payload);
+  if (rowMatchesUnhedgedLiveView(next, ctx)) return true;
+  if (rowMatchesUnhedgedLiveView(prev, ctx)) return true;
+  const mode = resolveUnhedgedStatusMode({ venue: ctx.venue });
+  if (mode === "requests" && next && isFilledUnhedgedRow(next) && rowMatchesVenueFilter(next, ctx.venue)) {
+    return true;
+  }
+  return false;
+}
+
+export function applyUnhedgedLiveChange(rows, payload, ctx = {}) {
+  const next = unhedgedLivePayloadRow(payload);
+  const prev = unhedgedLivePayloadPrev(payload);
+  const id = next && next.id != null ? next.id : (prev && prev.id);
+  if (id == null) return Array.isArray(rows) ? rows : [];
+  const list = Array.isArray(rows) ? rows.slice() : [];
+  const idx = list.findIndex((r) => r && String(r.id) === String(id));
+  const keep = rowMatchesUnhedgedLiveView(next, ctx);
+  if (keep) {
+    const merged = idx >= 0 ? { ...list[idx], ...next } : next;
+    if (idx >= 0) list[idx] = merged;
+    else list.unshift(merged);
+    return list;
+  }
+  if (idx >= 0) {
+    list.splice(idx, 1);
+    return list;
+  }
+  return list;
 }
 
 // Date-window *query* prefers filled_at so status=filled + filled_at can use
