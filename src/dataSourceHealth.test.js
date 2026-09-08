@@ -66,13 +66,17 @@ function timeoutErr(label = "odds_cache") {
 
 {
   const now = Date.parse("2026-09-08T18:00:00.000Z"); // 18 UTC → 5-min cron window
+  assert.equal(STALE_CACHE_MS, 30 * 60 * 1000);
   assert.equal(staleCacheThresholdMs(now), STALE_CACHE_MS);
   const overnight = Date.parse("2026-09-08T08:00:00.000Z"); // 08 UTC hourly window
   assert.equal(staleCacheThresholdMs(overnight), 70 * 60 * 1000);
   assert.equal(cacheAgeMs("2026-09-08T17:40:00.000Z", now), 20 * 60 * 1000);
   assert.equal(isCacheStale("2026-09-08T17:50:00.000Z", now), false); // 10 min
-  assert.equal(isCacheStale("2026-09-08T17:40:00.000Z", now), true); // 20 min
+  assert.equal(isCacheStale("2026-09-08T17:31:00.000Z", now), false); // 29 min — under 30
+  assert.equal(isCacheStale("2026-09-08T17:30:00.000Z", now), true); // 30 min — warn
+  assert.equal(isCacheStale("2026-09-08T17:20:00.000Z", now), true); // 40 min
   assert.equal(isCacheStale("2026-09-08T07:20:00.000Z", overnight), false); // 40 min in hourly window
+  assert.equal(isCacheStale("2026-09-08T06:50:00.000Z", overnight), true); // 70 min overnight
   assert.equal(isCacheStale("2026-09-08T06:40:00.000Z", overnight), true); // 80 min
   assert.equal(isCacheStale(null, now), false);
 }
@@ -89,7 +93,14 @@ function timeoutErr(label = "odds_cache") {
   assert.equal(ok.chip, null);
   assert.match(ok.label, /Updated /);
 
-  const staleNow = Date.parse("2026-09-08T18:40:00.000-04:00");
+  const underStaleNow = Date.parse("2026-09-08T18:49:00.000-04:00"); // 29 min
+  const stillFresh = describeCacheFreshness({ fetchedAt, now: underStaleNow });
+  assert.equal(stillFresh.stale, false);
+  assert.equal(stillFresh.warn, false);
+  assert.equal(stillFresh.hint, null);
+  assert.equal(stillFresh.chip, null);
+
+  const staleNow = Date.parse("2026-09-08T18:50:00.000-04:00"); // 30 min
   const stale = describeCacheFreshness({ fetchedAt, now: staleNow });
   assert.equal(stale.stale, true);
   assert.equal(stale.warn, true);
