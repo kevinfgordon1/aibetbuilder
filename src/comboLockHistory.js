@@ -195,6 +195,39 @@ export function attemptSummaryFilled(attempts) {
   return !!(stats && stats.skippedFilled);
 }
 
+// Matched RFQs panel — same tape as History. Do not read combo_matches alone:
+// quote-watcher may be parked, so watcher rows stay empty while submissions
+// and fills already show on the card.
+export function matchedRfqCounts(attempts) {
+  const live = attemptStats(attempts);
+  if (!live) return { total: 0, quoted: 0, skipped: 0, lost: 0 };
+  return {
+    total: live.matched || 0,
+    quoted: live.quoted || 0,
+    skipped: live.skipped || 0,
+    lost: live.lost || 0,
+  };
+}
+
+export function matchedRfqHeading(attempts) {
+  const { total, quoted, skipped, lost } = matchedRfqCounts(attempts);
+  return `Matched RFQs — ${total} total · ${quoted} quoted · ${skipped} skipped · ${lost} lost`;
+}
+
+export function matchedRfqEmptyText(attempts) {
+  const { total } = matchedRfqCounts(attempts);
+  if (total > 0) return null;
+  if (attempts && attempts.filled > 0) {
+    return "No per-RFQ rows to list, but this lock has fills — see History and the fill bar.";
+  }
+  return "No RFQs have matched this lock yet.";
+}
+
+export function matchedRfqWatcherParked(matches, attempts) {
+  const { total } = matchedRfqCounts(attempts);
+  return total > 0 && !(matches && matches.length);
+}
+
 // Consecutive identical attempts (status / reason / size / venue). Armed /
 // created stay single so the first row is never folded into a later one.
 export function collapseIdentity(ev) {
