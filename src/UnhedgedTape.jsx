@@ -9,7 +9,9 @@
 // Today / 24h / 7d stay one page. Month / All time page only after that chip
 // is selected. Tiles use head counts (same window + venue + status + beat-fill).
 // Legs cell is a per-leg Our fair / Kalshi opp / Poly opp breakdown plus sport + event date.
-// Manual Refresh only — do not poll. Row pull is a slim column list; fills
+// Current (Today / 24h / 7d) live-updates fills: realtime on status=filled
+// plus a slim visible-tab poll. History (Month / All time) stays manual.
+// Do not poll millions of seen rows. Row pull is a slim column list; fills
 // filter filled_at, Poly seen filters created_at.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
@@ -17,13 +19,19 @@ import { OWNER_EMAIL } from "./ComboLocks";
 import {
   UNHEDGED_DATE_FILTERS,
   UNHEDGED_DEFAULT_DATE_RANGE,
+  UNHEDGED_LIVE_DEBOUNCE_MS,
+  UNHEDGED_LIVE_POLL_MS,
+  UNHEDGED_VIEW_FILTERS,
+  applyUnhedgedLiveChange,
   countUnhedgedRfqs,
+  dateRangeForUnhedgedView,
   fetchUnhedgedRfqs,
   filterUnhedgedAnalytics,
   formatEtTime,
   isTickerBlob,
   mergeUnhedgedSummary,
   normalizeUnhedgedDateRange,
+  normalizeUnhedgedView,
   normalizeVenueFilter,
   statusModeForVenue,
   summarizeUnhedgedRows,
@@ -32,7 +40,11 @@ import {
   unhedgedDateRangePages,
   unhedgedDisplayTs,
   unhedgedBlotterListKind,
+  unhedgedLiveChangeTouchesView,
+  unhedgedRealtimeListenSpec,
   unhedgedRefreshLabel,
+  unhedgedShouldLivePoll,
+  unhedgedViewForDateRange,
   visibleUnhedgedRows,
 } from "./unhedgedTape";
 
@@ -133,13 +145,17 @@ export function UnhedgedBlotter({
   paging,
   dateRange = UNHEDGED_DEFAULT_DATE_RANGE,
   onDateRangeChange,
+  view = "current",
+  onViewChange,
   venueFilter = "all",
   onVenueFilterChange,
   quoteBeatFill = false,
   onQuoteBeatFillChange,
+  live = false,
 }) {
   const list = rows || [];
   const dateKey = normalizeUnhedgedDateRange(dateRange);
+  const viewKey = normalizeUnhedgedView(view) || unhedgedViewForDateRange(dateKey);
   const polyRequests = venueFilter === "polymarket";
   const heavy = unhedgedDateRangePages(dateKey);
   const venueScoped = useMemo(
@@ -229,17 +245,22 @@ export function UnhedgedBlotter({
             className="chip btn"
             disabled={!!refreshing || rowsBusy}
             aria-busy={!!refreshing || rowsBusy}
-            title="Re-fetch the tape. Manual only — this page does not auto-refresh. Does not reload the app. Today / 24h / 7d stay one page."
+            title="Re-fetch the tape. Current also picks up fills live (no hard refresh). Does not reload the app. Today / 24h / 7d stay one page."
             onClick={onRefresh}
           >
             {unhedgedRefreshLabel(refreshing || rowsBusy)}
           </button>
         ) : null}
+        {live ? <span className="chip ok" title="Current updates when a quote fills — no hard refresh.">live</span> : null}
       </div>
       <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
-        {polyRequests
-          ? "Polymarket open combo RFQ requests (status=seen). Would-quote is what we would have quoted — paper only. We did not take these."
-          : "Filled pregame RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only."}
+        {viewKey === "current"
+          ? (polyRequests
+            ? "Current — open Polymarket combo RFQ requests (status=seen). A fill drops the row here without a hard refresh. Would-quote is what we would have quoted — paper only. We did not take these."
+            : "Current — filled pregame RFQs someone else matched. New fills land here without a hard refresh. We did not take these — paper only.")
+          : (polyRequests
+            ? "History — Polymarket open combo RFQ requests (status=seen) in a longer window. Would-quote is what we would have quoted — paper only. We did not take these."
+            : "History — filled pregame RFQs someone else matched on Kalshi or Polymarket. We did not take these — paper only.")}
         {" "}In-game and started RFQs stay off this tape. No quoting from this page.
         {" "}{LEG_ODDS_NOTE}
       </div>
@@ -251,6 +272,20 @@ export function UnhedgedBlotter({
 
       {loaded && !missingTable && (
         <div className="filters" role="group" aria-label="Unhedged RFQ filters" aria-busy={rowsBusy || undefined}>
+          <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>View</span>
+          {UNHEDGED_VIEW_FILTERS.map((c) => (
+            <FilterChip
+              key={c.key}
+              label={c.label}
+              active={viewKey === c.key}
+              busy={rowsBusy}
+              onClick={() => { if (onViewChange) onViewChange(c.key); }}
+              title={c.key === "current"
+                ? "Current — live tape for Today / 24h / 7d. A fill appears or leaves this list without a hard refresh."
+                : "History — Month / All time, paged from the server. Manual Refresh. Not a live poll."}
+            />
+          ))}
+          <span className="muted" style={{ margin: "0 4px" }}>·</span>
           <span className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", marginRight: 2 }}>Date</span>
           {UNHEDGED_DATE_FILTERS.map((c) => (
             <FilterChip
@@ -413,21 +448,32 @@ export default function UnhedgedTape({ user }) {
   const [dateRange, setDateRange] = useState(UNHEDGED_DEFAULT_DATE_RANGE);
   const [venueFilter, setVenueFilter] = useState("all");
   const [quoteBeatFill, setQuoteBeatFill] = useState(false);
+  const [visibility, setVisibility] = useState(
+    typeof document !== "undefined" ? document.visibilityState : "visible",
+  );
   const rowGen = useRef(0);
   const countGen = useRef(0);
+  const sawVisibility = useRef(false);
+  const liveDebounce = useRef(null);
+  const reloadRowsRef = useRef(null);
+  const reloadCountsRef = useRef(null);
 
-  const reloadRows = useCallback(async ({ button } = {}) => {
+  const reloadRows = useCallback(async ({ button, silent } = {}) => {
     if (!owner) return;
-    const gen = rowGen.current + 1;
-    rowGen.current = gen;
+    // Silent live ticks must not cancel a filter/Refresh fetch (that leaves
+    // the list stuck on Loading…). Filter changes bump rowGen; stale silent
+    // results drop.
+    const gen = silent ? rowGen.current : rowGen.current + 1;
+    if (!silent) rowGen.current = gen;
     if (button) setRefreshing(true);
-    setPaging(true);
+    if (!silent) setPaging(true);
     try {
       const result = await fetchUnhedgedRfqs(supabase, {
         dateRange,
         venue: venueFilter,
       });
       if (gen !== rowGen.current) return;
+      if (silent && result.error && !(result.rows && result.rows.length)) return;
       setRaw(result.rows);
       setMissingTable(result.missingTable);
       setError(result.error);
@@ -435,7 +481,7 @@ export default function UnhedgedTape({ user }) {
     } finally {
       if (gen !== rowGen.current) return;
       if (button) setRefreshing(false);
-      setPaging(false);
+      if (!silent) setPaging(false);
     }
   }, [owner, dateRange, venueFilter]);
 
@@ -453,10 +499,63 @@ export default function UnhedgedTape({ user }) {
     if (head && head.missingTable) setMissingTable(true);
   }, [owner, dateRange, venueFilter, quoteBeatFill]);
 
+  reloadRowsRef.current = reloadRows;
+  reloadCountsRef.current = reloadCounts;
+
   useEffect(() => { reloadRows(); }, [reloadRows]);
   useEffect(() => { reloadCounts(); }, [reloadCounts]);
-  // Manual Refresh only. Do not poll: public.unhedged_rfqs has millions of
-  // seen rows and a 20s fetch+count was melting Today (~1.5k filled).
+  // Current live-updates fills. Do not poll seen firehose or History pages.
+
+  useEffect(() => {
+    const onVis = () => setVisibility(document.visibilityState);
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  useEffect(() => {
+    if (!sawVisibility.current) {
+      sawVisibility.current = true;
+      return undefined;
+    }
+    if (!owner || visibility !== "visible") return undefined;
+    if (reloadRowsRef.current) reloadRowsRef.current({ silent: true });
+    if (reloadCountsRef.current) reloadCountsRef.current();
+    return undefined;
+  }, [owner, visibility]);
+
+  useEffect(() => {
+    if (!owner || !unhedgedShouldLivePoll(visibility, dateRange)) return undefined;
+    const t = setInterval(() => {
+      if (reloadRowsRef.current) reloadRowsRef.current({ silent: true });
+      if (reloadCountsRef.current) reloadCountsRef.current();
+    }, UNHEDGED_LIVE_POLL_MS);
+    return () => clearInterval(t);
+  }, [owner, visibility, dateRange]);
+
+  useEffect(() => {
+    if (!owner) return undefined;
+    const spec = unhedgedRealtimeListenSpec();
+    const onChange = (payload) => {
+      const ctx = { venue: venueFilter, dateRange };
+      if (!unhedgedLiveChangeTouchesView(payload, ctx)) return;
+      setRaw((prev) => applyUnhedgedLiveChange(prev, payload, ctx));
+      if (liveDebounce.current) clearTimeout(liveDebounce.current);
+      liveDebounce.current = setTimeout(() => {
+        if (reloadRowsRef.current) reloadRowsRef.current({ silent: true });
+        if (reloadCountsRef.current) reloadCountsRef.current();
+      }, UNHEDGED_LIVE_DEBOUNCE_MS);
+    };
+    const channel = supabase
+      .channel("unhedged-rfqs-current")
+      .on("postgres_changes", { event: "INSERT", ...spec }, onChange)
+      .on("postgres_changes", { event: "UPDATE", ...spec }, onChange)
+      .subscribe();
+    return () => {
+      if (liveDebounce.current) clearTimeout(liveDebounce.current);
+      if (typeof supabase.removeChannel === "function") supabase.removeChannel(channel);
+      else if (channel && typeof channel.unsubscribe === "function") channel.unsubscribe();
+    };
+  }, [owner, venueFilter, dateRange]);
 
   const rows = useMemo(() => visibleUnhedgedRows(raw, { venue: venueFilter }), [raw, venueFilter]);
 
@@ -475,6 +574,13 @@ export default function UnhedgedTape({ user }) {
     if (next === dateRange) return;
     bumpFetch(unhedgedDateRangePages(next));
     setDateRange(next);
+  }, [dateRange, bumpFetch]);
+
+  const onViewChange = useCallback((key) => {
+    const nextRange = dateRangeForUnhedgedView(key, dateRange);
+    if (nextRange === dateRange) return;
+    bumpFetch(unhedgedDateRangePages(nextRange));
+    setDateRange(nextRange);
   }, [dateRange, bumpFetch]);
 
   const onVenueFilterChange = useCallback((key) => {
@@ -500,10 +606,13 @@ export default function UnhedgedTape({ user }) {
       paging={paging}
       dateRange={dateRange}
       onDateRangeChange={onDateRangeChange}
+      view={unhedgedViewForDateRange(dateRange)}
+      onViewChange={onViewChange}
       venueFilter={venueFilter}
       onVenueFilterChange={onVenueFilterChange}
       quoteBeatFill={quoteBeatFill}
       onQuoteBeatFillChange={setQuoteBeatFill}
+      live={unhedgedShouldLivePoll(visibility, dateRange)}
     />
   );
 }

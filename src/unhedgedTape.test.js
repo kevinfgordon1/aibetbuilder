@@ -72,6 +72,20 @@ import {
   UNHEDGED_DATE_COLS,
   UNHEDGED_DATE_FALLBACK_COLS,
   UNHEDGED_AUTO_REFRESH_MS,
+  UNHEDGED_LIVE_POLL_MS,
+  UNHEDGED_LIVE_DEBOUNCE_MS,
+  UNHEDGED_REALTIME_FILTER,
+  UNHEDGED_VIEW_FILTERS,
+  UNHEDGED_DEFAULT_VIEW,
+  applyUnhedgedLiveChange,
+  dateRangeForUnhedgedView,
+  normalizeUnhedgedView,
+  rowMatchesUnhedgedLiveView,
+  unhedgedLiveChangeTouchesView,
+  unhedgedLivePayloadRow,
+  unhedgedRealtimeListenSpec,
+  unhedgedShouldLivePoll,
+  unhedgedViewForDateRange,
   UNHEDGED_LIGHT_DATE_KEYS,
   UNHEDGED_HEAVY_DATE_KEYS,
   applyUnhedgedDateWindow,
@@ -496,6 +510,79 @@ assert.equal(unhedgedShouldAutoRefresh("visible"), false);
 assert.equal(unhedgedShouldAutoRefresh("visible", 20_000), false);
 assert.equal(unhedgedShouldAutoRefresh("visible", 90_000), true);
 assert.equal(unhedgedShouldAutoRefresh("hidden", 90_000), false);
+assert.equal(UNHEDGED_LIVE_POLL_MS, 15_000);
+assert.equal(UNHEDGED_LIVE_DEBOUNCE_MS, 350);
+assert.equal(UNHEDGED_REALTIME_FILTER, "status=eq.filled");
+assert.equal(UNHEDGED_DEFAULT_VIEW, "current");
+assert.deepEqual(UNHEDGED_VIEW_FILTERS.map((f) => f.label), ["Current", "History"]);
+assert.equal(normalizeUnhedgedView("Current"), "current");
+assert.equal(normalizeUnhedgedView("HISTORY"), "history");
+assert.equal(normalizeUnhedgedView("nope"), "current");
+assert.equal(unhedgedViewForDateRange("today"), "current");
+assert.equal(unhedgedViewForDateRange("24h"), "current");
+assert.equal(unhedgedViewForDateRange("7d"), "current");
+assert.equal(unhedgedViewForDateRange("month"), "history");
+assert.equal(unhedgedViewForDateRange("all"), "history");
+assert.equal(dateRangeForUnhedgedView("current", "month"), "today");
+assert.equal(dateRangeForUnhedgedView("current", "24h"), "24h");
+assert.equal(dateRangeForUnhedgedView("history", "today"), "month");
+assert.equal(dateRangeForUnhedgedView("history", "all"), "all");
+assert.equal(unhedgedShouldLivePoll("visible", "today"), true);
+assert.equal(unhedgedShouldLivePoll("visible", "24h"), true);
+assert.equal(unhedgedShouldLivePoll("hidden", "today"), false);
+assert.equal(unhedgedShouldLivePoll("visible", "month"), false);
+assert.equal(unhedgedShouldLivePoll("visible", "all"), false);
+assert.equal(unhedgedShouldLivePoll("visible", "today", 4_000), false);
+assert.deepEqual(unhedgedRealtimeListenSpec(), {
+  schema: "public",
+  table: UNHEDGED_TABLE,
+  filter: "status=eq.filled",
+});
+{
+  const now = etLocalToUtc("2026-09-03", 14, 40);
+  const ctx = { venue: "all", dateRange: "today", now };
+  const filled = {
+    id: "fill-1",
+    status: "filled",
+    venue: "kalshi",
+    filled_at: "2026-09-03T16:00:00.000Z",
+    created_at: "2026-09-03T15:00:00.000Z",
+  };
+  const seen = {
+    id: "req-1",
+    status: "seen",
+    venue: "polymarket",
+    created_at: "2026-09-03T16:00:00.000Z",
+  };
+  const stale = {
+    id: "old-1",
+    status: "filled",
+    venue: "kalshi",
+    filled_at: "2026-09-01T16:00:00.000Z",
+  };
+  assert.equal(unhedgedLivePayloadRow({ new: filled }), filled);
+  assert.equal(rowMatchesUnhedgedLiveView(filled, ctx), true);
+  assert.equal(rowMatchesUnhedgedLiveView(stale, ctx), false);
+  assert.equal(unhedgedLiveChangeTouchesView({ new: filled }, ctx), true);
+  assert.equal(unhedgedLiveChangeTouchesView({ new: seen }, ctx), false);
+  assert.deepEqual(
+    applyUnhedgedLiveChange([], { new: filled }, ctx).map((r) => r.id),
+    ["fill-1"],
+  );
+  const polyCtx = { venue: "polymarket", dateRange: "today", now };
+  assert.equal(rowMatchesUnhedgedLiveView(seen, polyCtx), true);
+  const filledSeen = { ...seen, status: "filled", filled_at: "2026-09-03T16:10:00.000Z" };
+  assert.equal(unhedgedLiveChangeTouchesView({ old: seen, new: filledSeen }, polyCtx), true);
+  assert.deepEqual(
+    applyUnhedgedLiveChange([seen], { old: seen, new: filledSeen }, polyCtx).map((r) => r.id),
+    [],
+  );
+  const patched = applyUnhedgedLiveChange([filled], {
+    new: { ...filled, fill_american: 450, updated_at: "2026-09-03T16:20:00.000Z" },
+  }, ctx);
+  assert.equal(patched.length, 1);
+  assert.equal(patched[0].fill_american, 450);
+}
 assert.equal(UNHEDGED_BLOTTER_SELECT.includes("*"), false);
 assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("legs"));
 assert.ok(UNHEDGED_BLOTTER_COLUMNS.includes("filled_at"));
@@ -2498,8 +2585,16 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(page, /reloadRows\(\{ button: true \}\)/);
   assert.match(page, /reloadCounts\(\)/);
   assert.match(page, /dateRange,/);
-  assert.match(page, /Manual Refresh only/);
-  assert.doesNotMatch(page, /setInterval/);
+  assert.match(page, /UNHEDGED_VIEW_FILTERS/);
+  assert.match(page, /Current — live tape/);
+  assert.match(page, /History — Month \/ All time/);
+  assert.match(page, /applyUnhedgedLiveChange/);
+  assert.match(page, /postgres_changes/);
+  assert.match(page, /reloadRowsRef\.current\(\{ silent: true \}\)/);
+  assert.match(page, /setInterval/);
+  assert.match(page, /UNHEDGED_LIVE_POLL_MS/);
+  assert.match(page, /unhedgedRealtimeListenSpec/);
+  assert.doesNotMatch(page, /Manual Refresh only/);
   assert.doesNotMatch(page, /20000/);
   assert.doesNotMatch(page, /Would-quote \/ Fair/);
   assert.doesNotMatch(page, /NCAAF|ncaaf/);
