@@ -228,7 +228,7 @@ assert.match(locksSrc, /\(archived \|\| \[\]\)\.forEach/);
 assert.match(locksSrc, /RiskProfile/);
 assert.match(locksSrc, /AttemptHistory/);
 assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
-assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} \/>/);
+assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
 assert.match(locksSrc, /open=\{\!\!openParlays\["hist-" \+ p\.id\]\}/);
 assert.match(locksSrc, /espn-scores/);
 assert.match(locksSrc, /underlying_result/);
