@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   remainingFill,
   quotingState,
@@ -12,6 +13,8 @@ import {
   lastLoss,
   lastRelevant,
   outcomesForParlay,
+  comboDeskChrome,
+  comboSectionKind,
   buildParlayDesk,
 } from "./comboDesk.js";
 
@@ -32,6 +35,32 @@ import {
   const r = remainingFill({ filled: 0, ceiling: 0 });
   assert.equal(r.left, 0);
   assert.equal(r.pct, 0);
+}
+
+// ── first-fetch chrome: no fake kill / empty Active until settings+parlays settle ──
+{
+  const loading = comboDeskChrome({ deskLoading: true, kill: true });
+  assert.equal(loading.ready, false);
+  assert.equal(loading.showKillBanner, false);
+  assert.equal(loading.killSwitchOn, false);
+  assert.equal(loading.killSwitchDisabled, true);
+  assert.equal(comboSectionKind(true, 0), "loading");
+  assert.equal(comboSectionKind(true, 3), "loading");
+}
+{
+  const live = comboDeskChrome({ deskLoading: false, kill: true });
+  assert.equal(live.ready, true);
+  assert.equal(live.showKillBanner, true);
+  assert.equal(live.killSwitchOn, true);
+  assert.equal(live.killSwitchDisabled, false);
+  assert.equal(comboSectionKind(false, 0), "empty");
+  assert.equal(comboSectionKind(false, 2), "rows");
+}
+{
+  const off = comboDeskChrome({ deskLoading: false, kill: false });
+  assert.equal(off.showKillBanner, false);
+  assert.equal(off.killSwitchOn, false);
+  assert.equal(comboSectionKind(false, 0), "empty");
 }
 
 // ── quoting on/off ──
@@ -216,6 +245,27 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   });
   assert.equal(desk.quote.key, "ceiling");
   assert.equal(desk.fill.left, 0);
+}
+
+// ── ComboLocks.jsx wires first-fetch chrome (no fake kill / empty Active) ──
+{
+  const page = readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
+  assert.match(page, /const \[kill, setKill\] = useState\(false\)/);
+  assert.match(page, /useState\(true\); \/\/ first settings\+parlays fetch/);
+  assert.doesNotMatch(page, /useState\(true\); \/\/ safe default until settings load/);
+  assert.match(page, /comboDeskChrome/);
+  assert.match(page, /comboSectionKind/);
+  assert.match(page, /deskChrome\.showKillBanner/);
+  assert.match(page, /deskChrome\.killSwitchOn/);
+  assert.match(page, /deskChrome\.killSwitchDisabled/);
+  assert.match(page, /waitingKind === "loading"/);
+  assert.match(page, /waitingKind === "empty"/);
+  assert.match(page, /Loading locks/);
+  assert.match(page, /className="empty loading"/);
+  assert.match(page, /setDeskLoading\(false\)/);
+  assert.match(page, /setKill\(\!\!\(s && s\.kill_switch\)\)/);
+  assert.match(page, /if \(deskLoading\) return;/);
+  assert.match(page, /kill: deskLoading \? false : kill/);
 }
 
 console.log("comboDesk.test.js ok");

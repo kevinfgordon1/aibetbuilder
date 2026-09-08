@@ -243,6 +243,24 @@ export function outcomesForParlay(outcomes, { parlayId, matches = [] } = {}) {
   return (outcomes || []).filter((o) => o && (o.parlay_id === parlayId || (o.rfq_id && rfqs.has(o.rfq_id))));
 }
 
+// First settings+parlays fetch. Kill banner / red toggle / empty Active copy
+// only after this settles — never flash "kill engaged" or "Nothing waiting"
+// from the pre-fetch defaults.
+export function comboDeskChrome({ deskLoading, kill } = {}) {
+  const ready = deskLoading !== true;
+  return {
+    ready,
+    showKillBanner: ready && !!kill,
+    killSwitchOn: ready && !!kill,
+    killSwitchDisabled: !ready,
+  };
+}
+
+export function comboSectionKind(deskLoading, count) {
+  if (deskLoading) return "loading";
+  return (count || 0) > 0 ? "rows" : "empty";
+}
+
 export function buildParlayDesk({
   parlay,
   filled = 0,

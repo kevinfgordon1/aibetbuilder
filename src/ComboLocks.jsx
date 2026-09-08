@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { buildParlayDesk, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { buildParlayDesk, comboDeskChrome, comboSectionKind, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { attemptSummaryFilled, attemptSummaryLine, buildLockAttempts, visibleAttempts } from "./comboLockHistory";
@@ -396,7 +396,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [games, setGames] = useState(SAMPLE);
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
-  const [kill, setKill] = useState(true); // safe default until settings load
+  const [kill, setKill] = useState(false);
+  const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
   const [history, setHistory] = useState([]);
   const [archived, setArchived] = useState([]);
   const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
@@ -552,6 +553,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   }, []);
   const reload = useCallback(async () => {
     if (!owner) return;
+    try {
     const [{ data: p }, { data: s }, { data: h }, { data: ar }, { data: fills }, { data: booked }, { data: mc }, { data: oc }, { data: mrows }] = await Promise.all([
       // All LIVING parlays (not yet archived), whether the worker is actively watching them
       // (active=true) or paused after recording a quote (active=false). Loading both means a
@@ -584,7 +586,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         : Promise.resolve({ data: [] }),
       ...livingSubReqs,
     ]);
-    setParlays(livingRows); if (s) setKill(!!s.kill_switch); setHistory(h || []); setArchived(archivedRows);
+    setParlays(livingRows); setKill(!!(s && s.kill_switch)); setHistory(h || []); setArchived(archivedRows);
     const mcMap = {}; (mc || []).forEach((r) => { mcMap[r.parlay_id] = r; }); setMatchCounts(mcMap);
     setOutcomes(oc || []);
     const subRows = [
@@ -600,6 +602,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     const q = {}; (booked || []).forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
     setQuoted(q);
     refreshSettlements({ living: p || [], archived: ar || [], fills: fills || [], outcomes: oc || [], matchesByParlay: mbp, submissions: subRows, filledById: rf });
+    } finally {
+      setDeskLoading(false);
+    }
   }, [owner, user, refreshSettlements]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
@@ -684,7 +689,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         parlay: p,
         filled: realFills[p.id] || 0,
         quoted: quoted[p.id] || 0,
-        kill,
+        kill: deskLoading ? false : kill,
         matches: matchesByParlay[p.id] || [],
         submissions: submissionsByParlay[p.id] || [],
         outcomes,
@@ -692,7 +697,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       });
     });
     return out;
-  }, [parlays, realFills, quoted, kill, matchesByParlay, submissionsByParlay, outcomes, outcomeByRfq]);
+  }, [parlays, realFills, quoted, kill, deskLoading, matchesByParlay, submissionsByParlay, outcomes, outcomeByRfq]);
   const fillsByParlay = useMemo(() => {
     const m = {};
     (comboFills || []).forEach((f) => {
@@ -750,8 +755,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const archiveParlay = async (id) => { await supabase.from("combo_parlays").update({ active: false, archived_at: new Date().toISOString() }).eq("id", id); reload(); };
   // Reactivate a parlay the worker paused (active=false) — it resumes watching for RFQs.
   const reactivateParlay = async (id) => { await supabase.from("combo_parlays").update({ active: true }).eq("id", id); reload(); };
-  const toggleKill = async () => { const next = !kill; setKill(next);
-    await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() }); };
+  const toggleKill = async () => {
+    if (deskLoading) return;
+    const next = !kill; setKill(next);
+    await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() });
+  };
 
   const simulate = async () => {
     const p = parlays.find((x) => x.id === sim.parlayId);
@@ -775,6 +783,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   };
 
   if (!owner) return null;
+
+  const deskChrome = comboDeskChrome({ deskLoading, kill });
+  const waitingKind = comboSectionKind(deskLoading, waiting.length);
+  const filledKind = comboSectionKind(deskLoading, filledParlays.length);
+  const archivedKind = comboSectionKind(deskLoading, archived.length);
 
   const marketGroups = (gameKey, selVal) => {
     const g = gameIdx[gameKey]; if (!g) return null;
@@ -822,7 +835,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .switch{position:relative;width:46px;height:26px;border-radius:999px;background:#3a3d46;cursor:pointer;border:none}
         .cl .switch .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
         .cl .switch.on{background:#ef4444}.cl .switch.on .knob{left:23px}
+        .cl .switch:disabled{opacity:.45;cursor:wait}
         .cl .empty{color:#6b7280;font-size:14px;padding:8px 2px}
+        .cl .empty.loading{display:flex;align-items:center;gap:8px}
+        .cl .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.15);border-top-color:#93c5fd;border-radius:50%;animation:cl-spin .7s linear infinite;flex:0 0 auto}
+        @keyframes cl-spin{to{transform:rotate(360deg)}}
         .cl .bar{height:7px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:2px}
         .cl .bar.thin{height:4px}
         .cl .bar-fill{height:100%;background:#34d399;border-radius:999px;transition:width .3s}
@@ -857,15 +874,16 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
         <div style={{ fontSize: 18, fontWeight: 700 }}>Combo Locks</div>
         <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }}>games: {srcLive ? "live" : "sample"}</span>
+        {deskLoading && <span className="chip">loading desk…</span>}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: "#8a8f98", fontWeight: 600 }}>Kill-switch</span>
-        <button className={"switch" + (kill ? " on" : "")} onClick={toggleKill} aria-label="kill switch"><span className="knob" /></button>
+        <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || undefined} title={deskLoading ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
       </div>
-      {kill && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
+      {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
 
       <h3>Active — waiting to be filled</h3>
-      <div className="card">
-        {waiting.length === 0 ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
+      <div className="card" aria-busy={deskLoading || undefined}>
+        {waitingKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : waitingKind === "empty" ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
           <div className="parlay" key={p.id} id={"lock-" + p.id}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
@@ -896,8 +914,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       </div>
 
       <h3>Filled — awaiting settlement</h3>
-      <div className="card">
-        {filledParlays.length === 0 ? (
+      <div className="card" aria-busy={deskLoading || undefined}>
+        {filledKind === "loading" ? (
+          <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
+        ) : filledKind === "empty" ? (
           <div className="empty">No confirmed fills yet. A parlay lands here once Kalshi actually executes a real position for it (from your account fills) — a posted quote that no taker accepted does not count.</div>
         ) : filledParlays.map((p) => {
           const desk = deskByParlay[p.id];
@@ -1047,8 +1067,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       </div>
 
       <h3>History — games over</h3>
-      <div className="card">
-        {archived.length === 0 ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : archived.map((a) => {
+      <div className="card" aria-busy={deskLoading || undefined}>
+        {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : archivedKind === "empty" ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : archived.map((a) => {
           const filledN = realFills[a.id] || 0;
           const out = lockOutcome(a, filledN);
           const openKey = "arch-" + a.id;
