@@ -7,7 +7,9 @@
 // Each card's always-visible desk strip (fill remaining, quoting state, last skip,
 // last loss / tape clearing price) is derived in comboDesk.js from the same polls.
 // Per-lock history (armed / quoted / skipped / unfilled / filled) reuses Miss-tape
-// classification. Risk/profit uses parlay_stake + fill_american + max_contracts.
+// classification. Matched RFQs uses the same History tape (combo_submissions /
+// combo_fills) so an empty watcher combo_matches cannot claim "0 total".
+// Risk/profit uses parlay_stake + fill_american + max_contracts.
 // Unfilled outcomes: official Kalshi combo ticker, else Kalshi single-game legs,
 // else ESPN public scoreboard (/api/espn-scores). Never invents scores.
 // Archived cards show outcome + source chips on chrome; one tap opens attempt history.
@@ -19,7 +21,7 @@ import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGa
 import { applyComboDeskPoll, buildParlayDesk, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
-import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, visibleAttempts } from "./comboLockHistory";
+import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
@@ -298,45 +300,76 @@ function DeskChips({ desk, thin }) {
     </div>
   );
 }
-function MatchedRfqTable({ matches, submissions, outcomeByRfq, desk }) {
-  const rows = matches || [];
-  const quotedN = rows.filter((m) => outcomeByRfq[m.rfq_id]).length;
-  const lostN = rows.filter((m) => (outcomeByRfq[m.rfq_id] || {}).outcome === "lost").length;
-  const skippedN = rows.length - quotedN;
+function matchedRfqOutcome(row, oc, skip) {
   const outMap = { executed: ["#6ee7b7", "filled"], accepted: ["#93c5fd", "accepted"], lost: ["#fca5a5", "lost"], posted: ["#9aa3b2", "awaiting"] };
+  if (oc) return outMap[oc.outcome] || ["#c3c6cc", oc.outcome];
+  if (row && row.bucket === "filled") return ["#6ee7b7", "filled"];
+  if (row && row.bucket === "awaiting") return ["#93c5fd", row.reason === "open" ? "quoted · rested" : "awaiting"];
+  if (row && (row.bucket === "outbid" || row.bucket === "too_slow" || row.bucket === "lost" || row.bucket === "no_taker")) {
+    const label = row.reason === "quoted · no take" ? "quoted · no take"
+      : row.reason === "cancelled" ? "cancelled"
+        : row.reason || "lost";
+    return ["#fca5a5", label];
+  }
+  if (skip && skip.kind === "oversized") return ["#fcd34d", skip.text];
+  if (skip) return ["#6b7280", skip.text];
+  if (row && (row.bucket === "skipped" || row.bucket === "oversized")) {
+    return [row.bucket === "oversized" ? "#fcd34d" : "#6b7280", row.reason || "skipped"];
+  }
+  return ["#6b7280", (row && (row.reason || row.bucket)) || "skipped"];
+}
+
+function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, desk }) {
+  const counts = matchedRfqCounts(attempts);
+  const tapeRows = [...((attempts && attempts.tape && attempts.tape.rows) || [])]
+    .sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
   const fillCtx = desk ? { filled: desk.fill.filled, ceiling: desk.fill.ceiling, hedgeCap: desk.fill.ceiling } : {};
+  const matchByRfq = {};
+  (matches || []).forEach((m) => { if (m && m.rfq_id) matchByRfq[m.rfq_id] = m; });
   const subByRfq = {};
   (submissions || []).forEach((s) => { if (s && s.rfq_id) subByRfq[s.rfq_id] = s; });
+  const parked = matchedRfqWatcherParked(matches, attempts);
+  const empty = matchedRfqEmptyText(attempts);
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
-        Matched RFQs — {rows.length} total · {quotedN} quoted · {skippedN} skipped · {lostN} lost
+        {matchedRfqHeading(attempts)}
       </div>
-      {rows.length === 0 ? <div className="empty">No RFQs have matched this lock yet. Matches are recorded from when the watcher went live.</div> : (
+      {parked ? (
+        <div className="empty" style={{ paddingTop: 0, paddingBottom: 6 }}>Quote-watcher is parked. Rows and counts come from History (combo_submissions / combo_fills), not watcher combo_matches.</div>
+      ) : null}
+      {counts.total === 0 ? <div className="empty">{empty}</div> : (
         <table><thead><tr><th>Time</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
-          <tbody>{rows.map((m) => {
-            const oc = outcomeByRfq[m.rfq_id];
-            const req = m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${m.contracts != null ? m.contracts : "—"} contracts`;
-            const lockable = m.locks === true ? "✓ yes" : m.locks === false ? "no" : "—";
-            const twin = subByRfq[m.rfq_id];
+          <tbody>{tapeRows.map((row) => {
+            const m = (row.rfqId && matchByRfq[row.rfqId]) || null;
+            const oc = (row.rfqId && outcomeByRfq[row.rfqId]) || row.outcome || null;
+            const twin = (row.rfqId && subByRfq[row.rfqId]) || row.submission || null;
+            const contracts = (m && m.contracts != null) ? m.contracts : row.contracts;
+            const req = m && m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${contracts != null ? contracts : "—"} contracts`;
+            const locks = m ? m.locks : null;
+            const lockable = locks === true ? "✓ yes" : locks === false ? "no" : "—";
+            const worst = (m && m.worst != null) ? m.worst : (twin && twin.worst_lock != null ? twin.worst_lock : null);
             const skip = !oc ? skipLabel({
-              ...m,
+              ...(m || {}),
               ...(twin || {}),
-              skip_reason: skipReasonOf(twin) || skipReasonOf(m),
-              contracts: m.contracts != null ? m.contracts : (twin && twin.contracts),
+              skip_reason: skipReasonOf(twin) || skipReasonOf(m) || skipReasonOf(row),
+              contracts,
             }, fillCtx) : null;
-            const [ocCol, ocLbl] = oc ? (outMap[oc.outcome] || ["#c3c6cc", oc.outcome]) : [skip && skip.kind === "oversized" ? "#fcd34d" : "#6b7280", skip ? skip.text : "skipped"];
-            const why = oc && oc.outcome === "lost" ? (formatLoss(oc) || "checking…") : (skip && skip.kind === "oversized" ? "cannot partial-fill" : "");
-            const tape = oc ? formatCents(tapeNoPrice(oc)) : null;
+            const [ocCol, ocLbl] = matchedRfqOutcome(row, oc, skip);
+            const why = oc && oc.outcome === "lost" ? (formatLoss(oc) || "checking…")
+              : (skip && skip.kind === "oversized" ? "cannot partial-fill" : (row.reason && row.reason !== ocLbl ? row.reason : ""));
+            const tape = oc ? formatCents(tapeNoPrice(oc)) : (row.tapeNo != null ? formatCents(row.tapeNo) : null);
+            const quotedNo = oc && oc.submitted_no_bid != null ? oc.submitted_no_bid
+              : (oc && oc.no_bid != null ? oc.no_bid : row.ourNo);
             const speed = oc && oc.responded_ms != null ? `${(oc.responded_ms / 1000).toFixed(1)}s${oc.rfq_lifetime_ms != null ? `/${(oc.rfq_lifetime_ms / 1000).toFixed(1)}s` : ""}` : "";
             const whyBits = [why, tape && oc && oc.outcome === "lost" && !String(why).includes("¢") ? `tape ${tape}` : "", speed].filter(Boolean);
             return (
-              <tr key={m.rfq_id}>
-                <td>{m.matched_at ? new Date(m.matched_at).toLocaleTimeString() : "—"}</td>
+              <tr key={row.rfqId || row.fillId || `${row.at}-${row.contracts}`}>
+                <td>{row.at ? new Date(row.at).toLocaleTimeString() : "—"}</td>
                 <td className="num">{req}</td>
-                <td className="num" style={{ color: m.locks === true ? "#6ee7b7" : m.locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
-                <td className="num">{m.worst != null ? money(m.worst) : "—"}</td>
-                <td className="num">{oc ? (oc.submitted_no_bid != null ? `NO $${Number(oc.submitted_no_bid).toFixed(2)}` : (oc.no_bid != null ? `NO $${Number(oc.no_bid).toFixed(2)}` : "—")) : "—"}</td>
+                <td className="num" style={{ color: locks === true ? "#6ee7b7" : locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
+                <td className="num">{worst != null ? money(worst) : "—"}</td>
+                <td className="num">{quotedNo != null ? `NO $${Number(quotedNo).toFixed(2)}` : "—"}</td>
                 <td style={{ color: ocCol }}>{ocLbl}</td>
                 <td style={{ color: "#8a8f98" }}>{whyBits.join(" · ")}</td>
               </tr>
@@ -990,12 +1023,12 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}${mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : " · matched 0 RFQs"; })()}</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqCounts(attemptsByParlay[p.id]).total); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : ""; })()}</div>
             <FillProgress desk={deskByParlay[p.id]} />
             <RiskProfile parlay={p} filled={realFills[p.id] || 0} />
             <DeskChips desk={deskByParlay[p.id]} />
             <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
-            {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
+            {openParlays[p.id] && <MatchedRfqTable attempts={attemptsByParlay[p.id]} matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
           </div>
         ))}
         {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>Note: {realUnattr} real combo contract(s) filled couldn’t be tied to a specific parlay (Kalshi fills carry no quote id) — counted but shown unattributed.</div>}
@@ -1026,9 +1059,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <FillProgress desk={desk} thin />
               <RiskProfile parlay={p} filled={desk ? desk.fill.filled : (realFills[p.id] || 0)} />
               <DeskChips desk={desk} thin />
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; return mc && mc.n ? ` · matched ${mc.n} RFQ${mc.n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqCounts(attemptsByParlay[p.id]).total); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
               <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
-              {openParlays[p.id] && <MatchedRfqTable matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
+              {openParlays[p.id] && <MatchedRfqTable attempts={attemptsByParlay[p.id]} matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
             </div>
           );
         })}

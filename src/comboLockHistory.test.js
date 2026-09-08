@@ -13,6 +13,10 @@ import {
   collapseIdentity,
   collapseAttempts,
   attemptRepeatLabel,
+  matchedRfqCounts,
+  matchedRfqHeading,
+  matchedRfqEmptyText,
+  matchedRfqWatcherParked,
 } from "./comboLockHistory.js";
 
 assert.equal(quotingEnded({ archived_at: "2026-09-04T00:00:00Z" }), true);
@@ -316,6 +320,91 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
 }
 
 {
+  const empty = buildLockAttempts({
+    parlay: {
+      id: "never",
+      active: true,
+      created_at: "2026-09-08T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 100,
+    },
+    now: Date.parse("2026-09-08T16:00:00Z"),
+  });
+  assert.deepEqual(matchedRfqCounts(empty), { total: 0, quoted: 0, skipped: 0, lost: 0 });
+  assert.equal(matchedRfqHeading(empty), "Matched RFQs — 0 total · 0 quoted · 0 skipped · 0 lost");
+  assert.equal(matchedRfqEmptyText(empty), "No RFQs have matched this lock yet.");
+  assert.doesNotMatch(matchedRfqEmptyText(empty), /watcher went live/);
+  assert.equal(matchedRfqWatcherParked([], empty), false);
+}
+
+{
+  const fillsOnly = buildLockAttempts({
+    parlay: {
+      id: "fill-only",
+      active: true,
+      created_at: "2026-09-08T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 408,
+    },
+    fills: [{ parlay_id: "fill-only", fill_id: "f1", count: 12, kalshi_created_time: "2026-09-08T15:00:00Z" }],
+    now: Date.parse("2026-09-08T16:00:00Z"),
+  });
+  assert.ok(matchedRfqCounts(fillsOnly).total > 0);
+  assert.equal(matchedRfqEmptyText(fillsOnly), null);
+}
+
+// Screenshot lock: History has skips/misses/fills, watcher combo_matches is empty.
+{
+  const sea = buildLockAttempts({
+    parlay: {
+      id: "p-sea-phi-lar-rfq",
+      active: true,
+      created_at: "2026-09-07T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 408,
+    },
+    fills: [
+      { parlay_id: "p-sea-phi-lar-rfq", fill_id: "f-sea", rfq_id: "fill1", count: 98, kalshi_created_time: "2026-09-08T02:00:00Z" },
+    ],
+    submissions: [
+      { parlay_id: "p-sea-phi-lar-rfq", rfq_id: "fill1", status: "filled", order_id: "o1", contracts: 98, created_at: "2026-09-08T02:00:00Z" },
+      ...Array.from({ length: 46 }, (_, i) => ({
+        parlay_id: "p-sea-phi-lar-rfq",
+        rfq_id: "sk" + i,
+        status: "declined",
+        skip_reason: "oversized",
+        tape_match: "none",
+        contracts: 80,
+        created_at: `2026-09-08T01:${String(i).padStart(2, "0")}:00Z`,
+      })),
+      ...Array.from({ length: 33 }, (_, i) => ({
+        parlay_id: "p-sea-phi-lar-rfq",
+        rfq_id: "ms" + i,
+        status: "unfilled",
+        quote_id: "q" + i,
+        is_live: false,
+        contracts: 39,
+        created_at: `2026-09-08T03:${String(i).padStart(2, "0")}:00Z`,
+      })),
+    ],
+    now: Date.parse("2026-09-08T16:00:00Z"),
+  });
+  const counts = matchedRfqCounts(sea);
+  assert.equal(counts.total, 80);
+  assert.equal(counts.skipped, 46);
+  assert.equal(counts.quoted, 34);
+  assert.equal(counts.lost, 33);
+  assert.equal(matchedRfqEmptyText(sea), null);
+  assert.equal(matchedRfqWatcherParked([], sea), true);
+  assert.equal(matchedRfqWatcherParked([{ rfq_id: "x" }], sea), false);
+  assert.match(matchedRfqHeading(sea), /80 total/);
+  assert.match(matchedRfqHeading(sea), /34 quoted/);
+  assert.match(matchedRfqHeading(sea), /46 skipped/);
+  assert.match(matchedRfqHeading(sea), /33 lost/);
+  assert.doesNotMatch(matchedRfqHeading(sea), /0 total · 0 quoted · 0 skipped · 0 lost/);
+}
+
+{
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
   // Living cards: history starts collapsed behind hist-<id>; archive stays always-open once the card expands.
   assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle, showSummary = true \}\)/);
@@ -327,6 +416,14 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /attemptRepeatLabel/);
   assert.match(locksSrc, /hist-sum/);
   assert.match(locksSrc, /hist-rpt/);
+  assert.match(locksSrc, /matchedRfqHeading/);
+  assert.match(locksSrc, /matchedRfqCounts/);
+  assert.match(locksSrc, /matchedRfqEmptyText/);
+  assert.match(locksSrc, /matchedRfqWatcherParked/);
+  assert.match(locksSrc, /<MatchedRfqTable attempts=\{attemptsByParlay\[p\.id\]\}/);
+  assert.doesNotMatch(locksSrc, /watcher went live/);
+  assert.doesNotMatch(locksSrc, /matched 0 RFQs/);
+  assert.match(locksSrc, /attempts && attempts\.tape && attempts\.tape\.rows/);
 }
 
 console.log("comboLockHistory.test.js ok");
