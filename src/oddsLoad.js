@@ -79,13 +79,10 @@ export function promoNeedsReload(promoSports, loadedSports) {
   return false;
 }
 
-// Browser PostgREST can hang (statement timeout, Warp thread kill) with no HTTP
-// error. Promo default sports (MLB+NFL+NCAAF) are ~2.8MB combined — one
-// `.in("sport", …)` select never finishes. Cap each query and load one sport
-// at a time; Promo prefers /api/odds-cache (selected sports, cache then live).
+// Client reads go to Supabase odds_cache / event_odds_cache — not /api/odds.
+// PostgREST can hang (statement timeout, Warp thread kill) with no HTTP error;
+// without a wall-clock cap the Promo spinner stays on "Loading live odds..." forever.
 export const ODDS_QUERY_TIMEOUT_MS = 12000;
-export const ODDS_CACHE_COLUMNS = "sport,data,fetched_at";
-export const ODDS_CACHE_API_TIMEOUT_MS = 20000;
 
 export function timeoutError(label, ms) {
   const err = new Error(`${label} timed out after ${ms}ms`);
@@ -138,11 +135,25 @@ export function featuredRowsUsable(featured) {
   return !!(featured && !featured.error && Array.isArray(featured.data));
 }
 
+export function isSupabaseDownError(err) {
+  if (!err) return false;
+  const status = err.status ?? err.statusCode ?? err.code;
+  if (status === 520 || status === 521 || status === 522 || status === 523 || status === 524
+    || status === "520" || status === "521" || status === "522" || status === "523" || status === "524") {
+    return true;
+  }
+  const msg = `${err.message || ""} ${err.details || ""} ${err.hint || ""}`;
+  return /520|521|522|523|524|cloudflare|origin (is )?down|connection (terminated|timeout|reset|refused)|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|Failed to fetch|fetch failed/i.test(msg);
+}
+
 export function describeOddsLoadError(err) {
   if (!err) return null;
   const msg = err.message || String(err);
+  if (isSupabaseDownError(err)) {
+    return "Couldn't reach the odds cache — Supabase / PostgREST is down (Cloudflare 520/522 or connection timeout). This is not The Odds API quota. Tap Retry after the database recovers.";
+  }
   if (err.name === "TimeoutError" || err.name === "AbortError" || /timed out/i.test(msg)) {
-    return "Live odds timed out waiting for the odds cache. This is not The Odds API quota — the cache request never finished. Tap Retry.";
+    return "Live odds timed out waiting for the odds cache (Supabase / PostgREST). This is not The Odds API quota — the cache request never finished. If Retry keeps failing, the database is likely still down.";
   }
   if (/401|403|JWT|invalid api key|invalid API key/i.test(msg)) {
     return "Odds cache access denied. Check the Supabase anon key.";
@@ -153,110 +164,32 @@ export function describeOddsLoadError(err) {
   return `Could not load live odds: ${msg}`;
 }
 
-export function oddsCacheApiUrl(plan) {
-  const sports = (plan && plan.featuredSports) || [];
-  const params = new URLSearchParams({ sports: sports.join(",") });
-  if (plan && plan.eventSince) params.set("eventSince", plan.eventSince);
-  return `/api/odds-cache?${params}`;
-}
-
-function emptyCaches(error = null, timedOut = false) {
-  return {
-    featured: { data: [], error, timedOut },
-    events: { data: [], error, timedOut },
-    futures: { data: [], error: null, timedOut: false },
-  };
-}
-
-export async function fetchOddsCacheFromApi(plan, {
-  fetchImpl = globalThis.fetch,
-  timeoutMs = ODDS_CACHE_API_TIMEOUT_MS,
-} = {}) {
-  if (typeof fetchImpl !== "function") return emptyCaches(new Error("fetch unavailable"));
-  const sports = (plan && plan.featuredSports) || [];
-  if (!sports.length) return emptyCaches();
-  try {
-    const json = await withTimeout(
-      (signal) => fetchImpl(oddsCacheApiUrl(plan), { signal }).then(async (res) => {
-        if (!res || !res.ok) {
-          const err = new Error(`odds-cache ${res ? res.status : "failed"}`);
-          err.status = res && res.status;
-          throw err;
-        }
-        return res.json();
-      }),
-      { timeoutMs, label: "odds-cache api" },
-    );
-    const featuredData = Array.isArray(json.featured) ? json.featured : [];
-    const eventData = Array.isArray(json.events) ? json.events : [];
-    const firstErr = json.errors && json.errors[0] && json.errors[0].error;
-    return {
-      featured: {
-        data: featuredData,
-        error: featuredData.length ? null : (firstErr ? new Error(firstErr) : new Error("odds cache empty")),
-        timedOut: false,
+export async function queryOddsCaches(client, plan, { timeoutMs = ODDS_QUERY_TIMEOUT_MS } = {}) {
+  const jobs = [
+    runCacheQuery(
+      () => client.from("odds_cache").select("*").in("sport", plan.featuredSports),
+      { timeoutMs, label: "odds_cache" },
+    ),
+    runCacheQuery(
+      () => {
+        let events = client.from("event_odds_cache").select("*").in("sport", plan.eventSports);
+        if (plan.eventSince) events = events.gte("commence_time", plan.eventSince);
+        return events;
       },
-      events: { data: eventData, error: null, timedOut: false },
-      futures: { data: [], error: null, timedOut: false },
-    };
-  } catch (err) {
-    const timedOut = !!(err && (err.name === "TimeoutError" || err.name === "AbortError"));
-    return emptyCaches(err, timedOut);
+      { timeoutMs, label: "event_odds_cache" },
+    ),
+  ];
+  if (plan.futures) {
+    jobs.push(runCacheQuery(
+      () => client.from("odds_cache").select("*").in("sport", plan.futuresKeys),
+      { timeoutMs, label: "odds_cache futures" },
+    ));
   }
-}
-
-async function queryFeaturedBySport(client, sports, timeoutMs) {
-  const rows = [];
-  let lastError = null;
-  let timedOut = false;
-  for (const sport of sports || []) {
-    const res = await runCacheQuery(
-      () => client.from("odds_cache").select(ODDS_CACHE_COLUMNS).eq("sport", sport),
-      { timeoutMs, label: `odds_cache ${sport}` },
-    );
-    if (res.timedOut) {
-      timedOut = true;
-      lastError = res.error;
-      continue;
-    }
-    if (res.error) {
-      lastError = res.error;
-      continue;
-    }
-    if (Array.isArray(res.data)) rows.push(...res.data.filter(Boolean));
-    else if (res.data) rows.push(res.data);
-  }
+  const [featuredRes, eventRes, futuresRes] = await Promise.all(jobs);
   return {
-    data: rows,
-    error: rows.length ? null : lastError,
-    timedOut: rows.length ? false : timedOut,
+    featured: featuredRes,
+    events: eventRes,
+    futures: futuresRes || { data: [], error: null, timedOut: false },
   };
 }
 
-export async function queryOddsCachesFromClient(client, plan, { timeoutMs = ODDS_QUERY_TIMEOUT_MS } = {}) {
-  const featured = await queryFeaturedBySport(client, plan.featuredSports, timeoutMs);
-  const events = await runCacheQuery(
-    () => {
-      let q = client.from("event_odds_cache").select("*").in("sport", plan.eventSports);
-      if (plan.eventSince) q = q.gte("commence_time", plan.eventSince);
-      return q;
-    },
-    { timeoutMs, label: "event_odds_cache" },
-  );
-  let futures = { data: [], error: null, timedOut: false };
-  if (plan.futures) {
-    futures = await queryFeaturedBySport(client, plan.futuresKeys, timeoutMs);
-  }
-  return { featured, events, futures };
-}
-
-export async function queryOddsCaches(client, plan, opts = {}) {
-  const preferApi = opts.preferApi ?? plan.mode === "promo";
-  if (preferApi) {
-    const api = await fetchOddsCacheFromApi(plan, opts);
-    if (api && featuredRowsUsable(api.featured) && api.featured.data.length) return api;
-  }
-  if (client) return queryOddsCachesFromClient(client, plan, opts);
-  if (preferApi) return fetchOddsCacheFromApi(plan, opts);
-  return emptyCaches(new Error("odds cache unavailable"));
-}

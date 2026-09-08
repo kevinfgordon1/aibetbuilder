@@ -10,10 +10,13 @@ assert.match(src, /parseRequestedSports/);
 assert.match(src, /featuredOnly/);
 assert.match(src, /maxDuration: 60/);
 assert.match(src, /Promo Builder never calls this/);
+assert.match(src, /cacheUnreachable/);
+assert.match(src, /503/);
+assert.match(src, /Supabase odds cache unreachable/);
 assert.match(src, /res\.status\(200\)\.json\(\{ success: true, results \}\)/);
 
 const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '../vercel.json'), 'utf8'));
 assert.equal(vercel.functions['api/fetch-odds.js'].maxDuration, 60);
-assert.equal(vercel.functions['api/odds-cache.js'].maxDuration, 30);
+assert.ok(!vercel.functions['api/odds-cache.js']);
 
 console.log('fetch-odds api tests passed');
