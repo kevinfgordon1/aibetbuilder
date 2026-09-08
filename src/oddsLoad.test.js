@@ -12,10 +12,14 @@ import {
   shouldFetchPromoOdds,
   promoNeedsReload,
   queryOddsCaches,
+  queryOddsCachesFromClient,
   withTimeout,
   featuredRowsUsable,
   describeOddsLoadError,
   timeoutError,
+  oddsCacheApiUrl,
+  fetchOddsCacheFromApi,
+  ODDS_CACHE_COLUMNS,
   DEFAULT_EV_DATE_RANGE,
   selectEvScanView,
   evScanFromLegs,
@@ -38,12 +42,14 @@ function createMockClient() {
   return {
     calls,
     from(table) {
-      const state = { table, select: null, in: null, gte: null };
+      const state = { table, select: null, in: null, eq: null, gte: null };
       calls.push(state);
       const chain = {
         select(cols) { state.select = cols; return chain; },
         in(col, vals) { state.in = { col, vals: [...vals] }; return chain; },
+        eq(col, val) { state.eq = { col, val }; return chain; },
         gte(col, val) { state.gte = { col, val }; return chain; },
+        maybeSingle() { state.maybeSingle = true; return chain; },
         abortSignal(signal) { state.signal = signal; return chain; },
         then(resolve, reject) {
           return Promise.resolve({ data: [], error: null }).then(resolve, reject);
@@ -140,10 +146,11 @@ function fullPlan() {
 // ── queryOddsCaches: promo does not query FUTURES_KEYS
 {
   const client = createMockClient();
-  await queryOddsCaches(client, promoPlan(new Set(["baseball_mlb"])));
+  await queryOddsCachesFromClient(client, promoPlan(new Set(["baseball_mlb"])));
   assert.equal(client.calls.length, 2);
   assert.equal(client.calls[0].table, "odds_cache");
-  assert.deepEqual(client.calls[0].in, { col: "sport", vals: ["baseball_mlb"] });
+  assert.equal(client.calls[0].select, ODDS_CACHE_COLUMNS);
+  assert.deepEqual(client.calls[0].eq, { col: "sport", val: "baseball_mlb" });
   assert.equal(client.calls[1].table, "event_odds_cache");
   assert.deepEqual(client.calls[1].in, { col: "sport", vals: ["baseball_mlb"] });
   assert.equal(client.calls[1].gte.col, "commence_time");
@@ -155,19 +162,21 @@ function fullPlan() {
 {
   const client = createMockClient();
   const sports = ["basketball_nba", "icehockey_nhl"];
-  await queryOddsCaches(client, promoPlan(new Set(sports)));
-  assert.deepEqual(client.calls[0].in.vals, sports);
-  assert.deepEqual(client.calls[1].in.vals, sports);
+  await queryOddsCachesFromClient(client, promoPlan(new Set(sports)));
+  const featured = client.calls.filter((c) => c.table === "odds_cache");
+  assert.deepEqual(featured.map((c) => c.eq.val), sports);
+  assert.deepEqual(client.calls.find((c) => c.table === "event_odds_cache").in.vals, sports);
 }
 
 // ── queryOddsCaches: full board includes futures, no commence_time floor
 {
   const client = createMockClient();
-  await queryOddsCaches(client, fullPlan());
-  assert.equal(client.calls.length, 3);
-  assert.deepEqual(client.calls[0].in.vals, SPORT_KEYS);
-  assert.equal(client.calls[1].gte, null);
-  assert.deepEqual(client.calls[2].in, { col: "sport", vals: FUTURES_KEYS });
+  await queryOddsCachesFromClient(client, fullPlan());
+  const featured = client.calls.filter((c) => c.table === "odds_cache" && SPORT_KEYS.includes(c.eq && c.eq.val));
+  const futures = client.calls.filter((c) => c.table === "odds_cache" && FUTURES_KEYS.includes(c.eq && c.eq.val));
+  assert.deepEqual(featured.map((c) => c.eq.val), SPORT_KEYS);
+  assert.equal(client.calls.find((c) => c.table === "event_odds_cache").gte, null);
+  assert.deepEqual(futures.map((c) => c.eq.val), FUTURES_KEYS);
 }
 
 // ── Visiting ev/odds without a full board triggers load; second visit does not
@@ -282,10 +291,13 @@ function fullPlan() {
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");
+  const fetchOddsJob = fs.readFileSync(path.join(dir, "../lib/odds-fetch-job.js"), "utf8");
   assert.match(fetchOddsFn, /res\.status\(200\)\.json\(\{ success: true, results \}\)/);
-  assert.match(fetchOddsFn, /results\.push\(\{ sport, games: data\.length \}\)/);
+  assert.match(fetchOddsJob, /games: row\.data\.length/);
   assert.match(fetchOddsFn, /Promo Builder never calls this/);
-  const fetchRegions = [...fetchOddsFn.matchAll(/regions=([^&]+)/g)].map((m) => m[1]);
+  assert.match(fetchOddsFn, /runFetchOddsJob/);
+  assert.match(fetchOddsFn, /parseRequestedSports/);
+  const fetchRegions = [...fetchOddsJob.matchAll(/regions=([^&]+)/g)].map((m) => m[1]);
   assert.ok(fetchRegions.length >= 2, "featured + per-event odds must both set regions");
   for (const regions of fetchRegions) {
     assert.match(regions, /\bus\b/);
@@ -295,6 +307,8 @@ function fullPlan() {
   }
   const fetchFuturesFn = fs.readFileSync(path.join(dir, "../api/fetch-futures.js"), "utf8");
   assert.match(fetchFuturesFn, /regions=us,us2,us_ex,eu/);
+  assert.match(fs.readFileSync(path.join(dir, "oddsLoad.js"), "utf8"), /\/api\/odds-cache/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, "oddsLoad.js"), "utf8"), /\/api\/fetch-odds/);
   assert.match(app, /featuredRowsUsable\(featured\)/);
   assert.match(app, /describeOddsLoadError/);
   assert.match(app, /setOddsLoadError/);
@@ -325,12 +339,14 @@ function createHangClient() {
   return {
     calls,
     from(table) {
-      const state = { table, select: null, in: null, gte: null, signal: null };
+      const state = { table, select: null, in: null, eq: null, gte: null, signal: null };
       calls.push(state);
       const chain = {
         select(cols) { state.select = cols; return chain; },
         in(col, vals) { state.in = { col, vals: [...vals] }; return chain; },
+        eq(col, val) { state.eq = { col, val }; return chain; },
         gte(col, val) { state.gte = { col, val }; return chain; },
+        maybeSingle() { return chain; },
         abortSignal(signal) { state.signal = signal; return chain; },
         then(resolve, reject) { return hangThen().then(resolve, reject); },
       };
@@ -345,7 +361,9 @@ function createPartialHangClient(hangTable) {
       const chain = {
         select() { return chain; },
         in() { return chain; },
+        eq() { return chain; },
         gte() { return chain; },
+        maybeSingle() { return chain; },
         abortSignal() { return chain; },
         then(resolve, reject) {
           if (table === hangTable) return hangThen().then(resolve, reject);
@@ -377,7 +395,7 @@ function createPartialHangClient(hangTable) {
 // ── queryOddsCaches: both tables hanging → timedOut, featured unusable
 {
   const t0 = Date.now();
-  const out = await queryOddsCaches(createHangClient(), promoPlan(new Set(["baseball_mlb"])), { timeoutMs: 40 });
+  const out = await queryOddsCachesFromClient(createHangClient(), promoPlan(new Set(["baseball_mlb"])), { timeoutMs: 40 });
   assert.ok(Date.now() - t0 < 500, "promo hang must abort, not spin forever");
   assert.equal(out.featured.timedOut, true);
   assert.equal(out.events.timedOut, true);
@@ -389,7 +407,7 @@ function createPartialHangClient(hangTable) {
 // ── event_odds_cache hang: featured still usable (Promo can render main lines)
 {
   const t0 = Date.now();
-  const out = await queryOddsCaches(
+  const out = await queryOddsCachesFromClient(
     createPartialHangClient("event_odds_cache"),
     promoPlan(new Set(["baseball_mlb"])),
     { timeoutMs: 40 },
@@ -407,6 +425,82 @@ function createPartialHangClient(hangTable) {
   assert.match(describeOddsLoadError({ message: "Invalid API key" }), /anon key|access denied/i);
   assert.match(describeOddsLoadError({ message: "429 rate limit" }), /quota|rate limit/i);
   assert.equal(describeOddsLoadError(null), null);
+}
+
+// ── one featured sport timeout does not drop the others
+{
+  const client = {
+    from(table) {
+      const state = { table, sport: null };
+      const chain = {
+        select() { return chain; },
+        eq(_col, val) { state.sport = val; return chain; },
+        in() { return chain; },
+        gte() { return chain; },
+        maybeSingle() { return chain; },
+        abortSignal() { return chain; },
+        then(resolve, reject) {
+          if (table === "odds_cache" && state.sport === "americanfootball_nfl") {
+            return hangThen().then(resolve, reject);
+          }
+          if (table === "odds_cache") {
+            return Promise.resolve({
+              data: [{ sport: state.sport, data: [{ id: "g1" }], fetched_at: "2026-09-08T18:00:00.000Z" }],
+              error: null,
+            }).then(resolve, reject);
+          }
+          return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+        },
+      };
+      return chain;
+    },
+  };
+  const out = await queryOddsCachesFromClient(
+    client,
+    promoPlan(new Set(["baseball_mlb", "americanfootball_nfl"])),
+    { timeoutMs: 40 },
+  );
+  assert.equal(featuredRowsUsable(out.featured), true);
+  assert.deepEqual(out.featured.data.map((r) => r.sport), ["baseball_mlb"]);
+}
+
+// ── Promo prefers /api/odds-cache when it returns selected-sport rows
+{
+  const client = createMockClient();
+  const plan = promoPlan(new Set(["baseball_mlb"]));
+  assert.match(oddsCacheApiUrl(plan), /^\/api\/odds-cache\?/);
+  assert.match(oddsCacheApiUrl(plan), /sports=baseball_mlb/);
+  const out = await queryOddsCaches(client, plan, {
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        featured: [{ sport: "baseball_mlb", data: [{ id: "live" }], fetched_at: "2026-09-08T18:00:00.000Z" }],
+        events: [],
+        errors: [],
+      }),
+    }),
+  });
+  assert.equal(out.featured.data[0].data[0].id, "live");
+  assert.equal(client.calls.length, 0, "cache API hit must skip the browser PostgREST path");
+}
+
+// ── hung /api/odds-cache falls back to the client and does not wait forever
+{
+  const t0 = Date.now();
+  const out = await fetchOddsCacheFromApi(promoPlan(new Set(["baseball_mlb"])), {
+    timeoutMs: 40,
+    fetchImpl: () => hangThen(),
+  });
+  assert.ok(Date.now() - t0 < 500);
+  assert.equal(out.featured.timedOut, true);
+  const client = createMockClient();
+  const fallback = await queryOddsCaches(client, promoPlan(new Set(["baseball_mlb"])), {
+    timeoutMs: 40,
+    fetchImpl: () => hangThen(),
+  });
+  assert.ok(Date.now() - t0 < 800);
+  assert.equal(client.calls[0].table, "odds_cache");
+  assert.deepEqual(fallback.featured.data, []);
 }
 
 console.log("oddsLoad.test.js: ok");

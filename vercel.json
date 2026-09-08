@@ -26,6 +26,12 @@
     }
   ],
   "functions": {
+    "api/fetch-odds.js": {
+      "maxDuration": 60
+    },
+    "api/odds-cache.js": {
+      "maxDuration": 30
+    },
     "api/scan-ev-parlays.js": {
       "maxDuration": 60
     }
