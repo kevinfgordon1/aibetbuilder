@@ -447,14 +447,26 @@ export function missLockLine(stats) {
   return bits.join(" · ");
 }
 
-// One yellow line for a lock card: skip summary when any skips, else misses.
-export function attemptLockLine(stats) {
+// Quoted misses only — skip rows also set missed:true, so subtract them.
+export function quotedMissedCount(stats) {
+  if (!stats) return 0;
+  return Math.max(0, (stats.missed || 0) - (stats.skipped || 0));
+}
+
+// Skip chip + quoted-miss chip. Both venues (Kalshi / Polymarket) share these
+// Miss-tape buckets — do not hide quoted-no-take when skips also exist.
+export function attemptLockParts(stats) {
   const skip = skipLockLine(stats);
-  if (skip) return skip;
-  const quotedMissed = (stats && stats.missed ? stats.missed : 0)
-    - (stats && stats.skipped ? stats.skipped : 0);
-  if (quotedMissed > 0) return missLockLine({ ...stats, missed: quotedMissed });
-  return null;
+  const quoted = quotedMissedCount(stats);
+  const miss = quoted > 0 ? missLockLine({ ...stats, missed: quoted }) : null;
+  return { skip, miss };
+}
+
+// One yellow line for a lock card: skips and quoted misses, joined when both.
+export function attemptLockLine(stats) {
+  const { skip, miss } = attemptLockParts(stats);
+  if (skip && miss) return `${skip} · ${miss}`;
+  return skip || miss || null;
 }
 
 // Official Kalshi combo result only (combo_parlays.kalshi_result). Same copy as

@@ -19,7 +19,7 @@ import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGa
 import { buildParlayDesk, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
-import { attemptSummaryFilled, attemptSummaryLine, buildLockAttempts, visibleAttempts } from "./comboLockHistory";
+import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, visibleAttempts } from "./comboLockHistory";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
@@ -198,13 +198,23 @@ const ATTEMPT_COLOR = {
   unfilled: "#fcd34d", filled: "#6ee7b7",
 };
 function AttemptSummary({ attempts }) {
-  const line = attemptSummaryLine(attempts);
-  if (!line) return null;
+  const parts = attemptSummaryParts(attempts);
+  if (!parts.skip && !parts.miss) return null;
   return (
-    <span
-      className={"chip num hist-sum " + (attemptSummaryFilled(attempts) ? "ok" : "warn")}
-      title="Miss-tape skip / miss summary"
-    >{line}</span>
+    <>
+      {parts.skip && (
+        <span
+          className={"chip num hist-sum " + (attemptSummaryFilled(attempts) ? "ok" : "warn")}
+          title="Miss-tape skips — Kalshi and Polymarket"
+        >{parts.skip}</span>
+      )}
+      {parts.miss && (
+        <span
+          className="chip num hist-sum warn"
+          title="Quoted misses — posted, no take. Kalshi and Polymarket"
+        >{parts.miss}</span>
+      )}
+    </>
   );
 }
 function AttemptHistory({ attempts, open = true, onToggle, showSummary = true }) {
@@ -241,7 +251,9 @@ function AttemptHistory({ attempts, open = true, onToggle, showSummary = true })
             <table><thead><tr><th>Time</th><th>Status</th><th>Size</th><th>Venue</th></tr></thead>
               <tbody>{shown.map((e, i) => (
                 <tr key={(e.at || e.key) + "-" + e.reason + "-" + i}>
-                  <td>{e.at ? new Date(e.at).toLocaleString() : "—"}</td>
+                  <td>{e.count > 1
+                    ? <span className="hist-rpt" title={`${e.count} identical attempts`}>{attemptRepeatLabel(e)}</span>
+                    : (e.at ? new Date(e.at).toLocaleString() : "—")}</td>
                   <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
                   <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
                   <td>{e.venueKey === "polymarket" ? "Polymarket" : (e.venue || "—")}</td>
@@ -847,6 +859,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .hist-head .hist-toggle{margin-left:auto}
         .cl .hist-static{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;margin-bottom:6px}
         .cl .hist-static .chip{text-transform:none;letter-spacing:0}
+        .cl .hist-rpt{display:inline-block;margin-left:6px;color:#9aa3b2;font-weight:600;white-space:nowrap}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}

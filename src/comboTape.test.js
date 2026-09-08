@@ -41,6 +41,8 @@ import {
   skipFillSummary,
   skipLockLine,
   missLockLine,
+  quotedMissedCount,
+  attemptLockParts,
   attemptLockLine,
   lockSettlement,
   settlementTally,
@@ -531,8 +533,26 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   assert.equal(skipLockLine({ skipped: 0 }), null);
   assert.equal(missLockLine({ missed: 16, no_taker: 16 }), "16 missed · later filled 0 · 16 no taker");
   assert.equal(missLockLine({ missed: 0 }), null);
+  assert.equal(quotedMissedCount({ missed: 50, skipped: 2 }), 48);
+  assert.equal(quotedMissedCount({ missed: 2, skipped: 2 }), 0);
+  assert.equal(quotedMissedCount(null), 0);
+  assert.deepEqual(
+    attemptLockParts({ skipped: 2, skippedFilled: 0, skippedNone: 2, skippedUnknown: 0, missed: 2 }),
+    { skip: "2 skipped · later filled 0 · 2 no print", miss: null },
+  );
+  assert.deepEqual(
+    attemptLockParts({ skipped: 2, skippedFilled: 0, skippedNone: 2, skippedUnknown: 0, missed: 50, no_taker: 48 }),
+    {
+      skip: "2 skipped · later filled 0 · 2 no print",
+      miss: "48 missed · later filled 0 · 48 no taker",
+    },
+  );
   assert.equal(attemptLockLine({ skipped: 2, skippedFilled: 0, skippedNone: 2, skippedUnknown: 0, missed: 2 }), "2 skipped · later filled 0 · 2 no print");
   assert.equal(attemptLockLine({ skipped: 0, missed: 16, no_taker: 16 }), "16 missed · later filled 0 · 16 no taker");
+  assert.equal(
+    attemptLockLine({ skipped: 2, skippedFilled: 0, skippedNone: 2, skippedUnknown: 0, missed: 50, no_taker: 48 }),
+    "2 skipped · later filled 0 · 2 no print · 48 missed · later filled 0 · 48 no taker",
+  );
   assert.equal(attemptLockLine({ skipped: 0, missed: 0 }), null);
 }
 
@@ -749,7 +769,7 @@ assert.equal(pickFillRow([
   assert.match(tapeUi, /from\("quote_outcomes"\)[\s\S]*?\.in\("parlay_id"/);
   assert.match(locks, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.is\("archived_at"/);
   assert.match(locks, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.not\("archived_at"/);
-  assert.match(locks, /attemptSummaryLine/);
+  assert.match(locks, /attemptSummaryParts/);
   assert.doesNotMatch(locks, /skipFill/);
   assert.match(tapeUi, /settlementFromStored/);
   assert.match(tapeUi, /parlay won \(we lost\)|settlement\.text/);

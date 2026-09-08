@@ -8,7 +8,11 @@ import {
   buildLockAttempts,
   visibleAttempts,
   attemptSummaryLine,
+  attemptSummaryParts,
   attemptSummaryFilled,
+  collapseIdentity,
+  collapseAttempts,
+  attemptRepeatLabel,
 } from "./comboLockHistory.js";
 
 assert.equal(quotingEnded({ archived_at: "2026-09-04T00:00:00Z" }), true);
@@ -157,6 +161,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     now: Date.parse("2026-09-05T20:00:00Z"),
   });
   assert.equal(attemptSummaryLine(skipHist), "2 skipped · later filled 0 · 2 no print");
+  assert.deepEqual(attemptSummaryParts(skipHist), {
+    skip: "2 skipped · later filled 0 · 2 no print",
+    miss: null,
+  });
   assert.equal(attemptSummaryFilled(skipHist), false);
 }
 
@@ -187,6 +195,124 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
 {
   assert.equal(attemptSummaryLine(null), null);
   assert.equal(attemptSummaryLine({}), null);
+  assert.deepEqual(attemptSummaryParts(null), { skip: null, miss: null });
+}
+
+// Kevin SEA+PHI+LAR — Poly oversized skips must not hide Poly quoted-no-take
+{
+  const mixed = buildLockAttempts({
+    parlay: {
+      id: "p-sea-phi-lar",
+      active: true,
+      created_at: "2026-09-07T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 100,
+    },
+    submissions: [
+      { parlay_id: "p-sea-phi-lar", rfq_id: "s1", venue: "polymarket", status: "declined", skip_reason: "oversized", tape_match: "none", contracts: 80, created_at: "2026-09-08T01:00:00Z" },
+      { parlay_id: "p-sea-phi-lar", rfq_id: "s2", venue: "polymarket", status: "declined", skip_reason: "oversized", tape_match: "none", contracts: 90, created_at: "2026-09-08T01:01:00Z" },
+      ...Array.from({ length: 12 }, (_, i) => ({
+        parlay_id: "p-sea-phi-lar",
+        rfq_id: "q" + i,
+        venue: "polymarket",
+        status: "unfilled",
+        quote_id: "pq" + i,
+        is_live: false,
+        contracts: 39,
+        created_at: `2026-09-08T01:10:${String(i).padStart(2, "0")}Z`,
+      })),
+    ],
+    now: Date.parse("2026-09-08T02:00:00Z"),
+  });
+  const parts = attemptSummaryParts(mixed);
+  assert.equal(parts.skip, "2 skipped · later filled 0 · 2 no print");
+  assert.equal(parts.miss, "12 missed · later filled 0 · 12 no taker");
+  assert.match(attemptSummaryLine(mixed), /2 skipped/);
+  assert.match(attemptSummaryLine(mixed), /12 missed/);
+  const collapsed = collapseAttempts(mixed.events);
+  const polyQuotes = collapsed.filter((e) => e.key === "unfilled" && e.contracts === 39);
+  assert.equal(polyQuotes.length, 1);
+  assert.equal(polyQuotes[0].count, 12);
+  assert.equal(polyQuotes[0].venueKey, "polymarket");
+  const vis = visibleAttempts(mixed.events);
+  assert.ok(vis.shown.some((e) => e.count === 12 && e.contracts === 39));
+}
+
+{
+  assert.equal(collapseIdentity({ key: "armed", reason: "armed" }), null);
+  assert.equal(collapseIdentity({ key: "created", reason: "paused" }), null);
+  assert.equal(
+    collapseIdentity({ key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket" }),
+    collapseIdentity({ key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket" }),
+  );
+}
+
+{
+  const same = collapseAttempts([
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "2026-09-08T02:02:51Z" },
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "2026-09-08T02:02:48Z" },
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "2026-09-08T02:02:45Z" },
+  ]);
+  assert.equal(same.length, 1);
+  assert.equal(same[0].count, 3);
+  assert.equal(same[0].at, "2026-09-08T02:02:51Z");
+  assert.equal(same[0].fromAt, "2026-09-08T02:02:45Z");
+  assert.match(attemptRepeatLabel(same[0]), /×3/);
+  assert.match(attemptRepeatLabel(same[0]), /last /);
+  assert.equal(attemptRepeatLabel({ count: 1, at: "2026-09-08T02:02:51Z" }), "");
+}
+
+{
+  const venues = collapseAttempts([
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "2" },
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "kalshi", at: "1" },
+  ]);
+  assert.equal(venues.length, 2);
+}
+
+{
+  const sizes = collapseAttempts([
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "2" },
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 40, venueKey: "polymarket", at: "1" },
+  ]);
+  assert.equal(sizes.length, 2);
+}
+
+{
+  const split = collapseAttempts([
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "3" },
+    { key: "skipped", reason: "oversized", label: "skipped oversized 80", contracts: 80, venueKey: "polymarket", at: "2" },
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "polymarket", at: "1" },
+  ]);
+  assert.equal(split.length, 3);
+  assert.equal(split[0].count, 1);
+  assert.equal(split[2].count, 1);
+}
+
+{
+  const armed = collapseAttempts([
+    { key: "armed", reason: "armed", at: "a" },
+    { key: "armed", reason: "armed", at: "b" },
+  ]);
+  assert.equal(armed.length, 2);
+}
+
+{
+  const vis = visibleAttempts([
+    { key: "armed", at: "a" },
+    ...Array.from({ length: 80 }, () => ({
+      key: "unfilled",
+      at: "t",
+      reason: "quoted · no take",
+      label: "unfilled · quoted, no take",
+      contracts: 39,
+      venueKey: "polymarket",
+    })),
+  ], 60);
+  assert.equal(vis.shown.length, 2);
+  assert.equal(vis.shown[0].key, "armed");
+  assert.equal(vis.shown[1].count, 80);
+  assert.equal(vis.extra, 0);
 }
 
 {
@@ -197,8 +323,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
   assert.match(locksSrc, /className="hist-head"/);
   assert.match(locksSrc, /AttemptSummary/);
-  assert.match(locksSrc, /attemptSummaryLine/);
+  assert.match(locksSrc, /attemptSummaryParts/);
+  assert.match(locksSrc, /attemptRepeatLabel/);
   assert.match(locksSrc, /hist-sum/);
+  assert.match(locksSrc, /hist-rpt/);
 }
 
 console.log("comboLockHistory.test.js ok");

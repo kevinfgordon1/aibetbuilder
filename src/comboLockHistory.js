@@ -2,7 +2,7 @@
 // Every attempt shows — not fills only: armed, quoted/rested, skipped, cancelled,
 // expired, unfilled, filled (partial or full). Reuses comboTape.buildLockTape.
 
-import { attemptLockLine, buildLockTape, formatSkipReason } from "./comboTape.js";
+import { attemptLockLine, attemptLockParts, buildLockTape, formatSkipReason } from "./comboTape.js";
 
 function tsMs(v) {
   if (v == null || v === "") return 0;
@@ -177,19 +177,61 @@ export function buildLockAttempts({
 
 export const ATTEMPT_CAP = 60;
 
-// Yellow Miss-tape skip/miss line from the same tape.live stats Miss tape uses.
+function attemptStats(attempts) {
+  return attempts && attempts.tape && attempts.tape.live;
+}
+
+// Yellow Miss-tape skip + quoted-miss parts (Kalshi and Polymarket).
+export function attemptSummaryParts(attempts) {
+  return attemptLockParts(attemptStats(attempts));
+}
+
 export function attemptSummaryLine(attempts) {
-  const stats = attempts && attempts.tape && attempts.tape.live;
-  return attemptLockLine(stats);
+  return attemptLockLine(attemptStats(attempts));
 }
 
 export function attemptSummaryFilled(attempts) {
-  const stats = attempts && attempts.tape && attempts.tape.live;
+  const stats = attemptStats(attempts);
   return !!(stats && stats.skippedFilled);
 }
 
+// Consecutive identical attempts (status / reason / size / venue). Armed /
+// created stay single so the first row is never folded into a later one.
+export function collapseIdentity(ev) {
+  if (!ev || ev.key === "armed" || ev.key === "created") return null;
+  const venue = ev.venueKey || ev.venue || "";
+  return [ev.key, ev.reason || "", ev.label || "", ev.contracts ?? "", venue].join("\0");
+}
+
+export function collapseAttempts(events) {
+  const out = [];
+  for (const ev of events || []) {
+    const id = collapseIdentity(ev);
+    const prev = out.length ? out[out.length - 1] : null;
+    if (id && prev && collapseIdentity(prev) === id) {
+      prev.count = (prev.count || 1) + 1;
+      const times = [prev.at, prev.fromAt, ev.at].filter(Boolean);
+      if (times.length) {
+        const newest = times.reduce((a, b) => (tsMs(a) >= tsMs(b) ? a : b));
+        const oldest = times.reduce((a, b) => (tsMs(a) <= tsMs(b) ? a : b));
+        prev.at = newest;
+        if (oldest !== newest) prev.fromAt = oldest;
+      }
+      continue;
+    }
+    out.push({ ...ev, count: 1 });
+  }
+  return out;
+}
+
+export function attemptRepeatLabel(ev) {
+  if (!ev || !(ev.count > 1)) return "";
+  const last = ev.at ? new Date(ev.at).toLocaleTimeString() : "";
+  return last ? `×${ev.count} · last ${last}` : `×${ev.count}`;
+}
+
 export function visibleAttempts(events, cap = ATTEMPT_CAP) {
-  const list = events || [];
+  const list = collapseAttempts(events || []);
   const head = list.filter((e) => e.key === "armed" || e.key === "created");
   const rest = list.filter((e) => e.key !== "armed" && e.key !== "created");
   const shownRest = rest.slice(0, Math.max(0, cap - head.length));
