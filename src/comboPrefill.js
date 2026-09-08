@@ -18,13 +18,13 @@ const MINUS = /[+\-\u2212]/;
 
 // Canonical MLB ids match the 2–3 letter codes Kalshi bakes into game keys.
 // Aliases cover Odds API full names, nicknames, and Kalshi abbreviations
-// ("Los Angeles D", "New York Y", "Philadelphia").
+// ("Chicago C", "Chicago WS", "Los Angeles D", "New York Y", "Philadelphia").
 const MLB_TEAMS = [
   { id: "ARI", aliases: ["arizona diamondbacks", "arizona", "diamondbacks", "dbacks", "d backs", "ari", "az"] },
   { id: "ATL", aliases: ["atlanta braves", "atlanta", "braves", "atl"] },
   { id: "BAL", aliases: ["baltimore orioles", "baltimore", "orioles", "bal"] },
   { id: "BOS", aliases: ["boston red sox", "boston", "red sox", "redsox", "bos"] },
-  { id: "CHC", aliases: ["chicago cubs", "cubs", "chc", "chi cubs"] },
+  { id: "CHC", aliases: ["chicago cubs", "cubs", "chc", "chi cubs", "chicago c"] },
   { id: "CWS", aliases: ["chicago white sox", "white sox", "whitesox", "cws", "chw", "chi sox", "chicago ws"] },
   { id: "CIN", aliases: ["cincinnati reds", "cincinnati", "reds", "cin"] },
   { id: "CLE", aliases: ["cleveland guardians", "cleveland", "guardians", "cle"] },
