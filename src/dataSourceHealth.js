@@ -3,7 +3,7 @@
 // other PostgREST tables. Same flap (timeout, Cloudflare 520/522, connection
 // reset) should look like Supabase / PostgREST — never Odds API quota.
 
-export const STALE_CACHE_MS = 15 * 60 * 1000;
+export const STALE_CACHE_MS = 30 * 60 * 1000;
 
 const CF_ORIGIN_CODES = new Set([520, 521, 522, 523, 524, "520", "521", "522", "523", "524"]);
 
@@ -84,7 +84,7 @@ export function cacheAgeMs(fetchedAt, now = Date.now()) {
 export function isCacheStale(fetchedAt, now = Date.now(), thresholdMs) {
   const age = cacheAgeMs(fetchedAt, now);
   if (age == null) return false;
-  return age > (thresholdMs != null ? thresholdMs : staleCacheThresholdMs(now));
+  return age >= (thresholdMs != null ? thresholdMs : staleCacheThresholdMs(now));
 }
 
 export function formatUpdatedEt(fetchedAt) {
