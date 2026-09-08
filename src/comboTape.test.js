@@ -40,6 +40,8 @@ import {
   formatSkipReason,
   skipFillSummary,
   skipLockLine,
+  missLockLine,
+  attemptLockLine,
   lockSettlement,
   settlementTally,
   settlementSummaryText,
@@ -527,6 +529,11 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   assert.equal(skipLockLine({ skipped: 3, skippedFilled: 0, skippedNone: 0, skippedUnknown: 3 }), "3 skipped · later filled unknown");
   assert.equal(skipLockLine({ skipped: 4, skippedFilled: 2, skippedNone: 1, skippedUnknown: 1 }), "4 skipped · later filled 2 · 1 unknown · 1 no print");
   assert.equal(skipLockLine({ skipped: 0 }), null);
+  assert.equal(missLockLine({ missed: 16, no_taker: 16 }), "16 missed · later filled 0 · 16 no taker");
+  assert.equal(missLockLine({ missed: 0 }), null);
+  assert.equal(attemptLockLine({ skipped: 2, skippedFilled: 0, skippedNone: 2, skippedUnknown: 0, missed: 2 }), "2 skipped · later filled 0 · 2 no print");
+  assert.equal(attemptLockLine({ skipped: 0, missed: 16, no_taker: 16 }), "16 missed · later filled 0 · 16 no taker");
+  assert.equal(attemptLockLine({ skipped: 0, missed: 0 }), null);
 }
 
 // ── open quotes, fills, cancelled quotes (not skip-only) ──
@@ -742,7 +749,8 @@ assert.equal(pickFillRow([
   assert.match(tapeUi, /from\("quote_outcomes"\)[\s\S]*?\.in\("parlay_id"/);
   assert.match(locks, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.is\("archived_at"/);
   assert.match(locks, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.not\("archived_at"/);
-  assert.doesNotMatch(locks, /skipFill|later filled/);
+  assert.match(locks, /attemptSummaryLine/);
+  assert.doesNotMatch(locks, /skipFill/);
   assert.match(tapeUi, /settlementFromStored/);
   assert.match(tapeUi, /parlay won \(we lost\)|settlement\.text/);
   assert.match(tapeUi, /pending/);

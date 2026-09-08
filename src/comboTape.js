@@ -433,6 +433,30 @@ export function skipLockLine(stats) {
   return `${s.n} skipped · ${s.sub.replace(/^of those, /, "")}`;
 }
 
+// Quoted-and-lost yellow line. Same shape as skipLockLine; leftover reasons
+// are MissChips buckets (no taker / outbid / too slow / lost). Skip rows are
+// already covered by skipLockLine — pass missed excluding skipped.
+export function missLockLine(stats) {
+  if (!stats || !(stats.missed > 0)) return null;
+  const later = stats.missedFilled || 0;
+  const bits = [`${stats.missed} missed · later filled ${later}`];
+  if (stats.no_taker) bits.push(`${stats.no_taker} no taker`);
+  if (stats.outbid) bits.push(`${stats.outbid} outbid`);
+  if (stats.too_slow) bits.push(`${stats.too_slow} too slow`);
+  if (stats.lost_other) bits.push(`${stats.lost_other} lost`);
+  return bits.join(" · ");
+}
+
+// One yellow line for a lock card: skip summary when any skips, else misses.
+export function attemptLockLine(stats) {
+  const skip = skipLockLine(stats);
+  if (skip) return skip;
+  const quotedMissed = (stats && stats.missed ? stats.missed : 0)
+    - (stats && stats.skipped ? stats.skipped : 0);
+  if (quotedMissed > 0) return missLockLine({ ...stats, missed: quotedMissed });
+  return null;
+}
+
 // Official Kalshi combo result only (combo_parlays.kalshi_result). Same copy as
 // Combo Locks: we sold NO, so yes = parlay won (we lost), no = parlay lost (we won).
 // Never infer from kickoff, clocks, or scores.

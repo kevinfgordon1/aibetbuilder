@@ -7,6 +7,8 @@ import {
   attemptFromTapeRow,
   buildLockAttempts,
   visibleAttempts,
+  attemptSummaryLine,
+  attemptSummaryFilled,
 } from "./comboLockHistory.js";
 
 assert.equal(quotingEnded({ archived_at: "2026-09-04T00:00:00Z" }), true);
@@ -136,12 +138,67 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
 }
 
 {
+  const skipHist = buildLockAttempts({
+    parlay: {
+      id: "p-skip-sum",
+      active: true,
+      created_at: "2026-09-04T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 100,
+    },
+    matches: [
+      { rfq_id: "n1", matched_at: "2026-09-05T18:00:00Z", contracts: 12, tape_match: "none" },
+      { rfq_id: "n2", matched_at: "2026-09-05T18:10:00Z", contracts: 9, tape_match: "none" },
+    ],
+    submissions: [
+      { parlay_id: "p-skip-sum", rfq_id: "n1", status: "declined", skip_reason: "oversized", tape_match: "none", contracts: 12, created_at: "2026-09-05T18:00:00Z" },
+      { parlay_id: "p-skip-sum", rfq_id: "n2", status: "declined", skip_reason: "oversized", tape_match: "none", contracts: 9, created_at: "2026-09-05T18:10:00Z" },
+    ],
+    now: Date.parse("2026-09-05T20:00:00Z"),
+  });
+  assert.equal(attemptSummaryLine(skipHist), "2 skipped · later filled 0 · 2 no print");
+  assert.equal(attemptSummaryFilled(skipHist), false);
+}
+
+{
+  const missHist = buildLockAttempts({
+    parlay: {
+      id: "p-miss-sum",
+      active: true,
+      created_at: "2026-09-04T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 100,
+    },
+    submissions: Array.from({ length: 16 }, (_, i) => ({
+      parlay_id: "p-miss-sum",
+      rfq_id: "m" + i,
+      status: "unfilled",
+      quote_id: "q" + i,
+      is_live: false,
+      contracts: 10,
+      created_at: "2026-09-05T18:00:00Z",
+    })),
+    now: Date.parse("2026-09-05T20:00:00Z"),
+  });
+  assert.equal(attemptSummaryLine(missHist), "16 missed · later filled 0 · 16 no taker");
+  assert.equal(attemptSummaryFilled(missHist), false);
+}
+
+{
+  assert.equal(attemptSummaryLine(null), null);
+  assert.equal(attemptSummaryLine({}), null);
+}
+
+{
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
   // Living cards: history starts collapsed behind hist-<id>; archive stays always-open once the card expands.
-  assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle \}\)/);
+  assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle, showSummary = true \}\)/);
   assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
-  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} \/>/);
+  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
   assert.match(locksSrc, /className="hist-head"/);
+  assert.match(locksSrc, /AttemptSummary/);
+  assert.match(locksSrc, /attemptSummaryLine/);
+  assert.match(locksSrc, /hist-sum/);
 }
 
 console.log("comboLockHistory.test.js ok");

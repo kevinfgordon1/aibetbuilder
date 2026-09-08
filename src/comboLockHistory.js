@@ -2,7 +2,7 @@
 // Every attempt shows — not fills only: armed, quoted/rested, skipped, cancelled,
 // expired, unfilled, filled (partial or full). Reuses comboTape.buildLockTape.
 
-import { buildLockTape, formatSkipReason } from "./comboTape.js";
+import { attemptLockLine, buildLockTape, formatSkipReason } from "./comboTape.js";
 
 function tsMs(v) {
   if (v == null || v === "") return 0;
@@ -176,6 +176,17 @@ export function buildLockAttempts({
 }
 
 export const ATTEMPT_CAP = 60;
+
+// Yellow Miss-tape skip/miss line from the same tape.live stats Miss tape uses.
+export function attemptSummaryLine(attempts) {
+  const stats = attempts && attempts.tape && attempts.tape.live;
+  return attemptLockLine(stats);
+}
+
+export function attemptSummaryFilled(attempts) {
+  const stats = attempts && attempts.tape && attempts.tape.live;
+  return !!(stats && stats.skippedFilled);
+}
 
 export function visibleAttempts(events, cap = ATTEMPT_CAP) {
   const list = events || [];

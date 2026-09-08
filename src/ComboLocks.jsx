@@ -19,7 +19,7 @@ import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGa
 import { buildParlayDesk, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
-import { buildLockAttempts, visibleAttempts } from "./comboLockHistory";
+import { attemptSummaryFilled, attemptSummaryLine, buildLockAttempts, visibleAttempts } from "./comboLockHistory";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
@@ -197,12 +197,23 @@ const ATTEMPT_COLOR = {
   skipped: "#fcd34d", cancelled: "#fca5a5", expired: "#9aa3b2",
   unfilled: "#fcd34d", filled: "#6ee7b7",
 };
-function AttemptHistory({ attempts, open = true, onToggle }) {
+function AttemptSummary({ attempts }) {
+  const line = attemptSummaryLine(attempts);
+  if (!line) return null;
+  return (
+    <span
+      className={"chip num hist-sum " + (attemptSummaryFilled(attempts) ? "ok" : "warn")}
+      title="Miss-tape skip / miss summary"
+    >{line}</span>
+  );
+}
+function AttemptHistory({ attempts, open = true, onToggle, showSummary = true }) {
   if (!attempts) return null;
   const { shown, extra } = visibleAttempts(attempts.events);
   const toggleable = typeof onToggle === "function";
   const expanded = toggleable ? !!open : true;
   const heading = "History — every attempt (not fills only)";
+  const summary = showSummary ? <AttemptSummary attempts={attempts} /> : null;
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
       {toggleable ? (
@@ -215,11 +226,13 @@ function AttemptHistory({ attempts, open = true, onToggle }) {
         >
           <span className="arch-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
           <span>{heading}</span>
-          <span className="chip">{expanded ? "Hide history" : "History"}</span>
+          {summary}
+          <span className="chip hist-toggle">{expanded ? "Hide history" : "History"}</span>
         </button>
       ) : (
-        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
-          {heading}
+        <div className="hist-static">
+          <span>{heading}</span>
+          {summary}
         </div>
       )}
       {expanded ? (
@@ -816,6 +829,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .desk{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px}
         .cl .desk.thin{margin-top:6px}
         .cl .chip.skip{background:rgba(245,158,11,.15);color:#fcd34d}
+        .cl .chip.warn{background:rgba(245,158,11,.15);color:#fcd34d}
+        .cl .chip.ok{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.loss{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .chip.settle-win{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.settle-lose{background:rgba(248,113,113,.14);color:#fca5a5}
@@ -827,8 +842,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .arch-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
         .cl .arch-caret{color:#93c5fd;font-size:14px;width:12px}
         .cl .arch-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#8a8f98}
-        .cl .hist-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#6b7280;font:inherit;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;padding:0;margin-bottom:6px}
-        .cl .hist-head .chip{margin-left:auto;text-transform:none;letter-spacing:0}
+        .cl .hist-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#6b7280;font:inherit;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;padding:0;margin-bottom:6px;flex-wrap:wrap}
+        .cl .hist-head .chip{text-transform:none;letter-spacing:0}
+        .cl .hist-head .hist-toggle{margin-left:auto}
+        .cl .hist-static{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;margin-bottom:6px}
+        .cl .hist-static .chip{text-transform:none;letter-spacing:0}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
@@ -1048,6 +1066,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                   <span className="arch-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
                   <span style={{ fontWeight: 700 }}>{a.label}</span>
                   <OutcomeChip out={out} filled={filledN > 0} />
+                  <AttemptSummary attempts={attemptsByParlay[a.id]} />
                   <span style={{ flex: 1 }} />
                   <span className="chip">{open ? "Hide history" : "History"}</span>
                 </div>
@@ -1066,7 +1085,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                     <div style={{ marginTop: 8 }}>{(a.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
                   )}
                   <RiskProfile parlay={a} filled={filledN} />
-                  <AttemptHistory attempts={attemptsByParlay[a.id]} />
+                  <AttemptHistory attempts={attemptsByParlay[a.id]} showSummary={false} />
                 </>
               ) : null}
             </div>

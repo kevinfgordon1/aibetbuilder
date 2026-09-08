@@ -457,7 +457,7 @@ assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
   assert.match(locksSrc, /Show attempt history/);
   assert.doesNotMatch(locksSrc, /History \+ profile/);
   assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
-  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} \/>/);
+  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
   const tapeSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboTape.jsx"), "utf8");
   assert.doesNotMatch(tapeSrc, /outcomeChrome|arch-head|hist-head/);
 }
