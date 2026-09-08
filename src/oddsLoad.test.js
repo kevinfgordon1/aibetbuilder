@@ -302,6 +302,9 @@ function fullPlan() {
   assert.match(app, /describeOddsLoadError/);
   assert.match(app, /setOddsLoadError/);
   assert.match(app, /showOddsLoadError/);
+  assert.match(app, /OddsUpdatedStamp/);
+  assert.match(app, /DataSourceBanner/);
+  assert.match(app, /showOddsHealthBanner/);
   assert.match(app, />Retry</);
   assert.match(app, /showOddsLoadError && \(\s*<div data-guard-allow="true"/);
   assert.match(app, /events\.error \? \[\] : \(events\.data \|\| \[\]\)/);

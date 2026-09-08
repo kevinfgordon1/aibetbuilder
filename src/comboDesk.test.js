@@ -98,6 +98,8 @@ import {
   assert.equal(out.parlays[0].id, "ari-jax");
   assert.equal(out.deskReady, true);
   assert.match(out.errorNote, /last known/);
+  assert.doesNotMatch(out.errorNote, /Supabase/);
+  assert.equal(out.sourceUnhealthy, false);
   assert.equal(comboDeskChrome({ deskLoading: false, deskReady: true, kill: out.kill }).showKillBanner, false);
   assert.equal(comboSectionKind({ deskLoading: false, deskReady: true, count: out.parlays.length }), "rows");
 }
@@ -113,6 +115,8 @@ import {
   assert.equal(first.kill, false);
   assert.equal(first.deskReady, false);
   assert.match(first.errorNote, /Retrying/);
+  assert.match(first.errorNote, /Supabase \/ PostgREST/);
+  assert.equal(first.sourceUnhealthy, true);
   assert.equal(comboDeskChrome({ deskLoading: false, deskReady: false, kill: true }).showKillBanner, false);
   assert.equal(comboSectionKind({ deskLoading: false, deskReady: false, count: 0 }), "loading");
 }
@@ -349,6 +353,10 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   assert.match(page, /deskChrome\.killSwitchOn/);
   assert.match(page, /deskChrome\.killSwitchDisabled/);
   assert.match(page, /deskChrome\.deskError/);
+  assert.match(page, /comboDeskCatchNote/);
+  assert.match(page, /DataSourceBanner/);
+  assert.match(page, /sourceUnhealthy/);
+  assert.match(page, /Supabase flaky/);
   assert.match(page, /waitingKind === "loading"/);
   assert.match(page, /waitingKind === "empty"/);
   assert.match(page, /Loading locks/);

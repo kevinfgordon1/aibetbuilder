@@ -18,7 +18,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { applyComboDeskPoll, buildParlayDesk, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
+import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
@@ -452,6 +454,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
   const [deskReady, setDeskReady] = useState(false);
   const [deskError, setDeskError] = useState(null);
+  const [sourceUnhealthy, setSourceUnhealthy] = useState(false);
+  const [deskHealthError, setDeskHealthError] = useState(null);
   const parlaysRef = useRef([]);
   const killRef = useRef(false);
   const parlaysReadyRef = useRef(false);
@@ -652,6 +656,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       settingsReadyRef.current = poll.settingsReady;
       setDeskReady(poll.deskReady);
       setDeskError(poll.errorNote);
+      setSourceUnhealthy(!!poll.sourceUnhealthy);
+      setDeskHealthError(poll.healthError || null);
 
       const takeList = (res) => (comboListQueryOk(res) ? res.data : null);
       const historyRows = takeList(historyRes);
@@ -721,10 +727,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
           }, {}) : {},
         });
       }
-    } catch (_) {
-      setDeskError(parlaysReadyRef.current || settingsReadyRef.current
-        ? "Couldn't refresh locks / kill-switch — showing last known desk."
-        : "Couldn't load locks / kill-switch. Retrying…");
+    } catch (err) {
+      const hadReady = parlaysReadyRef.current || settingsReadyRef.current;
+      setDeskError(comboDeskCatchNote(err, hadReady));
+      setSourceUnhealthy(isSupabaseUnhealthy(err));
+      setDeskHealthError(isSupabaseUnhealthy(err) ? err : null);
     } finally {
       setDeskLoading(false);
     }
@@ -909,7 +916,12 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
   if (!owner) return null;
 
-  const deskChrome = comboDeskChrome({ deskLoading, deskReady, kill, deskError });
+  const deskChrome = comboDeskChrome({ deskLoading, deskReady, kill, deskError, sourceUnhealthy });
+  const deskHealth = dataSourceStatus({
+    error: deskHealthError,
+    lastKnown: deskReady,
+    context: "combo",
+  });
   const waitingKind = comboSectionKind({ deskLoading, deskReady, count: waiting.length });
   const filledKind = comboSectionKind({ deskLoading, deskReady, count: filledParlays.length });
   const archivedKind = comboSectionKind({ deskLoading, deskReady, count: archived.length });
@@ -1003,12 +1015,16 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         <div style={{ fontSize: 18, fontWeight: 700 }}>Combo Locks</div>
         <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }}>games: {srcLive ? "live" : "sample"}</span>
         {deskLoading && <span className="chip">loading desk…</span>}
-        {!deskLoading && deskError && <span className="chip">refresh failed</span>}
+        {!deskLoading && deskError && (deskChrome.sourceUnhealthy
+          ? <DataSourceChip status={deskHealth} label="Supabase flaky" />
+          : <span className="chip">refresh failed</span>)}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: "#8a8f98", fontWeight: 600 }}>Kill-switch</span>
         <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
       </div>
-      {deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
+      {deskHealth.show
+        ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
+        : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
       {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
 
       <h3>Active — waiting to be filled</h3>

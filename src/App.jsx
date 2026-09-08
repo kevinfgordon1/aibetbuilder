@@ -45,6 +45,8 @@ import {
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
+import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
+import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
@@ -1543,6 +1545,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [promoLoading, setPromoLoading] = useState(true);
   const [oddsLoadError, setOddsLoadError] = useState(null);
+  const [oddsLoadCause, setOddsLoadCause] = useState(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [promoLoaded, setPromoLoaded] = useState(false);
   const [promoLoadedSports, setPromoLoadedSports] = useState(null);
   const [promoBoardData, setPromoBoardData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
@@ -1703,7 +1707,6 @@ export default function App() {
   const loadPromoBoard = async () => {
     const gen = ++promoFetchGen.current;
     setExcludedPromoLegs(new Set());
-    setOddsLoadError(null);
     setPromoLoading(true);
     const plan = buildOddsQueryPlan({
       mode: "promo",
@@ -1715,6 +1718,7 @@ export default function App() {
       const { featured, events } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
+        setOddsLoadCause(featured.error || { message: "Could not load live odds." });
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
@@ -1727,9 +1731,12 @@ export default function App() {
       setPromoLoadedSports(new Set(plan.eventSports));
       setFetchedAt(featuredRows[0]?.fetched_at);
       setPromoLoaded(true);
+      setOddsLoadCause(null);
+      setOddsLoadError(null);
       window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
     } catch (err) {
       if (gen !== promoFetchGen.current) return;
+      setOddsLoadCause(err);
       setOddsLoadError(describeOddsLoadError(err) || "Could not load live odds.");
     } finally {
       if (gen === promoFetchGen.current) setPromoLoading(false);
@@ -1738,7 +1745,6 @@ export default function App() {
 
   const loadFullBoard = async () => {
     const gen = ++fullFetchGen.current;
-    setOddsLoadError(null);
     setFullBoardLoading(true);
     const plan = buildOddsQueryPlan({
       mode: "full",
@@ -1749,6 +1755,7 @@ export default function App() {
       const { featured, events, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
+        setOddsLoadCause(featured.error || { message: "Could not load live odds." });
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
@@ -1758,9 +1765,12 @@ export default function App() {
       setFuturesData((futures.error ? [] : (futures.data || [])).map(row => transformFuturesData(row.data, row.sport)));
       setFetchedAt(featuredRows[0]?.fetched_at);
       setFullBoardLoaded(true);
+      setOddsLoadCause(null);
+      setOddsLoadError(null);
       window.gtag?.('event', 'odds_refreshed', { trigger: 'manual' });
     } catch (err) {
       if (gen !== fullFetchGen.current) return;
+      setOddsLoadCause(err);
       setOddsLoadError(describeOddsLoadError(err) || "Could not load live odds.");
     } finally {
       if (gen === fullFetchGen.current) setFullBoardLoading(false);
@@ -1779,6 +1789,11 @@ export default function App() {
   };
 
   useEffect(() => { fetchOdds({ forceRefresh: false }); }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (shouldFetchFullBoard({ tab: activeTab, fullBoardLoaded, forceRefresh: false })) {
@@ -1848,6 +1863,21 @@ export default function App() {
       (activeTab === "promo" && !promoLoaded) ||
       ((activeTab === "ev" || activeTab === "odds") && !fullBoardLoaded)
     );
+  const oddsHaveLastKnown = promoLoaded || fullBoardLoaded;
+  const cacheFreshness = describeCacheFreshness({
+    fetchedAt,
+    now: nowMs,
+    lastRefreshFailed: !!oddsLoadError,
+    lastRefreshError: oddsLoadCause,
+  });
+  const oddsHealth = dataSourceStatus({
+    error: oddsLoadCause,
+    fetchedAt,
+    now: nowMs,
+    lastKnown: oddsHaveLastKnown,
+    context: "odds",
+  });
+  const showOddsHealthBanner = oddsHealth.show && !showOddsLoadError;
 
   // +EV Bets tab — single-book filter
   const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
@@ -2172,13 +2202,11 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {fetchedAt && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ fontSize: 11, color: "#4b5563" }}>
-                Updated {new Date(fetchedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET
-              </div>
+              <OddsUpdatedStamp freshness={cacheFreshness} />
               <button
                 onClick={() => { fetchOdds({ forceRefresh: true }); logEvent(user, 'odds_refreshed', { trigger: 'manual' }); }}
                 disabled={refreshBusy}
-                title="Refresh odds data"
+                title="Re-read the odds cache. Does not call The Odds API."
                 style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: refreshBusy ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: refreshBusy ? 0.6 : 1, transition: "all 0.2s" }}
                 onMouseEnter={e => { if (!refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
                 onMouseLeave={e => { if (!refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
@@ -2241,6 +2269,10 @@ export default function App() {
             <button type="button" onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign in with Google</button>
           )}
         </div>
+      )}
+
+      {showOddsHealthBanner && (
+        <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
       )}
 
       {showFullPageSpinner && (
