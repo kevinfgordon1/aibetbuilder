@@ -402,6 +402,33 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(matchedRfqHeading(sea), /46 skipped/);
   assert.match(matchedRfqHeading(sea), /33 lost/);
   assert.doesNotMatch(matchedRfqHeading(sea), /0 total · 0 quoted · 0 skipped · 0 lost/);
+  assert.ok(sea.tape.rows.every((r) => r.venue && r.venueKey));
+}
+
+{
+  const mixedVenues = buildLockAttempts({
+    parlay: {
+      id: "p-mixed-venue",
+      active: true,
+      created_at: "2026-09-08T12:00:00Z",
+      starts_at: "2026-09-13T17:00:00Z",
+      max_contracts: 100,
+    },
+    submissions: [
+      { parlay_id: "p-mixed-venue", rfq_id: "k1", venue: "kalshi", status: "declined", skip_reason: "oversized", contracts: 80, created_at: "2026-09-08T15:00:00Z" },
+      { parlay_id: "p-mixed-venue", rfq_id: "p1", venue: "polymarket", status: "unfilled", quote_id: "qp1", is_live: false, contracts: 39, created_at: "2026-09-08T15:01:00Z" },
+    ],
+    now: Date.parse("2026-09-08T16:00:00Z"),
+  });
+  const byRfq = Object.fromEntries(mixedVenues.tape.rows.map((r) => [r.rfqId, r]));
+  assert.equal(byRfq.k1.venueKey, "kalshi");
+  assert.equal(byRfq.k1.venue, "Kalshi");
+  assert.equal(byRfq.p1.venueKey, "polymarket");
+  assert.equal(byRfq.p1.venue, "Polymarket");
+  const histKalshi = mixedVenues.events.find((e) => e.row && e.row.rfqId === "k1");
+  const histPoly = mixedVenues.events.find((e) => e.row && e.row.rfqId === "p1");
+  assert.equal(histKalshi.venueKey, "kalshi");
+  assert.equal(histPoly.venueKey, "polymarket");
 }
 
 {
@@ -421,6 +448,12 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /matchedRfqEmptyText/);
   assert.match(locksSrc, /matchedRfqWatcherParked/);
   assert.match(locksSrc, /<MatchedRfqTable attempts=\{attemptsByParlay\[p\.id\]\}/);
+  assert.match(locksSrc, /function VenueChip\(\{ venue, venueKey \}\)/);
+  assert.match(locksSrc, /<th>Venue<\/th>/);
+  assert.match(locksSrc, /<VenueChip venue=\{row\.venue\} venueKey=\{row\.venueKey\} \/>/);
+  assert.match(locksSrc, /<VenueChip venue=\{e\.venue\} venueKey=\{e\.venueKey\} \/>/);
+  assert.match(locksSrc, /chip\.venue-kalshi/);
+  assert.match(locksSrc, /chip\.venue-poly/);
   assert.doesNotMatch(locksSrc, /watcher went live/);
   assert.doesNotMatch(locksSrc, /matched 0 RFQs/);
   assert.match(locksSrc, /attempts && attempts\.tape && attempts\.tape\.rows/);
