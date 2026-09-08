@@ -49,7 +49,7 @@ const MLB = [
   sampleGame("26AUG071905NYMWSH", "NYM", "WSH", "New York M", "Washington"),
   sampleGame("26AUG071905NYYBOS", "NYY", "BOS", "New York Y", "Boston"),
   sampleGame("26AUG071905LAALAD", "LAA", "LAD", "Los Angeles A", "Los Angeles D"),
-  sampleGame("26AUG071905CHCCWS", "CHC", "CWS", "Chicago Cubs", "Chicago WS"),
+  sampleGame("26AUG071905CHCCWS", "CHC", "CWS", "Chicago C", "Chicago WS"),
 ];
 
 assert.equal(identifyTeam("Los Angeles Angels ML"), "LAA");
@@ -61,7 +61,11 @@ assert.equal(identifyTeam("New York M"), "NYM");
 assert.equal(identifyTeam("Philadelphia Phillies"), "PHI");
 assert.equal(identifyTeam("Philadelphia"), "PHI");
 assert.equal(identifyTeam("Chicago Cubs"), "CHC");
+assert.equal(identifyTeam("Chicago C"), "CHC");
+assert.equal(identifyTeam("Chicago Cubs ML"), "CHC");
 assert.equal(identifyTeam("Chicago White Sox"), "CWS");
+assert.equal(identifyTeam("Chicago WS"), "CWS");
+assert.equal(identifyTeam("Chicago White Sox ML"), "CWS");
 assert.equal(identifyTeam("Guardians"), "CLE");
 assert.equal(identifyTeam("Washington Nationals"), "WSH");
 assert.equal(identifyTeam("Kansas City Chiefs", "nfl"), "KC");
@@ -151,7 +155,34 @@ const cubs = mapPromoLegsToKalshi([{
   name: "Chicago Cubs ML", market: "ML",
   game: "Chicago Cubs @ Chicago White Sox", sport: "baseball_mlb",
 }], MLB);
+assert.equal(cubs.unmatched.length, 0, JSON.stringify(cubs.unmatched));
 assert.equal(cubs.rows[0].marketVal, encVal("KXMLBGAME-26AUG071905CHCCWS-CHC", "yes"));
+
+const sox = mapPromoLegsToKalshi([{
+  name: "Chicago White Sox ML", market: "ML",
+  game: "Chicago Cubs @ Chicago White Sox", sport: "baseball_mlb",
+}], MLB);
+assert.equal(sox.unmatched.length, 0, JSON.stringify(sox.unmatched));
+assert.equal(sox.rows[0].marketVal, encVal("KXMLBGAME-26AUG071905CHCCWS-CWS", "yes"));
+
+// Live Kalshi titles shorten Cubs to "Chicago C" (same class as "Los Angeles D" /
+// "New York Y"). Game match can still succeed from the ticker (CHC…MIL) while ML
+// side labels fail without the alias — the Combo Locks yellow-warning case.
+const cubsMilGame = sampleGame("26SEP081905CHCMIL", "CHC", "MIL", "Chicago C", "Milwaukee");
+const cubsMil = mapPromoLegsToKalshi([{
+  name: "Chicago Cubs ML", market: "ML",
+  game: "Chicago Cubs @ Milwaukee Brewers", sport: "baseball_mlb",
+}], [cubsMilGame]);
+assert.equal(cubsMil.unmatched.length, 0, JSON.stringify(cubsMil.unmatched));
+assert.equal(cubsMil.rows[0].gameKey, "26SEP081905CHCMIL");
+assert.equal(cubsMil.rows[0].marketVal, encVal("KXMLBGAME-26SEP081905CHCMIL-CHC", "yes"));
+
+const cubsNick = mapPromoLegsToKalshi([{
+  name: "Cubs ML", market: "ML",
+  game: "Cubs @ Brewers", sport: "baseball_mlb",
+}], [cubsMilGame]);
+assert.equal(cubsNick.unmatched.length, 0, JSON.stringify(cubsNick.unmatched));
+assert.equal(cubsNick.rows[0].marketVal, encVal("KXMLBGAME-26SEP081905CHCMIL-CHC", "yes"));
 
 const nfl = mapPromoLegsToKalshi([{
   name: "Kansas City Chiefs ML", market: "ML",
