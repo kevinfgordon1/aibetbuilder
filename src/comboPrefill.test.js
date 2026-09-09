@@ -4,6 +4,7 @@ import {
   parsePromoTotal,
   parsePromoSpread,
   mapPromoLegsToKalshi,
+  noMatchingGameReason,
   encVal,
   toDatetimeLocalValue,
   earliestCommence,
@@ -82,9 +83,15 @@ assert.equal(identifyTeam("as"), "ATH");
 assert.equal(identifyTeam("Oakland Athletics"), "ATH");
 assert.equal(identifyTeam("Oakland Athletics ML"), "ATH");
 assert.equal(identifyTeam("Sacramento Athletics"), "ATH");
+assert.equal(identifyTeam("St. Louis"), "STL");
+assert.equal(identifyTeam("St. Louis Cardinals"), "STL");
+assert.equal(identifyTeam("St Louis Cardinals"), "STL");
+assert.equal(identifyTeam("San Francisco"), "SF");
+assert.equal(identifyTeam("San Francisco Giants"), "SF");
 
 assert.deepEqual(parsePromoTotal("Los Angeles Angels/Atlanta Braves o8.5"), { ou: "over", line: "8.5" });
 assert.deepEqual(parsePromoTotal("Guardians/Tigers u8.5"), { ou: "under", line: "8.5" });
+assert.deepEqual(parsePromoTotal("St. Louis Cardinals/San Francisco Giants u8"), { ou: "under", line: "8" });
 assert.deepEqual(parsePromoTotal("Over 8.5"), { ou: "over", line: "8.5" });
 
 assert.deepEqual(parsePromoSpread("Cleveland Guardians -1.5"), { team: "Cleveland Guardians", sign: "-", line: "1.5" });
@@ -183,6 +190,100 @@ const cubsNick = mapPromoLegsToKalshi([{
 }], [cubsMilGame]);
 assert.equal(cubsNick.unmatched.length, 0, JSON.stringify(cubsNick.unmatched));
 assert.equal(cubsNick.rows[0].marketVal, encVal("KXMLBGAME-26SEP081905CHCMIL-CHC", "yes"));
+
+// Live 2026-09-09 Kalshi shape: title "St. Louis vs San Francisco", date
+// "STL vs SF (Sep 9)", key 26SEP091545STLSF. Period in "St. Louis" must
+// normalize; integer promo u8 snaps to the nearest Kalshi total (7.5).
+const stlSfGame = {
+  key: "26SEP091545STLSF",
+  sport: "mlb",
+  title: "St. Louis vs San Francisco",
+  date: "STL vs SF (Sep 9)",
+  startTime: "2026-09-09T19:45:00.000Z",
+  markets: {
+    side: [
+      gSide("KXMLBGAME-26SEP091545STLSF-STL", "St. Louis"),
+      gSide("KXMLBGAME-26SEP091545STLSF-SF", "San Francisco"),
+    ],
+    spread: [],
+    total: [
+      ...gTot("KXMLBTOTAL-26SEP091545STLSF-8", "7.5"),
+      ...gTot("KXMLBTOTAL-26SEP091545STLSF-9", "8.5"),
+    ],
+  },
+};
+const stlSfUnder = {
+  name: "St. Louis Cardinals/San Francisco Giants u8",
+  market: "TOT",
+  game: "St. Louis Cardinals @ San Francisco Giants",
+  sport: "baseball_mlb",
+  commence_time: "2026-09-09T19:46:00Z",
+};
+const stlSfMapped = mapPromoLegsToKalshi([stlSfUnder], [stlSfGame]);
+assert.equal(stlSfMapped.unmatched.length, 0, JSON.stringify(stlSfMapped.unmatched));
+assert.equal(stlSfMapped.rows[0].gameKey, "26SEP091545STLSF");
+assert.equal(stlSfMapped.rows[0].marketVal, encVal("KXMLBTOTAL-26SEP091545STLSF-8", "no"),
+  "u8 snaps to Under 7.5 (0.5) rather than leaving the row empty");
+
+const stlSfWithLaterGames = mapPromoLegsToKalshi([
+  stlSfUnder,
+  {
+    name: "Washington Nationals/San Diego Padres o8.5",
+    market: "TOT",
+    game: "Washington Nationals @ San Diego Padres",
+    sport: "baseball_mlb",
+    commence_time: "2026-09-09T20:10:00Z",
+  },
+  {
+    name: "Texas Rangers/Seattle Mariners o8",
+    market: "TOT",
+    game: "Texas Rangers @ Seattle Mariners",
+    sport: "baseball_mlb",
+    commence_time: "2026-09-09T20:10:00Z",
+  },
+], [
+  stlSfGame,
+  sampleGame("26SEP091610WSHSD", "WSH", "SD", "Washington", "San Diego"),
+  sampleGame("26SEP091610TEXSEA", "TEX", "SEA", "Texas", "Seattle"),
+]);
+assert.equal(stlSfWithLaterGames.unmatched.length, 0, JSON.stringify(stlSfWithLaterGames.unmatched));
+assert.equal(stlSfWithLaterGames.rows[0].gameKey, "26SEP091545STLSF");
+assert.equal(stlSfWithLaterGames.rows[1].gameKey, "26SEP091610WSHSD");
+assert.equal(stlSfWithLaterGames.rows[2].gameKey, "26SEP091610TEXSEA");
+assert.equal(stlSfWithLaterGames.rows[2].marketVal, encVal("KXMLBTOTAL-26SEP091610TEXSEA-8", "yes"),
+  "integer o8 snaps to Over 7.5");
+
+// Same promo slate after first pitch: Kalshi still lists STL@SF as open, but
+// Combo Locks omits started MLB games. Do not map to WSH/TEX; say started.
+const afterFirstPitch = Date.parse("2026-09-09T19:46:00Z");
+const stlSfStarted = mapPromoLegsToKalshi([
+  stlSfUnder,
+  {
+    name: "Washington Nationals/San Diego Padres o8.5",
+    market: "TOT",
+    game: "Washington Nationals @ San Diego Padres",
+    sport: "baseball_mlb",
+    commence_time: "2026-09-09T20:10:00Z",
+  },
+], [
+  sampleGame("26SEP091610WSHSD", "WSH", "SD", "Washington", "San Diego"),
+  sampleGame("26SEP091610TEXSEA", "TEX", "SEA", "Texas", "Seattle"),
+], afterFirstPitch);
+assert.equal(stlSfStarted.unmatched.length, 1, JSON.stringify(stlSfStarted.unmatched));
+assert.equal(stlSfStarted.unmatched[0].name, "St. Louis Cardinals/San Francisco Giants u8");
+assert.match(stlSfStarted.unmatched[0].reason, /already started/i);
+assert.match(stlSfStarted.unmatched[0].reason, /St\. Louis Cardinals vs San Francisco Giants/);
+assert.doesNotMatch(stlSfStarted.unmatched[0].reason, /no matching Kalshi MLB game$/);
+assert.equal(stlSfStarted.rows[0].gameKey, "", "do not invent a map onto a later MLB game");
+assert.equal(stlSfStarted.rows[1].gameKey, "26SEP091610WSHSD");
+
+const futureMissing = noMatchingGameReason({
+  game: "St. Louis Cardinals @ San Francisco Giants",
+  commence_time: "2026-09-09T19:45:00Z",
+}, "mlb", Date.parse("2026-09-09T18:00:00Z"));
+assert.match(futureMissing, /no matching Kalshi MLB game on the current pre-game slate/);
+assert.match(futureMissing, /St\. Louis Cardinals vs San Francisco Giants/);
+assert.doesNotMatch(futureMissing, /already started/);
 
 const nfl = mapPromoLegsToKalshi([{
   name: "Kansas City Chiefs ML", market: "ML",
