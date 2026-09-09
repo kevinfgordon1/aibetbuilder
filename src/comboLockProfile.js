@@ -1,6 +1,7 @@
-// Combo Locks risk / profit profile — current unhedged vs target after RFQ fills.
+// Combo Locks risk / profit profile — current standing vs target after RFQ fills.
 // Same lock math as ComboLocks decideAtFill / hedgeCap (maker fee already in fill).
 // Does not invent Polymarket fill prices. Missing fill/cap → target TBD.
+// currentUnhedged is book-only. lockProfile.current becomes book+fills standing when filled > 0.
 
 function toNum(v) {
   if (v == null || v === "") return null;
@@ -70,6 +71,27 @@ export function currentUnhedged(parlay) {
   };
 }
 
+// Book + fills so far. Headline uses remaining worst-case abs(miss) when still at risk.
+export function currentStanding(unhedged, soFar) {
+  if (!unhedged || !soFar) return unhedged || null;
+  const hit = soFar.hit;
+  const miss = soFar.miss;
+  const remainingRisk = miss < 0 ? r2(Math.abs(miss)) : 0;
+  const text = miss < 0
+    ? `risk ${moneyAbs(remainingRisk)} for ${moneyAbs(hit)} profit`
+    : `standing ${signedMoney(hit)} / ${signedMoney(miss)}`;
+  return {
+    stake: unhedged.stake,
+    american: unhedged.american,
+    risk: remainingRisk,
+    profit: hit,
+    hit,
+    miss,
+    text,
+    standing: true,
+  };
+}
+
 export function targetHedge(parlay) {
   if (!parlay) return null;
   const contracts = toNum(parlay.max_contracts);
@@ -90,11 +112,11 @@ export function targetHedge(parlay) {
 }
 
 export function lockProfile(parlay, filled = 0) {
-  const current = currentUnhedged(parlay);
+  const unhedged = currentUnhedged(parlay);
   const target = targetHedge(parlay);
   const filledN = Math.max(0, toNum(filled) || 0);
   const targetN = target ? target.contracts : null;
-  const soFar = current
+  const soFar = unhedged
     ? hedgePayoffs({
       stake: parlay.parlay_stake,
       american: parlay.parlay_american,
@@ -102,6 +124,9 @@ export function lockProfile(parlay, filled = 0) {
       contracts: filledN,
     })
     : null;
+  const current = filledN > 0 && soFar && unhedged
+    ? currentStanding(unhedged, soFar)
+    : unhedged;
   return {
     current,
     target,
