@@ -156,16 +156,27 @@ function OutcomeChip({ out, filled }) {
 function RiskProfile({ parlay, filled }) {
   const profile = lockProfile(parlay, filled);
   if (!profile.current) return null;
+  const standingLocked = profile.filled > 0 && !(profile.current.miss < 0);
   return (
     <div className="profile">
       <div className="tile">
-        <div className="k">Current (unhedged)</div>
+        <div className="k">{profile.filled > 0 ? "Current (standing)" : "Current (unhedged)"}</div>
         <div className="v num">
-          <span className="muted">risk </span>
-          <span className="neg">{moneyAbs(profile.current.risk)}</span>
-          <span className="muted"> for </span>
-          <span className="pos">{moneyAbs(profile.current.profit)}</span>
-          <span className="muted"> profit</span>
+          {standingLocked ? (
+            <>
+              <span className="pos">{signedMoney(profile.current.hit)}</span>
+              {" / "}
+              <span className="pos">{signedMoney(profile.current.miss)}</span>
+            </>
+          ) : (
+            <>
+              <span className="muted">risk </span>
+              <span className="neg">{moneyAbs(profile.current.risk)}</span>
+              <span className="muted"> for </span>
+              <span className="pos">{moneyAbs(profile.current.profit)}</span>
+              <span className="muted"> profit</span>
+            </>
+          )}
         </div>
         <div className="sub">
           If it hits <span className="pos">{signedMoney(profile.current.hit)}</span>
