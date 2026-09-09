@@ -35,6 +35,11 @@ import {
   isFilledSubmission,
   isQuotedLost,
   pickFillRow,
+  isLiveRunnerTwin,
+  dedupeFillsByOrder,
+  sumAttributedFills,
+  mergeSubmissionFillCounts,
+  deskFillCounts,
   skipTapeSource,
   skipFillState,
   formatSkipReason,
@@ -56,6 +61,7 @@ import {
   normalizeTapeVenueFilter,
 } from "./comboTape.js";
 import { settlementCopy, settlementFromStored } from "./comboSettlement.js";
+import { quotingState, remainingFill } from "./comboDesk.js";
 
 // ── American from YES price (combo-worker tape.test.js fixtures) ──
 assert.equal(americanFromProb(0.08), 1150);
@@ -644,7 +650,7 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
       },
     ],
   });
-  assert.equal(tape.fill.filled, 215.38);
+  assert.equal(tape.fill.filled, 104.38);
   assert.equal(tape.fill.ceiling, 1347);
   const openRow = tape.rows.find((r) => r.rfqId === "open-1");
   assert.equal(openRow.bucket, "awaiting");
@@ -710,6 +716,100 @@ assert.equal(pickFillRow([
   { fill_id: "f1", order_id: "o1", count: 104.38, no_price: 0.91 },
 ]).count, 104.38);
 
+assert.equal(isLiveRunnerTwin({ fill_id: "o1", order_id: "o1" }), true);
+assert.equal(isLiveRunnerTwin({ fill_id: "f1", order_id: "o1" }), false);
+assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "o1", order_id: "o1" }), true);
+assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", order_id: "o1" }), true);
+
+{
+  const twin = {
+    fill_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    parlay_id: "p-sea",
+    count: 105,
+    raw: { source: "live-runner" },
+  };
+  const real = {
+    fill_id: "07228709-6229-8235-5047-44b3103ff56b",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    parlay_id: "p-sea",
+    count: 98,
+    no_price: 0.91,
+    yes_price: 0.09,
+  };
+  const unattr = {
+    fill_id: "07228709-6229-8235-5047-44b3103ff56b",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    parlay_id: null,
+    count: 98,
+  };
+  assert.equal(dedupeFillsByOrder([twin, real]).length, 1);
+  assert.equal(dedupeFillsByOrder([twin, real])[0].count, 98);
+  assert.equal(dedupeFillsByOrder([real, twin])[0].count, 98);
+  assert.equal(sumAttributedFills([twin, real]).byParlay["p-sea"], 98);
+  assert.equal(sumAttributedFills([unattr]).unattributed, 98);
+  assert.equal(sumAttributedFills([unattr]).byParlay["p-sea"], undefined);
+  const merged = mergeSubmissionFillCounts({}, [{
+    parlay_id: "p-sea",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    contracts: 105,
+  }], [unattr]);
+  assert.equal(merged["p-sea"], 98, "unattributed Kalshi fill + stamped quote → lock uses fill count");
+  const desk = deskFillCounts([unattr], [{
+    parlay_id: "p-sea",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    contracts: 105,
+  }]);
+  assert.equal(desk.byParlay["p-sea"], 98);
+  assert.equal(desk.unattributed, 0);
+  const fromSubOnly = deskFillCounts([], [{
+    parlay_id: "p-sea",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    contracts: 105,
+  }]);
+  assert.equal(fromSubOnly.byParlay["p-sea"], 105);
+}
+
+// Bears+LAR+DET (parlay a87432ad…): 4 Kalshi trades each booked twice.
+// Naive sum of all 8 rows is 225.23; dedupe prefers the priced trade row.
+{
+  const parlayId = "a87432ad-4a16-434d-889b-2a2ee9141d40";
+  const pairs = [
+    { order: "o-15", real: 15, twin: 15, fill: "07228111-0000-0000-0000-000000000015" },
+    { order: "o-7", real: 7, twin: 7, fill: "07228111-0000-0000-0000-000000000007" },
+    { order: "o-35", real: 35.23, twin: 44, fill: "07228111-0000-0000-0000-000000000035" },
+    { order: "o-51", real: 51, twin: 51, fill: "07228111-0000-0000-0000-000000000051" },
+  ];
+  const rows = pairs.flatMap((p) => ([
+    {
+      fill_id: p.fill,
+      order_id: p.order,
+      parlay_id: parlayId,
+      count: p.real,
+      no_price: 0.74,
+      yes_price: 0.26,
+    },
+    {
+      fill_id: p.order,
+      order_id: p.order,
+      parlay_id: parlayId,
+      count: p.twin,
+      raw: { source: "live-runner" },
+    },
+  ]));
+  const naive = rows.reduce((n, f) => n + Number(f.count || 0), 0);
+  assert.equal(Math.round(naive * 100) / 100, 225.23);
+  const desk = deskFillCounts(rows, []);
+  const filled = desk.byParlay[parlayId];
+  assert.equal(Math.round(filled * 100) / 100, 108.23);
+  assert.equal(desk.unattributed, 0);
+  const rem = remainingFill({ filled, ceiling: 201 });
+  assert.equal(rem.left > 0, true);
+  assert.equal(quotingState({ active: true, kill: false, filled, ceiling: 201 }).key, "watching");
+  assert.notEqual(quotingState({ active: true, kill: false, filled, ceiling: 201 }).label, "deactivated at ceiling");
+  assert.equal(quotingState({ active: true, kill: false, filled: naive, ceiling: 201 }).key, "ceiling");
+}
+
 {
   const scoped = buildLockTape({
     parlay: { id: "p-a", active: true, max_contracts: 50 },
@@ -728,6 +828,8 @@ assert.equal(pickFillRow([
   assert.match(locks, /DeskChips/);
   assert.match(locks, /FillProgress/);
   assert.match(locks, /buildParlayDesk/);
+  assert.match(locks, /deskFillCounts/);
+  assert.doesNotMatch(locks, /fillRows\.forEach\(\(f\) => \{ const c = Number\(f\.count \|\| 0\)/);
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /Miss tape/);
   assert.match(app, /<ComboTape /);
