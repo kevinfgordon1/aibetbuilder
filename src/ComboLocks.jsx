@@ -15,8 +15,9 @@
 // Archived cards show outcome + source chips on chrome; one tap opens attempt history.
 // Living cards keep chips + risk profile visible; attempt history starts collapsed (one tap).
 // Blank underlying_result rows re-settle on Combo Locks page load / poll — no SQL backfill.
-// Probe (Add Parlay) opens a real Kalshi RFQ at max_contracts, waits ~4s, shows best
-// maker NO / implied fill, then deletes the RFQ. Never accept/confirm.
+// Probe (Add Parlay) opens a real Kalshi RFQ at max_contracts, waits up to ~8s
+// (early-exit on a usable quote), shows best maker NO / implied fill, then
+// deletes the RFQ. Never accept/confirm.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
@@ -900,7 +901,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         body: JSON.stringify({
           legs: legs.map((l) => ({ ticker: l.ticker, side: l.side })),
           contracts,
-          waitMs: 4000,
+          waitMs: 8000,
           collection: games.comboCollection,
         }),
       });

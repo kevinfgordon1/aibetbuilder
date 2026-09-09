@@ -1,7 +1,9 @@
 // POST /api/combo-probe — owner-only Combo Locks Probe.
-// Creates a real Kalshi RFQ at the lock's computed contract size, waits ~4s
-// for maker quotes, returns the best competing NO bid + implied American fill,
-// then DELETE the RFQ. Never accept or confirm.
+// Creates a real Kalshi RFQ at the lock's computed contract size, waits up to
+// ~8s for maker quotes (early-exit on a usable NO bid), returns the best
+// competing NO bid + implied American fill, then DELETE the RFQ. Never
+// accept or confirm. Lists quotes with rfq_user_filter=self so the RFQ
+// creator can see maker replies.
 'use strict';
 
 const lib = require('./combo-probe-lib');
@@ -135,7 +137,7 @@ async function createRfq(marketTicker, contracts, creds) {
 }
 
 async function listQuotes(rfqId, creds) {
-  const q = `/communications/quotes?rfq_id=${encodeURIComponent(rfqId)}`;
+  const q = lib.quotesListPath(rfqId);
   const res = await kalshi('GET', q, { creds });
   if (!res.ok) {
     return {
@@ -168,6 +170,7 @@ async function pollQuotes(rfqId, waitMs, creds) {
     if (listed.ok) {
       quotes = listed.quotes;
       lastErr = null;
+      if (lib.pickBestQuote(quotes).bestAmerican != null) break;
     } else {
       lastErr = listed.error;
     }
@@ -197,11 +200,13 @@ async function runProbe({ legs, contracts, waitMs, collection, creds }) {
     bestNoBid: best.bestNoBid,
     bestYesBid: best.bestYesBid,
     quoteCount: best.quoteCount,
+    usableQuoteCount: best.usableQuoteCount,
     rfqId: created.rfqId,
     marketTicker: market.marketTicker,
     waitedMs: poll.waitedMs,
     suggestFillAmerican: best.suggestFillAmerican,
     contracts,
+    listError: poll.listError || null,
   };
 }
 

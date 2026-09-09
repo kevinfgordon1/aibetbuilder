@@ -24,15 +24,35 @@ export function probeDisabled({ probing, legCount, contracts }) {
   return !!(probing || !(legCount >= 2) || !(Number(contracts) > 0));
 }
 
+function waitLabel(result) {
+  return result.waitedMs != null ? result.waitedMs + "ms" : "the wait window";
+}
+
+function sizeLabel(result) {
+  return result.contracts != null ? ` at ${result.contracts} contracts` : "";
+}
+
+function rfqLabel(result) {
+  return result.rfqId ? ` RFQ ${result.rfqId}.` : "";
+}
+
 export function formatProbeNote(result, fillAmerican) {
   if (!result) return "";
   if (!result.ok) return result.error || "Probe failed.";
   const n = result.quoteCount || 0;
-  const size = result.contracts != null ? ` at ${result.contracts} contracts` : "";
-  if (!n || result.bestAmerican == null) {
-    return `No maker quotes in ${result.waitedMs != null ? result.waitedMs + "ms" : "the wait window"}${size}. Try again closer to game time.`;
+  const size = sizeLabel(result);
+  const wait = waitLabel(result);
+  const rfq = rfqLabel(result);
+  if (result.listError && !n) {
+    return `Kalshi quote list failed in ${wait}${size}: ${result.listError}.${rfq}`;
   }
-  const best = `Best market ${formatAmerican(result.bestAmerican)} (NO ${formatNoBid(result.bestNoBid)}) from ${n} quote${n === 1 ? "" : "s"}${size}.`;
+  if (!n) {
+    return `0 quotes returned from Kalshi in ${wait}${size}.${rfq} Try again closer to game time.`;
+  }
+  if (result.bestAmerican == null) {
+    return `${n} quote${n === 1 ? "" : "s"} from Kalshi but no usable NO bid in ${wait}${size}.${rfq}`;
+  }
+  const best = `Best market ${formatAmerican(result.bestAmerican)} (NO ${formatNoBid(result.bestNoBid)}) from ${n} quote${n === 1 ? "" : "s"}${size}.${rfq}`;
   const beats = fillBeatsMarket(fillAmerican, result.bestAmerican);
   let cmp = "";
   if (beats === true) {

@@ -44,6 +44,7 @@ assert.ok(lib.fillAmericanFromNoBid(tick) > fillFrom92);
   assert.equal(best.bestNoBid, 0.92);
   assert.equal(best.bestYesBid, 0.07);
   assert.equal(best.quoteCount, 4);
+  assert.equal(best.usableQuoteCount, 2);
   assert.equal(best.quoteId, 'b');
   assert.equal(best.bestAmerican, lib.fillAmericanFromNoBid(0.92));
   assert.equal(best.suggestFillAmerican, lib.fillAmericanFromNoBid(0.93));
@@ -54,7 +55,35 @@ assert.ok(lib.fillAmericanFromNoBid(tick) > fillFrom92);
   assert.equal(empty.bestNoBid, null);
   assert.equal(empty.bestAmerican, null);
   assert.equal(empty.quoteCount, 0);
+  assert.equal(empty.usableQuoteCount, 0);
 }
+
+// Cents-style no_bid (88 = $0.88) must count as a usable maker quote.
+{
+  const cents = lib.pickBestQuote([
+    { id: 'cents', no_bid: 88, yes_bid: 11, status: 'open' },
+  ]);
+  assert.equal(cents.bestNoBid, 0.88);
+  assert.equal(cents.usableQuoteCount, 1);
+  assert.equal(cents.quoteCount, 1);
+}
+
+{
+  const declined = lib.pickBestQuote([
+    { id: 'd1', no_bid_dollars: '0.00', yes_bid_dollars: '0.20', status: 'open' },
+    { id: 'd2', no_bid: 0, yes_bid: 20, status: 'open' },
+  ]);
+  assert.equal(declined.bestNoBid, null);
+  assert.equal(declined.quoteCount, 2);
+  assert.equal(declined.usableQuoteCount, 0);
+}
+
+assert.equal(lib.parseBidPrice(88), 0.88);
+assert.equal(lib.parseBidPrice('0.92'), 0.92);
+assert.equal(lib.parseBidPrice(0), 0);
+assert.match(lib.quotesListPath('rfq-1'), /rfq_id=rfq-1/);
+assert.match(lib.quotesListPath('rfq-1'), /rfq_user_filter=self/);
+assert.doesNotMatch(lib.quotesListPath('rfq-1'), /[?&]user_filter=/);
 
 assert.equal(lib.fillBeatsMarket(1300, 1200), true);
 assert.equal(lib.fillBeatsMarket(1200, 1200), false);
@@ -109,7 +138,7 @@ assert.equal(lib.canSeeComboLocks(null, {}), false);
   );
   assert.equal(ok, true);
   assert.ok(sign.normalizePem(pem.replace(/-----BEGIN[\s\S]+?-----\n/, '').replace(/\n-----END[\s\S]+/, '')).includes('BEGIN RSA PRIVATE KEY'));
-  assert.equal(sign.signPathOf('https://api.elections.kalshi.com/trade-api/v2/communications/quotes?rfq_id=x'), '/trade-api/v2/communications/quotes');
+  assert.equal(sign.signPathOf('https://api.elections.kalshi.com/trade-api/v2/communications/quotes?rfq_id=x&rfq_user_filter=self'), '/trade-api/v2/communications/quotes');
   assert.equal(sign.isForbiddenKalshiPath('/trade-api/v2/communications/quotes/abc/accept'), true);
   assert.equal(sign.isForbiddenKalshiPath('/trade-api/v2/communications/rfqs'), false);
 }
@@ -143,6 +172,7 @@ function src() {
   assert.doesNotMatch(text, /\/accept|\/confirm/);
   assert.match(text, /rest_remainder:\s*false/);
   assert.match(text, /never accept/i);
+  assert.match(text, /quotesListPath|rfq_user_filter=self/);
   const vercel = require('../vercel.json');
   assert.equal(vercel.functions['api/combo-probe.js'].maxDuration, 20);
   assert.equal(handler.config.maxDuration, 20);
@@ -237,6 +267,7 @@ function src() {
       }
       if (method === 'GET' && path.endsWith('/communications/quotes')) {
         assert.match(url, /rfq_id=rfq-probe-1/);
+        assert.match(url, /rfq_user_filter=self/);
         return json(200, {
           quotes: [
             { id: 'q1', no_bid_dollars: '0.90', yes_bid_dollars: '0.09', status: 'open' },
@@ -272,13 +303,63 @@ function src() {
     assert.equal(res.out.body.bestNoBid, 0.92);
     assert.equal(res.out.body.bestYesBid, 0.07);
     assert.equal(res.out.body.quoteCount, 2);
+    assert.equal(res.out.body.usableQuoteCount, 2);
     assert.equal(res.out.body.bestAmerican, lib.fillAmericanFromNoBid(0.92));
     assert.equal(res.out.body.suggestFillAmerican, lib.fillAmericanFromNoBid(0.93));
     assert.equal(res.out.body.contracts, 750);
-    assert.ok(res.out.body.waitedMs >= 4000);
+    assert.ok(res.out.body.waitedMs < 4000, 'usable quote should early-exit');
     assert.ok(calls.some((c) => c.method === 'DELETE' && c.path.endsWith('/rfqs/rfq-probe-1')));
     assert.ok(calls.every((c) => !/accept|confirm/i.test(c.path)));
     assert.ok(calls.every((c) => c.method === 'GET' || c.method === 'POST' || c.method === 'DELETE'));
+  }
+
+  // Empty book: wait the full window (no early-exit).
+  fakeNow = 1_500_000;
+  const emptyCalls = [];
+  handler._setDeps({
+    requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+    kalshiCreds: probeCreds,
+    now: () => fakeNow,
+    sleep: async (ms) => { fakeNow += ms; },
+    fetchImpl: async (url, opts) => {
+      const method = (opts && opts.method) || 'GET';
+      const path = new URL(url).pathname;
+      emptyCalls.push({ method, path, url });
+      const json = (status, body) => ({
+        status,
+        ok: status >= 200 && status < 300,
+        text: async () => (body == null ? '' : JSON.stringify(body)),
+        clone() { return this; },
+      });
+      if (method === 'POST' && path.includes('multivariate')) return json(200, { market_ticker: 'M-empty' });
+      if (method === 'POST' && path.endsWith('/rfqs')) return json(201, { id: 'rfq-empty' });
+      if (method === 'GET' && path.endsWith('/communications/quotes')) {
+        assert.match(url, /rfq_user_filter=self/);
+        return json(200, { quotes: [] });
+      }
+      if (method === 'DELETE') return json(204, null);
+      throw new Error(`unexpected ${method} ${path}`);
+    },
+  });
+  {
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        legs: [{ ticker: 'A-1', side: 'yes' }, { ticker: 'B-1', side: 'yes' }],
+        contracts: 10,
+        waitMs: 2000,
+      },
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.ok, true);
+    assert.equal(res.out.body.quoteCount, 0);
+    assert.equal(res.out.body.usableQuoteCount, 0);
+    assert.equal(res.out.body.bestAmerican, null);
+    assert.equal(res.out.body.rfqId, 'rfq-empty');
+    assert.ok(res.out.body.waitedMs >= 2000);
+    assert.ok(emptyCalls.filter((c) => c.method === 'GET').length >= 2);
   }
 
   // DELETE still runs if listing quotes throws
