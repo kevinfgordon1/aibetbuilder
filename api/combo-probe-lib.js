@@ -25,6 +25,24 @@ function parsePrice(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Dollars in (0,1), or integer cents 1–99 (older Kalshi quote fields). */
+function parseBidPrice(v) {
+  const n = parsePrice(v);
+  if (n == null) return null;
+  if (n > 0 && n < 1) return n;
+  if (Number.isInteger(n) && n >= 1 && n <= 99) return n / 100;
+  return n;
+}
+
+function quotesListPath(rfqId) {
+  const id = encodeURIComponent(String(rfqId || ''));
+  // Kalshi requires a user-id filter on GET /communications/quotes.
+  // rfq_id alone is not enough — the RFQ creator must pass rfq_user_filter=self
+  // or the list comes back empty / is rejected. See Kalshi Get Quotes + SDK:
+  // "quotes responding to RFQs created by the authenticated user".
+  return `/communications/quotes?rfq_id=${id}&rfq_user_filter=self`;
+}
+
 function impliedProb(a) {
   const n = Number(a);
   if (!Number.isFinite(n) || n === 0) return null;
@@ -70,12 +88,14 @@ function noBidFromFillAmerican(fillAmerican) {
 
 function quoteNoBid(q) {
   if (!q || typeof q !== 'object') return null;
-  return parsePrice(q.no_bid_dollars != null ? q.no_bid_dollars : q.no_bid);
+  const raw = q.no_bid_dollars != null && q.no_bid_dollars !== '' ? q.no_bid_dollars : q.no_bid;
+  return parseBidPrice(raw);
 }
 
 function quoteYesBid(q) {
   if (!q || typeof q !== 'object') return null;
-  return parsePrice(q.yes_bid_dollars != null ? q.yes_bid_dollars : q.yes_bid);
+  const raw = q.yes_bid_dollars != null && q.yes_bid_dollars !== '' ? q.yes_bid_dollars : q.yes_bid;
+  return parseBidPrice(raw);
 }
 
 function isOpenishQuote(q) {
@@ -94,10 +114,12 @@ function pickBestQuote(quotes) {
   const list = Array.isArray(quotes) ? quotes : [];
   let best = null;
   let bestNo = null;
+  let usableQuoteCount = 0;
   for (const q of list) {
     if (!isOpenishQuote(q)) continue;
     const no = quoteNoBid(q);
     if (!(no > 0) || no >= 1) continue;
+    usableQuoteCount += 1;
     if (bestNo == null || no > bestNo) {
       bestNo = no;
       best = q;
@@ -110,6 +132,7 @@ function pickBestQuote(quotes) {
       bestAmerican: null,
       suggestFillAmerican: null,
       quoteCount: list.length,
+      usableQuoteCount: 0,
       quoteId: null,
     };
   }
@@ -120,6 +143,7 @@ function pickBestQuote(quotes) {
     bestAmerican: fillAmericanFromNoBid(bestNo),
     suggestFillAmerican: fillAmericanFromNoBid(suggestNo),
     quoteCount: list.length,
+    usableQuoteCount,
     quoteId: best.id || null,
   };
 }
@@ -273,6 +297,8 @@ module.exports = {
   KALSHI_API_BASE,
   clampWaitMs,
   parsePrice,
+  parseBidPrice,
+  quotesListPath,
   impliedProb,
   americanFromProb,
   impliedYesFromNo,

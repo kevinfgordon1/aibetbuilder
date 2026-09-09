@@ -58,8 +58,24 @@ assert.match(
   /beats it/,
 );
 assert.match(
-  formatProbeNote({ ok: true, quoteCount: 0, waitedMs: 4000, contracts: 100 }, 1200),
-  /No maker quotes/,
+  formatProbeNote({ ok: true, quoteCount: 0, waitedMs: 4001, contracts: 583, rfqId: "rfq-abc" }, 414),
+  /0 quotes returned from Kalshi in 4001ms at 583 contracts\. RFQ rfq-abc\./,
+);
+assert.match(
+  formatProbeNote({
+    ok: true,
+    quoteCount: 3,
+    usableQuoteCount: 0,
+    bestAmerican: null,
+    waitedMs: 4001,
+    contracts: 583,
+    rfqId: "rfq-abc",
+  }, 414),
+  /3 quotes from Kalshi but no usable NO bid in 4001ms at 583 contracts\. RFQ rfq-abc\./,
+);
+assert.match(
+  formatProbeNote({ ok: true, quoteCount: 0, waitedMs: 2100, listError: "must provide user filter" }, 414),
+  /Kalshi quote list failed in 2100ms: must provide user filter/,
 );
 assert.equal(formatProbeNote({ ok: false, error: "Sign in required" }), "Sign in required");
 
@@ -70,6 +86,7 @@ assert.equal(formatProbeNote({ ok: false, error: "Sign in required" }), "Sign in
   assert.match(src, /Finds the current best odds available on the market right now \(for this combo size\)/);
   assert.match(src, /\/api\/combo-probe/);
   assert.match(src, /authorization: "Bearer "/);
+  assert.match(src, /waitMs:\s*8000/);
 }
 
 console.log("comboProbe ui tests passed");
