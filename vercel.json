@@ -31,6 +31,9 @@
     },
     "api/scan-ev-parlays.js": {
       "maxDuration": 60
+    },
+    "api/combo-probe.js": {
+      "maxDuration": 20
     }
   },
   "rewrites": [
