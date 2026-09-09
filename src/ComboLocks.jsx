@@ -15,6 +15,8 @@
 // Archived cards show outcome + source chips on chrome; one tap opens attempt history.
 // Living cards keep chips + risk profile visible; attempt history starts collapsed (one tap).
 // Blank underlying_result rows re-settle on Combo Locks page load / poll — no SQL backfill.
+// Probe (Add Parlay) opens a real Kalshi RFQ at max_contracts, waits ~4s, shows best
+// maker NO / implied fill, then deletes the RFQ. Never accept/confirm.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
@@ -27,6 +29,7 @@ import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLoc
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
+import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export { OWNER_EMAIL };
@@ -474,6 +477,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [legRows, setLegRows] = useState(() => emptyLegRows(prefill?.legs?.length));
   const [form, setForm] = useState(() => formFromPrefill(prefill));
   const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
+  const [probing, setProbing] = useState(false);
+  const [probeResult, setProbeResult] = useState(null);
   const [gamesReady, setGamesReady] = useState(false);
   const [prefillWarning, setPrefillWarning] = useState(null);
   const createFormRef = useRef(null);
@@ -865,6 +870,43 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const addLeg = () => setLegRows((rows) => [...rows, { id: (rows.at(-1)?.id || 0) + 1, gameKey: "", marketVal: "" }]);
   const removeLeg = (id) => setLegRows((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
 
+  const runProbe = async () => {
+    const legs = readLegs();
+    const contracts = preview && preview.cap;
+    if (probeDisabled({ probing, legCount: legs.length, contracts })) return;
+    setProbing(true);
+    setProbeResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session && session.access_token;
+      if (!token) {
+        setProbeResult({ ok: false, error: "Sign in required" });
+        return;
+      }
+      const r = await fetch("/api/combo-probe", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify({
+          legs: legs.map((l) => ({ ticker: l.ticker, side: l.side })),
+          contracts,
+          waitMs: 4000,
+          collection: games.comboCollection,
+        }),
+      });
+      let d = null;
+      try { d = await r.json(); } catch (_) { d = null; }
+      if (!d || typeof d !== "object") {
+        setProbeResult({ ok: false, error: r.ok ? "Probe returned an empty response" : `Probe failed (${r.status})` });
+        return;
+      }
+      setProbeResult(d);
+    } catch (err) {
+      setProbeResult({ ok: false, error: String(err && err.message || err) });
+    } finally {
+      setProbing(false);
+    }
+  };
+
   const addParlay = async () => {
     const legs = readLegs();
     if (legs.length < 2) return alert("Pick at least 2 legs (game + market each).");
@@ -1164,10 +1206,25 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             <label>Label — auto-filled from your legs, edit if you like</label>
             <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value, labelEdited: true })} placeholder="pick legs above…" />
-            <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <button className="btn primary" onClick={addParlay}>Add to active parlays</button>
+              <button
+                type="button"
+                className="btn"
+                disabled={probeDisabled({ probing, legCount: readLegs().length, contracts: preview && preview.cap })}
+                title="Find the current best odds on the market for this combo size."
+                onClick={runProbe}
+              >{probing ? "Probing…" : "Probe"}</button>
               <button className="btn" onClick={loadExample}>Load example</button>
             </div>
+            <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>
+              Finds the current best odds available on the market right now (for this combo size).
+            </div>
+            {probeResult && (
+              <div className={"note " + (probeResult.ok && fillBeatsMarket(+form.fill, probeResult.bestAmerican) ? "ok" : "warn")}>
+                {formatProbeNote(probeResult, form.fill === "" ? null : +form.fill)}
+              </div>
+            )}
           </div>
         </div>
 
