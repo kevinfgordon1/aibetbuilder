@@ -420,7 +420,33 @@ function unmatchedEntry(leg, reason) {
   return { name: leg?.name || "(unnamed leg)", reason };
 }
 
-export function mapPromoLegsToKalshi(promoLegs, games) {
+function promoMatchupLabel(leg) {
+  const [away, home] = splitAt(leg?.game);
+  if (away && home) return `${away} vs ${home}`;
+  return null;
+}
+
+// Combo Locks /api/kalshi-games drops MLB once first pitch has passed, so a
+// promo leg can fail here even when Kalshi still lists the event as open.
+// Prefer "already started" when Odds API commence_time is in the past; never
+// invent a map onto a different game.
+export function noMatchingGameReason(leg, sport, nowMs = Date.now()) {
+  const label = COMBO_SPORT_LABEL[sport] || String(sport || "").toUpperCase();
+  const matchup = promoMatchupLabel(leg);
+  const startMs = Date.parse(leg?.commence_time);
+  const started = Number.isFinite(startMs) && startMs <= nowMs;
+  if (started) {
+    return matchup
+      ? `${matchup} already started — Combo Locks only quotes pre-game Kalshi ${label} markets`
+      : `game already started — Combo Locks only quotes pre-game Kalshi ${label} markets`;
+  }
+  if (matchup) {
+    return `no matching Kalshi ${label} game on the current pre-game slate (${matchup})`;
+  }
+  return `no matching Kalshi ${label} game`;
+}
+
+export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
   const unmatched = [];
   const rows = [];
   const flat = flattenComboGames(games);
@@ -438,7 +464,7 @@ export function mapPromoLegsToKalshi(promoLegs, games) {
     }
     const game = matchKalshiGame(leg, flat);
     if (!game) {
-      unmatched.push(unmatchedEntry(leg, `no matching Kalshi ${COMBO_SPORT_LABEL[sport]} game`));
+      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs)));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }

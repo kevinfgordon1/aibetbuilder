@@ -130,5 +130,10 @@ assert.equal(h.isUpcomingGame('26SEP09NESEA', NOW), true);
 assert.equal(h.isUpcomingGame('26AUG28NESEA', NOW), false);
 assert.equal(h.isUpcomingGame('26SEP021905PHIATL', NOW), true);
 assert.equal(h.isUpcomingGame('26AUG011905PHIATL', NOW), false);
+// Live 2026-09-09 STL@SF key: 15:45 ET first pitch = 19:45 UTC. Combo Locks
+// drops the game one minute later even though Kalshi still lists it as open.
+assert.equal(h.firstPitchUtcMs('26SEP091545STLSF'), Date.parse('2026-09-09T19:45:00Z'));
+assert.equal(h.isUpcomingGame('26SEP091545STLSF', Date.parse('2026-09-09T19:44:00Z')), true);
+assert.equal(h.isUpcomingGame('26SEP091545STLSF', Date.parse('2026-09-09T19:46:00Z')), false);
 
 console.log('kalshi-games tests passed');
