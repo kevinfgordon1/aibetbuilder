@@ -27,6 +27,7 @@ import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
+import { deskFillCounts } from "./comboTape";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
@@ -691,10 +692,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (ocRows) setOutcomes(ocRows);
       const fillRows = takeList(fillsRes);
       if (fillRows) {
-        const rf = {}; let un = 0;
-        fillRows.forEach((f) => { const c = Number(f.count || 0); if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c; else un += c; });
+        const summed = deskFillCounts(fillRows, []);
         setComboFills(fillRows);
-        setRealFills(rf); setRealUnattr(un);
+        setRealFills(summed.byParlay);
+        setRealUnattr(summed.unattributed);
       }
       const bookedRows = takeList(bookedRes);
       if (bookedRows) {
@@ -730,6 +731,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (livingSubsOk) {
         const subRows = [...livingSubRows, ...archivedSubRows];
         setSubmissions(subRows);
+        const deskFills = fillRows ? deskFillCounts(fillRows, subRows) : null;
+        if (deskFills) {
+          setRealFills(deskFills.byParlay);
+          setRealUnattr(deskFills.unattributed);
+        }
         refreshSettlements({
           living: livingRows,
           archived: archivedForSubs,
@@ -737,11 +743,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
           outcomes: ocRows || [],
           matchesByParlay: matchRows ? mbp : {},
           submissions: subRows,
-          filledById: fillRows ? fillRows.reduce((rf, f) => {
-            const c = Number(f.count || 0);
-            if (f.parlay_id) rf[f.parlay_id] = (rf[f.parlay_id] || 0) + c;
-            return rf;
-          }, {}) : {},
+          filledById: deskFills ? deskFills.byParlay : {},
         });
       }
     } catch (err) {

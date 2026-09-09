@@ -351,9 +351,88 @@ export function pickFillRow(fills = []) {
   return real || pool[0];
 }
 
+// Same twin rule as combo-worker fills-attr.js: live-runner confirm rows
+// book fill_id === order_id (and/or raw.source === 'live-runner').
+export function isLiveRunnerTwin(fill) {
+  if (!fill) return false;
+  if (fill.raw && fill.raw.source === "live-runner") return true;
+  return !!(fill.fill_id && fill.order_id && fill.fill_id === fill.order_id);
+}
+
+// One row per Kalshi order: prefer the account fill (fill_id ≠ order_id)
+// over the live-runner twin that books fill_id = order_id.
+export function dedupeFillsByOrder(fills = []) {
+  const byKey = new Map();
+  const unkeyed = [];
+  (fills || []).forEach((f) => {
+    if (!f) return;
+    const key = f.order_id || f.fill_id;
+    if (!key) {
+      unkeyed.push(f);
+      return;
+    }
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, f);
+      return;
+    }
+    if (isLiveRunnerTwin(prev) && !isLiveRunnerTwin(f)) byKey.set(key, f);
+  });
+  return [...byKey.values(), ...unkeyed];
+}
+
+export function sumAttributedFills(fills = []) {
+  const byParlay = {};
+  let unattributed = 0;
+  dedupeFillsByOrder(fills).forEach((f) => {
+    const c = Math.max(0, toNum(f.count) || 0);
+    if (f.parlay_id) byParlay[f.parlay_id] = (byParlay[f.parlay_id] || 0) + c;
+    else unattributed += c;
+  });
+  return { byParlay, unattributed };
+}
+
+// History / lock remaining: a stamped order_id on combo_submissions is a
+// real fill even if combo_fills.parlay_id is still null (shard ticker miss).
+// Prefer the Kalshi fill count when the same order_id is unattributed.
+export function mergeSubmissionFillCounts(byParlay, submissions = [], fills = []) {
+  const attributedOrders = new Set();
+  const unattrByOrder = new Map();
+  (fills || []).forEach((f) => {
+    if (!f || !f.order_id) return;
+    if (f.parlay_id) attributedOrders.add(f.order_id);
+    else unattrByOrder.set(f.order_id, f);
+  });
+  const next = { ...(byParlay || {}) };
+  (submissions || []).forEach((s) => {
+    if (!s || !s.order_id || !s.parlay_id || attributedOrders.has(s.order_id)) return;
+    attributedOrders.add(s.order_id);
+    const twin = unattrByOrder.get(s.order_id);
+    const c = Math.max(0, toNum(twin ? twin.count : s.contracts) || 0);
+    next[s.parlay_id] = (next[s.parlay_id] || 0) + c;
+  });
+  return next;
+}
+
+export function deskFillCounts(fills = [], submissions = []) {
+  const summed = sumAttributedFills(fills);
+  const byParlay = mergeSubmissionFillCounts(summed.byParlay, submissions, fills);
+  const assigned = new Set();
+  (submissions || []).forEach((s) => {
+    if (s && s.order_id && s.parlay_id) assigned.add(s.order_id);
+  });
+  let unattributed = 0;
+  dedupeFillsByOrder(fills).forEach((f) => {
+    if (f.parlay_id) return;
+    if (f.order_id && assigned.has(f.order_id)) return;
+    unattributed += Math.max(0, toNum(f.count) || 0);
+  });
+  return { byParlay, unattributed };
+}
+
 export function liveFilledContracts(fills = [], startsAt) {
   let n = 0;
-  (fills || []).forEach((f) => {
+  dedupeFillsByOrder(fills).forEach((f) => {
     if (!isLiveQuotingTs(fillEventAt(f), startsAt)) return;
     n += Math.max(0, toNum(f.count) || 0);
   });
