@@ -3,8 +3,12 @@
 // No odds fetches — callers pass already-scanned card data only.
 
 import { serializeAppHash } from "./comboAccess.js";
+import { DEFAULT_PROFILE_BOOK } from "./userProfile.js";
 
 const PROMO_TYPES = new Set(["boost", "nosweat", "freebet"]);
+
+/** Default Promo type when the hash has no share/deep-link cardId. */
+export const DEFAULT_PROMO_TYPE = "boost";
 
 export function fnv1a36(str) {
   let h = 2166136261;
@@ -45,6 +49,57 @@ export function decodePromoCardId(cardId) {
   const stake = Number(stakePart);
   if (!Number.isFinite(stake)) return null;
   return { promoType, book, stake, hash };
+}
+
+/**
+ * Expanding/collapsing a Promo or +EV pick is view-only. Do not persist that
+ * pick's cardId in the URL — a refresh would decode it and override Profile
+ * promoBook / the default promo type. Share / deep-link cardIds still live
+ * in the hash when the user opens or copies a real share URL.
+ */
+export function persistPickFocusInHash() {
+  return false;
+}
+
+/**
+ * Hash cardId after a view-only expand/collapse.
+ * Never introduces a sticky cardId. Leaves an existing share-link cardId alone.
+ */
+export function hashCardIdAfterPickViewToggle({
+  nextExpanded,
+  incomingCardId,
+  existingHashCardId,
+} = {}) {
+  if (persistPickFocusInHash()) {
+    return nextExpanded ? (incomingCardId || null) : null;
+  }
+  return existingHashCardId || null;
+}
+
+/**
+ * Promo prefs implied by a parsed route + Profile defaults.
+ * A share/deep-link cardId wins (type, book, stake). A plain #promo (no
+ * cardId) keeps Profile promoBook and DEFAULT_PROMO_TYPE.
+ */
+export function promoPrefsFromRoute(route, profilePrefs = {}) {
+  const cardId = route && route.cardId;
+  const decoded = cardId ? decodePromoCardId(cardId) : null;
+  if (decoded) {
+    return {
+      source: "share",
+      promoType: decoded.promoType,
+      promoBook: decoded.book,
+      stake: decoded.stake,
+      focusCardId: cardId,
+    };
+  }
+  return {
+    source: "profile",
+    promoType: DEFAULT_PROMO_TYPE,
+    promoBook: profilePrefs.promoBook || DEFAULT_PROFILE_BOOK,
+    stake: null,
+    focusCardId: null,
+  };
 }
 
 export function encodeEvCardId(bet = {}) {
