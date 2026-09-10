@@ -50,9 +50,9 @@ import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
-import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, formatPromoSignedMoney, formatPromoSignedPct, promoEvColor, sortPromoPicksByEv } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
-import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
+import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs, collectPromoDepthLegs } from "./promoBookDepth.js";
 import {
   applyPmBlendToLeg,
   preferCompletePmHedge,
@@ -1338,9 +1338,9 @@ function LowLiquidityFlag({ show, style }) {
   );
 }
 
-function attachPmBlendToPick(p, ctx) {
+function attachPmBlendToPick(p, ctx, ladders = {}) {
   const nLegs = (p.legs || []).length;
-  const { displayLegs } = applyBlendToLegs(p.legs || [], {}, { ...ctx, numLegs: nLegs });
+  const { displayLegs } = applyBlendToLegs(p.legs || [], ladders, { ...ctx, numLegs: nLegs });
   const next = overlayParlayMetrics(p, displayLegs, ctx);
   return { ...next, legs: displayLegs };
 }
@@ -1362,17 +1362,19 @@ function attachNoSweatLockToPick(p, nextStake) {
   return { ...p, lock, isGuaranteed: lock.valid };
 }
 
-function rankPromoPicks(picks, ctx, attachLock) {
-  const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx)));
-  const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : tagged;
+function rankPromoPicks(picks, ctx, attachLock, ladders = {}) {
+  const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx, ladders)));
+  const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : sortPromoPicksByEv(tagged);
   return filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
 }
 
-function usePromoDepthBlend(legs, live, ctx = {}) {
+function usePromoDepthBlend(legs, live, ctx = {}, sharedLadders) {
   const [ladders, setLadders] = useState(null);
   const wantedKey = (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook)).map(depthCacheKey).join("\n");
   const ctxKey = [ctx.promoType, ctx.numLegs, ctx.stake, ctx.boostPct, ctx.refundPct, ctx.creditConversionPct, ctx.boostedProfit, ctx.winProfit, ctx.creditValue].join("|");
+  const useShared = sharedLadders !== undefined;
   useEffect(() => {
+    if (useShared) return;
     if (!live) {
       setLadders(null);
       return;
@@ -1387,12 +1389,34 @@ function usePromoDepthBlend(legs, live, ctx = {}) {
       if (!cancelled) setLadders(map || {});
     });
     return () => { cancelled = true; };
-  }, [live, wantedKey]);
+  }, [live, wantedKey, useShared]);
   return useMemo(() => {
-    const map = ladders || {};
+    const map = useShared ? sharedLadders : (ladders || {});
     const { displayLegs, blends } = applyBlendToLegs(legs, map, ctx);
-    return { ladders: map, blends, displayLegs, ready: ladders != null, ctx };
-  }, [legs, ladders, ctxKey]);
+    return { ladders: map, blends, displayLegs, ready: useShared || ladders != null, ctx };
+  }, [legs, ladders, ctxKey, useShared, sharedLadders]);
+}
+
+function usePromoVisibleDepth(picks, enabled) {
+  const wanted = useMemo(() => collectPromoDepthLegs(picks), [picks]);
+  const wantedKey = wanted.map(depthCacheKey).join("\n");
+  const [ladders, setLadders] = useState(null);
+  useEffect(() => {
+    if (!enabled) {
+      setLadders(null);
+      return;
+    }
+    if (!wanted.length) {
+      setLadders({});
+      return;
+    }
+    let cancelled = false;
+    fetchPromoBookDepth(wanted).then((map) => {
+      if (!cancelled) setLadders(map || {});
+    });
+    return () => { cancelled = true; };
+  }, [enabled, wantedKey]);
+  return { ladders: ladders || {}, ready: ladders != null };
 }
 
 function overlayParlayMetrics(p, displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }) {
@@ -1405,7 +1429,7 @@ function overlayParlayMetrics(p, displayLegs, { promoType, stake, boostPct, refu
   return { ...p, ...calcParlayEV(next, boostPct, stake) };
 }
 
-function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditConversionPct, children }) {
+function PromoPickView({ p, live, ladders: sharedLadders, promoType, stake, boostPct, refundPct, creditConversionPct, children }) {
   const ctx = useMemo(() => ({
     promoType,
     numLegs: (p.legs || []).length,
@@ -1417,7 +1441,7 @@ function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditC
     winProfit: p.winProfit,
     creditValue: p.creditValue,
   }), [p.legs, p.boostedProfit, p.winProfit, p.creditValue, promoType, stake, boostPct, refundPct, creditConversionPct]);
-  const overlay = usePromoDepthBlend(p.legs, live, ctx);
+  const overlay = usePromoDepthBlend(p.legs, live, ctx, sharedLadders);
   const view = useMemo(
     () => overlayParlayMetrics(p, overlay.displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }),
     [p, overlay.displayLegs, promoType, stake, boostPct, refundPct, creditConversionPct],
@@ -1975,6 +1999,13 @@ export default function App() {
     const ac = new AbortController();
     const scanKey = currentPromoScanKey;
     setPromoScanBusy(true);
+    // Drop prior-scan cards when the input key changed so the new filter
+    // chip cannot sit above the previous slate. Same-key rescans keep cards.
+    if (scanKey !== lastCompletedScanKey) {
+      if (promoType === "boost") setScannedBoostParlays({ parlays: [], atStake: PROMO_SCAN_STAKE });
+      else if (promoType === "nosweat") setScannedNoSweats({ parlays: [], atStake: PROMO_SCAN_STAKE });
+      else setScannedFreeBets({ parlays: [], atStake: PROMO_SCAN_STAKE });
+    }
     findTopParlaysChunked(parlayLegPool, numLegs, calc, {
       maxResults: 50,
       minFinalOdds: parsedMinFinal,
@@ -2067,6 +2098,55 @@ export default function App() {
     scanCompletedForCurrent,
     resultCount: topFreeBetsWithLock.length,
   });
+
+  const boostPageEnabled = promoType === "boost" && boostEmptyState === "results";
+  const noSweatPageEnabled = promoType === "nosweat" && noSweatEmptyState === "results";
+  const freeBetPageEnabled = promoType === "freebet" && freeBetEmptyState === "results";
+  const visibleBoostPicks = useMemo(
+    () => (boostPageEnabled ? topParlaysWithHedge.slice(0, promoPage) : []),
+    [boostPageEnabled, topParlaysWithHedge, promoPage],
+  );
+  const visibleNoSweatPicks = useMemo(
+    () => (noSweatPageEnabled ? topNoSweatsWithLock.slice(0, promoPage) : []),
+    [noSweatPageEnabled, topNoSweatsWithLock, promoPage],
+  );
+  const visibleFreeBetPicks = useMemo(
+    () => (freeBetPageEnabled ? topFreeBetsWithLock.slice(0, promoPage) : []),
+    [freeBetPageEnabled, topFreeBetsWithLock, promoPage],
+  );
+  const boostPageDepth = usePromoVisibleDepth(visibleBoostPicks, boostPageEnabled);
+  const noSweatPageDepth = usePromoVisibleDepth(visibleNoSweatPicks, noSweatPageEnabled);
+  const freeBetPageDepth = usePromoVisibleDepth(visibleFreeBetPicks, freeBetPageEnabled);
+  const displayedBoostPicks = useMemo(() => {
+    if (!boostPageEnabled) return [];
+    if (!boostPageDepth.ready) return visibleBoostPicks;
+    return rankPromoPicks(
+      visibleBoostPicks,
+      { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity },
+      (p) => attachBoostLockToPick(p, stake),
+      boostPageDepth.ladders,
+    );
+  }, [boostPageEnabled, visibleBoostPicks, boostPageDepth.ready, boostPageDepth.ladders, numLegs, stake, boostPct, hideLowLiquidity]);
+  const displayedNoSweatPicks = useMemo(() => {
+    if (!noSweatPageEnabled) return [];
+    if (!noSweatPageDepth.ready) return visibleNoSweatPicks;
+    return rankPromoPicks(
+      visibleNoSweatPicks,
+      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity },
+      (p) => attachNoSweatLockToPick(p, stake),
+      noSweatPageDepth.ladders,
+    );
+  }, [noSweatPageEnabled, visibleNoSweatPicks, noSweatPageDepth.ready, noSweatPageDepth.ladders, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity]);
+  const displayedFreeBetPicks = useMemo(() => {
+    if (!freeBetPageEnabled) return [];
+    if (!freeBetPageDepth.ready) return visibleFreeBetPicks;
+    return rankPromoPicks(
+      visibleFreeBetPicks,
+      { promoType: "freebet", numLegs, stake, hideLowLiquidity },
+      (p) => attachFreeBetLock(p, stake),
+      freeBetPageDepth.ladders,
+    );
+  }, [freeBetPageEnabled, visibleFreeBetPicks, freeBetPageDepth.ready, freeBetPageDepth.ladders, numLegs, stake, hideLowLiquidity]);
 
   useEffect(() => {
     if (activeTab !== "combo") setComboPrefill(null);
@@ -2703,16 +2783,17 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
-                  {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
+                  {displayedBoostPicks.map((p, i) => {
                     const isExpanded = expandedPromo === i;
                     const isSingle = p.legs.length === 1;
                     const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
                     const promoId = encodePromoCardId({ promoType: "boost", book: promoBook, stake, legs: p.legs });
 
                     return (
-                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="boost" stake={stake} boostPct={boostPct}>
+                      <PromoPickView key={promoId} p={p} live={false} ladders={boostPageDepth.ready ? boostPageDepth.ladders : undefined} promoType="boost" stake={stake} boostPct={boostPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
+                    const evColor = promoEvColor(view.ev);
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
@@ -2742,16 +2823,16 @@ export default function App() {
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
-                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: view.ev > 0 ? "#10b981" : "#ef4444" }}>+${view.ev.toFixed(2)} EV</div>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{formatPromoSignedMoney(view.ev)} EV</div>
                           </div>
                           <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: "#10b981" }}>+{(view.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <span>EV: <strong style={{ color: evColor }}>{formatPromoSignedPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
@@ -2801,10 +2882,10 @@ export default function App() {
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                               <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * view.combinedProb).toFixed(2)}</strong></div>
                               <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - view.combinedProb)).toFixed(2)}</strong></div>
-                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${view.ev.toFixed(2)}</strong></div>
+                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong></div>
                             </div>
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${view.ev.toFixed(2)}</strong> on a ${stake} bet.
+                              <strong style={{ color: evColor }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong> on a ${stake} bet.
                             </div>
                             {canSeeComboLocks(user) && (
                               <div style={{ marginTop: 12 }}>
@@ -2820,7 +2901,7 @@ export default function App() {
                     );
                   })}
 
-                  {topParlaysWithHedge.length > promoPage && (
+                  {boostEmptyState === "results" && topParlaysWithHedge.length > promoPage && (
                     <button
                       onClick={() => setPromoPage(prev => prev + 5)}
                       style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
@@ -2849,16 +2930,16 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
-                  {topNoSweatsWithLock.slice(0, promoPage).map((p, i) => {
+                  {displayedNoSweatPicks.map((p, i) => {
                     const isExpanded = expandedPromo === i;
                     const isSingle = p.legs.length === 1;
                     const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
 
                     return (
-                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
+                      <PromoPickView key={promoId} p={p} live={false} ladders={noSweatPageDepth.ready ? noSweatPageDepth.ladders : undefined} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
-                    const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
+                    const evColor = promoEvColor(view.ev);
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
@@ -2892,7 +2973,7 @@ export default function App() {
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{formatPromoSignedMoney(view.ev)} EV</div>
                               {p.isGuaranteed && (
                                 <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>${p.lock.lockedProfit.toFixed(2)} guaranteed</div>
                               )}
@@ -2904,9 +2985,9 @@ export default function App() {
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
                             <span>On a loss: <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash</span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}{(view.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <span>EV: <strong style={{ color: evColor }}>{formatPromoSignedPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
                           </div>
@@ -3013,11 +3094,11 @@ export default function App() {
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                                   <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * view.combinedProb).toFixed(2)}</strong></div>
                                   <div>Lose → <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash <span style={{ color: "#6b7280" }}>(net {p.loseNet >= 0 ? "+" : "−"}${Math.abs(p.loseNet).toFixed(0)})</span> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>{p.loseNet * (1 - view.combinedProb) >= 0 ? "+" : "−"}${Math.abs(p.loseNet * (1 - view.combinedProb)).toFixed(2)}</strong></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong></div>
                                   <div style={{ marginTop: 6 }}>We treat site credit as {creditConversionPct}% cash: ${p.refund.toFixed(0)} refund = ${p.creditValue.toFixed(0)}.</div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${stake} cash stake.
+                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong> on a ${stake} cash stake.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
                                 </div>
                               </>
@@ -3031,7 +3112,7 @@ export default function App() {
                     );
                   })}
 
-                  {topNoSweatsWithLock.length > promoPage && (
+                  {noSweatEmptyState === "results" && topNoSweatsWithLock.length > promoPage && (
                     <button
                       onClick={() => setPromoPage(prev => prev + 5)}
                       style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
@@ -3060,7 +3141,7 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking free-bet parlays — Free Bet $ stays usable.</div>
                     </div>
                   )}
-                  {topFreeBetsWithLock.slice(0, promoPage).map((p, i) => {
+                  {displayedFreeBetPicks.map((p, i) => {
                     const isExpanded = expandedFreeBet === i;
                     const isSingle = p.legs?.length === 1;
                     const showLock = isSingle && !!p.lock?.valid;
@@ -3071,10 +3152,10 @@ export default function App() {
                     const promoId = encodePromoCardId({ promoType: "freebet", book: promoBook, stake, legs: p.legs });
 
                     return (
-                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="freebet" stake={stake}>
+                      <PromoPickView key={promoId} p={p} live={false} ladders={freeBetPageDepth.ready ? freeBetPageDepth.ladders : undefined} promoType="freebet" stake={stake}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
-                    const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
+                    const evColor = promoEvColor(view.ev);
                     const hedgeLeg = overlay.displayLegs?.[0] || leg;
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
@@ -3112,7 +3193,7 @@ export default function App() {
                                 <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>guaranteed cash · {((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</div>
                               </div>
                             ) : (
-                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{formatPromoSignedMoney(view.ev)} EV</div>
                             )}
                           </div>
 
@@ -3145,7 +3226,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>Game: <strong style={{ color: "#e8eaed" }}>{leg?.game}</strong></span>
                                 <span>Conversion: <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
+                                <span>EV: <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong></span>
                               </div>
                             </>
                           ) : (
@@ -3155,9 +3236,9 @@ export default function App() {
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
                                 <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
+                                <span>EV: <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong></span>
                               </div>
-                              {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
+                              {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={false} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
@@ -3262,10 +3343,10 @@ export default function App() {
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                                   <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * view.combinedProb).toFixed(2)}</strong></div>
                                   <div>Lose <strong style={{ color: "#6b7280" }}>$0</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>$0</strong> <span style={{ color: "#6b7280" }}>(free bet, no cash at risk)</span></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong></div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${fbAmount} free bet.
+                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{formatPromoSignedMoney(view.ev)}</strong> on a ${fbAmount} free bet.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg free bets cannot be locked on both sides at once."}
                                 </div>
                               </>
@@ -3279,7 +3360,7 @@ export default function App() {
                     );
                   })}
 
-                  {topFreeBetsWithLock.length > promoPage && (
+                  {freeBetEmptyState === "results" && topFreeBetsWithLock.length > promoPage && (
                     <button
                       onClick={() => setPromoPage(prev => prev + 5)}
                       style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}

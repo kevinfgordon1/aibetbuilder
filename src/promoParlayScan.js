@@ -52,6 +52,8 @@ export function passesOddsBounds(odds, minOdds, maxOdds) {
 // Empty-state for Promo Builder parlay results. "No Results Found" is only
 // valid after a scan has completed for the *current* inputs. First paint
 // (busy=false, parlays=[], no completion yet) must show scanning, not empty.
+// Prior-scan cards (resultCount > 0) must not render under a new filter chip
+// — that looks like EV failed to recalculate.
 export function promoScanEmptyState({
   promoLoaded,
   promoLoading,
@@ -59,11 +61,41 @@ export function promoScanEmptyState({
   scanCompletedForCurrent,
   resultCount,
 }) {
-  if (resultCount > 0) return "results";
-  if (!promoLoaded || promoLoading || scanBusy || !scanCompletedForCurrent) {
+  if (!promoLoaded || promoLoading || !scanCompletedForCurrent) {
     return "scanning";
   }
+  if (resultCount > 0) return "results";
+  if (scanBusy) return "scanning";
   return "no-results";
+}
+
+// Signed money / % for promo EV headers. Never "+$-15.16".
+export function formatPromoSignedMoney(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "$0.00";
+  const abs = Math.abs(v).toFixed(2);
+  if (v > 0) return `+$${abs}`;
+  if (v < 0) return `-$${abs}`;
+  return `$${abs}`;
+}
+
+export function formatPromoSignedPct(n, digits = 1) {
+  const v = Number(n);
+  const d = Number.isInteger(digits) && digits >= 0 ? digits : 1;
+  if (!Number.isFinite(v)) return `${(0).toFixed(d)}%`;
+  const abs = Math.abs(v).toFixed(d);
+  if (v > 0) return `+${abs}%`;
+  if (v < 0) return `-${abs}%`;
+  return `${abs}%`;
+}
+
+// Match No Sweat / Free Bet: zero and negative are the red tone.
+export function promoEvColor(n) {
+  return Number(n) > 0 ? "#10b981" : "#ef4444";
+}
+
+export function sortPromoPicksByEv(picks) {
+  return [...(picks || [])].sort((a, b) => (Number(b && b.ev) || 0) - (Number(a && a.ev) || 0));
 }
 
 // iOS / Safari: thousands of MessageChannel ports (one per yield) have

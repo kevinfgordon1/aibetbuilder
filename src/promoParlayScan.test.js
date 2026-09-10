@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, formatPromoSignedMoney, formatPromoSignedPct, promoEvColor, sortPromoPicksByEv } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -110,6 +110,16 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
   assert.match(app, /if \(gen !== promoScanGen\.current\) return;/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
+  assert.match(app, /if \(scanKey !== lastCompletedScanKey\)/);
+  assert.match(app, /setScannedBoostParlays\(\{ parlays: \[\], atStake: PROMO_SCAN_STAKE \}\)/);
+  assert.match(app, /displayedBoostPicks\.map/);
+  assert.match(app, /boostEmptyState === "results"/);
+  assert.match(app, /usePromoVisibleDepth/);
+  assert.match(app, /function rankPromoPicks\(picks, ctx, attachLock, ladders = \{\}\)/);
+  assert.match(app, /function attachPmBlendToPick\(p, ctx, ladders = \{\}\)/);
+  assert.match(app, /formatPromoSignedMoney\(view\.ev\)\} EV/);
+  assert.doesNotMatch(app, /\+\$\{view\.ev\.toFixed\(2\)\} EV/);
+  assert.doesNotMatch(app, /live=\{i === 0 \|\| isExpanded\}/);
   assert.equal(
     promoScanEmptyState({
       promoLoaded: true,
@@ -123,7 +133,7 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   );
 }
 
-// ── Empty-state machine: loading / running / done-empty / keep prior results
+// ── Empty-state machine: loading / running / done-empty / hide stale cards
 {
   assert.equal(promoScanEmptyState({
     promoLoaded: false, promoLoading: true, scanBusy: false,
@@ -144,11 +154,29 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.equal(promoScanEmptyState({
     promoLoaded: true, promoLoading: false, scanBusy: true,
     scanCompletedForCurrent: false, resultCount: 4,
-  }), "results", "keep prior cards while a newer pool is scanning");
+  }), "scanning", "prior-scan cards must not render under a new filter key");
+  assert.equal(promoScanEmptyState({
+    promoLoaded: true, promoLoading: false, scanBusy: true,
+    scanCompletedForCurrent: true, resultCount: 4,
+  }), "results", "same-key rescan may keep the current slate");
   assert.equal(promoScanEmptyState({
     promoLoaded: true, promoLoading: true, scanBusy: false,
     scanCompletedForCurrent: true, resultCount: 0,
   }), "scanning", "promoLoading with empty results is not No Results");
+}
+
+{
+  assert.equal(formatPromoSignedMoney(15.16), "+$15.16");
+  assert.equal(formatPromoSignedMoney(-15.16), "-$15.16");
+  assert.notEqual(formatPromoSignedMoney(-15.16), "+$-15.16");
+  assert.equal(formatPromoSignedMoney(0), "$0.00");
+  assert.equal(formatPromoSignedPct(92.2), "+92.2%");
+  assert.equal(formatPromoSignedPct(-15.16), "-15.2%");
+  assert.equal(formatPromoSignedPct(0), "0.0%");
+  assert.equal(promoEvColor(1), "#10b981");
+  assert.equal(promoEvColor(-15.16), "#ef4444");
+  assert.equal(promoEvColor(0), "#ef4444");
+  assert.deepEqual(sortPromoPicksByEv([{ ev: -15 }, { ev: 90 }, { ev: 88 }]).map((p) => p.ev), [90, 88, -15]);
 }
 
 // ── Pool fill must change the scan key so a completed [] is not reused
