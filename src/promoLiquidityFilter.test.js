@@ -163,6 +163,60 @@ const singleCtx = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 };
   assert.deepEqual(filterLowLiquidityPicks(undefined, false), []);
 }
 
+// ── unproven PM book: empty ladder / missing bestOppSize drops when hide on
+{
+  const unknownNovig = {
+    dk: -115,
+    bestOpp: 537,
+    bestOppBook: "novig",
+    bestOppSize: null,
+    sport: "americanfootball_ncaaf",
+    game: "Rutgers Scarlet Knights @ Opponent",
+    name: "Rutgers Scarlet Knights -11.5",
+    bestOppName: "Opponent +11.5",
+    market: "SPR",
+  };
+  const unknownKalshi = { ...unknownNovig, bestOppBook: "kalshi", bestOppSize: undefined, name: "Unknown Kalshi" };
+  const emptyLevelsPx = { ...unknownNovig, bestOppBook: "prophetx", bestOppSize: 0, name: "Zero-size ProphetX" };
+  const freeBet2 = { promoType: "freebet", numLegs: 2, stake: 100 };
+
+  assert.equal(blend(unknownNovig, freeBet2).lowLiquidity, true, "missing bestOppSize → unproven");
+  assert.equal(blend(unknownKalshi, freeBet2).lowLiquidity, true);
+  assert.equal(applyPmBlendToLeg(emptyLevelsPx, [], freeBet2).lowLiquidity, true);
+
+  const pool = [unknownNovig, deepKalshi, sportsbookFd];
+  assert.deepEqual(filterLowLiquidityLegs(pool, false, freeBet2), pool, "filter off keeps unknown (badge still tags)");
+  const keptPool = filterLowLiquidityLegs(pool, true, freeBet2);
+  assert.deepEqual(keptPool.map((l) => l.bestOppBook), ["kalshi", "fanduel"]);
+  assert.ok(!keptPool.includes(unknownNovig));
+
+  const screenshotPick = {
+    ev: 59.45,
+    legs: [blend(unknownNovig, freeBet2), blend(sportsbookFd, freeBet2)],
+  };
+  const liquidPick = { ev: 8, legs: [blend(deepKalshi, freeBet2), blend(sportsbookFd, freeBet2)] };
+  assert.deepEqual(filterLowLiquidityPicks([screenshotPick, liquidPick], false).map((p) => p.ev), [59.45, 8]);
+  assert.equal(screenshotPick.legs[0].lowLiquidity, true, "filter off still tags LOW LIQUIDITY");
+  assert.deepEqual(filterLowLiquidityPicks([screenshotPick, liquidPick], true).map((p) => p.ev), [8]);
+}
+
+// ── incomplete walk filtered; complete fill kept; sportsbook never low-liq
+{
+  const incomplete = blend(nationalsNovig, multiCtx);
+  const complete = blend(deepKalshi, multiCtx);
+  const sb = blend(sportsbookFd, multiCtx);
+  assert.equal(incomplete.lowLiquidity, true);
+  assert.equal(complete.lowLiquidity, false);
+  assert.equal(sb.lowLiquidity, false);
+
+  const ranked = filterLowLiquidityPicks([
+    { ev: 40, legs: [incomplete] },
+    { ev: 10, legs: [complete] },
+    { ev: 5, legs: [sb] },
+  ], true);
+  assert.deepEqual(ranked.map((p) => p.ev), [10, 5]);
+}
+
 // ── App.jsx Extra Filters: chip row + pool + ranked list use shared helper
 {
   assert.match(app, /import \{\s*HIDE_LOW_LIQUIDITY_LABEL,\s*LIQUIDITY_FILTER_ALL_LABEL,\s*liquidityFilterSummary,\s*filterLowLiquidityLegs,\s*filterLowLiquidityPicks,\s*\} from "\.\/promoLiquidityFilter\.js"/);

@@ -17,6 +17,8 @@
 //   american > 0: stake × (american / 100)
 //   american < 0: stake × (100 / |american|)
 // Never invents levels. Sportsbooks are left untouched.
+// A PM venue with no ladder and no bestOppSize has no proven fill → lowLiquidity.
+// Do not treat "unknown book" as OK; Hide low liquidity relies on that tag.
 // True odds / true win prob / EV use the blended VWAP American, not the thin top.
 // "blended to $500 payout" / "blended to $X hedge" only when the walk used
 // more than one price level (or VWAP ≠ top). A deep top that fills alone
@@ -305,8 +307,11 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
   }
   const quoted = leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp;
   const book = resolvePmBookLevels(leg, levels);
+  // Empty ladder and missing/invalid bestOppSize: no proven $500-profit /
+  // hedge-$ fill. Rank + Hide-low-liquidity must not treat this as OK —
+  // the live depth overlay would later badge LOW LIQUIDITY.
   if (!book.length) {
-    return { ...leg, bestOppQuoted: quoted, lowLiquidity: false, pmBlend: null };
+    return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
   }
 
   const nLegs = ctx.numLegs != null ? Number(ctx.numLegs) : 0;
@@ -319,7 +324,7 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
   if (!blend) blend = blendAskLadderToPayout(book);
 
   if (!blend || blend.american == null) {
-    return { ...leg, bestOppQuoted: quoted, lowLiquidity: false, pmBlend: null };
+    return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
   }
   return {
     ...leg,
