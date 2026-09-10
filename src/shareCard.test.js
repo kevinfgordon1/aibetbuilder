@@ -8,6 +8,10 @@ import {
   encodePromoCardId,
   decodePromoCardId,
   encodeEvCardId,
+  DEFAULT_PROMO_TYPE,
+  persistPickFocusInHash,
+  hashCardIdAfterPickViewToggle,
+  promoPrefsFromRoute,
   sharePath,
   absoluteShareUrl,
   shareCardFilename,
@@ -78,6 +82,81 @@ assert.equal(evId, encodeEvCardId({ ...evA }));
 assert.notEqual(evId, encodeEvCardId({ ...evA, bookKey: "draftkings" }));
 assert.notEqual(evId, encodeEvCardId({ ...evA, name: "Bills ML" }));
 assert.match(evId, /^fanduel\.[a-z0-9]+$/);
+
+assert.equal(DEFAULT_PROMO_TYPE, "boost");
+assert.equal(persistPickFocusInHash(), false);
+
+{
+  const profile = { promoBook: "draftkings" };
+  const nsId = encodePromoCardId({ promoType: "nosweat", book: "betrivers", stake: 100, legs: legsA });
+  const evPickId = evId;
+
+  const afterPromoExpand = hashCardIdAfterPickViewToggle({
+    nextExpanded: true,
+    incomingCardId: nsId,
+    existingHashCardId: null,
+  });
+  const afterPromoCollapse = hashCardIdAfterPickViewToggle({
+    nextExpanded: false,
+    incomingCardId: nsId,
+    existingHashCardId: afterPromoExpand,
+  });
+  const afterEvExpand = hashCardIdAfterPickViewToggle({
+    nextExpanded: true,
+    incomingCardId: evPickId,
+    existingHashCardId: null,
+  });
+  assert.equal(afterPromoExpand, null);
+  assert.equal(afterPromoCollapse, null);
+  assert.equal(afterEvExpand, null);
+
+  const afterExpandHash = serializeAppHash({ tab: "promo", cardId: afterPromoExpand });
+  assert.equal(afterExpandHash, "#promo");
+  assert.equal(parseAppHash(afterExpandHash).cardId, null);
+  assert.equal(serializeAppHash({ tab: "ev", cardId: afterEvExpand }), "#ev");
+
+  const afterRefresh = promoPrefsFromRoute(parseAppHash(afterExpandHash), profile);
+  assert.equal(afterRefresh.source, "profile");
+  assert.equal(afterRefresh.promoBook, "draftkings");
+  assert.equal(afterRefresh.promoType, "boost");
+  assert.equal(afterRefresh.focusCardId, null);
+  assert.equal(afterRefresh.stake, null);
+
+  const shareHash = serializeAppHash({ tab: "promo", cardId: nsId });
+  assert.equal(shareHash, "#promo/" + encodeURIComponent(nsId));
+  const fromShare = promoPrefsFromRoute(parseAppHash(shareHash), profile);
+  assert.equal(fromShare.source, "share");
+  assert.equal(fromShare.promoType, "nosweat");
+  assert.equal(fromShare.promoBook, "betrivers");
+  assert.equal(fromShare.stake, 100);
+  assert.equal(fromShare.focusCardId, nsId);
+  assert.deepEqual(decodePromoCardId(fromShare.focusCardId), {
+    promoType: "nosweat",
+    book: "betrivers",
+    stake: 100,
+    hash: nsId.split(".").pop(),
+  });
+
+  assert.equal(
+    hashCardIdAfterPickViewToggle({
+      nextExpanded: true,
+      incomingCardId: encodePromoCardId({ promoType: "boost", book: "fanduel", stake: 50, legs: legsA }),
+      existingHashCardId: nsId,
+    }),
+    nsId,
+    "view-only expand must not replace an existing share/deep-link cardId",
+  );
+
+  const resolvedShare = resolveAppHash(parseAppHash(shareHash), null);
+  assert.equal(resolvedShare.tab, "promo");
+  assert.equal(resolvedShare.cardId, nsId);
+  assert.equal(resolvedShare.allowed, true);
+  assert.deepEqual(promoPrefsFromRoute(resolvedShare, profile), fromShare);
+
+  const comboHash = serializeAppHash({ tab: "combo", lockId: "lock-1" });
+  assert.equal(comboHash, "#combo/lock-1");
+  assert.deepEqual(parseAppHash(comboHash), { tab: "combo", lockId: "lock-1", cardId: null });
+}
 
 assert.equal(sharePath({ tab: "promo" }), "/s/promo");
 assert.equal(sharePath({ tab: "promo", cardId: id1 }), "/s/promo/" + encodeURIComponent(id1));
@@ -314,6 +393,10 @@ const stranger = { id: "u2", email: "stranger@gmail.com" };
   assert.match(app, /promoType: \"freebet\"/);
   assert.match(app, /boostPct,/);
   assert.match(app, /refundPct,/);
+  assert.match(app, /promoPrefsFromRoute/);
+  assert.doesNotMatch(app, /setExpandedPromo\(isExpanded \? null : i\);\s*setFocusCardId/);
+  assert.doesNotMatch(app, /setExpandedEV\(isExpanded \? null : i\);\s*setFocusCardId/);
+  assert.doesNotMatch(app, /setExpandedFreeBet\(isExpanded \? null : i\);\s*setFocusCardId/);
   const shareSrc = fs.readFileSync(path.join(dir, "shareCard.js"), "utf8");
   assert.doesNotMatch(shareSrc, /Powered by Claude/);
   assert.doesNotMatch(app, /shouldFetchFullBoard\(\{ tab: \"promo\"/);

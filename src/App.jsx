@@ -5,7 +5,7 @@ import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual } from "./comboAccess";
-import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel } from "./shareCard";
+import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
@@ -1617,7 +1617,11 @@ export default function App() {
     setWhatsNewSessionDismissed(false);
     setWhatsNewReady(false);
     if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
-    if (loaded.promoBook) setPromoBook(loaded.promoBook);
+    if (loaded.promoBook) {
+      const route = parseAppHash(window.location.hash);
+      const sharedPromo = route.tab === "promo" && decodePromoCardId(route.cardId);
+      if (!sharedPromo) setPromoBook(loaded.promoBook);
+    }
     let cancelled = false;
     fetchActiveAnnouncement(supabase).then((ann) => {
       if (cancelled) return;
@@ -1647,13 +1651,13 @@ export default function App() {
       setActiveTab(resolved.tab || "promo");
       setFocusLockId(resolved.tab === "combo" ? resolved.lockId : null);
       if (resolved.tab === "promo") {
+        const fromRoute = promoPrefsFromRoute(resolved);
+        if (fromRoute.source === "share") {
+          if (fromRoute.promoType) setPromoType(fromRoute.promoType);
+          if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
+          if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
+        }
         if (resolved.cardId) {
-          const decoded = decodePromoCardId(resolved.cardId);
-          if (decoded) {
-            if (decoded.promoType) setPromoType(decoded.promoType);
-            if (decoded.book) setPromoBook(decoded.book);
-            if (Number.isFinite(decoded.stake) && decoded.stake > 0) setStake(decoded.stake);
-          }
           setFocusCardId(resolved.cardId);
           focusedCardApplied.current = null;
         } else {
@@ -2413,7 +2417,6 @@ export default function App() {
                     <div key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
                       onClick={() => {
                         setExpandedEV(isExpanded ? null : i);
-                        setFocusCardId(isExpanded ? null : evId);
                         if (!isExpanded) {
                           window.gtag?.('event', 'ev_bet_expanded', { rank: i + 1 });
                           logEvent(user, 'ev_bet_expanded', { rank: i + 1, bet: b.name, book: b.bookKey });
@@ -2727,7 +2730,6 @@ export default function App() {
                       <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
-                          setFocusCardId(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'boost', book: promoBook, legs: p.legs.map(l => l.name) });
@@ -2877,7 +2879,6 @@ export default function App() {
                       <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
-                          setFocusCardId(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'nosweat' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'nosweat', book: promoBook, legs: p.legs.map(l => l.name) });
@@ -3093,7 +3094,6 @@ export default function App() {
                       <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedFreeBet(isExpanded ? null : i);
-                          setFocusCardId(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet', book: promoBook, legs: (p.legs || []).map(l => l.name) });
