@@ -167,6 +167,62 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(pin.displayLegs[0].lowLiquidity, false);
 }
 
+// ── unproven PM book (empty ladder / missing bestOppSize) is low liquidity
+{
+  const multi = { promoType: "freebet", numLegs: 2, stake: 100 };
+  const unknown = applyPmBlendToLeg(
+    { dk: -115, bestOpp: 537, bestOppBook: "novig", bestOppSize: null },
+    null,
+    multi,
+  );
+  assert.equal(unknown.lowLiquidity, true, "missing size + no ladder → unproven fill");
+  assert.equal(unknown.pmBlend, null);
+  assert.equal(unknown.bestOpp, 537, "keep quoted true odds when unproven");
+
+  const emptyLadder = applyPmBlendToLeg(
+    { dk: -115, bestOpp: 537, bestOppBook: "kalshi" },
+    [],
+    multi,
+  );
+  assert.equal(emptyLadder.lowLiquidity, true, "empty ladder + no size → unproven fill");
+
+  const zeroSize = applyPmBlendToLeg(
+    { dk: -115, bestOpp: 537, bestOppBook: "polymarket", bestOppSize: 0 },
+    null,
+    multi,
+  );
+  assert.equal(zeroSize.lowLiquidity, true, "zero bestOppSize is not a proven fill");
+
+  const failedWalk = applyPmBlendToLeg(
+    { dk: -115, bestOpp: 537, bestOppBook: "prophetx", bestOppSize: null },
+    [{ american: 0, size: 100 }],
+    multi,
+  );
+  assert.equal(failedWalk.lowLiquidity, true, "levels that normalize away → unproven");
+
+  const provenFromSize = applyPmBlendToLeg(
+    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 1000 },
+    null,
+    multi,
+  );
+  assert.equal(provenFromSize.lowLiquidity, false, "bestOppSize that fills $500 profit is proven");
+
+  const provenFromLadder = applyPmBlendToLeg(
+    { dk: 200, bestOpp: -200, bestOppBook: "novig" },
+    [{ american: -200, size: 1000 }],
+    multi,
+  );
+  assert.equal(provenFromLadder.lowLiquidity, false, "real ladder that fills is proven even without bestOppSize");
+
+  const fdUnknown = applyPmBlendToLeg(
+    { dk: -115, bestOpp: 537, bestOppBook: "fanduel", bestOppSize: null },
+    null,
+    multi,
+  );
+  assert.equal(fdUnknown.lowLiquidity, false, "sportsbook opp is never low-liq from this path");
+  assert.equal(fdUnknown.pmBlend, null);
+}
+
 // ── Profit Boost EV uses blended American, not the thin top
 {
   function calcParlayEV(legs, boostPct, stake) {

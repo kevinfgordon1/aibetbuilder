@@ -5,6 +5,9 @@
 // Multi-leg: incomplete $500-profit walk (win excl. stake, #96).
 // 1-leg: incomplete required-hedge $ walk (perfect lock).
 // Sportsbooks never set lowLiquidity; only Kalshi/Polymarket/Novig/ProphetX.
+// Unproven PM books (empty ladder / missing bestOppSize) are low liquidity —
+// do not treat "unknown / no ladder" as OK. A positive bestOppSize still
+// counts as a one-level book (complete fill stays, shortfall drops).
 
 import { applyPmBlendToLeg, pickHasLowLiquidity } from "./blendAskLadder.js";
 
