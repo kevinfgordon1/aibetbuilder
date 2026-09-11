@@ -3,6 +3,13 @@
 // still iterate allBooks so an unchecked matching book can price the promo.
 
 import { outcomeSize } from "./trueOddsLine.js";
+import {
+  isSoccerSport,
+  isDrawOutcomeName,
+  outcomeMatchesName,
+  preferSoccerBinaryNo,
+  SOCCER_ML_SIDES,
+} from "./soccerPairing.js";
 
 export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBooks) {
   const moneylines = [];
@@ -22,7 +29,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       if (!book) return null;
       const market = book.markets.find(m => m.key === marketKey);
       if (!market) return null;
-      const outcome = market.outcomes.find(o => o.name === teamName);
+      const outcome = (market.outcomes || []).find(o => outcomeMatchesName(o.name, teamName));
       if (!outcome) return null;
       if (prop === "size") return outcomeSize(outcome);
       return outcome[prop] ?? null;
@@ -34,7 +41,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === marketKey);
         if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === teamName);
+        const outcome = (market.outcomes || []).find(o => outcomeMatchesName(o.name, teamName));
         if (!outcome) return;
         const val = outcome.price;
         if (val === null || val === undefined) return;
@@ -93,13 +100,13 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       return count;
     };
 
-    const countMLLines = (teamName) => {
+    const countMLLines = (teamName, marketKey = "h2h") => {
       let count = 0;
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
-        const market = book.markets.find(m => m.key === "h2h");
+        const market = book.markets.find(m => m.key === marketKey);
         if (!market) return;
-        const outcome = market.outcomes.find(o => o.name === teamName);
+        const outcome = (market.outcomes || []).find(o => outcomeMatchesName(o.name, teamName));
         if (outcome) count++;
       });
       return count;
@@ -110,8 +117,16 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       bookOdds[b.key] = {
         ml_away: getOdds(b.key, "h2h", away),
         ml_home: getOdds(b.key, "h2h", home),
+        ml_draw: getOdds(b.key, "h2h", "Draw"),
         ml_away_size: getOdds(b.key, "h2h", away, "size"),
         ml_home_size: getOdds(b.key, "h2h", home, "size"),
+        ml_draw_size: getOdds(b.key, "h2h", "Draw", "size"),
+        ml_away_no: getOdds(b.key, "h2h_lay", away),
+        ml_home_no: getOdds(b.key, "h2h_lay", home),
+        ml_draw_no: getOdds(b.key, "h2h_lay", "Draw"),
+        ml_away_no_size: getOdds(b.key, "h2h_lay", away, "size"),
+        ml_home_no_size: getOdds(b.key, "h2h_lay", home, "size"),
+        ml_draw_no_size: getOdds(b.key, "h2h_lay", "Draw", "size"),
         spr_away: getOdds(b.key, "spreads", away),
         spr_away_line: getOdds(b.key, "spreads", away, "point"),
         spr_home: getOdds(b.key, "spreads", home),
@@ -124,24 +139,52 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
 
     const bestAwayML = getBestOdds("h2h", away);
     const bestHomeML = getBestOdds("h2h", home);
+    const bestDrawML = getBestOdds("h2h", "Draw");
     const best_away = bestAwayML.best;
     const best_home = bestHomeML.best;
+    const best_draw = bestDrawML.best;
 
-    const isThreeWay = bookmakers.some(b => {
+    const isThreeWay = isSoccerSport(sportKey) || bookmakers.some(b => {
       const m = (b.markets || []).find(mk => mk.key === "h2h");
-      return m && m.outcomes.some(o => o.name === "Draw");
+      return m && (m.outcomes || []).some(o => isDrawOutcomeName(o.name));
     });
+
+    const soccerNo = {};
+    if (isSoccerSport(sportKey)) {
+      for (const side of SOCCER_ML_SIDES) {
+        const name = side === "draw" ? "Draw" : (side === "away" ? away : home);
+        const otherYes = side === "away" ? bestHomeML : side === "home" ? bestAwayML : null;
+        const lay = getBestOdds("h2h_lay", name);
+        const picked = preferSoccerBinaryNo(
+          { best: lay.best, bestBook: lay.bestBook, bestSize: lay.bestSize, count: countMLLines(name, "h2h_lay") },
+          otherYes,
+        );
+        soccerNo[side] = picked;
+      }
+    }
 
     moneylines.push({
       away, home, commence_time, bookOdds, sport: sportKey,
-      best_away, best_home,
+      best_away, best_home, best_draw,
       is_three_way: isThreeWay,
       best_away_book: bestAwayML.bestBook,
       best_home_book: bestHomeML.bestBook,
+      best_draw_book: bestDrawML.bestBook,
       best_away_size: bestAwayML.bestSize ?? null,
       best_home_size: bestHomeML.bestSize ?? null,
-      ml_opp_count_away: countMLLines(home),
-      ml_opp_count_home: countMLLines(away),
+      best_draw_size: bestDrawML.bestSize ?? null,
+      best_away_no: soccerNo.away?.best ?? null,
+      best_home_no: soccerNo.home?.best ?? null,
+      best_draw_no: soccerNo.draw?.best ?? null,
+      best_away_no_book: soccerNo.away?.bestBook ?? null,
+      best_home_no_book: soccerNo.home?.bestBook ?? null,
+      best_draw_no_book: soccerNo.draw?.bestBook ?? null,
+      best_away_no_size: soccerNo.away?.bestSize ?? null,
+      best_home_no_size: soccerNo.home?.bestSize ?? null,
+      best_draw_no_size: soccerNo.draw?.bestSize ?? null,
+      ml_opp_count_away: isSoccerSport(sportKey) ? (soccerNo.away?.count || 0) : countMLLines(home),
+      ml_opp_count_home: isSoccerSport(sportKey) ? (soccerNo.home?.count || 0) : countMLLines(away),
+      ml_opp_count_draw: soccerNo.draw?.count || 0,
     });
 
     allBooks.forEach(b => {
