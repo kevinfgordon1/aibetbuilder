@@ -8,6 +8,7 @@ import {
   isDrawOutcomeName,
   outcomeMatchesName,
   preferSoccerBinaryNo,
+  bestSoccerBinaryNo,
   SOCCER_ML_SIDES,
 } from "./soccerPairing.js";
 
@@ -154,11 +155,8 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       for (const side of SOCCER_ML_SIDES) {
         const name = side === "draw" ? "Draw" : (side === "away" ? away : home);
         const otherYes = side === "away" ? bestHomeML : side === "home" ? bestAwayML : null;
-        const lay = getBestOdds("h2h_lay", name);
-        const picked = preferSoccerBinaryNo(
-          { best: lay.best, bestBook: lay.bestBook, bestSize: lay.bestSize, count: countMLLines(name, "h2h_lay") },
-          otherYes,
-        );
+        const lay = bestSoccerBinaryNo(bookmakers, name, { sizeOf: outcomeSize, trustedBookKeys });
+        const picked = preferSoccerBinaryNo(lay, otherYes);
         soccerNo[side] = picked;
       }
     }
