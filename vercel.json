@@ -34,6 +34,9 @@
     },
     "api/combo-probe.js": {
       "maxDuration": 20
+    },
+    "api/soccer-pm-no.js": {
+      "maxDuration": 20
     }
   },
   "rewrites": [

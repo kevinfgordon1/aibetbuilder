@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import {
   SOCCER_SPORT_KEYS,
   SOCCER_ML_SIDES,
+  SOCCER_PM_NO_BOOK_KEYS,
+  SOCCER_EXCHANGE_LAY_BOOK_KEYS,
+  SOCCER_ML_EMPTY_HINT,
   isSoccerSport,
   expandSoccerSportKeys,
   isDrawOutcomeName,
@@ -14,11 +17,21 @@ import {
   outcomeMatchesName,
   preferSoccerBinaryNo,
   soccerMlOppResolveArgs,
+  invertAmericanOdds,
+  soccerLayPriceToNo,
+  pickBestSoccerLay,
+  bestSoccerBinaryNo,
+  soccerLayBookLabel,
+  soccerPromoEmptyDetail,
+  soccerPmGameKey,
+  overlaySoccerPmNos,
 } from "./soccerPairing.js";
+import { transformOddsData } from "./oddsTransform.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const cjs = require("../lib/soccer-pairing.js");
+const { TRUSTED_BOOK_KEYS, ALL_BOOKS, buildAllLegsForBook } = require("../lib/promo-ev.js");
 
 assert.deepEqual(SOCCER_SPORT_KEYS, ["soccer_epl", "soccer_usa_mls"]);
 assert.deepEqual(SOCCER_ML_SIDES, ["away", "draw", "home"]);
@@ -101,6 +114,115 @@ for (const key of Object.keys(cjs)) {
 assert.deepEqual(cjs.SOCCER_SPORT_KEYS, SOCCER_SPORT_KEYS);
 assert.equal(cjs.preferSoccerBinaryNo({ best: 100 }, { best: 999 }).best, 100);
 assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
+assert.ok(SOCCER_EXCHANGE_LAY_BOOK_KEYS.has("betfair_ex_eu"));
+assert.ok(SOCCER_EXCHANGE_LAY_BOOK_KEYS.has("matchbook"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("kalshi"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("polymarket"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("novig"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("prophetx"));
+assert.ok(!SOCCER_PM_NO_BOOK_KEYS.has("betfair_ex_eu"));
+assert.ok(!SOCCER_PM_NO_BOOK_KEYS.has("betopenly"));
+assert.equal(soccerLayBookLabel("betfair_ex_eu"), "Betfair");
+assert.equal(soccerLayBookLabel("matchbook"), "Matchbook");
+assert.equal(invertAmericanOdds(138), -138);
+assert.equal(invertAmericanOdds(-150), 150);
+assert.equal(soccerLayPriceToNo("betfair_ex_eu", 138), -138);
+assert.equal(soccerLayPriceToNo("matchbook", 245), -245);
+assert.equal(soccerLayPriceToNo("kalshi", 155), 155, "PM h2h_lay is already a No price");
+assert.equal(soccerPromoEmptyDetail({ soccerSelected: true, soccerMlLegCount: 0 }), SOCCER_ML_EMPTY_HINT);
+assert.equal(soccerPromoEmptyDetail({ soccerSelected: true, soccerMlLegCount: 2 }), null);
+assert.equal(soccerPromoEmptyDetail({ soccerSelected: false, soccerMlLegCount: 0 }), null);
+
+{
+  const quotes = [
+    { book: "betfair_ex_eu", price: -138, size: 14 },
+    { book: "matchbook", price: -140, size: 2 },
+    { book: "kalshi", price: 155, size: 900 },
+  ];
+  const pmFirst = pickBestSoccerLay(quotes);
+  assert.equal(pmFirst.bestBook, "kalshi");
+  assert.equal(pmFirst.best, 155);
+  const exchangeOnly = pickBestSoccerLay(quotes.filter((q) => q.book !== "kalshi"));
+  assert.equal(exchangeOnly.bestBook, "betfair_ex_eu");
+  assert.equal(exchangeOnly.best, -138);
+}
+
+{
+  const bookmakers = [
+    {
+      key: "kalshi",
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Arsenal", price: -115 },
+          { name: "Chelsea", price: 260 },
+          { name: "Draw", price: 230 },
+        ],
+      }],
+    },
+    {
+      key: "betfair_ex_eu",
+      markets: [{
+        key: "h2h_lay",
+        outcomes: [
+          { name: "Arsenal", price: 138, bet_limit: 14 },
+          { name: "Chelsea", price: 245, bet_limit: 956 },
+          { name: "Draw", price: 250, bet_limit: 4593 },
+        ],
+      }],
+    },
+    {
+      key: "matchbook",
+      markets: [{
+        key: "h2h_lay",
+        outcomes: [
+          { name: "Arsenal", price: 140, bet_limit: 2 },
+          { name: "Chelsea", price: 250, bet_limit: 391 },
+          { name: "Draw", price: 255, bet_limit: 920 },
+        ],
+      }],
+    },
+  ];
+  const homeNo = bestSoccerBinaryNo(bookmakers, "Arsenal", { sizeOf: (o) => o.bet_limit });
+  assert.equal(homeNo.bestBook, "betfair_ex_eu");
+  assert.equal(homeNo.best, -138, "exchange lay +138 is No −138");
+  assert.equal(homeNo.bestSize, 14);
+  assert.equal(homeNo.count, 2);
+  const awayYes = { best: 260, bestBook: "kalshi" };
+  const picked = preferSoccerBinaryNo(homeNo, awayYes);
+  assert.equal(picked.kind, "same_binary_no");
+  assert.equal(picked.best, -138);
+  assert.notEqual(picked.best, awayYes.best);
+
+  const withKalshiNo = bestSoccerBinaryNo([
+    ...bookmakers,
+    {
+      key: "kalshi",
+      markets: [{
+        key: "h2h_lay",
+        outcomes: [{ name: "Arsenal", price: 155, bet_limit: 900 }],
+      }],
+    },
+  ], "Arsenal", { sizeOf: (o) => o.bet_limit });
+  assert.equal(withKalshiNo.bestBook, "kalshi");
+  assert.equal(withKalshiNo.best, 155);
+
+  const kalshiExcluded = bestSoccerBinaryNo(bookmakers.concat([{
+    key: "kalshi",
+    markets: [{ key: "h2h_lay", outcomes: [{ name: "Arsenal", price: 155, bet_limit: 900 }] }],
+  }]), "Arsenal", {
+    sizeOf: (o) => o.bet_limit,
+    trustedBookKeys: new Set(["draftkings", "fanduel"]),
+  });
+  assert.equal(kalshiExcluded.bestBook, "betfair_ex_eu", "matching-books can drop PM No; exchange lay still used");
+}
+
+assert.deepEqual([...cjs.SOCCER_EXCHANGE_LAY_BOOK_KEYS].sort(), [...SOCCER_EXCHANGE_LAY_BOOK_KEYS].sort());
+assert.equal(cjs.soccerLayPriceToNo("betfair_ex_eu", 138), -138);
+assert.equal(cjs.bestSoccerBinaryNo([{
+  key: "matchbook",
+  markets: [{ key: "h2h_lay", outcomes: [{ name: "Arsenal", price: 140 }] }],
+}], "Arsenal").best, -140);
 
 {
   const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +232,16 @@ assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
   assert.match(app, /SPORT_CHIPS = sportChipOptions\(SPORTS\)/);
   assert.match(app, /function pushSoccerMlLegs/);
   assert.match(app, /isSoccerSport\(g\.sport\)/);
+  assert.match(app, /soccerPromoEmptyDetail/);
+  assert.match(app, /soccerLayBookLabel/);
+  assert.match(app, /soccerKeysSelected/);
+  assert.match(app, /fetchSoccerPmNos/);
+  assert.match(app, /overlaySoccerPmNos/);
+  assert.match(app, /soccerPmReady/);
+  const appTrusted = app.match(/const TRUSTED_BOOK_KEYS = new Set\(\[([\s\S]*?)\]\);/);
+  assert.ok(appTrusted, "App.jsx TRUSTED_BOOK_KEYS block");
+  assert.ok(!appTrusted[1].includes("betfair_ex_eu"));
+  assert.ok(!appTrusted[1].includes("matchbook"));
   assert.doesNotMatch(app, /DEFAULT_PROFILE_SPORTS = \[[^\]]*soccer/);
   assert.doesNotMatch(app, /label: "EPL"[\s\S]{0,80}togglePromoSport/);
   assert.doesNotMatch(app, /label: "MLS"[\s\S]{0,80}togglePromoSport/);
@@ -118,6 +250,68 @@ assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
   const fetchJob = fs.readFileSync(path.join(dir, "../lib/odds-fetch-job.js"), "utf8");
   assert.match(fetchJob, /h2h,h2h_lay,spreads,totals/);
   assert.match(fetchJob, /Do not pull alt props/);
+}
+
+{
+  const future = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
+  const games = [{
+    commence_time: future,
+    away_team: "Chelsea",
+    home_team: "Arsenal",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Chelsea", price: 280 },
+            { name: "Draw", price: 240 },
+            { name: "Arsenal", price: -120 },
+          ],
+        }],
+      },
+      {
+        key: "kalshi",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Chelsea", price: 260 },
+            { name: "Draw", price: 230 },
+            { name: "Arsenal", price: -115 },
+          ],
+        }],
+      },
+      {
+        key: "betfair_ex_eu",
+        markets: [{
+          key: "h2h_lay",
+          outcomes: [
+            { name: "Chelsea", price: 245, bet_limit: 956 },
+            { name: "Draw", price: 250, bet_limit: 4593 },
+            { name: "Arsenal", price: 138, bet_limit: 14 },
+          ],
+        }],
+      },
+    ],
+  }];
+  const data = transformOddsData(games, "soccer_epl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.equal(data.moneylines[0].best_home_no, -138);
+  assert.equal(data.moneylines[0].best_home_no_book, "betfair_ex_eu");
+  const dkLegs = buildAllLegsForBook(data, "draftkings");
+  const home = dkLegs.find((l) => l.name === "Arsenal ML");
+  assert.equal(home.bestOpp, -138);
+  assert.equal(home.bestOppBook, "betfair_ex_eu");
+  assert.equal(home.bestOppName, "Arsenal ML No");
+
+  const overlaid = overlaySoccerPmNos(data, {
+    [soccerPmGameKey(data.moneylines[0])]: {
+      home: { best: 155, bestBook: "kalshi", bestSize: 900, count: 1 },
+    },
+  });
+  const kalshiLegs = buildAllLegsForBook(overlaid, "draftkings");
+  const kalshiHome = kalshiLegs.find((l) => l.name === "Arsenal ML");
+  assert.equal(kalshiHome.bestOppBook, "kalshi");
+  assert.equal(kalshiHome.bestOpp, 155);
 }
 
 console.log("soccerPairing.test.js ok");

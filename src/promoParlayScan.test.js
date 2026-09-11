@@ -106,8 +106,8 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
     /topFreeBetsWithLock\.length === 0 && !promoScanBusy/,
     "No Results must not key off busy=false + empty freebets",
   );
-  assert.match(app, /if \(!promoLoaded\) \{\s*setPromoScanBusy\(false\);\s*return;/);
-  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey\]/);
+  assert.match(app, /if \(!promoLoaded \|\| !soccerPmReady\) \{/);
+  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, soccerPmReady, currentPromoScanKey\]/);
   assert.match(app, /if \(gen !== promoScanGen\.current\) return;/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
   assert.equal(
@@ -439,7 +439,7 @@ function namesOf(parlays) {
   assert.match(app, /const \[maxLegOdds, setMaxLegOdds\] = useState\(""\)/);
   assert.match(app, /parsedMaxFinal/);
   assert.match(app, /parsedMaxLeg/);
-  assert.match(app, /buildAllLegsForBook\(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg\)/);
+  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg\)/);
   assert.match(app, /maxFinalOdds: parsedMaxFinal/);
   assert.match(app, /parts\.push\(`max \$\{maxFinalOdds\}`\)/);
   assert.match(app, /parts\.push\(`legs max \$\{maxLegOdds\}`\)/);

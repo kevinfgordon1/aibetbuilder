@@ -20,7 +20,11 @@ import {
   soccerYesName,
   soccerNoName,
   soccerMlOppResolveArgs,
+  soccerLayBookLabel,
+  soccerPromoEmptyDetail,
+  SOCCER_PM_NO_BOOK_KEYS,
 } from "./soccerPairing.js";
+import { fetchSoccerPmNos, overlaySoccerPmNos } from "./soccerPmNo.js";
 import {
   sportChipOptions,
   sportChipSelected,
@@ -28,6 +32,7 @@ import {
   formatSelectedSportsSummary,
   boardSportMatches,
   isSoccerChipId,
+  soccerKeysSelected,
 } from "./sportChips.js";
 import {
   loadMatchingBookKeys,
@@ -258,7 +263,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
   if (!lock || !lock.valid) return null;
 
   const hedgeBook = ALL_BOOKS.find(x => x.key === leg.bestOppBook);
-  const hedgeBookLabel = hedgeBook?.label || leg.bestOppBook || null;
+  const hedgeBookLabel = hedgeBook?.label || soccerLayBookLabel(leg.bestOppBook) || leg.bestOppBook || null;
   const adjustmentNote = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
   const isNoSweat = variant === "nosweat";
   const isFreeBet = variant === "freebet";
@@ -1136,7 +1141,7 @@ function OddsBoard({ oddsData, futuresData }) {
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerChipId(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = prediction-market lay of that same binary" : " for that side"}</div>
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerChipId(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = same-binary No (Kalshi / Poly / Novig / ProphetX; exchange lay last resort)" : " for that side"}</div>
     </div>
   );
 }
@@ -1531,7 +1536,7 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
   }, [live, levelsProp, leg?.bestOppBook, leg?.sport, leg?.game, leg?.bestOppName, leg?.name, leg?.market]);
 
   if (!leg?.bestOppBook) return null;
-  const bookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || leg.bestOppBook;
+  const bookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || soccerLayBookLabel(leg.bestOppBook) || leg.bestOppBook;
   const note = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
   const ladder = levelsProp !== undefined ? levelsProp : fetched;
   const blendedLeg = applyPmBlendToLeg(leg, Array.isArray(ladder) ? ladder : null, blendCtx || {});
@@ -1666,6 +1671,9 @@ export default function App() {
   const promoFetchGen = useRef(0);
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
+  const soccerPmNoGen = useRef(0);
+  const [soccerPmNoByGame, setSoccerPmNoByGame] = useState(null);
+  const [soccerPmNoStatus, setSoccerPmNoStatus] = useState("idle");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1930,6 +1938,45 @@ export default function App() {
     ]);
   }, [promoBoardData, oddsSource, matchingBookKeys]);
 
+  const soccerOnBoard = useMemo(
+    () => (promoOddsData.moneylines || []).some((g) => isSoccerSport(g.sport)),
+    [promoOddsData],
+  );
+
+  useEffect(() => {
+    const games = (promoOddsData.moneylines || []).filter((g) => isSoccerSport(g.sport));
+    if (!games.length) {
+      setSoccerPmNoByGame(null);
+      setSoccerPmNoStatus("idle");
+      return;
+    }
+    const venues = [...SOCCER_PM_NO_BOOK_KEYS].filter((k) => matchingBookKeys.has(k));
+    if (!venues.length) {
+      setSoccerPmNoByGame(null);
+      setSoccerPmNoStatus("done");
+      return;
+    }
+    const gen = ++soccerPmNoGen.current;
+    setSoccerPmNoStatus("loading");
+    fetchSoccerPmNos(games, { venues })
+      .then((quotes) => {
+        if (gen !== soccerPmNoGen.current) return;
+        setSoccerPmNoByGame(quotes);
+        setSoccerPmNoStatus("done");
+      })
+      .catch(() => {
+        if (gen !== soccerPmNoGen.current) return;
+        setSoccerPmNoByGame(null);
+        setSoccerPmNoStatus("error");
+      });
+  }, [promoOddsData, matchingBookKeys]);
+
+  const soccerPmReady = !soccerOnBoard || soccerPmNoStatus === "done" || soccerPmNoStatus === "error";
+  const promoOddsForPromo = useMemo(
+    () => overlaySoccerPmNos(promoOddsData, soccerPmNoByGame),
+    [promoOddsData, soccerPmNoByGame],
+  );
+
   const liveEvScan = useMemo(() => {
     if (!fullBoardLoaded) return null;
     if (!shouldRunEvScan(loadModeForTab(activeTab))) return null;
@@ -2014,11 +2061,12 @@ export default function App() {
   // 1-leg: leave the pool; rankPromoPicks drops incomplete-hedge picks after blend.
   const dropThinPoolLegs = hideLowLiquidity && Number(numLegs) >= 2;
   const promoLegs = useMemo(() => {
-    const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
+    if (soccerOnBoard && !soccerPmReady) return [];
+    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
     const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     return filterLowLiquidityLegs(promoLegsKept, dropThinPoolLegs, { promoType, numLegs });
-  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs]);
+  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, soccerOnBoard, soccerPmReady]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -2051,8 +2099,8 @@ export default function App() {
       setPromoScanBusy(false);
       return;
     }
-    if (!promoLoaded) {
-      setPromoScanBusy(false);
+    if (!promoLoaded || !soccerPmReady) {
+      setPromoScanBusy(!!promoLoaded && !soccerPmReady);
       return;
     }
     const gen = ++promoScanGen.current;
@@ -2094,7 +2142,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, soccerPmReady, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2137,26 +2185,31 @@ export default function App() {
     );
   }, [topFreeBets, numLegs, stake, hideLowLiquidity]);
 
+  const promoBusyForEmpty = promoLoading || (soccerOnBoard && !soccerPmReady);
   const boostEmptyState = promoScanEmptyState({
     promoLoaded,
-    promoLoading,
+    promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
     resultCount: topParlaysWithHedge.length,
   });
   const noSweatEmptyState = promoScanEmptyState({
     promoLoaded,
-    promoLoading,
+    promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
     resultCount: topNoSweatsWithLock.length,
   });
   const freeBetEmptyState = promoScanEmptyState({
     promoLoaded,
-    promoLoading,
+    promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
     resultCount: topFreeBetsWithLock.length,
+  });
+  const soccerEmptyDetail = soccerPromoEmptyDetail({
+    soccerSelected: soccerKeysSelected(promoSports),
+    soccerMlLegCount: promoLegs.filter((l) => isSoccerSport(l.sport) && l.market === "ML").length,
   });
 
   useEffect(() => {
@@ -2259,7 +2312,7 @@ export default function App() {
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: "#8a8f98" };
   const activePromoBookData = ALL_BOOKS.find(b => b.key === promoBook) || ALL_BOOKS[0];
-  const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || key;
+  const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || soccerLayBookLabel(key) || key;
   const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
   // Soft gate: logged-out visitors can browse the live app, but the first time they
@@ -2781,6 +2834,7 @@ export default function App() {
                       <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
+                      {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
                     </div>
                   )}
                   {boostEmptyState === "scanning" && (
@@ -2927,6 +2981,7 @@ export default function App() {
                       <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
+                      {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
                     </div>
                   )}
                   {noSweatEmptyState === "scanning" && (
@@ -3138,6 +3193,7 @@ export default function App() {
                       <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters or selecting a different sportsbook.</div>
+                      {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
                     </div>
                   )}
                   {freeBetEmptyState === "scanning" && (
