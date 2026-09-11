@@ -3,6 +3,7 @@
 // 2-way sports (NFL/MLB/…) keep other-team Yes as the inverse.
 
 export const SOCCER_SPORT_KEYS = ["soccer_epl", "soccer_usa_mls"];
+// League labels for game badges / cache rows. Filter chips collapse these to Soccer.
 export const SOCCER_SPORTS = [
   { key: "soccer_epl", label: "EPL" },
   { key: "soccer_usa_mls", label: "MLS" },
@@ -14,6 +15,15 @@ const DRAW_LOOKUP = new Set(DRAW_OUTCOME_NAMES.map((n) => n.toLowerCase()));
 
 export function isSoccerSport(sportKey) {
   return SOCCER_SPORT_KEYS.includes(String(sportKey || ""));
+}
+
+// If any soccer league key is present, include both Odds API keys (featured fetch / filter).
+export function expandSoccerSportKeys(selected) {
+  const set = selected instanceof Set ? new Set(selected) : new Set(selected || []);
+  if (SOCCER_SPORT_KEYS.some((k) => set.has(k))) {
+    for (const k of SOCCER_SPORT_KEYS) set.add(k);
+  }
+  return set;
 }
 
 export function isDrawOutcomeName(name) {

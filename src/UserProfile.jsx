@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools, comboLockHash, profileShowsComboPnl } from "./comboAccess";
 import { identityFromUser, profileDisplayName } from "./userProfile";
+import { sportChipSelected, toggleSportChip } from "./sportChips";
 import WhatsNewComposer from "./WhatsNewComposer";
 import {
   STATEMENT_DATE_FILTERS,
@@ -133,17 +134,8 @@ export default function UserProfile({
     URL.revokeObjectURL(url);
   };
 
-  const toggleSport = (key) => {
-    setDraftSports((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        if (next.size <= 1) return prev;
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+  const toggleSport = (chip) => {
+    setDraftSports((prev) => toggleSportChip(prev, chip, { minSelected: 1 }));
   };
 
   const save = () => {
@@ -214,7 +206,7 @@ export default function UserProfile({
           <label>Default sports</label>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {sportsOptions.map((s) => (
-              <button key={s.key} type="button" className={"chip" + (draftSports.has(s.key) ? " on" : "")} onClick={() => toggleSport(s.key)}>{s.label}</button>
+              <button key={s.id || s.key} type="button" className={"chip" + (sportChipSelected(s, draftSports) ? " on" : "")} onClick={() => toggleSport(s)}>{s.label}</button>
             ))}
           </div>
         </div>

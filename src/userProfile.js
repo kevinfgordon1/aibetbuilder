@@ -4,6 +4,8 @@
 // dismissed announcements follow the account across devices.
 // Billing / exchange-key vault is parked.
 
+import { SOCCER_SPORT_KEYS } from "./soccerPairing.js";
+
 export const PROFILE_PREFS_KEY = "aibetbuilder.profilePrefs";
 export const PROFILE_PREFS_META_KEY = "aibetbuilderPrefs";
 
@@ -72,6 +74,15 @@ function sanitizeSports(sports, allowedKeys) {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(key);
+  }
+  // Soccer chip is on iff any soccer key is present — persist both Odds API keys.
+  if (SOCCER_SPORT_KEYS.some((k) => seen.has(k))) {
+    for (const k of SOCCER_SPORT_KEYS) {
+      if (allowed.size && !allowed.has(k)) continue;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(k);
+    }
   }
   return out.length ? out : DEFAULT_PROFILE_SPORTS.slice();
 }

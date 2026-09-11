@@ -243,6 +243,15 @@ function fullPlan() {
     "baseball_mlb",
     "icehockey_nhl",
   ]);
+  assert.deepEqual(sportKeysForPromoLoad(new Set(["soccer_epl"]), SPORT_KEYS), [
+    "soccer_epl",
+    "soccer_usa_mls",
+  ]);
+  assert.deepEqual(sportKeysForPromoLoad(new Set(["soccer_usa_mls", "baseball_mlb"]), SPORT_KEYS), [
+    "baseball_mlb",
+    "soccer_epl",
+    "soccer_usa_mls",
+  ]);
 }
 
 // ── promo-ev.js trusted set unchanged

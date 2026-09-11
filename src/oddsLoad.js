@@ -2,6 +2,7 @@
 // Promo fetches selected featured sports only (no futures, no 20k-leg EV scan).
 
 import { isSupabaseDownError, isTimeoutError, describeSupabaseUnhealthy } from "./dataSourceHealth.js";
+import { expandSoccerSportKeys } from "./soccerPairing.js";
 
 export { isSupabaseDownError, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 
@@ -14,11 +15,12 @@ export function loadModeForTab(tab) {
 
 export function sportKeysForPromoLoad(promoSports, featuredSportKeys) {
   const keys = featuredSportKeys || [];
-  if (!promoSports || promoSports.size === 0) return [...keys];
-  if (promoSports.size === keys.length && keys.every((k) => promoSports.has(k))) {
+  const expanded = expandSoccerSportKeys(promoSports);
+  if (!expanded.size) return [...keys];
+  if (keys.length && keys.every((k) => expanded.has(k))) {
     return [...keys];
   }
-  return keys.filter((k) => promoSports.has(k));
+  return keys.filter((k) => expanded.has(k));
 }
 
 export function buildOddsQueryPlan({

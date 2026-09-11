@@ -6,6 +6,7 @@ import {
   SOCCER_SPORT_KEYS,
   SOCCER_ML_SIDES,
   isSoccerSport,
+  expandSoccerSportKeys,
   isDrawOutcomeName,
   soccerYesName,
   soccerNoName,
@@ -25,6 +26,11 @@ assert.equal(isSoccerSport("soccer_epl"), true);
 assert.equal(isSoccerSport("soccer_usa_mls"), true);
 assert.equal(isSoccerSport("americanfootball_nfl"), false);
 assert.equal(isSoccerSport("baseball_mlb"), false);
+assert.deepEqual([...expandSoccerSportKeys(new Set(["soccer_epl"]))].sort(), [...SOCCER_SPORT_KEYS].sort());
+assert.deepEqual([...expandSoccerSportKeys(["soccer_usa_mls"])].sort(), [...SOCCER_SPORT_KEYS].sort());
+assert.deepEqual([...expandSoccerSportKeys(new Set(["baseball_mlb"]))], ["baseball_mlb"]);
+assert.equal(typeof cjs.expandSoccerSportKeys, "function");
+assert.deepEqual([...cjs.expandSoccerSportKeys(new Set(["soccer_epl"]))].sort(), [...SOCCER_SPORT_KEYS].sort());
 assert.equal(isDrawOutcomeName("Draw"), true);
 assert.equal(isDrawOutcomeName("tie"), true);
 assert.equal(isDrawOutcomeName("Arsenal"), false);
@@ -101,9 +107,12 @@ assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /key: "soccer_epl", label: "EPL"/);
   assert.match(app, /key: "soccer_usa_mls", label: "MLS"/);
+  assert.match(app, /SPORT_CHIPS = sportChipOptions\(SPORTS\)/);
   assert.match(app, /function pushSoccerMlLegs/);
   assert.match(app, /isSoccerSport\(g\.sport\)/);
   assert.doesNotMatch(app, /DEFAULT_PROFILE_SPORTS = \[[^\]]*soccer/);
+  assert.doesNotMatch(app, /label: "EPL"[\s\S]{0,80}togglePromoSport/);
+  assert.doesNotMatch(app, /label: "MLS"[\s\S]{0,80}togglePromoSport/);
   const profile = fs.readFileSync(path.join(dir, "userProfile.js"), "utf8");
   assert.match(profile, /DEFAULT_PROFILE_SPORTS = \["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"\]/);
   const fetchJob = fs.readFileSync(path.join(dir, "../lib/odds-fetch-job.js"), "utf8");
