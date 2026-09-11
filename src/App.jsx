@@ -16,10 +16,19 @@ import { transformOddsData as transformOddsDataForBooks, transformEventOddsData 
 import {
   SOCCER_ML_SIDES,
   isSoccerSport,
+  expandSoccerSportKeys,
   soccerYesName,
   soccerNoName,
   soccerMlOppResolveArgs,
 } from "./soccerPairing.js";
+import {
+  sportChipOptions,
+  sportChipSelected,
+  toggleSportChip,
+  formatSelectedSportsSummary,
+  boardSportMatches,
+  isSoccerChipId,
+} from "./sportChips.js";
 import {
   loadMatchingBookKeys,
   matchingSetIsFull,
@@ -133,6 +142,8 @@ const SPORTS = [
   { key: "soccer_usa_mls", label: "MLS" },
 ];
 const SPORT_KEYS = SPORTS.map(s => s.key);
+// Promo / Odds Board / Profile chips. Soccer is one chip → both Odds API keys.
+const SPORT_CHIPS = sportChipOptions(SPORTS);
 
 // Futures / outrights (championship winners). `sport` links each to its parent league
 // for badge coloring. These are pulled/stored separately from the game boards.
@@ -159,8 +170,7 @@ const DEFAULT_PROMO_SPORT_KEYS = DEFAULT_PROFILE_SPORTS;
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
 function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity }) {
-  const selected = SPORTS.filter(s => promoSports.has(s.key)).map(s => s.label);
-  const sportsPart = selected.length === SPORTS.length ? "All sports" : selected.join(", ");
+  const sportsPart = formatSelectedSportsSummary(promoSports, SPORT_CHIPS);
   const datePart = DATE_RANGES.find(d => d.val === promoDateRange)?.label || promoDateRange;
   const marketPart = marketScopeSummary(marketScope);
   const parts = [sportsPart, datePart, marketPart];
@@ -867,7 +877,7 @@ function OddsBoard({ oddsData, futuresData }) {
   const now = new Date();
 
   const games = (oddsData.moneylines || []).filter(g =>
-    g.sport === boardSport && new Date(g.commence_time) > now
+    boardSportMatches(g.sport, boardSport) && new Date(g.commence_time) > now
   );
 
   const filteredGames = games.filter(g => {
@@ -956,7 +966,7 @@ function OddsBoard({ oddsData, futuresData }) {
   const oddsColWidth = 88;
 
   // Championship (futures) view — one price per team, best across selected books.
-  const champMeta = FUTURES.find(f => f.sport === boardSport);
+  const champMeta = FUTURES.find(f => boardSportMatches(f.sport, boardSport));
   const champEntry = (futuresData || []).find(f => f.key === champMeta?.key);
   const champBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
   const champBestOf = (priceMap) => {
@@ -1002,8 +1012,8 @@ function OddsBoard({ oddsData, futuresData }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {SPORTS.map(s => (
-          <button key={s.key} onClick={() => setBoardSport(s.key)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.key ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.key ? "#fff" : "#6b7280" }}>
+        {SPORT_CHIPS.map(s => (
+          <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.id ? "#fff" : "#6b7280" }}>
             {s.label}
           </button>
         ))}
@@ -1126,7 +1136,7 @@ function OddsBoard({ oddsData, futuresData }) {
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerSport(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = prediction-market lay of that same binary" : " for that side"}</div>
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerChipId(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = prediction-market lay of that same binary" : " for that side"}</div>
     </div>
   );
 }
@@ -1986,10 +1996,10 @@ export default function App() {
   const scanStakeRef = useRef(scanStake);
   scanStakeRef.current = scanStake;
 
-  const promoSportFilter = useMemo(
-    () => (promoSports.size === SPORTS.length ? null : [...promoSports]),
-    [promoSports],
-  );
+  const promoSportFilter = useMemo(() => {
+    const expanded = expandSoccerSportKeys(promoSports);
+    return SPORT_KEYS.every((k) => expanded.has(k)) ? null : SPORT_KEYS.filter((k) => expanded.has(k));
+  }, [promoSports]);
   const isParlayPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
   const parsedMinLeg = (isParlayPromo && scanMinLegOdds !== "") ? Number(scanMinLegOdds) : null;
   const parsedMaxLeg = (isParlayPromo && scanMaxLegOdds !== "") ? Number(scanMaxLegOdds) : null;
@@ -2220,13 +2230,8 @@ export default function App() {
     setActiveTab("combo");
   };
 
-  const togglePromoSport = (sportKey) => {
-    setPromoSports(prev => {
-      const next = new Set(prev);
-      if (next.has(sportKey)) { if (next.size === 1) return prev; next.delete(sportKey); }
-      else next.add(sportKey);
-      return next;
-    });
+  const togglePromoSport = (chip) => {
+    setPromoSports((prev) => toggleSportChip(prev, chip, { minSelected: 1 }));
   };
 
   const toggleMatchingBook = (bookKey) => {
@@ -2405,7 +2410,7 @@ export default function App() {
                 if (saved.promoBook) setPromoBook(saved.promoBook);
                 persistProfilePrefsRemote(supabase, user, saved);
               }}
-              sportsOptions={SPORTS}
+              sportsOptions={SPORT_CHIPS}
               bookOptions={ALL_BOOKS.map((b) => ({ ...b, trusted: TRUSTED_BOOK_KEYS.has(b.key) }))}
               matchingBookKeys={matchingBookKeys}
               onToggleMatchingBook={toggleMatchingBook}
@@ -2697,8 +2702,8 @@ export default function App() {
                     <>
                       {controlBox(<>
                         <label style={labelStyle}>Sports</label>
-                        {SPORTS.map(s => (
-                          <button key={s.key} onClick={() => togglePromoSport(s.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoSports.has(s.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoSports.has(s.key) ? "#3b82f6" : "#6b7280" }}>
+                        {SPORT_CHIPS.map(s => (
+                          <button key={s.id} onClick={() => togglePromoSport(s)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: sportChipSelected(s, promoSports) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: sportChipSelected(s, promoSports) ? "#3b82f6" : "#6b7280" }}>
                             {s.label}
                           </button>
                         ))}

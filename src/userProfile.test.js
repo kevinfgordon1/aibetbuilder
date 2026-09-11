@@ -87,6 +87,17 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
 }
 
 {
+  const soccerAllowed = new Set([
+    "baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf",
+    "soccer_epl", "soccer_usa_mls",
+  ]);
+  const one = normalizeProfilePrefs({ sports: ["soccer_epl"] }, { allowedSports: soccerAllowed });
+  assert.deepEqual(one.sports, ["soccer_epl", "soccer_usa_mls"]);
+  const other = normalizeProfilePrefs({ sports: ["baseball_mlb", "soccer_usa_mls"] }, { allowedSports: soccerAllowed });
+  assert.deepEqual(other.sports, ["baseball_mlb", "soccer_usa_mls", "soccer_epl"]);
+}
+
+{
   const store = new Map();
   const storage = {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
