@@ -14,6 +14,13 @@ import { recommendedFillFromFair } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
 import {
+  SOCCER_ML_SIDES,
+  isSoccerSport,
+  soccerYesName,
+  soccerNoName,
+  soccerMlOppResolveArgs,
+} from "./soccerPairing.js";
+import {
   loadMatchingBookKeys,
   matchingSetIsFull,
   saveExcludedMatchingBooks,
@@ -122,6 +129,8 @@ const SPORTS = [
   { key: "basketball_nba", label: "NBA" },
   { key: "basketball_ncaab", label: "NCAAB" },
   { key: "icehockey_nhl", label: "NHL" },
+  { key: "soccer_epl", label: "EPL" },
+  { key: "soccer_usa_mls", label: "MLS" },
 ];
 const SPORT_KEYS = SPORTS.map(s => s.key);
 
@@ -518,6 +527,33 @@ function resolveOpp({ trustedOpp, trustedBook, trustedCount, trustedSize, sameBo
   return { bestOpp: null, bestOppBook: trustedBook || null, bestOppCount: trustedCount || 0, bestOppSize: trustedSize ?? null, sameBookFallback: false };
 }
 
+function pushSoccerMlLegs(legs, g, bookKey, { seen, minLegOdds, maxLegOdds } = {}) {
+  for (const side of SOCCER_ML_SIDES) {
+    const odds = g.bookOdds?.[bookKey]?.[`ml_${side}`];
+    if (odds == null) continue;
+    if (!passesOddsBounds(odds, minLegOdds ?? null, maxLegOdds ?? null)) continue;
+    const dedupe = `${g.away}@${g.home}_ML_${side}_${bookKey}`;
+    if (seen) {
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+    }
+    const opp = resolveOpp(soccerMlOppResolveArgs(g, side, bookKey));
+    if (opp.bestOpp == null) continue;
+    legs.push({
+      name: soccerYesName(side, g.away, g.home),
+      dk: odds,
+      market: "ML",
+      game: `${g.away} @ ${g.home}`,
+      commence_time: g.commence_time,
+      sport: g.sport,
+      bookKey,
+      bestOppName: soccerNoName(side, g.away, g.home),
+      soccerBinary: side,
+      ...opp,
+    });
+  }
+}
+
 // Same American-numeric convention as min: odds >= min and odds <= max.
 function passesOddsBounds(odds, minOdds, maxOdds) {
   if (minOdds !== null && odds < minOdds) return false;
@@ -534,6 +570,10 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (new Date(g.commence_time) <= now) return;
       if (!isWithinDateRange(g.commence_time, dateRange)) return;
       if (sportFilter && !sportFilter.includes(g.sport)) return;
+      if (isSoccerSport(g.sport)) {
+        pushSoccerMlLegs(legs, g, book, { minLegOdds, maxLegOdds });
+        return;
+      }
       if (g.is_three_way) return;
       const awayOdds = g.bookOdds?.[book]?.ml_away;
       const homeOdds = g.bookOdds?.[book]?.ml_home;
@@ -610,6 +650,10 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (new Date(g.commence_time) <= now) return;
         if (!isWithinDateRange(g.commence_time, dateRange)) return;
         if (sportFilter && !sportFilter.includes(g.sport)) return;
+        if (isSoccerSport(g.sport)) {
+          pushSoccerMlLegs(legs, g, book.key, { seen });
+          return;
+        }
         if (g.is_three_way) return;
         const awayOdds = g.bookOdds?.[book.key]?.ml_away;
         const homeOdds = g.bookOdds?.[book.key]?.ml_home;
@@ -777,7 +821,7 @@ function EVBadge({ ev }) {
 
 function SportBadge({ sport }) {
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { baseball_mlb: "#3b82f6", americanfootball_nfl: "#8b5cf6", americanfootball_ncaaf: "#a78bfa", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4" };
+  const colors = { baseball_mlb: "#3b82f6", americanfootball_nfl: "#8b5cf6", americanfootball_ncaaf: "#a78bfa", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
       {s?.label || sport}
@@ -848,12 +892,25 @@ function OddsBoard({ oddsData, futuresData }) {
   };
 
   const getCell = (game, bookKey) => {
+    const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
     if (bookKey === "best") {
       const vals = ALL_BOOKS.filter(b => selectedBooks.has(b.key));
       if (market === "ml") {
         const bestAway = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_away).filter(v => v != null));
         const bestHome = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_home).filter(v => v != null));
-        return { top: isFinite(bestAway) ? bestAway : null, bot: isFinite(bestHome) ? bestHome : null, topLine: null, botLine: null };
+        const bestDraw = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_draw).filter(v => v != null));
+        const bestAwayNo = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_away_no).filter(v => v != null));
+        const bestHomeNo = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_home_no).filter(v => v != null));
+        const bestDrawNo = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_draw_no).filter(v => v != null));
+        return {
+          top: isFinite(bestAway) ? bestAway : null,
+          mid: threeWay && isFinite(bestDraw) ? bestDraw : null,
+          bot: isFinite(bestHome) ? bestHome : null,
+          topNo: threeWay && isFinite(bestAwayNo) ? bestAwayNo : null,
+          midNo: threeWay && isFinite(bestDrawNo) ? bestDrawNo : null,
+          botNo: threeWay && isFinite(bestHomeNo) ? bestHomeNo : null,
+          topLine: null, botLine: null, threeWay,
+        };
       }
       if (market === "spr") {
         const bestAway = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.spr_away).filter(v => v != null));
@@ -869,22 +926,29 @@ function OddsBoard({ oddsData, futuresData }) {
       }
     }
     const b = game.bookOdds?.[bookKey];
-    if (!b) return { top: null, bot: null, topLine: null, botLine: null };
-    if (market === "ml") return { top: b.ml_away, bot: b.ml_home, topLine: null, botLine: null };
+    if (!b) return { top: null, bot: null, mid: null, topLine: null, botLine: null, threeWay };
+    if (market === "ml") {
+      return {
+        top: b.ml_away, mid: threeWay ? b.ml_draw : null, bot: b.ml_home,
+        topNo: threeWay ? b.ml_away_no : null, midNo: threeWay ? b.ml_draw_no : null, botNo: threeWay ? b.ml_home_no : null,
+        topLine: null, botLine: null, threeWay,
+      };
+    }
     if (market === "spr") return { top: b.spr_away, bot: b.spr_home, topLine: b.spr_away_line != null ? (b.spr_away_line > 0 ? `+${b.spr_away_line}` : `${b.spr_away_line}`) : null, botLine: b.spr_home_line != null ? (b.spr_home_line > 0 ? `+${b.spr_home_line}` : `${b.spr_home_line}`) : null };
     if (market === "tot") return { top: b.tot_over, bot: b.tot_under, topLine: b.tot_line ? `o${b.tot_line}` : null, botLine: b.tot_line ? `u${b.tot_line}` : null };
     return { top: null, bot: null, topLine: null, botLine: null };
   };
 
   const getBestForGame = (game) => {
-    let bestAway = null, bestHome = null;
+    let bestAway = null, bestHome = null, bestDraw = null;
     ALL_BOOKS.forEach(b => {
       if (!selectedBooks.has(b.key)) return;
       const cell = getCell(game, b.key);
       if (cell.top !== null && (bestAway === null || cell.top > bestAway)) bestAway = cell.top;
+      if (cell.mid != null && (bestDraw === null || cell.mid > bestDraw)) bestDraw = cell.mid;
       if (cell.bot !== null && (bestHome === null || cell.bot > bestHome)) bestHome = cell.bot;
     });
-    return { bestAway, bestHome };
+    return { bestAway, bestHome, bestDraw };
   };
 
   const visibleBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
@@ -937,7 +1001,7 @@ function OddsBoard({ oddsData, futuresData }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {SPORTS.map(s => (
           <button key={s.key} onClick={() => setBoardSport(s.key)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.key ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.key ? "#fff" : "#6b7280" }}>
             {s.label}
@@ -1006,31 +1070,48 @@ function OddsBoard({ oddsData, futuresData }) {
                   <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
                 </tr>
                 {dateGames.map((game, gi) => {
-                  const { bestAway, bestHome } = getBestForGame(game);
+                  const { bestAway, bestHome, bestDraw } = getBestForGame(game);
+                  const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
+                  const mlPrice = (yes, no) => (
+                    <>
+                      {formatOdds(yes)}
+                      {no != null && (
+                        <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginTop: 2 }}>NO {formatOdds(no)}</div>
+                      )}
+                    </>
+                  );
                   return (
                     <tr key={gi} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                       <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                         <div style={{ padding: "8px 16px 4px" }}>
                           <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>{new Date(game.commence_time).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET</div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 6 }}>{game.away}</div>
+                          {threeWay && market === "ml" && <div style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginBottom: 6 }}>Draw</div>}
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{game.home}</div>
                         </div>
                       </td>
                       {visibleBooks.map(b => {
                         const cell = getCell(game, b.key);
                         const isBestAway = b.key !== "best" && cell.top !== null && cell.top === bestAway;
+                        const isBestDraw = b.key !== "best" && cell.mid != null && cell.mid === bestDraw;
                         const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
                         const isBestCol = b.key === "best";
+                        const showNo = market === "ml" && cell.threeWay;
                         return (
                           <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
                             <div style={{ display: "flex", flexDirection: "column" }}>
                               <div style={{ padding: "8px 6px", borderBottom: "1px solid rgba(255,255,255,0.03)", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: cell.top === null ? "#2d3748" : (isBestCol || isBestAway) ? "#10b981" : "#e8eaed", background: isBestAway ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent" }}>
                                 {cell.topLine && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{cell.topLine}</div>}
-                                {formatOdds(cell.top)}
+                                {showNo ? mlPrice(cell.top, cell.topNo) : formatOdds(cell.top)}
                               </div>
+                              {threeWay && market === "ml" && (
+                                <div style={{ padding: "8px 6px", borderBottom: "1px solid rgba(255,255,255,0.03)", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: cell.mid == null ? "#2d3748" : (isBestCol || isBestDraw) ? "#10b981" : "#e8eaed", background: isBestDraw ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent" }}>
+                                  {mlPrice(cell.mid, cell.midNo)}
+                                </div>
+                              )}
                               <div style={{ padding: "8px 6px", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: cell.bot === null ? "#2d3748" : (isBestCol || isBestHome) ? "#10b981" : "#e8eaed", background: isBestHome ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent" }}>
                                 {cell.botLine && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{cell.botLine}</div>}
-                                {formatOdds(cell.bot)}
+                                {showNo ? mlPrice(cell.bot, cell.botNo) : formatOdds(cell.bot)}
                               </div>
                             </div>
                           </td>
@@ -1045,7 +1126,7 @@ function OddsBoard({ oddsData, futuresData }) {
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : " for that side"}</div>
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerSport(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = prediction-market lay of that same binary" : " for that side"}</div>
     </div>
   );
 }

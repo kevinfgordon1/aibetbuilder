@@ -110,7 +110,7 @@ function fullPlan() {
   assert.equal(plan.computeEv, false);
 }
 
-// ── All 6 featured sports still skip futures
+// ── All featured sports still skip futures
 {
   const plan = promoPlan(new Set(SPORT_KEYS));
   assert.deepEqual(plan.featuredSports, SPORT_KEYS);
