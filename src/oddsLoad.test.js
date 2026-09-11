@@ -275,7 +275,7 @@ function fullPlan() {
 {
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /from "\.\/oddsLoad\.js"/);
-  assert.match(app, /buildAllLegsForBook\(promoOddsData,/);
+  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo,/);
   assert.match(app, /if \(!shouldRunEvScan\(loadModeForTab\(activeTab\)\)\) return null;/);
   assert.match(app, /buildAllLegsAllBooks\(allOddsData,/);
   assert.doesNotMatch(app, /buildAllLegsAllBooks\(promoBoardData,/);

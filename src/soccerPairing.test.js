@@ -23,6 +23,8 @@ import {
   bestSoccerBinaryNo,
   soccerLayBookLabel,
   soccerPromoEmptyDetail,
+  soccerPmGameKey,
+  overlaySoccerPmNos,
 } from "./soccerPairing.js";
 import { transformOddsData } from "./oddsTransform.js";
 import { createRequire } from "node:module";
@@ -115,7 +117,11 @@ assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
 assert.ok(SOCCER_EXCHANGE_LAY_BOOK_KEYS.has("betfair_ex_eu"));
 assert.ok(SOCCER_EXCHANGE_LAY_BOOK_KEYS.has("matchbook"));
 assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("kalshi"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("polymarket"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("novig"));
+assert.ok(SOCCER_PM_NO_BOOK_KEYS.has("prophetx"));
 assert.ok(!SOCCER_PM_NO_BOOK_KEYS.has("betfair_ex_eu"));
+assert.ok(!SOCCER_PM_NO_BOOK_KEYS.has("betopenly"));
 assert.equal(soccerLayBookLabel("betfair_ex_eu"), "Betfair");
 assert.equal(soccerLayBookLabel("matchbook"), "Matchbook");
 assert.equal(invertAmericanOdds(138), -138);
@@ -229,6 +235,9 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   assert.match(app, /soccerPromoEmptyDetail/);
   assert.match(app, /soccerLayBookLabel/);
   assert.match(app, /soccerKeysSelected/);
+  assert.match(app, /fetchSoccerPmNos/);
+  assert.match(app, /overlaySoccerPmNos/);
+  assert.match(app, /soccerPmReady/);
   const appTrusted = app.match(/const TRUSTED_BOOK_KEYS = new Set\(\[([\s\S]*?)\]\);/);
   assert.ok(appTrusted, "App.jsx TRUSTED_BOOK_KEYS block");
   assert.ok(!appTrusted[1].includes("betfair_ex_eu"));
@@ -293,6 +302,16 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   assert.equal(home.bestOpp, -138);
   assert.equal(home.bestOppBook, "betfair_ex_eu");
   assert.equal(home.bestOppName, "Arsenal ML No");
+
+  const overlaid = overlaySoccerPmNos(data, {
+    [soccerPmGameKey(data.moneylines[0])]: {
+      home: { best: 155, bestBook: "kalshi", bestSize: 900, count: 1 },
+    },
+  });
+  const kalshiLegs = buildAllLegsForBook(overlaid, "draftkings");
+  const kalshiHome = kalshiLegs.find((l) => l.name === "Arsenal ML");
+  assert.equal(kalshiHome.bestOppBook, "kalshi");
+  assert.equal(kalshiHome.bestOpp, 155);
 }
 
 console.log("soccerPairing.test.js ok");

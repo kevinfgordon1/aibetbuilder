@@ -51,10 +51,10 @@ export function soccerLayOutcomeName(side, away, home) {
   return soccerSideTeam(side, away, home);
 }
 
-// PM venues that may later quote a true soccer No (h2h_lay or a separate binary).
-// Preferred over exchange lays when they actually post No — Kalshi today is Yes-only.
+// Primary soccer No books for Promo / Free Bet. Odds API is Yes-only on Kalshi;
+// true No comes from PM catalog / orderbook (Kalshi YES bids → No asks).
 export const SOCCER_PM_NO_BOOK_KEYS = new Set([
-  "kalshi", "polymarket", "novig", "prophetx", "betopenly",
+  "kalshi", "polymarket", "novig", "prophetx",
 ]);
 
 // Odds API books that currently supply soccer h2h_lay. Not added to TRUSTED_BOOK_KEYS —
@@ -69,7 +69,7 @@ export const SOCCER_LAY_BOOK_LABELS = {
 };
 
 export const SOCCER_ML_EMPTY_HINT =
-  "Soccer moneylines need a matching No on the same team (Betfair, Matchbook, or a prediction-market No). The other team's Yes is never used as the hedge.";
+  "Soccer moneylines need a matching No on the same team (Kalshi, Polymarket, Novig, or ProphetX). Exchange lays are a last resort. The other team's Yes is never used as the hedge.";
 
 export function isSoccerPmNoBook(bookKey) {
   return SOCCER_PM_NO_BOOK_KEYS.has(String(bookKey || ""));
@@ -116,8 +116,8 @@ export function pickBestSoccerLay(quotes) {
   };
 }
 
-// Any bookmaker quoting h2h_lay is eligible. PM books honor the matching-books
-// subset when provided; exchange / other lay books are soccer-No-only.
+// Odds API h2h_lay only (last-resort). Promo ranking overlays PM catalog/orderbook
+// Nos from Kalshi / Poly / Novig / ProphetX on top of this.
 export function bestSoccerBinaryNo(bookmakers, teamName, { sizeOf, trustedBookKeys } = {}) {
   const quotes = [];
   for (const book of bookmakers || []) {
@@ -135,6 +135,35 @@ export function bestSoccerBinaryNo(bookmakers, teamName, { sizeOf, trustedBookKe
     });
   }
   return pickBestSoccerLay(quotes);
+}
+
+export function soccerPmGameKey(game) {
+  if (!game) return "";
+  return [game.sport, game.away, game.home, game.commence_time || ""].join("|");
+}
+
+// Overlay PM catalog/orderbook Nos onto transformed moneylines. PM always
+// beats Odds API exchange h2h_lay for that side. Missing sides keep fallback.
+export function overlaySoccerPmNos(data, pmByGame) {
+  if (!data || !pmByGame) return data;
+  return {
+    ...data,
+    moneylines: (data.moneylines || []).map((g) => {
+      if (!isSoccerSport(g.sport)) return g;
+      const rec = pmByGame[soccerPmGameKey(g)];
+      if (!rec) return g;
+      const next = { ...g };
+      for (const side of SOCCER_ML_SIDES) {
+        const q = rec[side];
+        if (!q || q.best == null) continue;
+        next[`best_${side}_no`] = q.best;
+        next[`best_${side}_no_book`] = q.bestBook;
+        next[`best_${side}_no_size`] = q.bestSize ?? null;
+        next[`ml_opp_count_${side}`] = q.count || 1;
+      }
+      return next;
+    }),
+  };
 }
 
 export function soccerPromoEmptyDetail({ soccerSelected, soccerMlLegCount } = {}) {

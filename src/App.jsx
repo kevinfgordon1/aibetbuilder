@@ -22,7 +22,9 @@ import {
   soccerMlOppResolveArgs,
   soccerLayBookLabel,
   soccerPromoEmptyDetail,
+  SOCCER_PM_NO_BOOK_KEYS,
 } from "./soccerPairing.js";
+import { fetchSoccerPmNos, overlaySoccerPmNos } from "./soccerPmNo.js";
 import {
   sportChipOptions,
   sportChipSelected,
@@ -1139,7 +1141,7 @@ function OddsBoard({ oddsData, futuresData }) {
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerChipId(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = same-binary No (PM or exchange lay)" : " for that side"}</div>
+      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerChipId(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = same-binary No (Kalshi / Poly / Novig / ProphetX; exchange lay last resort)" : " for that side"}</div>
     </div>
   );
 }
@@ -1669,6 +1671,9 @@ export default function App() {
   const promoFetchGen = useRef(0);
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
+  const soccerPmNoGen = useRef(0);
+  const [soccerPmNoByGame, setSoccerPmNoByGame] = useState(null);
+  const [soccerPmNoStatus, setSoccerPmNoStatus] = useState("idle");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1933,6 +1938,45 @@ export default function App() {
     ]);
   }, [promoBoardData, oddsSource, matchingBookKeys]);
 
+  const soccerOnBoard = useMemo(
+    () => (promoOddsData.moneylines || []).some((g) => isSoccerSport(g.sport)),
+    [promoOddsData],
+  );
+
+  useEffect(() => {
+    const games = (promoOddsData.moneylines || []).filter((g) => isSoccerSport(g.sport));
+    if (!games.length) {
+      setSoccerPmNoByGame(null);
+      setSoccerPmNoStatus("idle");
+      return;
+    }
+    const venues = [...SOCCER_PM_NO_BOOK_KEYS].filter((k) => matchingBookKeys.has(k));
+    if (!venues.length) {
+      setSoccerPmNoByGame(null);
+      setSoccerPmNoStatus("done");
+      return;
+    }
+    const gen = ++soccerPmNoGen.current;
+    setSoccerPmNoStatus("loading");
+    fetchSoccerPmNos(games, { venues })
+      .then((quotes) => {
+        if (gen !== soccerPmNoGen.current) return;
+        setSoccerPmNoByGame(quotes);
+        setSoccerPmNoStatus("done");
+      })
+      .catch(() => {
+        if (gen !== soccerPmNoGen.current) return;
+        setSoccerPmNoByGame(null);
+        setSoccerPmNoStatus("error");
+      });
+  }, [promoOddsData, matchingBookKeys]);
+
+  const soccerPmReady = !soccerOnBoard || soccerPmNoStatus === "done" || soccerPmNoStatus === "error";
+  const promoOddsForPromo = useMemo(
+    () => overlaySoccerPmNos(promoOddsData, soccerPmNoByGame),
+    [promoOddsData, soccerPmNoByGame],
+  );
+
   const liveEvScan = useMemo(() => {
     if (!fullBoardLoaded) return null;
     if (!shouldRunEvScan(loadModeForTab(activeTab))) return null;
@@ -2017,11 +2061,12 @@ export default function App() {
   // 1-leg: leave the pool; rankPromoPicks drops incomplete-hedge picks after blend.
   const dropThinPoolLegs = hideLowLiquidity && Number(numLegs) >= 2;
   const promoLegs = useMemo(() => {
-    const promoLegsAll = buildAllLegsForBook(promoOddsData, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
+    if (soccerOnBoard && !soccerPmReady) return [];
+    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
     const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     return filterLowLiquidityLegs(promoLegsKept, dropThinPoolLegs, { promoType, numLegs });
-  }, [promoOddsData, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs]);
+  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, soccerOnBoard, soccerPmReady]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -2054,8 +2099,8 @@ export default function App() {
       setPromoScanBusy(false);
       return;
     }
-    if (!promoLoaded) {
-      setPromoScanBusy(false);
+    if (!promoLoaded || !soccerPmReady) {
+      setPromoScanBusy(!!promoLoaded && !soccerPmReady);
       return;
     }
     const gen = ++promoScanGen.current;
@@ -2097,7 +2142,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, soccerPmReady, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2140,23 +2185,24 @@ export default function App() {
     );
   }, [topFreeBets, numLegs, stake, hideLowLiquidity]);
 
+  const promoBusyForEmpty = promoLoading || (soccerOnBoard && !soccerPmReady);
   const boostEmptyState = promoScanEmptyState({
     promoLoaded,
-    promoLoading,
+    promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
     resultCount: topParlaysWithHedge.length,
   });
   const noSweatEmptyState = promoScanEmptyState({
     promoLoaded,
-    promoLoading,
+    promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
     resultCount: topNoSweatsWithLock.length,
   });
   const freeBetEmptyState = promoScanEmptyState({
     promoLoaded,
-    promoLoading,
+    promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
     resultCount: topFreeBetsWithLock.length,
