@@ -91,6 +91,7 @@ function fullPlan() {
   assert.equal(plan.futures, false);
   assert.deepEqual(plan.futuresKeys, []);
   assert.equal(plan.computeEv, false);
+  assert.equal(plan.includeEventOdds, true);
   assert.equal(shouldRunEvScan(plan.mode), false);
   assert.equal(plan.eventSince, new Date(NOW.getTime() - EVENT_ODDS_LOOKBACK_MS).toISOString());
 

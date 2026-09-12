@@ -169,8 +169,11 @@ export function describeOddsLoadError(err) {
   return `Could not load live odds: ${msg}`;
 }
 
+function emptyCacheResult() {
+  return { data: [], error: null, timedOut: false };
+}
+
 export async function queryOddsCaches(client, plan, { timeoutMs = ODDS_QUERY_TIMEOUT_MS } = {}) {
-  const empty = { data: [], error: null, timedOut: false };
   const jobs = [
     runCacheQuery(
       () => client.from("odds_cache").select("*").in("sport", plan.featuredSports),
@@ -195,13 +198,10 @@ export async function queryOddsCaches(client, plan, { timeoutMs = ODDS_QUERY_TIM
     ));
   }
   const results = await Promise.all(jobs);
-  const featuredRes = results[0];
-  const eventRes = skipEvents ? empty : results[1];
-  const futuresRes = plan.futures ? results[skipEvents ? 1 : 2] : empty;
   return {
-    featured: featuredRes,
-    events: eventRes,
-    futures: futuresRes,
+    featured: results[0],
+    events: skipEvents ? emptyCacheResult() : results[1],
+    futures: plan.futures ? results[skipEvents ? 1 : 2] : emptyCacheResult(),
   };
 }
 
