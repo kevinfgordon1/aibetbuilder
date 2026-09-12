@@ -4,6 +4,7 @@
 
 import { serializeAppHash } from "./comboAccess.js";
 import { DEFAULT_PROFILE_BOOK } from "./userProfile.js";
+import { formatPromoLegTitle } from "./soccerPairing.js";
 
 const PROMO_TYPES = new Set(["boost", "nosweat", "freebet"]);
 
@@ -198,7 +199,7 @@ export function formatShareLeg(leg) {
     const name = leg.trim();
     return name ? { name, market: "", game: "", odds: "" } : null;
   }
-  const name = String(leg.name || leg.label || "").trim();
+  const name = formatPromoLegTitle(leg) || String(leg.name || leg.label || "").trim();
   const market = formatShareMarket(leg.market);
   const game = String(leg.game || "").trim();
   const odds = formatShareAmerican(leg.odds != null ? leg.odds : leg.dk);

@@ -14,6 +14,9 @@ import {
   soccerYesName,
   soccerNoName,
   soccerLayOutcomeName,
+  formatSoccerThreeWayMlTitle,
+  formatPromoLegTitle,
+  formatPromoLegMarket,
   outcomeMatchesName,
   preferSoccerBinaryNo,
   soccerMlOppResolveArgs,
@@ -62,6 +65,46 @@ assert.equal(isDrawOutcomeName("Arsenal"), false);
   assert.equal(outcomeMatchesName("Draw", "Tie"), true);
   assert.equal(outcomeMatchesName("Arsenal", "Arsenal"), true);
   assert.equal(outcomeMatchesName("Chelsea", "Arsenal"), false);
+}
+
+{
+  assert.equal(formatSoccerThreeWayMlTitle("Manchester City ML"), "Manchester City ML - 3 way market");
+  assert.equal(formatSoccerThreeWayMlTitle("Draw"), "Draw ML - 3 way market");
+  assert.equal(formatSoccerThreeWayMlTitle("Tie"), "Draw ML - 3 way market");
+  assert.equal(formatSoccerThreeWayMlTitle("Draw ML"), "Draw ML - 3 way market");
+  assert.equal(formatSoccerThreeWayMlTitle("Chelsea ML - 3 way market"), "Chelsea ML - 3 way market");
+  assert.equal(
+    formatPromoLegTitle({ name: "Manchester City ML", market: "ML", sport: "soccer_epl" }),
+    "Manchester City ML - 3 way market",
+  );
+  assert.equal(
+    formatPromoLegTitle({ name: "Inter Miami CF ML", market: "ML", sport: "soccer_usa_mls" }),
+    "Inter Miami CF ML - 3 way market",
+  );
+  assert.equal(
+    formatPromoLegTitle({ name: "Draw", market: "ML", sport: "soccer_epl" }),
+    "Draw ML - 3 way market",
+  );
+  assert.equal(
+    formatPromoLegTitle({ name: "Yankees ML", market: "ML", sport: "baseball_mlb" }),
+    "Yankees ML",
+  );
+  assert.equal(
+    formatPromoLegTitle({ name: "Chiefs ML", market: "ML", sport: "americanfootball_nfl" }),
+    "Chiefs ML",
+  );
+  assert.equal(
+    formatPromoLegTitle({ name: "Man City / Palace o2.5", market: "TOT", sport: "soccer_epl" }),
+    "Man City / Palace o2.5",
+  );
+  assert.equal(
+    formatPromoLegMarket({ name: "Manchester City ML", market: "ML", sport: "soccer_epl" }),
+    "",
+  );
+  assert.equal(
+    formatPromoLegMarket({ name: "Yankees ML", market: "ML", sport: "baseball_mlb" }),
+    "ML",
+  );
 }
 
 // Soft Home Yes ↔ PM Home No. Away Yes must not win even if it is a better price.

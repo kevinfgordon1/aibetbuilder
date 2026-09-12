@@ -46,6 +46,42 @@ export function soccerNoName(side, away, home) {
   return `${soccerSideTeam(side, away, home)} ML No`;
 }
 
+// Promo / share display only. Canonical soccerYesName stays "{Team} ML" / "Draw"
+// so identity, pairing, and Combo mapping do not change.
+export const SOCCER_THREE_WAY_ML_SUFFIX = " - 3 way market";
+
+function isSoccerMoneylineMarket(market) {
+  const m = String(market || "").trim();
+  if (!m) return false;
+  return m === "ML" || /^moneyline$/i.test(m) || /^h2h$/i.test(m);
+}
+
+export function formatSoccerThreeWayMlTitle(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return raw;
+  if (/\s-\s3 way market$/i.test(raw)) return raw;
+  if (isDrawOutcomeName(raw) || /^draw(\s+ml)?$/i.test(raw) || /^tie(\s+ml)?$/i.test(raw)) {
+    return `Draw ML${SOCCER_THREE_WAY_ML_SUFFIX}`;
+  }
+  return `${raw}${SOCCER_THREE_WAY_ML_SUFFIX}`;
+}
+
+export function formatPromoLegTitle(leg) {
+  if (leg == null) return "";
+  if (typeof leg === "string") return leg.trim();
+  const name = String(leg.name || leg.label || "").trim();
+  if (!name) return "";
+  if (!isSoccerSport(leg.sport) || !isSoccerMoneylineMarket(leg.market)) return name;
+  return formatSoccerThreeWayMlTitle(name);
+}
+
+export function formatPromoLegMarket(leg) {
+  const market = String(leg?.market || "").trim();
+  if (!market) return "";
+  if (isSoccerSport(leg?.sport) && isSoccerMoneylineMarket(market)) return "";
+  return market;
+}
+
 // Odds API h2h_lay uses the same outcome name as h2h Yes (team or Draw).
 export function soccerLayOutcomeName(side, away, home) {
   return soccerSideTeam(side, away, home);
