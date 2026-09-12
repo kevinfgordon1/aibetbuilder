@@ -71,13 +71,13 @@ function BookMark({ book, extra = 0, title, size = 13 }) {
   );
 }
 
-function LiquidityCue({ size }) {
+function LiquidityCue({ size, inline = false }) {
   const label = fmtBoardSize(size);
   if (!label) return null;
   return (
-    <div data-liq={label} style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, marginTop: 1, lineHeight: 1.15 }}>
+    <span data-liq={label} style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, lineHeight: 1.15, display: inline ? "inline" : "block" }}>
       {label}
-    </div>
+    </span>
   );
 }
 
@@ -88,12 +88,16 @@ function OddsSide({
   noPrice,
   noSize,
   books,
+  noBooks,
   allBooks,
   showBestMark,
 }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(allBooks, primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(allBooks, k)?.label);
+  const noPrimary = noBooks?.[0];
+  const noBook = noPrimary ? bookByKey(allBooks, noPrimary.key) : null;
+  const noTitle = bestBooksTitle(noBooks, (k) => bookByKey(allBooks, k)?.label);
   return (
     <>
       {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
@@ -102,15 +106,16 @@ function OddsSide({
         {showBestMark && price != null && book && (
           <BookMark book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
+        <LiquidityCue size={size} inline />
       </div>
-      <LiquidityCue size={size} />
       {noPrice != null && (
-        <>
-          <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
-            NO {formatAmericanOdds(noPrice)}
-          </div>
-          <LiquidityCue size={noSize} />
-        </>
+        <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "nowrap" }}>
+          <span>NO {formatAmericanOdds(noPrice)}</span>
+          {showBestMark && noBook && (
+            <BookMark book={noBook} extra={Math.max(0, (noBooks?.length || 0) - 1)} title={noTitle} size={11} />
+          )}
+          <LiquidityCue size={noSize} inline />
+        </div>
       )}
     </>
   );
@@ -324,6 +329,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                                   noPrice={showNo ? cell.topNo : null}
                                   noSize={showNo ? cell.topNoSize : null}
                                   books={cell.topBooks}
+                                  noBooks={cell.topNoBooks}
                                   allBooks={allBooks}
                                   showBestMark={isBestCol}
                                 />
@@ -336,6 +342,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                                     noPrice={showNo ? cell.midNo : null}
                                     noSize={showNo ? cell.midNoSize : null}
                                     books={cell.midBooks}
+                                    noBooks={cell.midNoBooks}
                                     allBooks={allBooks}
                                     showBestMark={isBestCol}
                                   />
@@ -349,6 +356,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                                   noPrice={showNo ? cell.botNo : null}
                                   noSize={showNo ? cell.botNoSize : null}
                                   books={cell.botBooks}
+                                  noBooks={cell.botNoBooks}
                                   allBooks={allBooks}
                                   showBestMark={isBestCol}
                                 />
