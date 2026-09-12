@@ -184,6 +184,24 @@ assert.equal(sprLeg.game, "Wisconsin Badgers @ Notre Dame Fighting Irish");
 assert.equal(sprLeg.odds, "-110");
 assert.doesNotMatch(sprLeg.name + sprLeg.market + sprLeg.game, /— SPR ·/);
 
+const soccerMlShare = formatShareLeg({
+  name: "Manchester City ML",
+  market: "ML",
+  sport: "soccer_epl",
+  game: "Crystal Palace @ Manchester City",
+  dk: 115,
+});
+assert.equal(soccerMlShare.name, "Manchester City ML - 3 way market");
+assert.equal(soccerMlShare.market, "Moneyline");
+assert.equal(
+  formatShareLeg({ name: "Yankees ML", market: "ML", sport: "baseball_mlb", dk: -120 }).name,
+  "Yankees ML",
+);
+assert.equal(
+  formatShareLeg({ name: "Draw", market: "ML", sport: "soccer_usa_mls", dk: 240 }).name,
+  "Draw ML - 3 way market",
+);
+
 const model = buildShareCardModel({
   kind: "promo",
   badge: "BEST PICK",
