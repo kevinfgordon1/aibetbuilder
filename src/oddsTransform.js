@@ -130,11 +130,15 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         ml_draw_no_size: getOdds(b.key, "h2h_lay", "Draw", "size"),
         spr_away: getOdds(b.key, "spreads", away),
         spr_away_line: getOdds(b.key, "spreads", away, "point"),
+        spr_away_size: getOdds(b.key, "spreads", away, "size"),
         spr_home: getOdds(b.key, "spreads", home),
         spr_home_line: getOdds(b.key, "spreads", home, "point"),
+        spr_home_size: getOdds(b.key, "spreads", home, "size"),
         tot_line: getOdds(b.key, "totals", "Over", "point"),
         tot_over: getOdds(b.key, "totals", "Over"),
+        tot_over_size: getOdds(b.key, "totals", "Over", "size"),
         tot_under: getOdds(b.key, "totals", "Under"),
+        tot_under_size: getOdds(b.key, "totals", "Under", "size"),
       };
     });
 

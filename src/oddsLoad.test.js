@@ -368,7 +368,9 @@ function fullPlan() {
   assert.match(app, /\[promoSports, setPromoSports\] = useState\(new Set\(DEFAULT_PROMO_SPORT_KEYS\)\)/);
   assert.match(app, /\[evDateRange, setEvDateRange\] = useState\(DEFAULT_EV_DATE_RANGE\)/);
   assert.doesNotMatch(app, /\[evDateRange, setEvDateRange\] = useState\("any"\)/);
-  assert.match(app, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
+  const board = fs.readFileSync(path.join(dir, "OddsBoard.jsx"), "utf8");
+  assert.match(board, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
+  assert.match(app, /import OddsBoard from "\.\/OddsBoard\.jsx"/);
 }
 
 function hangThen() {
