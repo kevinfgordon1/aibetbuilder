@@ -263,9 +263,10 @@ function fullPlan() {
   assert.deepEqual(listed, [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-    "pinnacle", "kalshi", "novig", "prophetx", "polymarket",
+    "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
   ]);
   assert.equal(TRUSTED_BOOK_KEYS.has("pinnacle"), true);
+  assert.equal(TRUSTED_BOOK_KEYS.has("betus"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("betanysports"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betopenly"), false);
   assert.match(ev, /this EV-scanner copy always uses the full TRUSTED_BOOK_KEYS set/);
