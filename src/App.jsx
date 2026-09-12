@@ -129,7 +129,7 @@ const ALL_BOOKS = [
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
   "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-  "pinnacle", "kalshi", "novig", "prophetx", "polymarket",
+  "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
 ]);
 
 const ADJUSTED_BOOK_NOTES = {
