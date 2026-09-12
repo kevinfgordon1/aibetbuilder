@@ -32,8 +32,6 @@ import {
   sportChipSelected,
   toggleSportChip,
   formatSelectedSportsSummary,
-  boardSportMatches,
-  isSoccerChipId,
   soccerKeysSelected,
 } from "./sportChips.js";
 import {
@@ -75,6 +73,7 @@ import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
+import OddsBoard from "./OddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import {
   applyPmBlendToLeg,
@@ -413,13 +412,6 @@ function formatET(commence_time) {
   }) + ' ET';
 }
 
-function formatDateGroup(commence_time) {
-  return new Date(commence_time).toLocaleDateString('en-US', {
-    timeZone: 'America/New_York',
-    weekday: 'long', month: 'long', day: 'numeric',
-  });
-}
-
 function trueProb(bestOpponentOdds) {
   if (!bestOpponentOdds) return 0.5;
   if (bestOpponentOdds < 0) return Math.abs(bestOpponentOdds) / (Math.abs(bestOpponentOdds) + 100);
@@ -442,14 +434,6 @@ function dkDecimal(odds) {
 
 function formatOdds(odds) {
   return formatAmericanOdds(odds);
-}
-
-// Compact dollar formatter for exchange top-of-book size ($595, $2.0k, $1.2M).
-function fmtSize(v) {
-  if (v == null || !isFinite(v)) return null;
-  if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
-  if (v >= 1000) return `$${(v / 1000).toFixed(1)}k`;
-  return `$${Math.round(v)}`;
 }
 
 // Whole days between now and a game's start (floored). Used to flag far-off promo bets.
@@ -874,278 +858,6 @@ function transformFuturesData(dataArray, futuresKey) {
     });
   });
   return { key: futuresKey, teams: Object.values(teams) };
-}
-
-function OddsBoard({ oddsData, futuresData }) {
-  const [market, setMarket] = useState("ml");
-  const [search, setSearch] = useState("");
-  const [selectedBooks, setSelectedBooks] = useState(new Set(ALL_BOOKS.map(b => b.key)));
-  const [boardSport, setBoardSport] = useState("baseball_mlb");
-  const now = new Date();
-
-  const games = (oddsData.moneylines || []).filter(g =>
-    boardSportMatches(g.sport, boardSport) && new Date(g.commence_time) > now
-  );
-
-  const filteredGames = games.filter(g => {
-    const q = search.toLowerCase();
-    return g.away.toLowerCase().includes(q) || g.home.toLowerCase().includes(q);
-  });
-
-  const grouped = {};
-  filteredGames.forEach(g => {
-    const dateKey = formatDateGroup(g.commence_time);
-    if (!grouped[dateKey]) grouped[dateKey] = [];
-    grouped[dateKey].push(g);
-  });
-
-  const toggleBook = (bookKey) => {
-    setSelectedBooks(prev => {
-      const next = new Set(prev);
-      if (next.has(bookKey)) { if (next.size === 1) return prev; next.delete(bookKey); }
-      else next.add(bookKey);
-      return next;
-    });
-  };
-
-  const getCell = (game, bookKey) => {
-    const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
-    if (bookKey === "best") {
-      const vals = ALL_BOOKS.filter(b => selectedBooks.has(b.key));
-      if (market === "ml") {
-        const bestAway = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_away).filter(v => v != null));
-        const bestHome = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_home).filter(v => v != null));
-        const bestDraw = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_draw).filter(v => v != null));
-        const bestAwayNo = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_away_no).filter(v => v != null));
-        const bestHomeNo = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_home_no).filter(v => v != null));
-        const bestDrawNo = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.ml_draw_no).filter(v => v != null));
-        return {
-          top: isFinite(bestAway) ? bestAway : null,
-          mid: threeWay && isFinite(bestDraw) ? bestDraw : null,
-          bot: isFinite(bestHome) ? bestHome : null,
-          topNo: threeWay && isFinite(bestAwayNo) ? bestAwayNo : null,
-          midNo: threeWay && isFinite(bestDrawNo) ? bestDrawNo : null,
-          botNo: threeWay && isFinite(bestHomeNo) ? bestHomeNo : null,
-          topLine: null, botLine: null, threeWay,
-        };
-      }
-      if (market === "spr") {
-        const bestAway = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.spr_away).filter(v => v != null));
-        const bestHome = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.spr_home).filter(v => v != null));
-        const dkb = game.bookOdds?.draftkings;
-        return { top: isFinite(bestAway) ? bestAway : null, bot: isFinite(bestHome) ? bestHome : null, topLine: dkb?.spr_away_line != null ? (dkb.spr_away_line > 0 ? `+${dkb.spr_away_line}` : `${dkb.spr_away_line}`) : null, botLine: dkb?.spr_home_line != null ? (dkb.spr_home_line > 0 ? `+${dkb.spr_home_line}` : `${dkb.spr_home_line}`) : null };
-      }
-      if (market === "tot") {
-        const bestOver = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.tot_over).filter(v => v != null));
-        const bestUnder = Math.max(...vals.map(b => game.bookOdds?.[b.key]?.tot_under).filter(v => v != null));
-        const dkb = game.bookOdds?.draftkings;
-        return { top: isFinite(bestOver) ? bestOver : null, bot: isFinite(bestUnder) ? bestUnder : null, topLine: dkb?.tot_line ? `o${dkb.tot_line}` : null, botLine: dkb?.tot_line ? `u${dkb.tot_line}` : null };
-      }
-    }
-    const b = game.bookOdds?.[bookKey];
-    if (!b) return { top: null, bot: null, mid: null, topLine: null, botLine: null, threeWay };
-    if (market === "ml") {
-      return {
-        top: b.ml_away, mid: threeWay ? b.ml_draw : null, bot: b.ml_home,
-        topNo: threeWay ? b.ml_away_no : null, midNo: threeWay ? b.ml_draw_no : null, botNo: threeWay ? b.ml_home_no : null,
-        topLine: null, botLine: null, threeWay,
-      };
-    }
-    if (market === "spr") return { top: b.spr_away, bot: b.spr_home, topLine: b.spr_away_line != null ? (b.spr_away_line > 0 ? `+${b.spr_away_line}` : `${b.spr_away_line}`) : null, botLine: b.spr_home_line != null ? (b.spr_home_line > 0 ? `+${b.spr_home_line}` : `${b.spr_home_line}`) : null };
-    if (market === "tot") return { top: b.tot_over, bot: b.tot_under, topLine: b.tot_line ? `o${b.tot_line}` : null, botLine: b.tot_line ? `u${b.tot_line}` : null };
-    return { top: null, bot: null, topLine: null, botLine: null };
-  };
-
-  const getBestForGame = (game) => {
-    let bestAway = null, bestHome = null, bestDraw = null;
-    ALL_BOOKS.forEach(b => {
-      if (!selectedBooks.has(b.key)) return;
-      const cell = getCell(game, b.key);
-      if (cell.top !== null && (bestAway === null || cell.top > bestAway)) bestAway = cell.top;
-      if (cell.mid != null && (bestDraw === null || cell.mid > bestDraw)) bestDraw = cell.mid;
-      if (cell.bot !== null && (bestHome === null || cell.bot > bestHome)) bestHome = cell.bot;
-    });
-    return { bestAway, bestHome, bestDraw };
-  };
-
-  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
-  const teamColWidth = 170;
-  const oddsColWidth = 88;
-
-  // Championship (futures) view — one price per team, best across selected books.
-  const champMeta = FUTURES.find(f => boardSportMatches(f.sport, boardSport));
-  const champEntry = (futuresData || []).find(f => f.key === champMeta?.key);
-  const champBooks = [{ key: "best", label: "Best Odds" }, ...ALL_BOOKS.filter(b => selectedBooks.has(b.key))];
-  const champBestOf = (priceMap) => {
-    let best = null, bestBook = null;
-    ALL_BOOKS.forEach(b => {
-      if (!selectedBooks.has(b.key)) return;
-      const p = priceMap?.[b.key];
-      if (p != null && (best === null || p > best)) { best = p; bestBook = b.key; }
-    });
-    return { best, bestBook };
-  };
-  const champTeams = (champEntry?.teams || [])
-    .filter(t => t.name.toLowerCase().includes(search.toLowerCase()))
-    .map(t => {
-      const yes = champBestOf(t.books);
-      const no = champBestOf(t.noBooks);
-      return { ...t, best: yes.best, bestBook: yes.bestBook, noBest: no.best, noBestBook: no.bestBook, hasNo: no.best !== null };
-    })
-    .filter(t => t.best !== null || t.hasNo)
-    .sort((a, b) => impliedProb(b.best) - impliedProb(a.best));
-
-  // Render one odds row (Yes or No lay side) for a championship team.
-  const champRow = (key, name, isNo, priceMap, rowBest, hideNameBorder, sizeMap) => (
-    <tr key={key} style={{ background: isNo ? "rgba(239,68,68,0.05)" : "transparent" }}>
-      <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: isNo ? "#0f0a0b" : "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", borderBottom: hideNameBorder ? "none" : "1px solid rgba(255,255,255,0.03)", fontSize: 13, fontWeight: 600, color: isNo ? "#9ca3af" : "#e8eaed" }}>
-        {name}{isNo && <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 8, fontSize: 11 }}>NO</span>}
-      </td>
-      {champBooks.map(b => {
-        const price = b.key === "best" ? rowBest : priceMap?.[b.key];
-        const size = b.key === "best" ? null : sizeMap?.[b.key];
-        const isBestCol = b.key === "best";
-        const isBestCell = b.key !== "best" && price != null && price === rowBest;
-        return (
-          <td key={b.key} style={{ padding: "10px 6px", textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, borderBottom: "1px solid rgba(255,255,255,0.03)", color: price == null ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed", background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-            {price == null ? "—" : formatOdds(price)}
-            {size != null && <div style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, marginTop: 1 }}>{fmtSize(size)}</div>}
-          </td>
-        );
-      })}
-    </tr>
-  );
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {SPORT_CHIPS.map(s => (
-          <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.id ? "#fff" : "#6b7280" }}>
-            {s.label}
-          </button>
-        ))}
-      </div>
-      <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {["ml", "spr", "tot", "champ"].map(m => (
-          <button key={m} onClick={() => setMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
-            {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : m === "tot" ? "Totals" : "Championship"}
-          </button>
-        ))}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
-        {ALL_BOOKS.map(b => (
-          <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
-            {b.label}
-          </button>
-        ))}
-      </div>
-      {market === "champ" && (
-      <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + champBooks.length * oddsColWidth }}>
-          <thead>
-            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>{champMeta?.label || "Champion"}</th>
-              {champBooks.map(b => (
-                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>{b.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {champTeams.length === 0 && (
-              <tr><td colSpan={champBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>No championship odds posted yet{search ? ` for "${search}"` : ""}.</td></tr>
-            )}
-            {champTeams.flatMap((t, ti) => {
-              const rows = [];
-              if (t.best !== null) rows.push(champRow(`${ti}-yes`, t.name, false, t.books, t.best, t.hasNo, t.bookSizes));
-              if (t.hasNo) rows.push(champRow(`${ti}-no`, t.name, true, t.noBooks, t.noBest, false, t.noBookSizes));
-              return rows;
-            })}
-          </tbody>
-        </table>
-      </div>
-      )}
-      {market !== "champ" && (
-      <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
-          <thead>
-            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
-              {visibleBooks.map(b => (
-                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                  {b.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {Object.keys(grouped).length === 0 && (
-              <tr><td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>No games found{search ? ` for "${search}"` : ""}</td></tr>
-            )}
-            {Object.entries(grouped).map(([dateKey, dateGames]) => (
-              <>
-                <tr key={dateKey + "_h"} style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
-                </tr>
-                {dateGames.map((game, gi) => {
-                  const { bestAway, bestHome, bestDraw } = getBestForGame(game);
-                  const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
-                  const mlPrice = (yes, no) => (
-                    <>
-                      {formatOdds(yes)}
-                      {no != null && (
-                        <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginTop: 2 }}>NO {formatOdds(no)}</div>
-                      )}
-                    </>
-                  );
-                  return (
-                    <tr key={gi} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
-                        <div style={{ padding: "8px 16px 4px" }}>
-                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>{new Date(game.commence_time).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true })} ET</div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 6 }}>{game.away}</div>
-                          {threeWay && market === "ml" && <div style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginBottom: 6 }}>Draw</div>}
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{game.home}</div>
-                        </div>
-                      </td>
-                      {visibleBooks.map(b => {
-                        const cell = getCell(game, b.key);
-                        const isBestAway = b.key !== "best" && cell.top !== null && cell.top === bestAway;
-                        const isBestDraw = b.key !== "best" && cell.mid != null && cell.mid === bestDraw;
-                        const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
-                        const isBestCol = b.key === "best";
-                        const showNo = market === "ml" && cell.threeWay;
-                        return (
-                          <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                            <div style={{ display: "flex", flexDirection: "column" }}>
-                              <div style={{ padding: "8px 6px", borderBottom: "1px solid rgba(255,255,255,0.03)", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: cell.top === null ? "#2d3748" : (isBestCol || isBestAway) ? "#10b981" : "#e8eaed", background: isBestAway ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent" }}>
-                                {cell.topLine && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{cell.topLine}</div>}
-                                {showNo ? mlPrice(cell.top, cell.topNo) : formatOdds(cell.top)}
-                              </div>
-                              {threeWay && market === "ml" && (
-                                <div style={{ padding: "8px 6px", borderBottom: "1px solid rgba(255,255,255,0.03)", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: cell.mid == null ? "#2d3748" : (isBestCol || isBestDraw) ? "#10b981" : "#e8eaed", background: isBestDraw ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent" }}>
-                                  {mlPrice(cell.mid, cell.midNo)}
-                                </div>
-                              )}
-                              <div style={{ padding: "8px 6px", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: cell.bot === null ? "#2d3748" : (isBestCol || isBestHome) ? "#10b981" : "#e8eaed", background: isBestHome ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent" }}>
-                                {cell.botLine && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{cell.botLine}</div>}
-                                {showNo ? mlPrice(cell.bot, cell.botNo) : formatOdds(cell.bot)}
-                              </div>
-                            </div>
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>✅ Green = best available odds across selected books{market === "champ" ? " · top row = price to win the title (Yes); red NO row = exchange lay/\"won't win\" side; small $ under Kalshi/Polymarket = amount available at that price" : isSoccerChipId(boardSport) && market === "ml" ? " · soccer is 3-way (home / draw / away); red NO = same-binary No (Kalshi / Poly / Novig / ProphetX; exchange lay last resort)" : " for that side"}</div>
-    </div>
-  );
 }
 
 // Full signed-out landing page. Shown when a logged-out visitor tries to interact
@@ -2448,7 +2160,7 @@ export default function App() {
       {!showFullPageSpinner && !showOddsLoadError && (
         <div style={{ padding: "20px 32px" }}>
 
-          {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} />}
+          {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
           {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} />}
 
