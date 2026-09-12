@@ -127,15 +127,31 @@ function fullPlan() {
   assert.ok(!plan.featuredSports.includes("basketball_nba"));
 }
 
-// ── Full board plan matches today's all-sports + futures + EV
+// ── Full board plan: featured + futures + EV, no event_odds_cache (weekend band-aid)
 {
   const plan = fullPlan();
   assert.deepEqual(plan.featuredSports, SPORT_KEYS);
+  assert.deepEqual(plan.eventSports, []);
+  assert.equal(plan.includeEventOdds, false);
   assert.equal(plan.eventSince, null);
   assert.equal(plan.futures, true);
   assert.deepEqual(plan.futuresKeys, FUTURES_KEYS);
   assert.equal(plan.computeEv, true);
   assert.equal(shouldRunEvScan(plan.mode), true);
+}
+
+// ── Full board can opt back into unbounded event_odds_cache
+{
+  const plan = buildOddsQueryPlan({
+    mode: "full",
+    now: NOW,
+    featuredSportKeys: SPORT_KEYS,
+    futuresKeys: FUTURES_KEYS,
+    includeEventOdds: true,
+  });
+  assert.deepEqual(plan.eventSports, SPORT_KEYS);
+  assert.equal(plan.includeEventOdds, true);
+  assert.equal(plan.eventSince, null);
 }
 
 // ── queryOddsCaches: promo does not query FUTURES_KEYS
@@ -161,12 +177,32 @@ function fullPlan() {
   assert.deepEqual(client.calls[1].in.vals, sports);
 }
 
-// ── queryOddsCaches: full board includes futures, no commence_time floor
+// ── queryOddsCaches: full board skips event_odds_cache, still loads futures
 {
   const client = createMockClient();
   await queryOddsCaches(client, fullPlan());
-  assert.equal(client.calls.length, 3);
+  assert.equal(client.calls.length, 2);
+  assert.equal(client.calls[0].table, "odds_cache");
   assert.deepEqual(client.calls[0].in.vals, SPORT_KEYS);
+  assert.equal(client.calls[1].table, "odds_cache");
+  assert.deepEqual(client.calls[1].in, { col: "sport", vals: FUTURES_KEYS });
+  assert.ok(!client.calls.some((c) => c.table === "event_odds_cache"));
+}
+
+// ── queryOddsCaches: includeEventOdds restores the unbounded event pull
+{
+  const client = createMockClient();
+  const plan = buildOddsQueryPlan({
+    mode: "full",
+    now: NOW,
+    featuredSportKeys: SPORT_KEYS,
+    futuresKeys: FUTURES_KEYS,
+    includeEventOdds: true,
+  });
+  await queryOddsCaches(client, plan);
+  assert.equal(client.calls.length, 3);
+  assert.equal(client.calls[1].table, "event_odds_cache");
+  assert.deepEqual(client.calls[1].in.vals, SPORT_KEYS);
   assert.equal(client.calls[1].gte, null);
   assert.deepEqual(client.calls[2].in, { col: "sport", vals: FUTURES_KEYS });
 }
@@ -320,6 +356,8 @@ function fullPlan() {
   assert.match(app, /events\.error \? \[\] : \(events\.data \|\| \[\]\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);
+  assert.match(app, /setAllOddsData\(applyTransformed\(featuredRows, \[\]\)\)/);
+  assert.match(app, /if \(activeTab !== "ev"\) return null;/);
   assert.match(app, /setPromoBoardData/);
   assert.doesNotMatch(app, /in\("sport", SPORT_KEYS\)/);
   assert.doesNotMatch(app, /in\("sport", FUTURES_KEYS\)/);
