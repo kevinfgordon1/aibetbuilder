@@ -3,10 +3,16 @@ import {
   depthCacheKey,
   fetchPromoBookDepth,
   legsNeedingDepth,
+  collectPromoDepthLegs,
   venueHasDepthApi,
   applyBlendToLegs,
   _resetPromoBookDepthCache,
 } from "./promoBookDepth.js";
+import { sortPromoPicksByEv } from "./promoParlayScan.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { calcParlayEV } = require("../lib/promo-ev.js");
 import { formatTrueOddsBookLine, formatTrueOddsWithBlend, formatDepthTrail } from "./trueOddsLine.js";
 
 _resetPromoBookDepthCache();
@@ -29,6 +35,11 @@ const pinLeg = { ...pxLeg, bestOppBook: "pinnacle", bestOppSize: null };
 
 assert.equal(legsNeedingDepth([pxLeg, pinLeg]).length, 1);
 assert.equal(legsNeedingDepth([pinLeg]).length, 0);
+assert.equal(collectPromoDepthLegs([
+  { legs: [pxLeg, pinLeg] },
+  { legs: [pxLeg] },
+]).length, 1, "dedupe shared depth legs across visible cards");
+assert.equal(collectPromoDepthLegs([{ legs: [pinLeg] }]).length, 0);
 
 {
   const top = formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 });
@@ -127,6 +138,57 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   let called = false;
   await fetchPromoBookDepth([pinLeg], { fetchImpl: async () => { called = true; return { ok: true, json: async () => ({ results: [] }) }; } });
   assert.equal(called, false, "sportsbook legs do not hit /api/book-depth");
+}
+
+// Live VWAP on a thin #1 can collapse scan EV below a deeper sibling.
+// Ranking must use the same ladders so Best Pick is not stuck at −EV.
+{
+  const ctx = { promoType: "boost", numLegs: 3, stake: 100, boostPct: 50 };
+  const mk = (name, game, bestOpp, size) => ({
+    dk: -110,
+    bestOpp,
+    bestOppBook: "kalshi",
+    bestOppSize: size,
+    sport: "baseball_mlb",
+    game,
+    name,
+    bestOppName: `${name} opp`,
+    market: "ML",
+  });
+  const thin = {
+    ev: 90,
+    legs: [
+      mk("Thin1", "A @ B", 220, 15),
+      mk("Thin2", "C @ D", 220, 15),
+      mk("Thin3", "E @ F", 220, 15),
+    ],
+  };
+  const deep = {
+    ev: 80,
+    legs: [
+      mk("Deep1", "G @ H", 180, 2000),
+      mk("Deep2", "I @ J", 180, 2000),
+      mk("Deep3", "K @ L", 180, 2000),
+    ],
+  };
+  const crush = [
+    { american: 220, size: 15 },
+    { american: -200, size: 2000 },
+  ];
+  const hold = [{ american: 180, size: 2000 }];
+  const ladders = {};
+  for (const l of thin.legs) ladders[depthCacheKey(l)] = crush;
+  for (const l of deep.legs) ladders[depthCacheKey(l)] = hold;
+  const overlay = (p) => {
+    const { displayLegs } = applyBlendToLegs(p.legs, ladders, ctx);
+    return { ...p, ...calcParlayEV(displayLegs, ctx.boostPct, ctx.stake), legs: displayLegs };
+  };
+  const liveThin = overlay(thin);
+  const liveDeep = overlay(deep);
+  assert.ok(liveThin.ev < liveDeep.ev, "thin #1 live VWAP must fall below the deeper sibling");
+  assert.ok(liveThin.ev < 0, "collapsed thin book should be able to go negative");
+  const ranked = sortPromoPicksByEv([liveThin, liveDeep]);
+  assert.equal(ranked[0].legs[0].name, "Deep1", "Best Pick must follow live EV, not scan order");
 }
 
 console.log("promoBookDepth.test.js ok");

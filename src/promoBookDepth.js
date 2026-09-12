@@ -21,6 +21,22 @@ export function legsNeedingDepth(legs) {
   return (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook));
 }
 
+// Unique depth-API legs across a visible page of ranked picks.
+export function collectPromoDepthLegs(picks) {
+  const wanted = [];
+  const seen = new Set();
+  for (const p of picks || []) {
+    for (const l of p.legs || []) {
+      if (!venueHasDepthApi(l && l.bestOppBook)) continue;
+      const key = depthCacheKey(l);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      wanted.push(l);
+    }
+  }
+  return wanted;
+}
+
 function readCache(key) {
   const hit = cache.get(key);
   if (!hit) return null;
