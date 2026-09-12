@@ -1860,7 +1860,7 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
-      const { featured, events, futures } = await queryOddsCaches(supabase, plan);
+      const { featured, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
         setOddsLoadCause(featured.error || { message: "Could not load live odds." });
@@ -1868,8 +1868,9 @@ export default function App() {
         return;
       }
       const featuredRows = featured.data;
-      const eventRows = events.error ? [] : (events.data || []);
-      setAllOddsData(applyTransformed(featuredRows, eventRows));
+      // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that
+      // payload freezes Chrome. Promo still loads events with a 30-min lookback.
+      setAllOddsData(applyTransformed(featuredRows, []));
       setFuturesData((futures.error ? [] : (futures.data || [])).map(row => transformFuturesData(row.data, row.sport)));
       setFetchedAt(featuredRows[0]?.fetched_at);
       setFullBoardLoaded(true);
@@ -1984,6 +1985,7 @@ export default function App() {
 
   const liveEvScan = useMemo(() => {
     if (!fullBoardLoaded) return null;
+    if (activeTab !== "ev") return null;
     if (!shouldRunEvScan(loadModeForTab(activeTab))) return null;
     return evScanFromLegs(buildAllLegsAllBooks(allOddsData, null, evDateRange), calcEV);
   }, [fullBoardLoaded, allOddsData, evDateRange, activeTab]);

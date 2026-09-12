@@ -1,5 +1,7 @@
 // Promo Builder vs +EV / Odds Board load plans.
-// Promo fetches selected featured sports only (no futures, no 20k-leg EV scan).
+// Promo fetches selected featured sports + a 30-min event_odds_cache lookback.
+// Odds Board / +EV (mode "full") load featured odds_cache main lines + futures
+// only — they skip event_odds_cache so Chrome does not freeze on a 12MB+ transform.
 
 import { isSupabaseDownError, isTimeoutError, describeSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { expandSoccerSportKeys } from "./soccerPairing.js";
@@ -30,16 +32,24 @@ export function buildOddsQueryPlan({
   featuredSportKeys,
   futuresKeys,
   lookbackMs = EVENT_ODDS_LOOKBACK_MS,
+  includeEventOdds,
 } = {}) {
   const isFull = mode === "full";
   const sports = isFull
     ? [...(featuredSportKeys || [])]
     : sportKeysForPromoLoad(promoSports, featuredSportKeys);
+  // Weekend band-aid: Odds Board / +EV skip event_odds_cache (alt lines).
+  // Featured odds_cache main lines are enough to paint; Promo still uses lookback.
+  // Pass includeEventOdds: true to restore the old unbounded full-board event pull.
+  const loadEvents = includeEventOdds ?? !isFull;
   return {
     mode: isFull ? "full" : "promo",
     featuredSports: sports,
-    eventSports: sports,
-    eventSince: isFull ? null : new Date(now.getTime() - lookbackMs).toISOString(),
+    eventSports: loadEvents ? sports : [],
+    eventSince: loadEvents && !isFull
+      ? new Date(now.getTime() - lookbackMs).toISOString()
+      : null,
+    includeEventOdds: loadEvents,
     futures: isFull,
     futuresKeys: isFull ? [...(futuresKeys || [])] : [],
     computeEv: isFull,
@@ -159,32 +169,39 @@ export function describeOddsLoadError(err) {
   return `Could not load live odds: ${msg}`;
 }
 
+function emptyCacheResult() {
+  return { data: [], error: null, timedOut: false };
+}
+
 export async function queryOddsCaches(client, plan, { timeoutMs = ODDS_QUERY_TIMEOUT_MS } = {}) {
   const jobs = [
     runCacheQuery(
       () => client.from("odds_cache").select("*").in("sport", plan.featuredSports),
       { timeoutMs, label: "odds_cache" },
     ),
-    runCacheQuery(
+  ];
+  const skipEvents = !plan.eventSports?.length;
+  if (!skipEvents) {
+    jobs.push(runCacheQuery(
       () => {
         let events = client.from("event_odds_cache").select("*").in("sport", plan.eventSports);
         if (plan.eventSince) events = events.gte("commence_time", plan.eventSince);
         return events;
       },
       { timeoutMs, label: "event_odds_cache" },
-    ),
-  ];
+    ));
+  }
   if (plan.futures) {
     jobs.push(runCacheQuery(
       () => client.from("odds_cache").select("*").in("sport", plan.futuresKeys),
       { timeoutMs, label: "odds_cache futures" },
     ));
   }
-  const [featuredRes, eventRes, futuresRes] = await Promise.all(jobs);
+  const results = await Promise.all(jobs);
   return {
-    featured: featuredRes,
-    events: eventRes,
-    futures: futuresRes || { data: [], error: null, timedOut: false },
+    featured: results[0],
+    events: skipEvents ? emptyCacheResult() : results[1],
+    futures: plan.futures ? results[skipEvents ? 1 : 2] : emptyCacheResult(),
   };
 }
 
