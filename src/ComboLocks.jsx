@@ -12,7 +12,8 @@
 // Risk/profit uses parlay_stake + fill_american + max_contracts.
 // Unfilled outcomes: official Kalshi combo ticker, else Kalshi single-game legs,
 // else ESPN public scoreboard (/api/espn-scores). Never invents scores.
-// Archived cards show outcome + source chips on chrome; one tap opens attempt history.
+// History (archived / games-over) uses the P/L Statement board: filters, metric
+// cards, quiet lock + P/L rows. One tap expands attempt tape under the row.
 // Living cards keep chips + risk profile visible; attempt history starts collapsed (one tap).
 // Blank underlying_result rows re-settle on Combo Locks page load / poll — no SQL backfill.
 // Probe (Add Parlay) opens a real Kalshi RFQ at max_contracts, waits up to ~8s
@@ -26,6 +27,8 @@ import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip } from "./comboLockProfile";
+import { buildComboStatement } from "./comboStatement";
+import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
 import { deskFillCounts } from "./comboTape";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
@@ -975,6 +978,22 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     setForm({ ...DEFAULT_FORM });
   };
 
+  const historyStatement = useMemo(() => buildComboStatement({
+    parlays: archived,
+    fillsById: realFills,
+    fills: comboFills,
+    outcomes,
+    matchesByParlay,
+    submissions,
+    liveSettlement,
+  }), [archived, realFills, comboFills, outcomes, matchesByParlay, submissions, liveSettlement]);
+  const historyView = useStatementView(historyStatement);
+  const archivedById = useMemo(() => {
+    const m = {};
+    (archived || []).forEach((row) => { if (row && row.id) m[row.id] = row; });
+    return m;
+  }, [archived]);
+
   if (!owner) return null;
 
   const deskChrome = comboDeskChrome({ deskLoading, deskReady, kill, deskError, sourceUnhealthy });
@@ -1056,9 +1075,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
         .cl .outcome-pair{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
         .cl .arch-head{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:0}
-        .cl .arch-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
         .cl .arch-caret{color:#93c5fd;font-size:14px;width:12px}
         .cl .arch-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#8a8f98}
+        .cl .hist-detail-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+        .cl .sb td{border-bottom:none}
         .cl .hist-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#6b7280;font:inherit;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;padding:0;margin-bottom:6px;flex-wrap:wrap}
         .cl .hist-head .chip{text-transform:none;letter-spacing:0}
         .cl .hist-head .hist-toggle{margin-left:auto}
@@ -1291,49 +1311,42 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
       <h3>History — games over</h3>
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
-        {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : archivedKind === "empty" ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : archived.map((a) => {
-          const filledN = realFills[a.id] || 0;
-          const out = lockOutcome(a, filledN);
-          const openKey = "arch-" + a.id;
-          const open = !!openParlays[openKey];
-          return (
-            <div className={"parlay" + (open ? " arch-open" : "")} key={a.id} id={"lock-" + a.id}>
-              <button
-                type="button"
-                className="arch-head"
-                onClick={() => toggleOpen(openKey)}
-                aria-expanded={open}
-                title={open ? "Hide attempt history" : "Show attempt history"}
-              >
-                <div className="arch-top">
-                  <span className="arch-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
-                  <span style={{ fontWeight: 700 }}>{a.label}</span>
-                  <OutcomeChip out={out} filled={filledN > 0} />
-                  <AttemptSummary attempts={attemptsByParlay[a.id]} />
-                  <span style={{ flex: 1 }} />
-                  <span className="chip">{open ? "Hide history" : "History"}</span>
-                </div>
-                <div className="arch-meta">
-                  <StakeOddsChip parlay={a} />
-                  <span className="chip fill num">fill {fmtAm(a.fill_american)}</span>
-                  <span>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</span>
-                  <span>cap {a.max_contracts}</span>
-                  <span>archived {a.archived_at ? new Date(a.archived_at).toLocaleString() : "—"}</span>
-                  {a.starts_at ? <span>start {new Date(a.starts_at).toLocaleString()}</span> : null}
-                </div>
-              </button>
-              {open ? (
+        {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : archivedKind === "empty" ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : (
+          <StatementBoard
+            statement={historyStatement}
+            view={historyView}
+            onOpenLock={(id) => toggleOpen("arch-" + id)}
+            isExpanded={(line) => !!openParlays["arch-" + line.id]}
+            actionLabel={(line) => (openParlays["arch-" + line.id] ? "Hide lock" : "Open lock")}
+            rowTitle={(_line, open) => (open ? "Hide lock detail" : "Show lock detail")}
+            onExportCsv={() => downloadStatementCsv(historyView.filtered && historyView.filtered.lines)}
+            filtersAriaLabel="History filters"
+            emptyText={`Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~${HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).`}
+            renderExpanded={(line) => {
+              const a = archivedById[line.id];
+              if (!a) return null;
+              const filledN = realFills[a.id] || 0;
+              const out = lockOutcome(a, filledN);
+              return (
                 <>
+                  <div className="hist-detail-head">
+                    <OutcomeChip out={out} filled={filledN > 0} />
+                    <StakeOddsChip parlay={a} />
+                    <span className="chip fill num">fill {fmtAm(a.fill_american)}</span>
+                    <span className="muted num">{MODE_LABEL[a.hedge_mode] || a.hedge_mode} · cap {a.max_contracts}</span>
+                    <span style={{ flex: 1 }} />
+                    <CopyLockLink lockId={a.id} />
+                  </div>
                   {(a.legs || []).length > 0 && (
-                    <div style={{ marginTop: 8 }}>{(a.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
+                    <div style={{ marginBottom: 8 }}>{(a.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
                   )}
                   <RiskProfile parlay={a} filled={filledN} />
                   <AttemptHistory attempts={attemptsByParlay[a.id]} showSummary={false} />
                 </>
-              ) : null}
-            </div>
-          );
-        })}
+              );
+            }}
+          />
+        )}
       </div>
 
       <h3>Submitted bets — history</h3>
