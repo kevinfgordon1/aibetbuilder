@@ -104,10 +104,9 @@ function timeoutErr(label = "odds_cache") {
   const stale = describeCacheFreshness({ fetchedAt, now: staleNow });
   assert.equal(stale.stale, true);
   assert.equal(stale.warn, true);
-  assert.match(stale.hint, /cache writer/i);
-  assert.match(stale.hint, /stuck/i);
-  assert.doesNotMatch(stale.hint, /\/api\/fetch-odds/);
-  assert.equal(stale.chip, "stale cache");
+  assert.equal(stale.hint, "Odds are out of date. Please refresh to use latest odds.");
+  assert.doesNotMatch(stale.hint, /\/api\/fetch-odds|cache writer|cron|Supabase|PostgREST/i);
+  assert.equal(stale.chip, "out of date");
 
   const failed = describeCacheFreshness({
     fetchedAt,
@@ -118,9 +117,8 @@ function timeoutErr(label = "odds_cache") {
   assert.equal(failed.failed, true);
   assert.equal(failed.warn, true);
   assert.equal(failed.chip, SUPABASE_FLAKY_CHIP);
-  assert.match(failed.hint, /Supabase \/ PostgREST/);
-  assert.match(failed.hint, /not Odds API quota/);
-  assert.match(failed.hint, /re-reads the cache/);
+  assert.equal(failed.hint, "Last refresh failed. Please refresh to use latest odds.");
+  assert.doesNotMatch(failed.hint, /Supabase|PostgREST|Odds API/i);
 }
 
 {
