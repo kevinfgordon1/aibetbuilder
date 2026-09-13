@@ -12,6 +12,8 @@ import {
   formatFillProgress,
   signedMoney,
   moneyAbs,
+  formatAmericanOdds,
+  formatStakeOddsChip,
 } from "./comboLockProfile.js";
 
 // Ari + Jax — Kevin's example: risk $100 for $650 profit, ~$5 either way at 750 @ +610
@@ -123,7 +125,27 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
 }
 
 {
+  assert.equal(formatAmericanOdds(650), "+650");
+  assert.equal(formatAmericanOdds(-110), "-110");
+  assert.equal(formatAmericanOdds(0), null);
+  assert.equal(formatAmericanOdds(null), null);
+  assert.equal(formatStakeOddsChip(ariJax), "stake $100 @ +650");
+  assert.equal(formatStakeOddsChip({ parlay_stake: 50, parlay_american: 2447 }), "stake $50 @ +2447");
+  assert.equal(formatStakeOddsChip({ parlay_stake: 94.76, parlay_american: 434 }), "stake $94.76 @ +434");
+  assert.equal(formatStakeOddsChip({ parlay_stake: 100 }), null);
+  assert.equal(formatStakeOddsChip({ parlay_american: 650 }), null);
+  assert.equal(formatStakeOddsChip({ parlay_stake: 0, parlay_american: 650 }), null);
+  assert.equal(formatStakeOddsChip({ parlay_stake: 100, parlay_american: 0 }), null);
+  assert.equal(formatStakeOddsChip({}), null);
+  assert.equal(formatStakeOddsChip(null), null);
+}
+
+{
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  assert.equal((locksSrc.match(/<StakeOddsChip parlay=\{/g) || []).length, 3);
+  assert.match(locksSrc, /<StakeOddsChip parlay=\{p\} \/>/);
+  assert.match(locksSrc, /<StakeOddsChip parlay=\{a\} \/>/);
+  assert.doesNotMatch(locksSrc, /have \{fmtAm/);
   assert.match(locksSrc, /moneyAbs\(profile\.current\.risk\)/);
   assert.match(locksSrc, /moneyAbs\(profile\.current\.profit\)/);
   assert.match(locksSrc, /<span className="neg">\{moneyAbs\(profile\.current\.risk\)\}<\/span>/);
