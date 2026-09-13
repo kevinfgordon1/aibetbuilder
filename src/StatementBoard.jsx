@@ -27,6 +27,7 @@ export const STATEMENT_BOARD_CSS = `
   .sb .num{font-variant-numeric:tabular-nums}
   .sb .pos{color:#34d399}.sb .neg{color:#f87171}
   .sb .stmt-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+  @media (max-width:720px){.sb .stmt-cards{grid-template-columns:1fr}}
   .sb .stmt-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin:0}
   .sb .stmt-card .k{font-size:13px}
   .sb .stmt-card .v{font-variant-numeric:tabular-nums;font-weight:800;margin-top:4px}

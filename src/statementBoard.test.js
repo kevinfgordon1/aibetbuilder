@@ -30,6 +30,7 @@ assert.match(board, /Hide lock/);
 assert.match(board, /stmt-row/);
 assert.match(board, /stmt-sub/);
 assert.match(board, /stmt-cards/);
+assert.match(board, /@media \(max-width:720px\)\{\.sb \.stmt-cards\{grid-template-columns:1fr\}\}/);
 assert.match(board, /id=\{\"lock-\" \+ line\.id\}/);
 assert.match(board, /setSearchQuery\(searchInput\), 150/);
 
