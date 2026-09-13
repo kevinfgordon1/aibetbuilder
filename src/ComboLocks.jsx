@@ -25,7 +25,7 @@ import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrom
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
-import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs } from "./comboLockProfile";
+import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip } from "./comboLockProfile";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
 import { deskFillCounts } from "./comboTape";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
@@ -126,6 +126,11 @@ function QuoteChip({ quote }) {
   if (!quote) return null;
   const s = QUOTE_CHIP[quote.key] || QUOTE_CHIP.watching;
   return <span className="chip" style={{ background: s.bg, color: s.color }} title={s.title}>{s.mark}{quote.label}</span>;
+}
+function StakeOddsChip({ parlay }) {
+  const text = formatStakeOddsChip(parlay);
+  if (!text) return null;
+  return <span className="chip num" title="Original soft-book stake at the odds you put on — not the RFQ fill.">{text}</span>;
 }
 function outcomeChipClass(chrome) {
   if (!chrome) return "settle-wait";
@@ -1092,7 +1097,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <span style={{ fontWeight: 700 }}>{p.label}</span>
               <QuoteChip quote={(deskByParlay[p.id] || {}).quote} />
               <OutcomeChip out={lockOutcome(p, 0)} />
-              <span className="chip num">have {fmtAm(p.parlay_american)} · ${p.parlay_stake}</span>
+              <StakeOddsChip parlay={p} />
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
               {(() => { const eff = fillView(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
                 return <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
@@ -1130,6 +1135,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
                 <OutcomeChip out={lockOutcome(p, desk && desk.fill.filled)} filled />
                 <QuoteChip quote={desk && desk.quote} />
+                <StakeOddsChip parlay={p} />
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
                 <span style={{ flex: 1 }} />
                 <CopyLockLink lockId={p.id} />
@@ -1308,7 +1314,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                   <span className="chip">{open ? "Hide history" : "History"}</span>
                 </div>
                 <div className="arch-meta">
-                  <span className="chip num">have {fmtAm(a.parlay_american)} · ${a.parlay_stake}</span>
+                  <StakeOddsChip parlay={a} />
                   <span className="chip fill num">fill {fmtAm(a.fill_american)}</span>
                   <span>{MODE_LABEL[a.hedge_mode] || a.hedge_mode}</span>
                   <span>cap {a.max_contracts}</span>

@@ -29,6 +29,22 @@ export function moneyAbs(v) {
   return "$" + abs.toFixed(2);
 }
 
+export function formatAmericanOdds(american) {
+  const n = toNum(american);
+  if (n == null || n === 0) return null;
+  return n > 0 ? "+" + n : "" + n;
+}
+
+// Original soft-book / promo lock stake at the user's odds — not the RFQ fill.
+// Omit rather than show junk when either field is missing.
+export function formatStakeOddsChip(parlay) {
+  if (!parlay) return null;
+  const stake = toNum(parlay.parlay_stake);
+  const american = formatAmericanOdds(parlay.parlay_american);
+  if (!(stake > 0) || !american) return null;
+  return `stake ${moneyAbs(stake)} @ ${american}`;
+}
+
 export function signedMoney(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return "—";
