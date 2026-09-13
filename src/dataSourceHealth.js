@@ -122,16 +122,14 @@ export function describeCacheFreshness({
   const failed = !!lastRefreshFailed;
   const unhealthy = isSupabaseUnhealthy(lastRefreshError);
   let hint = null;
-  if (failed && unhealthy) {
-    hint = "Last refresh timed out or could not reach Supabase / PostgREST — not Odds API quota. Refresh still only re-reads the cache.";
-  } else if (failed) {
-    hint = "Last refresh failed. Refresh re-reads the last saved cache — it does not pull The Odds API.";
+  if (failed) {
+    hint = "Last refresh failed. Please refresh to use latest odds.";
   } else if (stale) {
-    hint = "Odds look stale vs the clock. Refresh re-reads the last saved cache; if this time stays old, the cache writer (cron) may be stuck.";
+    hint = "Odds are out of date. Please refresh to use latest odds.";
   }
   let chip = null;
   if (failed && unhealthy) chip = SUPABASE_FLAKY_CHIP;
-  else if (stale) chip = "stale cache";
+  else if (stale) chip = "out of date";
   return {
     show: true,
     label,
