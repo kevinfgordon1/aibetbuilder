@@ -433,10 +433,13 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
 
 {
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
-  // Living cards: history starts collapsed behind hist-<id>; archive stays always-open once the card expands.
+  // Living cards: history starts collapsed behind hist-<id>; archive expands in the Statement board.
   assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle, showSummary = true \}\)/);
   assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
   assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
+  assert.match(locksSrc, /StatementBoard/);
+  assert.match(locksSrc, /buildComboStatement/);
+  assert.match(locksSrc, /useStatementView\(historyStatement\)/);
   assert.match(locksSrc, /className="hist-head"/);
   assert.match(locksSrc, /AttemptSummary/);
   assert.match(locksSrc, /attemptSummaryParts/);

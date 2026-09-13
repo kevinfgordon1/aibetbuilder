@@ -217,7 +217,7 @@ assert.match(locksSrc, /historyOutcome/);
 assert.match(locksSrc, /awaiting settlement/);
 assert.match(locksSrc, /outcomeChrome/);
 assert.match(locksSrc, /chip src/);
-assert.match(locksSrc, /arch-head/);
+assert.match(locksSrc, /StatementBoard/);
 assert.match(locksSrc, /hist-head/);
 assert.match(locksSrc, /Hide history" : "History"/);
 assert.doesNotMatch(locksSrc, /History \+ profile/);
