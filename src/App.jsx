@@ -61,6 +61,8 @@ import {
   shouldRunEvScan,
   promoNeedsReload,
   featuredRowsUsable,
+  preferExistingPromoBoard,
+  boardHasPromoGames,
   describeOddsLoadError,
   DEFAULT_EV_DATE_RANGE,
   selectEvScanView,
@@ -71,7 +73,7 @@ import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
-import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
@@ -1546,10 +1548,17 @@ export default function App() {
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
       const eventRows = events.error ? [] : (events.data || []);
-      setOddsSource({ featured: featuredRows, events: eventRows });
-      setPromoBoardData(applyTransformed(featuredRows, eventRows));
-      setPromoLoadedSports(new Set(plan.eventSports));
-      setFetchedAt(featuredRows[0]?.fetched_at);
+      const nextBoard = applyTransformed(featuredRows, eventRows);
+      setOddsSource((prev) => (
+        boardHasPromoGames(nextBoard) || !prev.featured.length
+          ? { featured: featuredRows, events: eventRows }
+          : prev
+      ));
+      setPromoBoardData((prev) => preferExistingPromoBoard(prev, nextBoard));
+      if (boardHasPromoGames(nextBoard)) {
+        setPromoLoadedSports(new Set(plan.eventSports));
+        setFetchedAt(featuredRows[0]?.fetched_at);
+      }
       setPromoLoaded(true);
       setOddsLoadCause(null);
       setOddsLoadError(null);
@@ -1633,7 +1642,10 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, hideLowLiquidity, excludedPromoLegs, matchingBookKeys]);
+    // Remount starts with no exclusions. Filter tweaks must too — leftover
+    // X's otherwise hide the best plays until a full refresh.
+    setExcludedPromoLegs(new Set());
+  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, hideLowLiquidity, matchingBookKeys]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1660,10 +1672,11 @@ export default function App() {
     () => (promoOddsData.moneylines || []).some((g) => isSoccerSport(g.sport)),
     [promoOddsData],
   );
+  const soccerSelected = soccerKeysSelected(promoSports);
 
   useEffect(() => {
     const games = (promoOddsData.moneylines || []).filter((g) => isSoccerSport(g.sport));
-    if (!games.length) {
+    if (!games.length || !soccerSelected) {
       setSoccerPmNoByGame(null);
       setSoccerPmNoStatus("idle");
       return;
@@ -1687,9 +1700,13 @@ export default function App() {
         setSoccerPmNoByGame(null);
         setSoccerPmNoStatus("error");
       });
-  }, [promoOddsData, matchingBookKeys]);
+  }, [promoOddsData, matchingBookKeys, soccerSelected]);
 
-  const soccerPmReady = !soccerOnBoard || soccerPmNoStatus === "done" || soccerPmNoStatus === "error";
+  const waitForSoccerPm = soccerBlocksPromoPool({
+    soccerSelected,
+    soccerOnBoard,
+    soccerPmReady: soccerPmNoStatus === "done" || soccerPmNoStatus === "error",
+  });
   const promoOddsForPromo = useMemo(
     () => overlaySoccerPmNos(promoOddsData, soccerPmNoByGame),
     [promoOddsData, soccerPmNoByGame],
@@ -1767,8 +1784,9 @@ export default function App() {
     return SPORT_KEYS.every((k) => expanded.has(k)) ? null : SPORT_KEYS.filter((k) => expanded.has(k));
   }, [promoSports]);
   const isParlayPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
-  const parsedMinLeg = (isParlayPromo && scanMinLegOdds !== "") ? Number(scanMinLegOdds) : null;
-  const parsedMaxLeg = (isParlayPromo && scanMaxLegOdds !== "") ? Number(scanMaxLegOdds) : null;
+  const parsedLegBounds = parsedPromoLegOddsBounds(numLegs, isParlayPromo ? scanMinLegOdds : "", isParlayPromo ? scanMaxLegOdds : "");
+  const parsedMinLeg = parsedLegBounds.min;
+  const parsedMaxLeg = parsedLegBounds.max;
   const parsedMinFinal = (isParlayPromo && scanMinFinalOdds !== "") ? Number(scanMinFinalOdds) : null;
   const parsedMaxFinal = (isParlayPromo && scanMaxFinalOdds !== "") ? Number(scanMaxFinalOdds) : null;
   const oddsBoundsPending = scanMinFinalOdds !== minFinalOdds
@@ -1780,12 +1798,12 @@ export default function App() {
   // 1-leg: leave the pool; rankPromoPicks drops incomplete-hedge picks after blend.
   const dropThinPoolLegs = hideLowLiquidity && Number(numLegs) >= 2;
   const promoLegs = useMemo(() => {
-    if (soccerOnBoard && !soccerPmReady) return [];
+    if (waitForSoccerPm) return [];
     const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
     const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     return filterLowLiquidityLegs(promoLegsKept, dropThinPoolLegs, { promoType, numLegs });
-  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, soccerOnBoard, soccerPmReady]);
+  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, waitForSoccerPm]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -1811,15 +1829,24 @@ export default function App() {
 
   // Heavy C(n,k) scan is async + chunked. Never call findTopParlays during render.
   // Stake-only / free-bet-$ tweaks rescale below (scanStake omitted on purpose).
-  // Do not scan (or mark done) before odds exist — an empty-pool [] must not
-  // look like a finished slate while promoLoaded is still false.
+  // Do not scan (or mark done) before the slate is ready — an empty-pool []
+  // from a mid-refetch / leftover-soccer gate must not look finished.
   useEffect(() => {
     if (promoType !== "boost" && promoType !== "nosweat" && promoType !== "freebet") {
+      promoScanGen.current += 1;
       setPromoScanBusy(false);
       return;
     }
-    if (!promoLoaded || !soccerPmReady) {
-      setPromoScanBusy(!!promoLoaded && !soccerPmReady);
+    const slateReady = promoSlateReady({
+      promoLoaded,
+      promoLoading,
+      soccerBlocks: waitForSoccerPm,
+    });
+    if (!slateReady) {
+      // Bump gen so a 1-leg scan that already resolved cannot commit into
+      // this not-ready window (abort is only checked at yield / completion).
+      promoScanGen.current += 1;
+      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm));
       return;
     }
     const gen = ++promoScanGen.current;
@@ -1839,19 +1866,25 @@ export default function App() {
       maxFinalOdds: parsedMaxFinal,
       signal: ac.signal,
     }).then((parlays) => {
-      if (gen !== promoScanGen.current) return;
+      if (!shouldCommitPromoScan({
+        requestGen: gen,
+        latestGen: promoScanGen.current,
+        aborted: ac.signal.aborted,
+        slateReady: true,
+      })) return;
       if (promoType === "boost") setScannedBoostParlays({ parlays, atStake });
       else if (promoType === "nosweat") setScannedNoSweats({ parlays, atStake });
       else setScannedFreeBets({ parlays, atStake });
       setLastCompletedScanKey(scanKey);
       setPromoScanBusy(false);
     }).catch((err) => {
-      // Superseded gen (AbortError or otherwise): ignore. The replacement
-      // effect owns busy/status. Latest gen always completes below or is replaced.
-      if (gen !== promoScanGen.current) return;
+      if (!shouldCommitPromoScan({
+        requestGen: gen,
+        latestGen: promoScanGen.current,
+        aborted: ac.signal.aborted || err?.name === "AbortError",
+        slateReady: true,
+      })) return;
       if (err?.name === "AbortError") {
-        // Latest gen aborted: cleanup ran. A newer effect owns the next scan,
-        // or the non-parlay branch cleared busy. Do not strand or mark done.
         return;
       }
       console.error("[promo scan]", err);
@@ -1861,7 +1894,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, soccerPmReady, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -1904,7 +1937,7 @@ export default function App() {
     );
   }, [topFreeBets, numLegs, stake, hideLowLiquidity]);
 
-  const promoBusyForEmpty = promoLoading || (soccerOnBoard && !soccerPmReady);
+  const promoBusyForEmpty = promoLoading || waitForSoccerPm;
   const boostEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
