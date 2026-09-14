@@ -167,7 +167,7 @@ export default function BetstampOddsBoard() {
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
   const [boardSport, setBoardSport] = useState(BETSTAMP_DEFAULT_SPORT);
-  const [liveOnly, setLiveOnly] = useState(false);
+  const [liveOnly, setLiveOnly] = useState(false); // Pregame default. Never auto-enable LIVE.
   const [games, setGames] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [missingKey, setMissingKey] = useState(false);

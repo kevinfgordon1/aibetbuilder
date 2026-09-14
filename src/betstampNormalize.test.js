@@ -407,6 +407,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /data-tick-metrics/);
   assert.match(stamp, /BETSTAMP_PREGAME_POLL_MS/);
   assert.match(stamp, /data-snapshot-age/);
+  assert.match(stamp, /\[liveOnly, setLiveOnly\] = useState\(false\)/);
+  assert.doesNotMatch(stamp, /setLiveOnly\(\s*true\s*\)/);
   assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
   assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|data-snapshot-age/);
   assert.match(stamp, /data-line-age/);
