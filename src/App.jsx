@@ -2105,13 +2105,13 @@ export default function App() {
           window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' });
           logEvent(user, 'tab_switched', { tab: 'ev_bets' });
         }}>+EV Bets</button>
-        <button style={tabStyle("odds")} onClick={() => {
+        <button data-guard-allow="true" style={tabStyle("odds")} onClick={() => {
           setFocusCardId(null);
           setActiveTab("odds");
           window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
           logEvent(user, 'tab_switched', { tab: 'odds_board' });
         }}>Odds Board</button>
-        <button style={tabStyle("oddsBetstamp")} onClick={() => {
+        <button data-guard-allow="true" style={tabStyle("oddsBetstamp")} onClick={() => {
           setFocusCardId(null);
           setActiveTab("oddsBetstamp");
           window.gtag?.('event', 'tab_switched', { tab: 'odds_betstamp' });

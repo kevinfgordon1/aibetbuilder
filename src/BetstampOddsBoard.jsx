@@ -327,7 +327,7 @@ export default function BetstampOddsBoard() {
   });
 
   return (
-    <div data-betstamp-board="true">
+    <div data-betstamp-board="true" data-guard-allow="true">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>Betstamp Odds Board</div>

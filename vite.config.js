@@ -16,6 +16,19 @@ function betstampLocalApi() {
           const handler = path === '/api/betstamp-stream'
             ? require('./api/betstamp-stream.js')
             : require('./api/betstamp-markets.js')
+          if (typeof res.status !== 'function') {
+            res.status = (code) => {
+              res.statusCode = code
+              return res
+            }
+          }
+          if (typeof res.json !== 'function') {
+            res.json = (obj) => {
+              if (!res.headersSent) res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify(obj))
+              return res
+            }
+          }
           await handler(req, res)
         } catch (err) {
           if (res.headersSent) return
