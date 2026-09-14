@@ -2502,8 +2502,12 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(app, /tabStyle\("unhedged"\)/);
   assert.match(app, />Unhedged RFQs</);
   assert.match(app, /activeTab === "unhedged" && canSeeOwnerTools\(user\) && <UnhedgedTape user=\{user\} \/>/);
-  assert.match(app, /<button style=\{tabStyle\("combo"\)\} onClick=\{\(\) => setActiveTab\("combo"\)\}>Combo Locks<\/button>/);
-  assert.match(app, /<button style=\{tabStyle\("missTape"\)\} onClick=\{\(\) => setActiveTab\("missTape"\)\}>Miss tape<\/button>/);
+  assert.match(app, /href=\{tabHash\("combo"\)\}/);
+  assert.match(app, /tabStyle\("combo"\)/);
+  assert.match(app, />Combo Locks<\/a>/);
+  assert.match(app, /href=\{tabHash\("missTape"\)\}/);
+  assert.match(app, /tabStyle\("missTape"\)/);
+  assert.match(app, />Miss tape<\/a>/);
   assert.match(app, /activeTab === "combo" && canSeeComboLocks\(user\) && <ComboLocks user=\{user\} prefill=\{comboPrefill\} focusLockId=\{focusLockId\} \/>/);
   assert.match(app, /activeTab === "promo"/);
   assert.match(app, />Promo Builder</);
