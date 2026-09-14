@@ -4,7 +4,7 @@ import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
@@ -2022,7 +2022,27 @@ export default function App() {
     background: "none", border: "none",
     borderBottom: activeTab === tab ? "2px solid #3b82f6" : "2px solid transparent",
     transition: "all 0.2s",
+    textDecoration: "none",
+    display: "inline-block",
   });
+
+  // Left-click switches in place (same as the old <button> tabs). Modified /
+  // middle / right-click keep the real href so the browser can open a new tab.
+  const isPlainLeftClick = (e) =>
+    e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+
+  const onNavTabClick = (tab, analyticsName) => (e) => {
+    if (!isPlainLeftClick(e)) return;
+    e.preventDefault();
+    if (tab === "promo" || tab === "ev" || tab === "odds" || tab === "oddsBetstamp") {
+      setFocusCardId(null);
+    }
+    setActiveTab(tab);
+    if (analyticsName) {
+      window.gtag?.("event", "tab_switched", { tab: analyticsName });
+      logEvent(user, "tab_switched", { tab: analyticsName });
+    }
+  };
 
   const controlBox = (children) => (
     <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "14px 20px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -2039,6 +2059,9 @@ export default function App() {
   // interact with any control (outside the header) they're bounced to the full landing.
   const guardClick = (e) => {
     if (authLoading || user) return;
+    // Let middle / right / modified clicks through so nav <a href> can open in a new tab.
+    if (e.button != null && e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     if (e.target.closest && e.target.closest('[data-guard-allow]')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -2093,41 +2116,21 @@ export default function App() {
       </div>
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <button style={tabStyle("promo")} onClick={() => {
-          setFocusCardId(null);
-          setActiveTab("promo");
-          window.gtag?.('event', 'tab_switched', { tab: 'promo_builder' });
-          logEvent(user, 'tab_switched', { tab: 'promo_builder' });
-        }}>Promo Builder</button>
-        <button style={tabStyle("ev")} onClick={() => {
-          setFocusCardId(null);
-          setActiveTab("ev");
-          window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' });
-          logEvent(user, 'tab_switched', { tab: 'ev_bets' });
-        }}>+EV Bets</button>
-        <button data-guard-allow="true" style={tabStyle("odds")} onClick={() => {
-          setFocusCardId(null);
-          setActiveTab("odds");
-          window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
-          logEvent(user, 'tab_switched', { tab: 'odds_board' });
-        }}>Odds Board</button>
+        <a href={tabHash("promo")} style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
+        <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
+        <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
         {canSeeComboLocks(user) && (
-          <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
+          <a href={tabHash("combo")} style={tabStyle("combo")} onClick={onNavTabClick("combo")}>Combo Locks</a>
         )}
         {canSeeOwnerTools(user) && (
           <>
-            <button style={tabStyle("oddsBetstamp")} onClick={() => {
-              setFocusCardId(null);
-              setActiveTab("oddsBetstamp");
-              window.gtag?.('event', 'tab_switched', { tab: 'odds_betstamp' });
-              logEvent(user, 'tab_switched', { tab: 'odds_betstamp' });
-            }}>New Odds Board</button>
-            <button style={tabStyle("missTape")} onClick={() => setActiveTab("missTape")}>Miss tape</button>
-            <button style={tabStyle("unhedged")} onClick={() => setActiveTab("unhedged")}>Unhedged RFQs</button>
+            <a href={tabHash("oddsBetstamp")} style={tabStyle("oddsBetstamp")} onClick={onNavTabClick("oddsBetstamp", "odds_betstamp")}>New Odds Board</a>
+            <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
+            <a href={tabHash("unhedged")} style={tabStyle("unhedged")} onClick={onNavTabClick("unhedged")}>Unhedged RFQs</a>
           </>
         )}
         {user && (
-          <button style={tabStyle("profile")} onClick={() => setActiveTab("profile")}>Profile</button>
+          <a href={tabHash("profile")} style={tabStyle("profile")} onClick={onNavTabClick("profile")}>Profile</a>
         )}
       </div>
 
