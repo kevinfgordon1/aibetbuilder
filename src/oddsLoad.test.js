@@ -81,6 +81,7 @@ function fullPlan() {
   assert.equal(loadModeForTab("missTape"), "promo");
   assert.equal(loadModeForTab("ev"), "full");
   assert.equal(loadModeForTab("odds"), "full");
+  assert.equal(loadModeForTab("oddsBetstamp"), "promo");
 }
 
 // ── Promo-only plan: selected featured + event sports, no futures / +EV-tab scan
@@ -213,6 +214,8 @@ function fullPlan() {
   assert.equal(shouldFetchFullBoard({ tab: "promo", fullBoardLoaded: false, forceRefresh: false }), false);
   assert.equal(shouldFetchFullBoard({ tab: "ev", fullBoardLoaded: false, forceRefresh: false }), true);
   assert.equal(shouldFetchFullBoard({ tab: "odds", fullBoardLoaded: false, forceRefresh: false }), true);
+  assert.equal(shouldFetchFullBoard({ tab: "oddsBetstamp", fullBoardLoaded: false, forceRefresh: false }), false);
+  assert.equal(shouldFetchPromoOdds({ tab: "oddsBetstamp", forceRefresh: true, promoLoaded: true }), false);
   assert.equal(shouldFetchFullBoard({ tab: "ev", fullBoardLoaded: true, forceRefresh: false }), false);
   assert.equal(shouldFetchFullBoard({ tab: "odds", fullBoardLoaded: true, forceRefresh: false }), false);
 }

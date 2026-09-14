@@ -74,6 +74,7 @@ import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
 import OddsBoard from "./OddsBoard.jsx";
+import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import {
   applyPmBlendToLeg,
@@ -2110,6 +2111,12 @@ export default function App() {
           window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
           logEvent(user, 'tab_switched', { tab: 'odds_board' });
         }}>Odds Board</button>
+        <button style={tabStyle("oddsBetstamp")} onClick={() => {
+          setFocusCardId(null);
+          setActiveTab("oddsBetstamp");
+          window.gtag?.('event', 'tab_switched', { tab: 'odds_betstamp' });
+          logEvent(user, 'tab_switched', { tab: 'odds_betstamp' });
+        }}>Betstamp</button>
         {canSeeComboLocks(user) && (
           <button style={tabStyle("combo")} onClick={() => setActiveTab("combo")}>Combo Locks</button>
         )}
@@ -2133,7 +2140,7 @@ export default function App() {
         </div>
       )}
 
-      {showOddsHealthBanner && (
+      {showOddsHealthBanner && activeTab !== "oddsBetstamp" && (
         <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
       )}
 
@@ -2157,7 +2164,13 @@ export default function App() {
         </div>
       )}
 
-      {!showFullPageSpinner && !showOddsLoadError && (
+      {activeTab === "oddsBetstamp" && (
+        <div style={{ padding: "20px 32px" }}>
+          <BetstampOddsBoard />
+        </div>
+      )}
+
+      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && (
         <div style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}

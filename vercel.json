@@ -37,6 +37,9 @@
     },
     "api/soccer-pm-no.js": {
       "maxDuration": 20
+    },
+    "api/betstamp-stream.js": {
+      "maxDuration": 300
     }
   },
   "rewrites": [

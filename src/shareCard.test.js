@@ -328,6 +328,8 @@ assert.deepEqual(parseAppHash("#promo/" + id1), { tab: "promo", lockId: null, ca
 assert.deepEqual(parseAppHash("#ev"), { tab: "ev", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#ev/" + evId), { tab: "ev", lockId: null, cardId: evId });
 assert.deepEqual(parseAppHash("#odds"), { tab: "odds", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#odds-betstamp"), { tab: "oddsBetstamp", lockId: null, cardId: null });
+assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#odds-betstamp");
 assert.deepEqual(parseAppHash("#missTape"), { tab: "missTape", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#miss"), { tab: "missTape", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#unhedged"), { tab: "unhedged", lockId: null, cardId: null });

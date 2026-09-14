@@ -79,6 +79,9 @@ export const APP_HASH_TABS = Object.freeze({
   promo: "promo",
   ev: "ev",
   odds: "odds",
+  oddsBetstamp: "oddsBetstamp",
+  "odds-betstamp": "oddsBetstamp",
+  betstamp: "oddsBetstamp",
   combo: "combo",
   missTape: "missTape",
   miss: "missTape",
@@ -130,6 +133,7 @@ export function serializeAppHash({ tab = null, lockId = null, cardId = null } = 
     return "#" + resolved + "/" + encodeURIComponent(String(cardId));
   }
   if (resolved === "missTape") return "#missTape";
+  if (resolved === "oddsBetstamp") return "#odds-betstamp";
   return "#" + resolved;
 }
 
