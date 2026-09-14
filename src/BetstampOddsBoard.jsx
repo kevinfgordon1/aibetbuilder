@@ -7,6 +7,7 @@ import {
   formatDateGroup,
   getOddsBoardCell,
   getBestForGame,
+  LIVE_BEST_ODDS_MAX_AGE_MS,
 } from "./oddsBoard.js";
 import {
   BETSTAMP_TRIAL_BOOKS,
@@ -436,12 +437,15 @@ export default function BetstampOddsBoard() {
   const oddsColWidth = 92;
   const metrics = summarizeTickStats(tickStats, nowMs);
 
+  const liveBestOpts = { nowMs, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
     bookKey,
     market,
     selectedBookKeys: selectedBooks,
     allBooks: books,
+    ...liveBestOpts,
   });
 
   const sideStyle = (isBestCol, isBestCell, empty) => ({
@@ -455,7 +459,7 @@ export default function BetstampOddsBoard() {
   });
 
   const renderOddsPair = (rowGame, marketKey) => {
-    const { bestAway, bestHome } = getBestForGame(rowGame, marketKey, selectedBooks, books);
+    const { bestAway, bestHome } = getBestForGame(rowGame, marketKey, selectedBooks, books, liveBestOpts);
     const fields = cellLineFields(marketKey);
     return visibleBooks.map((b) => {
       const cell = getOddsBoardCell({
@@ -464,6 +468,7 @@ export default function BetstampOddsBoard() {
         market: marketKey,
         selectedBookKeys: selectedBooks,
         allBooks: books,
+        ...liveBestOpts,
       });
       const isBestAway = b.key !== "best" && cell.top !== null && cell.top === bestAway;
       const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
@@ -733,7 +738,7 @@ export default function BetstampOddsBoard() {
                   <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
                 </tr>
                 {dateGames.map((game) => {
-                  const { bestAway, bestHome } = getBestForGame(game, market, selectedBooks, books);
+                  const { bestAway, bestHome } = getBestForGame(game, market, selectedBooks, books, liveBestOpts);
                   return (
                     <tr
                       key={game.id}
@@ -825,7 +830,7 @@ export default function BetstampOddsBoard() {
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest; LIVE uses SSE
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
-        {" · "}Green = best available odds across selected books
+        {" · "}Green = best available odds across selected books (LIVE: a number 4+ minutes stale cannot win Best)
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}

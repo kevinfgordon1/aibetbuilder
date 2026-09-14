@@ -3,6 +3,23 @@
 
 import { isSoccerSport } from "./soccerPairing.js";
 
+// Live New Odds Board: a quote this old must not win the Best Odds column.
+export const LIVE_BEST_ODDS_MAX_AGE_MS = 240_000;
+
+export function isFreshForLiveBestOdds(updatedAt, nowMs, maxAgeMs = LIVE_BEST_ODDS_MAX_AGE_MS) {
+  if (updatedAt == null || !isFinite(Number(updatedAt))) return false;
+  if (nowMs == null || !isFinite(Number(nowMs))) return false;
+  if (maxAgeMs == null || !isFinite(Number(maxAgeMs))) return false;
+  return (Number(nowMs) - Number(updatedAt)) < Number(maxAgeMs);
+}
+
+function liveBestFreshness({ game, nowMs, maxBestAgeMs }) {
+  if (!game?.is_live) return null;
+  if (nowMs == null || !isFinite(nowMs)) return null;
+  if (maxBestAgeMs == null || !isFinite(maxBestAgeMs)) return null;
+  return { nowMs, maxAgeMs: maxBestAgeMs };
+}
+
 export function fmtBoardSize(v) {
   const n = typeof v === "number" ? v : parseFloat(v);
   if (!isFinite(n) || n <= 0) return null;
@@ -27,12 +44,20 @@ export function bookInitials(label) {
   return word.slice(0, 2).toUpperCase();
 }
 
-export function pickBestSide(entries) {
+export function pickBestSide(entries, freshness) {
+  const gate = !!(
+    freshness
+    && freshness.nowMs != null
+    && isFinite(freshness.nowMs)
+    && freshness.maxAgeMs != null
+    && isFinite(freshness.maxAgeMs)
+  );
   let best = null;
   const books = [];
   for (const entry of entries || []) {
     const price = entry?.price;
     if (price == null || !isFinite(price)) continue;
+    if (gate && !isFreshForLiveBestOdds(entry.updatedAt, freshness.nowMs, freshness.maxAgeMs)) continue;
     if (best === null || price > best) {
       best = price;
       books.length = 0;
@@ -68,12 +93,13 @@ function selectedBooks(allBooks, selectedBookKeys) {
   return (allBooks || []).filter((b) => selectedBookKeys.has(b.key));
 }
 
-function sideFromMap(vals, game, priceKey, sizeKey) {
+function sideFromMap(vals, game, priceKey, sizeKey, freshness) {
   return pickBestSide(vals.map((b) => ({
     key: b.key,
     price: game.bookOdds?.[b.key]?.[priceKey],
     size: game.bookOdds?.[b.key]?.[sizeKey],
-  })));
+    updatedAt: game.bookLineUpdatedAt?.[b.key]?.[priceKey],
+  })), freshness);
 }
 
 function fmtSpreadLine(point) {
@@ -107,18 +133,19 @@ function emptyCell(threeWay) {
   };
 }
 
-export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks }) {
+export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks, nowMs, maxBestAgeMs }) {
   const threeWay = !!(game?.is_three_way || isSoccerSport(game?.sport));
   const vals = selectedBooks(allBooks, selectedBookKeys);
+  const freshness = liveBestFreshness({ game, nowMs, maxBestAgeMs });
 
   if (bookKey === "best") {
     if (market === "ml") {
-      const top = sideFromMap(vals, game, "ml_away", "ml_away_size");
-      const mid = sideFromMap(vals, game, "ml_draw", "ml_draw_size");
-      const bot = sideFromMap(vals, game, "ml_home", "ml_home_size");
-      const topNo = sideFromMap(vals, game, "ml_away_no", "ml_away_no_size");
-      const midNo = sideFromMap(vals, game, "ml_draw_no", "ml_draw_no_size");
-      const botNo = sideFromMap(vals, game, "ml_home_no", "ml_home_no_size");
+      const top = sideFromMap(vals, game, "ml_away", "ml_away_size", freshness);
+      const mid = sideFromMap(vals, game, "ml_draw", "ml_draw_size", freshness);
+      const bot = sideFromMap(vals, game, "ml_home", "ml_home_size", freshness);
+      const topNo = sideFromMap(vals, game, "ml_away_no", "ml_away_no_size", freshness);
+      const midNo = sideFromMap(vals, game, "ml_draw_no", "ml_draw_no_size", freshness);
+      const botNo = sideFromMap(vals, game, "ml_home_no", "ml_home_no_size", freshness);
       return {
         ...emptyCell(threeWay),
         top: top.price,
@@ -142,8 +169,8 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       };
     }
     if (market === "spr") {
-      const top = sideFromMap(vals, game, "spr_away", "spr_away_size");
-      const bot = sideFromMap(vals, game, "spr_home", "spr_home_size");
+      const top = sideFromMap(vals, game, "spr_away", "spr_away_size", freshness);
+      const bot = sideFromMap(vals, game, "spr_home", "spr_home_size", freshness);
       const dkb = game.bookOdds?.draftkings;
       return {
         ...emptyCell(false),
@@ -158,8 +185,8 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       };
     }
     if (market === "tot") {
-      const top = sideFromMap(vals, game, "tot_over", "tot_over_size");
-      const bot = sideFromMap(vals, game, "tot_under", "tot_under_size");
+      const top = sideFromMap(vals, game, "tot_over", "tot_over_size", freshness);
+      const bot = sideFromMap(vals, game, "tot_under", "tot_under_size", freshness);
       const dkb = game.bookOdds?.draftkings;
       return {
         ...emptyCell(false),
@@ -231,13 +258,14 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
   return emptyCell(threeWay);
 }
 
-export function getBestForGame(game, market, selectedBookKeys, allBooks) {
+export function getBestForGame(game, market, selectedBookKeys, allBooks, freshnessOpts) {
   const cell = getOddsBoardCell({
     game,
     bookKey: "best",
     market,
     selectedBookKeys,
     allBooks,
+    ...(freshnessOpts || {}),
   });
   return {
     bestAway: cell.top,
