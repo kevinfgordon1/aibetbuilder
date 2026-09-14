@@ -62,6 +62,35 @@ function mockRes() {
   }
 
   {
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          markets: [
+            { id: 'keep', odds: 1.5, fixture_id: 'f1', is_alt: true },
+            { id: 'drop', odds: 1.6, fixture_id: 'f9', is_alt: true },
+          ],
+        }),
+      };
+    };
+    const res = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', include_alts: 'true', fixture_id: 'f1' } }, res, {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real' },
+      fetchFn,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.markets.length, 1);
+    assert.equal(res.body.markets[0].id, 'keep');
+    assert.equal(res.body.fixtures.length, 0);
+    assert.equal(calls.length, 1);
+    assert.match(String(calls[0]), /include_alts=true/);
+    assert.match(String(calls[0]), /fixture_id=f1/);
+  }
+
+  {
     const res = mockRes();
     await streamHandler({ method: 'GET', query: {} }, res, { env: {} });
     assert.equal(res.statusCode, 503);
