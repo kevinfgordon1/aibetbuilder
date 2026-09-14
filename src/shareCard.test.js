@@ -329,7 +329,8 @@ assert.deepEqual(parseAppHash("#ev"), { tab: "ev", lockId: null, cardId: null })
 assert.deepEqual(parseAppHash("#ev/" + evId), { tab: "ev", lockId: null, cardId: evId });
 assert.deepEqual(parseAppHash("#odds"), { tab: "odds", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#odds-betstamp"), { tab: "oddsBetstamp", lockId: null, cardId: null });
-assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#odds-betstamp");
+assert.deepEqual(parseAppHash("#new-odds-board"), { tab: "oddsBetstamp", lockId: null, cardId: null });
+assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#new-odds-board");
 assert.deepEqual(parseAppHash("#missTape"), { tab: "missTape", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#miss"), { tab: "missTape", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#unhedged"), { tab: "unhedged", lockId: null, cardId: null });
@@ -383,6 +384,10 @@ const stranger = { id: "u2", email: "stranger@gmail.com" };
   assert.equal(miss.tab, "promo");
   assert.equal(miss.notice, "noaccess");
   assert.equal(resolveAppHash(parseAppHash("#unhedged"), kevin).tab, "unhedged");
+  const newOddsDenied = resolveAppHash(parseAppHash("#new-odds-board"), stranger);
+  assert.equal(newOddsDenied.tab, "promo");
+  assert.equal(newOddsDenied.allowed, false);
+  assert.equal(resolveAppHash(parseAppHash("#odds-betstamp"), kevin).tab, "oddsBetstamp");
 }
 {
   const prof = resolveAppHash(parseAppHash("#profile"), null);

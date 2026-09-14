@@ -204,7 +204,7 @@ export default function BetstampOddsBoard() {
         setLoading(false);
       } catch (err) {
         if (ctrl.signal.aborted || gen !== fetchGen.current) return;
-        setLoadError(err.message || "Could not load Betstamp snapshot");
+        setLoadError(err.message || "Could not load snapshot");
         setLoading(false);
       }
     })();
@@ -330,9 +330,9 @@ export default function BetstampOddsBoard() {
     <div data-betstamp-board="true" data-guard-allow="true">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>Betstamp Odds Board</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-            Parallel live feed — The Odds API board is unchanged at the Odds Board tab.
+            Parallel live feed — the Odds Board tab is unchanged.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -473,7 +473,7 @@ export default function BetstampOddsBoard() {
       )}
 
       {loading && (
-        <div style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>Loading Betstamp snapshot…</div>
+        <div style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>Loading snapshot…</div>
       )}
 
       {!loading && (
@@ -570,10 +570,10 @@ export default function BetstampOddsBoard() {
       </div>
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
-        Betstamp trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
+        Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
         {" · "}Green = best available odds across selected books
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
-        {" · "}$ under a price is that book's size / limit when Betstamp sends it
+        {" · "}$ under a price is that book's size / limit when the feed sends it
       </div>
     </div>
   );

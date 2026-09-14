@@ -69,7 +69,8 @@ assert.deepEqual(parseAppHash(""), { tab: null, lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#odds"), { tab: "odds", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#odds-betstamp"), { tab: "oddsBetstamp", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#betstamp"), { tab: "oddsBetstamp", lockId: null, cardId: null });
-assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#odds-betstamp");
+assert.deepEqual(parseAppHash("#new-odds-board"), { tab: "oddsBetstamp", lockId: null, cardId: null });
+assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#new-odds-board");
 assert.deepEqual(parseAppHash("#promo"), { tab: "promo", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#ev/abc"), { tab: "ev", lockId: null, cardId: "abc" });
 assert.equal(serializeAppHash({ tab: "odds" }), "#odds");
@@ -82,6 +83,18 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.equal(denied.tab, "promo");
   assert.equal(denied.lockId, null);
   assert.equal(denied.notice, "noaccess");
+}
+{
+  const kevinBoard = resolveAppHash(parseAppHash("#new-odds-board"), kevin);
+  assert.equal(kevinBoard.tab, "oddsBetstamp");
+  assert.equal(kevinBoard.allowed, true);
+  const strangerBoard = resolveAppHash(parseAppHash("#odds-betstamp"), stranger);
+  assert.equal(strangerBoard.tab, "promo");
+  assert.equal(strangerBoard.allowed, false);
+  assert.equal(strangerBoard.notice, "noaccess");
+  const signedOutBoard = resolveAppHash(parseAppHash("#new-odds-board"), null);
+  assert.equal(signedOutBoard.tab, "promo");
+  assert.equal(signedOutBoard.notice, "signin");
 }
 
 {
@@ -100,8 +113,11 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, /activeTab === "unhedged" && canSeeOwnerTools\(user\) && <UnhedgedTape/);
   assert.match(app, /<button style=\{tabStyle\("combo"\)\} onClick=\{\(\) => setActiveTab\("combo"\)\}>Combo Locks<\/button>/);
   assert.match(app, /setActiveTab\("oddsBetstamp"\)/);
-  assert.match(app, /activeTab === "oddsBetstamp"/);
+  assert.match(app, /activeTab === "oddsBetstamp" && canSeeOwnerTools\(user\)/);
+  assert.match(app, />New Odds Board<\/button>/);
+  assert.doesNotMatch(app, />Betstamp<\/button>/);
   assert.match(app, /<BetstampOddsBoard/);
+  assert.doesNotMatch(landingSlice, /New Odds Board|Betstamp/i);
   assert.match(app, /activeTab === "profile"/);
   assert.match(app, /<UserProfile[\s>]/);
   assert.match(app, /canSeeLocks=\{canSeeComboLocks\(user\)\}/);

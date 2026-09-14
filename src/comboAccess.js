@@ -6,7 +6,7 @@
 // so a missing env var cannot lock him out.
 //
 // This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
-// Do not use this list to expand Miss tape / Unhedged — those stay OWNER_EMAIL.
+// Do not use this list to expand Miss tape / Unhedged / New Odds Board — those stay OWNER_EMAIL.
 
 export const OWNER_EMAIL = "kev120909@gmail.com";
 
@@ -82,6 +82,8 @@ export const APP_HASH_TABS = Object.freeze({
   oddsBetstamp: "oddsBetstamp",
   "odds-betstamp": "oddsBetstamp",
   betstamp: "oddsBetstamp",
+  "new-odds-board": "oddsBetstamp",
+  "new-odds": "oddsBetstamp",
   combo: "combo",
   missTape: "missTape",
   miss: "missTape",
@@ -133,7 +135,7 @@ export function serializeAppHash({ tab = null, lockId = null, cardId = null } = 
     return "#" + resolved + "/" + encodeURIComponent(String(cardId));
   }
   if (resolved === "missTape") return "#missTape";
-  if (resolved === "oddsBetstamp") return "#odds-betstamp";
+  if (resolved === "oddsBetstamp") return "#new-odds-board";
   return "#" + resolved;
 }
 
@@ -157,9 +159,9 @@ export function clearComboHash(hash) {
 }
 
 /**
- * Gate a parsed hash for the current user. Combo / owner tabs never keep
- * lock ids or land on those views unless the user is allowed. Denied links
- * fall back to Promo with a soft sign-in / no-access notice — no lock copy.
+ * Gate a parsed hash for the current user. Combo / owner tabs (Miss tape,
+ * Unhedged, New Odds Board) never land unless the user is allowed. Denied
+ * links fall back to Promo with a soft sign-in / no-access notice.
  */
 export function resolveAppHash(parsed, user) {
   const route = parsed && typeof parsed === "object" ? parsed : emptyAppRoute();
@@ -179,7 +181,7 @@ export function resolveAppHash(parsed, user) {
       allowed: false,
     };
   }
-  if (tab === "missTape" || tab === "unhedged") {
+  if (tab === "missTape" || tab === "unhedged" || tab === "oddsBetstamp") {
     if (canSeeOwnerTools(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }
