@@ -26,11 +26,13 @@ export function parseSseChunk(buffer) {
   return { events, rest };
 }
 
-export function betstampSnapshotUrl({ league, live } = {}) {
+export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);
   if (live === true) p.set("is_live", "true");
   if (live === false) p.set("is_live", "false");
+  if (includeAlts === true) p.set("include_alts", "true");
+  if (fixtureId != null && fixtureId !== "") p.set("fixture_id", String(fixtureId));
   return `/api/betstamp-markets?${p}`;
 }
 

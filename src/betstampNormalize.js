@@ -311,12 +311,117 @@ export function marketLine(market) {
   return isFinite(v) ? v : null;
 }
 
-export function isMainMarket(market) {
+export function isBoardMarket(market) {
   if (!market) return false;
-  if (market.is_alt === true) return false;
   if (normalizePeriod(market.period) !== "FT") return false;
   const bt = normalizeBetType(market.bet_type);
   return bt === "moneyline" || bt === "spread" || bt === "total";
+}
+
+export function isMainMarket(market) {
+  return isBoardMarket(market) && market.is_alt !== true;
+}
+
+export function spreadAwayLine(market, game) {
+  const line = marketLine(market);
+  if (line == null) return null;
+  const side = marketSide(market, game);
+  if (side === "home") return -line;
+  if (side === "away") return line;
+  return null;
+}
+
+function cloneGameShell(game) {
+  return {
+    id: game.id,
+    sport: game.sport,
+    league: game.league,
+    away: game.away,
+    home: game.home,
+    awayAbbr: game.awayAbbr,
+    homeAbbr: game.homeAbbr,
+    awayId: game.awayId,
+    homeId: game.homeId,
+    commence_time: game.commence_time,
+    is_live: game.is_live,
+    home_score: game.home_score,
+    away_score: game.away_score,
+    is_mnf: game.is_mnf,
+    bookOdds: emptyBookOddsForBooks(),
+    bookUpdatedAt: {},
+    bookLineUpdatedAt: {},
+  };
+}
+
+export function gameHasMarketPrices(game, marketKey) {
+  for (const odds of Object.values(game?.bookOdds || {})) {
+    if (!odds) continue;
+    if (marketKey === "ml" && (odds.ml_away != null || odds.ml_home != null)) return true;
+    if (marketKey === "spr" && (odds.spr_away != null || odds.spr_home != null)) return true;
+    if (marketKey === "tot" && (odds.tot_over != null || odds.tot_under != null)) return true;
+  }
+  return false;
+}
+
+function lineMapGet(map, line) {
+  const key = Number(line);
+  if (!map.has(key)) {
+    map.set(key, { line: key, isMain: false, game: null });
+  }
+  return map.get(key);
+}
+
+// Full FT moneyline / spread / total ladder for one fixture, including alts.
+// Main-board snapshot path stays mains-only via isMainMarket.
+export function fixtureAltLadders({ markets, game, nowMs } = {}) {
+  const seenAt = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
+  if (!game) return { moneyline: null, spreads: [], totals: [] };
+  const fid = String(game.id);
+  const list = asList(markets, ["markets", "data"]).filter((m) => {
+    if (!m || String(m.fixture_id) !== fid) return false;
+    return isBoardMarket(m);
+  });
+  const mlGame = cloneGameShell(game);
+  let mlMain = false;
+  const spreads = new Map();
+  const totals = new Map();
+
+  for (const market of list) {
+    const bt = normalizeBetType(market.bet_type);
+    const main = market.is_alt !== true;
+    if (bt === "moneyline") {
+      applyMarketToGame(mlGame, market, { receivedAt: seenAt, allowAlt: true });
+      if (main) mlMain = true;
+      continue;
+    }
+    if (bt === "spread") {
+      const line = spreadAwayLine(market, game);
+      if (line == null) continue;
+      const row = lineMapGet(spreads, line);
+      if (!row.game) row.game = cloneGameShell(game);
+      applyMarketToGame(row.game, market, { receivedAt: seenAt, allowAlt: true });
+      if (main) row.isMain = true;
+      continue;
+    }
+    if (bt === "total") {
+      const line = marketLine(market);
+      if (line == null) continue;
+      const row = lineMapGet(totals, line);
+      if (!row.game) row.game = cloneGameShell(game);
+      applyMarketToGame(row.game, market, { receivedAt: seenAt, allowAlt: true });
+      if (main) row.isMain = true;
+    }
+  }
+
+  const sortRows = (map, marketKey) => [...map.values()]
+    .filter((r) => r.game && gameHasMarketPrices(r.game, marketKey))
+    .sort((a, b) => a.line - b.line);
+
+  return {
+    moneyline: gameHasMarketPrices(mlGame, "ml") ? { game: mlGame, isMain: mlMain } : null,
+    spreads: sortRows(spreads, "spr"),
+    totals: sortRows(totals, "tot"),
+  };
 }
 
 function tickLabel(market, game, side, betType) {
@@ -403,8 +508,9 @@ function stubGameFromMarket(market, nowMs) {
   return game;
 }
 
-export function applyMarketToGame(game, market, { receivedAt } = {}) {
-  if (!game || !market || !isMainMarket(market)) return false;
+export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
+  if (!game || !market) return false;
+  if (!(allowAlt ? isBoardMarket(market) : isMainMarket(market))) return false;
   const bookKey = bookKeyForMarket(market);
   if (!bookKey) return false;
   const betType = normalizeBetType(market.bet_type);

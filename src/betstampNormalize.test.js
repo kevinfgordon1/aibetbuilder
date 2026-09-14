@@ -15,6 +15,9 @@ import {
   summarizeTickStats,
   quantile,
   isMainMarket,
+  isBoardMarket,
+  fixtureAltLadders,
+  spreadAwayLine,
   marketSide,
   formatCompactAge,
   formatWinProb,
@@ -274,14 +277,60 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(nextBackoffMs(10), 8000);
   assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /league=NFL/);
   assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /is_live=true/);
+  assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /include_alts|fixture_id/);
+  assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /include_alts=true/);
+  assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
 }
 
 {
   assert.equal(isMainMarket({ bet_type: "Moneyline", period: "FT", is_alt: false }), true);
+  assert.equal(isMainMarket({ bet_type: "Spread", period: "FT", is_alt: true }), false);
+  assert.equal(isBoardMarket({ bet_type: "Spread", period: "FT", is_alt: true }), true);
   assert.equal(isMainMarket({ bet_type: "Spread", period: "1Q", is_alt: false }), false);
   assert.equal(marketSide({ side_type: "Away" }, null), "away");
   assert.equal(marketSide({ side: "Over" }, null), "over");
+}
+
+{
+  const fixtureId = "fix-alts";
+  const game = {
+    id: fixtureId,
+    sport: "americanfootball_nfl",
+    league: "NFL",
+    away: "Broncos",
+    home: "Chiefs",
+    awayAbbr: "DEN",
+    homeAbbr: "KC",
+    commence_time: "2026-09-20T17:00:00Z",
+    is_live: false,
+  };
+  const markets = [
+    { odds: 1.91, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: fixtureId },
+    { odds: 1.95, side: "KC", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: fixtureId },
+    { odds: 2.05, number: -3.5, side: "DEN", side_type: "Away", bet_type: "Spread", period: "FT", is_alt: false, odd_provider_id: 100, fixture_id: fixtureId },
+    { odds: 1.80, number: 3.5, side: "KC", side_type: "Home", bet_type: "Spread", period: "FT", is_alt: false, odd_provider_id: 100, fixture_id: fixtureId },
+    { odds: 1.50, number: -7.5, side: "DEN", side_type: "Away", bet_type: "Spread", period: "FT", is_alt: true, odd_provider_id: 200, fixture_id: fixtureId },
+    { odds: 2.80, number: 7.5, side: "KC", side_type: "Home", bet_type: "Spread", period: "FT", is_alt: true, odd_provider_id: 200, fixture_id: fixtureId },
+    { odds: 1.91, number: 44.5, side: "Over", side_type: "Over", bet_type: "Total", period: "FT", is_alt: false, odd_provider_id: 250, fixture_id: fixtureId },
+    { odds: 1.91, number: 44.5, side: "Under", side_type: "Under", bet_type: "Total", period: "FT", is_alt: false, odd_provider_id: 250, fixture_id: fixtureId },
+    { odds: 1.67, number: 48.5, side: "Over", side_type: "Over", bet_type: "Total", period: "FT", is_alt: true, odd_provider_id: 194, fixture_id: fixtureId },
+    { odds: 2.20, number: 48.5, side: "Under", side_type: "Under", bet_type: "Total", period: "FT", is_alt: true, odd_provider_id: 194, fixture_id: fixtureId },
+    { odds: 1.40, number: -10.5, side: "DEN", side_type: "Away", bet_type: "Spread", period: "FT", is_alt: true, odd_provider_id: 200, fixture_id: "other-game" },
+  ];
+  assert.equal(spreadAwayLine(markets[2], game), -3.5);
+  assert.equal(spreadAwayLine(markets[3], game), -3.5);
+  const ladders = fixtureAltLadders({ markets, game, nowMs: 1 });
+  assert.equal(ladders.moneyline.isMain, true);
+  assert.equal(ladders.moneyline.game.bookOdds.draftkings.ml_away, -110);
+  assert.deepEqual(ladders.spreads.map((r) => r.line), [-7.5, -3.5]);
+  assert.equal(ladders.spreads.find((r) => r.line === -3.5).isMain, true);
+  assert.equal(ladders.spreads.find((r) => r.line === -7.5).isMain, false);
+  assert.equal(ladders.spreads.find((r) => r.line === -7.5).game.bookOdds.draftkings.spr_away, -200);
+  assert.deepEqual(ladders.totals.map((r) => r.line), [44.5, 48.5]);
+  assert.equal(ladders.totals.find((r) => r.line === 48.5).game.bookOdds.kalshi.tot_over, -149);
+  assert.equal(formatWinProb(ladders.totals.find((r) => r.line === 48.5).game.bookOdds.kalshi.tot_over), "59.8%");
+  assert.equal(ladders.spreads.some((r) => r.line === -10.5), false, "other fixture alts stay out");
 }
 
 {
@@ -312,6 +361,10 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(board, /data-line-age|bookLineUpdatedAt|data-win-prob/);
   assert.match(stamp, /\/api\/betstamp-markets/);
   assert.match(stamp, /\/api\/betstamp-stream/);
+  assert.match(stamp, /data-alt-drawer/);
+  assert.match(stamp, /includeAlts: true/);
+  assert.match(stamp, /fixtureAltLadders/);
+  assert.doesNotMatch(board, /data-alt-drawer|fixtureAltLadders|includeAlts/);
   assert.doesNotMatch(stamp, /BETSTAMP_API_KEY\s*=/);
   assert.doesNotMatch(app, /BETSTAMP_API_KEY/);
   assert.match(envEx, /BETSTAMP_API_KEY=/);
