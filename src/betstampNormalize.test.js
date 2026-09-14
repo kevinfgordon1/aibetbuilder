@@ -32,7 +32,7 @@ import {
   marketUpdatedAtMs,
 } from "./betstampNormalize.js";
 import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
-import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl } from "./betstampLive.js";
+import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS } from "./betstampLive.js";
 import { getOddsBoardCell } from "./oddsBoard.js";
 
 assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
@@ -333,6 +333,7 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /include_alts=true/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
+  assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
 }
 
 {
@@ -404,7 +405,10 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, />New Odds Board</);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /data-tick-metrics/);
+  assert.match(stamp, /BETSTAMP_PREGAME_POLL_MS/);
+  assert.match(stamp, /data-snapshot-age/);
   assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
+  assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|data-snapshot-age/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /data-win-prob/);

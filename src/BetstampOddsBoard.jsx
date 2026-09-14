@@ -36,6 +36,7 @@ import {
   betstampStreamUrl,
   consumeBetstampStream,
   nextBackoffMs,
+  BETSTAMP_PREGAME_POLL_MS,
 } from "./betstampLive.js";
 
 function BookMark({ book, extra = 0, title, size = 13 }) {
@@ -174,6 +175,7 @@ export default function BetstampOddsBoard() {
   const [streamStatus, setStreamStatus] = useState("idle");
   const [tickStats, setTickStats] = useState(() => emptyTickStats());
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [snapshotAt, setSnapshotAt] = useState(null);
   const gamesRef = useRef([]);
   const fetchGen = useRef(0);
   const altCacheRef = useRef(new Map());
@@ -198,48 +200,71 @@ export default function BetstampOddsBoard() {
     setLoadError(null);
     setMissingKey(false);
     setTickStats(emptyTickStats());
+    setSnapshotAt(null);
     setStreamStatus(liveOnly ? "connecting" : "idle");
 
-    (async () => {
+    const applySnapshot = async ({ showLoading }) => {
       try {
         const res = await fetch(betstampSnapshotUrl({ league, live: liveOnly }), {
           signal: ctrl.signal,
           cache: "no-store",
         });
         const body = await res.json().catch(() => ({}));
-        if (gen !== fetchGen.current) return;
+        if (gen !== fetchGen.current) return false;
         if (body.missingKey || res.status === 503) {
           setMissingKey(true);
           setLoadError(body.error || "BETSTAMP_API_KEY is not set");
-          setGames([]);
-          setLoading(false);
-          return;
+          if (showLoading) {
+            setGames([]);
+            setLoading(false);
+          }
+          return false;
         }
         if (!res.ok || body.ok === false) {
-          setLoadError(body.error || `Snapshot failed (${res.status})`);
-          setGames([]);
-          setLoading(false);
-          return;
+          if (showLoading) {
+            setLoadError(body.error || `Snapshot failed (${res.status})`);
+            setGames([]);
+            setLoading(false);
+          }
+          return false;
         }
+        const fetchedAt = Date.now();
         const next = gamesFromBetstampSnapshot({
           markets: body.markets,
           fixtures: body.fixtures,
           teams: body.teams,
-          nowMs: Date.now(),
+          nowMs: fetchedAt,
         });
         setGames(next);
         gamesRef.current = next;
-        setLoading(false);
+        setSnapshotAt(fetchedAt);
+        setLoadError(null);
+        if (showLoading) setLoading(false);
+        return true;
       } catch (err) {
-        if (ctrl.signal.aborted || gen !== fetchGen.current) return;
-        setLoadError(err.message || "Could not load snapshot");
-        setLoading(false);
+        if (ctrl.signal.aborted || gen !== fetchGen.current) return false;
+        if (showLoading) {
+          setLoadError(err.message || "Could not load snapshot");
+          setLoading(false);
+        }
+        return false;
       }
-    })();
+    };
 
     let cancelled = false;
     let attempt = 0;
     let timer;
+    let pollTimer;
+    let pollInFlight = false;
+
+    applySnapshot({ showLoading: true }).then((ok) => {
+      if (!ok || liveOnly || cancelled || gen !== fetchGen.current) return;
+      pollTimer = setInterval(() => {
+        if (pollInFlight || cancelled || liveOnly) return;
+        pollInFlight = true;
+        applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
+      }, BETSTAMP_PREGAME_POLL_MS);
+    });
 
     const runStream = async () => {
       if (!liveOnly || cancelled) return;
@@ -291,6 +316,7 @@ export default function BetstampOddsBoard() {
       cancelled = true;
       ctrl.abort();
       clearTimeout(timer);
+      clearInterval(pollTimer);
     };
   }, [boardSport, liveOnly]);
 
@@ -581,6 +607,14 @@ export default function BetstampOddsBoard() {
               {liveOnly ? streamStatus : "snapshot"}
             </div>
           </div>
+          {!liveOnly && (
+            <div>
+              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Refreshed</div>
+              <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+                {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
+              </div>
+            </div>
+          )}
           <div>
             <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
             <div data-last-tick-age style={{ fontSize: 20, fontWeight: 800, color: ageTone(metrics.lastTickAgeMs), fontFamily: "'JetBrains Mono', monospace" }}>
@@ -785,6 +819,7 @@ export default function BetstampOddsBoard() {
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
+        {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest; LIVE uses SSE
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books
