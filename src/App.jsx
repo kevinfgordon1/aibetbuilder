@@ -10,7 +10,7 @@ import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
-import { recommendedFillFromFair } from "./comboPrefill";
+import { buildPromoComboPrefill } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
 import {
@@ -1974,31 +1974,18 @@ export default function App() {
     });
   };
 
-  const sendToComboLocks = (p) => {
+  const sendToComboLocks = (p, kind = "cash") => {
     if (!canSeeComboLocks(user)) return;
-    const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
-    let fair = "";
-    if (p.combinedProb > 0 && p.combinedProb < 1) {
-      const am = probToAmerican(p.combinedProb);
-      if (Number.isFinite(am)) fair = am;
-    }
-    const startMs = (p.legs || []).map((l) => l.commence_time).filter(Boolean)
-      .map((t) => new Date(t).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
-    setComboPrefill({
-      nonce: Date.now(),
+    const american = kind === "freebet"
+      ? p.parlayOdds
+      : decimalToAmerican(1 + p.boostedProfit / stake);
+    setComboPrefill(buildPromoComboPrefill({
       stake,
-      boost: boostedOdds,
-      fair,
-      fill: recommendedFillFromFair(fair),
-      mode: "1x",
-      starts: startMs.length ? new Date(startMs[0]).toISOString() : "",
-      label: (p.legs || []).map((l) => l.name).join(" + "),
-      labelEdited: true,
-      // Every leg — including 4+ grown legs — must reach Combo Locks.
-      legs: (p.legs || []).map((l) => ({
-        name: l.name, market: l.market, game: l.game, commence_time: l.commence_time, sport: l.sport,
-      })),
-    });
+      american,
+      combinedProb: p.combinedProb,
+      legs: p.legs,
+      kind,
+    }));
     setActiveTab("combo");
   };
 
@@ -2372,7 +2359,7 @@ export default function App() {
                     ? "Place a cash bet. If it loses, the stake comes back as site credit, counted at 70¢ on the dollar. Ranked by expected value. 1-leg no-sweats can lock guaranteed cash by hedging the other side."
                     : (numLegs === 1
                       ? "Use a free bet on a single or a parlay. 1-leg still converts to locked cash by hedging the other side. Ranked by free-bet EV — you don't risk cash; a win pays profit only."
-                      : "Use a free bet on a parlay ranked by free-bet EV. You don't risk cash (a loss costs $0); a win pays profit only — the stake is not returned. 1-leg still converts to locked cash.")}
+                      : "Use a free bet on a parlay ranked by free-bet EV. You don't risk cash (a loss costs $0); a win pays profit only — the stake is not returned. 1-leg still converts to locked cash. Multi-leg can lock via Combo Locks (combo RFQ hedges hit vs miss).")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -3033,8 +3020,11 @@ export default function App() {
                               {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
-                          <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
+                          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
+                            {canSeeComboLocks(user) && !isSingle && (
+                              <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
+                            )}
                           </div>
                           {showLock && (
                             <div onClick={e => e.stopPropagation()}>
@@ -3139,8 +3129,13 @@ export default function App() {
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                                   <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${fbAmount} free bet.
-                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg free bets cannot be locked on both sides at once."}
+                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss."}
                                 </div>
+                                {canSeeComboLocks(user) && !isSingle && (
+                                  <div style={{ marginTop: 12 }}>
+                                    <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
+                                  </div>
+                                )}
                               </>
                             )}
                           </div>

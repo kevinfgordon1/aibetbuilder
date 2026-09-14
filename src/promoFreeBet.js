@@ -37,8 +37,10 @@ export function calcFreeBetParlayEV(legs, freeBetAmount) {
   return { parlayDec, combinedProb, winProfit, ev, parlayOdds: decimalToAmerican(parlayDec) };
 }
 
-// 1-leg only. Hedge the opposite side so both outcomes return the same cash.
-// Multi-leg free bets have 2^n outcomes and cannot be locked on both sides.
+// 1-leg sportsbook 2-way only. Hedge the opposite side so both outcomes return
+// the same cash. Multi-leg free bets cannot use this per-leg 2-way (2^n
+// outcomes). Combo Locks hedges the joint hit vs miss via combo RFQ — send
+// 2+ game legs there instead (bookMiss = $0, bookHit = (D−1)×FB).
 export function calcFreeBetConversion(fbOddsAmerican, hedgeOddsAmerican, freeBetAmount) {
   if (!fbOddsAmerican || !hedgeOddsAmerican || !freeBetAmount) {
     return { hedgeStake: 0, guaranteedCash: 0, conversionRate: 0, valid: false };

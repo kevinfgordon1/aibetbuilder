@@ -1,4 +1,4 @@
-// Map Promo Builder profit-boost legs onto Combo Locks Kalshi create-form rows.
+// Map Promo Builder profit-boost / free-bet legs onto Combo Locks Kalshi create-form rows.
 // Identity only — never inserts into Supabase.
 // Recommended fill equals fair (true parlay American) when fair is finite;
 // otherwise fill stays empty. Fill is the odds you sell at AFTER the maker fee
@@ -511,4 +511,34 @@ export function recommendedFillFromFair(fair) {
 
 export function recommendedFillFromProb(combinedProb) {
   return recommendedFillFromFair(fairAmericanFromProb(combinedProb));
+}
+
+// Promo Builder → Combo Locks create-form payload. Identity only — never inserts.
+// kind "freebet" tags stake as free-bet face value and book American (not boosted).
+export function buildPromoComboPrefill({
+  stake,
+  american,
+  combinedProb,
+  legs,
+  kind = "cash",
+  nonce,
+} = {}) {
+  const fair = fairAmericanFromProb(combinedProb);
+  // Every leg — including 4+ grown legs — must reach Combo Locks.
+  const mapped = (legs || []).map((l) => ({
+    name: l.name, market: l.market, game: l.game, commence_time: l.commence_time, sport: l.sport,
+  }));
+  return {
+    nonce: nonce ?? Date.now(),
+    stake,
+    boost: american,
+    fair,
+    fill: recommendedFillFromFair(fair),
+    mode: "1x",
+    kind: kind === "freebet" ? "freebet" : "cash",
+    starts: earliestCommence(mapped),
+    label: mapped.map((l) => l.name).join(" + "),
+    labelEdited: true,
+    legs: mapped,
+  };
 }

@@ -26,7 +26,7 @@ import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrom
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
-import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip } from "./comboLockProfile";
+import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
@@ -45,10 +45,8 @@ export { OWNER_EMAIL };
 // exchange price and the taker's matched odds (they pay a 7% taker fee, 4× your 1.75% maker fee).
 const KFEE = 0.0175;
 const TAKER_FEE = 0.07;
-const aToDec = (a) => (a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a));
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
 const americanFromProb = (p) => (!(p > 0 && p < 1) ? null : p < 0.5 ? Math.round((100 * (1 - p)) / p) : -Math.round((100 * p) / (1 - p)));
-const r2 = (x) => Math.round(x * 100) / 100;
 // Floor to cents so we never quote a no_bid worse than the fill target (user buys NO).
 const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
 function nominalProbFromEff(sEff) {
@@ -62,34 +60,19 @@ function fillView(fillAfterFeeAmerican) {
   const takerProb = sNom + TAKER_FEE * sNom * (1 - sNom);
   return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: floor2(1 - sNom).toFixed(2) };
 }
-// Auto contracts cap for a hedge mode. Fill odds already include your maker fee, so no fee term.
-function hedgeCap({ stake, boostAmerican, fillAmerican, mode = "1x" }) {
-  if (!(stake > 0) || !boostAmerican || !fillAmerican) return 0;
-  const winReturn = stake * aToDec(boostAmerican);
-  const s = impliedProb(fillAmerican);
-  const riskfree = s > 0 ? Math.ceil(stake / s) : 0;
-  switch (String(mode)) {
-    case "riskfree": return riskfree;
-    case "2x": return Math.round(2 * winReturn);
-    case "3x": return Math.round(3 * winReturn);
-    case "1x":
-    default: return Math.round(winReturn);
-  }
-}
-function decideAtFill({ parlayStake, parlayAmerican, fillAmerican, fairAmerican = null, rfqContracts, hedgeMode = "1x" }) {
-  if (!(parlayStake > 0) || !parlayAmerican || !fillAmerican || !(rfqContracts > 0)) return { ok: false, reason: "bad_inputs" };
-  const dec = aToDec(parlayAmerican), winReturn = parlayStake * dec, bookHit = winReturn - parlayStake, bookMiss = -parlayStake;
-  const cap = hedgeCap({ stake: parlayStake, boostAmerican: parlayAmerican, fillAmerican, mode: hedgeMode });
-  const N = Math.min(rfqContracts, cap); // partial fill up to the cap — bigger RFQs fill to the cap
-  if (!(N > 0)) return { ok: false, reason: "zero_cap", cap };
-  const s = impliedProb(fillAmerican); // already net of your maker fee
-  const hit = bookHit + N * s - N, miss = bookMiss + N * s, worst = Math.min(hit, miss);
-  const v = fillView(fillAmerican);
-  return { ok: true, locks: worst >= 0, hit: r2(hit), miss: r2(miss), worst: r2(worst),
-    partial: rfqContracts > cap, cap, hedgeMode,
-    competitive: fairAmerican == null ? null : fillAmerican >= fairAmerican, fillAmerican,
+// Hedge cap / decide-at-fill live in comboLockProfile (cash + free-bet PnL).
+// This wrapper only attaches fillView (maker/taker fee display) for the UI.
+function decideAtFill(args) {
+  const d = decideAtFillCore(args);
+  if (!d.ok) return d;
+  const v = fillView(args.fillAmerican);
+  return {
+    ...d,
+    competitive: args.fairAmerican == null ? null : args.fillAmerican >= args.fairAmerican,
+    fillAmerican: args.fillAmerican,
     effTakerOdds: v.effTaker,
-    quote: { yes_bid: "0.00", no_bid: v.noBid, rest_remainder: false }, contracts: N };
+    quote: { yes_bid: "0.00", no_bid: v.noBid, rest_remainder: false },
+  };
 }
 const MODE_LABEL = { riskfree: "Risk-free", "1x": "1× pure hedge", "2x": "2× (directional)", "3x": "3× (directional)" };
 const QUOTE_CHIP = {
@@ -167,6 +150,8 @@ function RiskProfile({ parlay, filled }) {
   const profile = lockProfile(parlay, filled);
   if (!profile.current) return null;
   const standingLocked = profile.filled > 0 && !(profile.current.miss < 0);
+  const freeBet = profile.current.kind === "freebet";
+  const missTone = profile.current.miss < 0 ? "neg" : "pos";
   return (
     <div className="profile">
       <div className="tile">
@@ -177,6 +162,13 @@ function RiskProfile({ parlay, filled }) {
               <span className="pos">{signedMoney(profile.current.hit)}</span>
               {" / "}
               <span className="pos">{signedMoney(profile.current.miss)}</span>
+            </>
+          ) : freeBet ? (
+            <>
+              <span className="pos">{((profile.current.conversionRate || 0) * 100).toFixed(1)}%</span>
+              <span className="muted"> conversion · </span>
+              <span className="pos">{moneyAbs(profile.current.unhedgedUpside ?? profile.current.profit)}</span>
+              <span className="muted"> unhedged upside</span>
             </>
           ) : (
             <>
@@ -191,7 +183,7 @@ function RiskProfile({ parlay, filled }) {
         <div className="sub">
           If it hits <span className="pos">{signedMoney(profile.current.hit)}</span>
           {" · "}
-          if it loses <span className="neg">{signedMoney(profile.current.miss)}</span>
+          if it loses <span className={missTone}>{signedMoney(profile.current.miss)}</span>
         </div>
       </div>
       <div className="tile">
@@ -214,7 +206,7 @@ function RiskProfile({ parlay, filled }) {
         <div className="sub">
           {profile.filled > 0 && profile.soFar
             ? `so far ${signedMoney(profile.soFar.hit)} / ${signedMoney(profile.soFar.miss)}`
-            : "0 filled — still the unhedged book bet"}
+            : (isFreeBetLock(parlay) ? "0 filled — still the unhedged free bet" : "0 filled — still the unhedged book bet")}
         </div>
       </div>
     </div>
@@ -447,7 +439,7 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
 const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)" };
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
-const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", starts: "", label: "", labelEdited: false };
+const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", kind: "cash", starts: "", label: "", labelEdited: false };
 const emptyLegRows = (n) => Array.from({ length: Math.max(2, n || 2) }, (_, i) => ({ id: i + 1, gameKey: "", marketVal: "" }));
 function formFromPrefill(prefill) {
   if (!prefill) return { ...DEFAULT_FORM };
@@ -457,6 +449,7 @@ function formFromPrefill(prefill) {
     fill: prefill.fill ?? "",
     fair: prefill.fair == null || prefill.fair === "" ? "" : prefill.fair,
     mode: prefill.mode || "1x",
+    kind: lockKind(prefill),
     starts: toDatetimeLocalValue(prefill.starts),
     label: prefill.label || "",
     labelEdited: true,
@@ -810,13 +803,15 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   // live preview: auto contracts cap for the chosen mode + the outcome if filled to that cap
   const preview = useMemo(() => {
     const stake = +form.stake, boost = +form.boost, fill = +form.fill;
+    const kind = lockKind(form);
     if (!(stake > 0) || !boost || !fill) return null;
-    const cap = hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: form.mode });
-    if (!(cap > 0)) return null;
+    const cap = hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: form.mode, kind });
+    if (!(cap > 0) && !(kind === "freebet" && form.mode === "riskfree")) return null;
     const d = decideAtFill({ parlayStake: stake, parlayAmerican: boost, fillAmerican: fill,
-      fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode });
-    return { cap, d };
-  }, [form.stake, form.boost, form.fill, form.fair, form.mode]);
+      fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode, kind });
+    if (!d.ok) return null;
+    return { cap, d, kind };
+  }, [form.stake, form.boost, form.fill, form.fair, form.mode, form.kind]);
 
   // Lifecycle split (derived, so nothing can disappear):
   //   waiting  = living parlay with NO confirmed real fill yet  → "Active — waiting to be filled"
@@ -932,14 +927,25 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const addParlay = async () => {
     const legs = readLegs();
     if (legs.length < 2) return alert("Pick at least 2 legs (game + market each).");
-    if (!(+form.stake > 0) || !+form.boost || !+form.fill) return alert("Enter stake, boosted odds, and fill odds.");
-    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: +form.fill, mode: form.mode });
+    if (!(+form.stake > 0) || !+form.boost || !+form.fill) {
+      return alert(lockKind(form) === "freebet"
+        ? "Enter free-bet amount, book parlay odds, and fill odds."
+        : "Enter stake, boosted odds, and fill odds.");
+    }
+    const kind = lockKind(form);
+    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: +form.fill, mode: form.mode, kind });
     const row = { user_id: user.id, label: form.label.trim() || legs.map((l) => l.label).join(" + "),
       legs, mve_collection: games.comboCollection, leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
       parlay_stake: +form.stake, parlay_american: +form.boost, fill_american: +form.fill,
       fair_american: form.fair === "" ? null : +form.fair, hedge_mode: form.mode, max_contracts: cap, scale_factor: 1,
+      is_free_bet: kind === "freebet",
       starts_at: form.starts ? new Date(form.starts).toISOString() : null };
-    const { error } = await supabase.from("combo_parlays").insert(row);
+    let { error } = await supabase.from("combo_parlays").insert(row);
+    if (error && /is_free_bet/i.test(error.message || "")) {
+      const { is_free_bet, ...rest } = row;
+      if (is_free_bet && !/^free bet\b/i.test(rest.label || "")) rest.label = `Free bet · ${rest.label}`;
+      ({ error } = await supabase.from("combo_parlays").insert(rest));
+    }
     if (error) return alert("Save failed: " + error.message);
     setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
     setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "" })); reload();
@@ -961,7 +967,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     const p = parlays.find((x) => x.id === sim.parlayId);
     if (!p) return setSim((s) => ({ ...s, result: { kind: "empty" } }));
     const d = decideAtFill({ parlayStake: p.parlay_stake, parlayAmerican: p.parlay_american, fillAmerican: p.fill_american,
-      fairAmerican: p.fair_american, rfqContracts: +sim.size, hedgeMode: p.hedge_mode || "1x" });
+      fairAmerican: p.fair_american, rfqContracts: +sim.size, hedgeMode: p.hedge_mode || "1x", kind: lockKind(p) });
     setSim((s) => ({ ...s, result: { ...d, parlay: p, kill } }));
     if (d.ok && d.locks) {
       const sub = { user_id: user.id, parlay_id: p.id, label: p.label, fill_american: d.fillAmerican, contracts: d.contracts, worst_lock: d.worst, status: "shadow" };
@@ -1205,9 +1211,17 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               </div>
             ))}
             <button className="btn mini" onClick={addLeg}>+ Add leg</button>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+              <input
+                type="checkbox"
+                checked={lockKind(form) === "freebet"}
+                onChange={(e) => setForm({ ...form, kind: e.target.checked ? "freebet" : "cash" })}
+              />
+              Free bet — hit pays profit only (stake not returned); miss costs $0
+            </label>
             <div className="row c3" style={{ marginTop: 14 }}>
-              <div><label>Stake ($) — your bet</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
-              <div><label>Boosted odds — you have</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
+              <div><label>{lockKind(form) === "freebet" ? "Free bet ($) — face value" : "Stake ($) — your bet"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
+              <div><label>{lockKind(form) === "freebet" ? "Book parlay odds — you have" : "Boosted odds — you have"}</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
               <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Fill odds — you sell at (after maker fees)
                 {+form.fill ? <span className="info" tabIndex={0} data-tip={`The taker is matched at ${fmtAm(fillView(+form.fill).effTaker)} — worse than your ${fmtAm(+form.fill)}, because their taker fee (7%) is 4× your maker fee. That's what a taker actually gets.`}>i</span> : null}
               </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter fill odds" : undefined} /></div>
@@ -1235,11 +1249,20 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                     <div className={preview.d.miss >= 0 ? "pos" : "neg"}>{money(preview.d.miss)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay loses</span></div>
                   </div>
                 </div>
-                <div className="tile"><div className="k">Worst case at cap</div><div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>{money(preview.d.worst)}</div></div>
+                <div className="tile"><div className="k">{preview.kind === "freebet" ? "Conversion at cap" : "Worst case at cap"}</div>
+                  <div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>
+                    {preview.kind === "freebet" && +form.stake > 0
+                      ? `${((Math.max(0, preview.d.worst) / +form.stake) * 100).toFixed(1)}% · ${money(preview.d.worst)}`
+                      : money(preview.d.worst)}
+                  </div>
+                </div>
               </div>
             )}
+            {lockKind(form) === "freebet" && (
+              <div className="note ok">Free-bet lock: miss costs $0; a hit pays profit only. 1× sizes the combo RFQ so both sides return the same cash (conversion = locked cash / free-bet $).</div>
+            )}
             {preview && !preview.d.locks && form.mode !== "2x" && form.mode !== "3x" && (
-              <div className="note warn">⚠ This won't fully lock — your boosted odds and fill odds are too close. Widen the gap (bigger boost, or offer stingier fill odds).</div>
+              <div className="note warn">⚠ This won't fully lock — your {lockKind(form) === "freebet" ? "book parlay" : "boosted"} odds and fill odds are too close. Widen the gap ({lockKind(form) === "freebet" ? "longer book odds" : "bigger boost"}, or offer stingier fill odds).</div>
             )}
             {preview && (form.mode === "2x" || form.mode === "3x") && (
               <div className="note warn">⚠ Directional: {MODE_LABEL[form.mode]} sells past the hedge. You profit if the combo misses but take the loss shown above if it hits.</div>

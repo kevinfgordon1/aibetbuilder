@@ -192,7 +192,10 @@ function mkLeg(name, game, dk, bestOpp, extra = {}) {
   // Only read lock money fields when lock?.valid — {valid:false} must not throw.
   assert.match(app, /showLock = isSingle && !!p\.lock\?\.valid/);
   assert.match(app, /guaranteed cash · \{\(\(lock\?\.conversionRate \?\? 0\) \* 100\)\.toFixed\(1\)\}%/);
-  assert.match(app, /Multi-leg free bets cannot be locked on both sides at once/);
+  assert.doesNotMatch(app, /Multi-leg free bets cannot be locked on both sides at once/);
+  assert.match(app, /Send 2\+ game legs to Combo Locks to hedge the joint hit vs miss/);
+  assert.match(app, /sendToComboLocks\(p, "freebet"\)/);
+  assert.match(app, /buildPromoComboPrefill/);
   assert.match(app, /free bet can be a parlay|Use a free bet on a single or a parlay|Use a free bet on a parlay ranked by free-bet EV/);
   assert.match(app, /1-leg still converts to locked cash/);
   // Debounce FB $ the same way as stake (PROMO_SCAN_DEBOUNCE_MS).

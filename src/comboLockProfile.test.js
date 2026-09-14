@@ -14,7 +14,13 @@ import {
   moneyAbs,
   formatAmericanOdds,
   formatStakeOddsChip,
+  lockKind,
+  isFreeBetLock,
+  bookPnL,
+  hedgeCap,
+  decideAtFill,
 } from "./comboLockProfile.js";
+import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 
 // Ari + Jax — Kevin's example: risk $100 for $650 profit, ~$5 either way at 750 @ +610
 const ariJax = {
@@ -151,12 +157,127 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.match(locksSrc, /<span className="neg">\{moneyAbs\(profile\.current\.risk\)\}<\/span>/);
   assert.match(locksSrc, /<span className="pos">\{moneyAbs\(profile\.current\.profit\)\}<\/span>/);
   assert.match(locksSrc, /If it hits <span className="pos">\{signedMoney\(profile\.current\.hit\)\}<\/span>/);
-  assert.match(locksSrc, /if it loses <span className="neg">\{signedMoney\(profile\.current\.miss\)\}<\/span>/);
+  assert.match(locksSrc, /if it loses <span className=\{missTone\}>\{signedMoney\(profile\.current\.miss\)\}<\/span>/);
+  assert.match(locksSrc, /conversionRate/);
+  assert.match(locksSrc, /unhedged upside/);
+  assert.match(locksSrc, /is_free_bet/);
+  assert.match(locksSrc, /hedgeCap/);
+  assert.match(locksSrc, /decideAtFill/);
   assert.match(locksSrc, /Current \(standing\)/);
   assert.match(locksSrc, /Current \(unhedged\)/);
   assert.match(locksSrc, /profile\.filled > 0 \? "Current \(standing\)" : "Current \(unhedged\)"/);
   assert.match(locksSrc, /\.cl \.pos\{color:#34d399\}\.cl \.neg\{color:#f87171\}\.cl \.muted\{color:#8a8f98\}/);
   assert.doesNotMatch(locksSrc, /className="v num">\{profile\.current\.text\}/);
+}
+
+{
+  // Free bet: miss is $0, hit is profit only. Do not reuse cash bookMiss = −stake.
+  const fb = {
+    parlay_stake: 100,
+    parlay_american: 650,
+    fill_american: 610,
+    fair_american: 600,
+    max_contracts: 650,
+    hedge_mode: "1x",
+    is_free_bet: true,
+  };
+  assert.equal(lockKind(fb), "freebet");
+  assert.equal(isFreeBetLock(fb), true);
+  assert.equal(lockKind({ label: "Free bet · Ari + Jax" }), "freebet");
+  assert.equal(lockKind(ariJax), "cash");
+
+  const book = bookPnL({ stake: 100, american: 650, kind: "freebet" });
+  assert.equal(book.bookMiss, 0);
+  assert.ok(Math.abs(book.bookHit - 650) < 1e-9);
+  assert.ok(Math.abs(book.equalizeN - 650) < 1e-9);
+  const cashBook = bookPnL({ stake: 100, american: 650, kind: "cash" });
+  assert.equal(cashBook.bookMiss, -100);
+  assert.ok(Math.abs(cashBook.equalizeN - 750) < 1e-9);
+
+  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "1x" }), 750);
+  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "1x", kind: "freebet" }), 650);
+  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "2x", kind: "freebet" }), 1300);
+  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "riskfree", kind: "freebet" }), 0);
+
+  const unhedged = currentUnhedged(fb);
+  assert.equal(unhedged.kind, "freebet");
+  assert.equal(unhedged.risk, 0);
+  assert.equal(unhedged.miss, 0);
+  assert.equal(unhedged.hit, 650);
+  assert.equal(unhedged.profit, 650);
+  assert.equal(unhedged.conversionRate, 0);
+  assert.match(unhedged.text, /0\.0% conversion/);
+  assert.match(unhedged.text, /\$650 unhedged upside/);
+  assert.notEqual(unhedged.text, "risk $100 for $650 profit");
+
+  const pay = hedgePayoffs({
+    stake: 100, american: 650, fillAmerican: 610, contracts: 650, kind: "freebet",
+  });
+  const s = 100 / (610 + 100);
+  const locked = 650 * s;
+  assert.ok(Math.abs(pay.hit - locked) < 0.02, `fb hit ${pay.hit}`);
+  assert.ok(Math.abs(pay.miss - locked) < 0.02, `fb miss ${pay.miss}`);
+  assert.ok(pay.hit > 0 && pay.miss > 0);
+  assert.notEqual(pay.miss, hedgePayoffs({
+    stake: 100, american: 650, fillAmerican: 610, contracts: 650,
+  }).miss);
+
+  const decided = decideAtFill({
+    parlayStake: 100, parlayAmerican: 650, fillAmerican: 610,
+    rfqContracts: 650, hedgeMode: "1x", kind: "freebet",
+  });
+  assert.equal(decided.ok, true);
+  assert.equal(decided.kind, "freebet");
+  assert.equal(decided.cap, 650);
+  assert.equal(decided.contracts, 650);
+  assert.equal(decided.locks, true);
+  assert.ok(Math.abs(decided.hit - decided.miss) < 0.02);
+
+  const cashDecided = decideAtFill({
+    parlayStake: 100, parlayAmerican: 650, fillAmerican: 610,
+    rfqContracts: 750, hedgeMode: "1x",
+  });
+  assert.equal(cashDecided.cap, 750);
+  assert.ok(Math.abs(cashDecided.hit - 5.63) < 0.02);
+  assert.ok(Math.abs(cashDecided.miss - 5.63) < 0.02);
+
+  const riskfree = decideAtFill({
+    parlayStake: 100, parlayAmerican: 650, fillAmerican: 610,
+    rfqContracts: 0, hedgeMode: "riskfree", kind: "freebet",
+  });
+  assert.equal(riskfree.ok, true);
+  assert.equal(riskfree.contracts, 0);
+  assert.equal(riskfree.hit, 650);
+  assert.equal(riskfree.miss, 0);
+
+  const prof = lockProfile(fb, 0);
+  assert.equal(prof.current.kind, "freebet");
+  assert.equal(prof.current.miss, 0);
+  assert.equal(prof.target.contracts, 650);
+  assert.ok(Math.abs(prof.target.hit - prof.target.miss) < 0.02);
+  assert.equal(formatStakeOddsChip(fb), "free bet $100 @ +650");
+
+  const half = lockProfile(fb, 325);
+  assert.equal(half.current.standing, true);
+  assert.equal(half.current.kind, "freebet");
+  assert.ok(half.current.miss >= 0);
+  assert.ok(half.current.conversionRate > 0);
+  assert.ok(half.current.unhedgedUpside > 0);
+  assert.match(half.current.text, /conversion/);
+}
+
+{
+  // EV consistency: Combo Locks free-bet bookHit === promo winProfit (D−1)×FB
+  const legs = [
+    { dk: 150, bestOpp: -130 },
+    { dk: -110, bestOpp: 120 },
+  ];
+  const ev = calcFreeBetParlayEV(legs, 40);
+  const book = bookPnL({ stake: 40, american: ev.parlayOdds, kind: "freebet" });
+  assert.ok(book);
+  assert.equal(book.bookMiss, 0);
+  assert.ok(Math.abs(book.bookHit - ev.winProfit) < 0.51, `bookHit ${book.bookHit} vs winProfit ${ev.winProfit}`);
+  assert.ok(Math.abs(ev.ev - ev.combinedProb * ev.winProfit) < 1e-9);
 }
 
 console.log("comboLockProfile.test.js ok");

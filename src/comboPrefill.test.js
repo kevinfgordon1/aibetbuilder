@@ -11,6 +11,7 @@ import {
   fairAmericanFromProb,
   recommendedFillFromFair,
   recommendedFillFromProb,
+  buildPromoComboPrefill,
   flattenComboGames,
   formatGameOption,
   comboGameId,
@@ -658,6 +659,33 @@ for (const bad of [undefined, null, 0, 1, NaN, "", Infinity, -Infinity]) {
 }
 for (const emptyFair of [undefined, null, "", NaN, Infinity, -Infinity]) {
   assert.equal(recommendedFillFromFair(emptyFair), "");
+}
+
+{
+  const legs = [
+    { name: "Phillies ML", market: "ML", game: "PHI @ ATL", commence_time: "2026-08-07T23:05:00Z", sport: "baseball_mlb" },
+    { name: "Mets ML", market: "ML", game: "NYM @ WSH", commence_time: "2026-08-08T01:00:00Z", sport: "baseball_mlb" },
+  ];
+  const cash = buildPromoComboPrefill({
+    stake: 100, american: 650, combinedProb: 0.08, legs, kind: "cash", nonce: 1,
+  });
+  assert.equal(cash.kind, "cash");
+  assert.equal(cash.stake, 100);
+  assert.equal(cash.boost, 650);
+  assert.equal(cash.mode, "1x");
+  assert.equal(cash.fill, cash.fair);
+  assert.equal(cash.starts, "2026-08-07T23:05:00.000Z");
+  assert.equal(cash.legs.length, 2);
+  assert.equal(cash.legs[0].name, "Phillies ML");
+
+  const fb = buildPromoComboPrefill({
+    stake: 25, american: 1200, combinedProb: 0.08, legs, kind: "freebet", nonce: 2,
+  });
+  assert.equal(fb.kind, "freebet");
+  assert.equal(fb.stake, 25);
+  assert.equal(fb.boost, 1200);
+  assert.equal(fb.fill, fb.fair);
+  assert.equal(fb.label, "Phillies ML + Mets ML");
 }
 
 console.log("comboPrefill tests passed");
