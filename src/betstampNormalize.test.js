@@ -16,8 +16,16 @@ import {
   quantile,
   isMainMarket,
   marketSide,
+  formatCompactAge,
+  formatWinProb,
+  cellShowsWinProb,
+  lineFieldFor,
+  cellLineFields,
+  lineUpdatedAt,
+  bestLineUpdatedAt,
+  marketUpdatedAtMs,
 } from "./betstampNormalize.js";
-import { isMnfFixture, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
+import { isMnfFixture, isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl } from "./betstampLive.js";
 import { getOddsBoardCell } from "./oddsBoard.js";
 
@@ -31,6 +39,19 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(toAmericanOdds(-110), -110);
   assert.equal(toAmericanOdds(150), 150);
   assert.equal(toAmericanOdds(1.5), -200);
+  assert.equal(toAmericanOdds(0.4), 150);
+  assert.equal(toAmericanOdds(0.6), -150);
+  assert.equal(formatWinProb(150), "40.0%");
+  assert.equal(formatWinProb(-110), "52.4%");
+  assert.equal(formatWinProb(null), null);
+  assert.equal(isPmWinProbBook("kalshi"), true);
+  assert.equal(isPmWinProbBook("polymarket"), true);
+  assert.equal(isPmWinProbBook("prophetx"), true);
+  assert.equal(isPmWinProbBook("draftkings"), false);
+  assert.equal(cellShowsWinProb("kalshi"), true);
+  assert.equal(cellShowsWinProb("fanduel"), false);
+  assert.equal(cellShowsWinProb("best", [{ key: "kalshi" }]), true);
+  assert.equal(cellShowsWinProb("best", [{ key: "draftkings" }]), false);
   assert.equal(marketSize({ size: 400 }), 400);
   assert.equal(marketSize({ bet_limit: "80" }), 80);
   assert.equal(marketSize({ size: 0 }), null);
@@ -132,6 +153,95 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(next[0].bookOdds.draftkings.ml_away, 120);
   assert.equal(applied.length, 1);
   assert.equal(applied[0].bookKey, "draftkings");
+  assert.equal(lineUpdatedAt(next[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:00:00.000Z"));
+}
+
+{
+  assert.equal(formatCompactAge(1000, 1380), "380ms");
+  assert.equal(formatCompactAge(1000, 13_000), "12s");
+  assert.equal(formatCompactAge(1000, 61_000), "1m");
+  assert.equal(formatCompactAge(null, 1000), null);
+  assert.equal(lineFieldFor("moneyline", "away"), "ml_away");
+  assert.equal(lineFieldFor("total", "over"), "tot_over");
+  assert.deepEqual(cellLineFields("spr"), { top: "spr_away", bot: "spr_home" });
+  assert.equal(marketUpdatedAtMs({ updated_at: "2026-09-14T20:00:00.000Z" }, 1), Date.parse("2026-09-14T20:00:00.000Z"));
+  assert.equal(marketUpdatedAtMs({}, 42), 42);
+}
+
+{
+  const tDk = Date.parse("2026-09-14T20:00:10.000Z");
+  const tFd = Date.parse("2026-09-14T20:00:10.400Z");
+  const games = gamesFromBetstampSnapshot({
+    nowMs: tDk,
+    markets: [
+      {
+        odds: 1.91, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+        is_alt: false, odd_provider_id: 200, fixture_id: "fix-age",
+        updated_at: "2026-09-14T20:00:10.000Z",
+      },
+      {
+        odds: 1.95, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+        is_alt: false, odd_provider_id: 100, fixture_id: "fix-age",
+        updated_at: "2026-09-14T20:00:10.400Z",
+      },
+      {
+        odds: 1.80, side: "KC", side_type: "Home", bet_type: "Moneyline", period: "FT",
+        is_alt: false, odd_provider_id: 200, fixture_id: "fix-age",
+        updated_at: "2026-09-14T19:59:00.000Z",
+      },
+    ],
+    fixtures: [{
+      id: "fix-age",
+      league: "NFL",
+      start_date: "2026-09-20T17:00:00Z",
+      home_team: { name: "Chiefs", abbreviation: "KC" },
+      away_team: { name: "Broncos", abbreviation: "DEN" },
+    }],
+    teams: [],
+  });
+  const g = games[0];
+  assert.equal(lineUpdatedAt(g, "draftkings", "ml_away"), tDk);
+  assert.equal(lineUpdatedAt(g, "fanduel", "ml_away"), tFd);
+  assert.equal(lineUpdatedAt(g, "draftkings", "ml_home"), Date.parse("2026-09-14T19:59:00.000Z"));
+  // FanDuel -105 beats DK -110, so best away uses FD's newer tick.
+  const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+  const best = getOddsBoardCell({ game: g, bookKey: "best", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
+  assert.equal(best.top, -105);
+  assert.equal(bestLineUpdatedAt(g, "ml_away", best.topBooks), tFd);
+}
+
+{
+  const games = gamesFromBetstampSnapshot({
+    markets: [
+      {
+        odds: 0.4, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+        is_alt: false, odd_provider_id: 194, fixture_id: "fix-pm",
+      },
+      {
+        odds: 1.50, side: "KC", side_type: "Home", bet_type: "Moneyline", period: "FT",
+        is_alt: false, odd_provider_id: 193, fixture_id: "fix-pm",
+      },
+      {
+        odds: 2.10, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+        is_alt: false, odd_provider_id: 191, fixture_id: "fix-pm",
+      },
+    ],
+    fixtures: [{
+      id: "fix-pm",
+      league: "NFL",
+      start_date: "2026-09-20T17:00:00Z",
+      home_team: { name: "Chiefs", abbreviation: "KC" },
+      away_team: { name: "Broncos", abbreviation: "DEN" },
+    }],
+    teams: [],
+  });
+  const g = games[0];
+  assert.equal(g.bookOdds.kalshi.ml_away, 150);
+  assert.equal(g.bookOdds.polymarket.ml_home, -200);
+  assert.equal(g.bookOdds.prophetx.ml_away, 110);
+  assert.equal(formatWinProb(g.bookOdds.kalshi.ml_away), "40.0%");
+  assert.equal(formatWinProb(g.bookOdds.polymarket.ml_home), "66.7%");
+  assert.equal(formatWinProb(g.bookOdds.prophetx.ml_away), "47.6%");
 }
 
 {
@@ -194,6 +304,12 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /data-tick-metrics/);
   assert.match(stamp, /data-mnf-focus/);
+  assert.match(stamp, /data-line-age/);
+  assert.match(stamp, /bestLineUpdatedAt/);
+  assert.match(stamp, /data-win-prob/);
+  assert.match(stamp, /formatWinProb/);
+  assert.match(stamp, /cellShowsWinProb/);
+  assert.doesNotMatch(board, /data-line-age|bookLineUpdatedAt|data-win-prob/);
   assert.match(stamp, /\/api\/betstamp-markets/);
   assert.match(stamp, /\/api\/betstamp-stream/);
   assert.doesNotMatch(stamp, /BETSTAMP_API_KEY\s*=/);

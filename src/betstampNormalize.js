@@ -5,8 +5,12 @@ import {
   bookById,
   BETSTAMP_TRIAL_BOOKS,
   isMnfFixture,
+  isPmWinProbBook,
   sportByLeague,
 } from "./betstampBooks.js";
+import { americanToImpliedProb, impliedProbToAmerican } from "./blendAskLadder.js";
+
+export { isPmWinProbBook };
 
 export function decimalToAmerican(odds) {
   const n = Number(odds);
@@ -16,13 +20,30 @@ export function decimalToAmerican(odds) {
 }
 
 // Betstamp docs show decimal odds. Some feeds may already send American.
+// 0 < n < 1 is a PM contract / win probability (same as OddsBoard / unhedgedTape).
 export function toAmericanOdds(odds) {
   if (odds == null || odds === "") return null;
   const n = Number(odds);
   if (!isFinite(n) || n === 0) return null;
+  if (n > 0 && n < 1) return impliedProbToAmerican(n);
   if (n <= -100 || n >= 100) return Math.round(n);
   if (n > 1) return decimalToAmerican(n);
   return null;
+}
+
+// Same American → implied win-prob as OddsBoard.jsx / +EV (`impliedProb`).
+export function formatWinProb(american) {
+  const p = americanToImpliedProb(american);
+  if (p == null) return null;
+  return `${(p * 100).toFixed(1)}%`;
+}
+
+export function cellShowsWinProb(bookKey, books) {
+  if (isPmWinProbBook(bookKey)) return true;
+  if (bookKey === "best") {
+    return (books || []).some((b) => isPmWinProbBook(b.key));
+  }
+  return false;
 }
 
 export function marketSize(market) {
@@ -36,6 +57,73 @@ export function marketSize(market) {
 export function marketEventTime(market) {
   if (!market || typeof market !== "object") return null;
   return market.updated_at || market.updatedAt || market.timestamp || market.ts || market.created_at || null;
+}
+
+export function marketUpdatedAtMs(market, fallbackMs) {
+  const raw = marketEventTime(market);
+  if (raw != null && raw !== "") {
+    const parsed = typeof raw === "number" ? raw : Date.parse(raw);
+    if (isFinite(parsed) && parsed > 0) return parsed;
+  }
+  if (fallbackMs != null && isFinite(fallbackMs)) return fallbackMs;
+  return null;
+}
+
+export function lineFieldFor(betType, side) {
+  if (betType === "moneyline") {
+    if (side === "away") return "ml_away";
+    if (side === "home") return "ml_home";
+    if (side === "draw") return "ml_draw";
+  }
+  if (betType === "spread") {
+    if (side === "away") return "spr_away";
+    if (side === "home") return "spr_home";
+  }
+  if (betType === "total") {
+    if (side === "over") return "tot_over";
+    if (side === "under") return "tot_under";
+  }
+  return null;
+}
+
+export function cellLineFields(marketKey) {
+  if (marketKey === "ml") return { top: "ml_away", bot: "ml_home" };
+  if (marketKey === "spr") return { top: "spr_away", bot: "spr_home" };
+  if (marketKey === "tot") return { top: "tot_over", bot: "tot_under" };
+  return { top: null, bot: null };
+}
+
+export function formatCompactAge(updatedAt, now = Date.now()) {
+  if (updatedAt == null || !isFinite(updatedAt)) return null;
+  const ms = Math.max(0, now - updatedAt);
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`;
+  if (ms < 86_400_000) return `${Math.max(1, Math.round(ms / 3_600_000))}h`;
+  return `${Math.max(1, Math.round(ms / 86_400_000))}d`;
+}
+
+export function lineUpdatedAt(game, bookKey, field) {
+  if (!game || !bookKey || !field) return null;
+  const n = game.bookLineUpdatedAt?.[bookKey]?.[field];
+  return typeof n === "number" && isFinite(n) ? n : null;
+}
+
+// Best-column age: newest tick among books currently offering that best price.
+export function bestLineUpdatedAt(game, field, books) {
+  let newest = null;
+  for (const b of books || []) {
+    const t = lineUpdatedAt(game, b.key, field);
+    if (t != null && (newest == null || t > newest)) newest = t;
+  }
+  return newest;
+}
+
+function setLineUpdatedAt(game, bookKey, field, ts) {
+  if (!game || !bookKey || !field || ts == null || !isFinite(ts)) return;
+  if (!game.bookLineUpdatedAt) game.bookLineUpdatedAt = {};
+  if (!game.bookLineUpdatedAt[bookKey]) game.bookLineUpdatedAt[bookKey] = {};
+  game.bookLineUpdatedAt[bookKey][field] = ts;
 }
 
 export function asList(payload, keys) {
@@ -280,6 +368,7 @@ function newGameFromFixture(fixture, teamsById, nowMs) {
     away_score: fixture.away_score ?? fixture.awayScore ?? null,
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
+    bookLineUpdatedAt: {},
     is_mnf: false,
   };
   game.is_mnf = isMnfFixture(game, nowMs);
@@ -307,6 +396,7 @@ function stubGameFromMarket(market, nowMs) {
     away_score: null,
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
+    bookLineUpdatedAt: {},
     is_mnf: false,
   };
   game.is_mnf = isMnfFixture(game, nowMs);
@@ -324,11 +414,16 @@ export function applyMarketToGame(game, market, { receivedAt } = {}) {
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
   applySideToOdds(game.bookOdds[bookKey], betType, side, price, marketSize(market), marketLine(market));
   if (market.is_live) game.is_live = true;
-  if (receivedAt != null) game.bookUpdatedAt[bookKey] = receivedAt;
-  return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType) };
+  const ts = marketUpdatedAtMs(market, receivedAt);
+  if (ts != null) {
+    game.bookUpdatedAt[bookKey] = ts;
+    setLineUpdatedAt(game, bookKey, lineFieldFor(betType, side), ts);
+  }
+  return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: ts };
 }
 
 export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = {}) {
+  const seenAt = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
   const marketList = asList(markets, ["markets", "data"]);
   const fixtureList = asList(fixtures, ["fixtures", "data"]);
   const teamList = asList(teams, ["teams", "data"]);
@@ -346,7 +441,7 @@ export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = 
     const fid = market.fixture_id != null ? String(market.fixture_id) : null;
     if (!fid) continue;
     if (!games.has(fid)) games.set(fid, stubGameFromMarket(market, nowMs));
-    applyMarketToGame(games.get(fid), market);
+    applyMarketToGame(games.get(fid), market, { receivedAt: seenAt });
   }
 
   const list = [...games.values()].filter((g) => g.away || g.home);
@@ -365,11 +460,15 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
     ...g,
     bookOdds: { ...g.bookOdds },
     bookUpdatedAt: { ...g.bookUpdatedAt },
+    bookLineUpdatedAt: { ...g.bookLineUpdatedAt },
   }));
   for (const g of next) {
     const copy = {};
     for (const [k, v] of Object.entries(g.bookOdds || {})) copy[k] = { ...v };
     g.bookOdds = copy;
+    const lineCopy = {};
+    for (const [k, v] of Object.entries(g.bookLineUpdatedAt || {})) lineCopy[k] = { ...v };
+    g.bookLineUpdatedAt = lineCopy;
   }
   const byId = new Map(next.map((g) => [String(g.id), g]));
   const applied = [];

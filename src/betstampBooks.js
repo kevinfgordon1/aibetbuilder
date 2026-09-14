@@ -46,6 +46,13 @@ export function bookByKey(key) {
   return BOOKS_BY_KEY.get(key) || null;
 }
 
+// Kalshi / Polymarket / ProphetX — same venues the public board treats as PMs.
+export const PM_WIN_PROB_BOOKS = Object.freeze(["kalshi", "polymarket", "prophetx"]);
+
+export function isPmWinProbBook(key) {
+  return PM_WIN_PROB_BOOKS.includes(String(key || "").toLowerCase());
+}
+
 export function sportById(id) {
   return BETSTAMP_SPORTS.find((s) => s.id === id) || BETSTAMP_SPORTS[0];
 }
