@@ -1,6 +1,11 @@
 // Client SSE consumer for the same-origin Betstamp proxy. The API key never
 // leaves the server — this talks only to /api/betstamp-*.
 
+// Pregame has no SSE. Re-pull one REST snapshot on this interval so cell ages
+// track Betstamp updated_at instead of climbing from a frozen mount snapshot.
+// One poll << Betstamp's ~4 RPS (3 GETs per league).
+export const BETSTAMP_PREGAME_POLL_MS = 20_000;
+
 export function parseSseChunk(buffer) {
   const parts = String(buffer || "").split("\n\n");
   const rest = parts.pop() ?? "";

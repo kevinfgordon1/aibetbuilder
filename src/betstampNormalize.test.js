@@ -9,6 +9,9 @@ import {
   gamesFromBetstampSnapshot,
   applyStreamMarkets,
   gameVisibleOnBoard,
+  gameIsFinished,
+  fixtureCommence,
+  fixtureIsClosed,
   unwrapStreamPayload,
   emptyTickStats,
   recordTicks,
@@ -28,8 +31,8 @@ import {
   bestLineUpdatedAt,
   marketUpdatedAtMs,
 } from "./betstampNormalize.js";
-import { isMnfFixture, isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
-import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl } from "./betstampLive.js";
+import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
+import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS } from "./betstampLive.js";
 import { getOddsBoardCell } from "./oddsBoard.js";
 
 assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
@@ -90,7 +93,6 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(g.away, "Denver Broncos");
   assert.equal(g.home, "Kansas City Chiefs");
   assert.equal(g.is_live, true);
-  assert.equal(g.is_mnf, true);
   assert.equal(g.sport, "americanfootball_nfl");
   assert.equal(g.bookOdds.draftkings.ml_away, -110);
   assert.equal(g.bookOdds.draftkings.ml_home, -105);
@@ -110,27 +112,77 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
 }
 
 {
-  assert.equal(isMnfFixture({
-    away: "Denver Broncos",
-    home: "Kansas City Chiefs",
-    awayAbbr: "DEN",
-    homeAbbr: "KC",
-    commence_time: "2026-09-15T00:20:00Z",
-  }), true);
-  assert.equal(isMnfFixture({
-    away: "Broncos",
-    home: "Chiefs",
-    commence_time: "2026-12-25T01:00:00Z",
-  }), false);
-}
-
-{
   const future = new Date(Date.now() + 36 * 3600 * 1000).toISOString();
   const past = new Date(Date.now() - 3600 * 1000).toISOString();
   assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: past }, { liveOnly: true }), true);
   assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: past }, { liveOnly: false }), false);
   assert.equal(gameVisibleOnBoard({ is_live: false, commence_time: future }, { liveOnly: false }), true);
   assert.equal(gameVisibleOnBoard({ is_live: false, commence_time: past }, { liveOnly: false }), false);
+}
+
+{
+  assert.equal(fixtureCommence({ date: "2026-09-15T00:15:00Z" }), "2026-09-15T00:15:00Z");
+  assert.equal(fixtureCommence({ start_date: "2026-09-20T17:00:00Z" }), "2026-09-20T17:00:00Z");
+  assert.equal(fixtureCommence({ kickoff: "2026-09-15T00:20:00Z" }), "2026-09-15T00:20:00Z");
+  assert.equal(fixtureIsClosed({ status: "closed" }), true);
+  assert.equal(fixtureIsClosed({ status: "final" }), true);
+  assert.equal(fixtureIsClosed({ status: "completed" }), true);
+  assert.equal(fixtureIsClosed({ status: "scheduled" }), false);
+  const now = Date.parse("2026-09-14T20:00:00Z");
+  assert.equal(gameVisibleOnBoard({
+    is_live: false,
+    commence_time: null,
+    status: "closed",
+  }, { liveOnly: false, now }), false);
+  assert.equal(gameVisibleOnBoard({
+    is_live: true,
+    commence_time: "2026-09-14T17:00:00Z",
+    status: "closed",
+  }, { liveOnly: true, now }), false);
+  assert.equal(gameVisibleOnBoard({
+    is_live: false,
+    commence_time: fixtureCommence({ date: "2026-09-14T17:00:00Z" }),
+  }, { liveOnly: false, now }), false);
+  assert.equal(gameVisibleOnBoard({
+    is_live: false,
+    commence_time: fixtureCommence({ date: "2026-09-15T00:15:00Z" }),
+    status: "scheduled",
+  }, { liveOnly: false, now }), true);
+
+  const snap = gamesFromBetstampSnapshot({
+    nowMs: now,
+    fixtures: [
+      {
+        id: "sun-final",
+        league: "NFL",
+        date: "2026-09-14T17:00:00Z",
+        status: "closed",
+        away_team: { name: "Bills", abbreviation: "BUF" },
+        home_team: { name: "Jets", abbreviation: "NYJ" },
+      },
+      {
+        id: "mnf",
+        league: "NFL",
+        date: "2026-09-15T00:15:00Z",
+        status: "scheduled",
+        away_team: { name: "Denver Broncos", abbreviation: "DEN" },
+        home_team: { name: "Kansas City Chiefs", abbreviation: "KC" },
+      },
+    ],
+    markets: [
+      { odds: 1.91, side: "BUF", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: "sun-final" },
+      { odds: 1.91, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: "mnf" },
+    ],
+    teams: [],
+  });
+  assert.equal(gameIsFinished({ status: "closed", commence_time: "2026-09-15T00:15:00Z" }, now), true);
+  assert.equal(gameIsFinished({ is_live: false, commence_time: "2026-09-14T17:00:00Z" }, now), true);
+  assert.equal(gameIsFinished({ is_live: true, commence_time: "2026-09-14T17:00:00Z" }, now), false);
+  const sunday = snap.find((g) => g.id === "sun-final");
+  const upcoming = snap.find((g) => g.id === "mnf");
+  assert.equal(sunday, undefined, "closed Sunday fixtures are dropped from the slate");
+  assert.equal(upcoming.commence_time, "2026-09-15T00:15:00Z");
+  assert.equal(gameVisibleOnBoard(upcoming, { liveOnly: false, now }), true);
 }
 
 {
@@ -281,6 +333,7 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /include_alts=true/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
+  assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
 }
 
 {
@@ -352,7 +405,15 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, />New Odds Board</);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /data-tick-metrics/);
-  assert.match(stamp, /data-mnf-focus/);
+  assert.match(stamp, /BETSTAMP_PREGAME_POLL_MS/);
+  assert.match(stamp, /setInterval\(\(\) => \{/);
+  assert.match(stamp, /if \(!liveOnly\) \{\s*pollTimer = setInterval/s);
+  assert.match(stamp, /clearInterval\(pollTimer\)/);
+  assert.match(stamp, /data-snapshot-age/);
+  assert.match(stamp, /\[liveOnly, setLiveOnly\] = useState\(false\)/);
+  assert.doesNotMatch(stamp, /setLiveOnly\(\s*true\s*\)/);
+  assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
+  assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|data-snapshot-age/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /data-win-prob/);

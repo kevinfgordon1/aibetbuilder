@@ -12,7 +12,6 @@ import {
   BETSTAMP_TRIAL_BOOKS,
   BETSTAMP_SPORTS,
   BETSTAMP_DEFAULT_SPORT,
-  MNF_LABEL,
   bookByKey,
   leagueForSport,
 } from "./betstampBooks.js";
@@ -37,6 +36,7 @@ import {
   betstampStreamUrl,
   consumeBetstampStream,
   nextBackoffMs,
+  BETSTAMP_PREGAME_POLL_MS,
 } from "./betstampLive.js";
 
 function BookMark({ book, extra = 0, title, size = 13 }) {
@@ -167,9 +167,7 @@ export default function BetstampOddsBoard() {
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
   const [boardSport, setBoardSport] = useState(BETSTAMP_DEFAULT_SPORT);
-  const [liveOnly, setLiveOnly] = useState(false);
-  const [focusMnf, setFocusMnf] = useState(false);
-  const mnfAutoPinned = useRef(false);
+  const [liveOnly, setLiveOnly] = useState(false); // Pregame default. Never auto-enable LIVE.
   const [games, setGames] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [missingKey, setMissingKey] = useState(false);
@@ -177,6 +175,7 @@ export default function BetstampOddsBoard() {
   const [streamStatus, setStreamStatus] = useState("idle");
   const [tickStats, setTickStats] = useState(() => emptyTickStats());
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [snapshotAt, setSnapshotAt] = useState(null);
   const gamesRef = useRef([]);
   const fetchGen = useRef(0);
   const altCacheRef = useRef(new Map());
@@ -187,14 +186,6 @@ export default function BetstampOddsBoard() {
   const [altError, setAltError] = useState(null);
 
   useEffect(() => { gamesRef.current = games; }, [games]);
-
-  useEffect(() => {
-    if (mnfAutoPinned.current) return;
-    if (games.some((g) => g.is_mnf)) {
-      mnfAutoPinned.current = true;
-      setFocusMnf(true);
-    }
-  }, [games]);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 200);
@@ -209,49 +200,74 @@ export default function BetstampOddsBoard() {
     setLoadError(null);
     setMissingKey(false);
     setTickStats(emptyTickStats());
+    setSnapshotAt(null);
     setStreamStatus(liveOnly ? "connecting" : "idle");
-    mnfAutoPinned.current = false;
 
-    (async () => {
+    const applySnapshot = async ({ showLoading }) => {
       try {
         const res = await fetch(betstampSnapshotUrl({ league, live: liveOnly }), {
           signal: ctrl.signal,
           cache: "no-store",
         });
         const body = await res.json().catch(() => ({}));
-        if (gen !== fetchGen.current) return;
+        if (gen !== fetchGen.current) return false;
         if (body.missingKey || res.status === 503) {
           setMissingKey(true);
           setLoadError(body.error || "BETSTAMP_API_KEY is not set");
-          setGames([]);
-          setLoading(false);
-          return;
+          if (showLoading) {
+            setGames([]);
+            setLoading(false);
+          }
+          return false;
         }
         if (!res.ok || body.ok === false) {
-          setLoadError(body.error || `Snapshot failed (${res.status})`);
-          setGames([]);
-          setLoading(false);
-          return;
+          if (showLoading) {
+            setLoadError(body.error || `Snapshot failed (${res.status})`);
+            setGames([]);
+            setLoading(false);
+          }
+          return false;
         }
+        const fetchedAt = Date.now();
         const next = gamesFromBetstampSnapshot({
           markets: body.markets,
           fixtures: body.fixtures,
           teams: body.teams,
-          nowMs: Date.now(),
+          nowMs: fetchedAt,
         });
         setGames(next);
         gamesRef.current = next;
-        setLoading(false);
+        setSnapshotAt(fetchedAt);
+        setLoadError(null);
+        if (showLoading) setLoading(false);
+        return true;
       } catch (err) {
-        if (ctrl.signal.aborted || gen !== fetchGen.current) return;
-        setLoadError(err.message || "Could not load snapshot");
-        setLoading(false);
+        if (ctrl.signal.aborted || gen !== fetchGen.current) return false;
+        if (showLoading) {
+          setLoadError(err.message || "Could not load snapshot");
+          setLoading(false);
+        }
+        return false;
       }
-    })();
+    };
 
     let cancelled = false;
     let attempt = 0;
     let timer;
+    let pollTimer;
+    let pollInFlight = false;
+
+    // Pregame: always run the interval while liveOnly is false. Do not wait
+    // for the first snapshot — a hung first GET must not freeze ages.
+    // LIVE: no poller; SSE below. Cleanup on LIVE / sport change aborts both.
+    applySnapshot({ showLoading: true });
+    if (!liveOnly) {
+      pollTimer = setInterval(() => {
+        if (pollInFlight || cancelled) return;
+        pollInFlight = true;
+        applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
+      }, BETSTAMP_PREGAME_POLL_MS);
+    }
 
     const runStream = async () => {
       if (!liveOnly || cancelled) return;
@@ -303,6 +319,7 @@ export default function BetstampOddsBoard() {
       cancelled = true;
       ctrl.abort();
       clearTimeout(timer);
+      clearInterval(pollTimer);
     };
   }, [boardSport, liveOnly]);
 
@@ -397,7 +414,6 @@ export default function BetstampOddsBoard() {
     return games.filter((g) => {
       if (g.sport !== boardSport) return false;
       if (!gameVisibleOnBoard(g, { liveOnly, now: nowMs })) return false;
-      if (focusMnf && !g.is_mnf) return false;
       if (!q) return true;
       return (
         g.away.toLowerCase().includes(q) ||
@@ -406,10 +422,7 @@ export default function BetstampOddsBoard() {
         (g.homeAbbr || "").toLowerCase().includes(q)
       );
     });
-  }, [games, boardSport, liveOnly, focusMnf, search, nowMs]);
-
-  const mnfOnBoard = games.some((g) => g.is_mnf);
-  const mnfLive = games.some((g) => g.is_mnf && g.is_live);
+  }, [games, boardSport, liveOnly, search, nowMs]);
 
   const grouped = {};
   filteredGames.forEach((g) => {
@@ -577,23 +590,6 @@ export default function BetstampOddsBoard() {
           >
             {liveOnly ? "● LIVE" : "Pregame"}
           </button>
-          <button
-            type="button"
-            onClick={() => setFocusMnf((v) => !v)}
-            data-mnf-focus={focusMnf ? "on" : "off"}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 999,
-              border: focusMnf ? "1px solid rgba(234,179,8,0.5)" : "1px solid rgba(255,255,255,0.1)",
-              background: focusMnf ? "rgba(234,179,8,0.12)" : "rgba(255,255,255,0.04)",
-              color: focusMnf ? "#fbbf24" : "#9ca3af",
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-            }}
-          >
-            {MNF_LABEL}{mnfLive ? " · live" : mnfOnBoard ? " · posted" : ""}
-          </button>
         </div>
       </div>
 
@@ -614,6 +610,14 @@ export default function BetstampOddsBoard() {
               {liveOnly ? streamStatus : "snapshot"}
             </div>
           </div>
+          {!liveOnly && (
+            <div>
+              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Refreshed</div>
+              <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+                {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
+              </div>
+            </div>
+          )}
           <div>
             <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
             <div data-last-tick-age style={{ fontSize: 20, fontWeight: 800, color: ageTone(metrics.lastTickAgeMs), fontFamily: "'JetBrains Mono', monospace" }}>
@@ -719,9 +723,7 @@ export default function BetstampOddsBoard() {
                 <td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
                   {missingKey
                     ? "Waiting on BETSTAMP_API_KEY"
-                    : focusMnf
-                      ? `No ${MNF_LABEL} row in this snapshot — turn off the MNF filter to see the rest of the slate.`
-                      : `No ${liveOnly ? "live" : ""} games found${search ? ` for "${search}"` : ""}`}
+                    : `No ${liveOnly ? "live" : ""} games found${search ? ` for "${search}"` : ""}`}
                 </td>
               </tr>
             )}
@@ -736,12 +738,11 @@ export default function BetstampOddsBoard() {
                     <tr
                       key={game.id}
                       data-fixture={game.id}
-                      data-mnf={game.is_mnf ? "1" : "0"}
                       data-open-alts={openGame?.id === game.id ? "1" : "0"}
                       onClick={() => openAlts(game)}
-                      style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", outline: game.is_mnf ? "1px solid rgba(234,179,8,0.25)" : "none", cursor: "pointer" }}
+                      style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
                     >
-                      <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: game.is_mnf ? "#14110a" : "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
+                      <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                         <div style={{ padding: "8px 16px 4px" }}>
                           <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>
                             {game.is_live ? (
@@ -749,7 +750,6 @@ export default function BetstampOddsBoard() {
                             ) : (
                               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
                             )}
-                            {game.is_mnf && <span style={{ marginLeft: 8, color: "#fbbf24", fontWeight: 700 }}>MNF</span>}
                           </div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 6 }}>
                             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
@@ -822,6 +822,7 @@ export default function BetstampOddsBoard() {
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
+        {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest; LIVE uses SSE
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books
