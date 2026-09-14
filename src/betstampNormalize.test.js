@@ -9,6 +9,7 @@ import {
   gamesFromBetstampSnapshot,
   applyStreamMarkets,
   gameVisibleOnBoard,
+  gameIsFinished,
   fixtureCommence,
   fixtureIsClosed,
   unwrapStreamPayload,
@@ -30,7 +31,7 @@ import {
   bestLineUpdatedAt,
   marketUpdatedAtMs,
 } from "./betstampNormalize.js";
-import { isMnfFixture, isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
+import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl } from "./betstampLive.js";
 import { getOddsBoardCell } from "./oddsBoard.js";
 
@@ -92,7 +93,6 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(g.away, "Denver Broncos");
   assert.equal(g.home, "Kansas City Chiefs");
   assert.equal(g.is_live, true);
-  assert.equal(g.is_mnf, true);
   assert.equal(g.sport, "americanfootball_nfl");
   assert.equal(g.bookOdds.draftkings.ml_away, -110);
   assert.equal(g.bookOdds.draftkings.ml_home, -105);
@@ -109,21 +109,6 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(ml.bot, -105);
   const sprBest = getOddsBoardCell({ game: g, bookKey: "best", market: "spr", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
   assert.equal(sprBest.top, 105);
-}
-
-{
-  assert.equal(isMnfFixture({
-    away: "Denver Broncos",
-    home: "Kansas City Chiefs",
-    awayAbbr: "DEN",
-    homeAbbr: "KC",
-    commence_time: "2026-09-15T00:20:00Z",
-  }), true);
-  assert.equal(isMnfFixture({
-    away: "Broncos",
-    home: "Chiefs",
-    commence_time: "2026-12-25T01:00:00Z",
-  }), false);
 }
 
 {
@@ -190,13 +175,14 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
     ],
     teams: [],
   });
+  assert.equal(gameIsFinished({ status: "closed", commence_time: "2026-09-15T00:15:00Z" }, now), true);
+  assert.equal(gameIsFinished({ is_live: false, commence_time: "2026-09-14T17:00:00Z" }, now), true);
+  assert.equal(gameIsFinished({ is_live: true, commence_time: "2026-09-14T17:00:00Z" }, now), false);
   const sunday = snap.find((g) => g.id === "sun-final");
-  const mnf = snap.find((g) => g.id === "mnf");
-  assert.equal(sunday.commence_time, "2026-09-14T17:00:00Z");
-  assert.equal(sunday.status, "closed");
-  assert.equal(mnf.commence_time, "2026-09-15T00:15:00Z");
-  assert.equal(gameVisibleOnBoard(sunday, { liveOnly: false, now }), false);
-  assert.equal(gameVisibleOnBoard(mnf, { liveOnly: false, now }), true);
+  const upcoming = snap.find((g) => g.id === "mnf");
+  assert.equal(sunday, undefined, "closed Sunday fixtures are dropped from the slate");
+  assert.equal(upcoming.commence_time, "2026-09-15T00:15:00Z");
+  assert.equal(gameVisibleOnBoard(upcoming, { liveOnly: false, now }), true);
 }
 
 {
@@ -418,7 +404,7 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, />New Odds Board</);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /data-tick-metrics/);
-  assert.match(stamp, /data-mnf-focus/);
+  assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /data-win-prob/);

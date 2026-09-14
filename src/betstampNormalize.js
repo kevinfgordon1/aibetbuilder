@@ -4,7 +4,6 @@
 import {
   bookById,
   BETSTAMP_TRIAL_BOOKS,
-  isMnfFixture,
   isPmWinProbBook,
   sportByLeague,
 } from "./betstampBooks.js";
@@ -402,7 +401,7 @@ function cloneGameShell(game) {
     is_live: game.is_live,
     home_score: game.home_score,
     away_score: game.away_score,
-    is_mnf: game.is_mnf,
+    status: game.status,
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
     bookLineUpdatedAt: {},
@@ -531,9 +530,7 @@ function newGameFromFixture(fixture, teamsById, nowMs) {
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
     bookLineUpdatedAt: {},
-    is_mnf: false,
   };
-  game.is_mnf = isMnfFixture(game, nowMs);
   return game;
 }
 
@@ -560,9 +557,7 @@ function stubGameFromMarket(market, nowMs) {
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
     bookLineUpdatedAt: {},
-    is_mnf: false,
   };
-  game.is_mnf = isMnfFixture(game, nowMs);
   return game;
 }
 
@@ -593,25 +588,28 @@ export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = 
   const teamList = asList(teams, ["teams", "data"]);
   const teamsById = indexById(teamList);
   const games = new Map();
+  const closedIds = new Set();
 
   for (const fixture of fixtureList) {
     const id = fixture?.id ?? fixture?.fixture_id;
     if (id == null) continue;
+    if (fixtureIsClosed(fixture)) {
+      closedIds.add(String(id));
+      continue;
+    }
     games.set(String(id), newGameFromFixture(fixture, teamsById, nowMs));
   }
 
   for (const market of marketList) {
     if (!isMainMarket(market)) continue;
     const fid = market.fixture_id != null ? String(market.fixture_id) : null;
-    if (!fid) continue;
+    if (!fid || closedIds.has(fid)) continue;
     if (!games.has(fid)) games.set(fid, stubGameFromMarket(market, nowMs));
     applyMarketToGame(games.get(fid), market, { receivedAt: seenAt });
   }
 
-  const list = [...games.values()].filter((g) => g.away || g.home);
+  const list = [...games.values()].filter((g) => (g.away || g.home) && !gameIsFinished(g, seenAt));
   list.sort((a, b) => {
-    if (a.is_mnf && !b.is_mnf) return -1;
-    if (!a.is_mnf && b.is_mnf) return 1;
     const ta = Date.parse(a.commence_time) || 0;
     const tb = Date.parse(b.commence_time) || 0;
     return ta - tb;
@@ -636,32 +634,38 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
   }
   const byId = new Map(next.map((g) => [String(g.id), g]));
   const applied = [];
+  const seenAt = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
   for (const market of markets || []) {
     const fid = market?.fixture_id != null ? String(market.fixture_id) : null;
     if (!fid) continue;
     if (!byId.has(fid)) {
       const stub = stubGameFromMarket(market, nowMs);
+      if (gameIsFinished(stub, seenAt)) continue;
       byId.set(fid, stub);
       next.push(stub);
     }
-    const hit = applyMarketToGame(byId.get(fid), market, { receivedAt });
+    const game = byId.get(fid);
+    if (gameIsFinished(game, seenAt)) continue;
+    const hit = applyMarketToGame(game, market, { receivedAt });
     if (hit) applied.push({ fixtureId: fid, ...hit, eventTime: marketEventTime(market) });
   }
-  next.sort((a, b) => {
-    if (a.is_mnf && !b.is_mnf) return -1;
-    if (!a.is_mnf && b.is_mnf) return 1;
-    return (Date.parse(a.commence_time) || 0) - (Date.parse(b.commence_time) || 0);
-  });
-  return { games: next, applied };
+  const kept = next.filter((g) => !gameIsFinished(g, seenAt));
+  kept.sort((a, b) => (Date.parse(a.commence_time) || 0) - (Date.parse(b.commence_time) || 0));
+  return { games: kept, applied };
+}
+
+export function gameIsFinished(game, now = Date.now()) {
+  if (!game) return true;
+  if (fixtureIsClosed(game)) return true;
+  if (game.is_live) return false;
+  const t = Date.parse(game.commence_time);
+  return isFinite(t) && t <= now;
 }
 
 export function gameVisibleOnBoard(game, { liveOnly, now = Date.now() } = {}) {
-  if (!game) return false;
-  if (fixtureIsClosed(game)) return false;
+  if (!game || gameIsFinished(game, now)) return false;
   if (liveOnly) return !!game.is_live;
   if (game.is_live) return false;
-  const t = Date.parse(game.commence_time);
-  if (isFinite(t) && t <= now) return false;
   return true;
 }
 

@@ -30,13 +30,6 @@ export const BETSTAMP_DEFAULT_SPORT = "americanfootball_nfl";
 export const BETSTAMP_MAIN_BET_TYPES = Object.freeze(["moneyline", "spread", "total"]);
 export const BETSTAMP_MAIN_PERIOD = "FT";
 
-export const MNF_LABEL = "Monday Night Football";
-export const MNF_AWAY_ALIASES = Object.freeze(["broncos", "denver", "den"]);
-export const MNF_HOME_ALIASES = Object.freeze(["chiefs", "kansas city", "kc"]);
-// DEN @ KC, 2026-09-14 ET / kickoff around 2026-09-15 UTC.
-export const MNF_WINDOW_START_MS = Date.parse("2026-09-14T12:00:00-04:00");
-export const MNF_WINDOW_END_MS = Date.parse("2026-09-15T08:00:00-04:00");
-
 export function bookById(id) {
   const n = Number(id);
   return BOOKS_BY_ID.get(n) || null;
@@ -64,31 +57,4 @@ export function sportByLeague(league) {
 
 export function leagueForSport(sportId) {
   return sportById(sportId).league;
-}
-
-function normName(s) {
-  return String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-export function nameMatchesAliases(name, abbr, aliases) {
-  const n = normName(name);
-  const a = normName(abbr);
-  for (const alias of aliases) {
-    if (n && (n === alias || n.includes(alias))) return true;
-    if (a && a === alias) return true;
-  }
-  return false;
-}
-
-export function isMnfFixture(game, nowMs) {
-  if (!game) return false;
-  const awayHit = nameMatchesAliases(game.away, game.awayAbbr, MNF_AWAY_ALIASES);
-  const homeHit = nameMatchesAliases(game.home, game.homeAbbr, MNF_HOME_ALIASES);
-  if (!awayHit || !homeHit) return false;
-  const t = Date.parse(game.commence_time);
-  if (!isFinite(t)) return true;
-  if (t >= MNF_WINDOW_START_MS && t <= MNF_WINDOW_END_MS) return true;
-  // If Kevin opens the board after the window, still pin tonight's namesake.
-  if (nowMs != null && nowMs >= MNF_WINDOW_START_MS && nowMs <= MNF_WINDOW_END_MS) return true;
-  return false;
 }
