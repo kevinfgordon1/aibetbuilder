@@ -9,6 +9,8 @@ import {
   getOddsBoardCell,
   getBestForGame,
   pickBestFromPriceMap,
+  LIVE_BEST_ODDS_MAX_AGE_MS,
+  isFreshForLiveBestOdds,
 } from "./oddsBoard.js";
 
 const require = createRequire(import.meta.url);
@@ -267,6 +269,167 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(onlyDk.top, 110);
   assert.equal(onlyDk.topBooks[0].key, "draftkings");
   assert.equal(onlyDk.topSize, null);
+}
+
+// ── live Best Odds: quotes ≥ 4 minutes old cannot win
+{
+  assert.equal(LIVE_BEST_ODDS_MAX_AGE_MS, 240_000);
+  const now = 1_700_000_000_000;
+  assert.equal(isFreshForLiveBestOdds(now - 239_999, now), true);
+  assert.equal(isFreshForLiveBestOdds(now - 240_000, now), false);
+  assert.equal(isFreshForLiveBestOdds(now - 300_000, now), false);
+  assert.equal(isFreshForLiveBestOdds(null, now), false);
+  assert.equal(isFreshForLiveBestOdds(undefined, now), false);
+
+  const freshPick = pickBestSide([
+    { key: "draftkings", price: 120, updatedAt: now - 241_000 },
+    { key: "kalshi", price: 105, updatedAt: now - 1_000 },
+  ], { nowMs: now, maxAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS });
+  assert.equal(freshPick.price, 105);
+  assert.equal(freshPick.primaryKey, "kalshi");
+
+  const noneFresh = pickBestSide([
+    { key: "draftkings", price: 120, updatedAt: now - 241_000 },
+    { key: "kalshi", price: 105, updatedAt: now - 300_000 },
+  ], { nowMs: now, maxAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS });
+  assert.equal(noneFresh.price, null);
+  assert.equal(noneFresh.primaryKey, null);
+  assert.deepEqual(noneFresh.books, []);
+
+  const liveGame = {
+    sport: "americanfootball_nfl",
+    is_live: true,
+    bookOdds: {
+      draftkings: { ml_away: 110, ml_home: -120, spr_away: 105, spr_home: -115, tot_over: 100, tot_under: -120 },
+      kalshi: { ml_away: 100, ml_home: -110, spr_away: -110, spr_home: -105, tot_over: -110, tot_under: -105, ml_away_size: 400 },
+    },
+    bookLineUpdatedAt: {
+      draftkings: {
+        ml_away: now - 241_000,
+        ml_home: now - 5_000,
+        spr_away: now - 300_000,
+        spr_home: now - 2_000,
+        tot_over: now - 241_000,
+        tot_under: now - 1_000,
+      },
+      kalshi: {
+        ml_away: now - 4_000,
+        ml_home: now - 300_000,
+        spr_away: now - 3_000,
+        spr_home: now - 400_000,
+        tot_over: now - 8_000,
+        tot_under: now - 400_000,
+      },
+    },
+  };
+  const liveOpts = { nowMs: now, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+
+  const mlBest = getOddsBoardCell({
+    game: liveGame,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(mlBest.top, 100, "stale DK +110 must not win live Best");
+  assert.equal(mlBest.topBooks[0].key, "kalshi");
+  assert.equal(mlBest.topSize, 400);
+  assert.equal(mlBest.bot, -120, "fresh DK home still wins");
+  assert.equal(mlBest.botBooks[0].key, "draftkings");
+
+  const dkCell = getOddsBoardCell({
+    game: liveGame,
+    bookKey: "draftkings",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(dkCell.top, 110, "stale book cell still displays its price");
+
+  const sprBest = getOddsBoardCell({
+    game: liveGame,
+    bookKey: "best",
+    market: "spr",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(sprBest.top, -110);
+  assert.equal(sprBest.topBooks[0].key, "kalshi");
+  assert.equal(sprBest.bot, -115);
+  assert.equal(sprBest.botBooks[0].key, "draftkings");
+
+  const totBest = getOddsBoardCell({
+    game: liveGame,
+    bookKey: "best",
+    market: "tot",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(totBest.top, -110);
+  assert.equal(totBest.topBooks[0].key, "kalshi");
+  assert.equal(totBest.bot, -120);
+  assert.equal(totBest.botBooks[0].key, "draftkings");
+
+  const allStale = {
+    ...liveGame,
+    bookLineUpdatedAt: {
+      draftkings: { ml_away: now - 241_000 },
+      kalshi: { ml_away: now - 300_000 },
+    },
+  };
+  const emptyBest = getOddsBoardCell({
+    game: allStale,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(emptyBest.top, null);
+  assert.deepEqual(emptyBest.topBooks, []);
+
+  const noTs = {
+    sport: "americanfootball_nfl",
+    is_live: true,
+    bookOdds: { draftkings: { ml_away: 200 } },
+  };
+  const noTsBest = getOddsBoardCell({
+    game: noTs,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(noTsBest.top, null, "live quote with no last-update cannot win Best");
+
+  const pregame = getOddsBoardCell({
+    game: { ...liveGame, is_live: false },
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    ...liveOpts,
+  });
+  assert.equal(pregame.top, 110, "pregame Best still uses the raw number");
+  assert.equal(pregame.topBooks[0].key, "draftkings");
+
+  const ungated = getOddsBoardCell({
+    game: liveGame,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+  });
+  assert.equal(ungated.top, 110, "public board / no freshness opts stays ungated");
+
+  const { bestAway, bestHome } = getBestForGame(liveGame, "ml", selected, ALL_BOOKS, liveOpts);
+  assert.equal(bestAway, 100);
+  assert.equal(bestHome, -120);
 }
 
 console.log("oddsBoard.test.js ok");

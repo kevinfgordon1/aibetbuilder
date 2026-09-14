@@ -33,7 +33,7 @@ import {
 } from "./betstampNormalize.js";
 import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS } from "./betstampLive.js";
-import { getOddsBoardCell } from "./oddsBoard.js";
+import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS } from "./oddsBoard.js";
 
 assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
 assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
@@ -266,6 +266,54 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
 }
 
 {
+  // Live Best Odds uses the same per-line bookLineUpdatedAt clock: a 4+ minute
+  // stale number cannot win, but the book cell still keeps its price + age.
+  const now = Date.parse("2026-09-14T20:10:00.000Z");
+  const games = gamesFromBetstampSnapshot({
+    nowMs: now,
+    markets: [
+      {
+        odds: 2.20, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+        is_alt: false, is_live: true, odd_provider_id: 200, fixture_id: "fix-stale-best",
+        updated_at: "2026-09-14T20:05:00.000Z",
+      },
+      {
+        odds: 2.05, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+        is_alt: false, is_live: true, odd_provider_id: 100, fixture_id: "fix-stale-best",
+        updated_at: "2026-09-14T20:09:50.000Z",
+      },
+    ],
+    fixtures: [{
+      id: "fix-stale-best",
+      league: "NFL",
+      is_live: true,
+      start_date: "2026-09-14T18:00:00Z",
+      home_team: { name: "Chiefs", abbreviation: "KC" },
+      away_team: { name: "Broncos", abbreviation: "DEN" },
+    }],
+    teams: [],
+  });
+  const g = games[0];
+  assert.equal(g.is_live, true);
+  assert.equal(g.bookOdds.draftkings.ml_away, 120);
+  assert.equal(g.bookOdds.fanduel.ml_away, 105);
+  const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+  const liveOpts = { nowMs: now, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+  const best = getOddsBoardCell({
+    game: g, bookKey: "best", market: "ml",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, ...liveOpts,
+  });
+  assert.equal(best.top, 105);
+  assert.equal(best.topBooks[0].key, "fanduel");
+  const dk = getOddsBoardCell({
+    game: g, bookKey: "draftkings", market: "ml",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, ...liveOpts,
+  });
+  assert.equal(dk.top, 120);
+  assert.equal(lineUpdatedAt(g, "draftkings", "ml_away"), Date.parse("2026-09-14T20:05:00.000Z"));
+}
+
+{
   const games = gamesFromBetstampSnapshot({
     markets: [
       {
@@ -418,6 +466,9 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|data-snapshot-age/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /bestLineUpdatedAt/);
+  assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
+  assert.match(stamp, /maxBestAgeMs/);
+  assert.doesNotMatch(board, /LIVE_BEST_ODDS_MAX_AGE_MS|maxBestAgeMs/);
   assert.match(stamp, /data-win-prob/);
   assert.match(stamp, /formatWinProb/);
   assert.match(stamp, /cellShowsWinProb/);
