@@ -257,14 +257,17 @@ export default function BetstampOddsBoard() {
     let pollTimer;
     let pollInFlight = false;
 
-    applySnapshot({ showLoading: true }).then((ok) => {
-      if (!ok || liveOnly || cancelled || gen !== fetchGen.current) return;
+    // Pregame: always run the interval while liveOnly is false. Do not wait
+    // for the first snapshot — a hung first GET must not freeze ages.
+    // LIVE: no poller; SSE below. Cleanup on LIVE / sport change aborts both.
+    applySnapshot({ showLoading: true });
+    if (!liveOnly) {
       pollTimer = setInterval(() => {
-        if (pollInFlight || cancelled || liveOnly) return;
+        if (pollInFlight || cancelled) return;
         pollInFlight = true;
         applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
       }, BETSTAMP_PREGAME_POLL_MS);
-    });
+    }
 
     const runStream = async () => {
       if (!liveOnly || cancelled) return;
