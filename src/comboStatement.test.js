@@ -82,6 +82,20 @@ const ariJax = {
 }
 
 {
+  const fb = { ...ariJax, is_free_bet: true, max_contracts: 650 };
+  const unfilledMiss = lockStatementLine({
+    parlay: { ...fb, kalshi_result: "no" },
+    filled: 0,
+  });
+  assert.equal(unfilledMiss.pnl, 0, "free-bet miss costs $0, not −stake");
+  const unfilledHit = lockStatementLine({
+    parlay: { ...fb, kalshi_result: "yes" },
+    filled: 0,
+  });
+  assert.equal(unfilledHit.pnl, 650);
+}
+
+{
   const pending = lockStatementLine({
     parlay: { ...ariJax, legs: [{}, {}] },
     filled: 0,
