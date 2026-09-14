@@ -883,7 +883,6 @@ function LandingFull({ onSignIn, onBack }) {
         .lf-brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
         .lf-logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg,#3b82f6,#8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 800; }
         .lf-bn { font-size: 17px; font-weight: 700; letter-spacing: -0.4px; }
-        .lf-bs { font-size: 11px; color: #6b7280; }
         .lf-navcta { background: #fff; color: #111; border: none; border-radius: 9px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
         .lf-hero { text-align: center; padding: 84px 24px 60px; }
         .lf-hero::before { content: ""; position: absolute; top: -10%; left: 50%; transform: translateX(-50%); width: 900px; height: 600px; background: radial-gradient(closest-side, rgba(59,130,246,0.18), rgba(139,92,246,0.10) 45%, transparent 70%); filter: blur(20px); z-index: -1; }
@@ -946,7 +945,7 @@ function LandingFull({ onSignIn, onBack }) {
       <div className="lf-nav">
         <div className="lf-brand" onClick={onBack} title="Back to preview">
           <div className="lf-logo">B</div>
-          <div><div className="lf-bn">AI Bet Builder</div><div className="lf-bs">aibetbuilder.io</div></div>
+          <div className="lf-bn">AI Bet Builder</div>
         </div>
         <button className="lf-navcta" onClick={onSignIn}>Sign in</button>
       </div>
@@ -2080,10 +2079,7 @@ export default function App() {
       <div data-guard-allow="true" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
-            <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>aibetbuilder.io</div>
-          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {fetchedAt && (
