@@ -24,6 +24,10 @@ import {
   emptyTickStats,
   recordTicks,
   summarizeTickStats,
+  formatCompactAge,
+  cellLineFields,
+  lineUpdatedAt,
+  bestLineUpdatedAt,
 } from "./betstampNormalize.js";
 import {
   betstampSnapshotUrl,
@@ -91,10 +95,12 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-function OddsSide({ price, size, line, books, allBooks, showBestMark }) {
+function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
+  const age = price == null ? null : formatCompactAge(updatedAt, nowMs);
+  const clock = updatedAt ? fmtClock(updatedAt) : "";
   return (
     <>
       {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
@@ -105,6 +111,15 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark }) {
         )}
         <LiquidityCue size={size} inline />
       </div>
+      {age && (
+        <div
+          data-line-age={age}
+          title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
+          style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}
+        >
+          {age}
+        </div>
+      )}
     </>
   );
 }
@@ -530,9 +545,16 @@ export default function BetstampOddsBoard() {
                       </td>
                       {visibleBooks.map((b) => {
                         const cell = getCell(game, b.key);
+                        const fields = cellLineFields(market);
                         const isBestAway = b.key !== "best" && cell.top !== null && cell.top === bestAway;
                         const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
                         const isBestCol = b.key === "best";
+                        const topUpdatedAt = isBestCol
+                          ? bestLineUpdatedAt(game, fields.top, cell.topBooks)
+                          : lineUpdatedAt(game, b.key, fields.top);
+                        const botUpdatedAt = isBestCol
+                          ? bestLineUpdatedAt(game, fields.bot, cell.botBooks)
+                          : lineUpdatedAt(game, b.key, fields.bot);
                         return (
                           <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
                             <div style={{ display: "flex", flexDirection: "column" }}>
@@ -544,6 +566,11 @@ export default function BetstampOddsBoard() {
                                   books={cell.topBooks}
                                   allBooks={books}
                                   showBestMark={isBestCol}
+                                  updatedAt={topUpdatedAt}
+                                  nowMs={nowMs}
+                                  ageTitle={isBestCol
+                                    ? "Newest update among books offering this best price"
+                                    : undefined}
                                 />
                               </div>
                               <div style={{ ...sideStyle(isBestCol, isBestHome, cell.bot === null), borderBottom: "none" }}>
@@ -554,6 +581,11 @@ export default function BetstampOddsBoard() {
                                   books={cell.botBooks}
                                   allBooks={books}
                                   showBestMark={isBestCol}
+                                  updatedAt={botUpdatedAt}
+                                  nowMs={nowMs}
+                                  ageTitle={isBestCol
+                                    ? "Newest update among books offering this best price"
+                                    : undefined}
                                 />
                               </div>
                             </div>
@@ -574,6 +606,7 @@ export default function BetstampOddsBoard() {
         {" · "}Green = best available odds across selected books
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
         {" · "}$ under a price is that book's size / limit when the feed sends it
+        {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
       </div>
     </div>
   );
