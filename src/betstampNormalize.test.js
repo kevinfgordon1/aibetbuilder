@@ -9,6 +9,8 @@ import {
   gamesFromBetstampSnapshot,
   applyStreamMarkets,
   gameVisibleOnBoard,
+  fixtureCommence,
+  fixtureIsClosed,
   unwrapStreamPayload,
   emptyTickStats,
   recordTicks,
@@ -131,6 +133,70 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: past }, { liveOnly: false }), false);
   assert.equal(gameVisibleOnBoard({ is_live: false, commence_time: future }, { liveOnly: false }), true);
   assert.equal(gameVisibleOnBoard({ is_live: false, commence_time: past }, { liveOnly: false }), false);
+}
+
+{
+  assert.equal(fixtureCommence({ date: "2026-09-15T00:15:00Z" }), "2026-09-15T00:15:00Z");
+  assert.equal(fixtureCommence({ start_date: "2026-09-20T17:00:00Z" }), "2026-09-20T17:00:00Z");
+  assert.equal(fixtureCommence({ kickoff: "2026-09-15T00:20:00Z" }), "2026-09-15T00:20:00Z");
+  assert.equal(fixtureIsClosed({ status: "closed" }), true);
+  assert.equal(fixtureIsClosed({ status: "final" }), true);
+  assert.equal(fixtureIsClosed({ status: "completed" }), true);
+  assert.equal(fixtureIsClosed({ status: "scheduled" }), false);
+  const now = Date.parse("2026-09-14T20:00:00Z");
+  assert.equal(gameVisibleOnBoard({
+    is_live: false,
+    commence_time: null,
+    status: "closed",
+  }, { liveOnly: false, now }), false);
+  assert.equal(gameVisibleOnBoard({
+    is_live: true,
+    commence_time: "2026-09-14T17:00:00Z",
+    status: "closed",
+  }, { liveOnly: true, now }), false);
+  assert.equal(gameVisibleOnBoard({
+    is_live: false,
+    commence_time: fixtureCommence({ date: "2026-09-14T17:00:00Z" }),
+  }, { liveOnly: false, now }), false);
+  assert.equal(gameVisibleOnBoard({
+    is_live: false,
+    commence_time: fixtureCommence({ date: "2026-09-15T00:15:00Z" }),
+    status: "scheduled",
+  }, { liveOnly: false, now }), true);
+
+  const snap = gamesFromBetstampSnapshot({
+    nowMs: now,
+    fixtures: [
+      {
+        id: "sun-final",
+        league: "NFL",
+        date: "2026-09-14T17:00:00Z",
+        status: "closed",
+        away_team: { name: "Bills", abbreviation: "BUF" },
+        home_team: { name: "Jets", abbreviation: "NYJ" },
+      },
+      {
+        id: "mnf",
+        league: "NFL",
+        date: "2026-09-15T00:15:00Z",
+        status: "scheduled",
+        away_team: { name: "Denver Broncos", abbreviation: "DEN" },
+        home_team: { name: "Kansas City Chiefs", abbreviation: "KC" },
+      },
+    ],
+    markets: [
+      { odds: 1.91, side: "BUF", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: "sun-final" },
+      { odds: 1.91, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: "mnf" },
+    ],
+    teams: [],
+  });
+  const sunday = snap.find((g) => g.id === "sun-final");
+  const mnf = snap.find((g) => g.id === "mnf");
+  assert.equal(sunday.commence_time, "2026-09-14T17:00:00Z");
+  assert.equal(sunday.status, "closed");
+  assert.equal(mnf.commence_time, "2026-09-15T00:15:00Z");
+  assert.equal(gameVisibleOnBoard(sunday, { liveOnly: false, now }), false);
+  assert.equal(gameVisibleOnBoard(mnf, { liveOnly: false, now }), true);
 }
 
 {

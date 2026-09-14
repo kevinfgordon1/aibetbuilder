@@ -225,14 +225,70 @@ export function fixtureHomeAway(fixture, teamsById) {
   };
 }
 
+function firstParseableTime(...vals) {
+  for (const raw of vals) {
+    if (raw == null || raw === "") continue;
+    if (typeof raw === "number" && isFinite(raw) && raw > 0) {
+      const ms = raw < 1e12 ? raw * 1000 : raw;
+      return new Date(ms).toISOString();
+    }
+    const s = String(raw).trim();
+    if (!s) continue;
+    if (isFinite(Date.parse(s))) return s;
+  }
+  return null;
+}
+
 export function fixtureCommence(fixture) {
-  return fixture?.start_date || fixture?.start_time || fixture?.commence_time || fixture?.starts_at || fixture?.scheduled_at || fixture?.start || null;
+  if (!fixture || typeof fixture !== "object") return null;
+  // Betstamp fixtures use `date` (ISO kickoff). Keep the older aliases too.
+  return firstParseableTime(
+    fixture.start_date,
+    fixture.start_time,
+    fixture.commence_time,
+    fixture.starts_at,
+    fixture.scheduled_at,
+    fixture.start,
+    fixture.date,
+    fixture.kickoff,
+    fixture.kickoff_time,
+    fixture.game_time,
+    fixture.game_date,
+    fixture.datetime,
+    fixture.startDate,
+    fixture.startTime,
+  );
+}
+
+export function fixtureStatus(fixture) {
+  if (!fixture || typeof fixture !== "object") return "";
+  return String(fixture.status || fixture.state || fixture.fixture_status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+const CLOSED_FIXTURE_STATUSES = new Set([
+  "closed",
+  "final",
+  "completed",
+  "complete",
+  "finished",
+  "ended",
+  "settled",
+  "official",
+  "finalized",
+]);
+
+export function fixtureIsClosed(fixture) {
+  return CLOSED_FIXTURE_STATUSES.has(fixtureStatus(fixture));
 }
 
 export function fixtureIsLive(fixture) {
   if (!fixture) return false;
+  if (fixtureIsClosed(fixture)) return false;
   if (fixture.is_live === true) return true;
-  const status = String(fixture.status || fixture.state || "").toLowerCase();
+  const status = fixtureStatus(fixture);
   return status === "live" || status === "in" || status === "in_play" || status === "inplay";
 }
 
@@ -468,6 +524,7 @@ function newGameFromFixture(fixture, teamsById, nowMs) {
     awayId: sides.awayId,
     homeId: sides.homeId,
     commence_time: commence,
+    status: fixture.status || fixture.state || fixture.fixture_status || null,
     is_live: fixtureIsLive(fixture),
     home_score: fixture.home_score ?? fixture.homeScore ?? null,
     away_score: fixture.away_score ?? fixture.awayScore ?? null,
@@ -495,8 +552,9 @@ function stubGameFromMarket(market, nowMs) {
     homeAbbr: type === "home" ? sideName : "",
     awayId: null,
     homeId: null,
-    commence_time: market.start_date || market.commence_time || null,
-    is_live: !!market.is_live,
+    commence_time: fixtureCommence(market),
+    status: market.status || market.state || null,
+    is_live: fixtureIsLive(market),
     home_score: null,
     away_score: null,
     bookOdds: emptyBookOddsForBooks(),
@@ -599,6 +657,7 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
 
 export function gameVisibleOnBoard(game, { liveOnly, now = Date.now() } = {}) {
   if (!game) return false;
+  if (fixtureIsClosed(game)) return false;
   if (liveOnly) return !!game.is_live;
   if (game.is_live) return false;
   const t = Date.parse(game.commence_time);
