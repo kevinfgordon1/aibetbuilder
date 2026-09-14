@@ -946,7 +946,7 @@ function LandingFull({ onSignIn, onBack }) {
       <div className="lf-nav">
         <div className="lf-brand" onClick={onBack} title="Back to preview">
           <div className="lf-logo">B</div>
-          <div><div className="lf-bn">AI Bet Builder</div><div className="lf-bs">Powered by Claude</div></div>
+          <div><div className="lf-bn">AI Bet Builder</div><div className="lf-bs">aibetbuilder.io</div></div>
         </div>
         <button className="lf-navcta" onClick={onSignIn}>Sign in</button>
       </div>
@@ -1010,7 +1010,7 @@ function LandingFull({ onSignIn, onBack }) {
       <div className="lf-footer">
         <div className="lf-brand" onClick={onBack}><div className="lf-logo" style={{ width: 30, height: 30, fontSize: 16, borderRadius: 8 }}>B</div>
           <span style={{ fontSize: 14, fontWeight: 600 }}>AI Bet Builder</span></div>
-        <span className="muted">Powered by Claude · An analytics tool, not betting advice · 21+</span>
+        <span className="muted">An analytics tool, not betting advice · 21+</span>
       </div>
     </div>
   );
@@ -2059,7 +2059,7 @@ export default function App() {
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
-            <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>Powered by Claude</div>
+            <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>aibetbuilder.io</div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
