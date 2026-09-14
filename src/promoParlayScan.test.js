@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -54,7 +54,7 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.match(app, /const topFreeBetsWithLock = useMemo\(/);
   assert.match(app, /promoScanInputKey/);
   assert.match(app, /promoType === "freebet"/);
-  const resetDeps = app.match(/setExpandedFreeBet\(null\);\s*\}, \[([^\]]+)\]/);
+  const resetDeps = app.match(/setExpandedFreeBet\(null\);[\s\S]*?\}, \[([^\]]+)\]/);
   assert.ok(resetDeps, "promo page reset effect");
   assert.doesNotMatch(resetDeps[1], /\bboostPct\b/);
   assert.doesNotMatch(resetDeps[1], /\bstake\b/);
@@ -106,9 +106,13 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
     /topFreeBetsWithLock\.length === 0 && !promoScanBusy/,
     "No Results must not key off busy=false + empty freebets",
   );
-  assert.match(app, /if \(!promoLoaded \|\| !soccerPmReady\) \{/);
-  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, soccerPmReady, currentPromoScanKey\]/);
-  assert.match(app, /if \(gen !== promoScanGen\.current\) return;/);
+  assert.match(app, /promoSlateReady\(/);
+  assert.match(app, /shouldCommitPromoScan\(/);
+  assert.match(app, /soccerBlocksPromoPool\(/);
+  assert.match(app, /parsedPromoLegOddsBounds\(/);
+  assert.match(app, /preferExistingPromoBoard\(/);
+  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey\]/);
+  assert.match(app, /if \(!shouldCommitPromoScan\(/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
   assert.equal(
     promoScanEmptyState({
@@ -444,6 +448,144 @@ function namesOf(parlays) {
   assert.match(app, /parts\.push\(`max \$\{maxFinalOdds\}`\)/);
   assert.match(app, /parts\.push\(`legs max \$\{maxLegOdds\}`\)/);
   assert.doesNotMatch(app, /function StatCard/);
+}
+
+// ── Leftover soccer on the board must not wipe an NFL-only slate
+{
+  assert.equal(soccerBlocksPromoPool({
+    soccerSelected: false, soccerOnBoard: true, soccerPmReady: false,
+  }), false, "NFL-only must scan even if a prior soccer fetch is still on the board");
+  assert.equal(soccerBlocksPromoPool({
+    soccerSelected: true, soccerOnBoard: true, soccerPmReady: false,
+  }), true);
+  assert.equal(soccerBlocksPromoPool({
+    soccerSelected: true, soccerOnBoard: true, soccerPmReady: true,
+  }), false);
+  assert.equal(promoSlateReady({
+    promoLoaded: true, promoLoading: true, soccerBlocks: false,
+  }), false, "mid-refetch is not a finished empty slate");
+  assert.equal(promoSlateReady({
+    promoLoaded: true, promoLoading: false, soccerBlocks: false,
+  }), true);
+}
+
+// ── Stale / aborted scans must not overwrite newer results
+{
+  assert.equal(shouldCommitPromoScan({
+    requestGen: 1, latestGen: 2, aborted: false, slateReady: true,
+  }), false, "older gen loses");
+  assert.equal(shouldCommitPromoScan({
+    requestGen: 2, latestGen: 2, aborted: true, slateReady: true,
+  }), false, "aborted 1-leg resolve must not commit");
+  assert.equal(shouldCommitPromoScan({
+    requestGen: 2, latestGen: 2, aborted: false, slateReady: false,
+  }), false, "empty pool during refetch must not mark done");
+  assert.equal(shouldCommitPromoScan({
+    requestGen: 2, latestGen: 2, aborted: false, slateReady: true,
+  }), true);
+}
+
+{
+  const legs = [mkLeg("A ML", "A @ B", 150, 100), mkLeg("C ML", "C @ D", 140, 105)];
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  const ac = new AbortController();
+  ac.abort();
+  await assert.rejects(
+    () => findTopParlaysChunked(legs, 1, calc, { signal: ac.signal, yieldMs: 0 }),
+    (err) => err.name === "AbortError",
+    "1-leg scan already aborted at start must not return a slate",
+  );
+}
+
+// ── Same names + different prices are a new scan key (matching-book drift)
+{
+  const base = {
+    promoType: "boost", numLegs: 1, scanBoostPct: 30,
+    parsedMinFinal: null, parsedMaxFinal: null, refundPct: 100, creditConversionPct: 70,
+  };
+  const a = promoScanInputKey({
+    ...base,
+    pool: [{ game: "KC @ BUF", name: "Chiefs ML", dk: 120, bestOpp: -140 }],
+  });
+  const b = promoScanInputKey({
+    ...base,
+    pool: [{ game: "KC @ BUF", name: "Chiefs ML", dk: 120, bestOpp: -110 }],
+  });
+  assert.notEqual(a, b, "bestOpp change must invalidate lastCompletedScanKey");
+}
+
+// ── Hidden 1-leg leg-odds + leftover exclusions: sequential tweaks === remount
+{
+  const best = mkLeg("Chiefs ML", "KC @ BUF", 120, -130);
+  const other = mkLeg("Bills ML", "KC @ BUF", -140, 110);
+  const extra = mkLeg("Eagles ML", "PHI @ DAL", -110, 100);
+  const all = [best, other, extra];
+
+  const dirty = {
+    excluded: new Set([`${best.game}\0${best.name}`]),
+    minLegOdds: "200",
+    maxLegOdds: "400",
+    numLegs: 3,
+  };
+  const finalFilters = { numLegs: 1, minLegOdds: dirty.minLegOdds, maxLegOdds: dirty.maxLegOdds };
+
+  function applySession(legs, session) {
+    const bounds = parsedPromoLegOddsBounds(session.numLegs, session.minLegOdds, session.maxLegOdds);
+    return legs.filter((l) => {
+      if (session.excluded.has(`${l.game}\0${l.name}`)) return false;
+      return passesOddsBounds(l.dk, bounds.min, bounds.max);
+    });
+  }
+
+  // Pre-fix App.jsx applied min/max leg odds on 1-leg even though the inputs hide.
+  const legacyBounds = {
+    min: dirty.minLegOdds !== "" ? Number(dirty.minLegOdds) : null,
+    max: dirty.maxLegOdds !== "" ? Number(dirty.maxLegOdds) : null,
+  };
+  const drifted = all.filter((l) => {
+    if (dirty.excluded.has(`${l.game}\0${l.name}`)) return false;
+    return passesOddsBounds(l.dk, legacyBounds.min, legacyBounds.max);
+  });
+  const remount = applySession(all, { excluded: new Set(), minLegOdds: "", maxLegOdds: "", numLegs: 1 });
+  const sequential = applySession(all, nextPromoSessionAfterFilterChange(dirty, finalFilters));
+
+  assert.equal(drifted.length, 0, "sticky 3-leg bounds + exclude would empty Fanatics 1-leg");
+  assert.deepEqual(sequential.map((l) => l.name), remount.map((l) => l.name));
+  assert.ok(remount.some((l) => l.name === "Chiefs ML"), "fresh 1-leg keeps the top play");
+  assert.deepEqual(
+    parsedPromoLegOddsBounds(1, "200", "400"),
+    { min: null, max: null },
+  );
+  assert.deepEqual(
+    parsedPromoLegOddsBounds(3, "200", "400"),
+    { min: 200, max: 400 },
+  );
+}
+
+{
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  const best = mkLeg("Chiefs ML", "KC @ BUF", 150, -120);
+  const mid = mkLeg("Eagles ML", "PHI @ DAL", 110, -115);
+  const thin = mkLeg("Long shot", "A @ B", 400, -110);
+  const pool = [best, mid, thin];
+
+  const dirtyScan = await findTopParlaysChunked(
+    pool.filter((l) => l.dk >= 200),
+    1,
+    calc,
+    { maxResults: 10, yieldMs: 0 },
+  );
+  const afterTweaks = await findTopParlaysChunked(pool, 1, calc, { maxResults: 10, yieldMs: 0 });
+  const oneshot = await findTopParlaysChunked(pool, 1, calc, { maxResults: 10, yieldMs: 0 });
+
+  assert.equal(dirtyScan[0].legs[0].name, "Long shot");
+  assert.ok(dirtyScan.every((p) => p.legs[0].name === "Long shot"));
+  assert.deepEqual(
+    afterTweaks.map((p) => p.legs.map((l) => l.name).sort()),
+    oneshot.map((p) => p.legs.map((l) => l.name).sort()),
+    "two sequential filter updates must match a single-shot final slate",
+  );
+  assert.ok(oneshot.some((p) => p.legs[0].name === "Chiefs ML"), "final slate includes the play the dirty bounds hid");
 }
 
 console.log("promoParlayScan.test.js: ok");

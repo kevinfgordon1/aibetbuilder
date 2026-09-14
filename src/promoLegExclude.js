@@ -1,5 +1,6 @@
 // Promo Builder session exclusions: same identity parlayLegKey already uses
-// (game + name). Not persisted. Cleared on odds refresh.
+// (game + name). Not persisted. Cleared on odds refresh and on slate filter
+// changes (same as a remount — leftovers must not hide later slates).
 
 export function promoLegIdentity(leg) {
   return `${leg.game}\0${leg.name}`;

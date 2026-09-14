@@ -228,7 +228,7 @@ const singleCtx = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 };
   assert.match(app, /<label style=\{labelStyle\}>Liquidity<\/label>/);
   assert.match(app, /HIDE_LOW_LIQUIDITY_LABEL/);
   assert.match(app, /LIQUIDITY_FILTER_ALL_LABEL/);
-  const resetDeps = app.match(/setExpandedFreeBet\(null\);\s*\}, \[([^\]]+)\]/);
+  const resetDeps = app.match(/setExpandedFreeBet\(null\);[\s\S]*?\}, \[([^\]]+)\]/);
   assert.ok(resetDeps, "promo page reset effect");
   assert.match(resetDeps[1], /hideLowLiquidity/);
   assert.doesNotMatch(resetDeps[1], /\bstake\b/);

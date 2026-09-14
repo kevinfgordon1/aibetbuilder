@@ -281,6 +281,8 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   assert.match(app, /fetchSoccerPmNos/);
   assert.match(app, /overlaySoccerPmNos/);
   assert.match(app, /soccerPmReady/);
+  assert.match(app, /soccerBlocksPromoPool/);
+  assert.match(app, /!games\.length \|\| !soccerSelected/);
   const appTrusted = app.match(/const TRUSTED_BOOK_KEYS = new Set\(\[([\s\S]*?)\]\);/);
   assert.ok(appTrusted, "App.jsx TRUSTED_BOOK_KEYS block");
   assert.ok(!appTrusted[1].includes("betfair_ex_eu"));

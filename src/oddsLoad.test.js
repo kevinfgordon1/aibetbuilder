@@ -11,6 +11,8 @@ import {
   shouldFetchFullBoard,
   shouldFetchPromoOdds,
   promoNeedsReload,
+  boardHasPromoGames,
+  preferExistingPromoBoard,
   queryOddsCaches,
   withTimeout,
   featuredRowsUsable,
@@ -242,6 +244,27 @@ function fullPlan() {
   assert.equal(promoNeedsReload(new Set(["baseball_mlb"]), new Set(["baseball_mlb"])), false);
   assert.equal(promoNeedsReload(new Set(["baseball_mlb", "americanfootball_nfl"]), new Set(["baseball_mlb"])), true);
   assert.equal(promoNeedsReload(new Set(["baseball_mlb"]), new Set(["baseball_mlb", "americanfootball_nfl"])), false);
+}
+
+// ── Empty selected-sports refetch must not wipe a board the user already had
+{
+  const empty = { moneylines: [], run_lines: [], totals: [], team_totals: [] };
+  const nfl = {
+    moneylines: [{ away: "KC", home: "BUF", sport: "americanfootball_nfl" }],
+    run_lines: [],
+    totals: [],
+    team_totals: [],
+  };
+  assert.equal(boardHasPromoGames(empty), false);
+  assert.equal(boardHasPromoGames(nfl), true);
+  assert.equal(preferExistingPromoBoard(nfl, empty), nfl);
+  assert.equal(preferExistingPromoBoard(nfl, {
+    moneylines: [{ away: "PHI", home: "DAL", sport: "americanfootball_nfl" }],
+    run_lines: [],
+    totals: [],
+    team_totals: [],
+  }).moneylines[0].away, "PHI");
+  assert.deepEqual(preferExistingPromoBoard(empty, empty), empty);
 }
 
 // ── +EV tab view: live scan wins, else cached; no promo-board header scan

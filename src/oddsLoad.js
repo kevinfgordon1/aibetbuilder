@@ -151,6 +151,20 @@ export function featuredRowsUsable(featured) {
   return !!(featured && !featured.error && Array.isArray(featured.data));
 }
 
+export function boardHasPromoGames(board) {
+  if (!board) return false;
+  return [board.moneylines, board.run_lines, board.totals, board.team_totals]
+    .some((arr) => Array.isArray(arr) && arr.length > 0);
+}
+
+// A selected-sports refetch that comes back empty must not wipe a slate the
+// user already had — remount + same filters would still show those games.
+export function preferExistingPromoBoard(prev, next) {
+  if (boardHasPromoGames(next)) return next;
+  if (boardHasPromoGames(prev)) return prev;
+  return next || prev || { moneylines: [], run_lines: [], totals: [], team_totals: [] };
+}
+
 export function describeOddsLoadError(err) {
   if (!err) return null;
   const msg = err.message || String(err);

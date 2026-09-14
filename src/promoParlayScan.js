@@ -24,7 +24,9 @@ export function promoScanInputKey({
   let fp = list.length;
   for (let i = 0; i < list.length; i++) {
     const l = list[i];
-    const s = `${l.game ?? ""}\0${l.name ?? ""}`;
+    // Include prices so a matching-book / overlay change with the same
+    // game+name set is a new slate (not "already scanned" leftover EV).
+    const s = `${l.game ?? ""}\0${l.name ?? ""}\0${l.dk ?? ""}\0${l.bestOpp ?? ""}`;
     for (let j = 0; j < s.length; j++) {
       fp = ((fp << 5) - fp + s.charCodeAt(j)) | 0;
     }
@@ -64,6 +66,48 @@ export function promoScanEmptyState({
     return "scanning";
   }
   return "no-results";
+}
+
+// Soccer leftovers on a wider prior fetch must not wipe NFL/etc. Only wait
+// for PM overlays when soccer is actually selected.
+export function soccerBlocksPromoPool({ soccerSelected, soccerOnBoard, soccerPmReady }) {
+  return !!(soccerSelected && soccerOnBoard && !soccerPmReady);
+}
+
+export function promoSlateReady({ promoLoaded, promoLoading, soccerBlocks }) {
+  return !!promoLoaded && !promoLoading && !soccerBlocks;
+}
+
+// Ignore a scan that lost the race (newer gen, abort, or slate not ready).
+export function shouldCommitPromoScan({ requestGen, latestGen, aborted, slateReady }) {
+  if (requestGen !== latestGen) return false;
+  if (aborted) return false;
+  return !!slateReady;
+}
+
+// 1-leg hides Min/Max Leg Odds in the UI — applying leftover 2/3-leg bounds
+// falsely empties Fanatics singles until remount resets the inputs.
+export function parsedPromoLegOddsBounds(numLegs, minLegOdds, maxLegOdds) {
+  if (Number(numLegs) < 2) return { min: null, max: null };
+  return {
+    min: minLegOdds !== "" && minLegOdds != null ? Number(minLegOdds) : null,
+    max: maxLegOdds !== "" && maxLegOdds != null ? Number(maxLegOdds) : null,
+  };
+}
+
+// Fresh-load semantics after a filter tweak: drop session exclusions and
+// 1-leg-hidden leg-odds bounds so sequential tweaks match a remount.
+export function nextPromoSessionAfterFilterChange(prevSession, nextFilters) {
+  const numLegs = nextFilters && nextFilters.numLegs != null
+    ? nextFilters.numLegs
+    : prevSession && prevSession.numLegs;
+  const keepLegBounds = Number(numLegs) >= 2;
+  return {
+    excluded: new Set(),
+    minLegOdds: keepLegBounds ? (nextFilters?.minLegOdds ?? prevSession?.minLegOdds ?? "") : "",
+    maxLegOdds: keepLegBounds ? (nextFilters?.maxLegOdds ?? prevSession?.maxLegOdds ?? "") : "",
+    numLegs,
+  };
 }
 
 // iOS / Safari: thousands of MessageChannel ports (one per yield) have
@@ -236,7 +280,9 @@ export async function findTopParlaysChunked(
       growFrom3Seeds,
     });
     throwIfAborted(signal);
-    return growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds);
+    const grown = growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds);
+    throwIfAborted(signal);
+    return grown;
   }
 
   const top = [];
@@ -274,6 +320,7 @@ export async function findTopParlaysChunked(
     }
   }
 
+  throwIfAborted(signal);
   return finalizeTopByEv(top);
 }
 
