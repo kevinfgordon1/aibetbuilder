@@ -25,6 +25,8 @@ import {
   recordTicks,
   summarizeTickStats,
   formatCompactAge,
+  formatWinProb,
+  cellShowsWinProb,
   cellLineFields,
   lineUpdatedAt,
   bestLineUpdatedAt,
@@ -95,12 +97,13 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle }) {
+function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle, showWinProb }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
   const age = price == null ? null : formatCompactAge(updatedAt, nowMs);
   const clock = updatedAt ? fmtClock(updatedAt) : "";
+  const winProb = showWinProb && price != null ? formatWinProb(price) : null;
   return (
     <>
       {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
@@ -111,6 +114,15 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
         )}
         <LiquidityCue size={size} inline />
       </div>
+      {winProb && (
+        <div
+          data-win-prob={winProb}
+          title="Implied win probability"
+          style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
+        >
+          {winProb}
+        </div>
+      )}
       {age && (
         <div
           data-line-age={age}
@@ -566,6 +578,7 @@ export default function BetstampOddsBoard() {
                                   books={cell.topBooks}
                                   allBooks={books}
                                   showBestMark={isBestCol}
+                                  showWinProb={cellShowsWinProb(b.key, cell.topBooks)}
                                   updatedAt={topUpdatedAt}
                                   nowMs={nowMs}
                                   ageTitle={isBestCol
@@ -581,6 +594,7 @@ export default function BetstampOddsBoard() {
                                   books={cell.botBooks}
                                   allBooks={books}
                                   showBestMark={isBestCol}
+                                  showWinProb={cellShowsWinProb(b.key, cell.botBooks)}
                                   updatedAt={botUpdatedAt}
                                   nowMs={nowMs}
                                   ageTitle={isBestCol
@@ -603,6 +617,7 @@ export default function BetstampOddsBoard() {
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
+        {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
         {" · "}$ under a price is that book's size / limit when the feed sends it

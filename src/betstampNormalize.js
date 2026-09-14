@@ -5,8 +5,12 @@ import {
   bookById,
   BETSTAMP_TRIAL_BOOKS,
   isMnfFixture,
+  isPmWinProbBook,
   sportByLeague,
 } from "./betstampBooks.js";
+import { americanToImpliedProb, impliedProbToAmerican } from "./blendAskLadder.js";
+
+export { isPmWinProbBook };
 
 export function decimalToAmerican(odds) {
   const n = Number(odds);
@@ -16,13 +20,30 @@ export function decimalToAmerican(odds) {
 }
 
 // Betstamp docs show decimal odds. Some feeds may already send American.
+// 0 < n < 1 is a PM contract / win probability (same as OddsBoard / unhedgedTape).
 export function toAmericanOdds(odds) {
   if (odds == null || odds === "") return null;
   const n = Number(odds);
   if (!isFinite(n) || n === 0) return null;
+  if (n > 0 && n < 1) return impliedProbToAmerican(n);
   if (n <= -100 || n >= 100) return Math.round(n);
   if (n > 1) return decimalToAmerican(n);
   return null;
+}
+
+// Same American → implied win-prob as OddsBoard.jsx / +EV (`impliedProb`).
+export function formatWinProb(american) {
+  const p = americanToImpliedProb(american);
+  if (p == null) return null;
+  return `${(p * 100).toFixed(1)}%`;
+}
+
+export function cellShowsWinProb(bookKey, books) {
+  if (isPmWinProbBook(bookKey)) return true;
+  if (bookKey === "best") {
+    return (books || []).some((b) => isPmWinProbBook(b.key));
+  }
+  return false;
 }
 
 export function marketSize(market) {
