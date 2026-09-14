@@ -74,6 +74,7 @@ import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
 import OddsBoard from "./OddsBoard.jsx";
+import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import {
   applyPmBlendToLeg,
@@ -1498,7 +1499,7 @@ export default function App() {
       setFocusLockId(null);
     }
     if (activeTab === "profile" && !user) setActiveTab("promo");
-    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) {
+    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "oddsBetstamp") && !canSeeOwnerTools(user)) {
       setActiveTab("promo");
     }
   }, [activeTab, user, authLoading]);
@@ -1507,7 +1508,7 @@ export default function App() {
     if (authLoading) return;
     if (activeTab === "combo" && !canSeeComboLocks(user)) return;
     if (activeTab === "profile" && !user) return;
-    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) return;
+    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "oddsBetstamp") && !canSeeOwnerTools(user)) return;
     const desired = serializeAppHash({
       tab: activeTab || "promo",
       lockId: activeTab === "combo" ? focusLockId : null,
@@ -2104,7 +2105,7 @@ export default function App() {
           window.gtag?.('event', 'tab_switched', { tab: 'ev_bets' });
           logEvent(user, 'tab_switched', { tab: 'ev_bets' });
         }}>+EV Bets</button>
-        <button style={tabStyle("odds")} onClick={() => {
+        <button data-guard-allow="true" style={tabStyle("odds")} onClick={() => {
           setFocusCardId(null);
           setActiveTab("odds");
           window.gtag?.('event', 'tab_switched', { tab: 'odds_board' });
@@ -2115,6 +2116,12 @@ export default function App() {
         )}
         {canSeeOwnerTools(user) && (
           <>
+            <button style={tabStyle("oddsBetstamp")} onClick={() => {
+              setFocusCardId(null);
+              setActiveTab("oddsBetstamp");
+              window.gtag?.('event', 'tab_switched', { tab: 'odds_betstamp' });
+              logEvent(user, 'tab_switched', { tab: 'odds_betstamp' });
+            }}>New Odds Board</button>
             <button style={tabStyle("missTape")} onClick={() => setActiveTab("missTape")}>Miss tape</button>
             <button style={tabStyle("unhedged")} onClick={() => setActiveTab("unhedged")}>Unhedged RFQs</button>
           </>
@@ -2133,7 +2140,7 @@ export default function App() {
         </div>
       )}
 
-      {showOddsHealthBanner && (
+      {showOddsHealthBanner && activeTab !== "oddsBetstamp" && (
         <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
       )}
 
@@ -2157,7 +2164,13 @@ export default function App() {
         </div>
       )}
 
-      {!showFullPageSpinner && !showOddsLoadError && (
+      {activeTab === "oddsBetstamp" && canSeeOwnerTools(user) && (
+        <div style={{ padding: "20px 32px" }}>
+          <BetstampOddsBoard />
+        </div>
+      )}
+
+      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && (
         <div style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}

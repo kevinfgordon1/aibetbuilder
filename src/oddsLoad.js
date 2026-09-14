@@ -82,7 +82,7 @@ export function shouldFetchFullBoard({ tab, fullBoardLoaded, forceRefresh }) {
 }
 
 export function shouldFetchPromoOdds({ tab, forceRefresh, promoLoaded }) {
-  if (tab === "ev" || tab === "odds") return false;
+  if (tab === "ev" || tab === "odds" || tab === "oddsBetstamp") return false;
   if (forceRefresh) return true;
   return !promoLoaded;
 }
