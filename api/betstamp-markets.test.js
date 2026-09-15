@@ -56,7 +56,14 @@ function mockRes() {
     assert.equal(res.body.markets.length, 1);
     assert.equal(res.body.fixtures[0].id, 'f1');
     assert.equal(res.body.query.is_live, 'true');
+    assert.equal(res.body.query.timedelta, '240');
     assert.equal(calls.length, 3);
+    const marketUrl = calls.find((u) => String(u).includes('/markets'));
+    const fixtureUrl = calls.find((u) => String(u).includes('/fixtures'));
+    const teamUrl = calls.find((u) => String(u).includes('/teams'));
+    assert.match(String(marketUrl), /timedelta=240/);
+    assert.match(String(fixtureUrl), /timedelta=240/);
+    assert.doesNotMatch(String(teamUrl), /timedelta=/);
     assert.ok(calls.every((u) => !String(u).includes('test-key-not-real')));
     assert.ok(!JSON.stringify(res.body).includes('test-key-not-real'));
   }
@@ -88,6 +95,8 @@ function mockRes() {
     assert.equal(calls.length, 1);
     assert.match(String(calls[0]), /include_alts=true/);
     assert.match(String(calls[0]), /fixture_id=f1/);
+    assert.match(String(calls[0]), /timedelta=240/);
+    assert.equal(res.body.query.timedelta, '240');
   }
 
   {

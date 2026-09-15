@@ -30,7 +30,7 @@ async function handler(req, res, deps = {}) {
     return;
   }
 
-  const params = buildMarketParams(readQuery(req));
+  const params = buildMarketParams(readQuery(req), deps.env);
   const url = streamUrl(params);
   const fetchFn = deps.fetchFn || fetch;
 
