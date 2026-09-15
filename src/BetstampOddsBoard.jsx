@@ -8,6 +8,8 @@ import {
   getOddsBoardCell,
   getBestForGame,
   LIVE_BEST_ODDS_MAX_AGE_MS,
+  oddsBoardHideKey,
+  isHiddenOddsCell,
 } from "./oddsBoard.js";
 import {
   BETSTAMP_TRIAL_BOOKS,
@@ -138,6 +140,78 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
   );
 }
 
+function boardHideSide(marketKey, which) {
+  if (marketKey === "tot") return which === "top" ? "over" : "under";
+  return which === "top" ? "away" : "home";
+}
+
+function BookSideCell({
+  gameId,
+  marketKey,
+  which,
+  bookKey,
+  bookLabel,
+  isBestCol,
+  isBestCell,
+  empty,
+  last,
+  hidden,
+  onToggleHide,
+  sideStyle,
+  children,
+}) {
+  const side = boardHideSide(marketKey, which);
+  const canHide = bookKey !== "best" && (!empty || hidden);
+  return (
+    <div
+      className="obb-side"
+      data-odds-side={side}
+      data-hidden={hidden ? "1" : "0"}
+      style={{
+        ...sideStyle(isBestCol, isBestCell && !hidden, empty),
+        ...(last ? { borderBottom: "none" } : {}),
+        ...(hidden ? {
+          color: "#6b7280",
+          background: "rgba(255,255,255,0.03)",
+        } : {}),
+        position: "relative",
+      }}
+    >
+      {canHide && (
+        <button
+          type="button"
+          className="obb-hide"
+          data-hide-odds={hidden ? "show" : "hide"}
+          data-hide-key={oddsBoardHideKey({ gameId, market: marketKey, side, bookKey })}
+          aria-label={hidden
+            ? `Unhide ${bookLabel || bookKey} ${side} in Best odds`
+            : `Hide ${bookLabel || bookKey} ${side} from Best odds`}
+          aria-pressed={hidden}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleHide?.(gameId, marketKey, side, bookKey);
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {hidden ? "Show" : "×"}
+        </button>
+      )}
+      <div
+        data-odds-price={empty ? "empty" : "set"}
+        style={hidden ? { textDecoration: "line-through", opacity: 0.72 } : undefined}
+      >
+        {children}
+      </div>
+      {hidden && (
+        <div data-odds-hidden-label="true" style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", marginTop: 2, letterSpacing: 0.3, textTransform: "uppercase" }}>
+          hidden
+        </div>
+      )}
+    </div>
+  );
+}
+
 function fmtMs(v) {
   if (v == null || !isFinite(v)) return "—";
   if (v < 1000) return `${Math.round(v)}ms`;
@@ -181,6 +255,7 @@ export default function BetstampOddsBoard() {
   const fetchGen = useRef(0);
   const altCacheRef = useRef(new Map());
   const altFetchGen = useRef(0);
+  const [hiddenKeys, setHiddenKeys] = useState(() => new Set());
   const [openGame, setOpenGame] = useState(null);
   const [altLadders, setAltLadders] = useState(null);
   const [altLoading, setAltLoading] = useState(false);
@@ -399,6 +474,17 @@ export default function BetstampOddsBoard() {
     })();
   };
 
+  const toggleHiddenCell = (gameId, marketKey, side, bookKey) => {
+    const key = oddsBoardHideKey({ gameId, market: marketKey, side, bookKey });
+    if (!key) return;
+    setHiddenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const toggleBook = (bookKey) => {
     setSelectedBooks((prev) => {
       const next = new Set(prev);
@@ -437,7 +523,7 @@ export default function BetstampOddsBoard() {
   const oddsColWidth = 92;
   const metrics = summarizeTickStats(tickStats, nowMs);
 
-  const liveBestOpts = { nowMs, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+  const liveBestOpts = { nowMs, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS, hiddenKeys };
 
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
@@ -458,9 +544,76 @@ export default function BetstampOddsBoard() {
     background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent",
   });
 
+  const renderBookColumn = (rowGame, marketKey, b, cell, bestAway, bestHome, { includeLine = true } = {}) => {
+    const fields = cellLineFields(marketKey);
+    const isBestCol = b.key === "best";
+    const topHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
+      gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "top"), bookKey: b.key,
+    });
+    const botHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
+      gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "bot"), bookKey: b.key,
+    });
+    const isBestAway = !topHidden && !isBestCol && cell.top !== null && cell.top === bestAway;
+    const isBestHome = !botHidden && !isBestCol && cell.bot !== null && cell.bot === bestHome;
+    const topUpdatedAt = isBestCol
+      ? bestLineUpdatedAt(rowGame, fields.top, cell.topBooks)
+      : lineUpdatedAt(rowGame, b.key, fields.top);
+    const botUpdatedAt = isBestCol
+      ? bestLineUpdatedAt(rowGame, fields.bot, cell.botBooks)
+      : lineUpdatedAt(rowGame, b.key, fields.bot);
+    const sideProps = (which) => ({
+      price: which === "top" ? cell.top : cell.bot,
+      size: which === "top" ? cell.topSize : cell.botSize,
+      line: includeLine ? (which === "top" ? cell.topLine : cell.botLine) : null,
+      books: which === "top" ? cell.topBooks : cell.botBooks,
+      allBooks: books,
+      showBestMark: isBestCol,
+      showWinProb: cellShowsWinProb(b.key, which === "top" ? cell.topBooks : cell.botBooks),
+      updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
+      nowMs,
+      ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
+    });
+    return (
+      <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <BookSideCell
+            gameId={rowGame.id}
+            marketKey={marketKey}
+            which="top"
+            bookKey={b.key}
+            bookLabel={b.label}
+            isBestCol={isBestCol}
+            isBestCell={isBestAway}
+            empty={cell.top === null}
+            hidden={topHidden}
+            onToggleHide={toggleHiddenCell}
+            sideStyle={sideStyle}
+          >
+            <OddsSide {...sideProps("top")} />
+          </BookSideCell>
+          <BookSideCell
+            gameId={rowGame.id}
+            marketKey={marketKey}
+            which="bot"
+            bookKey={b.key}
+            bookLabel={b.label}
+            isBestCol={isBestCol}
+            isBestCell={isBestHome}
+            empty={cell.bot === null}
+            last
+            hidden={botHidden}
+            onToggleHide={toggleHiddenCell}
+            sideStyle={sideStyle}
+          >
+            <OddsSide {...sideProps("bot")} />
+          </BookSideCell>
+        </div>
+      </td>
+    );
+  };
+
   const renderOddsPair = (rowGame, marketKey) => {
     const { bestAway, bestHome } = getBestForGame(rowGame, marketKey, selectedBooks, books, liveBestOpts);
-    const fields = cellLineFields(marketKey);
     return visibleBooks.map((b) => {
       const cell = getOddsBoardCell({
         game: rowGame,
@@ -470,49 +623,7 @@ export default function BetstampOddsBoard() {
         allBooks: books,
         ...liveBestOpts,
       });
-      const isBestAway = b.key !== "best" && cell.top !== null && cell.top === bestAway;
-      const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
-      const isBestCol = b.key === "best";
-      const topUpdatedAt = isBestCol
-        ? bestLineUpdatedAt(rowGame, fields.top, cell.topBooks)
-        : lineUpdatedAt(rowGame, b.key, fields.top);
-      const botUpdatedAt = isBestCol
-        ? bestLineUpdatedAt(rowGame, fields.bot, cell.botBooks)
-        : lineUpdatedAt(rowGame, b.key, fields.bot);
-      return (
-        <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={sideStyle(isBestCol, isBestAway, cell.top === null)}>
-              <OddsSide
-                price={cell.top}
-                size={cell.topSize}
-                line={marketKey === "ml" ? cell.topLine : null}
-                books={cell.topBooks}
-                allBooks={books}
-                showBestMark={isBestCol}
-                showWinProb={cellShowsWinProb(b.key, cell.topBooks)}
-                updatedAt={topUpdatedAt}
-                nowMs={nowMs}
-                ageTitle={isBestCol ? "Newest update among books offering this best price" : undefined}
-              />
-            </div>
-            <div style={{ ...sideStyle(isBestCol, isBestHome, cell.bot === null), borderBottom: "none" }}>
-              <OddsSide
-                price={cell.bot}
-                size={cell.botSize}
-                line={marketKey === "ml" ? cell.botLine : null}
-                books={cell.botBooks}
-                allBooks={books}
-                showBestMark={isBestCol}
-                showWinProb={cellShowsWinProb(b.key, cell.botBooks)}
-                updatedAt={botUpdatedAt}
-                nowMs={nowMs}
-                ageTitle={isBestCol ? "Newest update among books offering this best price" : undefined}
-              />
-            </div>
-          </div>
-        </td>
-      );
+      return renderBookColumn(rowGame, marketKey, b, cell, bestAway, bestHome, { includeLine: marketKey === "ml" });
     });
   };
 
@@ -570,6 +681,38 @@ export default function BetstampOddsBoard() {
 
   return (
     <div data-betstamp-board="true" data-guard-allow="true">
+      <style>{`
+        .obb-side { position: relative; }
+        .obb-hide {
+          position: absolute;
+          top: 1px;
+          right: 1px;
+          z-index: 2;
+          min-width: 24px;
+          min-height: 24px;
+          padding: 0 6px;
+          border-radius: 4px;
+          border: 1px solid rgba(255,255,255,0.14);
+          background: rgba(10,11,15,0.92);
+          color: #d1d5db;
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1;
+          cursor: pointer;
+          opacity: 0;
+          pointer-events: none;
+          font-family: 'DM Sans', sans-serif;
+        }
+        .obb-side:hover .obb-hide,
+        .obb-side:focus-within .obb-hide,
+        .obb-side[data-hidden="1"] .obb-hide {
+          opacity: 1;
+          pointer-events: auto;
+        }
+        @media (hover: none) {
+          .obb-hide { opacity: 0.9; pointer-events: auto; }
+        }
+      `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
@@ -765,57 +908,7 @@ export default function BetstampOddsBoard() {
                           <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "6px 0 4px" }}>Alts →</div>
                         </div>
                       </td>
-                      {visibleBooks.map((b) => {
-                        const cell = getCell(game, b.key);
-                        const fields = cellLineFields(market);
-                        const isBestAway = b.key !== "best" && cell.top !== null && cell.top === bestAway;
-                        const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
-                        const isBestCol = b.key === "best";
-                        const topUpdatedAt = isBestCol
-                          ? bestLineUpdatedAt(game, fields.top, cell.topBooks)
-                          : lineUpdatedAt(game, b.key, fields.top);
-                        const botUpdatedAt = isBestCol
-                          ? bestLineUpdatedAt(game, fields.bot, cell.botBooks)
-                          : lineUpdatedAt(game, b.key, fields.bot);
-                        return (
-                          <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                            <div style={{ display: "flex", flexDirection: "column" }}>
-                              <div style={sideStyle(isBestCol, isBestAway, cell.top === null)}>
-                                <OddsSide
-                                  price={cell.top}
-                                  size={cell.topSize}
-                                  line={cell.topLine}
-                                  books={cell.topBooks}
-                                  allBooks={books}
-                                  showBestMark={isBestCol}
-                                  showWinProb={cellShowsWinProb(b.key, cell.topBooks)}
-                                  updatedAt={topUpdatedAt}
-                                  nowMs={nowMs}
-                                  ageTitle={isBestCol
-                                    ? "Newest update among books offering this best price"
-                                    : undefined}
-                                />
-                              </div>
-                              <div style={{ ...sideStyle(isBestCol, isBestHome, cell.bot === null), borderBottom: "none" }}>
-                                <OddsSide
-                                  price={cell.bot}
-                                  size={cell.botSize}
-                                  line={cell.botLine}
-                                  books={cell.botBooks}
-                                  allBooks={books}
-                                  showBestMark={isBestCol}
-                                  showWinProb={cellShowsWinProb(b.key, cell.botBooks)}
-                                  updatedAt={botUpdatedAt}
-                                  nowMs={nowMs}
-                                  ageTitle={isBestCol
-                                    ? "Newest update among books offering this best price"
-                                    : undefined}
-                                />
-                              </div>
-                            </div>
-                          </td>
-                        );
-                      })}
+                      {visibleBooks.map((b) => renderBookColumn(game, market, b, getCell(game, b.key), bestAway, bestHome))}
                     </tr>
                   );
                 })}
@@ -831,6 +924,7 @@ export default function BetstampOddsBoard() {
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: a number 4+ minutes stale cannot win Best)
+        {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
