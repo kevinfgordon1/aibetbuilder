@@ -8,6 +8,7 @@ import {
   sportByLeague,
 } from "./betstampBooks.js";
 import { americanToImpliedProb, impliedProbToAmerican } from "./blendAskLadder.js";
+import { BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
 
 export { isPmWinProbBook };
 
@@ -123,6 +124,191 @@ function setLineUpdatedAt(game, bookKey, field, ts) {
   if (!game.bookLineUpdatedAt) game.bookLineUpdatedAt = {};
   if (!game.bookLineUpdatedAt[bookKey]) game.bookLineUpdatedAt[bookKey] = {};
   game.bookLineUpdatedAt[bookKey][field] = ts;
+}
+
+export function lineIsSuspended(game, bookKey, field) {
+  if (!game || !bookKey || !field) return false;
+  return game.bookLineSuspended?.[bookKey]?.[field] === true;
+}
+
+export function lineConfirmedAt(game, bookKey, field) {
+  const n = game?.bookLineConfirmedAt?.[bookKey]?.[field];
+  return typeof n === "number" && isFinite(n) ? n : null;
+}
+
+const NOT_OFFERED_MARKET_STATUSES = new Set([
+  "suspended",
+  "suspend",
+  "taken_down",
+  "unavailable",
+  "inactive",
+  "closed",
+  "removed",
+  "offline",
+  "halted",
+  "locked",
+  "disabled",
+  "dead",
+  "void",
+  "hidden",
+  "pulled",
+]);
+
+// Public Betstamp docs do not document a suspend/tombstone field. Honor one
+// when a payload actually sends it; otherwise presence in the REST snapshot
+// is the availability signal.
+export function marketIsOffered(market) {
+  if (!market || typeof market !== "object") return false;
+  if (market.suspended === true || market.is_suspended === true || market.isSuspended === true) return false;
+  if (market.active === false || market.is_active === false || market.isActive === false) return false;
+  if (market.available === false || market.is_available === false || market.isAvailable === false) return false;
+  const status = String(
+    market.status ?? market.market_status ?? market.line_status ?? market.odds_status ?? "",
+  ).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (status && NOT_OFFERED_MARKET_STATUSES.has(status)) return false;
+  return true;
+}
+
+export function quotePresenceKey({ fixtureId, bookKey, betType, side } = {}) {
+  const fid = fixtureId != null ? String(fixtureId) : "";
+  const book = bookKey || "";
+  const bt = normalizeBetType(betType);
+  const s = String(side || "").trim().toLowerCase();
+  if (!fid || !book || !bt || !s) return null;
+  return `${fid}|${book}|${bt}|${s}`;
+}
+
+// fixture + book + bet_type + side, plus Betstamp's number for spread/total mains.
+export function quoteOfferKey({ fixtureId, bookKey, betType, side, line } = {}) {
+  const presence = quotePresenceKey({ fixtureId, bookKey, betType, side });
+  if (!presence) return null;
+  const bt = normalizeBetType(betType);
+  if (bt === "spread" || bt === "total") {
+    const n = line == null || line === "" ? "" : String(Number(line));
+    return `${presence}|${n}`;
+  }
+  return presence;
+}
+
+const BOARD_QUOTE_SPECS = [
+  { betType: "moneyline", side: "away", field: "ml_away" },
+  { betType: "moneyline", side: "home", field: "ml_home" },
+  { betType: "moneyline", side: "draw", field: "ml_draw" },
+  { betType: "spread", side: "away", field: "spr_away", lineField: "spr_away_line" },
+  { betType: "spread", side: "home", field: "spr_home", lineField: "spr_home_line" },
+  { betType: "total", side: "over", field: "tot_over", lineField: "tot_line" },
+  { betType: "total", side: "under", field: "tot_under", lineField: "tot_line" },
+];
+
+export function listedBoardQuotes(game) {
+  const out = [];
+  for (const [bookKey, odds] of Object.entries(game?.bookOdds || {})) {
+    if (!odds) continue;
+    for (const spec of BOARD_QUOTE_SPECS) {
+      if (odds[spec.field] == null) continue;
+      out.push({
+        bookKey,
+        betType: spec.betType,
+        side: spec.side,
+        field: spec.field,
+        lineField: spec.lineField || null,
+        price: odds[spec.field],
+        line: spec.lineField ? odds[spec.lineField] ?? null : null,
+        updatedAt: lineUpdatedAt(game, bookKey, spec.field),
+      });
+    }
+  }
+  return out;
+}
+
+export function offeredPresenceKeysFromMarkets(markets, gamesById) {
+  const keys = new Set();
+  for (const market of asList(markets, ["markets", "data"])) {
+    if (!isMainMarket(market) || !marketIsOffered(market)) continue;
+    if (toAmericanOdds(market.odds) == null) continue;
+    const bookKey = bookKeyForMarket(market);
+    const fid = market.fixture_id != null ? String(market.fixture_id) : null;
+    if (!bookKey || !fid) continue;
+    const game = gamesById && typeof gamesById.get === "function" ? gamesById.get(fid) : null;
+    const side = marketSide(market, game);
+    const key = quotePresenceKey({ fixtureId: fid, bookKey, betType: market.bet_type, side });
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+function cloneBookMap(src) {
+  const out = {};
+  for (const [k, v] of Object.entries(src || {})) out[k] = { ...v };
+  return out;
+}
+
+function cloneBoardGames(games) {
+  return (games || []).map((g) => ({
+    ...g,
+    bookOdds: cloneBookMap(g.bookOdds),
+    bookUpdatedAt: { ...(g.bookUpdatedAt || {}) },
+    bookLineUpdatedAt: cloneBookMap(g.bookLineUpdatedAt),
+    bookLineConfirmedAt: cloneBookMap(g.bookLineConfirmedAt),
+    bookLineSuspended: cloneBookMap(g.bookLineSuspended),
+  }));
+}
+
+function confirmSideQuote(game, bookKey, field, nowMs) {
+  if (!game || !bookKey || !field) return;
+  if (nowMs != null && isFinite(nowMs)) {
+    if (!game.bookLineConfirmedAt) game.bookLineConfirmedAt = {};
+    if (!game.bookLineConfirmedAt[bookKey]) game.bookLineConfirmedAt[bookKey] = {};
+    game.bookLineConfirmedAt[bookKey][field] = nowMs;
+  }
+  if (game.bookLineSuspended?.[bookKey]) {
+    game.bookLineSuspended[bookKey][field] = false;
+  }
+}
+
+function clearSideQuote(game, bookKey, betType, side) {
+  if (!game || !bookKey || !side) return;
+  const field = lineFieldFor(betType, side);
+  if (!field) return;
+  if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
+  const odds = game.bookOdds[bookKey];
+  if (betType === "moneyline") {
+    if (side === "away") {
+      odds.ml_away = null;
+      odds.ml_away_size = null;
+    } else if (side === "home") {
+      odds.ml_home = null;
+      odds.ml_home_size = null;
+    } else if (side === "draw") {
+      odds.ml_draw = null;
+      odds.ml_draw_size = null;
+    }
+  } else if (betType === "spread") {
+    if (side === "away") {
+      odds.spr_away = null;
+      odds.spr_away_size = null;
+      odds.spr_away_line = null;
+    } else if (side === "home") {
+      odds.spr_home = null;
+      odds.spr_home_size = null;
+      odds.spr_home_line = null;
+    }
+  } else if (betType === "total") {
+    if (side === "over") {
+      odds.tot_over = null;
+      odds.tot_over_size = null;
+    } else if (side === "under") {
+      odds.tot_under = null;
+      odds.tot_under_size = null;
+    }
+    if (odds.tot_over == null && odds.tot_under == null) odds.tot_line = null;
+  }
+  if (game.bookLineUpdatedAt?.[bookKey]) {
+    delete game.bookLineUpdatedAt[bookKey][field];
+  }
+  if (!game.bookLineSuspended) game.bookLineSuspended = {};
+  if (!game.bookLineSuspended[bookKey]) game.bookLineSuspended[bookKey] = {};
+  game.bookLineSuspended[bookKey][field] = true;
 }
 
 export function asList(payload, keys) {
@@ -476,6 +662,8 @@ function cloneGameShell(game) {
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
     bookLineUpdatedAt: {},
+    bookLineConfirmedAt: {},
+    bookLineSuspended: {},
   };
 }
 
@@ -601,6 +789,8 @@ function newGameFromFixture(fixture, teamsById, nowMs) {
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
     bookLineUpdatedAt: {},
+    bookLineConfirmedAt: {},
+    bookLineSuspended: {},
   };
   return game;
 }
@@ -628,6 +818,8 @@ function stubGameFromMarket(market, nowMs) {
     bookOdds: emptyBookOddsForBooks(),
     bookUpdatedAt: {},
     bookLineUpdatedAt: {},
+    bookLineConfirmedAt: {},
+    bookLineSuspended: {},
   };
   return game;
 }
@@ -639,16 +831,32 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   if (!bookKey) return false;
   const betType = normalizeBetType(market.bet_type);
   const side = marketSide(market, game);
+  if (!side) return false;
+  const field = lineFieldFor(betType, side);
+  if (!field) return false;
+  if (!marketIsOffered(market)) {
+    clearSideQuote(game, bookKey, betType, side);
+    return {
+      bookKey,
+      betType,
+      side,
+      price: null,
+      suspended: true,
+      label: tickLabel(market, game, side, betType),
+      updatedAt: null,
+    };
+  }
   const price = toAmericanOdds(market.odds);
-  if (price == null || !side) return false;
+  if (price == null) return false;
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
   applySideToOdds(game.bookOdds[bookKey], betType, side, price, marketSize(market), marketLine(market));
   if (market.is_live) game.is_live = true;
   const ts = marketUpdatedAtMs(market, receivedAt);
   if (ts != null) {
     game.bookUpdatedAt[bookKey] = ts;
-    setLineUpdatedAt(game, bookKey, lineFieldFor(betType, side), ts);
+    setLineUpdatedAt(game, bookKey, field, ts);
   }
+  confirmSideQuote(game, bookKey, field, ts ?? receivedAt);
   return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: ts };
 }
 
@@ -672,7 +880,7 @@ export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = 
   }
 
   for (const market of marketList) {
-    if (!isMainMarket(market)) continue;
+    if (!isMainMarket(market) || !marketIsOffered(market)) continue;
     const fid = market.fixture_id != null ? String(market.fixture_id) : null;
     if (!fid || closedIds.has(fid)) continue;
     if (!games.has(fid)) games.set(fid, stubGameFromMarket(market, nowMs));
@@ -689,20 +897,7 @@ export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = 
 }
 
 export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
-  const next = games.map((g) => ({
-    ...g,
-    bookOdds: { ...g.bookOdds },
-    bookUpdatedAt: { ...g.bookUpdatedAt },
-    bookLineUpdatedAt: { ...g.bookLineUpdatedAt },
-  }));
-  for (const g of next) {
-    const copy = {};
-    for (const [k, v] of Object.entries(g.bookOdds || {})) copy[k] = { ...v };
-    g.bookOdds = copy;
-    const lineCopy = {};
-    for (const [k, v] of Object.entries(g.bookLineUpdatedAt || {})) lineCopy[k] = { ...v };
-    g.bookLineUpdatedAt = lineCopy;
-  }
+  const next = cloneBoardGames(games);
   const byId = new Map(next.map((g) => [String(g.id), g]));
   const applied = [];
   const seenAt = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
@@ -723,6 +918,76 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
   const kept = next.filter((g) => !gameIsFinished(g, seenAt));
   kept.sort((a, b) => (Date.parse(a.commence_time) || 0) - (Date.parse(b.commence_time) || 0));
   return { games: kept, applied };
+}
+
+// LIVE availability truth: REST mains listing vs previously shown quotes.
+// Present → confirm (keep SSE price). Absent → clear / OFF and out of Best.
+// Silence alone is not a suspend — only a snapshot miss (or an explicit
+// suspended status). Halftime still reconciles. `markets == null` is a no-op
+// so a botched payload cannot wipe the board.
+export function reconcileLiveGames(games, {
+  markets,
+  fixtures,
+  teams,
+  nowMs,
+  clearGraceMs = BETSTAMP_RECONCILE_CLEAR_GRACE_MS,
+} = {}) {
+  if (markets == null) return games || [];
+  const seenAt = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
+  const next = cloneBoardGames(games);
+  const byId = new Map(next.map((g) => [String(g.id), g]));
+
+  const snapGames = gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs: seenAt });
+  for (const sg of snapGames) {
+    if (!byId.has(String(sg.id))) {
+      next.push(sg);
+      byId.set(String(sg.id), sg);
+    }
+  }
+
+  const offered = offeredPresenceKeysFromMarkets(markets, byId);
+  const marketList = asList(markets, ["markets", "data"]);
+
+  for (const game of next) {
+    if (!game?.is_live || gameIsFinished(game, seenAt)) continue;
+    for (const quote of listedBoardQuotes(game)) {
+      const key = quotePresenceKey({
+        fixtureId: game.id,
+        bookKey: quote.bookKey,
+        betType: quote.betType,
+        side: quote.side,
+      });
+      if (key && offered.has(key)) {
+        confirmSideQuote(game, quote.bookKey, quote.field, seenAt);
+        continue;
+      }
+      const updatedAt = quote.updatedAt;
+      if (
+        updatedAt != null
+        && isFinite(updatedAt)
+        && clearGraceMs > 0
+        && (seenAt - updatedAt) < clearGraceMs
+      ) {
+        continue;
+      }
+      clearSideQuote(game, quote.bookKey, quote.betType, quote.side);
+    }
+
+    for (const market of marketList) {
+      if (!isMainMarket(market) || !marketIsOffered(market)) continue;
+      if (market.fixture_id == null || String(market.fixture_id) !== String(game.id)) continue;
+      const bookKey = bookKeyForMarket(market);
+      const side = marketSide(market, game);
+      const field = lineFieldFor(normalizeBetType(market.bet_type), side);
+      if (!bookKey || !side || !field) continue;
+      if (game.bookOdds?.[bookKey]?.[field] != null) continue;
+      applyMarketToGame(game, market, { receivedAt: seenAt });
+    }
+  }
+
+  const kept = next.filter((g) => !gameIsFinished(g, seenAt));
+  kept.sort((a, b) => (Date.parse(a.commence_time) || 0) - (Date.parse(b.commence_time) || 0));
+  return kept;
 }
 
 export function gameIsFinished(game, now = Date.now()) {

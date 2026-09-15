@@ -25,6 +25,7 @@ import {
   gamesFromBetstampSnapshot,
   applyFixtureMeta,
   applyStreamMarkets,
+  reconcileLiveGames,
   gameVisibleOnBoard,
   unwrapStreamPayload,
   emptyTickStats,
@@ -35,6 +36,7 @@ import {
   cellShowsWinProb,
   cellLineFields,
   lineUpdatedAt,
+  lineIsSuspended,
   bestLineUpdatedAt,
   fixtureAltLadders,
 } from "./betstampNormalize.js";
@@ -44,6 +46,7 @@ import {
   consumeBetstampStream,
   nextBackoffMs,
   BETSTAMP_PREGAME_POLL_MS,
+  BETSTAMP_LIVE_RECONCILE_MS,
 } from "./betstampLive.js";
 
 function BookMark({ book, extra = 0, title, size = 13 }) {
@@ -105,22 +108,22 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle, showWinProb }) {
+function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle, showWinProb, suspended }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
-  const age = price == null ? null : formatCompactAge(updatedAt, nowMs);
+  const age = price == null || suspended ? null : formatCompactAge(updatedAt, nowMs);
   const clock = updatedAt ? fmtClock(updatedAt) : "";
-  const winProb = showWinProb && price != null ? formatWinProb(price) : null;
+  const winProb = showWinProb && price != null && !suspended ? formatWinProb(price) : null;
   return (
     <>
-      {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
+      {line && !suspended && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
       <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, flexWrap: "nowrap" }}>
-        <span>{price == null ? "—" : formatAmericanOdds(price)}</span>
-        {showBestMark && price != null && book && (
+        <span>{price == null || suspended ? "—" : formatAmericanOdds(price)}</span>
+        {showBestMark && price != null && !suspended && book && (
           <BookMark book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
-        <LiquidityCue size={size} inline />
+        {!suspended && <LiquidityCue size={size} inline />}
       </div>
       {winProb && (
         <div
@@ -129,6 +132,15 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
           style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
         >
           {winProb}
+        </div>
+      )}
+      {suspended && (
+        <div
+          data-odds-suspended="1"
+          title="Betstamp no longer lists this line live"
+          style={{ fontSize: 9, color: "#f59e0b", fontWeight: 700, marginTop: 2, letterSpacing: 0.3, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.1 }}
+        >
+          OFF
         </div>
       )}
       {age && (
@@ -340,7 +352,8 @@ export default function BetstampOddsBoard() {
 
     // Pregame: always run the interval while liveOnly is false. Do not wait
     // for the first snapshot — a hung first GET must not freeze ages.
-    // LIVE: SSE owns prices; a light snapshot poll only refreshes fixture
+    // LIVE: SSE owns prices; REST reconcile (~15s) is availability truth
+    // (clear books Betstamp no longer lists) and still refreshes fixture
     // halt/halftime so the 60s Best gate can relax at the break.
     applySnapshot({ showLoading: true });
     if (!liveOnly) {
@@ -357,18 +370,29 @@ export default function BetstampOddsBoard() {
           signal: ctrl.signal,
           cache: "no-store",
         })
-          .then((res) => res.json().catch(() => ({})))
-          .then((body) => {
+          .then(async (res) => {
+            const body = await res.json().catch(() => ({}));
+            return { res, body };
+          })
+          .then(({ res, body }) => {
             if (cancelled || gen !== fetchGen.current) return;
-            if (!body || !Array.isArray(body.fixtures) || !body.fixtures.length) return;
-            const next = applyFixtureMeta(gamesRef.current, body.fixtures);
-            if (next === gamesRef.current) return;
+            if (!body || body.ok === false || body.missingKey || (res && !res.ok)) return;
+            if (body.markets == null) return;
+            const fetchedAt = Date.now();
+            const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
+            const next = reconcileLiveGames(withMeta, {
+              markets: body.markets,
+              fixtures: body.fixtures,
+              teams: body.teams,
+              nowMs: fetchedAt,
+            });
             gamesRef.current = next;
             setGames(next);
+            setSnapshotAt(fetchedAt);
           })
           .catch(() => {})
           .finally(() => { pollInFlight = false; });
-      }, BETSTAMP_PREGAME_POLL_MS);
+      }, BETSTAMP_LIVE_RECONCILE_MS);
     }
 
     const runStream = async () => {
@@ -669,6 +693,7 @@ export default function BetstampOddsBoard() {
       updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
       nowMs,
       ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
+      suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
     });
     if (pairBlocks) {
       const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
@@ -801,6 +826,7 @@ export default function BetstampOddsBoard() {
       data-best-view={bestView}
       data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
       data-live-best-break-age-ms={LIVE_BEST_ODDS_BREAK_MAX_AGE_MS}
+      data-live-reconcile-ms={BETSTAMP_LIVE_RECONCILE_MS}
     >
       <style>{`
         .obb-side { position: relative; }
@@ -897,14 +923,14 @@ export default function BetstampOddsBoard() {
               {liveOnly ? streamStatus : "snapshot"}
             </div>
           </div>
-          {!liveOnly && (
-            <div>
-              <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Refreshed</div>
-              <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
-                {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
-              </div>
+          <div>
+            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>
+              {liveOnly ? "Reconciled" : "Refreshed"}
             </div>
-          )}
+            <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+              {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
+            </div>
+          </div>
           <div>
             <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
             <div data-last-tick-age style={{ fontSize: 20, fontWeight: 800, color: ageTone(metrics.lastTickAgeMs), fontFamily: "'JetBrains Mono', monospace" }}>
@@ -1091,13 +1117,14 @@ export default function BetstampOddsBoard() {
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
-        {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest; LIVE uses SSE
+        {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
+        {" · "}LIVE uses SSE for ticks plus a 15s REST presence reconcile — cells show — / OFF when Betstamp no longer lists that book/side live (silence alone is not a suspend)
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
-        {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
+        {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
       </div>
