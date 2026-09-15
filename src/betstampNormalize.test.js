@@ -132,7 +132,9 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr, stackedBest: true,
   });
   assert.equal(sprStackedHide.top, null);
-  assert.deepEqual(sprStackedHide.topStacks, []);
+  assert.equal(sprStackedHide.topStacks.length, 1, "home +3.5 still keeps the 3.5 point after hiding away");
+  assert.equal(sprStackedHide.topStacks[0].price, null);
+  assert.equal(sprStackedHide.botStacks[0].line, 3.5);
   const fdSpr = getOddsBoardCell({
     game: g, bookKey: "fanduel", market: "spr",
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr,
@@ -540,10 +542,13 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /Top 2 lines/);
   assert.match(stamp, /stackedBest/);
   assert.match(stamp, /data-best-stacks/);
+  assert.match(stamp, /data-best-point-pairs/);
+  assert.match(stamp, /data-best-point=/);
+  assert.match(stamp, /pointStacks/);
   assert.doesNotMatch(stamp, /location\.hash|serializeAppHash/);
   assert.doesNotMatch(board, /LIVE_BEST_ODDS_MAX_AGE_MS|maxBestAgeMs/);
   assert.doesNotMatch(board, /data-hide-odds|oddsBoardHideKey|hiddenKeys/);
-  assert.doesNotMatch(board, /stackedBest|data-best-view|Top 2 lines|data-best-stacks/);
+  assert.doesNotMatch(board, /stackedBest|data-best-view|Top 2 lines|data-best-stacks|data-best-point-pairs|pointStacks/);
   assert.match(stamp, /data-win-prob/);
   assert.match(stamp, /formatWinProb/);
   assert.match(stamp, /cellShowsWinProb/);

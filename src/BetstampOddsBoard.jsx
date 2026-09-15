@@ -581,36 +581,59 @@ export default function BetstampOddsBoard() {
     return price === singleBest;
   };
 
-  const renderStackedSides = (rowGame, marketKey, stacks, field) => {
-    if (!stacks?.length) {
-      return <OddsSide price={null} size={null} line={null} books={[]} allBooks={books} showBestMark nowMs={nowMs} />;
+  const renderStackedSide = (rowGame, field, stack) => (
+    <OddsSide
+      price={stack?.price ?? null}
+      size={stack?.size ?? null}
+      line={stack?.lineLabel ?? null}
+      books={stack?.books ?? []}
+      allBooks={books}
+      showBestMark
+      showWinProb={cellShowsWinProb("best", stack?.books)}
+      updatedAt={bestLineUpdatedAt(rowGame, field, stack?.books)}
+      nowMs={nowMs}
+      ageTitle="Newest update among books offering this best price"
+    />
+  );
+
+  const renderPairedPointBlocks = (rowGame, blocks, fields) => {
+    if (!blocks?.length) {
+      return (
+        <div data-best-point-pairs="0" data-best-stacks="0">
+          <OddsSide price={null} size={null} line={null} books={[]} allBooks={books} showBestMark nowMs={nowMs} />
+        </div>
+      );
     }
     return (
-      <div data-best-stacks={stacks.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
-        {stacks.map((s, i) => (
+      <div data-best-point-pairs={blocks.length} data-best-stacks={blocks.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
+        {blocks.map((block, i) => (
           <div
-            key={`${s.line}-${s.primaryKey || i}`}
-            data-best-stack={s.line}
-            data-best-stack-price={s.price}
+            key={block.point}
+            data-best-point={block.point}
+            data-best-point-count={block.count}
             style={i > 0 ? {
               marginTop: 6,
               paddingTop: 6,
-              borderTop: "1px solid rgba(16,185,129,0.2)",
+              borderTop: "1px solid rgba(16,185,129,0.28)",
               width: "100%",
             } : { width: "100%" }}
           >
-            <OddsSide
-              price={s.price}
-              size={s.size}
-              line={s.lineLabel}
-              books={s.books}
-              allBooks={books}
-              showBestMark
-              showWinProb={cellShowsWinProb("best", s.books)}
-              updatedAt={bestLineUpdatedAt(rowGame, field, s.books)}
-              nowMs={nowMs}
-              ageTitle="Newest update among books offering this best price"
-            />
+            <div data-best-stack={block.top?.line} data-best-stack-price={block.top?.price} data-best-stack-side="top" style={{ width: "100%" }}>
+              {renderStackedSide(rowGame, fields.top, block.top)}
+            </div>
+            <div
+              data-best-stack={block.bot?.line}
+              data-best-stack-price={block.bot?.price}
+              data-best-stack-side="bot"
+              style={{
+                width: "100%",
+                marginTop: 4,
+                paddingTop: 4,
+                borderTop: "1px solid rgba(16,185,129,0.12)",
+              }}
+            >
+              {renderStackedSide(rowGame, fields.bot, block.bot)}
+            </div>
           </div>
         ))}
       </div>
@@ -628,8 +651,7 @@ export default function BetstampOddsBoard() {
     });
     const isBestAway = !topHidden && isBestHighlight(rowGame, marketKey, b, cell, "top", bests.bestAway, bests.awayStacks);
     const isBestHome = !botHidden && isBestHighlight(rowGame, marketKey, b, cell, "bot", bests.bestHome, bests.homeStacks);
-    const stackTop = isBestCol && stackedBest && marketKey !== "ml" && cell.topStacks;
-    const stackBot = isBestCol && stackedBest && marketKey !== "ml" && cell.botStacks;
+    const pairBlocks = isBestCol && stackedBest && marketKey !== "ml" && cell.pointStacks;
     const topUpdatedAt = isBestCol
       ? bestLineUpdatedAt(rowGame, fields.top, cell.topBooks)
       : lineUpdatedAt(rowGame, b.key, fields.top);
@@ -648,6 +670,24 @@ export default function BetstampOddsBoard() {
       nowMs,
       ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
     });
+    if (pairBlocks) {
+      const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
+      return (
+        <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+          <div
+            className="obb-side"
+            data-odds-side="paired"
+            style={{
+              ...sideStyle(true, false, emptyPairs),
+              borderBottom: "none",
+            }}
+          >
+            {renderPairedPointBlocks(rowGame, cell.pointStacks, fields)}
+          </div>
+        </td>
+      );
+    }
+
     return (
       <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
         <div style={{ display: "flex", flexDirection: "column" }}>
@@ -664,7 +704,7 @@ export default function BetstampOddsBoard() {
             onToggleHide={toggleHiddenCell}
             sideStyle={sideStyle}
           >
-            {stackTop ? renderStackedSides(rowGame, marketKey, cell.topStacks, fields.top) : <OddsSide {...sideProps("top")} />}
+            <OddsSide {...sideProps("top")} />
           </BookSideCell>
           <BookSideCell
             gameId={rowGame.id}
@@ -680,7 +720,7 @@ export default function BetstampOddsBoard() {
             onToggleHide={toggleHiddenCell}
             sideStyle={sideStyle}
           >
-            {stackBot ? renderStackedSides(rowGame, marketKey, cell.botStacks, fields.bot) : <OddsSide {...sideProps("bot")} />}
+            <OddsSide {...sideProps("bot")} />
           </BookSideCell>
         </div>
       </td>
@@ -1037,7 +1077,7 @@ export default function BetstampOddsBoard() {
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
-        {" · "}Best view default is Single (today's juice compare). Top 2 lines stacks the two most popular spread/total points (eligible book count; moneyline stays single)}
+        {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
         {" · "}$ under a price is that book's size / limit when the feed sends it

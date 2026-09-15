@@ -18,10 +18,12 @@ import {
   hideSideFromPriceKey,
   isHiddenOddsCell,
   pickBestSidesByPopularLines,
+  pickBestByPopularPoints,
   STACKED_BEST_MAX_LINES,
   normalizeBoardLine,
   formatStackedBestLine,
   isStackedBestMatch,
+  marketLinePoint,
 } from "./oddsBoard.js";
 import { BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
@@ -726,6 +728,9 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(formatStackedBestLine("spr", -3.5), "-3.5");
   assert.equal(formatStackedBestLine("tot", 47.5, "over"), "o47.5");
   assert.equal(formatStackedBestLine("tot", 47.5, "under"), "u47.5");
+  assert.equal(marketLinePoint("tot", 47.5), 47.5);
+  assert.equal(marketLinePoint("spr", 6.5), 6.5);
+  assert.equal(marketLinePoint("spr", -6.5), 6.5);
   assert.equal(isStackedBestMatch([{ line: 3.5, price: -105 }], -105, 3.5), true);
   assert.equal(isStackedBestMatch([{ line: 3.5, price: -105 }], -105, 2.5), false);
 
@@ -810,6 +815,13 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(stackedSpr.botStacks[1].line, -2.5);
   assert.equal(stackedSpr.botStacks[1].price, 100);
   assert.equal(stackedSpr.botStacks[1].primaryKey, "bet365");
+  assert.equal(stackedSpr.pointStacks.length, 2);
+  assert.equal(stackedSpr.pointStacks[0].point, 3.5);
+  assert.equal(stackedSpr.pointStacks[0].top.line, 3.5);
+  assert.equal(stackedSpr.pointStacks[0].bot.line, -3.5);
+  assert.equal(stackedSpr.pointStacks[1].point, 2.5);
+  assert.equal(stackedSpr.pointStacks[1].top.line, 2.5);
+  assert.equal(stackedSpr.pointStacks[1].bot.line, -2.5);
 
   const singleTot = getOddsBoardCell({
     game: denKc, bookKey: "best", market: "tot",
@@ -836,6 +848,12 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(stackedTot.topStacks[1].primaryKey, "bet365");
   assert.equal(stackedTot.botStacks[0].lineLabel, "u47.5");
   assert.equal(stackedTot.botStacks[0].price, -110);
+  assert.equal(stackedTot.pointStacks[0].point, 47.5);
+  assert.equal(stackedTot.pointStacks[0].top.lineLabel, "o47.5");
+  assert.equal(stackedTot.pointStacks[0].bot.lineLabel, "u47.5");
+  assert.equal(stackedTot.pointStacks[1].point, 46.5);
+  assert.equal(stackedTot.pointStacks[1].top.lineLabel, "o46.5");
+  assert.equal(stackedTot.pointStacks[1].bot.lineLabel, "u46.5");
 
   const onlyOneLine = getOddsBoardCell({
     game: {
@@ -853,6 +871,8 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(onlyOneLine.topStacks.length, 1, "one distinct line → one Best chip");
   assert.equal(onlyOneLine.topStacks[0].price, -105);
   assert.equal(onlyOneLine.topLine, "+3.5");
+  assert.equal(onlyOneLine.botStacks[0].price, null, "missing home at that point → —");
+  assert.equal(onlyOneLine.botStacks[0].lineLabel, "-3.5");
 
   const threeLines = getOddsBoardCell({
     game: {
@@ -904,8 +924,24 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
     selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
     stackedBest: true, hiddenKeys: hidden2p5,
   });
-  assert.equal(stackedHidden.topStacks.length, 1, "hidden 2.5 books drop that line from popularity");
+  assert.equal(stackedHidden.pointStacks.length, 2, "home −2.5 still counts the 2.5 point after hiding away 2.5");
   assert.equal(stackedHidden.topStacks[0].line, 3.5);
+  assert.equal(stackedHidden.topStacks[1].line, 2.5);
+  assert.equal(stackedHidden.topStacks[1].price, null, "away 2.5 is hidden so that half is empty");
+  assert.equal(stackedHidden.botStacks[1].line, -2.5);
+  assert.equal(stackedHidden.botStacks[1].price, 100);
+  const hideBoth2p5 = new Set([
+    ...hidden2p5,
+    oddsBoardHideKey({ gameId: "den-kc-spr", market: "spr", side: "home", bookKey: "betcris" }),
+    oddsBoardHideKey({ gameId: "den-kc-spr", market: "spr", side: "home", bookKey: "bet365" }),
+  ]);
+  const stackedHiddenBoth = getOddsBoardCell({
+    game: denKc, bookKey: "best", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+    stackedBest: true, hiddenKeys: hideBoth2p5,
+  });
+  assert.equal(stackedHiddenBoth.pointStacks.length, 1, "hiding both sides of 2.5 drops that point");
+  assert.equal(stackedHiddenBoth.topStacks[0].line, 3.5);
   const stackedHideFd = getOddsBoardCell({
     game: denKc, bookKey: "best", market: "spr",
     selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
@@ -964,16 +1000,208 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(isStackedBestMatch(stackedLive.topStacks, 110, 2.5), true);
   assert.equal(isStackedBestMatch(stackedLive.topStacks, -102, 3.5), false);
 
-  const { bestAway, awayStacks } = getBestForGame(denKc, "spr", trial, BETSTAMP_TRIAL_BOOKS, { stackedBest: true });
+  const { bestAway, awayStacks, pointStacks } = getBestForGame(denKc, "spr", trial, BETSTAMP_TRIAL_BOOKS, { stackedBest: true });
   assert.equal(bestAway, -105);
   assert.equal(awayStacks[0].line, 3.5);
   assert.equal(awayStacks[1].line, 2.5);
+  assert.equal(pointStacks[0].point, 3.5);
+  assert.equal(pointStacks[0].bot.line, -3.5);
 
   const ungated = getOddsBoardCell({
     game: denKc, bookKey: "best", market: "spr",
     selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
   });
   assert.equal(ungated.topStacks, null, "omitting stackedBest leaves Single / public Best unchanged");
+  assert.equal(ungated.pointStacks, null);
+}
+
+// ── Top 2 pairs both sides of the same |point| (totals + spreads)
+{
+  const trial = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+
+  const uniqueCount = pickBestByPopularPoints(
+    [
+      { key: "fanduel", price: -110, line: 47.5 },
+      { key: "draftkings", price: -108, line: 47.5 },
+    ],
+    [
+      { key: "fanduel", price: -110, line: 47.5 },
+      { key: "draftkings", price: -112, line: 47.5 },
+      { key: "kalshi", price: 101, line: 45.5 },
+    ],
+    null,
+    { market: "tot" },
+  );
+  assert.equal(uniqueCount[0].point, 47.5);
+  assert.equal(uniqueCount[0].count, 2, "a book quoting both over and under 47.5 counts once");
+  assert.equal(uniqueCount[1].point, 45.5);
+  assert.equal(uniqueCount[1].count, 1);
+  assert.equal(uniqueCount[1].top.price, null, "no over at 45.5 → empty half");
+  assert.equal(uniqueCount[1].top.lineLabel, "o45.5");
+  assert.equal(uniqueCount[1].bot.price, 101);
+  assert.equal(uniqueCount[1].bot.lineLabel, "u45.5");
+
+  const denKcTot = {
+    id: "den-kc-tot-pair",
+    sport: "americanfootball_nfl",
+    bookOdds: {
+      fanduel: { tot_over: -110, tot_under: -110, tot_line: 47.5 },
+      draftkings: { tot_over: -108, tot_under: -102, tot_line: 47.5 },
+      pinnacle: { tot_over: -111, tot_under: -109, tot_line: 47.5 },
+      williamhill_us: { tot_over: -105, tot_under: -115, tot_line: 47.5 },
+      betonlineag: { tot_over: -107, tot_under: -113, tot_line: 47.5 },
+      kalshi: { tot_over: 101, tot_under: -127, tot_line: 45.5 },
+      prophetx: { tot_over: 102, tot_under: -102, tot_line: 47.5 },
+    },
+  };
+  const pairedTot = getOddsBoardCell({
+    game: denKcTot, bookKey: "best", market: "tot",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+    stackedBest: true,
+  });
+  assert.deepEqual(pairedTot.pointStacks.map((b) => b.point), [47.5, 45.5]);
+  assert.equal(pairedTot.pointStacks[0].top.lineLabel, "o47.5");
+  assert.equal(pairedTot.pointStacks[0].top.price, 102);
+  assert.equal(pairedTot.pointStacks[0].top.primaryKey, "prophetx");
+  assert.equal(pairedTot.pointStacks[0].bot.lineLabel, "u47.5");
+  assert.equal(pairedTot.pointStacks[0].bot.price, -102);
+  assert.equal(pairedTot.pointStacks[0].bot.primaryKey, "draftkings");
+  assert.equal(pairedTot.pointStacks[1].top.lineLabel, "o45.5");
+  assert.equal(pairedTot.pointStacks[1].top.price, 101);
+  assert.equal(pairedTot.pointStacks[1].top.primaryKey, "kalshi");
+  assert.equal(pairedTot.pointStacks[1].bot.lineLabel, "u45.5");
+  assert.equal(pairedTot.pointStacks[1].bot.price, -127);
+  assert.equal(pairedTot.topStacks[0].line, pairedTot.botStacks[0].line);
+  assert.equal(pairedTot.topStacks[1].line, pairedTot.botStacks[1].line);
+
+  const mismatchTot = getOddsBoardCell({
+    game: {
+      id: "tot-mismatch",
+      sport: "americanfootball_nfl",
+      bookOdds: {
+        fanduel: { tot_over: -110, tot_under: -110, tot_line: 47.5 },
+        draftkings: { tot_over: -108, tot_under: -112, tot_line: 47.5 },
+        pinnacle: { tot_over: -111, tot_under: -109, tot_line: 47.5 },
+        kalshi: { tot_over: 100, tot_line: 45.5 },
+        bet365: { tot_over: 101, tot_line: 45.5 },
+        betcris: { tot_under: -115, tot_line: 48.5 },
+        circa: { tot_under: -118, tot_line: 48.5 },
+        betonlineag: { tot_under: -104, tot_line: 48.5 },
+        williamhill_us: { tot_under: -120, tot_line: 48.5 },
+      },
+    },
+    bookKey: "best", market: "tot",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+    stackedBest: true,
+  });
+  assert.deepEqual(mismatchTot.pointStacks.map((b) => b.point), [48.5, 47.5], "union book count picks 48.5 over the overs-only 45.5");
+  assert.equal(mismatchTot.pointStacks[0].top.price, null, "no over quotes at 48.5 → —");
+  assert.equal(mismatchTot.pointStacks[0].top.lineLabel, "o48.5");
+  assert.equal(mismatchTot.pointStacks[0].bot.price, -104);
+  assert.equal(mismatchTot.pointStacks[0].bot.primaryKey, "betonlineag");
+  assert.equal(mismatchTot.pointStacks[1].top.lineLabel, "o47.5");
+  assert.equal(mismatchTot.pointStacks[1].bot.lineLabel, "u47.5");
+  assert.equal(mismatchTot.topStacks.some((s) => s.line === 45.5), false, "per-side 45.5 does not leak in");
+
+  const singleMismatch = getOddsBoardCell({
+    game: {
+      id: "tot-mismatch",
+      sport: "americanfootball_nfl",
+      bookOdds: {
+        fanduel: { tot_over: -110, tot_under: -110, tot_line: 47.5 },
+        draftkings: { tot_over: -108, tot_under: -112, tot_line: 47.5 },
+        pinnacle: { tot_over: -111, tot_under: -109, tot_line: 47.5 },
+        kalshi: { tot_over: 100, tot_line: 45.5 },
+        bet365: { tot_over: 101, tot_line: 45.5 },
+        betcris: { tot_under: -115, tot_line: 48.5 },
+        circa: { tot_under: -118, tot_line: 48.5 },
+        betonlineag: { tot_under: -104, tot_line: 48.5 },
+        williamhill_us: { tot_under: -120, tot_line: 48.5 },
+      },
+    },
+    bookKey: "best", market: "tot",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+  });
+  assert.equal(singleMismatch.top, 101, "Single totals still pick juice across lines");
+  assert.equal(singleMismatch.topStacks, null);
+  assert.equal(singleMismatch.pointStacks, null);
+  assert.equal(singleMismatch.topLine, "o47.5", "Single still labels the DK total");
+
+  const pairedSpr = getOddsBoardCell({
+    game: {
+      id: "spr-pair",
+      sport: "americanfootball_nfl",
+      bookOdds: {
+        fanduel: { spr_away: -110, spr_away_line: 6.5, spr_home: -110, spr_home_line: -6.5 },
+        draftkings: { spr_away: -105, spr_away_line: 6.5, spr_home: -115, spr_home_line: -6.5 },
+        pinnacle: { spr_away: -108, spr_away_line: 6.5, spr_home: -112, spr_home_line: -6.5 },
+        williamhill_us: { spr_away: -114, spr_away_line: 6.5, spr_home: -106, spr_home_line: -6.5 },
+        betonlineag: { spr_away: -120, spr_away_line: 6.5, spr_home: 100, spr_home_line: -6.5 },
+        kalshi: { spr_away: 105, spr_away_line: 10.5, spr_home: -125, spr_home_line: -10.5 },
+        bet365: { spr_away: -102, spr_away_line: 10.5, spr_home: -118, spr_home_line: -10.5 },
+      },
+    },
+    bookKey: "best", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+    stackedBest: true,
+  });
+  assert.deepEqual(pairedSpr.pointStacks.map((b) => b.point), [6.5, 10.5]);
+  assert.equal(pairedSpr.pointStacks[0].top.lineLabel, "+6.5");
+  assert.equal(pairedSpr.pointStacks[0].top.price, -105);
+  assert.equal(pairedSpr.pointStacks[0].bot.lineLabel, "-6.5");
+  assert.equal(pairedSpr.pointStacks[0].bot.price, 100);
+  assert.equal(pairedSpr.pointStacks[1].top.lineLabel, "+10.5");
+  assert.equal(pairedSpr.pointStacks[1].bot.lineLabel, "-10.5");
+  assert.equal(pairedSpr.pointStacks[1].top.price, 105);
+  assert.equal(pairedSpr.pointStacks[1].bot.price, -118);
+
+  const mismatchSpr = getOddsBoardCell({
+    game: {
+      id: "spr-mismatch",
+      sport: "americanfootball_nfl",
+      bookOdds: {
+        fanduel: { spr_away: -110, spr_away_line: 6.5, spr_home: -110, spr_home_line: -6.5 },
+        draftkings: { spr_away: -108, spr_away_line: 6.5, spr_home: -112, spr_home_line: -6.5 },
+        pinnacle: { spr_away: -111, spr_away_line: 6.5, spr_home: -109, spr_home_line: -6.5 },
+        kalshi: { spr_away: 102, spr_away_line: 10.5 },
+        bet365: { spr_away: 100, spr_away_line: 10.5 },
+        betcris: { spr_home: 105, spr_home_line: -3.5 },
+        circa: { spr_home: 101, spr_home_line: -3.5 },
+        betonlineag: { spr_home: 110, spr_home_line: -3.5 },
+      },
+    },
+    bookKey: "best", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+    stackedBest: true,
+  });
+  assert.deepEqual(mismatchSpr.pointStacks.map((b) => b.point), [6.5, 3.5], "home-only 3.5 beats away-only 10.5 on unique books");
+  assert.equal(mismatchSpr.pointStacks[0].top.lineLabel, "+6.5");
+  assert.equal(mismatchSpr.pointStacks[0].bot.lineLabel, "-6.5");
+  assert.equal(mismatchSpr.pointStacks[1].top.price, null, "no away +3.5 → —");
+  assert.equal(mismatchSpr.pointStacks[1].top.lineLabel, "+3.5");
+  assert.equal(mismatchSpr.pointStacks[1].bot.lineLabel, "-3.5");
+  assert.equal(mismatchSpr.pointStacks[1].bot.price, 110);
+  assert.equal(mismatchSpr.topStacks.some((s) => s.line === 10.5), false);
+
+  const favAway = getOddsBoardCell({
+    game: {
+      id: "spr-fav-away",
+      sport: "americanfootball_nfl",
+      bookOdds: {
+        fanduel: { spr_away: -110, spr_away_line: -3.5, spr_home: -110, spr_home_line: 3.5 },
+        draftkings: { spr_away: -105, spr_away_line: -3.5, spr_home: -115, spr_home_line: 3.5 },
+        pinnacle: { spr_away: -108, spr_away_line: -3.5, spr_home: -112, spr_home_line: 3.5 },
+        kalshi: { spr_away: 104, spr_away_line: -7.5, spr_home: -124, spr_home_line: 7.5 },
+      },
+    },
+    bookKey: "best", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS,
+    stackedBest: true,
+  });
+  assert.deepEqual(favAway.pointStacks.map((b) => b.point), [3.5, 7.5]);
+  assert.equal(favAway.pointStacks[0].top.lineLabel, "-3.5", "favorite away keeps the minus");
+  assert.equal(favAway.pointStacks[0].bot.lineLabel, "+3.5");
+  assert.equal(favAway.pointStacks[0].top.price, -105);
 }
 
 console.log("oddsBoard.test.js ok");
