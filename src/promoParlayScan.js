@@ -19,6 +19,7 @@ export function promoScanInputKey({
   refundPct,
   creditConversionPct,
   pool,
+  includeTeam,
 }) {
   const list = pool || [];
   let fp = list.length;
@@ -39,6 +40,7 @@ export function promoScanInputKey({
     parsedMaxFinal ?? "",
     refundPct,
     creditConversionPct,
+    includeTeam ?? "",
     list.length,
     fp,
   ].join("|");
@@ -259,6 +261,7 @@ export async function findTopParlaysChunked(
     yieldFn = yieldToMain,
     maxPromoLegs = SCAN_MAX_PROMO_LEGS,
     growFrom3Seeds = SCAN_GROW_FROM_3_SEEDS,
+    acceptCombo = null,
   } = {},
 ) {
   throwIfAborted(signal);
@@ -278,16 +281,18 @@ export async function findTopParlaysChunked(
       yieldFn,
       maxPromoLegs,
       growFrom3Seeds,
+      acceptCombo,
     });
     throwIfAborted(signal);
     const grown = growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds);
     throwIfAborted(signal);
-    return grown;
+    return typeof acceptCombo === "function" ? grown.filter((p) => acceptCombo(p.legs)) : grown;
   }
 
   const top = [];
   const getGame = (leg) => leg.game;
   const takeIfTop = (r, comboLegs) => {
+    if (typeof acceptCombo === "function" && !acceptCombo(comboLegs)) return;
     if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) return;
     if (!shouldTake(top, r.ev, maxResults)) return;
     considerTopByEv(top, { legs: comboLegs, ...r }, maxResults);

@@ -232,7 +232,7 @@ function futureGame() {
   assert.match(app, /function transformOddsData\(gamesArray, sportKey, trustedBookKeys = TRUSTED_BOOK_KEYS\)/);
   assert.match(app, /transformOddsData\(row\.data, row\.sport, matchingBookKeys\)/);
   assert.match(app, /transformEventOddsData\(row\.data, row\.sport, matchingBookKeys\)/);
-  assert.match(app, /hideLowLiquidity, matchingBookKeys\]/);
+  assert.match(app, /hideLowLiquidity, matchingBookKeys, promoTeamInclude, promoTeamExclude\]/);
   assert.match(app, /setExcludedPromoLegs\(new Set\(\)\)/);
   assert.match(app, /buildAllLegsForBook\(promoOddsForPromo,/);
   assert.match(app, /buildAllLegsAllBooks\(allOddsData,/);

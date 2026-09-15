@@ -53,6 +53,15 @@ import {
   filterLowLiquidityPicks,
 } from "./promoLiquidityFilter.js";
 import {
+  parseTeamFilterTokens,
+  filterLegsByTeamExclude,
+  filterLegsByTeamInclude,
+  filterPicksByTeamName,
+  pinTeamIncludeLegs,
+  pickMatchesTeamInclude,
+  teamFilterSummary,
+} from "./promoTeamFilter.js";
+import {
   loadModeForTab,
   buildOddsQueryPlan,
   queryOddsCaches,
@@ -178,13 +187,15 @@ const DATE_RANGES = [
 const DEFAULT_PROMO_SPORT_KEYS = DEFAULT_PROFILE_SPORTS;
 const DEFAULT_PROMO_DATE_RANGE = "7d";
 
-function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity }) {
+function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity, includeTeamTokens, excludeTeamTokens }) {
   const sportsPart = formatSelectedSportsSummary(promoSports, SPORT_CHIPS);
   const datePart = DATE_RANGES.find(d => d.val === promoDateRange)?.label || promoDateRange;
   const marketPart = marketScopeSummary(marketScope);
   const parts = [sportsPart, datePart, marketPart];
   const liqPart = liquidityFilterSummary(hideLowLiquidity);
   if (liqPart) parts.push(liqPart);
+  const teamPart = teamFilterSummary(includeTeamTokens, excludeTeamTokens);
+  if (teamPart) parts.push(teamPart);
   const isOddsPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
   if (isOddsPromo && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
   if (isOddsPromo && maxFinalOdds !== "") parts.push(`max ${maxFinalOdds}`);
@@ -1180,7 +1191,8 @@ function attachNoSweatLockToPick(p, nextStake) {
 function rankPromoPicks(picks, ctx, attachLock) {
   const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx)));
   const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : tagged;
-  return filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
+  const liquid = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
+  return filterPicksByTeamName(liquid, ctx.includeTeamTokens, ctx.excludeTeamTokens);
 }
 
 function usePromoDepthBlend(legs, live, ctx = {}) {
@@ -1355,6 +1367,8 @@ export default function App() {
   const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
   const [marketScope, setMarketScope] = useState("all");
   const [hideLowLiquidity, setHideLowLiquidity] = useState(true);
+  const [promoTeamInclude, setPromoTeamInclude] = useState("");
+  const [promoTeamExclude, setPromoTeamExclude] = useState("");
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1645,7 +1659,7 @@ export default function App() {
     // Remount starts with no exclusions. Filter tweaks must too — leftover
     // X's otherwise hide the best plays until a full refresh.
     setExcludedPromoLegs(new Set());
-  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, hideLowLiquidity, matchingBookKeys]);
+  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, hideLowLiquidity, matchingBookKeys, promoTeamInclude, promoTeamExclude]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1776,6 +1790,12 @@ export default function App() {
   const scanMaxFinalOdds = useDebouncedValue(maxFinalOdds, PROMO_SCAN_DEBOUNCE_MS);
   const scanMinLegOdds = useDebouncedValue(minLegOdds, PROMO_SCAN_DEBOUNCE_MS);
   const scanMaxLegOdds = useDebouncedValue(maxLegOdds, PROMO_SCAN_DEBOUNCE_MS);
+  const scanTeamInclude = useDebouncedValue(promoTeamInclude, PROMO_SCAN_DEBOUNCE_MS);
+  const scanTeamExclude = useDebouncedValue(promoTeamExclude, PROMO_SCAN_DEBOUNCE_MS);
+  const includeTeamTokens = useMemo(() => parseTeamFilterTokens(scanTeamInclude), [scanTeamInclude]);
+  const excludeTeamTokens = useMemo(() => parseTeamFilterTokens(scanTeamExclude), [scanTeamExclude]);
+  const summaryIncludeTokens = useMemo(() => parseTeamFilterTokens(promoTeamInclude), [promoTeamInclude]);
+  const summaryExcludeTokens = useMemo(() => parseTeamFilterTokens(promoTeamExclude), [promoTeamExclude]);
   const scanStakeRef = useRef(scanStake);
   scanStakeRef.current = scanStake;
 
@@ -1793,6 +1813,8 @@ export default function App() {
     || scanMaxFinalOdds !== maxFinalOdds
     || scanMinLegOdds !== minLegOdds
     || scanMaxLegOdds !== maxLegOdds;
+  const teamFilterPending = scanTeamInclude !== promoTeamInclude
+    || scanTeamExclude !== promoTeamExclude;
 
   // Multi-leg: drop thin PM legs from the scan pool ($500 profit walk, stake-independent).
   // 1-leg: leave the pool; rankPromoPicks drops incomplete-hedge picks after blend.
@@ -1802,15 +1824,22 @@ export default function App() {
     const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
     const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
-    return filterLowLiquidityLegs(promoLegsKept, dropThinPoolLegs, { promoType, numLegs });
-  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, waitForSoccerPm]);
+    const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
+    const promoLegsLiquid = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs });
+    // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
+    // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
+    if (Number(numLegs) === 1 && includeTeamTokens.length) {
+      return filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens);
+    }
+    return promoLegsLiquid;
+  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
-    return [...promoLegs]
-      .sort((a, b) => (ourTrueProb(b.bestOpp) - impliedProb(b.dk)) - (ourTrueProb(a.bestOpp) - impliedProb(a.dk)))
-      .slice(0, PARLAY_LEG_CAP);
-  }, [promoLegs, isParlayPromo]);
+    const sorted = [...promoLegs]
+      .sort((a, b) => (ourTrueProb(b.bestOpp) - impliedProb(b.dk)) - (ourTrueProb(a.bestOpp) - impliedProb(a.dk)));
+    return pinTeamIncludeLegs(sorted, includeTeamTokens, PARLAY_LEG_CAP);
+  }, [promoLegs, isParlayPromo, includeTeamTokens]);
 
   const currentPromoScanKey = useMemo(
     () => promoScanInputKey({
@@ -1822,8 +1851,9 @@ export default function App() {
       refundPct,
       creditConversionPct,
       pool: parlayLegPool,
+      includeTeam: includeTeamTokens.join(","),
     }),
-    [promoType, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool],
+    [promoType, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool, includeTeamTokens],
   );
   const scanCompletedForCurrent = lastCompletedScanKey === currentPromoScanKey;
 
@@ -1865,6 +1895,9 @@ export default function App() {
       minFinalOdds: parsedMinFinal,
       maxFinalOdds: parsedMaxFinal,
       signal: ac.signal,
+      acceptCombo: includeTeamTokens.length
+        ? (comboLegs) => pickMatchesTeamInclude(comboLegs, includeTeamTokens)
+        : null,
     }).then((parlays) => {
       if (!shouldCommitPromoScan({
         requestGen: gen,
@@ -1909,20 +1942,20 @@ export default function App() {
   const topNoSweatsWithLock = useMemo(() => {
     return rankPromoPicks(
       topNoSweats,
-      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity },
+      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
       (p) => attachNoSweatLockToPick(p, stake),
     );
-  }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity]);
+  }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
   const topParlaysWithHedge = useMemo(() => {
     // 1-leg: top-only blend to required hedge $, prefer a full fill, lock from quoted opp.
     // Multi-leg: $500 payout blend (profit excluding stake); lock badge stays off (no simultaneous lock).
     return rankPromoPicks(
       topParlays,
-      { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity },
+      { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
       (p) => attachBoostLockToPick(p, stake),
     );
-  }, [topParlays, numLegs, stake, boostPct, hideLowLiquidity]);
+  }, [topParlays, numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
   const topFreeBets = useMemo(
     () => rescaleParlaysForStake(scannedFreeBets.parlays, scannedFreeBets.atStake, stake),
@@ -1932,10 +1965,10 @@ export default function App() {
   const topFreeBetsWithLock = useMemo(() => {
     return rankPromoPicks(
       topFreeBets,
-      { promoType: "freebet", numLegs, stake, hideLowLiquidity },
+      { promoType: "freebet", numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
       (p) => attachFreeBetLock(p, stake),
     );
-  }, [topFreeBets, numLegs, stake, hideLowLiquidity]);
+  }, [topFreeBets, numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
   const promoBusyForEmpty = promoLoading || waitForSoccerPm;
   const boostEmptyState = promoScanEmptyState({
@@ -2498,7 +2531,7 @@ export default function App() {
                     <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
                     {!promoFiltersOpen && (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", lineHeight: 1.2 }}>
-                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity })}
+                        {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity, includeTeamTokens: summaryIncludeTokens, excludeTeamTokens: summaryExcludeTokens })}
                       </span>
                     )}
                   </div>
@@ -2527,6 +2560,14 @@ export default function App() {
                             {opt.label}
                           </button>
                         ))}
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Must include</label>
+                        <input type="text" value={promoTeamInclude} onChange={(e) => setPromoTeamInclude(e.target.value)} placeholder="e.g. Lions" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Must exclude</label>
+                        <input type="text" value={promoTeamExclude} onChange={(e) => setPromoTeamExclude(e.target.value)} placeholder="e.g. Commanders" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
                       </>)}
                       {controlBox(<>
                         <label style={labelStyle}>Liquidity</label>
@@ -2568,7 +2609,7 @@ export default function App() {
 
               {((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && promoScanBusy && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0
                 || (promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0)
-                || ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && oddsBoundsPending && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0)) && (
+                || ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && (oddsBoundsPending || teamFilterPending) && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0)) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
               )}
               {((promoType === "boost" && boostEmptyState === "scanning")
