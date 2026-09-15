@@ -10,6 +10,13 @@ import {
   applyFixtureMeta,
   fixtureLiveMeta,
   applyStreamMarkets,
+  reconcileLiveGames,
+  marketIsOffered,
+  quoteOfferKey,
+  quotePresenceKey,
+  listedBoardQuotes,
+  lineIsSuspended,
+  lineConfirmedAt,
   gameVisibleOnBoard,
   gameIsFinished,
   fixtureCommence,
@@ -34,7 +41,7 @@ import {
   marketUpdatedAtMs,
 } from "./betstampNormalize.js";
 import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
-import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS } from "./betstampLive.js";
+import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
 import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS, oddsBoardHideKey } from "./oddsBoard.js";
 
 assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
@@ -437,6 +444,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
   assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
+  assert.ok(BETSTAMP_LIVE_RECONCILE_MS >= 10_000 && BETSTAMP_LIVE_RECONCILE_MS <= 20_000);
+  assert.ok(BETSTAMP_RECONCILE_CLEAR_GRACE_MS >= 0 && BETSTAMP_RECONCILE_CLEAR_GRACE_MS <= 10_000);
 }
 
 {
@@ -490,6 +499,151 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
 }
 
 {
+  assert.equal(marketIsOffered({ odds: 1.91 }), true);
+  assert.equal(marketIsOffered({ odds: 1.91, status: "suspended" }), false);
+  assert.equal(marketIsOffered({ odds: 1.91, is_suspended: true }), false);
+  assert.equal(marketIsOffered({ odds: 1.91, active: false }), false);
+  assert.equal(marketIsOffered({ odds: 1.91, status: "open" }), true);
+  assert.equal(quotePresenceKey({ fixtureId: "fix-1", bookKey: "draftkings", betType: "Moneyline", side: "away" }), "fix-1|draftkings|moneyline|away");
+  assert.equal(quoteOfferKey({ fixtureId: "fix-1", bookKey: "fanduel", betType: "Spread", side: "away", line: -3.5 }), "fix-1|fanduel|spread|away|-3.5");
+  assert.equal(quoteOfferKey({ fixtureId: "fix-1", bookKey: "pinnacle", betType: "Total", side: "over", line: 44.5 }), "fix-1|pinnacle|total|over|44.5");
+
+  const now = Date.parse("2026-09-14T20:10:00.000Z");
+  const fixture = {
+    id: "fix-recon",
+    league: "NFL",
+    is_live: true,
+    start_date: "2026-09-14T18:00:00Z",
+    home_team: { name: "Chiefs", abbreviation: "KC" },
+    away_team: { name: "Broncos", abbreviation: "DEN" },
+  };
+  const dkAway = {
+    odds: 2.20, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+    is_alt: false, is_live: true, odd_provider_id: 200, fixture_id: "fix-recon",
+    updated_at: "2026-09-14T20:05:00.000Z",
+  };
+  const fdAway = {
+    odds: 2.05, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT",
+    is_alt: false, is_live: true, odd_provider_id: 100, fixture_id: "fix-recon",
+    updated_at: "2026-09-14T20:09:50.000Z",
+  };
+  const games = gamesFromBetstampSnapshot({
+    nowMs: now,
+    markets: [dkAway, fdAway],
+    fixtures: [fixture],
+    teams: [],
+  });
+  assert.equal(games[0].bookOdds.draftkings.ml_away, 120);
+  assert.equal(games[0].bookOdds.fanduel.ml_away, 105);
+  assert.equal(listedBoardQuotes(games[0]).length, 2);
+
+  // Present in the next snapshot: keep SSE/REST price (even if snapshot juice differs)
+  // and bump lastConfirmedAt. Do not treat this as a suspend.
+  const confirmed = reconcileLiveGames(games, {
+    nowMs: now + 16_000,
+    fixtures: [fixture],
+    markets: [
+      { ...dkAway, odds: 2.10 },
+      fdAway,
+    ],
+  });
+  assert.equal(confirmed[0].bookOdds.draftkings.ml_away, 120, "present quote keeps held price");
+  assert.equal(confirmed[0].bookOdds.fanduel.ml_away, 105);
+  assert.equal(lineIsSuspended(confirmed[0], "draftkings", "ml_away"), false);
+  assert.equal(lineConfirmedAt(confirmed[0], "draftkings", "ml_away"), now + 16_000);
+  assert.equal(lineUpdatedAt(confirmed[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:05:00.000Z"));
+
+  // Missing from the snapshot: clear the zombie, mark OFF, exclude from Best.
+  const cleared = reconcileLiveGames(confirmed, {
+    nowMs: now + 32_000,
+    fixtures: [fixture],
+    markets: [fdAway],
+  });
+  assert.equal(cleared[0].bookOdds.draftkings.ml_away, null, "absent quote is cleared");
+  assert.equal(cleared[0].bookOdds.fanduel.ml_away, 105);
+  assert.equal(lineIsSuspended(cleared[0], "draftkings", "ml_away"), true);
+  assert.equal(lineUpdatedAt(cleared[0], "draftkings", "ml_away"), null);
+  const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+  const liveOpts = { nowMs: now + 32_000, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+  const bestAfterClear = getOddsBoardCell({
+    game: cleared[0], bookKey: "best", market: "ml",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, ...liveOpts,
+  });
+  assert.equal(bestAfterClear.top, 105);
+  assert.equal(bestAfterClear.topBooks[0].key, "fanduel");
+  const dkAfterClear = getOddsBoardCell({
+    game: cleared[0], bookKey: "draftkings", market: "ml",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, ...liveOpts,
+  });
+  assert.equal(dkAfterClear.top, null);
+
+  // SSE tick after clear restores the cell and drops the suspended flag.
+  const { games: restored, applied } = applyStreamMarkets(cleared, [{
+    ...dkAway,
+    odds: 2.30,
+    updated_at: "2026-09-14T20:10:20.000Z",
+  }], { receivedAt: Date.parse("2026-09-14T20:10:20.400Z") });
+  assert.equal(applied.length, 1);
+  assert.equal(restored[0].bookOdds.draftkings.ml_away, 130);
+  assert.equal(lineIsSuspended(restored[0], "draftkings", "ml_away"), false);
+  const bestAfterRestore = getOddsBoardCell({
+    game: restored[0], bookKey: "best", market: "ml",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS,
+    nowMs: Date.parse("2026-09-14T20:10:20.400Z"), maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS,
+  });
+  assert.equal(bestAfterRestore.top, 130);
+
+  // Explicit suspended status on a listed market is not offered.
+  const statusSuspended = reconcileLiveGames(games, {
+    nowMs: now + 40_000,
+    fixtures: [fixture],
+    markets: [{ ...dkAway, status: "suspended" }, fdAway],
+  });
+  assert.equal(statusSuspended[0].bookOdds.draftkings.ml_away, null);
+  assert.equal(lineIsSuspended(statusSuspended[0], "draftkings", "ml_away"), true);
+  assert.equal(statusSuspended[0].bookOdds.fanduel.ml_away, 105);
+
+  // SSE tombstone with status=suspended also clears immediately.
+  const { games: sseOff } = applyStreamMarkets(games, [{
+    ...dkAway,
+    status: "suspended",
+  }], { receivedAt: now + 1_000 });
+  assert.equal(sseOff[0].bookOdds.draftkings.ml_away, null);
+  assert.equal(lineIsSuspended(sseOff[0], "draftkings", "ml_away"), true);
+
+  // markets == null must not wipe the board (failed/incomplete payload).
+  const noop = reconcileLiveGames(games, { nowMs: now + 50_000, markets: null });
+  assert.equal(noop[0].bookOdds.draftkings.ml_away, 120);
+
+  // Pregame rebuild drops a book that disappeared from the snapshot.
+  const pregameFix = {
+    id: "fix-pre",
+    league: "NFL",
+    start_date: "2026-09-20T17:00:00Z",
+    home_team: { name: "Chiefs", abbreviation: "KC" },
+    away_team: { name: "Broncos", abbreviation: "DEN" },
+  };
+  const firstPregame = gamesFromBetstampSnapshot({
+    markets: [
+      { odds: 1.91, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 200, fixture_id: "fix-pre" },
+      { odds: 1.95, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 100, fixture_id: "fix-pre" },
+    ],
+    fixtures: [pregameFix],
+    teams: [],
+  });
+  assert.equal(firstPregame[0].bookOdds.draftkings.ml_away, -110);
+  const secondPregame = gamesFromBetstampSnapshot({
+    markets: [
+      { odds: 1.95, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 100, fixture_id: "fix-pre" },
+    ],
+    fixtures: [pregameFix],
+    teams: [],
+  });
+  assert.equal(secondPregame[0].bookOdds.draftkings.ml_away, null, "pregame re-poll drops disappeared books");
+  assert.equal(secondPregame[0].bookOdds.fanduel.ml_away, -105);
+}
+
+{
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   const board = fs.readFileSync(path.join(dir, "OddsBoard.jsx"), "utf8");
@@ -511,6 +665,11 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /data-tick-metrics/);
   assert.match(stamp, /BETSTAMP_PREGAME_POLL_MS/);
+  assert.match(stamp, /BETSTAMP_LIVE_RECONCILE_MS/);
+  assert.match(stamp, /reconcileLiveGames/);
+  assert.match(stamp, /data-odds-suspended/);
+  assert.match(stamp, /data-live-reconcile-ms/);
+  assert.match(stamp, /no longer lists/);
   assert.match(stamp, /setInterval\(\(\) => \{/);
   assert.match(stamp, /if \(!liveOnly\) \{\s*pollTimer = setInterval/s);
   assert.match(stamp, /clearInterval\(pollTimer\)/);
@@ -518,7 +677,7 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /\[liveOnly, setLiveOnly\] = useState\(false\)/);
   assert.doesNotMatch(stamp, /setLiveOnly\(\s*true\s*\)/);
   assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
-  assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|data-snapshot-age/);
+  assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|BETSTAMP_LIVE_RECONCILE_MS|data-snapshot-age|reconcileLiveGames|data-odds-suspended/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
@@ -565,6 +724,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(app, /BETSTAMP_API_KEY/);
   assert.match(envEx, /BETSTAMP_API_KEY=/);
   assert.doesNotMatch(envEx, /BETSTAMP_API_KEY=\S/);
+  assert.match(envEx, /VITE_BETSTAMP_LIVE_RECONCILE_MS=/);
+  assert.doesNotMatch(envEx, /VITE_BETSTAMP_LIVE_RECONCILE_MS=\d/);
   assert.match(vercel, /api\/betstamp-stream\.js/);
   assert.doesNotMatch(app, /\/api\/fetch-odds/);
 }
