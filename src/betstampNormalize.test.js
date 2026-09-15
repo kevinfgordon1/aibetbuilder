@@ -7,6 +7,8 @@ import {
   toAmericanOdds,
   marketSize,
   gamesFromBetstampSnapshot,
+  applyFixtureMeta,
+  fixtureLiveMeta,
   applyStreamMarkets,
   gameVisibleOnBoard,
   gameIsFinished,
@@ -130,7 +132,9 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr, stackedBest: true,
   });
   assert.equal(sprStackedHide.top, null);
-  assert.deepEqual(sprStackedHide.topStacks, []);
+  assert.equal(sprStackedHide.topStacks.length, 1, "home +3.5 still keeps the 3.5 point after hiding away");
+  assert.equal(sprStackedHide.topStacks[0].price, null);
+  assert.equal(sprStackedHide.botStacks[0].line, 3.5);
   const fdSpr = getOddsBoardCell({
     game: g, bookKey: "fanduel", market: "spr",
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr,
@@ -155,6 +159,30 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(fixtureIsClosed({ status: "final" }), true);
   assert.equal(fixtureIsClosed({ status: "completed" }), true);
   assert.equal(fixtureIsClosed({ status: "scheduled" }), false);
+  const halfMeta = fixtureLiveMeta({ status: "Halftime", live: { period: "HT" } });
+  assert.equal(halfMeta.status, "Halftime");
+  assert.equal(halfMeta.period, "HT");
+  const same = [{ id: "den-kc", status: "live", period: "2Q", is_live: true }];
+  assert.equal(applyFixtureMeta(same, [{ id: "den-kc", status: "live", period: "2Q", is_live: true }]), same);
+  const patched = applyFixtureMeta(same, [{ id: "den-kc", status: "halftime", period: "HT", is_live: true }]);
+  assert.notEqual(patched, same);
+  assert.equal(patched[0].status, "halftime");
+  assert.equal(patched[0].period, "HT");
+  const snapHalf = gamesFromBetstampSnapshot({
+    nowMs: Date.parse("2026-09-14T20:00:00Z"),
+    markets: [],
+    fixtures: [{
+      id: "fix-ht",
+      league: "NFL",
+      is_live: true,
+      status: "halftime",
+      start_date: "2026-09-14T18:00:00Z",
+      home_team: { name: "Chiefs", abbreviation: "KC" },
+      away_team: { name: "Broncos", abbreviation: "DEN" },
+    }],
+    teams: [],
+  });
+  assert.equal(snapHalf[0].status, "halftime");
   const now = Date.parse("2026-09-14T20:00:00Z");
   assert.equal(gameVisibleOnBoard({
     is_live: false,
@@ -293,8 +321,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
 }
 
 {
-  // Live Best Odds uses the same per-line bookLineUpdatedAt clock: a 4+ minute
-  // stale number cannot win, but the book cell still keeps its price + age.
+  // Live Best Odds uses the same per-line bookLineUpdatedAt clock: a 60s+
+  // stale number cannot win while moving, but the book cell still keeps its price + age.
   const now = Date.parse("2026-09-14T20:10:00.000Z");
   const games = gamesFromBetstampSnapshot({
     nowMs: now,
@@ -494,10 +522,17 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
-  assert.match(stamp, /maxBestAgeMs/);
+  assert.match(stamp, /LIVE_BEST_ODDS_BREAK_MAX_AGE_MS/);
+  assert.match(stamp, /data-live-best-age-ms/);
+  assert.match(stamp, /applyFixtureMeta/);
+  assert.match(stamp, /60s/);
+  assert.match(stamp, /halftime \/ intermission/);
+  assert.doesNotMatch(stamp, /4\+ minutes stale/);
   assert.match(stamp, /hiddenKeys/);
   assert.match(stamp, /oddsBoardHideKey/);
   assert.match(stamp, /data-hide-odds/);
+  assert.match(stamp, /opacity: 0;/);
+  assert.match(stamp, /@media \(hover: none\) \{\s*\n\s*\.obb-hide \{ opacity: 0\.2;/);
   assert.match(stamp, /toggleHiddenCell/);
   assert.match(stamp, /useState\(\(\) => new Set\(\)\)/);
   assert.match(stamp, /useState\("single"\)/);
@@ -509,10 +544,13 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /Top 2 lines/);
   assert.match(stamp, /stackedBest/);
   assert.match(stamp, /data-best-stacks/);
+  assert.match(stamp, /data-best-point-pairs/);
+  assert.match(stamp, /data-best-point=/);
+  assert.match(stamp, /pointStacks/);
   assert.doesNotMatch(stamp, /location\.hash|serializeAppHash/);
   assert.doesNotMatch(board, /LIVE_BEST_ODDS_MAX_AGE_MS|maxBestAgeMs/);
   assert.doesNotMatch(board, /data-hide-odds|oddsBoardHideKey|hiddenKeys/);
-  assert.doesNotMatch(board, /stackedBest|data-best-view|Top 2 lines|data-best-stacks/);
+  assert.doesNotMatch(board, /stackedBest|data-best-view|Top 2 lines|data-best-stacks|data-best-point-pairs|pointStacks/);
   assert.match(stamp, /data-win-prob/);
   assert.match(stamp, /formatWinProb/);
   assert.match(stamp, /cellShowsWinProb/);

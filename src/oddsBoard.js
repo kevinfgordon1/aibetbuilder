@@ -3,8 +3,50 @@
 
 import { isSoccerSport } from "./soccerPairing.js";
 
-// Live New Odds Board: a quote this old must not win the Best Odds column.
-export const LIVE_BEST_ODDS_MAX_AGE_MS = 240_000;
+// Live New Odds Board Best: while the game is moving, drop quotes older than 60s.
+// Halftime / intermission keeps the longer 4-minute allowance — books go quiet
+// at the break and a 60s cut would empty Best. Pregame is ungated.
+export const LIVE_BEST_ODDS_MAX_AGE_MS = 60_000;
+export const LIVE_BEST_ODDS_BREAK_MAX_AGE_MS = 240_000;
+
+function normLiveBreakToken(v) {
+  if (v == null || typeof v === "object") return "";
+  return String(v).trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+const LIVE_BREAK_TOKENS = new Set([
+  "ht",
+  "half",
+  "halftime",
+  "half_time",
+  "half_time_break",
+  "end_of_1st_half",
+  "end_1st_half",
+  "end_first_half",
+  "between_halves",
+  "intermission",
+  "intermission_1",
+  "intermission_2",
+  "period_break",
+  "break",
+]);
+
+export function isLiveGameBreak(game) {
+  if (!game) return false;
+  if (game.is_halftime === true || game.in_break === true) return true;
+  for (const raw of [game.status, game.state, game.fixture_status, game.period, game.clock]) {
+    const t = normLiveBreakToken(raw);
+    if (!t) continue;
+    if (LIVE_BREAK_TOKENS.has(t)) return true;
+    if (t.includes("halftime") || t.includes("half_time") || t.includes("intermission")) return true;
+  }
+  return false;
+}
+
+export function liveBestOddsMaxAgeMs(game) {
+  if (!game?.is_live) return null;
+  return isLiveGameBreak(game) ? LIVE_BEST_ODDS_BREAK_MAX_AGE_MS : LIVE_BEST_ODDS_MAX_AGE_MS;
+}
 
 export function isFreshForLiveBestOdds(updatedAt, nowMs, maxAgeMs = LIVE_BEST_ODDS_MAX_AGE_MS) {
   if (updatedAt == null || !isFinite(Number(updatedAt))) return false;
@@ -16,8 +58,11 @@ export function isFreshForLiveBestOdds(updatedAt, nowMs, maxAgeMs = LIVE_BEST_OD
 function liveBestFreshness({ game, nowMs, maxBestAgeMs }) {
   if (!game?.is_live) return null;
   if (nowMs == null || !isFinite(nowMs)) return null;
-  if (maxBestAgeMs == null || !isFinite(maxBestAgeMs)) return null;
-  return { nowMs, maxAgeMs: maxBestAgeMs };
+  const maxAgeMs = maxBestAgeMs != null && isFinite(maxBestAgeMs)
+    ? Number(maxBestAgeMs)
+    : liveBestOddsMaxAgeMs(game);
+  if (maxAgeMs == null || !isFinite(maxAgeMs)) return null;
+  return { nowMs, maxAgeMs };
 }
 
 export function fmtBoardSize(v) {
@@ -130,6 +175,13 @@ export function formatStackedBestLine(market, point, side) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+// Spreads pair +6.5 with −6.5; totals already share 47.5 across over/under.
+export function marketLinePoint(market, line) {
+  const n = normalizeBoardLine(line);
+  if (n == null) return null;
+  return market === "spr" ? Math.abs(n) : n;
+}
+
 function medianLines(values) {
   const a = [...values].sort((x, y) => x - y);
   if (!a.length) return null;
@@ -154,13 +206,7 @@ export function pickBestSidesByPopularLines(entries, freshness, maxLines = STACK
   }
   if (!groups.size) return [];
   const median = medianLines(eligible.map((e) => e.line));
-  const bookOrder = [];
-  const seen = new Set();
-  for (const entry of entries || []) {
-    if (!entry?.key || seen.has(entry.key)) continue;
-    seen.add(entry.key);
-    bookOrder.push(entry.key);
-  }
+  const bookOrder = bookOrderOf(entries);
   const ranked = [...groups.entries()].map(([line, group]) => {
     const pick = pickBestSide(group, null);
     const winnerIdx = bookOrder.findIndex((k) => pick.books.some((b) => b.key === k));
@@ -173,16 +219,7 @@ export function pickBestSidesByPopularLines(entries, freshness, maxLines = STACK
       pick,
     };
   });
-  ranked.sort((a, b) => {
-    if (b.count !== a.count) return b.count - a.count;
-    if (a.dist !== b.dist) return a.dist - b.dist;
-    if (a.bestPrice !== b.bestPrice) {
-      if (a.bestPrice == null) return 1;
-      if (b.bestPrice == null) return -1;
-      return b.bestPrice - a.bestPrice;
-    }
-    return a.winnerIdx - b.winnerIdx;
-  });
+  ranked.sort(comparePopularPoints);
   const cap = Number.isFinite(maxLines) && maxLines > 0 ? Math.floor(maxLines) : STACKED_BEST_MAX_LINES;
   return ranked.slice(0, cap).map(({ line, count, pick }) => ({
     line,
@@ -193,6 +230,126 @@ export function pickBestSidesByPopularLines(entries, freshness, maxLines = STACK
     primaryKey: pick.primaryKey,
     count,
   }));
+}
+
+function bookOrderOf(entries) {
+  const bookOrder = [];
+  const seen = new Set();
+  for (const entry of entries || []) {
+    if (!entry?.key || seen.has(entry.key)) continue;
+    seen.add(entry.key);
+    bookOrder.push(entry.key);
+  }
+  return bookOrder;
+}
+
+function emptySidePick() {
+  return { price: null, books: [], extra: 0, size: null, primaryKey: null, line: null };
+}
+
+function pickSideAtPoint(entries) {
+  if (!entries?.length) return emptySidePick();
+  const pick = pickBestSide(entries, null);
+  if (pick.price == null) return { ...emptySidePick() };
+  const winner = entries.find((e) => e.price === pick.price && pick.books.some((b) => b.key === e.key));
+  return { ...pick, line: winner?.line ?? null };
+}
+
+function fallbackSideLine(market, side, point, otherLine) {
+  if (market === "spr") {
+    const other = normalizeBoardLine(otherLine);
+    if (other != null) return -other;
+    return side === "home" || side === "under" || side === "bot" ? -point : point;
+  }
+  return point;
+}
+
+function stackFromPointPick(pick, { market, side, point, count, fallbackLine }) {
+  const line = normalizeBoardLine(pick.line ?? fallbackLine);
+  return {
+    line,
+    point,
+    price: pick.price,
+    books: pick.books,
+    extra: pick.extra,
+    size: pick.size,
+    primaryKey: pick.primaryKey,
+    count,
+    lineLabel: formatStackedBestLine(market, line, side),
+  };
+}
+
+function comparePopularPoints(a, b) {
+  if (b.count !== a.count) return b.count - a.count;
+  if (a.dist !== b.dist) return a.dist - b.dist;
+  if (a.bestPrice !== b.bestPrice) {
+    if (a.bestPrice == null) return 1;
+    if (b.bestPrice == null) return -1;
+    return b.bestPrice - a.bestPrice;
+  }
+  return a.winnerIdx - b.winnerIdx;
+}
+
+// Top 2 lines at the game/market: rank |point| by unique eligible books
+// (a book counts if either side quotes that point), then best juice per side.
+export function pickBestByPopularPoints(topEntries, botEntries, freshness, {
+  market,
+  maxPoints = STACKED_BEST_MAX_LINES,
+} = {}) {
+  const tagged = [
+    ...(topEntries || []).map((e) => ({ ...e, _side: "top" })),
+    ...(botEntries || []).map((e) => ({ ...e, _side: "bot" })),
+  ];
+  const eligible = [];
+  for (const entry of tagged) {
+    if (!isEligibleBestEntry(entry, freshness)) continue;
+    const raw = normalizeBoardLine(entry.line);
+    if (raw == null) continue;
+    const point = marketLinePoint(market, raw);
+    if (point == null) continue;
+    eligible.push({ ...entry, line: raw, point });
+  }
+  const groups = new Map();
+  for (const entry of eligible) {
+    if (!groups.has(entry.point)) {
+      groups.set(entry.point, { top: [], bot: [], books: new Set() });
+    }
+    const group = groups.get(entry.point);
+    group[entry._side].push(entry);
+    if (entry.key) group.books.add(entry.key);
+  }
+  if (!groups.size) return [];
+  const median = medianLines(eligible.map((e) => e.point));
+  const bookOrder = bookOrderOf(tagged);
+  const ranked = [...groups.entries()].map(([point, group]) => {
+    const top = pickSideAtPoint(group.top);
+    const bot = pickSideAtPoint(group.bot);
+    const bestPrice = top.price == null ? bot.price
+      : bot.price == null ? top.price
+      : Math.max(top.price, bot.price);
+    const winnerIdx = bookOrder.findIndex((k) => group.books.has(k));
+    return {
+      point,
+      count: group.books.size,
+      dist: median == null ? 0 : Math.abs(point - median),
+      bestPrice,
+      winnerIdx: winnerIdx < 0 ? 999 : winnerIdx,
+      top,
+      bot,
+    };
+  });
+  ranked.sort(comparePopularPoints);
+  const cap = Number.isFinite(maxPoints) && maxPoints > 0 ? Math.floor(maxPoints) : STACKED_BEST_MAX_LINES;
+  return ranked.slice(0, cap).map(({ point, count, top, bot }) => {
+    const topLine = fallbackSideLine(market, "top", point, bot.line);
+    const botLine = fallbackSideLine(market, "bot", point, top.line ?? topLine);
+    return {
+      point,
+      count,
+      top: stackFromPointPick(top, { market, side: "top", point, count, fallbackLine: topLine }),
+      bot: stackFromPointPick(bot, { market, side: "bot", point, count, fallbackLine: botLine }),
+    };
+  });
 }
 
 export function isStackedBestMatch(stacks, price, point) {
@@ -257,34 +414,33 @@ function sideFromMap(vals, game, priceKey, sizeKey, freshness, hiddenKeys) {
   return pickBestSide(sideEntries(vals, game, priceKey, sizeKey, hiddenKeys), freshness);
 }
 
-function stackedSideFromMap(vals, game, priceKey, sizeKey, freshness, hiddenKeys, market) {
-  const hide = hideSideFromPriceKey(priceKey);
-  const stacks = pickBestSidesByPopularLines(
-    sideEntries(vals, game, priceKey, sizeKey, hiddenKeys),
+function stackedPointBlocks(vals, game, market, freshness, hiddenKeys) {
+  const topPrice = market === "spr" ? "spr_away" : "tot_over";
+  const topSize = market === "spr" ? "spr_away_size" : "tot_over_size";
+  const botPrice = market === "spr" ? "spr_home" : "tot_under";
+  const botSize = market === "spr" ? "spr_home_size" : "tot_under_size";
+  return pickBestByPopularPoints(
+    sideEntries(vals, game, topPrice, topSize, hiddenKeys),
+    sideEntries(vals, game, botPrice, botSize, hiddenKeys),
     freshness,
-    STACKED_BEST_MAX_LINES,
+    { market, maxPoints: STACKED_BEST_MAX_LINES },
   );
-  return stacks.map((s) => ({
-    ...s,
-    lineLabel: formatStackedBestLine(market, s.line, hide?.side),
-  }));
 }
 
-function applyStackedSide(cell, which, stacks) {
-  const first = stacks[0];
-  if (which === "top") {
-    cell.topStacks = stacks;
-    cell.top = first?.price ?? null;
-    cell.topSize = first?.size ?? null;
-    cell.topBooks = first?.books ?? [];
-    cell.topLine = first?.lineLabel ?? null;
-  } else {
-    cell.botStacks = stacks;
-    cell.bot = first?.price ?? null;
-    cell.botSize = first?.size ?? null;
-    cell.botBooks = first?.books ?? [];
-    cell.botLine = first?.lineLabel ?? null;
-  }
+function applyStackedPointBlocks(cell, blocks) {
+  cell.pointStacks = blocks;
+  cell.topStacks = blocks.map((b) => b.top);
+  cell.botStacks = blocks.map((b) => b.bot);
+  const firstTop = cell.topStacks[0];
+  const firstBot = cell.botStacks[0];
+  cell.top = firstTop?.price ?? null;
+  cell.topSize = firstTop?.size ?? null;
+  cell.topBooks = firstTop?.books ?? [];
+  cell.topLine = firstTop?.lineLabel ?? null;
+  cell.bot = firstBot?.price ?? null;
+  cell.botSize = firstBot?.size ?? null;
+  cell.botBooks = firstBot?.books ?? [];
+  cell.botLine = firstBot?.lineLabel ?? null;
   return cell;
 }
 
@@ -317,6 +473,7 @@ function emptyCell(threeWay) {
     botLine: null,
     topStacks: null,
     botStacks: null,
+    pointStacks: null,
     threeWay,
   };
 }
@@ -358,10 +515,7 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
     }
     if (market === "spr") {
       if (stackedBest) {
-        const cell = emptyCell(false);
-        applyStackedSide(cell, "top", stackedSideFromMap(vals, game, "spr_away", "spr_away_size", freshness, hiddenKeys, "spr"));
-        applyStackedSide(cell, "bot", stackedSideFromMap(vals, game, "spr_home", "spr_home_size", freshness, hiddenKeys, "spr"));
-        return cell;
+        return applyStackedPointBlocks(emptyCell(false), stackedPointBlocks(vals, game, "spr", freshness, hiddenKeys));
       }
       const top = sideFromMap(vals, game, "spr_away", "spr_away_size", freshness, hiddenKeys);
       const bot = sideFromMap(vals, game, "spr_home", "spr_home_size", freshness, hiddenKeys);
@@ -380,10 +534,7 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
     }
     if (market === "tot") {
       if (stackedBest) {
-        const cell = emptyCell(false);
-        applyStackedSide(cell, "top", stackedSideFromMap(vals, game, "tot_over", "tot_over_size", freshness, hiddenKeys, "tot"));
-        applyStackedSide(cell, "bot", stackedSideFromMap(vals, game, "tot_under", "tot_under_size", freshness, hiddenKeys, "tot"));
-        return cell;
+        return applyStackedPointBlocks(emptyCell(false), stackedPointBlocks(vals, game, "tot", freshness, hiddenKeys));
       }
       const top = sideFromMap(vals, game, "tot_over", "tot_over_size", freshness, hiddenKeys);
       const bot = sideFromMap(vals, game, "tot_under", "tot_under_size", freshness, hiddenKeys);
@@ -473,6 +624,7 @@ export function getBestForGame(game, market, selectedBookKeys, allBooks, freshne
     bestDraw: cell.mid,
     awayStacks: cell.topStacks,
     homeStacks: cell.botStacks,
+    pointStacks: cell.pointStacks,
   };
 }
 
