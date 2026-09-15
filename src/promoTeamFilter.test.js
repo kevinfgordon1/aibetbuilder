@@ -16,7 +16,7 @@ import {
   pinTeamIncludeLegs,
   teamFilterSummary,
 } from "./promoTeamFilter.js";
-import { findTopParlaysChunked } from "./promoParlayScan.js";
+import { findTopParlaysChunked, promoScanInputKey } from "./promoParlayScan.js";
 
 const require = createRequire(import.meta.url);
 const { calcParlayEV } = require("../lib/promo-ev.js");
@@ -136,6 +136,16 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   assert.ok(parlays.length > 0);
   assert.ok(parlays.every((p) => p.legs.some((l) => /lions/i.test(l.name + l.game))));
   assert.ok(parlays.every((p) => !p.legs.some((l) => /commanders/i.test(l.name + l.game))));
+
+  const keyBase = {
+    promoType: "boost", numLegs: 1, scanBoostPct: 50,
+    parsedMinFinal: null, parsedMaxFinal: null, refundPct: 100, creditConversionPct: 70,
+    pool: [lionLeg],
+  };
+  assert.notEqual(
+    promoScanInputKey({ ...keyBase, includeTeam: "lions" }),
+    promoScanInputKey({ ...keyBase, includeTeam: "" }),
+  );
 }
 
 // ── App.jsx Extra Filters: two inputs + pool + ranked list use shared helper
@@ -169,7 +179,11 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   assert.doesNotMatch(app, /saveProfilePrefs[\s\S]{0,200}promoTeamInclude/);
   assert.doesNotMatch(profile, /promoTeamInclude|promoTeamExclude|teamInclude|teamExclude/);
   assert.doesNotMatch(share, /promoTeamInclude|promoTeamExclude/);
-  assert.doesNotMatch(app, /serializeAppHash\([\s\S]*promoTeamInclude/);
+  const hashWrites = [...app.matchAll(/serializeAppHash\(\{[\s\S]*?\}\)/g)].map((m) => m[0]);
+  assert.ok(hashWrites.length);
+  for (const call of hashWrites) {
+    assert.doesNotMatch(call, /promoTeamInclude|promoTeamExclude|includeTeamTokens/);
+  }
 
   const combo = fs.readFileSync(path.join(dir, "ComboLocks.jsx"), "utf8");
   assert.doesNotMatch(combo, /promoTeamInclude|filterPicksByTeamName/);
