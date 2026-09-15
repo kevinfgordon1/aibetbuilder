@@ -42,6 +42,8 @@ import {
   deskFillCounts,
   skipTapeSource,
   skipFillState,
+  laterFillOf,
+  formatLaterFilledSuffix,
   formatSkipReason,
   skipFillSummary,
   skipLockLine,
@@ -442,6 +444,15 @@ assert.equal(skipFillState({ tape_match: "matched", tape_no_price: 0.8 }), "fill
 assert.equal(skipFillState({ tape_match: "none" }), "none");
 assert.equal(skipFillState({ tape_match: "ambiguous" }), "unknown");
 assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
+assert.equal(laterFillOf(null), "unknown");
+assert.equal(laterFillOf({ skipFill: "filled" }), "filled");
+assert.equal(laterFillOf({ skipFill: "none" }), "none");
+assert.equal(laterFillOf({ skipFill: "unknown" }), "unknown");
+assert.equal(laterFillOf({ submission: { tape_match: "matched" } }), "filled");
+assert.equal(formatLaterFilledSuffix({ skipFill: "unknown" }), "later filled unknown");
+assert.equal(formatLaterFilledSuffix({ skipFill: "none" }), "no print");
+assert.equal(formatLaterFilledSuffix({ skipFill: "filled", tapeNo: 0.8 }), "later filled +400");
+assert.equal(formatLaterFilledSuffix({ skipFill: "filled" }), "later filled");
 
 {
   const fromMatch = skipTapeSource({ tape_match: "matched", tape_no_price: 0.81 }, { status: "declined" });
@@ -455,7 +466,7 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   const unknown = classifyMiss({ match: { rfq_id: "s1", contracts: 80 }, filled: 40, ceiling: 100 });
   assert.equal(unknown.bucket, "oversized");
   assert.equal(unknown.skipFill, "unknown");
-  assert.equal(formatSkipReason(unknown), "skipped oversized 80 (need ≤60)");
+  assert.equal(formatSkipReason(unknown), "skipped oversized 80 (need ≤60) · later filled unknown");
   assert.doesNotMatch(formatSkipReason(unknown), /unfilled/);
 }
 {
@@ -523,6 +534,7 @@ assert.equal(skipFillState({ tape_no_price: 0.8 }), "unknown");
   assert.equal(formatSkipReason(later), "skipped, later filled +400");
   const unknown = tape.rows.find((r) => r.rfqId === "unk");
   assert.equal(unknown.skipFill, "unknown");
+  assert.match(formatSkipReason(unknown), /later filled unknown/);
   assert.doesNotMatch(formatSkipReason(unknown), /unfilled/);
   assert.equal(tape.rows.some((r) => r.rfqId === "orphan-skip"), true);
 }
@@ -1049,7 +1061,7 @@ assert.equal(inferRfqVenue({}), "kalshi");
   });
   assert.equal(fromSub.bucket, "skipped");
   assert.equal(fromSub.skip.text, "skipped · different leg count");
-  assert.equal(formatSkipReason(fromSub), "skipped · different leg count");
+  assert.equal(formatSkipReason(fromSub), "skipped · different leg count · later filled unknown");
 
   const merged = classifyMiss({
     match: { rfq_id: "pm-2", contracts: 80 },
@@ -1078,15 +1090,15 @@ assert.equal(inferRfqVenue({}), "kalshi");
   });
   assert.equal(underfunded.bucket, "skipped");
   assert.equal(underfunded.skip.text, "skipped · insufficient funds");
-  assert.equal(formatSkipReason(underfunded), "skipped · insufficient funds");
+  assert.equal(formatSkipReason(underfunded), "skipped · insufficient funds · later filled unknown");
   assert.equal(formatSkipReason(classifyMiss({
     submission: { rfq_id: "k-funds-syn", status: "declined", skip_reason: "insufficient_funds" },
-  })), "skipped · insufficient funds");
+  })), "skipped · insufficient funds · later filled unknown");
 
   const unknown = classifyMiss({
     submission: { rfq_id: "pm-new", venue: "polymarket", status: "declined", skip_reason: "poly_future_code" },
   });
-  assert.equal(formatSkipReason(unknown), "skipped · poly_future_code");
+  assert.equal(formatSkipReason(unknown), "skipped · poly_future_code · later filled unknown");
 
   const noise = classifyMiss({
     submission: {
@@ -1096,7 +1108,7 @@ assert.equal(inferRfqVenue({}), "kalshi");
       skip_reason: "no_lock_overlap:no_shared_game x9",
     },
   });
-  assert.equal(formatSkipReason(noise), "skipped · no shared game ×9");
+  assert.equal(formatSkipReason(noise), "skipped · no shared game ×9 · later filled unknown");
 
   const row = buildRfqRow({
     submission: {
@@ -1110,7 +1122,7 @@ assert.equal(inferRfqVenue({}), "kalshi");
   });
   assert.equal(row.venueKey, "polymarket");
   assert.equal(row.venue, "Polymarket");
-  assert.equal(formatSkipReason(row), "skipped · same games, no match");
+  assert.equal(formatSkipReason(row), "skipped · same games, no match · later filled unknown");
 }
 
 assert.equal(isQuotingParlay({ active: true, archived_at: null }), true);

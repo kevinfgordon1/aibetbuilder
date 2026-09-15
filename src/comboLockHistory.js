@@ -2,7 +2,7 @@
 // Every attempt shows — not fills only: armed, quoted/rested, skipped, cancelled,
 // expired, unfilled, filled (partial or full). Reuses comboTape.buildLockTape.
 
-import { attemptLockLine, attemptLockParts, buildLockTape, formatSkipReason } from "./comboTape.js";
+import { attemptLockLine, attemptLockParts, buildLockTape, formatLaterFilledSuffix, formatSkipReason } from "./comboTape.js";
 
 function tsMs(v) {
   if (v == null || v === "") return 0;
@@ -78,9 +78,11 @@ export function attemptFromTapeRow(row, { filled = 0, ceiling = 0 } = {}) {
         : row.bucket === "no_taker" ? "unfilled · no taker"
           : row.bucket === "lost" ? "unfilled · lost"
             : (row.reason || "unfilled");
+  // Outbid already carries tape/beat in ComboTape; don't replace that with later-filled.
+  const later = row.bucket === "outbid" ? "" : ` · ${formatLaterFilledSuffix(row)}`;
   return {
     key: "unfilled",
-    label: why,
+    label: why + later,
     reason: row.reason || "unfilled",
     at: row.at || null,
     contracts: row.contracts,
