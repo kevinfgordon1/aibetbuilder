@@ -33,7 +33,7 @@ import {
 } from "./betstampNormalize.js";
 import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS } from "./betstampLive.js";
-import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS } from "./oddsBoard.js";
+import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS, oddsBoardHideKey } from "./oddsBoard.js";
 
 assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
 assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
@@ -109,6 +109,18 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(ml.bot, -105);
   const sprBest = getOddsBoardCell({ game: g, bookKey: "best", market: "spr", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
   assert.equal(sprBest.top, 105);
+
+  const hiddenFdSpr = new Set([oddsBoardHideKey({ gameId: g.id, market: "spr", side: "away", bookKey: "fanduel" })]);
+  const sprAfterHide = getOddsBoardCell({
+    game: g, bookKey: "best", market: "spr",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr,
+  });
+  assert.equal(sprAfterHide.top, null, "hiding the only book on that side leaves Best as —");
+  const fdSpr = getOddsBoardCell({
+    game: g, bookKey: "fanduel", market: "spr",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr,
+  });
+  assert.equal(fdSpr.top, 105, "hidden FanDuel square still shows +105");
 }
 
 {
@@ -468,7 +480,14 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
   assert.match(stamp, /maxBestAgeMs/);
+  assert.match(stamp, /hiddenKeys/);
+  assert.match(stamp, /oddsBoardHideKey/);
+  assert.match(stamp, /data-hide-odds/);
+  assert.match(stamp, /toggleHiddenCell/);
+  assert.match(stamp, /useState\(\(\) => new Set\(\)\)/);
+  assert.doesNotMatch(stamp, /location\.hash|serializeAppHash/);
   assert.doesNotMatch(board, /LIVE_BEST_ODDS_MAX_AGE_MS|maxBestAgeMs/);
+  assert.doesNotMatch(board, /data-hide-odds|oddsBoardHideKey|hiddenKeys/);
   assert.match(stamp, /data-win-prob/);
   assert.match(stamp, /formatWinProb/);
   assert.match(stamp, /cellShowsWinProb/);

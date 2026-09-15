@@ -44,6 +44,30 @@ export function bookInitials(label) {
   return word.slice(0, 2).toUpperCase();
 }
 
+// Session hide on New Odds Board: game + market + side + book (not the whole column).
+export function oddsBoardHideKey({ gameId, market, side, bookKey } = {}) {
+  if (gameId == null || gameId === "") return null;
+  if (!market || !side || !bookKey || bookKey === "best") return null;
+  return `${gameId}:${market}:${side}:${bookKey}`;
+}
+
+export function hideSideFromPriceKey(priceKey) {
+  if (priceKey === "ml_away" || priceKey === "ml_away_no") return { market: "ml", side: priceKey === "ml_away" ? "away" : "away_no" };
+  if (priceKey === "ml_home" || priceKey === "ml_home_no") return { market: "ml", side: priceKey === "ml_home" ? "home" : "home_no" };
+  if (priceKey === "ml_draw" || priceKey === "ml_draw_no") return { market: "ml", side: priceKey === "ml_draw" ? "draw" : "draw_no" };
+  if (priceKey === "spr_away") return { market: "spr", side: "away" };
+  if (priceKey === "spr_home") return { market: "spr", side: "home" };
+  if (priceKey === "tot_over") return { market: "tot", side: "over" };
+  if (priceKey === "tot_under") return { market: "tot", side: "under" };
+  return null;
+}
+
+export function isHiddenOddsCell(hiddenKeys, spec) {
+  if (!hiddenKeys || typeof hiddenKeys.has !== "function") return false;
+  const key = oddsBoardHideKey(spec);
+  return !!(key && hiddenKeys.has(key));
+}
+
 export function pickBestSide(entries, freshness) {
   const gate = !!(
     freshness
@@ -55,6 +79,7 @@ export function pickBestSide(entries, freshness) {
   let best = null;
   const books = [];
   for (const entry of entries || []) {
+    if (entry?.hidden) continue;
     const price = entry?.price;
     if (price == null || !isFinite(price)) continue;
     if (gate && !isFreshForLiveBestOdds(entry.updatedAt, freshness.nowMs, freshness.maxAgeMs)) continue;
@@ -93,12 +118,19 @@ function selectedBooks(allBooks, selectedBookKeys) {
   return (allBooks || []).filter((b) => selectedBookKeys.has(b.key));
 }
 
-function sideFromMap(vals, game, priceKey, sizeKey, freshness) {
+function sideFromMap(vals, game, priceKey, sizeKey, freshness, hiddenKeys) {
+  const hide = hideSideFromPriceKey(priceKey);
   return pickBestSide(vals.map((b) => ({
     key: b.key,
     price: game.bookOdds?.[b.key]?.[priceKey],
     size: game.bookOdds?.[b.key]?.[sizeKey],
     updatedAt: game.bookLineUpdatedAt?.[b.key]?.[priceKey],
+    hidden: !!(hide && isHiddenOddsCell(hiddenKeys, {
+      gameId: game?.id,
+      market: hide.market,
+      side: hide.side,
+      bookKey: b.key,
+    })),
   })), freshness);
 }
 
@@ -133,19 +165,19 @@ function emptyCell(threeWay) {
   };
 }
 
-export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks, nowMs, maxBestAgeMs }) {
+export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks, nowMs, maxBestAgeMs, hiddenKeys }) {
   const threeWay = !!(game?.is_three_way || isSoccerSport(game?.sport));
   const vals = selectedBooks(allBooks, selectedBookKeys);
   const freshness = liveBestFreshness({ game, nowMs, maxBestAgeMs });
 
   if (bookKey === "best") {
     if (market === "ml") {
-      const top = sideFromMap(vals, game, "ml_away", "ml_away_size", freshness);
-      const mid = sideFromMap(vals, game, "ml_draw", "ml_draw_size", freshness);
-      const bot = sideFromMap(vals, game, "ml_home", "ml_home_size", freshness);
-      const topNo = sideFromMap(vals, game, "ml_away_no", "ml_away_no_size", freshness);
-      const midNo = sideFromMap(vals, game, "ml_draw_no", "ml_draw_no_size", freshness);
-      const botNo = sideFromMap(vals, game, "ml_home_no", "ml_home_no_size", freshness);
+      const top = sideFromMap(vals, game, "ml_away", "ml_away_size", freshness, hiddenKeys);
+      const mid = sideFromMap(vals, game, "ml_draw", "ml_draw_size", freshness, hiddenKeys);
+      const bot = sideFromMap(vals, game, "ml_home", "ml_home_size", freshness, hiddenKeys);
+      const topNo = sideFromMap(vals, game, "ml_away_no", "ml_away_no_size", freshness, hiddenKeys);
+      const midNo = sideFromMap(vals, game, "ml_draw_no", "ml_draw_no_size", freshness, hiddenKeys);
+      const botNo = sideFromMap(vals, game, "ml_home_no", "ml_home_no_size", freshness, hiddenKeys);
       return {
         ...emptyCell(threeWay),
         top: top.price,
@@ -169,8 +201,8 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       };
     }
     if (market === "spr") {
-      const top = sideFromMap(vals, game, "spr_away", "spr_away_size", freshness);
-      const bot = sideFromMap(vals, game, "spr_home", "spr_home_size", freshness);
+      const top = sideFromMap(vals, game, "spr_away", "spr_away_size", freshness, hiddenKeys);
+      const bot = sideFromMap(vals, game, "spr_home", "spr_home_size", freshness, hiddenKeys);
       const dkb = game.bookOdds?.draftkings;
       return {
         ...emptyCell(false),
@@ -185,8 +217,8 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       };
     }
     if (market === "tot") {
-      const top = sideFromMap(vals, game, "tot_over", "tot_over_size", freshness);
-      const bot = sideFromMap(vals, game, "tot_under", "tot_under_size", freshness);
+      const top = sideFromMap(vals, game, "tot_over", "tot_over_size", freshness, hiddenKeys);
+      const bot = sideFromMap(vals, game, "tot_under", "tot_under_size", freshness, hiddenKeys);
       const dkb = game.bookOdds?.draftkings;
       return {
         ...emptyCell(false),

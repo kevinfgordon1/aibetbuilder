@@ -11,6 +11,9 @@ import {
   pickBestFromPriceMap,
   LIVE_BEST_ODDS_MAX_AGE_MS,
   isFreshForLiveBestOdds,
+  oddsBoardHideKey,
+  hideSideFromPriceKey,
+  isHiddenOddsCell,
 } from "./oddsBoard.js";
 
 const require = createRequire(import.meta.url);
@@ -430,6 +433,171 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   const { bestAway, bestHome } = getBestForGame(liveGame, "ml", selected, ALL_BOOKS, liveOpts);
   assert.equal(bestAway, 100);
   assert.equal(bestHome, -120);
+}
+
+// ── hide key: game + market + side + book (not the Best column)
+{
+  assert.equal(oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "fanduel" }), "den-kc:ml:away:fanduel");
+  assert.equal(oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "best" }), null);
+  assert.equal(oddsBoardHideKey({ gameId: "", market: "ml", side: "away", bookKey: "fanduel" }), null);
+  assert.deepEqual(hideSideFromPriceKey("ml_away"), { market: "ml", side: "away" });
+  assert.deepEqual(hideSideFromPriceKey("tot_under"), { market: "tot", side: "under" });
+  const keys = new Set([oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "fanduel" })]);
+  assert.equal(isHiddenOddsCell(keys, { gameId: "den-kc", market: "ml", side: "away", bookKey: "fanduel" }), true);
+  assert.equal(isHiddenOddsCell(keys, { gameId: "den-kc", market: "ml", side: "home", bookKey: "fanduel" }), false);
+  assert.equal(isHiddenOddsCell(keys, { gameId: "den-kc", market: "ml", side: "away", bookKey: "draftkings" }), false);
+}
+
+// ── pick-best with a hidden book: next-best wins; opposite side unchanged
+{
+  const skipped = pickBestSide([
+    { key: "fanduel", price: 120, hidden: true },
+    { key: "draftkings", price: 110 },
+    { key: "kalshi", price: 105 },
+  ]);
+  assert.equal(skipped.price, 110);
+  assert.equal(skipped.primaryKey, "draftkings");
+
+  const noneLeft = pickBestSide([
+    { key: "fanduel", price: 120, hidden: true },
+    { key: "draftkings", price: 110, hidden: true },
+  ]);
+  assert.equal(noneLeft.price, null);
+  assert.equal(noneLeft.primaryKey, null);
+  assert.deepEqual(noneLeft.books, []);
+
+  const game = {
+    id: "den-kc",
+    sport: "americanfootball_nfl",
+    bookOdds: {
+      fanduel: { ml_away: 120, ml_home: -140, spr_away: 105, spr_home: -115, tot_over: 100, tot_under: -120 },
+      draftkings: { ml_away: 110, ml_home: -130, spr_away: -110, spr_home: -105, tot_over: -110, tot_under: -105 },
+      kalshi: { ml_away: 105, ml_home: -125 },
+    },
+  };
+  const hiddenAwayFd = new Set([oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "fanduel" })]);
+  const mlBest = getOddsBoardCell({
+    game,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    hiddenKeys: hiddenAwayFd,
+  });
+  assert.equal(mlBest.top, 110, "hidden FanDuel +120 drops; DK +110 is next-best");
+  assert.equal(mlBest.topBooks[0].key, "draftkings");
+  assert.equal(mlBest.bot, -125, "home side still includes FanDuel and Kalshi");
+  assert.equal(mlBest.botBooks[0].key, "kalshi");
+
+  const fdCell = getOddsBoardCell({
+    game,
+    bookKey: "fanduel",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    hiddenKeys: hiddenAwayFd,
+  });
+  assert.equal(fdCell.top, 120, "hidden square still shows its price");
+  assert.equal(fdCell.bot, -140);
+
+  const otherGame = getOddsBoardCell({
+    game: { ...game, id: "buf-mia" },
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    hiddenKeys: hiddenAwayFd,
+  });
+  assert.equal(otherGame.top, 120, "hide is scoped to that game id");
+  assert.equal(otherGame.topBooks[0].key, "fanduel");
+
+  const allAwayHidden = new Set([
+    oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "fanduel" }),
+    oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "draftkings" }),
+    oddsBoardHideKey({ gameId: "den-kc", market: "ml", side: "away", bookKey: "kalshi" }),
+  ]);
+  const emptyBest = getOddsBoardCell({
+    game,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    hiddenKeys: allAwayHidden,
+  });
+  assert.equal(emptyBest.top, null, "no eligible book → Best shows —");
+  assert.deepEqual(emptyBest.topBooks, []);
+  assert.equal(emptyBest.bot, -125);
+
+  const sprHidden = new Set([oddsBoardHideKey({ gameId: "den-kc", market: "spr", side: "away", bookKey: "fanduel" })]);
+  const sprBest = getOddsBoardCell({
+    game,
+    bookKey: "best",
+    market: "spr",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    hiddenKeys: sprHidden,
+  });
+  assert.equal(sprBest.top, -110);
+  assert.equal(sprBest.topBooks[0].key, "draftkings");
+  assert.equal(sprBest.bot, -105, "home spread still uses DK; FanDuel home was never hidden");
+
+  const totHidden = new Set([oddsBoardHideKey({ gameId: "den-kc", market: "tot", side: "over", bookKey: "fanduel" })]);
+  const totBest = getOddsBoardCell({
+    game,
+    bookKey: "best",
+    market: "tot",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    hiddenKeys: totHidden,
+  });
+  assert.equal(totBest.top, -110);
+  assert.equal(totBest.topBooks[0].key, "draftkings");
+
+  const { bestAway, bestHome } = getBestForGame(game, "ml", selected, ALL_BOOKS, { hiddenKeys: hiddenAwayFd });
+  assert.equal(bestAway, 110);
+  assert.equal(bestHome, -125);
+
+  const ungated = getOddsBoardCell({
+    game,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+  });
+  assert.equal(ungated.top, 120, "omitting hiddenKeys leaves public / default Best unchanged");
+}
+
+// ── hidden is an extra layer on live stale exclusion
+{
+  const now = 1_700_000_000_000;
+  const liveGame = {
+    id: "den-kc-live",
+    sport: "americanfootball_nfl",
+    is_live: true,
+    bookOdds: {
+      fanduel: { ml_away: 130 },
+      draftkings: { ml_away: 120 },
+      kalshi: { ml_away: 100 },
+    },
+    bookLineUpdatedAt: {
+      fanduel: { ml_away: now - 1_000 },
+      draftkings: { ml_away: now - 241_000 },
+      kalshi: { ml_away: now - 2_000 },
+    },
+  };
+  const hiddenFd = new Set([oddsBoardHideKey({ gameId: "den-kc-live", market: "ml", side: "away", bookKey: "fanduel" })]);
+  const best = getOddsBoardCell({
+    game: liveGame,
+    bookKey: "best",
+    market: "ml",
+    selectedBookKeys: selected,
+    allBooks: ALL_BOOKS,
+    nowMs: now,
+    maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS,
+    hiddenKeys: hiddenFd,
+  });
+  assert.equal(best.top, 100, "hidden fresh FD and stale DK skip; Kalshi wins");
+  assert.equal(best.topBooks[0].key, "kalshi");
 }
 
 console.log("oddsBoard.test.js ok");
