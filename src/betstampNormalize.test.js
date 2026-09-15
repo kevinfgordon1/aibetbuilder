@@ -531,6 +531,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /hiddenKeys/);
   assert.match(stamp, /oddsBoardHideKey/);
   assert.match(stamp, /data-hide-odds/);
+  assert.match(stamp, /opacity: 0;/);
+  assert.match(stamp, /@media \(hover: none\) \{\s*\n\s*\.obb-hide \{ opacity: 0\.2;/);
   assert.match(stamp, /toggleHiddenCell/);
   assert.match(stamp, /useState\(\(\) => new Set\(\)\)/);
   assert.match(stamp, /useState\("single"\)/);

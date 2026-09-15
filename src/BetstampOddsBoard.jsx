@@ -806,18 +806,18 @@ export default function BetstampOddsBoard() {
         .obb-side { position: relative; }
         .obb-hide {
           position: absolute;
-          top: 1px;
-          right: 1px;
+          top: 2px;
+          right: 2px;
           z-index: 2;
-          min-width: 24px;
-          min-height: 24px;
-          padding: 0 6px;
-          border-radius: 4px;
-          border: 1px solid rgba(255,255,255,0.14);
-          background: rgba(10,11,15,0.92);
-          color: #d1d5db;
-          font-size: 12px;
-          font-weight: 700;
+          min-width: 16px;
+          min-height: 16px;
+          padding: 0 3px;
+          border-radius: 3px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: #4b5563;
+          font-size: 10px;
+          font-weight: 600;
           line-height: 1;
           cursor: pointer;
           opacity: 0;
@@ -825,13 +825,31 @@ export default function BetstampOddsBoard() {
           font-family: 'DM Sans', sans-serif;
         }
         .obb-side:hover .obb-hide,
-        .obb-side:focus-within .obb-hide,
+        .obb-side:focus-within .obb-hide {
+          opacity: 0.4;
+          pointer-events: auto;
+        }
+        .obb-side:hover .obb-hide:hover,
+        .obb-side:focus-within .obb-hide:focus {
+          opacity: 0.85;
+          color: #9ca3af;
+          background: rgba(10,11,15,0.7);
+        }
         .obb-side[data-hidden="1"] .obb-hide {
           opacity: 1;
           pointer-events: auto;
+          color: #d1d5db;
+          background: rgba(10,11,15,0.92);
+          border-color: rgba(255,255,255,0.14);
+          font-size: 11px;
+          font-weight: 700;
+          min-width: 24px;
+          min-height: 20px;
+          padding: 0 6px;
         }
         @media (hover: none) {
-          .obb-hide { opacity: 0.9; pointer-events: auto; }
+          .obb-hide { opacity: 0.2; pointer-events: auto; }
+          .obb-side[data-hidden="1"] .obb-hide { opacity: 1; }
         }
       `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
