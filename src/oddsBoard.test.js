@@ -539,6 +539,49 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   });
   assert.equal(pregameOld.top, 210, "pregame is not age-gated");
 
+  // Screenshot: DEN@KC LIVE spread, Single Best. bet365 −10.5 / +218 at 3m
+  // was winning KC Best while FD/DK/PX on −7.5 were 1–8s fresh.
+  const denKcLiveSpr = {
+    id: "den-kc-mnf-spr",
+    sport: "americanfootball_nfl",
+    is_live: true,
+    status: "live",
+    period: "2Q",
+    bookOdds: {
+      fanduel: { spr_away: -130, spr_away_line: 7.5, spr_home: -102, spr_home_line: -7.5 },
+      draftkings: { spr_away: -111, spr_away_line: 7.5, spr_home: -119, spr_home_line: -7.5 },
+      prophetx: { spr_away: -118, spr_away_line: 7.5, spr_home: 101, spr_home_line: -7.5 },
+      bet365: { spr_away: -300, spr_away_line: 10.5, spr_home: 218, spr_home_line: -10.5 },
+    },
+    bookLineUpdatedAt: {
+      fanduel: { spr_away: now - 8_000, spr_home: now - 8_000 },
+      draftkings: { spr_away: now - 3_000, spr_home: now - 3_000 },
+      prophetx: { spr_away: now - 1_000, spr_home: now - 1_000 },
+      bet365: { spr_away: now - 180_000, spr_home: now - 180_000 },
+    },
+  };
+  const denKcBest = getOddsBoardCell({
+    game: denKcLiveSpr, bookKey: "best", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS, nowMs: now,
+  });
+  assert.equal(denKcBest.bot, 101, "3m bet365 +218 on −10.5 cannot win live Best");
+  assert.equal(denKcBest.botBooks[0].key, "prophetx");
+  assert.equal(denKcBest.top, -111, "fresh DEN Best is unchanged");
+  assert.equal(denKcBest.topBooks[0].key, "draftkings");
+  const denKc365 = getOddsBoardCell({
+    game: denKcLiveSpr, bookKey: "bet365", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS, nowMs: now,
+  });
+  assert.equal(denKc365.bot, 218, "bet365 cell still shows the 3m +218");
+  assert.equal(denKc365.botLine, "-10.5");
+  const denKcHalf = getOddsBoardCell({
+    game: { ...denKcLiveSpr, status: "halftime", period: "HT" },
+    bookKey: "best", market: "spr",
+    selectedBookKeys: trial, allBooks: BETSTAMP_TRIAL_BOOKS, nowMs: now,
+  });
+  assert.equal(denKcHalf.bot, 218, "same 3m +218 can win Best at halftime");
+  assert.equal(denKcHalf.botBooks[0].key, "bet365");
+
   const ungated = getOddsBoardCell({
     game: liveGame,
     bookKey: "best",
