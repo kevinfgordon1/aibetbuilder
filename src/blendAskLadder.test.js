@@ -29,7 +29,7 @@ assert.equal(isPmBlendVenue("kalshi"), true);
 assert.equal(isPmBlendVenue("pinnacle"), false);
 assert.equal(isPmBlendVenue("draftkings"), false);
 
-// ── Kevin: $100 stake, +200 boosted 100% → $400 win; opp −200 needs $333.33
+// ── Lock math stays hedge-$ ; Hide-low-liquidity / blend is $500 profit
 {
   const stake = 100;
   const profit = boostedProfitFromLeg({ dk: 200 }, stake, 100);
@@ -39,26 +39,35 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.ok(Math.abs(H - 333.333333) < 1e-4);
 
   const full = applyPmBlendToLeg(
-    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 400 },
+    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 1000 },
     null,
     { promoType: "boost", numLegs: 1, stake, boostPct: 100 },
   );
-  assert.equal(full.lowLiquidity, false, "full book covers $333.33 hedge");
+  assert.equal(full.lowLiquidity, false, "full book covers $500 profit");
   assert.equal(full.bestOpp, -200);
-  assert.equal(full.pmBlend.mode, "hedge");
+  assert.equal(full.pmBlend.mode, "payout");
   assert.ok(full.pmBlend.complete);
   assert.equal(full.pmBlend.levelsUsed, 1);
-  assert.equal(full.pmBlend.flag, "", "top size alone fills the hedge — no blend tag");
+  assert.equal(full.pmBlend.flag, "", "top size alone fills $500 profit — no blend tag");
 
   const short = applyPmBlendToLeg(
     { dk: 200, bestOpp: -200, bestOppBook: "novig", bestOppSize: 100 },
     null,
     { promoType: "boost", numLegs: 1, stake, boostPct: 100 },
   );
-  assert.equal(short.lowLiquidity, true, "top-only $100 cannot fund $333.33 hedge");
+  assert.equal(short.lowLiquidity, true, "top-only $100 cannot fund $500 profit");
   assert.equal(short.bestOpp, -200);
-  assert.ok(Math.abs(short.pmBlend.stakeFilled - 100) < 1e-6);
-  assert.match(short.pmBlend.flag, /of \$333\.33 hedge available/);
+  assert.equal(short.pmBlend.mode, "payout");
+  assert.match(short.pmBlend.flag, /of \$500 payout available/);
+
+  // Old hedge-$ bar would have cleared $400 @ −200 (profit $200); $500 payout does not.
+  const coversOldHedge = applyPmBlendToLeg(
+    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 400 },
+    null,
+    { promoType: "boost", numLegs: 1, stake, boostPct: 100 },
+  );
+  assert.equal(coversOldHedge.lowLiquidity, true, "$400 fills $333 hedge but only $200 of $500 profit");
+  assert.match(coversOldHedge.pmBlend.flag, /\$200 of \$500/);
 
   const pxShort = applyPmBlendToLeg(
     { dk: 200, bestOpp: -200, bestOppBook: "prophetx", bestOppSize: 80 },
@@ -68,32 +77,63 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(pxShort.lowLiquidity, true, "ProphetX top-only shortfall flags");
 }
 
-// 1-leg walk VWAP uses hedge $, not the thin top (and not the $500 payout bar)
+// Kevin Cardinals: Fanatics −175 / Novig +163 $125 / 0% boost — old hedge ~$60
+{
+  const stake = 100;
+  const profit = boostedProfitFromLeg({ dk: -175 }, stake, 0);
+  const H = requiredBoostHedgeStake(stake, profit, 163);
+  assert.ok(H > 0 && H < 125, "old hedge-$ bar would have cleared $125 Novig");
+  const cardinals = applyPmBlendToLeg(
+    { dk: -175, bestOpp: 163, bestOppBook: "novig", bestOppSize: 125 },
+    null,
+    { promoType: "boost", numLegs: 1, stake, boostPct: 0 },
+  );
+  assert.equal(cardinals.lowLiquidity, true, "Cardinals-style $125 Novig fails $500 profit");
+  assert.equal(cardinals.pmBlend.mode, "payout");
+  assert.ok(Math.abs(cardinals.pmBlend.payoutFilled - 125 * 1.63) < 1e-6);
+  assert.match(cardinals.pmBlend.flag, /of \$500 payout available/);
+}
+
+// 1-leg walk VWAP uses $500 payout, same as multi-leg (not the small hedge $)
 {
   const walked = applyPmBlendToLeg(
-    { dk: 200, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 100 },
+    { dk: 200, bestOpp: 200, bestOppBook: "kalshi", bestOppSize: 100 },
     [
-      { american: -200, size: 100 },
-      { american: -250, size: 300 },
+      { american: 200, size: 100 },
+      { american: 100, size: 400 },
     ],
     { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 },
   );
   assert.equal(walked.lowLiquidity, false);
-  assert.equal(walked.bestOppQuoted, -200);
-  assert.notEqual(walked.bestOpp, -200, "VWAP to $333.33 walks into −250");
-  assert.equal(walked.pmBlend.mode, "hedge");
+  assert.equal(walked.bestOppQuoted, 200);
+  assert.equal(walked.bestOpp, 125, "VWAP to $500 profit walks into +100");
+  assert.equal(walked.pmBlend.mode, "payout");
   assert.ok(walked.pmBlend.complete);
   assert.ok(walked.pmBlend.levelsUsed > 1);
-  assert.match(walked.pmBlend.flag, /blended to \$333\.33 hedge/);
+  assert.match(walked.pmBlend.flag, /blended to \$500 payout/);
 }
 
-// 1-leg no-sweat: H = (winProfit + stake − creditValue) / d_h
+// 1-leg no-sweat: lock H stays hedge-$ ; liquidity is $500 profit
 {
   const H = requiredNoSweatHedgeStake(100, 100, 70, -200);
   assert.ok(Math.abs(H - 130 / 1.5) < 1e-9);
+  const short = applyPmBlendToLeg(
+    { dk: 100, bestOpp: -200, bestOppBook: "novig", bestOppSize: 80 },
+    null,
+    { promoType: "nosweat", numLegs: 1, stake: 100 },
+  );
+  assert.equal(short.lowLiquidity, true);
+  assert.equal(short.pmBlend.mode, "payout");
+  const full = applyPmBlendToLeg(
+    { dk: 100, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 1000 },
+    null,
+    { promoType: "nosweat", numLegs: 1, stake: 100 },
+  );
+  assert.equal(full.lowLiquidity, false);
+  assert.equal(full.pmBlend.mode, "payout");
 }
 
-// 1-leg free bet: H = (d_fb − 1) × FB / d_h
+// 1-leg free bet: lock H stays hedge-$ ; liquidity is $500 profit
 {
   const H = requiredFreeBetHedgeStake(200, -200, 100);
   assert.ok(Math.abs(H - 200 / 1.5) < 1e-9);
@@ -103,7 +143,14 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     { promoType: "freebet", numLegs: 1, stake: 100 },
   );
   assert.equal(short.lowLiquidity, true);
-  assert.equal(short.pmBlend.mode, "hedge");
+  assert.equal(short.pmBlend.mode, "payout");
+  const full = applyPmBlendToLeg(
+    { dk: 200, bestOpp: -200, bestOppBook: "polymarket", bestOppSize: 1000 },
+    null,
+    { promoType: "freebet", numLegs: 1, stake: 100 },
+  );
+  assert.equal(full.lowLiquidity, false);
+  assert.equal(full.pmBlend.mode, "payout");
 }
 
 // ── multi-leg uses $500 profit excl. stake (not hedge $, not face/total return)

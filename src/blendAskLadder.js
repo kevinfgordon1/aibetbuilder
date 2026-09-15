@@ -1,16 +1,16 @@
 // Walk a prediction-market ask ladder for Promo true-odds / Profit Boost.
 //
-// Two walk modes
-// --------------
-// 1-leg Profit Boost / Free Bet / No Sweat:
-//   Compute the exact hedge STAKE $ for a perfect lock from the quoted opp,
-//   then VWAP-walk the book until that hedge $ is filled. Not the multi-leg
-//   payout target. Example: $100 stake, +200 boosted 100% → $400 win;
-//   opp −200 needs $333.33.
-// Multi-leg (numLegs ≥ 2):
+// Liquidity / true-odds walk (1-leg and multi-leg):
 //   VWAP-walk until PROFIT (win excluding the original stake) reaches
-//   TARGET_PAYOUT_USD ($500). "Payout" in UI copy is this profit, not
-//   face/total return (stake + win).
+//   TARGET_PAYOUT_USD ($500). Same bar for Profit Boost (incl. 0%), Free Bet,
+//   and No Sweat. "Payout" in UI copy is this profit, not face/total return
+//   (stake + win). Incomplete walk → lowLiquidity. Sportsbooks never flag.
+//
+// Lock math is separate: requiredBoostHedgeStake / freebet / nosweat hedge $
+//   still describe the perfect-lock stake for Guaranteed Profit. That is not
+//   the Hide-low-liquidity completeness bar. Example: $100 stake, +200 boosted
+//   100% → $400 win; opp −200 needs $333.33 hedge — but $500 profit still
+//   decides whether the inverse book is liquid enough to show.
 //
 // Size on depth levels is DOLLAR STAKE (price × contracts). See lib/book-depth.js.
 // Profit = stake × (decimalOdds − 1):
@@ -84,7 +84,7 @@ export function payoutTargetLabel(target = TARGET_PAYOUT_USD) {
 }
 
 // True blending = walked into additional/worse prices (or VWAP ≠ the quoted top).
-// A single deep top that already fills the $500-profit / hedge $ target is not a blend.
+// A single deep top that already fills the $500-profit target is not a blend.
 export function blendDidWalk(blend, topAmerican) {
   if (!blend) return false;
   if (Number(blend.levelsUsed) > 1) return true;
@@ -273,26 +273,6 @@ export function resolvePmBookLevels(leg, levels) {
   return normalizeLevels([{ american: quoted, size }]);
 }
 
-function requiredHedgeForLeg(leg, ctx) {
-  const quoted = leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp;
-  const type = ctx && ctx.promoType;
-  const stake = ctx && ctx.stake;
-  if (type === "freebet") {
-    return requiredFreeBetHedgeStake(leg.dk, quoted, stake);
-  }
-  if (type === "nosweat") {
-    const winProfit = ctx.winProfit != null ? ctx.winProfit : boostedProfitFromLeg(leg, stake, 0);
-    const creditValue = ctx.creditValue != null
-      ? ctx.creditValue
-      : Number(stake) * (Number(ctx.refundPct ?? 100) / 100) * (Number(ctx.creditConversionPct ?? 70) / 100);
-    return requiredNoSweatHedgeStake(stake, winProfit, creditValue, quoted);
-  }
-  const boostedProfit = ctx.boostedProfit != null
-    ? ctx.boostedProfit
-    : boostedProfitFromLeg(leg, stake, ctx.boostPct);
-  return requiredBoostHedgeStake(stake, boostedProfit, quoted);
-}
-
 // Blended VWAP when the book was walked; otherwise the quoted bestOpp.
 export function trueOppAmerican(leg) {
   const blended = leg && leg.pmBlend && leg.pmBlend.american;
@@ -307,21 +287,16 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
   }
   const quoted = leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp;
   const book = resolvePmBookLevels(leg, levels);
-  // Empty ladder and missing/invalid bestOppSize: no proven $500-profit /
-  // hedge-$ fill. Rank + Hide-low-liquidity must not treat this as OK —
+  // Empty ladder and missing/invalid bestOppSize: no proven $500-profit
+  // fill. Rank + Hide-low-liquidity must not treat this as OK —
   // the live depth overlay would later badge LOW LIQUIDITY.
   if (!book.length) {
     return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
   }
 
-  const nLegs = ctx.numLegs != null ? Number(ctx.numLegs) : 0;
-  const singleLeg = nLegs === 1;
-  let blend = null;
-  if (singleLeg && (ctx.promoType === "boost" || ctx.promoType === "freebet" || ctx.promoType === "nosweat")) {
-    const H = requiredHedgeForLeg({ ...leg, bestOpp: quoted, bestOppQuoted: quoted }, ctx);
-    if (H > 0) blend = blendAskLadderToStake(book, { targetStake: H });
-  }
-  if (!blend) blend = blendAskLadderToPayout(book);
+  // 1-leg boost / freebet / nosweat use the same $500 inverse-payout walk
+  // as multi-leg. Hedge $ stays on lock math (quoted opp), not this bar.
+  const blend = blendAskLadderToPayout(book);
 
   if (!blend || blend.american == null) {
     return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };

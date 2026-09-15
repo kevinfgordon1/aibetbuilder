@@ -2,8 +2,7 @@
 // Session-only (same as Markets / date / odds bounds). Default on.
 //
 // Reuses pickHasLowLiquidity / applyPmBlendToLeg — no second definition.
-// Multi-leg: incomplete $500-profit walk (win excl. stake, #96).
-// 1-leg: incomplete required-hedge $ walk (perfect lock).
+// 1-leg and multi-leg: incomplete $500-profit walk (win excl. stake).
 // Sportsbooks never set lowLiquidity; only Kalshi/Polymarket/Novig/ProphetX.
 // Unproven PM books (empty ladder / missing bestOppSize) are low liquidity —
 // do not treat "unknown / no ladder" as OK. A positive bestOppSize still

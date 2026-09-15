@@ -1816,9 +1816,9 @@ export default function App() {
   const teamFilterPending = scanTeamInclude !== promoTeamInclude
     || scanTeamExclude !== promoTeamExclude;
 
-  // Multi-leg: drop thin PM legs from the scan pool ($500 profit walk, stake-independent).
-  // 1-leg: leave the pool; rankPromoPicks drops incomplete-hedge picks after blend.
-  const dropThinPoolLegs = hideLowLiquidity && Number(numLegs) >= 2;
+  // Drop thin PM legs from the scan pool ($500 profit walk, stake-independent
+  // for 1-leg and multi-leg). rankPromoPicks also drops incomplete $500 walks.
+  const dropThinPoolLegs = hideLowLiquidity;
   const promoLegs = useMemo(() => {
     if (waitForSoccerPm) return [];
     const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
@@ -1948,8 +1948,8 @@ export default function App() {
   }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
   const topParlaysWithHedge = useMemo(() => {
-    // 1-leg: top-only blend to required hedge $, prefer a full fill, lock from quoted opp.
-    // Multi-leg: $500 payout blend (profit excluding stake); lock badge stays off (no simultaneous lock).
+    // 1-leg and multi-leg: $500 payout blend (profit excluding stake).
+    // Lock from quoted opp (Guaranteed Profit); multi-leg lock badge stays off.
     return rankPromoPicks(
       topParlays,
       { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
