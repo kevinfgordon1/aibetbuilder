@@ -77,6 +77,7 @@ import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promo
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
+import { bookLogo } from "./bookLogos.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import {
   applyPmBlendToLeg,
@@ -106,26 +107,26 @@ const logEvent = async (user, event, metadata = {}) => {
 };
 
 const ALL_BOOKS = [
-  { key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: "https://www.draftkings.com/favicon.ico" },
-  { key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: "https://www.fanduel.com/favicon.ico" },
-  { key: "williamhill_us", label: "Caesars", color: "#d4a843", bg: "rgba(212,168,67,0.15)", logo: "https://www.caesars.com/favicon.ico" },
-  { key: "betmgm", label: "BetMGM", color: "#c4a962", bg: "rgba(196,169,98,0.15)", logo: "https://sports.betmgm.com/favicon.ico" },
-  { key: "betrivers", label: "BetRivers", color: "#4a9eff", bg: "rgba(74,158,255,0.15)", logo: "https://www.betrivers.com/favicon.ico" },
-  { key: "fanatics", label: "Fanatics", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: "https://sportsbook.fanatics.com/favicon.ico" },
-  { key: "hardrockbet", label: "Hard Rock", color: "#d4af37", bg: "rgba(212,175,55,0.15)", logo: "https://app.hardrock.bet/favicon.ico" },
-  { key: "espnbet", label: "theScore Bet", color: "#ff6600", bg: "rgba(255,102,0,0.15)", logo: "https://sportsbook.thescore.bet/favicon.ico" },
-  { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: null },
-  { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
-  { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
-  { key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: "https://www.pinnacle.com/favicon.ico" },
-  { key: "lowvig", label: "LowVig", color: "#8b5cf6", bg: "rgba(139,92,246,0.15)", logo: null },
-  { key: "betus", label: "BetUS", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", logo: null },
-  { key: "betanysports", label: "BetAnything", color: "#14b8a6", bg: "rgba(20,184,166,0.15)", logo: null },
-  { key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: "https://kalshi.com/favicon.ico", exchange: true },
-  { key: "novig", label: "Novig", color: "#a855f7", bg: "rgba(168,85,247,0.15)", logo: null, exchange: true },
-  { key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
-  { key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
-  { key: "betopenly", label: "BetOpenly", color: "#e879f9", bg: "rgba(232,121,249,0.15)", logo: null, exchange: true },
+  { key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: bookLogo("draftkings") },
+  { key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: bookLogo("fanduel") },
+  { key: "williamhill_us", label: "Caesars", color: "#d4a843", bg: "rgba(212,168,67,0.15)", logo: bookLogo("williamhill_us") },
+  { key: "betmgm", label: "BetMGM", color: "#c4a962", bg: "rgba(196,169,98,0.15)", logo: bookLogo("betmgm") },
+  { key: "betrivers", label: "BetRivers", color: "#4a9eff", bg: "rgba(74,158,255,0.15)", logo: bookLogo("betrivers") },
+  { key: "fanatics", label: "Fanatics", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: bookLogo("fanatics") },
+  { key: "hardrockbet", label: "Hard Rock", color: "#d4af37", bg: "rgba(212,175,55,0.15)", logo: bookLogo("hardrockbet") },
+  { key: "espnbet", label: "theScore Bet", color: "#ff6600", bg: "rgba(255,102,0,0.15)", logo: bookLogo("espnbet") },
+  { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: bookLogo("bovada") },
+  { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: bookLogo("mybookieag") },
+  { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: bookLogo("betonlineag") },
+  { key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: bookLogo("pinnacle") },
+  { key: "lowvig", label: "LowVig", color: "#8b5cf6", bg: "rgba(139,92,246,0.15)", logo: bookLogo("lowvig") },
+  { key: "betus", label: "BetUS", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", logo: bookLogo("betus") },
+  { key: "betanysports", label: "BetAnything", color: "#14b8a6", bg: "rgba(20,184,166,0.15)", logo: bookLogo("betanysports") },
+  { key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: bookLogo("kalshi"), exchange: true },
+  { key: "novig", label: "Novig", color: "#a855f7", bg: "rgba(168,85,247,0.15)", logo: bookLogo("novig"), exchange: true },
+  { key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: bookLogo("prophetx"), exchange: true },
+  { key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: bookLogo("polymarket"), exchange: true },
+  { key: "betopenly", label: "BetOpenly", color: "#e879f9", bg: "rgba(232,121,249,0.15)", logo: bookLogo("betopenly"), exchange: true },
 ];
 
 const TRUSTED_BOOK_KEYS = new Set([

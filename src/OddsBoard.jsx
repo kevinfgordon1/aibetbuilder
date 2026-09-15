@@ -4,13 +4,13 @@ import { isSoccerSport } from "./soccerPairing.js";
 import { boardSportMatches, isSoccerChipId } from "./sportChips.js";
 import {
   fmtBoardSize,
-  bookInitials,
   bestBooksTitle,
   formatDateGroup,
   getOddsBoardCell,
   getBestForGame,
   pickBestFromPriceMap,
 } from "./oddsBoard.js";
+import BookMark from "./BookMark.jsx";
 
 function impliedProb(odds) {
   if (!odds) return 0.5;
@@ -20,55 +20,6 @@ function impliedProb(odds) {
 
 function bookByKey(books, key) {
   return (books || []).find((b) => b.key === key) || null;
-}
-
-function BookMark({ book, extra = 0, title, size = 13 }) {
-  const [logoError, setLogoError] = useState(false);
-  if (!book) return null;
-  const showLogo = book.logo && !logoError;
-  const initials = bookInitials(book.label);
-  return (
-    <span
-      title={title || book.label}
-      data-book-mark={book.key}
-      style={{ display: "inline-flex", alignItems: "center", gap: 3, verticalAlign: "middle", flexShrink: 0 }}
-    >
-      {showLogo ? (
-        <img
-          src={book.logo}
-          alt=""
-          width={size}
-          height={size}
-          style={{ borderRadius: 2, display: "block" }}
-          onError={() => setLogoError(true)}
-        />
-      ) : (
-        <span
-          aria-hidden="true"
-          style={{
-            width: size,
-            height: size,
-            borderRadius: 3,
-            background: book.bg,
-            color: book.color,
-            fontSize: Math.max(8, Math.round(size * 0.58)),
-            fontWeight: 800,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            lineHeight: 1,
-            fontFamily: "'DM Sans', sans-serif",
-            letterSpacing: -0.3,
-          }}
-        >
-          {initials}
-        </span>
-      )}
-      {extra > 0 && (
-        <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", fontFamily: "'DM Sans', sans-serif" }}>+{extra}</span>
-      )}
-    </span>
-  );
 }
 
 function LiquidityCue({ size, inline = false }) {
@@ -246,7 +197,8 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
         ))}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         {allBooks.map((b) => (
-          <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
+          <button key={b.key} onClick={() => toggleBook(b.key)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
+            <BookMark book={b} size={14} />
             {b.label}
           </button>
         ))}
@@ -258,7 +210,12 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
             <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
               <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>{champMeta?.label || "Champion"}</th>
               {champBooks.map((b) => (
-                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>{b.label}</th>
+                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                    {b.key !== "best" && <BookMark book={b} size={16} />}
+                    {b.label}
+                  </span>
+                </th>
               ))}
             </tr>
           </thead>
@@ -284,7 +241,10 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
               <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
               {visibleBooks.map((b) => (
                 <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                  {b.label}
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                    {b.key !== "best" && <BookMark book={b} size={16} />}
+                    {b.label}
+                  </span>
                 </th>
               ))}
             </tr>
