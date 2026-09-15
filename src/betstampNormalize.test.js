@@ -109,6 +109,15 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(ml.bot, -105);
   const sprBest = getOddsBoardCell({ game: g, bookKey: "best", market: "spr", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
   assert.equal(sprBest.top, 105);
+  assert.equal(sprBest.topStacks, null, "default Single Best does not stack");
+
+  const sprStacked = getOddsBoardCell({
+    game: g, bookKey: "best", market: "spr",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, stackedBest: true,
+  });
+  assert.equal(sprStacked.topStacks.length, 1);
+  assert.equal(sprStacked.topStacks[0].line, -3.5);
+  assert.equal(sprStacked.topStacks[0].price, 105);
 
   const hiddenFdSpr = new Set([oddsBoardHideKey({ gameId: g.id, market: "spr", side: "away", bookKey: "fanduel" })]);
   const sprAfterHide = getOddsBoardCell({
@@ -116,6 +125,12 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr,
   });
   assert.equal(sprAfterHide.top, null, "hiding the only book on that side leaves Best as —");
+  const sprStackedHide = getOddsBoardCell({
+    game: g, bookKey: "best", market: "spr",
+    selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr, stackedBest: true,
+  });
+  assert.equal(sprStackedHide.top, null);
+  assert.deepEqual(sprStackedHide.topStacks, []);
   const fdSpr = getOddsBoardCell({
     game: g, bookKey: "fanduel", market: "spr",
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, hiddenKeys: hiddenFdSpr,
@@ -485,9 +500,19 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(stamp, /data-hide-odds/);
   assert.match(stamp, /toggleHiddenCell/);
   assert.match(stamp, /useState\(\(\) => new Set\(\)\)/);
+  assert.match(stamp, /useState\("single"\)/);
+  assert.match(stamp, /data-best-view=\{bestView\}/);
+  assert.match(stamp, /data-best-view-toggle/);
+  assert.match(stamp, /data-best-view=\{opt\.id\}/);
+  assert.match(stamp, /id: "single"/);
+  assert.match(stamp, /id: "stacked"/);
+  assert.match(stamp, /Top 2 lines/);
+  assert.match(stamp, /stackedBest/);
+  assert.match(stamp, /data-best-stacks/);
   assert.doesNotMatch(stamp, /location\.hash|serializeAppHash/);
   assert.doesNotMatch(board, /LIVE_BEST_ODDS_MAX_AGE_MS|maxBestAgeMs/);
   assert.doesNotMatch(board, /data-hide-odds|oddsBoardHideKey|hiddenKeys/);
+  assert.doesNotMatch(board, /stackedBest|data-best-view|Top 2 lines|data-best-stacks/);
   assert.match(stamp, /data-win-prob/);
   assert.match(stamp, /formatWinProb/);
   assert.match(stamp, /cellShowsWinProb/);

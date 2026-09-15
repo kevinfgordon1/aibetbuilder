@@ -10,6 +10,8 @@ import {
   LIVE_BEST_ODDS_MAX_AGE_MS,
   oddsBoardHideKey,
   isHiddenOddsCell,
+  isStackedBestMatch,
+  oddsBoardSidePoint,
 } from "./oddsBoard.js";
 import {
   BETSTAMP_TRIAL_BOOKS,
@@ -256,6 +258,7 @@ export default function BetstampOddsBoard() {
   const altCacheRef = useRef(new Map());
   const altFetchGen = useRef(0);
   const [hiddenKeys, setHiddenKeys] = useState(() => new Set());
+  const [bestView, setBestView] = useState("single"); // default = today's single Best
   const [openGame, setOpenGame] = useState(null);
   const [altLadders, setAltLadders] = useState(null);
   const [altLoading, setAltLoading] = useState(false);
@@ -523,7 +526,8 @@ export default function BetstampOddsBoard() {
   const oddsColWidth = 92;
   const metrics = summarizeTickStats(tickStats, nowMs);
 
-  const liveBestOpts = { nowMs, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS, hiddenKeys };
+  const stackedBest = bestView === "stacked";
+  const liveBestOpts = { nowMs, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS, hiddenKeys, stackedBest };
 
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
@@ -544,7 +548,53 @@ export default function BetstampOddsBoard() {
     background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent",
   });
 
-  const renderBookColumn = (rowGame, marketKey, b, cell, bestAway, bestHome, { includeLine = true } = {}) => {
+  const isBestHighlight = (rowGame, marketKey, b, cell, which, singleBest, stacks) => {
+    if (b.key === "best") return false;
+    const price = which === "top" ? cell.top : cell.bot;
+    if (price == null) return false;
+    if (stackedBest && marketKey !== "ml") {
+      return isStackedBestMatch(stacks, price, oddsBoardSidePoint(rowGame, b.key, marketKey, which));
+    }
+    return price === singleBest;
+  };
+
+  const renderStackedSides = (rowGame, marketKey, stacks, field) => {
+    if (!stacks?.length) {
+      return <OddsSide price={null} size={null} line={null} books={[]} allBooks={books} showBestMark nowMs={nowMs} />;
+    }
+    return (
+      <div data-best-stacks={stacks.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
+        {stacks.map((s, i) => (
+          <div
+            key={`${s.line}-${s.primaryKey || i}`}
+            data-best-stack={s.line}
+            data-best-stack-price={s.price}
+            style={i > 0 ? {
+              marginTop: 6,
+              paddingTop: 6,
+              borderTop: "1px solid rgba(16,185,129,0.2)",
+              width: "100%",
+            } : { width: "100%" }}
+          >
+            <OddsSide
+              price={s.price}
+              size={s.size}
+              line={s.lineLabel}
+              books={s.books}
+              allBooks={books}
+              showBestMark
+              showWinProb={cellShowsWinProb("best", s.books)}
+              updatedAt={bestLineUpdatedAt(rowGame, field, s.books)}
+              nowMs={nowMs}
+              ageTitle="Newest update among books offering this best price"
+            />
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderBookColumn = (rowGame, marketKey, b, cell, bests, { includeLine = true } = {}) => {
     const fields = cellLineFields(marketKey);
     const isBestCol = b.key === "best";
     const topHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
@@ -553,8 +603,10 @@ export default function BetstampOddsBoard() {
     const botHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
       gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "bot"), bookKey: b.key,
     });
-    const isBestAway = !topHidden && !isBestCol && cell.top !== null && cell.top === bestAway;
-    const isBestHome = !botHidden && !isBestCol && cell.bot !== null && cell.bot === bestHome;
+    const isBestAway = !topHidden && isBestHighlight(rowGame, marketKey, b, cell, "top", bests.bestAway, bests.awayStacks);
+    const isBestHome = !botHidden && isBestHighlight(rowGame, marketKey, b, cell, "bot", bests.bestHome, bests.homeStacks);
+    const stackTop = isBestCol && stackedBest && marketKey !== "ml" && cell.topStacks;
+    const stackBot = isBestCol && stackedBest && marketKey !== "ml" && cell.botStacks;
     const topUpdatedAt = isBestCol
       ? bestLineUpdatedAt(rowGame, fields.top, cell.topBooks)
       : lineUpdatedAt(rowGame, b.key, fields.top);
@@ -589,7 +641,7 @@ export default function BetstampOddsBoard() {
             onToggleHide={toggleHiddenCell}
             sideStyle={sideStyle}
           >
-            <OddsSide {...sideProps("top")} />
+            {stackTop ? renderStackedSides(rowGame, marketKey, cell.topStacks, fields.top) : <OddsSide {...sideProps("top")} />}
           </BookSideCell>
           <BookSideCell
             gameId={rowGame.id}
@@ -605,7 +657,7 @@ export default function BetstampOddsBoard() {
             onToggleHide={toggleHiddenCell}
             sideStyle={sideStyle}
           >
-            <OddsSide {...sideProps("bot")} />
+            {stackBot ? renderStackedSides(rowGame, marketKey, cell.botStacks, fields.bot) : <OddsSide {...sideProps("bot")} />}
           </BookSideCell>
         </div>
       </td>
@@ -613,7 +665,7 @@ export default function BetstampOddsBoard() {
   };
 
   const renderOddsPair = (rowGame, marketKey) => {
-    const { bestAway, bestHome } = getBestForGame(rowGame, marketKey, selectedBooks, books, liveBestOpts);
+    const bests = getBestForGame(rowGame, marketKey, selectedBooks, books, liveBestOpts);
     return visibleBooks.map((b) => {
       const cell = getOddsBoardCell({
         game: rowGame,
@@ -623,7 +675,7 @@ export default function BetstampOddsBoard() {
         allBooks: books,
         ...liveBestOpts,
       });
-      return renderBookColumn(rowGame, marketKey, b, cell, bestAway, bestHome, { includeLine: marketKey === "ml" });
+      return renderBookColumn(rowGame, marketKey, b, cell, bests, { includeLine: marketKey === "ml" });
     });
   };
 
@@ -680,7 +732,7 @@ export default function BetstampOddsBoard() {
   };
 
   return (
-    <div data-betstamp-board="true" data-guard-allow="true">
+    <div data-betstamp-board="true" data-guard-allow="true" data-best-view={bestView}>
       <style>{`
         .obb-side { position: relative; }
         .obb-hide {
@@ -826,6 +878,38 @@ export default function BetstampOddsBoard() {
           </button>
         ))}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</span>
+        <div
+          data-best-view-toggle="true"
+          role="group"
+          aria-label="Best odds view"
+          style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
+          {[
+            { id: "single", label: "Single" },
+            { id: "stacked", label: "Top 2 lines" },
+          ].map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              data-best-view={opt.id}
+              aria-pressed={bestView === opt.id}
+              onClick={() => setBestView(opt.id)}
+              style={{
+                padding: "6px 12px",
+                border: "none",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: bestView === opt.id ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.03)",
+                color: bestView === opt.id ? "#34d399" : "#6b7280",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         {books.map((b) => (
           <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
             {b.label}
@@ -881,7 +965,7 @@ export default function BetstampOddsBoard() {
                   <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
                 </tr>
                 {dateGames.map((game) => {
-                  const { bestAway, bestHome } = getBestForGame(game, market, selectedBooks, books, liveBestOpts);
+                  const bests = getBestForGame(game, market, selectedBooks, books, liveBestOpts);
                   return (
                     <tr
                       key={game.id}
@@ -908,7 +992,7 @@ export default function BetstampOddsBoard() {
                           <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "6px 0 4px" }}>Alts →</div>
                         </div>
                       </td>
-                      {visibleBooks.map((b) => renderBookColumn(game, market, b, getCell(game, b.key), bestAway, bestHome))}
+                      {visibleBooks.map((b) => renderBookColumn(game, market, b, getCell(game, b.key), bests))}
                     </tr>
                   );
                 })}
@@ -924,6 +1008,7 @@ export default function BetstampOddsBoard() {
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: a number 4+ minutes stale cannot win Best)
+        {" · "}Best view default is Single (today's juice compare). Top 2 lines stacks the two most popular spread/total points (eligible book count; moneyline stays single)}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim
         {" · "}$ under a price is that book's size / limit when the feed sends it

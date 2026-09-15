@@ -68,21 +68,32 @@ export function isHiddenOddsCell(hiddenKeys, spec) {
   return !!(key && hiddenKeys.has(key));
 }
 
-export function pickBestSide(entries, freshness) {
-  const gate = !!(
+function freshnessGate(freshness) {
+  return !!(
     freshness
     && freshness.nowMs != null
     && isFinite(freshness.nowMs)
     && freshness.maxAgeMs != null
     && isFinite(freshness.maxAgeMs)
   );
+}
+
+export function isEligibleBestEntry(entry, freshness) {
+  if (entry?.hidden) return false;
+  const price = entry?.price;
+  if (price == null || !isFinite(price)) return false;
+  if (freshnessGate(freshness) && !isFreshForLiveBestOdds(entry.updatedAt, freshness.nowMs, freshness.maxAgeMs)) {
+    return false;
+  }
+  return true;
+}
+
+export function pickBestSide(entries, freshness) {
   let best = null;
   const books = [];
   for (const entry of entries || []) {
-    if (entry?.hidden) continue;
-    const price = entry?.price;
-    if (price == null || !isFinite(price)) continue;
-    if (gate && !isFreshForLiveBestOdds(entry.updatedAt, freshness.nowMs, freshness.maxAgeMs)) continue;
+    if (!isEligibleBestEntry(entry, freshness)) continue;
+    const price = entry.price;
     if (best === null || price > best) {
       best = price;
       books.length = 0;
@@ -98,6 +109,105 @@ export function pickBestSide(entries, freshness) {
     size: books[0]?.size ?? null,
     primaryKey: books[0]?.key ?? null,
   };
+}
+
+// New Odds Board "Top 2 lines" Best: cap stacked spread/total chips.
+export const STACKED_BEST_MAX_LINES = 2;
+
+export function normalizeBoardLine(point) {
+  const n = Number(point);
+  if (point == null || point === "" || !isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+export function formatStackedBestLine(market, point, side) {
+  const n = normalizeBoardLine(point);
+  if (n == null) return null;
+  if (market === "tot") {
+    const over = side === "over" || side === "top";
+    return `${over ? "o" : "u"}${n}`;
+  }
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+function medianLines(values) {
+  const a = [...values].sort((x, y) => x - y);
+  if (!a.length) return null;
+  const mid = Math.floor(a.length / 2);
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+}
+
+// Group eligible quotes by exact line. Popularity = eligible book count.
+// Ties: closer to median/consensus, then better American (same as pickBestSide).
+export function pickBestSidesByPopularLines(entries, freshness, maxLines = STACKED_BEST_MAX_LINES) {
+  const eligible = [];
+  for (const entry of entries || []) {
+    if (!isEligibleBestEntry(entry, freshness)) continue;
+    const line = normalizeBoardLine(entry.line);
+    if (line == null) continue;
+    eligible.push({ ...entry, line });
+  }
+  const groups = new Map();
+  for (const entry of eligible) {
+    if (!groups.has(entry.line)) groups.set(entry.line, []);
+    groups.get(entry.line).push(entry);
+  }
+  if (!groups.size) return [];
+  const median = medianLines(eligible.map((e) => e.line));
+  const bookOrder = [];
+  const seen = new Set();
+  for (const entry of entries || []) {
+    if (!entry?.key || seen.has(entry.key)) continue;
+    seen.add(entry.key);
+    bookOrder.push(entry.key);
+  }
+  const ranked = [...groups.entries()].map(([line, group]) => {
+    const pick = pickBestSide(group, null);
+    const winnerIdx = bookOrder.findIndex((k) => pick.books.some((b) => b.key === k));
+    return {
+      line,
+      count: group.length,
+      dist: median == null ? 0 : Math.abs(line - median),
+      bestPrice: pick.price,
+      winnerIdx: winnerIdx < 0 ? 999 : winnerIdx,
+      pick,
+    };
+  });
+  ranked.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    if (a.dist !== b.dist) return a.dist - b.dist;
+    if (a.bestPrice !== b.bestPrice) {
+      if (a.bestPrice == null) return 1;
+      if (b.bestPrice == null) return -1;
+      return b.bestPrice - a.bestPrice;
+    }
+    return a.winnerIdx - b.winnerIdx;
+  });
+  const cap = Number.isFinite(maxLines) && maxLines > 0 ? Math.floor(maxLines) : STACKED_BEST_MAX_LINES;
+  return ranked.slice(0, cap).map(({ line, count, pick }) => ({
+    line,
+    price: pick.price,
+    books: pick.books,
+    extra: pick.extra,
+    size: pick.size,
+    primaryKey: pick.primaryKey,
+    count,
+  }));
+}
+
+export function isStackedBestMatch(stacks, price, point) {
+  if (price == null || !isFinite(price) || !stacks?.length) return false;
+  const line = normalizeBoardLine(point);
+  if (line == null) return false;
+  return stacks.some((s) => s.line === line && s.price === price);
+}
+
+export function oddsBoardSidePoint(game, bookKey, market, which) {
+  const b = game?.bookOdds?.[bookKey];
+  if (!b) return null;
+  if (market === "spr") return which === "top" ? b.spr_away_line : b.spr_home_line;
+  if (market === "tot") return b.tot_line;
+  return null;
 }
 
 export function bestBooksTitle(books, labelOf) {
@@ -118,20 +228,64 @@ function selectedBooks(allBooks, selectedBookKeys) {
   return (allBooks || []).filter((b) => selectedBookKeys.has(b.key));
 }
 
-function sideFromMap(vals, game, priceKey, sizeKey, freshness, hiddenKeys) {
+function lineFieldForPriceKey(priceKey) {
+  if (priceKey === "spr_away") return "spr_away_line";
+  if (priceKey === "spr_home") return "spr_home_line";
+  if (priceKey === "tot_over" || priceKey === "tot_under") return "tot_line";
+  return null;
+}
+
+function sideEntries(vals, game, priceKey, sizeKey, hiddenKeys) {
   const hide = hideSideFromPriceKey(priceKey);
-  return pickBestSide(vals.map((b) => ({
+  const lineField = lineFieldForPriceKey(priceKey);
+  return vals.map((b) => ({
     key: b.key,
     price: game.bookOdds?.[b.key]?.[priceKey],
     size: game.bookOdds?.[b.key]?.[sizeKey],
     updatedAt: game.bookLineUpdatedAt?.[b.key]?.[priceKey],
+    line: lineField ? game.bookOdds?.[b.key]?.[lineField] : null,
     hidden: !!(hide && isHiddenOddsCell(hiddenKeys, {
       gameId: game?.id,
       market: hide.market,
       side: hide.side,
       bookKey: b.key,
     })),
-  })), freshness);
+  }));
+}
+
+function sideFromMap(vals, game, priceKey, sizeKey, freshness, hiddenKeys) {
+  return pickBestSide(sideEntries(vals, game, priceKey, sizeKey, hiddenKeys), freshness);
+}
+
+function stackedSideFromMap(vals, game, priceKey, sizeKey, freshness, hiddenKeys, market) {
+  const hide = hideSideFromPriceKey(priceKey);
+  const stacks = pickBestSidesByPopularLines(
+    sideEntries(vals, game, priceKey, sizeKey, hiddenKeys),
+    freshness,
+    STACKED_BEST_MAX_LINES,
+  );
+  return stacks.map((s) => ({
+    ...s,
+    lineLabel: formatStackedBestLine(market, s.line, hide?.side),
+  }));
+}
+
+function applyStackedSide(cell, which, stacks) {
+  const first = stacks[0];
+  if (which === "top") {
+    cell.topStacks = stacks;
+    cell.top = first?.price ?? null;
+    cell.topSize = first?.size ?? null;
+    cell.topBooks = first?.books ?? [];
+    cell.topLine = first?.lineLabel ?? null;
+  } else {
+    cell.botStacks = stacks;
+    cell.bot = first?.price ?? null;
+    cell.botSize = first?.size ?? null;
+    cell.botBooks = first?.books ?? [];
+    cell.botLine = first?.lineLabel ?? null;
+  }
+  return cell;
 }
 
 function fmtSpreadLine(point) {
@@ -161,11 +315,13 @@ function emptyCell(threeWay) {
     botNoBooks: [],
     topLine: null,
     botLine: null,
+    topStacks: null,
+    botStacks: null,
     threeWay,
   };
 }
 
-export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks, nowMs, maxBestAgeMs, hiddenKeys }) {
+export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks, nowMs, maxBestAgeMs, hiddenKeys, stackedBest }) {
   const threeWay = !!(game?.is_three_way || isSoccerSport(game?.sport));
   const vals = selectedBooks(allBooks, selectedBookKeys);
   const freshness = liveBestFreshness({ game, nowMs, maxBestAgeMs });
@@ -201,6 +357,12 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       };
     }
     if (market === "spr") {
+      if (stackedBest) {
+        const cell = emptyCell(false);
+        applyStackedSide(cell, "top", stackedSideFromMap(vals, game, "spr_away", "spr_away_size", freshness, hiddenKeys, "spr"));
+        applyStackedSide(cell, "bot", stackedSideFromMap(vals, game, "spr_home", "spr_home_size", freshness, hiddenKeys, "spr"));
+        return cell;
+      }
       const top = sideFromMap(vals, game, "spr_away", "spr_away_size", freshness, hiddenKeys);
       const bot = sideFromMap(vals, game, "spr_home", "spr_home_size", freshness, hiddenKeys);
       const dkb = game.bookOdds?.draftkings;
@@ -217,6 +379,12 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       };
     }
     if (market === "tot") {
+      if (stackedBest) {
+        const cell = emptyCell(false);
+        applyStackedSide(cell, "top", stackedSideFromMap(vals, game, "tot_over", "tot_over_size", freshness, hiddenKeys, "tot"));
+        applyStackedSide(cell, "bot", stackedSideFromMap(vals, game, "tot_under", "tot_under_size", freshness, hiddenKeys, "tot"));
+        return cell;
+      }
       const top = sideFromMap(vals, game, "tot_over", "tot_over_size", freshness, hiddenKeys);
       const bot = sideFromMap(vals, game, "tot_under", "tot_under_size", freshness, hiddenKeys);
       const dkb = game.bookOdds?.draftkings;
@@ -303,6 +471,8 @@ export function getBestForGame(game, market, selectedBookKeys, allBooks, freshne
     bestAway: cell.top,
     bestHome: cell.bot,
     bestDraw: cell.mid,
+    awayStacks: cell.topStacks,
+    homeStacks: cell.botStacks,
   };
 }
 
