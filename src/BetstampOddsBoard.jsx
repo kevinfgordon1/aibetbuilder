@@ -546,6 +546,11 @@ export default function BetstampOddsBoard() {
     });
   };
 
+  const selectBoardMarket = (next) => {
+    if (next === "ml") setBestView("single");
+    setMarket(next);
+  };
+
   const filteredGames = useMemo(() => {
     const q = search.toLowerCase();
     return games.filter((g) => {
@@ -573,7 +578,10 @@ export default function BetstampOddsBoard() {
   const oddsColWidth = 92;
   const metrics = summarizeTickStats(tickStats, nowMs);
 
-  const stackedBest = bestView === "stacked";
+  // Top 2 only applies to spread/totals (multiple line points). Moneyline is always Single.
+  const lineBestViews = market !== "ml";
+  const stackedBest = lineBestViews && bestView === "stacked";
+  const effectiveBestView = stackedBest ? "stacked" : "single";
   const liveBestOpts = { nowMs, hiddenKeys, stackedBest };
 
   const getCell = (game, bookKey) => getOddsBoardCell({
@@ -823,7 +831,7 @@ export default function BetstampOddsBoard() {
     <div
       data-betstamp-board="true"
       data-guard-allow="true"
-      data-best-view={bestView}
+      data-best-view={effectiveBestView}
       data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
       data-live-best-break-age-ms={LIVE_BEST_ODDS_BREAK_MAX_AGE_MS}
       data-live-reconcile-ms={BETSTAMP_LIVE_RECONCILE_MS}
@@ -986,42 +994,46 @@ export default function BetstampOddsBoard() {
       <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         {["ml", "spr", "tot"].map((m) => (
-          <button key={m} onClick={() => setMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
+          <button key={m} onClick={() => selectBoardMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
             {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : "Totals"}
           </button>
         ))}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</span>
-        <div
-          data-best-view-toggle="true"
-          role="group"
-          aria-label="Best odds view"
-          style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}
-        >
-          {[
-            { id: "single", label: "Single" },
-            { id: "stacked", label: "Top 2 lines" },
-          ].map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              data-best-view={opt.id}
-              aria-pressed={bestView === opt.id}
-              onClick={() => setBestView(opt.id)}
-              style={{
-                padding: "6px 12px",
-                border: "none",
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: "pointer",
-                background: bestView === opt.id ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.03)",
-                color: bestView === opt.id ? "#34d399" : "#6b7280",
-              }}
+        {lineBestViews && (
+          <>
+            <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</span>
+            <div
+              data-best-view-toggle="true"
+              role="group"
+              aria-label="Best odds view"
+              style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}
             >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+              {[
+                { id: "single", label: "Single" },
+                { id: "stacked", label: "Top 2 lines" },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-best-view={opt.id}
+                  aria-pressed={bestView === opt.id}
+                  onClick={() => setBestView(opt.id)}
+                  style={{
+                    padding: "6px 12px",
+                    border: "none",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    background: bestView === opt.id ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.03)",
+                    color: bestView === opt.id ? "#34d399" : "#6b7280",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         {books.map((b) => (
           <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
@@ -1122,7 +1134,7 @@ export default function BetstampOddsBoard() {
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
-        {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
+        {" · "}On Spread and Totals, Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
         {" · "}$ under a price is that book's size / limit when the feed sends it
