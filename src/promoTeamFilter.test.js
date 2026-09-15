@@ -165,6 +165,25 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   assert.match(app, /<label style=\{labelStyle\}>Must exclude<\/label>/);
   assert.match(app, /placeholder="e\.g\. Lions"/);
   assert.match(app, /placeholder="e\.g\. Commanders"/);
+  const extraStart = app.indexOf("{promoFiltersOpen && (");
+  const extraEnd = app.indexOf("recalculating…");
+  assert.ok(extraStart >= 0 && extraEnd > extraStart, "promo extra-filters block");
+  const extra = app.slice(extraStart, extraEnd);
+  const extraFilterOrder = [
+    "Sports",
+    "Date",
+    "Markets",
+    "Liquidity",
+    "Matching books",
+    "Min Final Odds",
+    "Max Final Odds",
+    "Min Leg Odds",
+    "Max Leg Odds",
+    "Must include",
+    "Must exclude",
+  ].map((label) => extra.indexOf(`<label style={labelStyle}>${label}</label>`));
+  assert.ok(extraFilterOrder.every((i) => i >= 0), "Extra Filter labels present");
+  assert.deepEqual(extraFilterOrder, [...extraFilterOrder].sort((a, b) => a - b), "team filters after min/max odds");
   assert.match(scanSrc, /acceptCombo/);
   assert.match(scanSrc, /includeTeam/);
 

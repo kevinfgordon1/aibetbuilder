@@ -2562,14 +2562,6 @@ export default function App() {
                         ))}
                       </>)}
                       {controlBox(<>
-                        <label style={labelStyle}>Must include</label>
-                        <input type="text" value={promoTeamInclude} onChange={(e) => setPromoTeamInclude(e.target.value)} placeholder="e.g. Lions" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
-                      </>)}
-                      {controlBox(<>
-                        <label style={labelStyle}>Must exclude</label>
-                        <input type="text" value={promoTeamExclude} onChange={(e) => setPromoTeamExclude(e.target.value)} placeholder="e.g. Commanders" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
-                      </>)}
-                      {controlBox(<>
                         <label style={labelStyle}>Liquidity</label>
                         <button type="button" onClick={() => setHideLowLiquidity(false)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: !hideLowLiquidity ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: !hideLowLiquidity ? "#3b82f6" : "#6b7280" }}>
                           {LIQUIDITY_FILTER_ALL_LABEL}
@@ -2601,6 +2593,14 @@ export default function App() {
                       {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && numLegs >= 2 && controlBox(<>
                         <label style={labelStyle}>Max Leg Odds</label>
                         <input type="number" value={maxLegOdds} onChange={(e) => setMaxLegOdds(e.target.value)} placeholder="e.g. 200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Must include</label>
+                        <input type="text" value={promoTeamInclude} onChange={(e) => setPromoTeamInclude(e.target.value)} placeholder="e.g. Lions" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
+                      </>)}
+                      {controlBox(<>
+                        <label style={labelStyle}>Must exclude</label>
+                        <input type="text" value={promoTeamExclude} onChange={(e) => setPromoTeamExclude(e.target.value)} placeholder="e.g. Commanders" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
                       </>)}
                     </>
                   )}
