@@ -1,9 +1,12 @@
 'use strict';
 
 // GET /api/betstamp-markets — same-origin REST snapshot proxy.
-// Forwards league / is_live / book_ids / include_alts / fixture_id to Betstamp
-// Pro using BETSTAMP_API_KEY (server-only). A fixture_id pull is markets-only
-// so the New Odds Board can load one game's alts without the full slate.
+// Forwards league / is_live / book_ids / include_alts / fixture_id / timedelta
+// to Betstamp Pro using BETSTAMP_API_KEY (server-only). League-wide fixture
+// and market pulls send timedelta (default 240h / 10 days) so next-week NFL
+// and NCAAF slates are not clipped to Betstamp's ±24h window. Override via
+// ?timedelta= or BETSTAMP_TIMEDELTA. A fixture_id pull is markets-only so
+// the New Odds Board can load one game's alts without the full slate.
 // Does not touch The Odds API or odds_cache.
 
 const {

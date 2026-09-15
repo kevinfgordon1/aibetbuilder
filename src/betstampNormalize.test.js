@@ -724,6 +724,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(app, /BETSTAMP_API_KEY/);
   assert.match(envEx, /BETSTAMP_API_KEY=/);
   assert.doesNotMatch(envEx, /BETSTAMP_API_KEY=\S/);
+  assert.match(envEx, /BETSTAMP_TIMEDELTA=/);
+  assert.doesNotMatch(envEx, /BETSTAMP_TIMEDELTA=\S/);
   assert.match(envEx, /VITE_BETSTAMP_LIVE_RECONCILE_MS=/);
   assert.doesNotMatch(envEx, /VITE_BETSTAMP_LIVE_RECONCILE_MS=\d/);
   assert.match(vercel, /api\/betstamp-stream\.js/);
