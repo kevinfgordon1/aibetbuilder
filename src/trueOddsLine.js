@@ -54,7 +54,7 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
 }
 
-// Precomputed `blend` wins (1-leg hedge $ or multi-leg $500 profit excl. stake).
+// Precomputed `blend` wins ($500 profit excl. stake). Hedge-mode blends still display if passed.
 // If `blend` is omitted, a raw ladder still defaults to the $500-profit walk.
 // Passing `blend: null` means "do not re-walk" (sportsbook / no PM book).
 // Primary line is the blended VWAP American; top size / thin top stay secondary.

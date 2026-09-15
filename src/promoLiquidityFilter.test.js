@@ -50,7 +50,7 @@ const deepKalshi = {
   market: "ML",
 };
 
-// 1-leg +200 / −200 / $100 / 100% boost needs $333.33 hedge.
+// 1-leg +200 / −200 / $100 book is $50 of $500 profit (old hedge bar was $333.33).
 const hedgeShortNovig = {
   dk: 200,
   bestOpp: -200,
@@ -65,10 +65,22 @@ const hedgeShortNovig = {
 const hedgeFullKalshi = {
   ...hedgeShortNovig,
   bestOppBook: "kalshi",
-  bestOppSize: 400,
+  bestOppSize: 1000,
   game: "E @ F",
   name: "E ML",
   bestOppName: "F ML",
+};
+// Kevin Cardinals: Fanatics −175 / Novig +163 $125 / 0% boost — hedge ~$60, profit ~$204.
+const cardinalsNovig = {
+  dk: -175,
+  bestOpp: 163,
+  bestOppBook: "novig",
+  bestOppSize: 125,
+  sport: "baseball_mlb",
+  game: "Cardinals @ Rival",
+  name: "St. Louis Cardinals ML",
+  bestOppName: "Rival ML",
+  market: "ML",
 };
 
 const sportsbookFd = {
@@ -85,6 +97,7 @@ const sportsbookFd = {
 
 const multiCtx = { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 };
 const singleCtx = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 };
+const singleZeroBoost = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 0 };
 
 {
   const thin = blend(nationalsNovig, multiCtx);
@@ -102,12 +115,15 @@ const singleCtx = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 };
 
 {
   const short = blend(hedgeShortNovig, singleCtx);
-  assert.equal(short.lowLiquidity, true, "1-leg $100 book cannot fund $333.33 hedge");
+  assert.equal(short.lowLiquidity, true, "1-leg $100 book cannot fund $500 profit");
   const full = blend(hedgeFullKalshi, singleCtx);
   assert.equal(full.lowLiquidity, false);
+  const cardinals = blend(cardinalsNovig, singleZeroBoost);
+  assert.equal(cardinals.lowLiquidity, true, "Cardinals-style $125 Novig fails $500 profit");
+  assert.ok(cardinals.pmBlend && cardinals.pmBlend.payoutFilled < 500);
 }
 
-// ── filter off: keep multi-leg shortfall and 1-leg incomplete hedge
+// ── filter off: keep multi-leg shortfall and 1-leg incomplete $500 walk
 {
   const legs = [nationalsNovig, deepKalshi, hedgeShortNovig, sportsbookFd];
   assert.equal(filterLowLiquidityLegs(legs, false, multiCtx), legs);
@@ -142,17 +158,19 @@ const singleCtx = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 };
   assert.deepEqual(ranked.map((p) => p.ev), [8]);
 }
 
-// ── filter on: 1-leg incomplete hedge drops; full hedge + sportsbook stay
+// ── filter on: 1-leg incomplete $500 walk drops; full $500 + sportsbook stay
 {
-  const legs = [hedgeShortNovig, hedgeFullKalshi, sportsbookFd];
-  const kept = filterLowLiquidityLegs(legs, true, singleCtx);
+  const legs = [hedgeShortNovig, hedgeFullKalshi, sportsbookFd, cardinalsNovig];
+  const kept = filterLowLiquidityLegs(legs, true, singleZeroBoost);
   assert.deepEqual(kept.map((l) => l.bestOppBook), ["kalshi", "fanduel"]);
   assert.ok(!kept.includes(hedgeShortNovig));
+  assert.ok(!kept.includes(cardinalsNovig));
 
   const shortPick = { ev: 50, legs: [blend(hedgeShortNovig, singleCtx)] };
+  const cardinalsPick = { ev: -2.61, legs: [blend(cardinalsNovig, singleZeroBoost)] };
   const fullPick = { ev: 12, legs: [blend(hedgeFullKalshi, singleCtx)] };
   const fdPick = { ev: 5, legs: [blend(sportsbookFd, singleCtx)] };
-  const ranked = filterLowLiquidityPicks([shortPick, fullPick, fdPick], true);
+  const ranked = filterLowLiquidityPicks([shortPick, cardinalsPick, fullPick, fdPick], true);
   assert.deepEqual(ranked.map((p) => p.ev), [12, 5]);
 }
 

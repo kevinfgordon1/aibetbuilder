@@ -72,10 +72,18 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
     bestOppName: "B ML",
     market: "ML",
   };
-  const oneLeg = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 });
-  assert.equal(oneLeg.displayLegs[0].pmBlend.mode, "hedge");
+  const oneLeg = applyBlendToLegs(
+    [{ ...kevin, bestOppSize: 1000 }],
+    {},
+    { promoType: "boost", numLegs: 1, stake: 100, boostPct: 0 },
+  );
+  assert.equal(oneLeg.displayLegs[0].pmBlend.mode, "payout");
   assert.equal(oneLeg.displayLegs[0].lowLiquidity, false);
-  assert.equal(oneLeg.displayLegs[0].pmBlend.flag, "", "top-only hedge fill is not a blend");
+  assert.equal(oneLeg.displayLegs[0].pmBlend.flag, "", "top-only $500 fill is not a blend");
+
+  const oneLegShort = applyBlendToLegs([kevin], {}, { promoType: "boost", numLegs: 1, stake: 100, boostPct: 0 });
+  assert.equal(oneLegShort.displayLegs[0].pmBlend.mode, "payout");
+  assert.equal(oneLegShort.displayLegs[0].lowLiquidity, true, "$400 @ −200 is $200 of $500 profit");
 
   const covers500 = applyBlendToLegs(
     [{ ...kevin, bestOppSize: 1000 }],

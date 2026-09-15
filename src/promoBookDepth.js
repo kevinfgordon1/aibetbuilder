@@ -90,7 +90,7 @@ export function _resetPromoBookDepthCache() {
 }
 
 // Overlay bestOpp from a real ladder or top-of-book size. Never invents books.
-// ctx.numLegs === 1 → walk to required hedge $; otherwise $500 profit (excl. stake).
+// PM legs walk to $500 profit (excl. stake) for 1-leg and multi-leg.
 export function applyBlendToLegs(legs, laddersByKey, ctx = {}) {
   return applyPmBlendToLegs(legs, laddersByKey, ctx);
 }
