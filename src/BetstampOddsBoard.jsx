@@ -8,6 +8,7 @@ import {
   getOddsBoardCell,
   getBestForGame,
   LIVE_BEST_ODDS_MAX_AGE_MS,
+  LIVE_BEST_ODDS_BREAK_MAX_AGE_MS,
   oddsBoardHideKey,
   isHiddenOddsCell,
   isStackedBestMatch,
@@ -22,6 +23,7 @@ import {
 } from "./betstampBooks.js";
 import {
   gamesFromBetstampSnapshot,
+  applyFixtureMeta,
   applyStreamMarkets,
   gameVisibleOnBoard,
   unwrapStreamPayload,
@@ -338,13 +340,34 @@ export default function BetstampOddsBoard() {
 
     // Pregame: always run the interval while liveOnly is false. Do not wait
     // for the first snapshot — a hung first GET must not freeze ages.
-    // LIVE: no poller; SSE below. Cleanup on LIVE / sport change aborts both.
+    // LIVE: SSE owns prices; a light snapshot poll only refreshes fixture
+    // halt/halftime so the 60s Best gate can relax at the break.
     applySnapshot({ showLoading: true });
     if (!liveOnly) {
       pollTimer = setInterval(() => {
         if (pollInFlight || cancelled) return;
         pollInFlight = true;
         applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
+      }, BETSTAMP_PREGAME_POLL_MS);
+    } else {
+      pollTimer = setInterval(() => {
+        if (pollInFlight || cancelled) return;
+        pollInFlight = true;
+        fetch(betstampSnapshotUrl({ league, live: true }), {
+          signal: ctrl.signal,
+          cache: "no-store",
+        })
+          .then((res) => res.json().catch(() => ({})))
+          .then((body) => {
+            if (cancelled || gen !== fetchGen.current) return;
+            if (!body || !Array.isArray(body.fixtures) || !body.fixtures.length) return;
+            const next = applyFixtureMeta(gamesRef.current, body.fixtures);
+            if (next === gamesRef.current) return;
+            gamesRef.current = next;
+            setGames(next);
+          })
+          .catch(() => {})
+          .finally(() => { pollInFlight = false; });
       }, BETSTAMP_PREGAME_POLL_MS);
     }
 
@@ -527,7 +550,7 @@ export default function BetstampOddsBoard() {
   const metrics = summarizeTickStats(tickStats, nowMs);
 
   const stackedBest = bestView === "stacked";
-  const liveBestOpts = { nowMs, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS, hiddenKeys, stackedBest };
+  const liveBestOpts = { nowMs, hiddenKeys, stackedBest };
 
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
@@ -732,7 +755,13 @@ export default function BetstampOddsBoard() {
   };
 
   return (
-    <div data-betstamp-board="true" data-guard-allow="true" data-best-view={bestView}>
+    <div
+      data-betstamp-board="true"
+      data-guard-allow="true"
+      data-best-view={bestView}
+      data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
+      data-live-best-break-age-ms={LIVE_BEST_ODDS_BREAK_MAX_AGE_MS}
+    >
       <style>{`
         .obb-side { position: relative; }
         .obb-hide {
@@ -1007,7 +1036,7 @@ export default function BetstampOddsBoard() {
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest; LIVE uses SSE
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
-        {" · "}Green = best available odds across selected books (LIVE: a number 4+ minutes stale cannot win Best)
+        {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines stacks the two most popular spread/total points (eligible book count; moneyline stays single)}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim

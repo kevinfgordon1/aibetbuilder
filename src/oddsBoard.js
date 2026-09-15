@@ -3,8 +3,50 @@
 
 import { isSoccerSport } from "./soccerPairing.js";
 
-// Live New Odds Board: a quote this old must not win the Best Odds column.
-export const LIVE_BEST_ODDS_MAX_AGE_MS = 240_000;
+// Live New Odds Board Best: while the game is moving, drop quotes older than 60s.
+// Halftime / intermission keeps the longer 4-minute allowance — books go quiet
+// at the break and a 60s cut would empty Best. Pregame is ungated.
+export const LIVE_BEST_ODDS_MAX_AGE_MS = 60_000;
+export const LIVE_BEST_ODDS_BREAK_MAX_AGE_MS = 240_000;
+
+function normLiveBreakToken(v) {
+  if (v == null || typeof v === "object") return "";
+  return String(v).trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+const LIVE_BREAK_TOKENS = new Set([
+  "ht",
+  "half",
+  "halftime",
+  "half_time",
+  "half_time_break",
+  "end_of_1st_half",
+  "end_1st_half",
+  "end_first_half",
+  "between_halves",
+  "intermission",
+  "intermission_1",
+  "intermission_2",
+  "period_break",
+  "break",
+]);
+
+export function isLiveGameBreak(game) {
+  if (!game) return false;
+  if (game.is_halftime === true || game.in_break === true) return true;
+  for (const raw of [game.status, game.state, game.fixture_status, game.period, game.clock]) {
+    const t = normLiveBreakToken(raw);
+    if (!t) continue;
+    if (LIVE_BREAK_TOKENS.has(t)) return true;
+    if (t.includes("halftime") || t.includes("half_time") || t.includes("intermission")) return true;
+  }
+  return false;
+}
+
+export function liveBestOddsMaxAgeMs(game) {
+  if (!game?.is_live) return null;
+  return isLiveGameBreak(game) ? LIVE_BEST_ODDS_BREAK_MAX_AGE_MS : LIVE_BEST_ODDS_MAX_AGE_MS;
+}
 
 export function isFreshForLiveBestOdds(updatedAt, nowMs, maxAgeMs = LIVE_BEST_ODDS_MAX_AGE_MS) {
   if (updatedAt == null || !isFinite(Number(updatedAt))) return false;
@@ -16,8 +58,11 @@ export function isFreshForLiveBestOdds(updatedAt, nowMs, maxAgeMs = LIVE_BEST_OD
 function liveBestFreshness({ game, nowMs, maxBestAgeMs }) {
   if (!game?.is_live) return null;
   if (nowMs == null || !isFinite(nowMs)) return null;
-  if (maxBestAgeMs == null || !isFinite(maxBestAgeMs)) return null;
-  return { nowMs, maxAgeMs: maxBestAgeMs };
+  const maxAgeMs = maxBestAgeMs != null && isFinite(maxBestAgeMs)
+    ? Number(maxBestAgeMs)
+    : liveBestOddsMaxAgeMs(game);
+  if (maxAgeMs == null || !isFinite(maxAgeMs)) return null;
+  return { nowMs, maxAgeMs };
 }
 
 export function fmtBoardSize(v) {

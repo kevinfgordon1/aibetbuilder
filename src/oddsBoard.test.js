@@ -10,7 +10,10 @@ import {
   getBestForGame,
   pickBestFromPriceMap,
   LIVE_BEST_ODDS_MAX_AGE_MS,
+  LIVE_BEST_ODDS_BREAK_MAX_AGE_MS,
   isFreshForLiveBestOdds,
+  isLiveGameBreak,
+  liveBestOddsMaxAgeMs,
   oddsBoardHideKey,
   hideSideFromPriceKey,
   isHiddenOddsCell,
@@ -280,25 +283,36 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(onlyDk.topSize, null);
 }
 
-// ── live Best Odds: quotes ≥ 4 minutes old cannot win
+// ── live Best Odds: quotes ≥ 60s old cannot win while the game is moving
 {
-  assert.equal(LIVE_BEST_ODDS_MAX_AGE_MS, 240_000);
+  assert.equal(LIVE_BEST_ODDS_MAX_AGE_MS, 60_000);
+  assert.equal(LIVE_BEST_ODDS_BREAK_MAX_AGE_MS, 240_000);
   const now = 1_700_000_000_000;
-  assert.equal(isFreshForLiveBestOdds(now - 239_999, now), true);
+  assert.equal(isFreshForLiveBestOdds(now - 30_000, now), true);
+  assert.equal(isFreshForLiveBestOdds(now - 59_999, now), true);
+  assert.equal(isFreshForLiveBestOdds(now - 60_000, now), false);
+  assert.equal(isFreshForLiveBestOdds(now - 61_000, now), false);
   assert.equal(isFreshForLiveBestOdds(now - 240_000, now), false);
-  assert.equal(isFreshForLiveBestOdds(now - 300_000, now), false);
   assert.equal(isFreshForLiveBestOdds(null, now), false);
   assert.equal(isFreshForLiveBestOdds(undefined, now), false);
+  assert.equal(isLiveGameBreak({ is_live: true, status: "halftime" }), true);
+  assert.equal(isLiveGameBreak({ is_live: true, status: "HT" }), true);
+  assert.equal(isLiveGameBreak({ is_live: true, period: "intermission" }), true);
+  assert.equal(isLiveGameBreak({ is_live: true, is_halftime: true }), true);
+  assert.equal(isLiveGameBreak({ is_live: true, status: "live", period: "2Q" }), false);
+  assert.equal(liveBestOddsMaxAgeMs({ is_live: true, status: "live" }), 60_000);
+  assert.equal(liveBestOddsMaxAgeMs({ is_live: true, status: "halftime" }), 240_000);
+  assert.equal(liveBestOddsMaxAgeMs({ is_live: false, status: "halftime" }), null);
 
   const freshPick = pickBestSide([
-    { key: "draftkings", price: 120, updatedAt: now - 241_000 },
-    { key: "kalshi", price: 105, updatedAt: now - 1_000 },
+    { key: "draftkings", price: 120, updatedAt: now - 61_000 },
+    { key: "kalshi", price: 105, updatedAt: now - 30_000 },
   ], { nowMs: now, maxAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS });
   assert.equal(freshPick.price, 105);
   assert.equal(freshPick.primaryKey, "kalshi");
 
   const noneFresh = pickBestSide([
-    { key: "draftkings", price: 120, updatedAt: now - 241_000 },
+    { key: "draftkings", price: 120, updatedAt: now - 61_000 },
     { key: "kalshi", price: 105, updatedAt: now - 300_000 },
   ], { nowMs: now, maxAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS });
   assert.equal(noneFresh.price, null);
@@ -314,11 +328,11 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
     },
     bookLineUpdatedAt: {
       draftkings: {
-        ml_away: now - 241_000,
+        ml_away: now - 61_000,
         ml_home: now - 5_000,
         spr_away: now - 300_000,
         spr_home: now - 2_000,
-        tot_over: now - 241_000,
+        tot_over: now - 61_000,
         tot_under: now - 1_000,
       },
       kalshi: {
@@ -386,7 +400,7 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   const allStale = {
     ...liveGame,
     bookLineUpdatedAt: {
-      draftkings: { ml_away: now - 241_000 },
+      draftkings: { ml_away: now - 61_000 },
       kalshi: { ml_away: now - 300_000 },
     },
   };
@@ -416,6 +430,85 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   });
   assert.equal(noTsBest.top, null, "live quote with no last-update cannot win Best");
 
+  const trial = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+  const moving61 = getOddsBoardCell({
+    game: {
+      ...liveGame,
+      status: "live",
+      period: "2Q",
+      bookOdds: {
+        bet365: { spr_away: 210, spr_away_line: -10.5 },
+        draftkings: { spr_away: -110, spr_away_line: -3.5 },
+      },
+      bookLineUpdatedAt: {
+        bet365: { spr_away: now - 61_000 },
+        draftkings: { spr_away: now - 8_000 },
+      },
+    },
+    bookKey: "best",
+    market: "spr",
+    selectedBookKeys: trial,
+    allBooks: BETSTAMP_TRIAL_BOOKS,
+    nowMs: now,
+  });
+  assert.equal(moving61.top, -110, "61s bet365 cannot win Best while the game is moving");
+  assert.equal(moving61.topBooks[0].key, "draftkings");
+
+  const moving30 = getOddsBoardCell({
+    game: {
+      ...liveGame,
+      status: "live",
+      bookOdds: {
+        bet365: { spr_away: 210, spr_away_line: -10.5 },
+        draftkings: { spr_away: -110, spr_away_line: -3.5 },
+      },
+      bookLineUpdatedAt: {
+        bet365: { spr_away: now - 30_000 },
+        draftkings: { spr_away: now - 8_000 },
+      },
+    },
+    bookKey: "best",
+    market: "spr",
+    selectedBookKeys: trial,
+    allBooks: BETSTAMP_TRIAL_BOOKS,
+    nowMs: now,
+  });
+  assert.equal(moving30.top, 210, "30s quote still wins Best while moving");
+  assert.equal(moving30.topBooks[0].key, "bet365");
+
+  const halfGame = {
+    ...liveGame,
+    status: "halftime",
+    period: "HT",
+    bookOdds: {
+      bet365: { spr_away: 210, spr_away_line: -10.5 },
+      draftkings: { spr_away: -110, spr_away_line: -3.5 },
+    },
+    bookLineUpdatedAt: {
+      bet365: { spr_away: now - 150_000 },
+      draftkings: { spr_away: now - 8_000 },
+    },
+  };
+  const halfBest = getOddsBoardCell({
+    game: halfGame,
+    bookKey: "best",
+    market: "spr",
+    selectedBookKeys: trial,
+    allBooks: BETSTAMP_TRIAL_BOOKS,
+    nowMs: now,
+  });
+  assert.equal(halfBest.top, 210, "2.5 min quote can still win Best at halftime");
+  assert.equal(halfBest.topBooks[0].key, "bet365");
+  const halfBook = getOddsBoardCell({
+    game: halfGame,
+    bookKey: "bet365",
+    market: "spr",
+    selectedBookKeys: trial,
+    allBooks: BETSTAMP_TRIAL_BOOKS,
+    nowMs: now,
+  });
+  assert.equal(halfBook.top, 210, "book cell still shows the older quote + age");
+
   const pregame = getOddsBoardCell({
     game: { ...liveGame, is_live: false },
     bookKey: "best",
@@ -426,6 +519,23 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   });
   assert.equal(pregame.top, 110, "pregame Best still uses the raw number");
   assert.equal(pregame.topBooks[0].key, "draftkings");
+  const pregameOld = getOddsBoardCell({
+    game: {
+      ...liveGame,
+      is_live: false,
+      bookOdds: { bet365: { spr_away: 210 }, draftkings: { spr_away: -110 } },
+      bookLineUpdatedAt: {
+        bet365: { spr_away: now - 180_000 },
+        draftkings: { spr_away: now - 8_000 },
+      },
+    },
+    bookKey: "best",
+    market: "spr",
+    selectedBookKeys: trial,
+    allBooks: BETSTAMP_TRIAL_BOOKS,
+    nowMs: now,
+  });
+  assert.equal(pregameOld.top, 210, "pregame is not age-gated");
 
   const ungated = getOddsBoardCell({
     game: liveGame,
@@ -587,7 +697,7 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
     },
     bookLineUpdatedAt: {
       fanduel: { ml_away: now - 1_000 },
-      draftkings: { ml_away: now - 241_000 },
+      draftkings: { ml_away: now - 61_000 },
       kalshi: { ml_away: now - 2_000 },
     },
   };

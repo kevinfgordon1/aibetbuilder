@@ -267,6 +267,77 @@ export function fixtureStatus(fixture) {
     .replace(/[\s-]+/g, "_");
 }
 
+function firstScalar(...vals) {
+  for (const v of vals) {
+    if (v == null || typeof v === "object") continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return null;
+}
+
+// Clock / period tokens used by the live Best age gate (60s moving, 4 min at half).
+export function fixtureLiveMeta(fixture) {
+  if (!fixture || typeof fixture !== "object") {
+    return { status: null, period: null, clock: null, is_halftime: false, in_break: false };
+  }
+  const live = fixture.live && typeof fixture.live === "object" ? fixture.live : null;
+  const clockObj = fixture.clock && typeof fixture.clock === "object" ? fixture.clock : null;
+  return {
+    status: firstScalar(fixture.status, fixture.state, fixture.fixture_status, live?.status),
+    period: firstScalar(
+      fixture.period,
+      fixture.live_period,
+      fixture.clock_period,
+      fixture.period_name,
+      fixture.game_period,
+      fixture.current_period,
+      live?.period,
+      clockObj?.period,
+    ),
+    clock: firstScalar(
+      typeof fixture.clock === "string" || typeof fixture.clock === "number" ? fixture.clock : null,
+      fixture.display_clock,
+      fixture.game_clock,
+      live?.clock,
+      clockObj?.display,
+      clockObj?.time,
+    ),
+    is_halftime: !!(fixture.is_halftime || live?.is_halftime),
+    in_break: !!(fixture.in_break || live?.in_break),
+  };
+}
+
+export function applyFixtureMeta(games, fixtures) {
+  if (!games?.length) return games || [];
+  const byId = new Map();
+  for (const fixture of fixtures || []) {
+    const id = fixture?.id ?? fixture?.fixture_id;
+    if (id != null) byId.set(String(id), fixture);
+  }
+  if (!byId.size) return games;
+  let changed = false;
+  const next = games.map((game) => {
+    const fixture = byId.get(String(game.id));
+    if (!fixture) return game;
+    const meta = fixtureLiveMeta(fixture);
+    const isLive = fixtureIsLive(fixture) || !!game.is_live;
+    if (
+      (game.status || null) === meta.status
+      && (game.period || null) === meta.period
+      && (game.clock || null) === meta.clock
+      && !!game.is_halftime === meta.is_halftime
+      && !!game.in_break === meta.in_break
+      && game.is_live === isLive
+    ) {
+      return game;
+    }
+    changed = true;
+    return { ...game, ...meta, is_live: isLive };
+  });
+  return changed ? next : games;
+}
+
 const CLOSED_FIXTURE_STATUSES = new Set([
   "closed",
   "final",
@@ -523,7 +594,7 @@ function newGameFromFixture(fixture, teamsById, nowMs) {
     awayId: sides.awayId,
     homeId: sides.homeId,
     commence_time: commence,
-    status: fixture.status || fixture.state || fixture.fixture_status || null,
+    ...fixtureLiveMeta(fixture),
     is_live: fixtureIsLive(fixture),
     home_score: fixture.home_score ?? fixture.homeScore ?? null,
     away_score: fixture.away_score ?? fixture.awayScore ?? null,
@@ -550,7 +621,7 @@ function stubGameFromMarket(market, nowMs) {
     awayId: null,
     homeId: null,
     commence_time: fixtureCommence(market),
-    status: market.status || market.state || null,
+    ...fixtureLiveMeta(market),
     is_live: fixtureIsLive(market),
     home_score: null,
     away_score: null,
