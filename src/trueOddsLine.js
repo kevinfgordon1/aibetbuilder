@@ -32,6 +32,26 @@ export function formatAmericanOdds(odds) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+// Promo EV money: +$12.34 / −$95.45. Never "+$-95.45".
+export function formatSignedEvMoney(n) {
+  const v = typeof n === "number" ? n : Number(n);
+  if (!isFinite(v)) return "—";
+  const body = `$${Math.abs(v).toFixed(2)}`;
+  if (v > 0) return `+${body}`;
+  if (v < 0) return `-${body}`;
+  return body;
+}
+
+// Promo EV percent: +2.1% / −95.5%. Never "+-95.5%".
+export function formatSignedEvPct(n) {
+  const v = typeof n === "number" ? n : Number(n);
+  if (!isFinite(v)) return "—";
+  const body = `${Math.abs(v).toFixed(1)}%`;
+  if (v > 0) return `+${body}`;
+  if (v < 0) return `-${body}`;
+  return body;
+}
+
 // Promo Builder Total-row sportsbook cell: boosted final odds, not raw book odds.
 export function formatPromoTotalBookOdds(boostedOdds) {
   return formatAmericanOdds(boostedOdds);

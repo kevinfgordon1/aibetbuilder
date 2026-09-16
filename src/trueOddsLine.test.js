@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   outcomeSize,
   formatAmericanOdds,
+  formatSignedEvMoney,
+  formatSignedEvPct,
   formatPromoTotalBookOdds,
   formatAvailableDollars,
   formatAvailableSizeClause,
@@ -70,6 +72,11 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   );
   assert.equal(formatAmericanOdds(120), "+120");
   assert.equal(formatAmericanOdds(-120), "-120");
+  assert.equal(formatSignedEvMoney(-95.45), "-$95.45");
+  assert.equal(formatSignedEvMoney(12.3), "+$12.30");
+  assert.equal(formatSignedEvPct(-95.5), "-95.5%");
+  assert.ok(!formatSignedEvMoney(-95.45).includes("+$-"));
+  assert.ok(!formatSignedEvPct(-95.5).includes("+-"));
 }
 
 // ── depth trail: next 1–2 worse levels; no depth → empty (top line unchanged)
