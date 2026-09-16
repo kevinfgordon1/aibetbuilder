@@ -24,6 +24,8 @@
 // more than one price level (or VWAP ≠ top). A deep top that fills alone
 // is not a blend — omit the tag. Shortfall copy still always shows.
 
+import { oppQuoteLooksInverted, quoteLooksWrongSideOf } from "./promoOppGuard.js";
+
 export const TARGET_PAYOUT_USD = 500;
 export const PM_BLEND_VENUES = new Set(["kalshi", "polymarket", "novig", "prophetx"]);
 export const LOW_LIQUIDITY_LABEL = "Low liquidity";
@@ -300,6 +302,11 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
 
   if (!blend || blend.american == null) {
     return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
+  }
+  // Wrong-side depth (favorite ladder walked as the dog inverse) must not
+  // replace a sane quoted opp with +2000-class "true" odds.
+  if (oppQuoteLooksInverted(leg.dk, blend.american) || quoteLooksWrongSideOf(quoted, blend.american)) {
+    return { ...leg, bestOppQuoted: quoted, bestOpp: quoted, lowLiquidity: !!blend.lowLiquidity, pmBlend: null };
   }
   return {
     ...leg,

@@ -3,6 +3,7 @@
 // still iterate allBooks so an unchecked matching book can price the promo.
 
 import { outcomeSize } from "./trueOddsLine.js";
+import { pickBestAmericanQuote } from "./promoOppGuard.js";
 import {
   isSoccerSport,
   isDrawOutcomeName,
@@ -37,7 +38,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
     };
 
     const getBestOdds = (marketKey, teamName) => {
-      let best = null, bestBook = null, bestSize = null;
+      const quotes = [];
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === marketKey);
@@ -46,22 +47,22 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         if (!outcome) return;
         const val = outcome.price;
         if (val === null || val === undefined) return;
-        if (best === null || val > best) { best = val; bestBook = book.key; bestSize = outcomeSize(outcome); }
+        quotes.push({ price: val, book: book.key, size: outcomeSize(outcome) });
       });
-      return { best, bestBook, bestSize };
+      return pickBestAmericanQuote(quotes, { allBooks });
     };
 
     const getBestSpreadOddsAtLine = (teamName, targetPoint) => {
-      let best = null, bestBook = null, bestSize = null;
+      const quotes = [];
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === "spreads");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === teamName && o.point === targetPoint);
         if (!outcome) return;
-        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; bestSize = outcomeSize(outcome); }
+        quotes.push({ price: outcome.price, book: book.key, size: outcomeSize(outcome) });
       });
-      return { best, bestBook, bestSize };
+      return pickBestAmericanQuote(quotes, { allBooks });
     };
 
     const countSpreadLinesAtPoint = (teamName, targetPoint) => {
@@ -77,16 +78,16 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
     };
 
     const getBestTotalOddsAtLine = (side, targetPoint) => {
-      let best = null, bestBook = null, bestSize = null;
+      const quotes = [];
       bookmakers.forEach(book => {
         if (!trustedBookKeys.has(book.key)) return;
         const market = book.markets.find(m => m.key === "totals");
         if (!market) return;
         const outcome = market.outcomes.find(o => o.name === side && o.point === targetPoint);
         if (!outcome) return;
-        if (best === null || outcome.price > best) { best = outcome.price; bestBook = book.key; bestSize = outcomeSize(outcome); }
+        quotes.push({ price: outcome.price, book: book.key, size: outcomeSize(outcome) });
       });
-      return { best, bestBook, bestSize };
+      return pickBestAmericanQuote(quotes, { allBooks });
     };
 
     const countTotalLinesAtPoint = (side, targetPoint) => {
@@ -292,46 +293,43 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
   const fmtPoint = (p) => (p > 0 ? `+${p}` : `${p}`);
 
   const bestSpreadAt = (teamName, point) => {
-    let best = null, bestBook = null, bestSize = null, count = 0;
+    const quotes = [];
     bookmakers.forEach(b => {
       if (!trustedBookKeys.has(b.key)) return;
       const m = (b.markets || []).find(mk => mk.key === "alternate_spreads");
       if (!m) return;
       const o = m.outcomes.find(x => x.name === teamName && x.point === point);
       if (!o || o.price == null) return;
-      count++;
-      if (best === null || o.price > best) { best = o.price; bestBook = b.key; bestSize = outcomeSize(o); }
+      quotes.push({ price: o.price, book: b.key, size: outcomeSize(o) });
     });
-    return { best, bestBook, bestSize, count };
+    return { ...pickBestAmericanQuote(quotes, { allBooks }), count: quotes.length };
   };
 
   const bestTotalAt = (side, point) => {
-    let best = null, bestBook = null, bestSize = null, count = 0;
+    const quotes = [];
     bookmakers.forEach(b => {
       if (!trustedBookKeys.has(b.key)) return;
       const m = (b.markets || []).find(mk => mk.key === "alternate_totals");
       if (!m) return;
       const o = m.outcomes.find(x => x.name === side && x.point === point);
       if (!o || o.price == null) return;
-      count++;
-      if (best === null || o.price > best) { best = o.price; bestBook = b.key; bestSize = outcomeSize(o); }
+      quotes.push({ price: o.price, book: b.key, size: outcomeSize(o) });
     });
-    return { best, bestBook, bestSize, count };
+    return { ...pickBestAmericanQuote(quotes, { allBooks }), count: quotes.length };
   };
 
   const bestTeamTotalAt = (team, side, point) => {
-    let best = null, bestBook = null, bestSize = null, count = 0;
+    const quotes = [];
     bookmakers.forEach(b => {
       if (!trustedBookKeys.has(b.key)) return;
       (b.markets || []).forEach(m => {
         if (m.key !== "team_totals" && m.key !== "alternate_team_totals") return;
         const o = m.outcomes.find(x => x.name === side && x.description === team && x.point === point);
         if (!o || o.price == null) return;
-        count++;
-        if (best === null || o.price > best) { best = o.price; bestBook = b.key; bestSize = outcomeSize(o); }
+        quotes.push({ price: o.price, book: b.key, size: outcomeSize(o) });
       });
     });
-    return { best, bestBook, bestSize, count };
+    return { ...pickBestAmericanQuote(quotes, { allBooks }), count: quotes.length };
   };
 
   allBooks.forEach(b => {

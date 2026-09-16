@@ -83,7 +83,8 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
-import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds } from "./trueOddsLine.js";
+import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
+import { resolveOppWithSideGuard, rankPicksAfterOppGuard } from "./promoOppGuard.js";
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
@@ -536,10 +537,8 @@ function calcBoostLock(bestOppAmerican, stake, boostedProfit) {
 // untrusted book like MyBookie offers). Legs are only built when both sides exist on
 // the book, so a same-book opposite is always available. A single book's other side
 // carries its vig, so the derived edge is conservative (understated), never fabricated.
-function resolveOpp({ trustedOpp, trustedBook, trustedCount, trustedSize, sameBookOpp, sameBookKey, sameBookSize }) {
-  if (trustedOpp != null) return { bestOpp: trustedOpp, bestOppBook: trustedBook, bestOppCount: trustedCount, bestOppSize: trustedSize ?? null, sameBookFallback: false };
-  if (sameBookOpp != null) return { bestOpp: sameBookOpp, bestOppBook: sameBookKey, bestOppCount: 1, bestOppSize: sameBookSize ?? null, sameBookFallback: true };
-  return { bestOpp: null, bestOppBook: trustedBook || null, bestOppCount: trustedCount || 0, bestOppSize: trustedSize ?? null, sameBookFallback: false };
+function resolveOpp(args) {
+  return resolveOppWithSideGuard(args);
 }
 
 function pushSoccerMlLegs(legs, g, bookKey, { seen, minLegOdds, maxLegOdds } = {}) {
@@ -552,7 +551,7 @@ function pushSoccerMlLegs(legs, g, bookKey, { seen, minLegOdds, maxLegOdds } = {
       if (seen.has(dedupe)) continue;
       seen.add(dedupe);
     }
-    const opp = resolveOpp(soccerMlOppResolveArgs(g, side, bookKey));
+    const opp = resolveOpp({ ...soccerMlOppResolveArgs(g, side, bookKey), bookOdds: odds });
     if (opp.bestOpp == null) continue;
     legs.push({
       name: soccerYesName(side, g.away, g.home),
@@ -594,9 +593,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
       if (passesOddsBounds(awayOdds, minLegOdds, maxLegOdds))
-        legs.push({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, trustedSize: g.best_home_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.bookOdds?.[book]?.ml_home_size }) });
+        legs.push({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, trustedSize: g.best_home_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.bookOdds?.[book]?.ml_home_size, bookOdds: awayOdds }) });
       if (passesOddsBounds(homeOdds, minLegOdds, maxLegOdds))
-        legs.push({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, trustedSize: g.best_away_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.bookOdds?.[book]?.ml_away_size }) });
+        legs.push({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, trustedSize: g.best_away_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.bookOdds?.[book]?.ml_away_size, bookOdds: homeOdds }) });
     });
   }
 
@@ -612,8 +611,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (awayOdds == null || homeOdds == null) return;
       const ak = `${g.away}@${g.home}_away_${g.away_line}`;
       const hk = `${g.away}@${g.home}_home_${g.home_line}`;
-      if (!seen.has(ak) && passesOddsBounds(awayOdds, minLegOdds, maxLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.home_size }) }); }
-      if (!seen.has(hk) && passesOddsBounds(homeOdds, minLegOdds, maxLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.away_size }) }); }
+      if (!seen.has(ak) && passesOddsBounds(awayOdds, minLegOdds, maxLegOdds)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.home_size, bookOdds: awayOdds }) }); }
+      if (!seen.has(hk) && passesOddsBounds(homeOdds, minLegOdds, maxLegOdds)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.away_size, bookOdds: homeOdds }) }); }
     });
   }
 
@@ -629,8 +628,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_over_${g.line}`;
       const uk = `${g.away}@${g.home}_under_${g.line}`;
-      if (!seen.has(ok) && passesOddsBounds(overOdds, minLegOdds, maxLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size }) }); }
-      if (!seen.has(uk) && passesOddsBounds(underOdds, minLegOdds, maxLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size }) }); }
+      if (!seen.has(ok) && passesOddsBounds(overOdds, minLegOdds, maxLegOdds)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size, bookOdds: overOdds }) }); }
+      if (!seen.has(uk) && passesOddsBounds(underOdds, minLegOdds, maxLegOdds)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size, bookOdds: underOdds }) }); }
     });
   }
 
@@ -646,12 +645,12 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_TT_${g.team}_o_${g.line}`;
       const uk = `${g.away}@${g.home}_TT_${g.team}_u_${g.line}`;
-      if (!seen.has(ok) && passesOddsBounds(overOdds, minLegOdds, maxLegOdds)) { seen.add(ok); legs.push({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size }) }); }
-      if (!seen.has(uk) && passesOddsBounds(underOdds, minLegOdds, maxLegOdds)) { seen.add(uk); legs.push({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size }) }); }
+      if (!seen.has(ok) && passesOddsBounds(overOdds, minLegOdds, maxLegOdds)) { seen.add(ok); legs.push({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size, bookOdds: overOdds }) }); }
+      if (!seen.has(uk) && passesOddsBounds(underOdds, minLegOdds, maxLegOdds)) { seen.add(uk); legs.push({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size, bookOdds: underOdds }) }); }
     });
   }
 
-  return legs;
+  return legs.filter((l) => l.bestOpp != null);
 }
 
 function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
@@ -675,8 +674,8 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (awayOdds == null || homeOdds == null) return;
         const ak = `${g.away}@${g.home}_ML_away_${book.key}`;
         const hk = `${g.away}@${g.home}_ML_home_${book.key}`;
-        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, trustedSize: g.best_home_size, sameBookOpp: homeOdds, sameBookKey: book.key, sameBookSize: g.bookOdds?.[book.key]?.ml_home_size }) }); }
-        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, trustedSize: g.best_away_size, sameBookOpp: awayOdds, sameBookKey: book.key, sameBookSize: g.bookOdds?.[book.key]?.ml_away_size }) }); }
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, trustedSize: g.best_home_size, sameBookOpp: homeOdds, sameBookKey: book.key, sameBookSize: g.bookOdds?.[book.key]?.ml_home_size, bookOdds: awayOdds }) }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, trustedSize: g.best_away_size, sameBookOpp: awayOdds, sameBookKey: book.key, sameBookSize: g.bookOdds?.[book.key]?.ml_away_size, bookOdds: homeOdds }) }); }
       });
     }
     if (data.run_lines) {
@@ -690,8 +689,8 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (awayOdds == null || homeOdds == null) return;
         const ak = `${g.away}@${g.home}_SPR_away_${g.away_line}_${book.key}`;
         const hk = `${g.away}@${g.home}_SPR_home_${g.home_line}_${book.key}`;
-        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book.key, sameBookSize: g.home_size }) }); }
-        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book.key, sameBookSize: g.away_size }) }); }
+        if (!seen.has(ak)) { seen.add(ak); legs.push({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book.key, sameBookSize: g.home_size, bookOdds: awayOdds }) }); }
+        if (!seen.has(hk)) { seen.add(hk); legs.push({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book.key, sameBookSize: g.away_size, bookOdds: homeOdds }) }); }
       });
     }
     if (data.totals) {
@@ -705,8 +704,8 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (overOdds == null || underOdds == null) return;
         const ok = `${g.away}@${g.home}_TOT_over_${g.line}_${book.key}`;
         const uk = `${g.away}@${g.home}_TOT_under_${g.line}_${book.key}`;
-        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book.key, sameBookSize: g.under_size }) }); }
-        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book.key, sameBookSize: g.over_size }) }); }
+        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book.key, sameBookSize: g.under_size, bookOdds: overOdds }) }); }
+        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book.key, sameBookSize: g.over_size, bookOdds: underOdds }) }); }
       });
     }
     if (data.team_totals) {
@@ -720,13 +719,13 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (overOdds == null || underOdds == null) return;
         const ok = `${g.away}@${g.home}_TT_${g.team}_o_${g.line}_${book.key}`;
         const uk = `${g.away}@${g.home}_TT_${g.team}_u_${g.line}_${book.key}`;
-        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book.key, sameBookSize: g.under_size }) }); }
-        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book.key, sameBookSize: g.over_size }) }); }
+        if (!seen.has(ok)) { seen.add(ok); legs.push({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book.key, sameBookSize: g.under_size, bookOdds: overOdds }) }); }
+        if (!seen.has(uk)) { seen.add(uk); legs.push({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book.key, sameBookSize: g.over_size, bookOdds: underOdds }) }); }
       });
     }
   });
 
-  return legs;
+  return legs.filter((l) => l.bestOpp != null);
 }
 
 function parlayLegKey(p) {
@@ -1190,7 +1189,8 @@ function attachNoSweatLockToPick(p, nextStake) {
 
 function rankPromoPicks(picks, ctx, attachLock) {
   const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx)));
-  const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(tagged) : tagged;
+  const guarded = rankPicksAfterOppGuard(tagged);
+  const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(guarded) : guarded;
   const liquid = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
   return filterPicksByTeamName(liquid, ctx.includeTeamTokens, ctx.excludeTeamTokens);
 }
@@ -2674,14 +2674,14 @@ export default function App() {
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
-                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: view.ev > 0 ? "#10b981" : "#ef4444" }}>+${view.ev.toFixed(2)} EV</div>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvMoney(view.ev)} EV</div>
                           </div>
                           <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: "#10b981" }}>+{(view.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <span>EV: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
@@ -2733,10 +2733,10 @@ export default function App() {
                             <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                               <div>Win <strong style={{ color: "#10b981" }}>${p.boostedProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.boostedProfit * view.combinedProb).toFixed(2)}</strong></div>
                               <div>Lose <strong style={{ color: "#ef4444" }}>${stake}</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>-${(stake * (1 - view.combinedProb)).toFixed(2)}</strong></div>
-                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: "#10b981" }}>+${view.ev.toFixed(2)}</strong></div>
+                              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvMoney(view.ev)}</strong></div>
                             </div>
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: "#10b981" }}>+${view.ev.toFixed(2)}</strong> on a ${stake} bet.
+                              <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvMoney(view.ev)}</strong> on a ${stake} bet.
                             </div>
                             {canSeeComboLocks(user) && (
                               <div style={{ marginTop: 12 }}>
@@ -2825,7 +2825,7 @@ export default function App() {
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{formatSignedEvMoney(view.ev)} EV</div>
                               {p.isGuaranteed && (
                                 <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>${p.lock.lockedProfit.toFixed(2)} guaranteed</div>
                               )}
@@ -2837,7 +2837,7 @@ export default function App() {
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
                             <span>On a loss: <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash</span>
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}{(view.ev / stake * 100).toFixed(1)}%</strong></span>
+                            <span>EV: <strong style={{ color: evColor }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
@@ -2946,11 +2946,11 @@ export default function App() {
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                                   <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * view.combinedProb).toFixed(2)}</strong></div>
                                   <div>Lose → <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash <span style={{ color: "#6b7280" }}>(net {p.loseNet >= 0 ? "+" : "−"}${Math.abs(p.loseNet).toFixed(0)})</span> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>{p.loseNet * (1 - view.combinedProb) >= 0 ? "+" : "−"}${Math.abs(p.loseNet * (1 - view.combinedProb)).toFixed(2)}</strong></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></div>
                                   <div style={{ marginTop: 6 }}>We treat site credit as {creditConversionPct}% cash: ${p.refund.toFixed(0)} refund = ${p.creditValue.toFixed(0)}.</div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${stake} cash stake.
+                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${stake} cash stake.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
                                 </div>
                               </>
@@ -3046,7 +3046,7 @@ export default function App() {
                                 <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>guaranteed cash · {((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</div>
                               </div>
                             ) : (
-                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)} EV</div>
+                              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{formatSignedEvMoney(view.ev)} EV</div>
                             )}
                           </div>
 
@@ -3079,7 +3079,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>Game: <strong style={{ color: "#e8eaed" }}>{leg?.game}</strong></span>
                                 <span>Conversion: <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
+                                <span>EV: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
                             </>
                           ) : (
@@ -3089,7 +3089,7 @@ export default function App() {
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
                                 <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${(view.ev ?? 0).toFixed(2)}</strong></span>
+                                <span>EV: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
                               {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
@@ -3199,10 +3199,10 @@ export default function App() {
                                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "14px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
                                   <div>Win <strong style={{ color: "#10b981" }}>${p.winProfit.toFixed(0)}</strong> × <strong style={{ color: "#f59e0b" }}>{(view.combinedProb * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>+${(p.winProfit * view.combinedProb).toFixed(2)}</strong></div>
                                   <div>Lose <strong style={{ color: "#6b7280" }}>$0</strong> × <strong style={{ color: "#f59e0b" }}>{((1 - view.combinedProb) * 100).toFixed(1)}%</strong> = <strong style={{ color: "#e8eaed" }}>$0</strong> <span style={{ color: "#6b7280" }}>(free bet, no cash at risk)</span></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong></div>
+                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>EV = <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></div>
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
-                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{view.ev > 0 ? "+" : ""}${view.ev.toFixed(2)}</strong> on a ${fbAmount} free bet.
+                                  <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${fbAmount} free bet.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss."}
                                 </div>
                                 {canSeeComboLocks(user) && !isSingle && (
