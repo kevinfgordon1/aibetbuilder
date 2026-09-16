@@ -9,6 +9,8 @@
 // Per-lock history (armed / quoted / skipped / unfilled / filled) reuses Miss-tape
 // classification. Matched RFQs uses the same History tape (combo_submissions /
 // combo_fills) so an empty watcher combo_matches cannot claim "0 total".
+// Per-lock submissions fetch quotes/fills separately from game_started noise
+// (comboLockSubmissions.js) so midday Polymarket quote_id rows stay visible.
 // Risk/profit uses parlay_stake + fill_american + max_contracts.
 // Unfilled outcomes: official Kalshi combo ticker, else Kalshi single-game legs,
 // else ESPN public scoreboard (/api/espn-scores). Never invents scores.
@@ -31,6 +33,7 @@ import { buildComboStatement } from "./comboStatement";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
 import { deskFillCounts } from "./comboTape";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
@@ -641,7 +644,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         // parlay can never fall through the gap between the Active and History lists again.
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
         supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
-        supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["quoted", "declined", "filled", "unfilled", "shadow"]).order("created_at", { ascending: false }).limit(50),
+        supabase.from("combo_submissions").select("*").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
         // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
         supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false),
@@ -714,23 +717,21 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (!poll.applyParlays) return;
       const livingRows = poll.parlays;
       const archivedForSubs = archivedRows || [];
-      // Per-lock attempts (quoted / skipped / unfilled), including skip-tape market_ticker.
-      const livingSubReqs = livingRows.slice(0, 20).map((row) =>
-        supabase.from("combo_submissions").select("*").eq("user_id", user.id).eq("parlay_id", row.id).neq("status", "shadow").order("created_at", { ascending: false }).limit(80)
-      );
+      // Per-lock attempts: quotes/fills and noisy skips are separate queries so
+      // a game_started flood cannot hide midday Polymarket quote_id rows.
       const archivedIds = archivedForSubs.map((row) => row.id).filter(Boolean);
-      const subSettled = await Promise.allSettled([
-        archivedIds.length
-          ? supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("parlay_id", archivedIds).neq("status", "shadow").order("created_at", { ascending: false }).limit(400)
-          : Promise.resolve({ data: [] }),
-        ...livingSubReqs,
-      ]);
-      const [archivedSubRes, ...livingSubRes] = subSettled.map(comboSettledQuery);
-      const livingSubsOk = livingSubReqs.length === 0 || livingSubRes.every(comboListQueryOk);
-      const livingSubRows = livingSubRes.flatMap((r) => (comboListQueryOk(r) ? r.data : []));
-      const archivedSubRows = comboListQueryOk(archivedSubRes) ? archivedSubRes.data : [];
+      const livingForSubs = livingRows.slice(0, 20);
+      const subReqs = lockSubmissionQueriesForParlays(supabase, {
+        userId: user.id,
+        living: livingForSubs,
+        archivedIds,
+      });
+      const subSettled = await Promise.allSettled(subReqs.length ? subReqs : [Promise.resolve({ data: [] })]);
+      const subRes = subSettled.map(comboSettledQuery);
+      const livingSubsOk = subReqs.length === 0 || subRes.every(comboListQueryOk);
+      const livingSubRows = subRes.flatMap((r) => (comboListQueryOk(r) ? r.data : []));
       if (livingSubsOk) {
-        const subRows = [...livingSubRows, ...archivedSubRows];
+        const subRows = mergeSubmissionRows(livingSubRows);
         setSubmissions(subRows);
         const deskFills = fillRows ? deskFillCounts(fillRows, subRows) : null;
         if (deskFills) {

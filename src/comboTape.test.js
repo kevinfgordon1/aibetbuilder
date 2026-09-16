@@ -872,6 +872,9 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   assert.match(locks, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.is\("archived_at"/);
   assert.match(locks, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.not\("archived_at"/);
   assert.match(locks, /attemptSummaryParts/);
+  assert.match(locks, /lockSubmissionQueriesForParlays/);
+  assert.match(locks, /mergeSubmissionRows/);
+  assert.doesNotMatch(locks, /\.limit\(80\)\s*\n\s*\)/);
   assert.doesNotMatch(locks, /skipFill/);
   assert.match(tapeUi, /settlementFromStored/);
   assert.match(tapeUi, /parlay won \(we lost\)|settlement\.text/);
