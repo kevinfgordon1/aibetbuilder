@@ -7,8 +7,9 @@
 // Each card's always-visible desk strip (fill remaining, quoting state, last skip,
 // last loss / tape clearing price) is derived in comboDesk.js from the same polls.
 // Per-lock history (armed / quoted / skipped / unfilled / filled) reuses Miss-tape
-// classification. Matched RFQs uses the same History tape (combo_submissions /
-// combo_fills) so an empty watcher combo_matches cannot claim "0 total".
+// classification. Matched RFQs lists filled quotes only (combo_fills /
+// filled submissions). History keeps the full attempt tape so an empty
+// watcher combo_matches cannot hide quotes or skips.
 // Per-lock submissions fetch quotes/fills separately from game_started noise
 // (comboLockSubmissions.js) so midday Polymarket quote_id rows stay visible.
 // Risk/profit uses parlay_stake + fill_american + max_contracts.
@@ -31,7 +32,7 @@ import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSet
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
-import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqHeading, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
+import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqHeading, matchedRfqMatchedCount, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
 import { deskFillCounts } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
@@ -348,8 +349,7 @@ function matchedRfqOutcome(row, oc, skip) {
 // (combo_submissions.venue when the worker writes kalshi | polymarket).
 function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, desk }) {
   const counts = matchedRfqCounts(attempts);
-  const tapeRows = [...((attempts && attempts.tape && attempts.tape.rows) || [])]
-    .sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+  const tapeRows = matchedRfqFillRows(attempts);
   const fillCtx = desk ? { filled: desk.fill.filled, ceiling: desk.fill.ceiling, hedgeCap: desk.fill.ceiling } : {};
   const matchByRfq = {};
   (matches || []).forEach((m) => { if (m && m.rfq_id) matchByRfq[m.rfq_id] = m; });
@@ -363,9 +363,9 @@ function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, de
         {matchedRfqHeading(attempts)}
       </div>
       {parked ? (
-        <div className="empty" style={{ paddingTop: 0, paddingBottom: 6 }}>Quote-watcher is parked. Rows and counts come from History (combo_submissions / combo_fills), not watcher combo_matches.</div>
+        <div className="empty" style={{ paddingTop: 0, paddingBottom: 6 }}>Quote-watcher is parked. Fill rows come from combo_fills / filled submissions, not watcher combo_matches.</div>
       ) : null}
-      {counts.total === 0 ? <div className="empty">{empty}</div> : (
+      {counts.filled === 0 ? <div className="empty">{empty}</div> : (
         <table><thead><tr><th>Time</th><th>Venue</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
           <tbody>{tapeRows.map((row) => {
             const m = (row.rfqId && matchByRfq[row.rfqId]) || null;
@@ -1136,7 +1136,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqCounts(attemptsByParlay[p.id]).total); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : ""; })()}</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqMatchedCount(attemptsByParlay[p.id])); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : ""; })()}</div>
             <FillProgress desk={deskByParlay[p.id]} />
             <RiskProfile parlay={p} filled={realFills[p.id] || 0} />
             <DeskChips desk={deskByParlay[p.id]} />
@@ -1173,7 +1173,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <FillProgress desk={desk} thin />
               <RiskProfile parlay={p} filled={desk ? desk.fill.filled : (realFills[p.id] || 0)} />
               <DeskChips desk={desk} thin />
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqCounts(attemptsByParlay[p.id]).total); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqMatchedCount(attemptsByParlay[p.id])); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
               <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
               {openParlays[p.id] && <MatchedRfqTable attempts={attemptsByParlay[p.id]} matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
             </div>
