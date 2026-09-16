@@ -195,37 +195,57 @@ export function attemptSummaryFilled(attempts) {
   return !!(stats && stats.skippedFilled);
 }
 
-// Matched RFQs panel — same tape as History. Do not read combo_matches alone:
-// quote-watcher may be parked, so watcher rows stay empty while submissions
-// and fills already show on the card.
+// Matched RFQs panel — fills only. History keeps the full attempt tape
+// (quotes, skips, no-takes). Do not read combo_matches alone: quote-watcher
+// may be parked, so filled submissions / combo_fills still list here.
+export function isMatchedRfqFill(row) {
+  return !!(row && row.bucket === "filled");
+}
+
+export function matchedRfqFillRows(attempts) {
+  const rows = (attempts && attempts.tape && attempts.tape.rows) || [];
+  return rows.filter(isMatchedRfqFill).sort((a, b) => tsMs(b.at) - tsMs(a.at));
+}
+
 export function matchedRfqCounts(attempts) {
+  const rows = matchedRfqFillRows(attempts);
+  let contracts = 0;
+  for (const row of rows) {
+    const n = Number(row && row.contracts);
+    if (Number.isFinite(n) && n > 0) contracts += n;
+  }
+  return { filled: rows.length, contracts };
+}
+
+// Card chrome "matched N RFQs" still counts every live match. The open-card
+// table uses matchedRfqCounts (fills only), not this.
+export function matchedRfqMatchedCount(attempts) {
   const live = attemptStats(attempts);
-  if (!live) return { total: 0, quoted: 0, skipped: 0, lost: 0 };
-  return {
-    total: live.matched || 0,
-    quoted: live.quoted || 0,
-    skipped: live.skipped || 0,
-    lost: live.lost || 0,
-  };
+  return (live && live.matched) || 0;
 }
 
 export function matchedRfqHeading(attempts) {
-  const { total, quoted, skipped, lost } = matchedRfqCounts(attempts);
-  return `Matched RFQs — ${total} total · ${quoted} quoted · ${skipped} skipped · ${lost} lost`;
+  const { filled, contracts } = matchedRfqCounts(attempts);
+  const bits = [`Matched RFQs — fills only · ${filled} filled`];
+  if (filled > 0 && contracts > 0) bits.push(`${contracts} contract${contracts === 1 ? "" : "s"}`);
+  return bits.join(" · ");
 }
 
 export function matchedRfqEmptyText(attempts) {
-  const { total } = matchedRfqCounts(attempts);
-  if (total > 0) return null;
+  const { filled } = matchedRfqCounts(attempts);
+  if (filled > 0) return null;
   if (attempts && attempts.filled > 0) {
-    return "No per-RFQ rows to list, but this lock has fills — see History and the fill bar.";
+    return "No per-RFQ fill rows to list, but this lock has fills — see History and the fill bar.";
   }
-  return "No RFQs have matched this lock yet.";
+  if (matchedRfqMatchedCount(attempts) > 0) {
+    return "No fills yet. Every quote and skip is in History.";
+  }
+  return "No fills yet.";
 }
 
 export function matchedRfqWatcherParked(matches, attempts) {
-  const { total } = matchedRfqCounts(attempts);
-  return total > 0 && !(matches && matches.length);
+  const { filled } = matchedRfqCounts(attempts);
+  return filled > 0 && !(matches && matches.length);
 }
 
 // Consecutive identical attempts (status / reason / size / venue). Armed /

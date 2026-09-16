@@ -16,7 +16,10 @@ import {
   matchedRfqCounts,
   matchedRfqHeading,
   matchedRfqEmptyText,
+  matchedRfqFillRows,
+  matchedRfqMatchedCount,
   matchedRfqWatcherParked,
+  isMatchedRfqFill,
 } from "./comboLockHistory.js";
 
 assert.equal(quotingEnded({ archived_at: "2026-09-04T00:00:00Z" }), true);
@@ -330,10 +333,13 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     },
     now: Date.parse("2026-09-08T16:00:00Z"),
   });
-  assert.deepEqual(matchedRfqCounts(empty), { total: 0, quoted: 0, skipped: 0, lost: 0 });
-  assert.equal(matchedRfqHeading(empty), "Matched RFQs — 0 total · 0 quoted · 0 skipped · 0 lost");
-  assert.equal(matchedRfqEmptyText(empty), "No RFQs have matched this lock yet.");
+  assert.deepEqual(matchedRfqCounts(empty), { filled: 0, contracts: 0 });
+  assert.equal(matchedRfqMatchedCount(empty), 0);
+  assert.equal(matchedRfqFillRows(empty).length, 0);
+  assert.equal(matchedRfqHeading(empty), "Matched RFQs — fills only · 0 filled");
+  assert.equal(matchedRfqEmptyText(empty), "No fills yet.");
   assert.doesNotMatch(matchedRfqEmptyText(empty), /watcher went live/);
+  assert.doesNotMatch(matchedRfqHeading(empty), /quoted|skipped|lost/);
   assert.equal(matchedRfqWatcherParked([], empty), false);
 }
 
@@ -349,8 +355,12 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     fills: [{ parlay_id: "fill-only", fill_id: "f1", count: 12, kalshi_created_time: "2026-09-08T15:00:00Z" }],
     now: Date.parse("2026-09-08T16:00:00Z"),
   });
-  assert.ok(matchedRfqCounts(fillsOnly).total > 0);
+  assert.deepEqual(matchedRfqCounts(fillsOnly), { filled: 1, contracts: 12 });
+  assert.equal(matchedRfqFillRows(fillsOnly).length, 1);
+  assert.equal(matchedRfqFillRows(fillsOnly)[0].bucket, "filled");
   assert.equal(matchedRfqEmptyText(fillsOnly), null);
+  assert.match(matchedRfqHeading(fillsOnly), /fills only · 1 filled/);
+  assert.match(matchedRfqHeading(fillsOnly), /12 contracts/);
 }
 
 // Screenshot lock: History has skips/misses/fills, watcher combo_matches is empty.
@@ -390,19 +400,55 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     now: Date.parse("2026-09-08T16:00:00Z"),
   });
   const counts = matchedRfqCounts(sea);
-  assert.equal(counts.total, 80);
-  assert.equal(counts.skipped, 46);
-  assert.equal(counts.quoted, 34);
-  assert.equal(counts.lost, 33);
+  assert.deepEqual(counts, { filled: 1, contracts: 98 });
+  assert.equal(matchedRfqMatchedCount(sea), 80);
+  const fillRows = matchedRfqFillRows(sea);
+  assert.equal(fillRows.length, 1);
+  assert.equal(fillRows[0].rfqId, "fill1");
+  assert.ok(fillRows.every(isMatchedRfqFill));
+  assert.equal(sea.tape.rows.filter((r) => r.bucket !== "filled").length, 79);
+  assert.ok(sea.events.some((e) => e.key === "skipped"));
+  assert.ok(sea.events.some((e) => e.key === "unfilled"));
+  assert.ok(sea.events.some((e) => e.key === "filled"));
   assert.equal(matchedRfqEmptyText(sea), null);
   assert.equal(matchedRfqWatcherParked([], sea), true);
   assert.equal(matchedRfqWatcherParked([{ rfq_id: "x" }], sea), false);
-  assert.match(matchedRfqHeading(sea), /80 total/);
-  assert.match(matchedRfqHeading(sea), /34 quoted/);
-  assert.match(matchedRfqHeading(sea), /46 skipped/);
-  assert.match(matchedRfqHeading(sea), /33 lost/);
-  assert.doesNotMatch(matchedRfqHeading(sea), /0 total · 0 quoted · 0 skipped · 0 lost/);
+  assert.equal(matchedRfqHeading(sea), "Matched RFQs — fills only · 1 filled · 98 contracts");
+  assert.doesNotMatch(matchedRfqHeading(sea), /80 total|34 quoted|46 skipped|33 lost/);
   assert.ok(sea.tape.rows.every((r) => r.venue && r.venueKey));
+}
+
+// Guardians / Yankees / Giants: hundreds of quoted-no-take rows stay in
+// History. Matched RFQs must show the empty fills state, not that flood.
+{
+  const cle = buildLockAttempts({
+    parlay: {
+      id: "p-cle-nyy-sf",
+      active: true,
+      created_at: "2026-09-16T16:00:00Z",
+      starts_at: "2026-09-16T23:10:00Z",
+      max_contracts: 479,
+    },
+    submissions: Array.from({ length: 400 }, (_, i) => ({
+      parlay_id: "p-cle-nyy-sf",
+      rfq_id: "q" + i,
+      venue: i % 2 ? "kalshi" : "polymarket",
+      status: "unfilled",
+      quote_id: "quote-" + i,
+      is_live: false,
+      contracts: 33 + (i % 8),
+      created_at: new Date(Date.parse("2026-09-16T17:00:00Z") + i * 1000).toISOString(),
+    })),
+    now: Date.parse("2026-09-16T21:00:00Z"),
+  });
+  assert.equal(matchedRfqMatchedCount(cle), 400);
+  assert.deepEqual(matchedRfqCounts(cle), { filled: 0, contracts: 0 });
+  assert.equal(matchedRfqFillRows(cle).length, 0);
+  assert.equal(cle.events.filter((e) => e.key === "unfilled").length, 400);
+  assert.equal(matchedRfqHeading(cle), "Matched RFQs — fills only · 0 filled");
+  assert.doesNotMatch(matchedRfqHeading(cle), /400 quoted|397 lost|400 total/);
+  assert.equal(matchedRfqEmptyText(cle), "No fills yet. Every quote and skip is in History.");
+  assert.equal(matchedRfqWatcherParked([], cle), false);
 }
 
 {
@@ -449,7 +495,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /matchedRfqHeading/);
   assert.match(locksSrc, /matchedRfqCounts/);
   assert.match(locksSrc, /matchedRfqEmptyText/);
+  assert.match(locksSrc, /matchedRfqFillRows/);
+  assert.match(locksSrc, /matchedRfqMatchedCount/);
   assert.match(locksSrc, /matchedRfqWatcherParked/);
+  assert.match(locksSrc, /counts\.filled === 0/);
   assert.match(locksSrc, /<MatchedRfqTable attempts=\{attemptsByParlay\[p\.id\]\}/);
   assert.match(locksSrc, /function VenueChip\(\{ venue, venueKey \}\)/);
   assert.match(locksSrc, /<th>Venue<\/th>/);
@@ -459,7 +508,8 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /chip\.venue-poly/);
   assert.doesNotMatch(locksSrc, /watcher went live/);
   assert.doesNotMatch(locksSrc, /matched 0 RFQs/);
-  assert.match(locksSrc, /attempts && attempts\.tape && attempts\.tape\.rows/);
+  assert.match(locksSrc, /const tapeRows = matchedRfqFillRows\(attempts\)/);
+  assert.doesNotMatch(locksSrc, /const tapeRows = \[\.\.\.\(\(attempts && attempts\.tape && attempts\.tape\.rows\)/);
 }
 
 console.log("comboLockHistory.test.js ok");
