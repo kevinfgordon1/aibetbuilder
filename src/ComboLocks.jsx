@@ -8,8 +8,9 @@
 // last loss / tape clearing price) is derived in comboDesk.js from the same polls.
 // Per-lock history (armed / quoted / skipped / unfilled / filled) reuses Miss-tape
 // classification. Matched RFQs lists filled quotes only (combo_fills /
-// filled submissions). History keeps the full attempt tape so an empty
-// watcher combo_matches cannot hide quotes or skips.
+// filled submissions). History itself splits the same way: filled orders,
+// then the full attempt tape (quotes, skips, no-takes) so an empty watcher
+// combo_matches cannot hide quotes or skips.
 // Per-lock submissions fetch quotes/fills separately from game_started noise
 // (comboLockSubmissions.js) so midday Polymarket quote_id rows stay visible.
 // Risk/profit uses parlay_stake + fill_american + max_contracts.
@@ -32,7 +33,7 @@ import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSet
 import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
-import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqHeading, matchedRfqMatchedCount, matchedRfqWatcherParked, visibleAttempts } from "./comboLockHistory";
+import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, filledAttemptEvents, historyFillsEmptyText, historyFillsHeading, historyQuotesHeading, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqHeading, matchedRfqMatchedCount, matchedRfqWatcherParked, collapseAttempts, visibleAttempts } from "./comboLockHistory";
 import { deskFillCounts } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
@@ -245,13 +246,41 @@ function AttemptSummary({ attempts }) {
     </>
   );
 }
+function AttemptRows({ events }) {
+  return (
+    <table><thead><tr><th>Time</th><th>Status</th><th>Size</th><th>Venue</th></tr></thead>
+      <tbody>{events.map((e, i) => (
+        <tr key={(e.at || e.key) + "-" + e.reason + "-" + i}>
+          <td>{e.count > 1
+            ? <span className="hist-rpt" title={`${e.count} identical attempts`}>{attemptRepeatLabel(e)}</span>
+            : (e.at ? new Date(e.at).toLocaleString() : "—")}</td>
+          <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
+          <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
+          <td><VenueChip venue={e.venue} venueKey={e.venueKey} /></td>
+        </tr>
+      ))}</tbody>
+    </table>
+  );
+}
 function AttemptHistory({ attempts, open = true, onToggle, showSummary = true }) {
   if (!attempts) return null;
   const { shown, extra } = visibleAttempts(attempts.events);
+  const fillEvents = collapseAttempts(filledAttemptEvents(attempts));
+  const fillsEmpty = historyFillsEmptyText(attempts);
   const toggleable = typeof onToggle === "function";
   const expanded = toggleable ? !!open : true;
-  const heading = "History — every attempt (not fills only)";
+  const heading = "History";
   const summary = showSummary ? <AttemptSummary attempts={attempts} /> : null;
+  const body = (
+    <>
+      <div className="hist-sub">{historyFillsHeading(attempts)}</div>
+      {fillEvents.length === 0 ? <div className="empty">{fillsEmpty}</div> : <AttemptRows events={fillEvents} />}
+      <div className="hist-sub">{historyQuotesHeading()}</div>
+      {summary && !toggleable ? <div className="hist-static" style={{ marginTop: 0 }}>{summary}</div> : null}
+      {shown.length === 0 ? <div className="empty">No attempts recorded.</div> : <AttemptRows events={shown} />}
+      {extra > 0 && <div className="empty">Showing newest {shown.length} rows. {extra} older omitted.</div>}
+    </>
+  );
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
       {toggleable ? (
@@ -267,31 +296,8 @@ function AttemptHistory({ attempts, open = true, onToggle, showSummary = true })
           {summary}
           <span className="chip hist-toggle">{expanded ? "Hide history" : "History"}</span>
         </button>
-      ) : (
-        <div className="hist-static">
-          <span>{heading}</span>
-          {summary}
-        </div>
-      )}
-      {expanded ? (
-        <>
-          {shown.length === 0 ? <div className="empty">No attempts recorded.</div> : (
-            <table><thead><tr><th>Time</th><th>Status</th><th>Size</th><th>Venue</th></tr></thead>
-              <tbody>{shown.map((e, i) => (
-                <tr key={(e.at || e.key) + "-" + e.reason + "-" + i}>
-                  <td>{e.count > 1
-                    ? <span className="hist-rpt" title={`${e.count} identical attempts`}>{attemptRepeatLabel(e)}</span>
-                    : (e.at ? new Date(e.at).toLocaleString() : "—")}</td>
-                  <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
-                  <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
-                  <td><VenueChip venue={e.venue} venueKey={e.venueKey} /></td>
-                </tr>
-              ))}</tbody>
-            </table>
-          )}
-          {extra > 0 && <div className="empty">Showing newest {shown.length} rows. {extra} older omitted.</div>}
-        </>
       ) : null}
+      {expanded ? body : null}
     </div>
   );
 }
@@ -1091,6 +1097,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .hist-head .hist-toggle{margin-left:auto}
         .cl .hist-static{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;margin-bottom:6px}
         .cl .hist-static .chip{text-transform:none;letter-spacing:0}
+        .cl .hist-sub{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;margin:12px 0 6px}
+        .cl .hist-sub:first-child{margin-top:0}
         .cl .hist-rpt{display:inline-block;margin-left:6px;color:#9aa3b2;font-weight:600;white-space:nowrap}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}

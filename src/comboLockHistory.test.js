@@ -20,6 +20,10 @@ import {
   matchedRfqMatchedCount,
   matchedRfqWatcherParked,
   isMatchedRfqFill,
+  filledAttemptEvents,
+  historyFillsHeading,
+  historyQuotesHeading,
+  historyFillsEmptyText,
 } from "./comboLockHistory.js";
 
 assert.equal(quotingEnded({ archived_at: "2026-09-04T00:00:00Z" }), true);
@@ -338,6 +342,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.equal(matchedRfqFillRows(empty).length, 0);
   assert.equal(matchedRfqHeading(empty), "Matched RFQs — fills only · 0 filled");
   assert.equal(matchedRfqEmptyText(empty), "No fills yet.");
+  assert.equal(filledAttemptEvents(empty).length, 0);
+  assert.equal(historyFillsHeading(empty), "Filled orders — fills only · 0 filled");
+  assert.equal(historyFillsEmptyText(empty), "No fills yet.");
+  assert.equal(historyQuotesHeading(), "All quotes — every attempt");
   assert.doesNotMatch(matchedRfqEmptyText(empty), /watcher went live/);
   assert.doesNotMatch(matchedRfqHeading(empty), /quoted|skipped|lost/);
   assert.equal(matchedRfqWatcherParked([], empty), false);
@@ -361,6 +369,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.equal(matchedRfqEmptyText(fillsOnly), null);
   assert.match(matchedRfqHeading(fillsOnly), /fills only · 1 filled/);
   assert.match(matchedRfqHeading(fillsOnly), /12 contracts/);
+  assert.equal(filledAttemptEvents(fillsOnly).length, 1);
+  assert.equal(filledAttemptEvents(fillsOnly)[0].key, "filled");
+  assert.equal(historyFillsHeading(fillsOnly), "Filled orders — fills only · 1 filled · 12 contracts");
+  assert.equal(historyFillsEmptyText(fillsOnly), null);
 }
 
 // Screenshot lock: History has skips/misses/fills, watcher combo_matches is empty.
@@ -416,6 +428,14 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.equal(matchedRfqHeading(sea), "Matched RFQs — fills only · 1 filled · 98 contracts");
   assert.doesNotMatch(matchedRfqHeading(sea), /80 total|34 quoted|46 skipped|33 lost/);
   assert.ok(sea.tape.rows.every((r) => r.venue && r.venueKey));
+  assert.equal(filledAttemptEvents(sea).length, 1);
+  assert.equal(filledAttemptEvents(sea)[0].key, "filled");
+  assert.ok(filledAttemptEvents(sea).every((e) => e.key === "filled"));
+  assert.equal(historyFillsHeading(sea), "Filled orders — fills only · 1 filled · 98 contracts");
+  assert.equal(historyFillsEmptyText(sea), null);
+  assert.equal(historyQuotesHeading(), "All quotes — every attempt");
+  assert.ok(sea.events.some((e) => e.key === "unfilled"));
+  assert.ok(sea.events.length > filledAttemptEvents(sea).length);
 }
 
 // Guardians / Yankees / Giants: hundreds of quoted-no-take rows stay in
@@ -449,6 +469,25 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.doesNotMatch(matchedRfqHeading(cle), /400 quoted|397 lost|400 total/);
   assert.equal(matchedRfqEmptyText(cle), "No fills yet. Every quote and skip is in History.");
   assert.equal(matchedRfqWatcherParked([], cle), false);
+  assert.equal(filledAttemptEvents(cle).length, 0);
+  assert.equal(historyFillsHeading(cle), "Filled orders — fills only · 0 filled");
+  assert.equal(historyFillsEmptyText(cle), "No fills yet.");
+  assert.equal(historyQuotesHeading(), "All quotes — every attempt");
+  assert.doesNotMatch(historyFillsHeading(cle), /400 quoted|397 lost|400 total/);
+}
+
+{
+  assert.equal(historyFillsEmptyText({ filled: 18, events: [] }), "No per-RFQ fill rows to list, but this lock has fills — see the fill bar.");
+  assert.equal(historyFillsEmptyText({ filled: 0, events: [{ key: "unfilled" }] }), "No fills yet.");
+  assert.equal(historyFillsEmptyText({ filled: 0, events: [{ key: "filled" }] }), null);
+  assert.deepEqual(filledAttemptEvents({
+    events: [
+      { key: "armed" },
+      { key: "filled", contracts: 10 },
+      { key: "unfilled" },
+      { key: "filled", contracts: 4 },
+    ],
+  }).map((e) => e.contracts), [10, 4]);
 }
 
 {
@@ -487,11 +526,17 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /buildComboStatement/);
   assert.match(locksSrc, /useStatementView\(historyStatement\)/);
   assert.match(locksSrc, /className="hist-head"/);
+  assert.match(locksSrc, /className="hist-sub"/);
+  assert.match(locksSrc, /function AttemptRows\(\{ events \}\)/);
   assert.match(locksSrc, /AttemptSummary/);
   assert.match(locksSrc, /attemptSummaryParts/);
   assert.match(locksSrc, /attemptRepeatLabel/);
   assert.match(locksSrc, /hist-sum/);
   assert.match(locksSrc, /hist-rpt/);
+  assert.match(locksSrc, /historyFillsHeading/);
+  assert.match(locksSrc, /historyQuotesHeading/);
+  assert.match(locksSrc, /historyFillsEmptyText/);
+  assert.match(locksSrc, /filledAttemptEvents/);
   assert.match(locksSrc, /matchedRfqHeading/);
   assert.match(locksSrc, /matchedRfqCounts/);
   assert.match(locksSrc, /matchedRfqEmptyText/);
@@ -506,6 +551,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /<VenueChip venue=\{e\.venue\} venueKey=\{e\.venueKey\} \/>/);
   assert.match(locksSrc, /chip\.venue-kalshi/);
   assert.match(locksSrc, /chip\.venue-poly/);
+  assert.doesNotMatch(locksSrc, /History — every attempt \(not fills only\)/);
   assert.doesNotMatch(locksSrc, /watcher went live/);
   assert.doesNotMatch(locksSrc, /matched 0 RFQs/);
   assert.match(locksSrc, /const tapeRows = matchedRfqFillRows\(attempts\)/);
