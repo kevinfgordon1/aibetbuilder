@@ -1,6 +1,7 @@
 // Per-lock Combo Locks attempt history (Miss-tape classification, under the card).
-// Every attempt shows — not fills only: armed, quoted/rested, skipped, cancelled,
-// expired, unfilled, filled (partial or full). Reuses comboTape.buildLockTape.
+// The card splits filled orders from the full tape. Every attempt still shows
+// in All quotes: armed, quoted/rested, skipped, cancelled, expired, unfilled,
+// filled (partial or full). Reuses comboTape.buildLockTape.
 
 import { attemptLockLine, attemptLockParts, buildLockTape, formatSkipReason } from "./comboTape.js";
 
@@ -195,9 +196,10 @@ export function attemptSummaryFilled(attempts) {
   return !!(stats && stats.skippedFilled);
 }
 
-// Matched RFQs panel — fills only. History keeps the full attempt tape
-// (quotes, skips, no-takes). Do not read combo_matches alone: quote-watcher
-// may be parked, so filled submissions / combo_fills still list here.
+// Matched RFQs panel — fills only. History now splits the same way: a
+// fills-only section, then the full attempt tape (quotes, skips, no-takes).
+// Do not read combo_matches alone: quote-watcher may be parked, so filled
+// submissions / combo_fills still list here.
 export function isMatchedRfqFill(row) {
   return !!(row && row.bucket === "filled");
 }
@@ -239,6 +241,31 @@ export function matchedRfqEmptyText(attempts) {
   }
   if (matchedRfqMatchedCount(attempts) > 0) {
     return "No fills yet. Every quote and skip is in History.";
+  }
+  return "No fills yet.";
+}
+
+// History card: same split as Matched RFQs vs the full tape — a fills-only
+// list, then every attempt (quotes, skips, no-takes, and fills).
+export function filledAttemptEvents(attempts) {
+  return ((attempts && attempts.events) || []).filter((e) => e && e.key === "filled");
+}
+
+export function historyFillsHeading(attempts) {
+  const { filled, contracts } = matchedRfqCounts(attempts);
+  const bits = [`Filled orders — fills only · ${filled} filled`];
+  if (filled > 0 && contracts > 0) bits.push(`${contracts} contract${contracts === 1 ? "" : "s"}`);
+  return bits.join(" · ");
+}
+
+export function historyQuotesHeading() {
+  return "All quotes — every attempt";
+}
+
+export function historyFillsEmptyText(attempts) {
+  if (filledAttemptEvents(attempts).length > 0) return null;
+  if (attempts && attempts.filled > 0) {
+    return "No per-RFQ fill rows to list, but this lock has fills — see the fill bar.";
   }
   return "No fills yet.";
 }
