@@ -1561,9 +1561,9 @@ export default function App() {
     });
     try {
       // Refresh sets forceBookmaker and bypasses the 5-min client TTL.
-      // /api/betstamp-markets still serves its own 5-min cache (no ?refresh=1),
-      // so Refresh stays fast unless the server snap is stale. Sport chips
-      // and remounts pass forceBookmaker=false and reuse memory/sessionStorage.
+      // The Betstamp snapshot API still serves its own 5-min cache (Promo
+      // does not send refresh=1), so Refresh stays fast unless that snap is
+      // stale. Sport chips and remounts honor client TTL via memory/session.
       const bookmakerPromise = resolveBookmakerSnapshot({
         sports: plan.featuredSports,
         cached: bookmakerCacheRef.current,

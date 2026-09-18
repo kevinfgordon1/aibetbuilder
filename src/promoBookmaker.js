@@ -520,6 +520,25 @@ function bookmakerMarketKey(m) {
   return `${m?.fixture_id ?? ""}\0${m?.bet_type ?? ""}\0${m?.side ?? ""}\0${m?.number ?? ""}\0${m?.period ?? ""}`;
 }
 
+export function omitBookmakerLeagues(snap, leagues) {
+  if (!snap) return snap;
+  const drop = new Set((leagues || []).map((l) => String(l).toUpperCase()));
+  if (!drop.size) return snap;
+  const fixtures = asList(snap.fixtures, ["fixtures", "data"]).filter((f) => {
+    const raw = String(f?.league || f?.sport || "").toUpperCase();
+    return !drop.has(raw);
+  });
+  const keepIds = new Set();
+  for (const f of fixtures) {
+    const id = f?.id ?? f?.fixture_id;
+    if (id != null) keepIds.add(String(id));
+  }
+  const markets = asList(snap.markets, ["markets", "data"]).filter((m) => (
+    m != null && m.fixture_id != null && keepIds.has(String(m.fixture_id))
+  ));
+  return { ...snap, fixtures, markets, teams: asList(snap.teams, ["teams", "data"]) };
+}
+
 export function mergeBookmakerSnapshots(prev, next) {
   if (!next) return prev || null;
   if (!prev) return next;
@@ -601,7 +620,7 @@ export async function resolveBookmakerSnapshot({
     next = { snap: fresh, leagues: missing, fetchedAtByLeague, fromCache: false };
   } else {
     next = {
-      snap: mergeBookmakerSnapshots(effective.snap, fresh),
+      snap: mergeBookmakerSnapshots(omitBookmakerLeagues(effective.snap, missing), fresh),
       leagues: [...new Set([...(effective.leagues || []), ...missing])],
       fetchedAtByLeague,
       fromCache: false,
