@@ -81,6 +81,13 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
     /if \(promoNeedsReload\(promoSports, promoLoadedSports\)\) \{\s*loadPromoBoard\(\);/,
     "sport-add refetch must debounce, not fire on the chip click",
   );
+  // Live prod: /api/betstamp-markets ~1.4MB, /api/fetch-odds ~9s TTFB.
+  // Promo chips must not touch either. Bookmaker overlay only runs inside
+  // loadPromoBoard / loadFullBoard (network), never on matching-book rematch.
+  assert.doesNotMatch(app, /\/api\/betstamp-markets/);
+  assert.doesNotMatch(app, /\/api\/fetch-odds/);
+  const fetchBookmakerAt = [...app.matchAll(/fetchBookmakerSnapshot\(/g)].map((m) => m.index);
+  assert.equal(fetchBookmakerAt.length, 2, "Bookmaker snapshot only on promo + full board loads");
 }
 
 // Reset effect: team / odds text use debounced values (not every keystroke)
