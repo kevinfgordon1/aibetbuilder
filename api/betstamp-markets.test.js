@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const handler = require('./betstamp-markets');
 const streamHandler = require('./betstamp-stream');
+const { createSnapshotCache, SNAPSHOT_CACHE_TTL_MS } = require('../lib/betstamp');
 
 function mockRes() {
   return {
@@ -107,10 +108,106 @@ function mockRes() {
   }
 
   {
+    const res = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL' } }, res, { env: {} });
+    assert.equal(res.headers['Cache-Control'], 'no-store');
+  }
+
+  {
+    const cache = createSnapshotCache();
+    const inflight = new Map();
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(url);
+      const u = String(url);
+      if (u.includes('/markets')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ markets: [{ id: 'm1', fixture_id: 'f1' }] }) };
+      }
+      if (u.includes('/fixtures')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ fixtures: [{ id: 'f1', league: 'NFL' }] }) };
+      }
+      if (u.includes('/teams')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ teams: [{ id: 't1' }] }) };
+      }
+      throw new Error('unexpected ' + url);
+    };
+    const deps = {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real' },
+      fetchFn,
+      gapMs: 0,
+      cache,
+      inflight,
+      nowMs: 10_000,
+    };
+    const miss = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '642', is_live: 'false' } }, miss, deps);
+    assert.equal(miss.statusCode, 200);
+    assert.equal(miss.headers['X-Betstamp-Cache'], 'MISS');
+    assert.match(miss.headers['Cache-Control'], /s-maxage=300/);
+    assert.match(miss.headers['Cache-Control'], /stale-while-revalidate=60/);
+    assert.doesNotMatch(miss.headers['Cache-Control'], /no-store/);
+    assert.equal(calls.length, 3);
+
+    const hit = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '642', is_live: 'false' } }, hit, {
+      ...deps,
+      nowMs: 10_000 + 30_000,
+    });
+    assert.equal(hit.statusCode, 200);
+    assert.equal(hit.headers['X-Betstamp-Cache'], 'HIT');
+    assert.equal(hit.headers.Age, '30');
+    assert.match(hit.headers['Cache-Control'], /s-maxage=270/);
+    assert.equal(hit.body.markets[0].id, 'm1');
+    assert.equal(calls.length, 3, 'second Promo load within TTL must not re-hit Betstamp');
+
+    const ncaafCalls = [];
+    const ncaafFetch = async (url) => {
+      ncaafCalls.push(url);
+      const u = String(url);
+      if (u.includes('/markets')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ markets: [{ id: 'ncaaf-m', fixture_id: 'ncaaf-f' }] }) };
+      }
+      if (u.includes('/fixtures')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ fixtures: [{ id: 'ncaaf-f', league: 'NCAAF' }] }) };
+      }
+      if (u.includes('/teams')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ teams: [] }) };
+      }
+      throw new Error('unexpected ' + url);
+    };
+    const ncaaf = mockRes();
+    await handler({ method: 'GET', query: { league: 'NCAAF', book_ids: '642', is_live: 'false' } }, ncaaf, {
+      ...deps,
+      fetchFn: ncaafFetch,
+      nowMs: 10_000 + 30_000,
+    });
+    assert.equal(ncaaf.headers['X-Betstamp-Cache'], 'MISS');
+    assert.equal(ncaaf.body.markets[0].id, 'ncaaf-m');
+    assert.equal(ncaafCalls.length, 3);
+    const nflAgain = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '642', is_live: 'false' } }, nflAgain, {
+      ...deps,
+      nowMs: 10_000 + 30_000,
+    });
+    assert.equal(nflAgain.headers['X-Betstamp-Cache'], 'HIT');
+    assert.equal(calls.length, 3, 'NCAAF fetch must not blow the NFL cache');
+
+    const expired = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '642', is_live: 'false' } }, expired, {
+      ...deps,
+      nowMs: 10_000 + SNAPSHOT_CACHE_TTL_MS + 1,
+    });
+    assert.equal(expired.headers['X-Betstamp-Cache'], 'MISS');
+    assert.equal(calls.length, 6);
+  }
+
+  {
     const src = fs.readFileSync(path.join(__dirname, 'betstamp-markets.js'), 'utf8');
     const stream = fs.readFileSync(path.join(__dirname, 'betstamp-stream.js'), 'utf8');
     const fetchOdds = fs.readFileSync(path.join(__dirname, 'fetch-odds.js'), 'utf8');
     assert.match(src, /BETSTAMP_API_KEY/);
+    assert.match(src, /fetchSnapshotWithCache/);
+    assert.match(src, /s-maxage/);
     assert.match(stream, /text\/event-stream/);
     assert.match(stream, /ingest_ts/);
     assert.match(stream, /X-API-KEY/);

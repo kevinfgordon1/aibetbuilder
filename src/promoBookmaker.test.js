@@ -9,6 +9,8 @@ import { transformOddsData } from "./oddsTransform.js";
 import {
   BOOKMAKER_BOOK_ID,
   BOOKMAKER_BOOK_KEY,
+  BOOKMAKER_CACHE_TTL_MS,
+  BOOKMAKER_CACHE_STORAGE_KEY,
   BOOKMAKER_COMMENCE_WINDOW_MS,
   BOOKMAKER_TITLE,
   abbrHitsName,
@@ -18,8 +20,15 @@ import {
   resolveBookmakerSnapshot,
   bookmakerLeaguesForSports,
   bookmakerSnapCovers,
+  bookmakerSnapIsFresh,
+  bookmakerLeagueIsFresh,
+  staleBookmakerLeagues,
   missingBookmakerLeagues,
   mergeBookmakerSnapshots,
+  readBookmakerClientCache,
+  writeBookmakerClientCache,
+  resetBookmakerClientCache,
+  coalesceBookmakerCache,
   foldTeamName,
   joinOddsEventToBetstampFixture,
   leaguesForSports,
@@ -696,11 +705,20 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.deepEqual(bookmakerLeaguesForSports(["americanfootball_nfl", "baseball_mlb"]), ["NFL"]);
   assert.deepEqual(bookmakerLeaguesForSports(["basketball_nba"]), []);
   assert.deepEqual(bookmakerLeaguesForSports(["americanfootball_nfl", "americanfootball_ncaaf"]), ["NFL", "NCAAF"]);
-  const cachedNfl = { snap: bookmakerSnapshot(), leagues: ["NFL"] };
+  const now = 1_700_000_000_000;
+  const cachedNfl = {
+    snap: bookmakerSnapshot(),
+    leagues: ["NFL"],
+    fetchedAtByLeague: { NFL: now },
+  };
   assert.equal(bookmakerSnapCovers(cachedNfl, ["NFL"]), true);
   assert.equal(bookmakerSnapCovers(cachedNfl, ["NFL", "NCAAF"]), false);
   assert.equal(bookmakerSnapCovers(cachedNfl, []), true);
   assert.deepEqual(missingBookmakerLeagues(cachedNfl, ["NFL", "NCAAF"]), ["NCAAF"]);
+  assert.equal(bookmakerSnapIsFresh(cachedNfl, ["NFL"], now, BOOKMAKER_CACHE_TTL_MS), true);
+  assert.equal(bookmakerLeagueIsFresh(cachedNfl, "NFL", now + BOOKMAKER_CACHE_TTL_MS - 1), true);
+  assert.equal(bookmakerLeagueIsFresh(cachedNfl, "NFL", now + BOOKMAKER_CACHE_TTL_MS), false);
+  assert.deepEqual(staleBookmakerLeagues(cachedNfl, ["NFL"], now + BOOKMAKER_CACHE_TTL_MS + 1), ["NFL"]);
   const ncaafSnap = bookmakerSnapshot({ fixtureId: "fix-ncaaf" });
   ncaafSnap.fixtures[0].league = "NCAAF";
   const merged = mergeBookmakerSnapshots(cachedNfl.snap, ncaafSnap);
@@ -709,6 +727,8 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   const reused = await resolveBookmakerSnapshot({
     sports: ["americanfootball_nfl", "basketball_nba"],
     cached: cachedNfl,
+    persist: false,
+    now,
     fetchFn: async () => { throw new Error("must not refetch NFL when adding NBA"); },
   });
   assert.equal(reused.fromCache, true);
@@ -717,6 +737,8 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   const added = await resolveBookmakerSnapshot({
     sports: ["americanfootball_nfl", "americanfootball_ncaaf"],
     cached: cachedNfl,
+    persist: false,
+    now,
     fetchFn: async (url) => {
       fetchedLeagues = url;
       return { ok: true, json: async () => ncaafSnap };
@@ -727,9 +749,13 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.doesNotMatch(fetchedLeagues, /NFL/);
   assert.equal(added.leagues.includes("NFL"), true);
   assert.equal(added.leagues.includes("NCAAF"), true);
+  assert.equal(added.fetchedAtByLeague.NFL, now);
+  assert.equal(added.fetchedAtByLeague.NCAAF, now);
   const kept = await resolveBookmakerSnapshot({
     sports: ["americanfootball_nfl", "americanfootball_ncaaf"],
     cached: cachedNfl,
+    persist: false,
+    now,
     fetchFn: async () => ({ ok: false }),
   });
   assert.equal(kept.fromCache, true);
@@ -739,6 +765,8 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     sports: ["americanfootball_nfl"],
     cached: cachedNfl,
     forceRefresh: true,
+    persist: false,
+    now,
     fetchFn: async (url) => {
       forceUrl = url;
       return { ok: true, json: async () => bookmakerSnapshot() };
@@ -746,6 +774,137 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   });
   assert.equal(forced.fromCache, false);
   assert.match(forceUrl, /league=NFL/);
+}
+
+{
+  resetBookmakerClientCache();
+  const now = 1_700_000_000_000;
+  const nflSnap = bookmakerSnapshot();
+  const ncaafSnap = bookmakerSnapshot({ fixtureId: "fix-ncaaf" });
+  ncaafSnap.fixtures[0].league = "NCAAF";
+  function memoryStorage() {
+    const m = new Map();
+    return {
+      getItem: (k) => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, String(v)); },
+      removeItem: (k) => { m.delete(k); },
+    };
+  }
+
+  assert.equal(BOOKMAKER_CACHE_TTL_MS, 5 * 60 * 1000);
+  assert.match(BOOKMAKER_CACHE_STORAGE_KEY, /bookmakerSnap/);
+
+  {
+    let calls = 0;
+    const within = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now } },
+      persist: false,
+      now: now + BOOKMAKER_CACHE_TTL_MS - 1,
+      fetchFn: async () => { calls += 1; throw new Error("TTL hit must not network"); },
+    });
+    assert.equal(within.fromCache, true);
+    assert.equal(calls, 0);
+  }
+
+  {
+    let calls = 0;
+    const expired = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now } },
+      persist: false,
+      now: now + BOOKMAKER_CACHE_TTL_MS + 1,
+      fetchFn: async () => {
+        calls += 1;
+        return { ok: true, json: async () => bookmakerSnapshot({ fixtureId: "fix-fresh" }) };
+      },
+    });
+    assert.equal(expired.fromCache, false);
+    assert.equal(calls, 1);
+    assert.equal(expired.snap.fixtures[0].id, "fix-fresh");
+    assert.equal(expired.fetchedAtByLeague.NFL, now + BOOKMAKER_CACHE_TTL_MS + 1);
+  }
+
+  {
+    let forceUrl = null;
+    const forced = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now } },
+      forceRefresh: true,
+      persist: false,
+      now,
+      fetchFn: async (url) => {
+        forceUrl = url;
+        return { ok: true, json: async () => bookmakerSnapshot() };
+      },
+    });
+    assert.equal(forced.fromCache, false, "Refresh forceRefresh bypasses client TTL");
+    assert.match(forceUrl, /league=NFL/);
+  }
+
+  {
+    let fetched = null;
+    const added = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl", "americanfootball_ncaaf"],
+      cached: { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now } },
+      persist: false,
+      now: now + 30_000,
+      fetchFn: async (url) => {
+        fetched = url;
+        return { ok: true, json: async () => ncaafSnap };
+      },
+    });
+    assert.equal(added.fromCache, false);
+    assert.match(fetched, /league=NCAAF/);
+    assert.doesNotMatch(fetched, /NFL/, "fresh NFL TTL must survive adding NCAAF");
+    assert.equal(added.leagues.includes("NFL"), true);
+    assert.equal(added.leagues.includes("NCAAF"), true);
+    assert.equal(added.snap.fixtures.some((f) => f.id === "fix-den-kc"), true);
+    assert.equal(added.snap.fixtures.some((f) => f.id === "fix-ncaaf"), true);
+    assert.equal(added.fetchedAtByLeague.NFL, now, "NFL timestamp stays when only NCAAF is fetched");
+    assert.equal(added.fetchedAtByLeague.NCAAF, now + 30_000);
+  }
+
+  {
+    const store = memoryStorage();
+    let calls = 0;
+    const first = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: null,
+      persist: true,
+      storage: store,
+      now,
+      fetchFn: async () => {
+        calls += 1;
+        return { ok: true, json: async () => nflSnap };
+      },
+    });
+    assert.equal(first.fromCache, false);
+    assert.equal(calls, 1);
+    assert.ok(store.getItem(BOOKMAKER_CACHE_STORAGE_KEY));
+    resetBookmakerClientCache({ storage: store, clearStorage: false });
+    assert.equal(readBookmakerClientCache({ storage: store })?.leagues.includes("NFL"), true);
+    const remount = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: null,
+      persist: true,
+      storage: store,
+      now: now + 10_000,
+      fetchFn: async () => { throw new Error("remount within TTL must not refetch"); },
+    });
+    assert.equal(remount.fromCache, true);
+    assert.equal(calls, 1);
+    resetBookmakerClientCache({ storage: store });
+  }
+
+  {
+    const staleStore = { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now - BOOKMAKER_CACHE_TTL_MS - 5 } };
+    const freshPassed = { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now } };
+    const coalesced = coalesceBookmakerCache(freshPassed, staleStore);
+    assert.equal(bookmakerSnapIsFresh(coalesced, ["NFL"], now), true);
+    writeBookmakerClientCache(staleStore, { storage: memoryStorage() });
+    resetBookmakerClientCache();
+  }
 }
 
 {
@@ -757,6 +916,8 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.match(app, /overlayBookmakerOnCacheRows/);
   assert.match(app, /resolveBookmakerSnapshot/);
   assert.match(app, /bookmakerCacheRef/);
+  assert.match(app, /readBookmakerClientCache/);
+  assert.match(app, /fetchedAtByLeague/);
   assert.match(app, /Betstamp Bookmaker overlay is best-effort/);
   assert.doesNotMatch(app, /promoBetcris/);
   assert.doesNotMatch(app, /key: "betcris"/);
