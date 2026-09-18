@@ -330,6 +330,7 @@ function fullPlan() {
   ]);
   assert.equal(TRUSTED_BOOK_KEYS.has("pinnacle"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("betus"), true);
+  assert.equal(TRUSTED_BOOK_KEYS.has("betcris"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betanysports"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betopenly"), false);
   assert.match(ev, /this EV-scanner copy always uses the full TRUSTED_BOOK_KEYS set/);
@@ -354,6 +355,7 @@ function fullPlan() {
   assert.match(app, /selectEvScanView\(/);
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
+  assert.doesNotMatch(app, /overlayBetcrisOnCacheRows|fetchBetcrisSnapshot|promoBetcris/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");
   const fetchOddsJob = fs.readFileSync(path.join(dir, "../lib/odds-fetch-job.js"), "utf8");
