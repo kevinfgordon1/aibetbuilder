@@ -8,11 +8,11 @@ export const BETSTAMP_PREGAME_POLL_MS = 20_000;
 
 // LIVE: SSE owns fast price ticks. A REST mains pull on this interval is the
 // availability truth — books that vanish from the snapshot are cleared (OFF),
-// even when SSE is silent. Default 15s; override with VITE_BETSTAMP_LIVE_RECONCILE_MS
+// even when SSE is silent. Default 10s; override with VITE_BETSTAMP_LIVE_RECONCILE_MS
 // (clamped 10s–60s). Do not go below 10s (Betstamp ~4 RPS).
 export const BETSTAMP_LIVE_RECONCILE_MS = resolvePollMs(
   readEnvMs("VITE_BETSTAMP_LIVE_RECONCILE_MS"),
-  15_000,
+  10_000,
 );
 
 // Skip clearing a quote SSE wrote this recently — snapshot can lag a fresh tick.

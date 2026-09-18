@@ -352,7 +352,7 @@ export default function BetstampOddsBoard() {
 
     // Pregame: always run the interval while liveOnly is false. Do not wait
     // for the first snapshot — a hung first GET must not freeze ages.
-    // LIVE: SSE owns prices; REST reconcile (~15s) is availability truth
+    // LIVE: SSE owns prices; REST reconcile (~10s) is availability truth
     // (clear books Betstamp no longer lists) and still refreshes fixture
     // halt/halftime so the 60s Best gate can relax at the break.
     applySnapshot({ showLoading: true });
@@ -1118,7 +1118,7 @@ export default function BetstampOddsBoard() {
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
-        {" · "}LIVE uses SSE for ticks plus a 15s REST presence reconcile — cells show — / OFF when Betstamp no longer lists that book/side live (silence alone is not a suspend)
+        {" · "}LIVE uses SSE for ticks plus a 10s REST presence reconcile — cells show — / OFF when Betstamp no longer lists that book/side live (silence alone is not a suspend)
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
