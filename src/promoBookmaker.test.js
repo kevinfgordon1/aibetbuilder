@@ -24,6 +24,8 @@ import {
   overlayBookmakerOnGames,
   teamMatchScore,
   teamsLikelySame,
+  uniquePairScore,
+  oddsApiOutcomeName,
 } from "./promoBookmaker.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -122,9 +124,17 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.equal(teamsLikelySame("Michigan", "Michigan State"), false);
   assert.equal(teamsLikelySame("Ohio", "Ohio State"), false);
   assert.equal(teamsLikelySame("New York Giants", "Giants"), true);
+  assert.equal(teamsLikelySame("Kansas Jayhawks", "Kansas"), true);
+  assert.equal(teamsLikelySame("Kansas Jayhawks", "Kansas State"), false);
+  assert.equal(teamsLikelySame("Kansas State Wildcats", "Kansas"), false);
+  assert.equal(teamsLikelySame("Iowa State Cyclones", "Iowa"), false);
+  assert.equal(teamsLikelySame("Arizona State Sun Devils", "Arizona"), false);
   assert.equal(abbrHitsName("DEN", "Denver Broncos"), true);
+  assert.equal(abbrHitsName("KAN", "Kansas Jayhawks"), true, "loose abbr still scores 1 — join must ignore it");
   assert.equal(teamMatchScore("Denver Broncos", "Broncos", "DEN"), 2);
   assert.equal(teamMatchScore("Denver Broncos", "", "DEN"), 1);
+  assert.equal(teamMatchScore("Kansas Jayhawks", "Kansas State", "KAN"), 1);
+  assert.equal(teamMatchScore("Iowa State Cyclones", "Iowa", "IOWA"), 1);
 }
 
 {
@@ -305,6 +315,143 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     timeoutMs: 20,
     fetchFn: () => new Promise(() => {}),
   }), null);
+}
+
+{
+  const kick = future;
+  const jayhawks = {
+    id: "odds-ku-isu",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Iowa State Cyclones",
+    home_team: "Kansas Jayhawks",
+    bookmakers: [{
+      key: "draftkings",
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Kansas Jayhawks", price: 180 },
+          { name: "Iowa State Cyclones", price: -218 },
+        ],
+      }],
+    }],
+  };
+  const ksuIowa = {
+    id: "fix-ksu-iowa",
+    league: "NCAAF",
+    start_date: kick,
+    home_team: { name: "Kansas State", abbreviation: "KAN" },
+    away_team: { name: "Iowa", abbreviation: "IOWA" },
+  };
+  const stolen642 = [
+    { odds: 1.535, side: "KSU", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ksu-iowa" },
+    { odds: 2.55, side: "IOWA", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ksu-iowa" },
+  ];
+  const ksuOnly = { ok: true, fixtures: [ksuIowa], teams: [], markets: stolen642 };
+  assert.equal(joinOddsEventToBetstampFixture(jayhawks, ksuOnly), null, "KAN+IOWA abbr must not join KSU-Iowa onto KU-ISU");
+  assert.equal(bookmakerBookmakerFromSnapshot(jayhawks, ksuOnly), null);
+  const overlaidSteal = overlayBookmakerOnGame(jayhawks, ksuOnly);
+  assert.equal(overlaidSteal.bookmakers.some((b) => b.key === "bookmaker"), false);
+  const stolenData = transformOddsData([overlaidSteal], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.equal(stolenData.moneylines[0].bookOdds.bookmaker.ml_home, null);
+  assert.notEqual(stolenData.moneylines[0].best_home_book, "bookmaker");
+  assert.notEqual(stolenData.moneylines[0].bookOdds.bookmaker.ml_home, -187);
+}
+
+{
+  const kick = future;
+  const jayhawks = {
+    id: "odds-ku-wvu",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "West Virginia Mountaineers",
+    home_team: "Kansas Jayhawks",
+    bookmakers: [],
+  };
+  const kuFixture = {
+    id: "fix-ku-wvu",
+    league: "NCAAF",
+    start_date: kick,
+    home_team: { name: "Kansas", abbreviation: "KU" },
+    away_team: { name: "West Virginia", abbreviation: "WVU" },
+  };
+  const ksuFixture = {
+    id: "fix-ksu-wvu",
+    league: "NCAAF",
+    start_date: kick,
+    home_team: { name: "Kansas State", abbreviation: "KAN" },
+    away_team: { name: "West Virginia", abbreviation: "WVU" },
+  };
+  const snap = {
+    ok: true,
+    fixtures: [kuFixture, ksuFixture],
+    teams: [],
+    markets: [
+      { odds: 1.535, side: "KSU", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ksu-wvu" },
+      { odds: 2.55, side: "WVU", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ksu-wvu" },
+    ],
+  };
+  const join = joinOddsEventToBetstampFixture(jayhawks, snap);
+  assert.equal(join.fixtureId, "fix-ku-wvu");
+  assert.equal(bookmakerBookmakerFromSnapshot(jayhawks, snap), null, "no 642 on KU fixture → omit Bookmaker; do not steal KSU -187");
+  const overlaid = overlayBookmakerOnGame(jayhawks, snap);
+  assert.equal(overlaid.bookmakers.some((b) => b.key === "bookmaker"), false);
+}
+
+{
+  const kick = future;
+  const event = {
+    id: "odds-ku-cin",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Kansas Jayhawks",
+    home_team: "Cincinnati Bearcats",
+    bookmakers: [{
+      key: "draftkings",
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Kansas Jayhawks", price: 180 },
+          { name: "Cincinnati Bearcats", price: -218 },
+        ],
+      }],
+    }],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-ku-cin",
+      league: "NCAAF",
+      start_date: kick,
+      home_team_id: "team-ku",
+      away_team_id: "team-cin",
+    }],
+    teams: [
+      { id: "team-ku", name: "Kansas", abbreviation: "KU" },
+      { id: "team-cin", name: "Cincinnati", abbreviation: "CIN" },
+    ],
+    markets: [
+      { odds: 2.55, side: "KU", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ku-cin", team_id: "team-ku" },
+      { odds: 1.535, side: "CIN", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ku-cin", team_id: "team-cin" },
+    ],
+  };
+  const join = joinOddsEventToBetstampFixture(event, snap);
+  assert.equal(join.swapped, true);
+  assert.equal(uniquePairScore(event, join.sides).swapped, true);
+  assert.equal(oddsApiOutcomeName(snap.markets[0], event, join), "Kansas Jayhawks");
+  assert.equal(oddsApiOutcomeName(snap.markets[1], event, join), "Cincinnati Bearcats");
+  const bm = bookmakerBookmakerFromSnapshot(event, snap);
+  const ku = bm.markets.find((m) => m.key === "h2h").outcomes.find((o) => o.name === "Kansas Jayhawks");
+  const cin = bm.markets.find((m) => m.key === "h2h").outcomes.find((o) => o.name === "Cincinnati Bearcats");
+  assert.equal(ku.price, 155, "Kansas keeps the dog Bookmaker price after home/away swap");
+  assert.equal(cin.price, -187);
+  assert.notEqual(ku.price, -187, "favorite −187 must not land on underdog +180 side");
+  const data = transformOddsData([overlayBookmakerOnGame(event, snap)], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.equal(data.moneylines[0].bookOdds.bookmaker.ml_away, 155);
+  assert.equal(data.moneylines[0].bookOdds.bookmaker.ml_home, -187);
 }
 
 {

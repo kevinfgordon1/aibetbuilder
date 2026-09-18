@@ -3,6 +3,12 @@
 // instead of failing the scan. Dropped Betstamp lines are stripped — never
 // left as zombie prices (The Odds API has no `bookmaker` key).
 //
+// Join is unique name-level only (both teams). Bookmaker-only snapshots omit
+// fixtures 642 does not price — a weak "Kansas"/"KAN" hit must not steal
+// Kansas State's market. No 642 row for that fixture+side → omit Bookmaker.
+// side_type Home/Away is Betstamp orientation and is remapped when Odds API
+// home/away is swapped.
+//
 // New Odds Board still labels 642 as BetCris in betstampBooks.js. Promo must
 // not reuse that key — filter by book id and emit key `bookmaker`.
 
@@ -105,11 +111,20 @@ export function teamMatchScore(oddsName, stampName, stampAbbr) {
   return 0;
 }
 
-function alignmentScore(event, sides) {
-  const home = teamMatchScore(event.home_team, sides.home, sides.homeAbbr);
-  const away = teamMatchScore(event.away_team, sides.away, sides.awayAbbr);
-  if (!home || !away) return 0;
-  return home + away;
+// Abbr-only hits (score 1) are too loose for NCAAF: KAN→Kansas Jayhawks and
+// IOWA→Iowa State will join Kansas State vs Iowa onto the Jayhawks game.
+// Require a unique name-level pair (score >= 2 each side, no cross hits).
+export function uniquePairScore(event, sides) {
+  if (!event || !sides) return { score: 0, swapped: false };
+  const hh = teamMatchScore(event.home_team, sides.home, sides.homeAbbr);
+  const ha = teamMatchScore(event.home_team, sides.away, sides.awayAbbr);
+  const ah = teamMatchScore(event.away_team, sides.home, sides.homeAbbr);
+  const aa = teamMatchScore(event.away_team, sides.away, sides.awayAbbr);
+  const alignedOk = hh >= 2 && aa >= 2 && ha < 2 && ah < 2;
+  const swappedOk = ha >= 2 && ah >= 2 && hh < 2 && aa < 2;
+  if (alignedOk && !swappedOk) return { score: hh + aa, swapped: false };
+  if (swappedOk && !alignedOk) return { score: ha + ah, swapped: true };
+  return { score: 0, swapped: false };
 }
 
 export function joinOddsEventToBetstampFixture(event, snapshot, { windowMs = BOOKMAKER_COMMENCE_WINDOW_MS } = {}) {
@@ -133,21 +148,18 @@ export function joinOddsEventToBetstampFixture(event, snapshot, { windowMs = BOO
     const fixMs = commence ? Date.parse(commence) : NaN;
     if (isFinite(eventMs) && isFinite(fixMs) && Math.abs(eventMs - fixMs) > windowMs) continue;
 
-    const aligned = alignmentScore(event, sides);
-    const swapped = alignmentScore({ home_team: event.away_team, away_team: event.home_team }, sides);
-    const useSwap = swapped > aligned;
-    const pair = useSwap ? swapped : aligned;
-    if (pair < 2) continue;
+    const pair = uniquePairScore(event, sides);
+    if (pair.score < 4) continue;
 
     let timeScore = 0;
     if (isFinite(eventMs) && isFinite(fixMs)) {
       timeScore = Math.max(0, 50 - Math.abs(eventMs - fixMs) / (60 * 60 * 1000));
     }
-    const total = pair * 1000 + timeScore;
+    const total = pair.score * 1000 + timeScore;
     if (total > bestScore + 1e-6) {
       bestScore = total;
       ties = 0;
-      best = { fixture, sides, swapped: useSwap, commence };
+      best = { fixture, sides, swapped: pair.swapped, commence };
     } else if (Math.abs(total - bestScore) <= 1e-6) {
       ties += 1;
     }
@@ -186,17 +198,66 @@ export function marketIsBookmaker(market) {
   return id === BOOKMAKER_BOOK_ID;
 }
 
+// Map a Betstamp 642 market onto the Odds API team/total name for this event.
+// side_type Home/Away is Betstamp fixture orientation — remap when home/away
+// is swapped. Prefer team_id / team name so we never attach the other side.
+export function oddsApiOutcomeName(market, event, join) {
+  if (!market || !event || !join) return null;
+  const bt = normalizeBetType(market.bet_type);
+  const type = String(market.side_type || "").trim().toLowerCase();
+  const sideRaw = String(market.side || "").trim();
+  const sideLow = sideRaw.toLowerCase();
+  if (
+    bt === "total"
+    || type === "over" || type === "under"
+    || sideLow === "over" || sideLow === "under" || sideLow === "o" || sideLow === "u"
+  ) {
+    if (type === "over" || sideLow === "over" || sideLow === "o") return "Over";
+    if (type === "under" || sideLow === "under" || sideLow === "u") return "Under";
+    return null;
+  }
+
+  const stampName = (stampSide) => (
+    stampSide === "home"
+      ? (join.swapped ? event.away_team : event.home_team)
+      : (join.swapped ? event.home_team : event.away_team)
+  );
+
+  const teamId = market.team_id != null ? String(market.team_id) : "";
+  if (teamId && join.sides.homeId && teamId === String(join.sides.homeId)) return stampName("home");
+  if (teamId && join.sides.awayId && teamId === String(join.sides.awayId)) return stampName("away");
+
+  if (sideRaw) {
+    const homeByOdds = teamMatchScore(event.home_team, sideRaw, null);
+    const awayByOdds = teamMatchScore(event.away_team, sideRaw, null);
+    if (homeByOdds >= 2 && awayByOdds < 2) return event.home_team;
+    if (awayByOdds >= 2 && homeByOdds < 2) return event.away_team;
+
+    const stampHome = teamMatchScore(join.sides.home, sideRaw, join.sides.homeAbbr);
+    const stampAway = teamMatchScore(join.sides.away, sideRaw, join.sides.awayAbbr);
+    if (stampHome >= 2 && stampAway < 2) return stampName("home");
+    if (stampAway >= 2 && stampHome < 2) return stampName("away");
+  }
+
+  if (type === "home") return stampName("home");
+  if (type === "away") return stampName("away");
+
+  const stampGame = {
+    away: join.sides.away,
+    home: join.sides.home,
+    awayAbbr: join.sides.awayAbbr,
+    homeAbbr: join.sides.homeAbbr,
+    awayId: join.sides.awayId,
+    homeId: join.sides.homeId,
+  };
+  const stampSide = marketSide(market, stampGame);
+  if (stampSide === "home" || stampSide === "away") return stampName(stampSide);
+  return null;
+}
+
 export function bookmakerBookmakerFromSnapshot(event, snapshot, joinHit) {
   const join = joinHit || joinOddsEventToBetstampFixture(event, snapshot);
   if (!join) return null;
-  const game = {
-    away: event.away_team,
-    home: event.home_team,
-    awayAbbr: join.swapped ? join.sides.homeAbbr : join.sides.awayAbbr,
-    homeAbbr: join.swapped ? join.sides.awayAbbr : join.sides.homeAbbr,
-    awayId: join.swapped ? join.sides.homeId : join.sides.awayId,
-    homeId: join.swapped ? join.sides.awayId : join.sides.homeId,
-  };
   const h2h = [];
   const spreads = [];
   const totals = [];
@@ -207,20 +268,17 @@ export function bookmakerBookmakerFromSnapshot(event, snapshot, joinHit) {
     if (!isMainMarket(market) || !marketIsOffered(market)) continue;
     const price = toAmericanOdds(market.odds);
     if (price == null) continue;
-    const side = marketSide(market, game);
-    if (!side) continue;
+    const name = oddsApiOutcomeName(market, event, join);
+    if (!name) continue;
     const size = marketSize(market);
     const line = marketLine(market);
     const bt = normalizeBetType(market.bet_type);
     if (bt === "moneyline") {
-      const name = side === "away" ? event.away_team : side === "home" ? event.home_team : null;
-      if (name) pushOutcome(h2h, outcomePayload(name, price, size));
+      pushOutcome(h2h, outcomePayload(name, price, size));
     } else if (bt === "spread" && line != null) {
-      const name = side === "away" ? event.away_team : side === "home" ? event.home_team : null;
-      if (name) pushOutcome(spreads, outcomePayload(name, price, size, line));
+      pushOutcome(spreads, outcomePayload(name, price, size, line));
     } else if (bt === "total" && line != null) {
-      const name = side === "under" ? "Under" : side === "over" ? "Over" : null;
-      if (name) pushOutcome(totals, outcomePayload(name, price, size, line));
+      pushOutcome(totals, outcomePayload(name, price, size, line));
     }
   }
 
