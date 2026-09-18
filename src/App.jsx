@@ -1561,7 +1561,9 @@ export default function App() {
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      // Betstamp Bookmaker overlay is best-effort: a blip omits those cells.
+      // Betstamp Bookmaker overlay is best-effort and re-runs every Promo
+      // fetch. It strips any cached `bookmaker` key first (odds_cache is Odds
+      // API only) then overlays 642 — a blip or failed join omits those cells.
       const bookmakerSnap = await bookmakerPromise.catch(() => null);
       const featuredRows = overlayBookmakerOnCacheRows(featured.data, bookmakerSnap);
       // Alt-line events are best-effort: a hung event_odds_cache must not
