@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useDeferredValue, useMemo } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import { isSoccerSport } from "./soccerPairing.js";
 import { boardSportMatches, isSoccerChipId } from "./sportChips.js";
@@ -126,17 +126,25 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set((books || []).map((b) => b.key)));
   const [boardSport, setBoardSport] = useState("baseball_mlb");
-  const now = new Date();
+  const deferredBoardSport = useDeferredValue(boardSport);
+  const deferredSearch = useDeferredValue(search);
+  const deferredSelectedBooks = useDeferredValue(selectedBooks);
+  const deferredMarket = useDeferredValue(market);
   const allBooks = books || [];
 
-  const games = (oddsData.moneylines || []).filter((g) =>
-    boardSportMatches(g.sport, boardSport) && new Date(g.commence_time) > now
-  );
+  const games = useMemo(() => {
+    const t = Date.now();
+    return (oddsData.moneylines || []).filter((g) =>
+      boardSportMatches(g.sport, deferredBoardSport) && new Date(g.commence_time).getTime() > t
+    );
+  }, [oddsData.moneylines, deferredBoardSport]);
 
-  const filteredGames = games.filter((g) => {
-    const q = search.toLowerCase();
-    return g.away.toLowerCase().includes(q) || g.home.toLowerCase().includes(q);
-  });
+  const filteredGames = useMemo(() => {
+    const q = deferredSearch.toLowerCase();
+    return games.filter((g) => {
+      return g.away.toLowerCase().includes(q) || g.home.toLowerCase().includes(q);
+    });
+  }, [games, deferredSearch]);
 
   const grouped = {};
   filteredGames.forEach((g) => {
@@ -159,23 +167,23 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
     bookKey,
-    market,
-    selectedBookKeys: selectedBooks,
+    market: deferredMarket,
+    selectedBookKeys: deferredSelectedBooks,
     allBooks,
   });
 
-  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...allBooks.filter((b) => selectedBooks.has(b.key))];
+  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...allBooks.filter((b) => deferredSelectedBooks.has(b.key))];
   const teamColWidth = 170;
   const oddsColWidth = 92;
 
-  const champMeta = (futures || []).find((f) => boardSportMatches(f.sport, boardSport));
+  const champMeta = (futures || []).find((f) => boardSportMatches(f.sport, deferredBoardSport));
   const champEntry = (futuresData || []).find((f) => f.key === champMeta?.key);
-  const champBooks = [{ key: "best", label: "Best Odds" }, ...allBooks.filter((b) => selectedBooks.has(b.key))];
+  const champBooks = [{ key: "best", label: "Best Odds" }, ...allBooks.filter((b) => deferredSelectedBooks.has(b.key))];
   const champTeams = (champEntry?.teams || [])
-    .filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
+    .filter((t) => t.name.toLowerCase().includes(deferredSearch.toLowerCase()))
     .map((t) => {
-      const yes = pickBestFromPriceMap(t.books, t.bookSizes, selectedBooks, allBooks);
-      const no = pickBestFromPriceMap(t.noBooks, t.noBookSizes, selectedBooks, allBooks);
+      const yes = pickBestFromPriceMap(t.books, t.bookSizes, deferredSelectedBooks, allBooks);
+      const no = pickBestFromPriceMap(t.noBooks, t.noBookSizes, deferredSelectedBooks, allBooks);
       return {
         ...t,
         best: yes.price,
@@ -251,7 +259,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
           </button>
         ))}
       </div>
-      {market === "champ" && (
+      {deferredMarket === "champ" && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + champBooks.length * oddsColWidth }}>
           <thead>
@@ -276,7 +284,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
         </table>
       </div>
       )}
-      {market !== "champ" && (
+      {deferredMarket !== "champ" && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
           <thead>
@@ -299,7 +307,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                   <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
                 </tr>
                 {dateGames.map((game, gi) => {
-                  const { bestAway, bestHome, bestDraw } = getBestForGame(game, market, selectedBooks, allBooks);
+                  const { bestAway, bestHome, bestDraw } = getBestForGame(game, deferredMarket, deferredSelectedBooks, allBooks);
                   const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
                   return (
                     <tr key={gi} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
@@ -317,7 +325,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                         const isBestDraw = b.key !== "best" && cell.mid != null && cell.mid === bestDraw;
                         const isBestHome = b.key !== "best" && cell.bot !== null && cell.bot === bestHome;
                         const isBestCol = b.key === "best";
-                        const showNo = market === "ml" && cell.threeWay;
+                        const showNo = deferredMarket === "ml" && cell.threeWay;
                         return (
                           <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
                             <div style={{ display: "flex", flexDirection: "column" }}>
@@ -334,7 +342,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                                   showBestMark={isBestCol}
                                 />
                               </div>
-                              {threeWay && market === "ml" && (
+                              {threeWay && deferredMarket === "ml" && (
                                 <div style={sideStyle(isBestCol, isBestDraw, cell.mid == null)}>
                                   <OddsSide
                                     price={cell.mid}

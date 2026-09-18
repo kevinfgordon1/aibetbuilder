@@ -106,7 +106,7 @@ assert.equal(boardSportMatches("soccer_epl", "baseball_mlb"), false);
   assert.match(app, /SPORT_CHIPS\.map/);
   assert.match(app, /formatSelectedSportsSummary\(promoSports, SPORT_CHIPS\)/);
   assert.match(app, /toggleSportChip\(prev, chip/);
-  assert.match(app, /expandSoccerSportKeys\(promoSports\)/);
+  assert.match(app, /expandSoccerSportKeys\(scanPromoSports\)/);
   assert.doesNotMatch(app, /SPORTS\.map\(s => \(\s*\n\s*<button key=\{s\.key\}/);
   assert.match(app, /key: "soccer_epl", label: "EPL"/);
   assert.match(app, /key: "soccer_usa_mls", label: "MLS"/);

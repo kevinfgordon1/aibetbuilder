@@ -265,6 +265,9 @@ export async function findTopParlaysChunked(
   } = {},
 ) {
   throwIfAborted(signal);
+  // First yield before C(n,k) so a chip/input paint is not stuck behind the
+  // opening enumerate burst (256 combos can still be several ms).
+  await yieldFn();
   const list = legs || [];
   const state = {
     lastYield: typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(),

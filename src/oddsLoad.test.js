@@ -11,6 +11,8 @@ import {
   shouldFetchFullBoard,
   shouldFetchPromoOdds,
   promoNeedsReload,
+  promoSportsNeedNetworkReload,
+  PROMO_SPORT_RELOAD_DEBOUNCE_MS,
   boardHasPromoGames,
   preferExistingPromoBoard,
   queryOddsCaches,
@@ -244,6 +246,9 @@ function fullPlan() {
   assert.equal(promoNeedsReload(new Set(["baseball_mlb"]), new Set(["baseball_mlb"])), false);
   assert.equal(promoNeedsReload(new Set(["baseball_mlb", "americanfootball_nfl"]), new Set(["baseball_mlb"])), true);
   assert.equal(promoNeedsReload(new Set(["baseball_mlb"]), new Set(["baseball_mlb", "americanfootball_nfl"])), false);
+  assert.equal(PROMO_SPORT_RELOAD_DEBOUNCE_MS, 160);
+  assert.equal(promoSportsNeedNetworkReload(new Set(["americanfootball_nfl"]), new Set(["baseball_mlb"]), true), true);
+  assert.equal(promoSportsNeedNetworkReload(new Set(["americanfootball_nfl"]), new Set(["baseball_mlb"]), false), false);
 }
 
 // ── Empty selected-sports refetch must not wipe a board the user already had

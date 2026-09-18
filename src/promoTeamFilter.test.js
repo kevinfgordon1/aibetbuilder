@@ -189,8 +189,8 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
 
   const resetDeps = app.match(/setExpandedFreeBet\(null\);[\s\S]*?\}, \[([^\]]+)\]/);
   assert.ok(resetDeps, "promo page reset effect");
-  assert.match(resetDeps[1], /promoTeamInclude/);
-  assert.match(resetDeps[1], /promoTeamExclude/);
+  assert.match(resetDeps[1], /scanTeamInclude/);
+  assert.match(resetDeps[1], /scanTeamExclude/);
   assert.doesNotMatch(resetDeps[1], /\bstake\b/);
   assert.doesNotMatch(resetDeps[1], /\bboostPct\b/);
 
