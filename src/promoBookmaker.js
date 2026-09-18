@@ -3,9 +3,12 @@
 // instead of failing the scan. Dropped Betstamp lines are stripped — never
 // left as zombie prices (The Odds API has no `bookmaker` key).
 //
-// Join is unique name-level only (both teams). Bookmaker-only snapshots omit
-// fixtures 642 does not price — a weak "Kansas"/"KAN" hit must not steal
-// Kansas State's market. No 642 row for that fixture+side → omit Bookmaker.
+// Join is unique name-level only (both teams) and only onto fixtures that
+// already have a 642 row. /fixtures is the full slate — a KU name hit with
+// no 642 market must not inherit Kansas State's line. No 642 row for that
+// fixture+side → omit Bookmaker. After overlay, drop 642 if any ML side
+// conflicts with the other books on that Odds API event (inverted +163 on
+// the favorite becomes displayed −163 / 62% true).
 // side_type Home/Away is Betstamp orientation and is remapped when Odds API
 // home/away is swapped.
 //
@@ -68,8 +71,13 @@ export function namesLooselyEqual(a, b) {
   const y = foldTeamName(b);
   if (!x || !y) return false;
   if (x === y) return true;
-  if (x.length >= 4 && y.length >= 4 && (x.includes(y) || y.includes(x))) return true;
-  return false;
+  const tx = teamTokens(a);
+  const ty = teamTokens(b);
+  if (!tx.length || !ty.length) return false;
+  const shorter = tx.length <= ty.length ? tx : ty;
+  const longer = tx.length <= ty.length ? ty : tx;
+  // Token containment only — "arkansas".includes("kansas") is not a match.
+  return shorter.every((t) => longer.includes(t));
 }
 
 export function abbrHitsName(abbr, name) {
@@ -127,15 +135,28 @@ export function uniquePairScore(event, sides) {
   return { score: 0, swapped: false };
 }
 
+export function fixtureIdsPricedByBookmaker(snapshot) {
+  const ids = new Set();
+  for (const market of asList(snapshot?.markets, ["markets", "data"])) {
+    if (!marketIsBookmaker(market) || market.fixture_id == null || market.fixture_id === "") continue;
+    ids.add(String(market.fixture_id));
+  }
+  return ids;
+}
+
 export function joinOddsEventToBetstampFixture(event, snapshot, { windowMs = BOOKMAKER_COMMENCE_WINDOW_MS } = {}) {
   if (!event || !snapshot) return null;
   const sport = event.sport_key || event.sport;
   const league = BETSTAMP_SPORTS.find((s) => s.id === sport)?.league;
   if (!league) return null;
+  const pricedIds = fixtureIdsPricedByBookmaker(snapshot);
   const teamsById = indexById(asList(snapshot.teams, ["teams", "data"]));
   const fixtures = asList(snapshot.fixtures, ["fixtures", "data"]).filter((f) => {
     const raw = String(f?.league || f?.sport || "").toUpperCase();
-    return raw === league;
+    if (raw !== league) return false;
+    const id = f?.id ?? f?.fixture_id;
+    if (id == null) return false;
+    return pricedIds.has(String(id));
   });
   const eventMs = Date.parse(event.commence_time);
   let best = null;
@@ -290,11 +311,56 @@ export function bookmakerBookmakerFromSnapshot(event, snapshot, joinHit) {
   return { key: BOOKMAKER_BOOK_KEY, title: BOOKMAKER_TITLE, markets };
 }
 
+function h2hOutcomeOnBook(book, teamName) {
+  const market = (book?.markets || []).find((m) => m && m.key === "h2h");
+  if (!market) return null;
+  return (market.outcomes || []).find((o) => o && teamsLikelySame(o.name, teamName)) || null;
+}
+
+function americanSign(odds) {
+  const n = Number(odds);
+  if (!isFinite(n) || n === 0) return 0;
+  return n > 0 ? 1 : -1;
+}
+
+function medianAmerican(prices) {
+  const s = (prices || []).map(Number).filter((n) => isFinite(n) && n !== 0).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// 642 landed on the opposite side of the rest of the board (KU +163 attached
+// to Arizona State). Complement of that +163 is displayed −163 / 62% true.
+// Sign vs median is enough — the 40% inverted-opp guard misses this ~25pt gap.
+export function bookmakerConflictsWithEventBooks(event, bm) {
+  const h2h = (bm?.markets || []).find((m) => m && m.key === "h2h");
+  if (!h2h) return false;
+  const others = (event?.bookmakers || []).filter((b) => b && b.key !== BOOKMAKER_BOOK_KEY);
+  if (!others.length) return false;
+  for (const outcome of h2h.outcomes || []) {
+    if (!outcome || outcome.price == null || !outcome.name) continue;
+    const consensus = [];
+    for (const book of others) {
+      const hit = h2hOutcomeOnBook(book, outcome.name);
+      if (hit && hit.price != null) consensus.push(hit.price);
+    }
+    if (consensus.length < 2) continue;
+    const med = medianAmerican(consensus);
+    const medSign = americanSign(med);
+    const bmSign = americanSign(outcome.price);
+    if (medSign && bmSign && medSign !== bmSign) return true;
+  }
+  return false;
+}
+
 export function overlayBookmakerOnGame(game, snapshot) {
   if (!game || typeof game !== "object") return game;
   const bookmakers = (game.bookmakers || []).filter((b) => b && b.key !== BOOKMAKER_BOOK_KEY);
-  const bm = snapshot ? bookmakerBookmakerFromSnapshot(game, snapshot) : null;
-  return { ...game, bookmakers: bm ? [...bookmakers, bm] : bookmakers };
+  const stripped = { ...game, bookmakers };
+  let bm = snapshot ? bookmakerBookmakerFromSnapshot(stripped, snapshot) : null;
+  if (bm && bookmakerConflictsWithEventBooks(stripped, bm)) bm = null;
+  return { ...stripped, bookmakers: bm ? [...bookmakers, bm] : bookmakers };
 }
 
 export function overlayBookmakerOnGames(games, snapshot) {

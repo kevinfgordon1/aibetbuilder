@@ -26,6 +26,9 @@ import {
   teamsLikelySame,
   uniquePairScore,
   oddsApiOutcomeName,
+  namesLooselyEqual,
+  fixtureIdsPricedByBookmaker,
+  bookmakerConflictsWithEventBooks,
 } from "./promoBookmaker.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -129,6 +132,10 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.equal(teamsLikelySame("Kansas State Wildcats", "Kansas"), false);
   assert.equal(teamsLikelySame("Iowa State Cyclones", "Iowa"), false);
   assert.equal(teamsLikelySame("Arizona State Sun Devils", "Arizona"), false);
+  assert.equal(namesLooselyEqual("Kansas Jayhawks", "Arkansas"), false, "kansas ⊂ arkansas is not a token match");
+  assert.equal(namesLooselyEqual("Kansas Jayhawks", "Arkansas Razorbacks"), false);
+  assert.equal(teamsLikelySame("Kansas Jayhawks", "Arkansas Razorbacks"), false);
+  assert.equal(namesLooselyEqual("Denver Broncos", "Denver"), true);
   assert.equal(abbrHitsName("DEN", "Denver Broncos"), true);
   assert.equal(abbrHitsName("KAN", "Kansas Jayhawks"), true, "loose abbr still scores 1 — join must ignore it");
   assert.equal(teamMatchScore("Denver Broncos", "Broncos", "DEN"), 2);
@@ -195,7 +202,15 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     home_team: { name: "Michigan", abbreviation: "MICH" },
     away_team: { name: "Ohio State", abbreviation: "OSU" },
   };
-  const snap = { ok: true, fixtures: [washington, osu], teams: [], markets: [] };
+  const snap = {
+    ok: true,
+    fixtures: [washington, osu],
+    teams: [],
+    markets: [
+      { odds: 1.91, side: "OSU", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-osu-um" },
+      { odds: 1.91, side: "UW", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-uw-wsu" },
+    ],
+  };
   const join = joinOddsEventToBetstampFixture(ncaaf, snap);
   assert.equal(join.fixtureId, "fix-osu-um");
   assert.equal(joinOddsEventToBetstampFixture({
@@ -394,10 +409,11 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     ],
   };
   const join = joinOddsEventToBetstampFixture(jayhawks, snap);
-  assert.equal(join.fixtureId, "fix-ku-wvu");
+  assert.equal(join, null, "unpriced KU fixture is not a join candidate; KSU 642 stays off KU");
   assert.equal(bookmakerBookmakerFromSnapshot(jayhawks, snap), null, "no 642 on KU fixture → omit Bookmaker; do not steal KSU -187");
   const overlaid = overlayBookmakerOnGame(jayhawks, snap);
   assert.equal(overlaid.bookmakers.some((b) => b.key === "bookmaker"), false);
+  assert.deepEqual([...fixtureIdsPricedByBookmaker(snap)], ["fix-ksu-wvu"]);
 }
 
 {
@@ -452,6 +468,223 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   const data = transformOddsData([overlayBookmakerOnGame(event, snap)], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   assert.equal(data.moneylines[0].bookOdds.bookmaker.ml_away, 155);
   assert.equal(data.moneylines[0].bookOdds.bookmaker.ml_home, -187);
+}
+
+{
+  // Live 2026-09-19 shape: Odds API Kansas @ Arizona State (FD +168), Betstamp
+  // string home_team + home_id/home_abbr, KU home vs ASU, 642 KU 2.63 / ASU 1.526.
+  // Side map must keep +163 on Kansas. Complement of a misplaced +163 is the
+  // screenshot −163 (62.0%) / +24.7% edge vs FanDuel +168.
+  const kick = "2026-09-19T16:00:00Z";
+  const jayhawks = {
+    id: "odds-ku-asu",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Kansas Jayhawks",
+    home_team: "Arizona State Sun Devils",
+    bookmakers: [
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Kansas Jayhawks", price: 168 },
+            { name: "Arizona State Sun Devils", price: -205 },
+          ],
+        }],
+      },
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Kansas Jayhawks", price: 170 },
+            { name: "Arizona State Sun Devils", price: -205 },
+          ],
+        }],
+      },
+      {
+        key: "pinnacle",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Kansas Jayhawks", price: 178 },
+            { name: "Arizona State Sun Devils", price: -210 },
+          ],
+        }],
+      },
+    ],
+  };
+  const kuId = "0191b82a-3497-7f42-a550-34e3071d7869";
+  const asuId = "0191b82a-34d7-7034-822a-0294e61e8b0a";
+  const liveSnap = {
+    ok: true,
+    fixtures: [{
+      id: "019e5010-312a-7e87-a97d-6e8776f8050f",
+      date: kick,
+      league: "NCAAF",
+      home_team: "Kansas Jayhawks",
+      away_team: "Arizona State Sun Devils",
+      home_abbr: "KU",
+      away_abbr: "ASU",
+      home_id: kuId,
+      away_id: asuId,
+      status: "scheduled",
+      type: "match",
+    }],
+    teams: [
+      { id: kuId, abbr: "KU", full_name: "Kansas Jayhawks", league: "NCAAF" },
+      { id: asuId, abbr: "ASU", full_name: "Arizona State Sun Devils", league: "NCAAF" },
+    ],
+    markets: [
+      { odds: 2.63, side: "KU", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "019e5010-312a-7e87-a97d-6e8776f8050f", team_id: kuId },
+      { odds: 1.526, side: "ASU", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "019e5010-312a-7e87-a97d-6e8776f8050f", team_id: asuId },
+    ],
+  };
+  const join = joinOddsEventToBetstampFixture(jayhawks, liveSnap);
+  assert.equal(join.fixtureId, "019e5010-312a-7e87-a97d-6e8776f8050f");
+  assert.equal(join.swapped, true);
+  assert.equal(oddsApiOutcomeName(liveSnap.markets[0], jayhawks, join), "Kansas Jayhawks");
+  assert.equal(oddsApiOutcomeName(liveSnap.markets[1], jayhawks, join), "Arizona State Sun Devils");
+  const overlaid = overlayBookmakerOnGame(jayhawks, liveSnap);
+  const bm = overlaid.bookmakers.find((b) => b.key === "bookmaker");
+  const ku = bm.markets.find((m) => m.key === "h2h").outcomes.find((o) => o.name === "Kansas Jayhawks");
+  const asu = bm.markets.find((m) => m.key === "h2h").outcomes.find((o) => o.name === "Arizona State Sun Devils");
+  assert.equal(ku.price, 163);
+  assert.equal(asu.price, -190);
+  const data = transformOddsData([overlaid], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.equal(data.moneylines[0].bookOdds.bookmaker.ml_away, 163);
+  assert.equal(data.moneylines[0].bookOdds.bookmaker.ml_home, -190);
+  assert.notEqual(data.moneylines[0].best_home, 163, "ASU must not inherit KU +163");
+  const asuTrue = data.moneylines[0].best_home;
+  const ourTrue = 1 - (asuTrue < 0 ? Math.abs(asuTrue) / (Math.abs(asuTrue) + 100) : 100 / (asuTrue + 100));
+  assert.ok(ourTrue < 0.5, "Kansas true from ASU Bookmaker must stay the dog, not 62%");
+  assert.ok(Math.abs(ourTrue - 0.62) > 0.05, "screenshot 62% / −163 complement of +163 must not appear");
+}
+
+{
+  // Stale odds_cache Bookmaker −163 on Kansas (pre-#166 overlay baked into JSON)
+  // plus a 642 snapshot that does not price the Jayhawks fixture.
+  const kick = future;
+  const stale = {
+    id: "odds-ku-stale",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Kansas Jayhawks",
+    home_team: "Arizona State Sun Devils",
+    bookmakers: [
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Kansas Jayhawks", price: 168 },
+            { name: "Arizona State Sun Devils", price: -205 },
+          ],
+        }],
+      },
+      {
+        key: "bookmaker",
+        title: "Bookmaker",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Kansas Jayhawks", price: -163 },
+            { name: "Arizona State Sun Devils", price: 163 },
+          ],
+        }],
+      },
+    ],
+  };
+  const empty642 = {
+    ok: true,
+    fixtures: [{
+      id: "fix-ku-asu",
+      league: "NCAAF",
+      date: kick,
+      home_team: "Kansas Jayhawks",
+      away_team: "Arizona State Sun Devils",
+      home_abbr: "KU",
+      away_abbr: "ASU",
+    }],
+    teams: [],
+    markets: [],
+  };
+  const cleared = overlayBookmakerOnGame(stale, empty642);
+  assert.equal(cleared.bookmakers.some((b) => b.key === "bookmaker"), false, "refresh strips cached Bookmaker when 642 has no KU market");
+  const clearedNull = overlayBookmakerOnGame(stale, null);
+  assert.equal(clearedNull.bookmakers.some((b) => b.key === "bookmaker"), false);
+  const rows = overlayBookmakerOnCacheRows([{ sport: "americanfootball_ncaaf", data: [stale] }], empty642);
+  assert.equal(rows[0].data[0].bookmakers.some((b) => b.key === "bookmaker"), false);
+  const staleData = transformOddsData([cleared], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.equal(staleData.moneylines[0].bookOdds.bookmaker.ml_away, null);
+  assert.notEqual(staleData.moneylines[0].best_away_book, "bookmaker");
+  assert.notEqual(staleData.moneylines[0].best_home_book, "bookmaker");
+}
+
+{
+  // Inverted 642 (KU +163 landed on Arizona State) must be dropped so Promo
+  // cannot show −163 on Bookmaker as Kansas true / +24.7% vs FanDuel +168.
+  const kick = future;
+  const event = {
+    id: "odds-ku-inverted",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Kansas Jayhawks",
+    home_team: "Arizona State Sun Devils",
+    bookmakers: [
+      {
+        key: "fanduel",
+        markets: [{ key: "h2h", outcomes: [{ name: "Kansas Jayhawks", price: 168 }, { name: "Arizona State Sun Devils", price: -205 }] }],
+      },
+      {
+        key: "draftkings",
+        markets: [{ key: "h2h", outcomes: [{ name: "Kansas Jayhawks", price: 170 }, { name: "Arizona State Sun Devils", price: -205 }] }],
+      },
+    ],
+  };
+  const invertedBm = {
+    key: "bookmaker",
+    title: "Bookmaker",
+    markets: [{
+      key: "h2h",
+      outcomes: [
+        { name: "Kansas Jayhawks", price: -163 },
+        { name: "Arizona State Sun Devils", price: 163 },
+      ],
+    }],
+  };
+  assert.equal(bookmakerConflictsWithEventBooks(event, invertedBm), true);
+  const flippedSnap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-ku-asu-flip",
+      league: "NCAAF",
+      start_date: kick,
+      home_team: { name: "Kansas Jayhawks", abbreviation: "KU" },
+      away_team: { name: "Arizona State Sun Devils", abbreviation: "ASU" },
+    }],
+    teams: [],
+    markets: [
+      // team_id omitted; side_type Home without remap would put +163 on Odds API home (ASU).
+      // Force the wrong names via side strings that match Odds API home/away.
+      { odds: 2.63, side: "Arizona State Sun Devils", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ku-asu-flip" },
+      { odds: 1.613, side: "Kansas Jayhawks", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 642, fixture_id: "fix-ku-asu-flip" },
+    ],
+  };
+  const flipped = overlayBookmakerOnGame(event, flippedSnap);
+  assert.equal(flipped.bookmakers.some((b) => b.key === "bookmaker"), false, "consensus guard omits inverted 642 so −163 cannot be Kansas true");
+  const flippedData = transformOddsData([flipped], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.notEqual(flippedData.moneylines[0].best_home, 163);
+  assert.notEqual(flippedData.moneylines[0].best_home_book, "bookmaker");
+  const asuBest = flippedData.moneylines[0].best_home;
+  const our = 1 - (asuBest < 0 ? Math.abs(asuBest) / (Math.abs(asuBest) + 100) : 100 / (asuBest + 100));
+  const fdImp = 100 / 268;
+  assert.ok(Math.abs(our - 0.62) > 0.05);
+  assert.ok(our - fdImp < 0.10, "FanDuel +168 must not pick up the screenshot +24.7% fake edge");
 }
 
 {
