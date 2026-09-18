@@ -326,10 +326,11 @@ function fullPlan() {
   assert.deepEqual(listed, [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-    "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
+    "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
   ]);
   assert.equal(TRUSTED_BOOK_KEYS.has("pinnacle"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("betus"), true);
+  assert.equal(TRUSTED_BOOK_KEYS.has("bookmaker"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("betcris"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betanysports"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betopenly"), false);
@@ -355,6 +356,8 @@ function fullPlan() {
   assert.match(app, /selectEvScanView\(/);
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
+  assert.match(app, /overlayBookmakerOnCacheRows/);
+  assert.match(app, /fetchBookmakerSnapshot\(\{ leagues: leaguesForSports\(plan\.featuredSports\) \}\)/);
   assert.doesNotMatch(app, /overlayBetcrisOnCacheRows|fetchBetcrisSnapshot|promoBetcris/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");
