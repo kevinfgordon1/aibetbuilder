@@ -95,6 +95,9 @@ export function promoNeedsReload(promoSports, loadedSports) {
   return false;
 }
 
+// Re-export so load-plan tests and the UI debounce share one definition.
+export { PROMO_SPORT_RELOAD_DEBOUNCE_MS, promoSportsNeedNetworkReload } from "./promoUiPerf.js";
+
 // Client reads go to Supabase odds_cache / event_odds_cache — not /api/odds.
 // PostgREST can hang (statement timeout, Warp thread kill) with no HTTP error;
 // without a wall-clock cap the Promo spinner stays on "Loading live odds..." forever.

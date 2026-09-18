@@ -206,7 +206,7 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /useDebouncedValue\(maxLegOdds/);
   assert.match(app, /scanMinFinalOdds !== ""\) \? Number\(scanMinFinalOdds\)/);
   assert.match(app, /scanMaxFinalOdds !== ""\) \? Number\(scanMaxFinalOdds\)/);
-  assert.match(app, /parsedPromoLegOddsBounds\(numLegs, isParlayPromo \? scanMinLegOdds : "", isParlayPromo \? scanMaxLegOdds : ""\)/);
+  assert.match(app, /parsedPromoLegOddsBounds\(scanNumLegs, isParlayPromo \? scanMinLegOdds : "", isParlayPromo \? scanMaxLegOdds : ""\)/);
   assert.match(app, /parsedMinLeg = parsedLegBounds\.min/);
   assert.match(app, /parsedMaxLeg = parsedLegBounds\.max/);
 }

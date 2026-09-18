@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
@@ -68,7 +68,6 @@ import {
   shouldFetchFullBoard,
   shouldFetchPromoOdds,
   shouldRunEvScan,
-  promoNeedsReload,
   featuredRowsUsable,
   preferExistingPromoBoard,
   boardHasPromoGames,
@@ -77,7 +76,7 @@ import {
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
-import { fetchBookmakerSnapshot, leaguesForSports, overlayBookmakerOnCacheRows } from "./promoBookmaker.js";
+import { overlayBookmakerOnCacheRows, resolveBookmakerSnapshot } from "./promoBookmaker.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -89,6 +88,12 @@ import { resolveOppWithSideGuard, rankPicksAfterOppGuard } from "./promoOppGuard
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
+import {
+  PROMO_SPORT_RELOAD_DEBOUNCE_MS,
+  PROMO_CARD_LAYER_STYLE,
+  promoFilterWorkPending,
+  promoSportsNeedNetworkReload,
+} from "./promoUiPerf.js";
 import {
   applyPmBlendToLeg,
   preferCompletePmHedge,
@@ -884,7 +889,6 @@ function LandingFull({ onSignIn, onBack }) {
   );
   return (
     <div className="lf-root">
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
       <style>{`
         .lf-root { font-family: 'DM Sans', sans-serif; background: #0a0b0f; color: #e8eaed; overflow-x: hidden; min-height: 100vh; }
         .lf-bar { position: relative; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 11px 46px; font-size: 13px; color: #dbeafe; text-align: center; background: linear-gradient(90deg, rgba(59,130,246,0.22), rgba(139,92,246,0.22)); border-bottom: 1px solid rgba(99,102,241,0.35); }
@@ -1404,6 +1408,7 @@ export default function App() {
   const [promoScanBusy, setPromoScanBusy] = useState(false);
   const [lastCompletedScanKey, setLastCompletedScanKey] = useState(null);
   const promoFetchGen = useRef(0);
+  const bookmakerCacheRef = useRef({ snap: null, leagues: [] });
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
   const soccerPmNoGen = useRef(0);
@@ -1542,10 +1547,12 @@ export default function App() {
     return mergeOddsData([...featured, ...eventTransformed]);
   };
 
-  const loadPromoBoard = async () => {
+  const loadPromoBoard = async ({ background = false, forceBookmaker = false } = {}) => {
     const gen = ++promoFetchGen.current;
-    setExcludedPromoLegs(new Set());
-    setPromoLoading(true);
+    if (!background) {
+      setExcludedPromoLegs(new Set());
+      setPromoLoading(true);
+    }
     const plan = buildOddsQueryPlan({
       mode: "promo",
       promoSports,
@@ -1553,7 +1560,14 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
-      const bookmakerPromise = fetchBookmakerSnapshot({ leagues: leaguesForSports(plan.featuredSports) });
+      const bookmakerPromise = resolveBookmakerSnapshot({
+        sports: plan.featuredSports,
+        cached: bookmakerCacheRef.current,
+        forceRefresh: forceBookmaker,
+      }).then((resolved) => {
+        if (resolved.snap) bookmakerCacheRef.current = { snap: resolved.snap, leagues: resolved.leagues };
+        return resolved.snap;
+      });
       const { featured, events } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
@@ -1602,7 +1616,14 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
-      const bookmakerPromise = fetchBookmakerSnapshot({ leagues: leaguesForSports(plan.featuredSports) });
+      const bookmakerPromise = resolveBookmakerSnapshot({
+        sports: plan.featuredSports,
+        cached: bookmakerCacheRef.current,
+        forceRefresh: true,
+      }).then((resolved) => {
+        if (resolved.snap) bookmakerCacheRef.current = { snap: resolved.snap, leagues: resolved.leagues };
+        return resolved.snap;
+      });
       const { featured, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
@@ -1636,7 +1657,7 @@ export default function App() {
       return;
     }
     if (shouldFetchPromoOdds({ tab, forceRefresh, promoLoaded })) {
-      await loadPromoBoard();
+      await loadPromoBoard({ forceBookmaker: forceRefresh });
     }
   };
 
@@ -1654,20 +1675,10 @@ export default function App() {
   }, [activeTab, fullBoardLoaded]);
 
   useEffect(() => {
-    if (!promoLoaded) return;
-    if (promoNeedsReload(promoSports, promoLoadedSports)) {
-      loadPromoBoard();
-    }
+    if (!promoSportsNeedNetworkReload(promoSports, promoLoadedSports, promoLoaded)) return;
+    const id = setTimeout(() => { loadPromoBoard({ background: true }); }, PROMO_SPORT_RELOAD_DEBOUNCE_MS);
+    return () => clearTimeout(id);
   }, [promoSports]);
-
-  useEffect(() => {
-    setPromoPage(5);
-    setExpandedPromo(null);
-    setExpandedFreeBet(null);
-    // Remount starts with no exclusions. Filter tweaks must too — leftover
-    // X's otherwise hide the best plays until a full refresh.
-    setExcludedPromoLegs(new Set());
-  }, [promoBook, promoSports, promoDateRange, promoType, creditConversionPct, refundPct, numLegs, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, marketScope, hideLowLiquidity, matchingBookKeys, promoTeamInclude, promoTeamExclude]);
 
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
@@ -1681,14 +1692,54 @@ export default function App() {
     setUser(null);
   };
 
+  const scanBoostPct = useDebouncedValue(boostPct, PROMO_SCAN_DEBOUNCE_MS);
+  const scanStake = useDebouncedValue(stake, PROMO_SCAN_DEBOUNCE_MS);
+  const scanMinFinalOdds = useDebouncedValue(minFinalOdds, PROMO_SCAN_DEBOUNCE_MS);
+  const scanMaxFinalOdds = useDebouncedValue(maxFinalOdds, PROMO_SCAN_DEBOUNCE_MS);
+  const scanMinLegOdds = useDebouncedValue(minLegOdds, PROMO_SCAN_DEBOUNCE_MS);
+  const scanMaxLegOdds = useDebouncedValue(maxLegOdds, PROMO_SCAN_DEBOUNCE_MS);
+  const scanTeamInclude = useDebouncedValue(promoTeamInclude, PROMO_SCAN_DEBOUNCE_MS);
+  const scanTeamExclude = useDebouncedValue(promoTeamExclude, PROMO_SCAN_DEBOUNCE_MS);
+  // Chip / input state stays urgent. Heavy rematch, pool rebuild, and C(n,k)
+  // read these deferred copies so the first paint can highlight the chip.
+  const scanPromoSports = useDeferredValue(promoSports);
+  const scanPromoDateRange = useDeferredValue(promoDateRange);
+  const scanMarketScope = useDeferredValue(marketScope);
+  const scanPromoBook = useDeferredValue(promoBook);
+  const scanMatchingBookKeys = useDeferredValue(matchingBookKeys);
+  const scanHideLowLiquidity = useDeferredValue(hideLowLiquidity);
+  const scanNumLegs = useDeferredValue(numLegs);
+  const deferredEvDateRange = useDeferredValue(evDateRange);
+  const includeTeamTokens = useMemo(() => parseTeamFilterTokens(scanTeamInclude), [scanTeamInclude]);
+  const excludeTeamTokens = useMemo(() => parseTeamFilterTokens(scanTeamExclude), [scanTeamExclude]);
+  const summaryIncludeTokens = useMemo(() => parseTeamFilterTokens(promoTeamInclude), [promoTeamInclude]);
+  const summaryExcludeTokens = useMemo(() => parseTeamFilterTokens(promoTeamExclude), [promoTeamExclude]);
+  const scanStakeRef = useRef(scanStake);
+  scanStakeRef.current = scanStake;
+  const promoFilterPending = promoFilterWorkPending(
+    { sports: promoSports, dateRange: promoDateRange, marketScope, promoBook, matchingBookKeys, hideLowLiquidity, numLegs },
+    { sports: scanPromoSports, dateRange: scanPromoDateRange, marketScope: scanMarketScope, promoBook: scanPromoBook, matchingBookKeys: scanMatchingBookKeys, hideLowLiquidity: scanHideLowLiquidity, numLegs: scanNumLegs },
+  );
+
+  useEffect(() => {
+    setPromoPage(5);
+    setExpandedPromo(null);
+    setExpandedFreeBet(null);
+    // Remount starts with no exclusions. Filter tweaks must too — leftover
+    // X's otherwise hide the best plays until a full refresh.
+    // Team / odds text use the debounced scan* values so typing does not
+    // reset the list on every keystroke.
+    setExcludedPromoLegs(new Set());
+  }, [scanPromoBook, scanPromoSports, scanPromoDateRange, promoType, creditConversionPct, refundPct, scanNumLegs, scanMinFinalOdds, scanMaxFinalOdds, scanMinLegOdds, scanMaxLegOdds, scanMarketScope, hideLowLiquidity, scanMatchingBookKeys, scanTeamInclude, scanTeamExclude]);
+
   const promoOddsData = useMemo(() => {
-    if (matchingSetIsFull(matchingBookKeys, TRUSTED_BOOK_KEYS)) return promoBoardData;
+    if (matchingSetIsFull(scanMatchingBookKeys, TRUSTED_BOOK_KEYS)) return promoBoardData;
     const { featured, events } = oddsSource;
     return mergeOddsData([
-      ...featured.map(row => transformOddsData(row.data, row.sport, matchingBookKeys)),
-      ...events.map(row => transformEventOddsData(row.data, row.sport, matchingBookKeys)),
+      ...featured.map(row => transformOddsData(row.data, row.sport, scanMatchingBookKeys)),
+      ...events.map(row => transformEventOddsData(row.data, row.sport, scanMatchingBookKeys)),
     ]);
-  }, [promoBoardData, oddsSource, matchingBookKeys]);
+  }, [promoBoardData, oddsSource, scanMatchingBookKeys]);
 
   const soccerOnBoard = useMemo(
     () => (promoOddsData.moneylines || []).some((g) => isSoccerSport(g.sport)),
@@ -1703,7 +1754,7 @@ export default function App() {
       setSoccerPmNoStatus("idle");
       return;
     }
-    const venues = [...SOCCER_PM_NO_BOOK_KEYS].filter((k) => matchingBookKeys.has(k));
+    const venues = [...SOCCER_PM_NO_BOOK_KEYS].filter((k) => scanMatchingBookKeys.has(k));
     if (!venues.length) {
       setSoccerPmNoByGame(null);
       setSoccerPmNoStatus("done");
@@ -1722,7 +1773,7 @@ export default function App() {
         setSoccerPmNoByGame(null);
         setSoccerPmNoStatus("error");
       });
-  }, [promoOddsData, matchingBookKeys, soccerSelected]);
+  }, [promoOddsData, scanMatchingBookKeys, soccerSelected]);
 
   const waitForSoccerPm = soccerBlocksPromoPool({
     soccerSelected,
@@ -1738,8 +1789,8 @@ export default function App() {
     if (!fullBoardLoaded) return null;
     if (activeTab !== "ev") return null;
     if (!shouldRunEvScan(loadModeForTab(activeTab))) return null;
-    return evScanFromLegs(buildAllLegsAllBooks(allOddsData, null, evDateRange), calcEV);
-  }, [fullBoardLoaded, allOddsData, evDateRange, activeTab]);
+    return evScanFromLegs(buildAllLegsAllBooks(allOddsData, null, deferredEvDateRange), calcEV);
+  }, [fullBoardLoaded, allOddsData, deferredEvDateRange, activeTab]);
 
   useEffect(() => {
     if (liveEvScan) setEvScan(liveEvScan);
@@ -1792,27 +1843,12 @@ export default function App() {
     return [hit, ...list.filter((b) => encodeEvCardId(b) !== focusCardId)].slice(0, 30);
   }, [filteredEvBets, activeTab, focusCardId]);
 
-  const scanBoostPct = useDebouncedValue(boostPct, PROMO_SCAN_DEBOUNCE_MS);
-  const scanStake = useDebouncedValue(stake, PROMO_SCAN_DEBOUNCE_MS);
-  const scanMinFinalOdds = useDebouncedValue(minFinalOdds, PROMO_SCAN_DEBOUNCE_MS);
-  const scanMaxFinalOdds = useDebouncedValue(maxFinalOdds, PROMO_SCAN_DEBOUNCE_MS);
-  const scanMinLegOdds = useDebouncedValue(minLegOdds, PROMO_SCAN_DEBOUNCE_MS);
-  const scanMaxLegOdds = useDebouncedValue(maxLegOdds, PROMO_SCAN_DEBOUNCE_MS);
-  const scanTeamInclude = useDebouncedValue(promoTeamInclude, PROMO_SCAN_DEBOUNCE_MS);
-  const scanTeamExclude = useDebouncedValue(promoTeamExclude, PROMO_SCAN_DEBOUNCE_MS);
-  const includeTeamTokens = useMemo(() => parseTeamFilterTokens(scanTeamInclude), [scanTeamInclude]);
-  const excludeTeamTokens = useMemo(() => parseTeamFilterTokens(scanTeamExclude), [scanTeamExclude]);
-  const summaryIncludeTokens = useMemo(() => parseTeamFilterTokens(promoTeamInclude), [promoTeamInclude]);
-  const summaryExcludeTokens = useMemo(() => parseTeamFilterTokens(promoTeamExclude), [promoTeamExclude]);
-  const scanStakeRef = useRef(scanStake);
-  scanStakeRef.current = scanStake;
-
   const promoSportFilter = useMemo(() => {
-    const expanded = expandSoccerSportKeys(promoSports);
+    const expanded = expandSoccerSportKeys(scanPromoSports);
     return SPORT_KEYS.every((k) => expanded.has(k)) ? null : SPORT_KEYS.filter((k) => expanded.has(k));
-  }, [promoSports]);
+  }, [scanPromoSports]);
   const isParlayPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
-  const parsedLegBounds = parsedPromoLegOddsBounds(numLegs, isParlayPromo ? scanMinLegOdds : "", isParlayPromo ? scanMaxLegOdds : "");
+  const parsedLegBounds = parsedPromoLegOddsBounds(scanNumLegs, isParlayPromo ? scanMinLegOdds : "", isParlayPromo ? scanMaxLegOdds : "");
   const parsedMinLeg = parsedLegBounds.min;
   const parsedMaxLeg = parsedLegBounds.max;
   const parsedMinFinal = (isParlayPromo && scanMinFinalOdds !== "") ? Number(scanMinFinalOdds) : null;
@@ -1826,21 +1862,21 @@ export default function App() {
 
   // Drop thin PM legs from the scan pool ($500 profit walk, stake-independent
   // for 1-leg and multi-leg). rankPromoPicks also drops incomplete $500 walks.
-  const dropThinPoolLegs = hideLowLiquidity;
+  const dropThinPoolLegs = scanHideLowLiquidity;
   const promoLegs = useMemo(() => {
     if (waitForSoccerPm) return [];
-    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg);
-    const promoLegsScoped = scopePromoLegs(promoLegsAll, marketScope);
+    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg);
+    const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
-    const promoLegsLiquid = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs });
+    const promoLegsLiquid = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
     // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
     // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
-    if (Number(numLegs) === 1 && includeTeamTokens.length) {
+    if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
       return filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens);
     }
     return promoLegsLiquid;
-  }, [promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, promoDateRange, marketScope, excludedPromoLegs, dropThinPoolLegs, promoType, numLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens]);
+  }, [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, scanMarketScope, excludedPromoLegs, dropThinPoolLegs, promoType, scanNumLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -1852,7 +1888,7 @@ export default function App() {
   const currentPromoScanKey = useMemo(
     () => promoScanInputKey({
       promoType,
-      numLegs,
+      numLegs: scanNumLegs,
       scanBoostPct,
       parsedMinFinal,
       parsedMaxFinal,
@@ -1861,7 +1897,7 @@ export default function App() {
       pool: parlayLegPool,
       includeTeam: includeTeamTokens.join(","),
     }),
-    [promoType, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool, includeTeamTokens],
+    [promoType, scanNumLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool, includeTeamTokens],
   );
   const scanCompletedForCurrent = lastCompletedScanKey === currentPromoScanKey;
 
@@ -1898,7 +1934,7 @@ export default function App() {
     const ac = new AbortController();
     const scanKey = currentPromoScanKey;
     setPromoScanBusy(true);
-    findTopParlaysChunked(parlayLegPool, numLegs, calc, {
+    findTopParlaysChunked(parlayLegPool, scanNumLegs, calc, {
       maxResults: 50,
       minFinalOdds: parsedMinFinal,
       maxFinalOdds: parsedMaxFinal,
@@ -1935,7 +1971,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, scanNumLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2134,7 +2170,6 @@ export default function App() {
 
   return (
     <div onClickCapture={guardClick} onMouseDownCapture={guardClick} style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       <div data-guard-allow="true" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -2617,7 +2652,7 @@ export default function App() {
 
               {((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && promoScanBusy && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0
                 || (promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0)
-                || ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && (oddsBoundsPending || teamFilterPending) && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0)) && (
+                || ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && (oddsBoundsPending || teamFilterPending || promoFilterPending) && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0)) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
               )}
               {((promoType === "boost" && boostEmptyState === "scanning")
@@ -2667,7 +2702,7 @@ export default function App() {
                       legs: p.legs,
                     });
                     return (
-                      <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
                           if (!isExpanded) {
@@ -2817,7 +2852,7 @@ export default function App() {
                       legs: p.legs,
                     });
                     return (
-                      <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : i);
                           if (!isExpanded) {
@@ -3033,7 +3068,7 @@ export default function App() {
                       legs: p.legs,
                     });
                     return (
-                      <div id={"pick-" + promoId} style={{ background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedFreeBet(isExpanded ? null : i);
                           if (!isExpanded) {

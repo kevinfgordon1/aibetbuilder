@@ -84,7 +84,7 @@ const legs = [
 {
   assert.match(app, /import \{\s*MARKET_SCOPES,\s*scopePromoLegs,\s*marketScopeSummary,\s*\} from "\.\/promoMarketScope\.js"/);
   assert.match(app, /const \[marketScope, setMarketScope\] = useState\("all"\)/);
-  assert.match(app, /scopePromoLegs\(promoLegsAll, marketScope\)/);
+  assert.match(app, /scopePromoLegs\(promoLegsAll, scanMarketScope\)/);
   assert.match(app, /marketScopeSummary\(marketScope\)/);
   assert.match(app, /MARKET_SCOPES\.map\(opt =>/);
   assert.match(app, /<label style=\{labelStyle\}>Markets<\/label>/);

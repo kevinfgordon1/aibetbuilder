@@ -11,6 +11,8 @@ import {
   shouldFetchFullBoard,
   shouldFetchPromoOdds,
   promoNeedsReload,
+  promoSportsNeedNetworkReload,
+  PROMO_SPORT_RELOAD_DEBOUNCE_MS,
   boardHasPromoGames,
   preferExistingPromoBoard,
   queryOddsCaches,
@@ -244,6 +246,9 @@ function fullPlan() {
   assert.equal(promoNeedsReload(new Set(["baseball_mlb"]), new Set(["baseball_mlb"])), false);
   assert.equal(promoNeedsReload(new Set(["baseball_mlb", "americanfootball_nfl"]), new Set(["baseball_mlb"])), true);
   assert.equal(promoNeedsReload(new Set(["baseball_mlb"]), new Set(["baseball_mlb", "americanfootball_nfl"])), false);
+  assert.equal(PROMO_SPORT_RELOAD_DEBOUNCE_MS, 160);
+  assert.equal(promoSportsNeedNetworkReload(new Set(["americanfootball_nfl"]), new Set(["baseball_mlb"]), true), true);
+  assert.equal(promoSportsNeedNetworkReload(new Set(["americanfootball_nfl"]), new Set(["baseball_mlb"]), false), false);
 }
 
 // ── Empty selected-sports refetch must not wipe a board the user already had
@@ -357,7 +362,7 @@ function fullPlan() {
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
   assert.match(app, /overlayBookmakerOnCacheRows/);
-  assert.match(app, /fetchBookmakerSnapshot\(\{ leagues: leaguesForSports\(plan\.featuredSports\) \}\)/);
+  assert.match(app, /resolveBookmakerSnapshot\(/);
   assert.doesNotMatch(app, /overlayBetcrisOnCacheRows|fetchBetcrisSnapshot|promoBetcris/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");

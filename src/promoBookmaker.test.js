@@ -15,6 +15,11 @@ import {
   bookmakerBookmakerFromSnapshot,
   bookmakerSnapshotUrl,
   fetchBookmakerSnapshot,
+  resolveBookmakerSnapshot,
+  bookmakerLeaguesForSports,
+  bookmakerSnapCovers,
+  missingBookmakerLeagues,
+  mergeBookmakerSnapshots,
   foldTeamName,
   joinOddsEventToBetstampFixture,
   leaguesForSports,
@@ -688,14 +693,70 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
 }
 
 {
+  assert.deepEqual(bookmakerLeaguesForSports(["americanfootball_nfl", "baseball_mlb"]), ["NFL"]);
+  assert.deepEqual(bookmakerLeaguesForSports(["basketball_nba"]), []);
+  assert.deepEqual(bookmakerLeaguesForSports(["americanfootball_nfl", "americanfootball_ncaaf"]), ["NFL", "NCAAF"]);
+  const cachedNfl = { snap: bookmakerSnapshot(), leagues: ["NFL"] };
+  assert.equal(bookmakerSnapCovers(cachedNfl, ["NFL"]), true);
+  assert.equal(bookmakerSnapCovers(cachedNfl, ["NFL", "NCAAF"]), false);
+  assert.equal(bookmakerSnapCovers(cachedNfl, []), true);
+  assert.deepEqual(missingBookmakerLeagues(cachedNfl, ["NFL", "NCAAF"]), ["NCAAF"]);
+  const ncaafSnap = bookmakerSnapshot({ fixtureId: "fix-ncaaf" });
+  ncaafSnap.fixtures[0].league = "NCAAF";
+  const merged = mergeBookmakerSnapshots(cachedNfl.snap, ncaafSnap);
+  assert.equal(merged.fixtures.some((f) => f.id === "fix-den-kc"), true);
+  assert.equal(merged.fixtures.some((f) => f.id === "fix-ncaaf"), true);
+  const reused = await resolveBookmakerSnapshot({
+    sports: ["americanfootball_nfl", "basketball_nba"],
+    cached: cachedNfl,
+    fetchFn: async () => { throw new Error("must not refetch NFL when adding NBA"); },
+  });
+  assert.equal(reused.fromCache, true);
+  assert.equal(reused.snap, cachedNfl.snap);
+  let fetchedLeagues = null;
+  const added = await resolveBookmakerSnapshot({
+    sports: ["americanfootball_nfl", "americanfootball_ncaaf"],
+    cached: cachedNfl,
+    fetchFn: async (url) => {
+      fetchedLeagues = url;
+      return { ok: true, json: async () => ncaafSnap };
+    },
+  });
+  assert.equal(added.fromCache, false);
+  assert.match(fetchedLeagues, /league=NCAAF/);
+  assert.doesNotMatch(fetchedLeagues, /NFL/);
+  assert.equal(added.leagues.includes("NFL"), true);
+  assert.equal(added.leagues.includes("NCAAF"), true);
+  const kept = await resolveBookmakerSnapshot({
+    sports: ["americanfootball_nfl", "americanfootball_ncaaf"],
+    cached: cachedNfl,
+    fetchFn: async () => ({ ok: false }),
+  });
+  assert.equal(kept.fromCache, true);
+  assert.equal(kept.snap, cachedNfl.snap);
+  let forceUrl = null;
+  const forced = await resolveBookmakerSnapshot({
+    sports: ["americanfootball_nfl"],
+    cached: cachedNfl,
+    forceRefresh: true,
+    fetchFn: async (url) => {
+      forceUrl = url;
+      return { ok: true, json: async () => bookmakerSnapshot() };
+    },
+  });
+  assert.equal(forced.fromCache, false);
+  assert.match(forceUrl, /league=NFL/);
+}
+
+{
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   const ev = fs.readFileSync(path.join(dir, "../lib/promo-ev.js"), "utf8");
   const matching = fs.readFileSync(path.join(dir, "promoMatchingBooks.js"), "utf8");
   assert.match(app, /key: "bookmaker", label: "Bookmaker", color: "#f59e0b"/);
   assert.match(app, /from "\.\/promoBookmaker\.js"/);
   assert.match(app, /overlayBookmakerOnCacheRows/);
-  assert.match(app, /fetchBookmakerSnapshot/);
-  assert.match(app, /leaguesForSports\(plan\.featuredSports\)/);
+  assert.match(app, /resolveBookmakerSnapshot/);
+  assert.match(app, /bookmakerCacheRef/);
   assert.match(app, /Betstamp Bookmaker overlay is best-effort/);
   assert.doesNotMatch(app, /promoBetcris/);
   assert.doesNotMatch(app, /key: "betcris"/);

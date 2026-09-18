@@ -58,12 +58,12 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.ok(resetDeps, "promo page reset effect");
   assert.doesNotMatch(resetDeps[1], /\bboostPct\b/);
   assert.doesNotMatch(resetDeps[1], /\bstake\b/);
-  assert.match(resetDeps[1], /promoBook/);
-  assert.match(resetDeps[1], /numLegs/);
-  assert.match(resetDeps[1], /maxFinalOdds/);
-  assert.match(resetDeps[1], /maxLegOdds/);
-  assert.match(resetDeps[1], /minFinalOdds/);
-  assert.match(resetDeps[1], /minLegOdds/);
+  assert.match(resetDeps[1], /scanPromoBook/);
+  assert.match(resetDeps[1], /scanNumLegs/);
+  assert.match(resetDeps[1], /scanMaxFinalOdds/);
+  assert.match(resetDeps[1], /scanMaxLegOdds/);
+  assert.match(resetDeps[1], /scanMinFinalOdds/);
+  assert.match(resetDeps[1], /scanMinLegOdds/);
 }
 
 // ── Heavy scan is async + chunked, never inside useMemo / render
@@ -111,7 +111,7 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.match(app, /soccerBlocksPromoPool\(/);
   assert.match(app, /parsedPromoLegOddsBounds\(/);
   assert.match(app, /preferExistingPromoBoard\(/);
-  assert.match(app, /\[promoType, parlayLegPool, numLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey\]/);
+  assert.match(app, /\[promoType, parlayLegPool, scanNumLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey\]/);
   assert.match(app, /if \(!shouldCommitPromoScan\(/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
   assert.equal(
@@ -443,7 +443,7 @@ function namesOf(parlays) {
   assert.match(app, /const \[maxLegOdds, setMaxLegOdds\] = useState\(""\)/);
   assert.match(app, /parsedMaxFinal/);
   assert.match(app, /parsedMaxLeg/);
-  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, promoBook, promoSportFilter, parsedMinLeg, promoDateRange, parsedMaxLeg\)/);
+  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg\)/);
   assert.match(app, /maxFinalOdds: parsedMaxFinal/);
   assert.match(app, /parts\.push\(`max \$\{maxFinalOdds\}`\)/);
   assert.match(app, /parts\.push\(`legs max \$\{maxLegOdds\}`\)/);
