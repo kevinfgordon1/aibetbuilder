@@ -1562,7 +1562,7 @@ export default function App() {
         return;
       }
       // Betstamp BetCris overlay is best-effort: a blip omits those cells.
-      const betcrisSnap = await betcrisPromise;
+      const betcrisSnap = await betcrisPromise.catch(() => null);
       const featuredRows = overlayBetcrisOnCacheRows(featured.data, betcrisSnap);
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
@@ -1608,7 +1608,7 @@ export default function App() {
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      const featuredRows = overlayBetcrisOnCacheRows(featured.data, await betcrisPromise);
+      const featuredRows = overlayBetcrisOnCacheRows(featured.data, await betcrisPromise.catch(() => null));
       // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that
       // payload freezes Chrome. Promo still loads events with a 30-min lookback.
       setAllOddsData(applyTransformed(featuredRows, []));
