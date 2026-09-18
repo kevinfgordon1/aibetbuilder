@@ -66,13 +66,16 @@ export function parseSseChunk(buffer) {
   return { events, rest };
 }
 
-export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId } = {}) {
+export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId, bookIds } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);
   if (live === true) p.set("is_live", "true");
   if (live === false) p.set("is_live", "false");
   if (includeAlts === true) p.set("include_alts", "true");
   if (fixtureId != null && fixtureId !== "") p.set("fixture_id", String(fixtureId));
+  if (bookIds != null && bookIds !== "") {
+    p.set("book_ids", Array.isArray(bookIds) ? bookIds.join(",") : String(bookIds));
+  }
   return `/api/betstamp-markets?${p}`;
 }
 

@@ -77,6 +77,7 @@ import {
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
+import { fetchBookmakerSnapshot, leaguesForSports, overlayBookmakerOnCacheRows } from "./promoBookmaker.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -127,6 +128,7 @@ const ALL_BOOKS = [
   { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: null },
   { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
   { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
+  { key: "bookmaker", label: "Bookmaker", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
   { key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: "https://www.pinnacle.com/favicon.ico" },
   { key: "lowvig", label: "LowVig", color: "#8b5cf6", bg: "rgba(139,92,246,0.15)", logo: null },
   { key: "betus", label: "BetUS", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", logo: null },
@@ -141,7 +143,7 @@ const ALL_BOOKS = [
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
   "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-  "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
+  "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
 ]);
 
 const ADJUSTED_BOOK_NOTES = {
@@ -1551,6 +1553,7 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
+      const bookmakerPromise = fetchBookmakerSnapshot({ leagues: leaguesForSports(plan.featuredSports) });
       const { featured, events } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
@@ -1558,10 +1561,12 @@ export default function App() {
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      const featuredRows = featured.data;
+      // Betstamp Bookmaker overlay is best-effort: a blip omits those cells.
+      const bookmakerSnap = await bookmakerPromise.catch(() => null);
+      const featuredRows = overlayBookmakerOnCacheRows(featured.data, bookmakerSnap);
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
-      const eventRows = events.error ? [] : (events.data || []);
+      const eventRows = overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap);
       const nextBoard = applyTransformed(featuredRows, eventRows);
       setOddsSource((prev) => (
         boardHasPromoGames(nextBoard) || !prev.featured.length
@@ -1595,6 +1600,7 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
+      const bookmakerPromise = fetchBookmakerSnapshot({ leagues: leaguesForSports(plan.featuredSports) });
       const { featured, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
@@ -1602,7 +1608,7 @@ export default function App() {
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      const featuredRows = featured.data;
+      const featuredRows = overlayBookmakerOnCacheRows(featured.data, await bookmakerPromise.catch(() => null));
       // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that
       // payload freezes Chrome. Promo still loads events with a 30-min lookback.
       setAllOddsData(applyTransformed(featuredRows, []));
