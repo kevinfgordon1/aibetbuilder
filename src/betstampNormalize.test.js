@@ -444,7 +444,7 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
   assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
-  assert.ok(BETSTAMP_LIVE_RECONCILE_MS >= 10_000 && BETSTAMP_LIVE_RECONCILE_MS <= 20_000);
+  assert.equal(BETSTAMP_LIVE_RECONCILE_MS, 10_000);
   assert.ok(BETSTAMP_RECONCILE_CLEAR_GRACE_MS >= 0 && BETSTAMP_RECONCILE_CLEAR_GRACE_MS <= 10_000);
 }
 
