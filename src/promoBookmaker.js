@@ -391,6 +391,90 @@ export function bookmakerSnapshotUrl({ leagues } = {}) {
   });
 }
 
+// Bookmaker overlay is NFL/NCAAF only. Adding NBA while NFL is already
+// loaded must not re-download the ~1.4MB /api/betstamp-markets?league=nfl payload.
+export function bookmakerLeaguesForSports(sports) {
+  return [...new Set(
+    leaguesForSports(sports).map((l) => String(l).toUpperCase()).filter((l) => l === "NFL" || l === "NCAAF"),
+  )];
+}
+
+export function bookmakerSnapCovers(cached, neededLeagues) {
+  const needed = neededLeagues || [];
+  if (!needed.length) return true;
+  if (!cached || !cached.snap) return false;
+  const have = new Set((cached.leagues || []).map((l) => String(l).toUpperCase()));
+  return needed.every((l) => have.has(String(l).toUpperCase()));
+}
+
+export function missingBookmakerLeagues(cached, neededLeagues) {
+  const have = new Set((cached?.leagues || []).map((l) => String(l).toUpperCase()));
+  return (neededLeagues || []).filter((l) => !have.has(String(l).toUpperCase()));
+}
+
+function bookmakerMarketKey(m) {
+  return `${m?.fixture_id ?? ""}\0${m?.bet_type ?? ""}\0${m?.side ?? ""}\0${m?.number ?? ""}\0${m?.period ?? ""}`;
+}
+
+export function mergeBookmakerSnapshots(prev, next) {
+  if (!next) return prev || null;
+  if (!prev) return next;
+  const fixtures = [];
+  const fixtureIds = new Set();
+  for (const f of [...asList(prev.fixtures, ["fixtures", "data"]), ...asList(next.fixtures, ["fixtures", "data"])]) {
+    const id = f && f.id;
+    if (id != null) {
+      if (fixtureIds.has(id)) continue;
+      fixtureIds.add(id);
+    }
+    fixtures.push(f);
+  }
+  const teams = [];
+  const teamIds = new Set();
+  for (const t of [...asList(prev.teams, ["teams", "data"]), ...asList(next.teams, ["teams", "data"])]) {
+    const id = t && t.id;
+    if (id != null) {
+      if (teamIds.has(id)) continue;
+      teamIds.add(id);
+    }
+    teams.push(t);
+  }
+  const markets = new Map();
+  for (const m of [...asList(prev.markets, ["markets", "data"]), ...asList(next.markets, ["markets", "data"])]) {
+    if (!m) continue;
+    markets.set(bookmakerMarketKey(m), m);
+  }
+  return { ok: true, fixtures, teams, markets: [...markets.values()] };
+}
+
+export async function resolveBookmakerSnapshot({
+  sports,
+  cached,
+  forceRefresh = false,
+  fetchFn,
+  timeoutMs,
+} = {}) {
+  const needed = bookmakerLeaguesForSports(sports);
+  if (!needed.length) return { snap: null, leagues: [], fromCache: true };
+  if (!forceRefresh && bookmakerSnapCovers(cached, needed)) {
+    return { snap: cached.snap, leagues: cached.leagues, fromCache: true };
+  }
+  const missing = forceRefresh ? needed : missingBookmakerLeagues(cached, needed);
+  const fresh = await fetchBookmakerSnapshot({ leagues: missing, fetchFn, timeoutMs });
+  if (!fresh) {
+    if (cached?.snap) return { snap: cached.snap, leagues: cached.leagues, fromCache: true };
+    return { snap: null, leagues: [], fromCache: false };
+  }
+  if (forceRefresh || !cached?.snap) {
+    return { snap: fresh, leagues: missing, fromCache: false };
+  }
+  return {
+    snap: mergeBookmakerSnapshots(cached.snap, fresh),
+    leagues: [...new Set([...(cached.leagues || []), ...missing])],
+    fromCache: false,
+  };
+}
+
 export async function fetchBookmakerSnapshot({
   leagues,
   fetchFn = fetch,

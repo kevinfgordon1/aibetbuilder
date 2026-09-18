@@ -76,7 +76,7 @@ import {
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
-import { fetchBookmakerSnapshot, leaguesForSports, overlayBookmakerOnCacheRows } from "./promoBookmaker.js";
+import { overlayBookmakerOnCacheRows, resolveBookmakerSnapshot } from "./promoBookmaker.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -1408,6 +1408,7 @@ export default function App() {
   const [promoScanBusy, setPromoScanBusy] = useState(false);
   const [lastCompletedScanKey, setLastCompletedScanKey] = useState(null);
   const promoFetchGen = useRef(0);
+  const bookmakerCacheRef = useRef({ snap: null, leagues: [] });
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
   const soccerPmNoGen = useRef(0);
@@ -1546,10 +1547,12 @@ export default function App() {
     return mergeOddsData([...featured, ...eventTransformed]);
   };
 
-  const loadPromoBoard = async () => {
+  const loadPromoBoard = async ({ background = false, forceBookmaker = false } = {}) => {
     const gen = ++promoFetchGen.current;
-    setExcludedPromoLegs(new Set());
-    setPromoLoading(true);
+    if (!background) {
+      setExcludedPromoLegs(new Set());
+      setPromoLoading(true);
+    }
     const plan = buildOddsQueryPlan({
       mode: "promo",
       promoSports,
@@ -1557,7 +1560,14 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
-      const bookmakerPromise = fetchBookmakerSnapshot({ leagues: leaguesForSports(plan.featuredSports) });
+      const bookmakerPromise = resolveBookmakerSnapshot({
+        sports: plan.featuredSports,
+        cached: bookmakerCacheRef.current,
+        forceRefresh: forceBookmaker,
+      }).then((resolved) => {
+        if (resolved.snap) bookmakerCacheRef.current = { snap: resolved.snap, leagues: resolved.leagues };
+        return resolved.snap;
+      });
       const { featured, events } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
@@ -1606,7 +1616,14 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
-      const bookmakerPromise = fetchBookmakerSnapshot({ leagues: leaguesForSports(plan.featuredSports) });
+      const bookmakerPromise = resolveBookmakerSnapshot({
+        sports: plan.featuredSports,
+        cached: bookmakerCacheRef.current,
+        forceRefresh: true,
+      }).then((resolved) => {
+        if (resolved.snap) bookmakerCacheRef.current = { snap: resolved.snap, leagues: resolved.leagues };
+        return resolved.snap;
+      });
       const { featured, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
       if (!featuredRowsUsable(featured)) {
@@ -1640,7 +1657,7 @@ export default function App() {
       return;
     }
     if (shouldFetchPromoOdds({ tab, forceRefresh, promoLoaded })) {
-      await loadPromoBoard();
+      await loadPromoBoard({ forceBookmaker: forceRefresh });
     }
   };
 
@@ -1659,7 +1676,7 @@ export default function App() {
 
   useEffect(() => {
     if (!promoSportsNeedNetworkReload(promoSports, promoLoadedSports, promoLoaded)) return;
-    const id = setTimeout(() => { loadPromoBoard(); }, PROMO_SPORT_RELOAD_DEBOUNCE_MS);
+    const id = setTimeout(() => { loadPromoBoard({ background: true }); }, PROMO_SPORT_RELOAD_DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [promoSports]);
 

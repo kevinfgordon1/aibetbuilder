@@ -74,7 +74,7 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
   assert.match(app, /PROMO_CARD_LAYER_STYLE/);
   assert.match(app, /PROMO_SPORT_RELOAD_DEBOUNCE_MS/);
   assert.match(app, /promoSportsNeedNetworkReload\(promoSports, promoLoadedSports, promoLoaded\)/);
-  assert.match(app, /setTimeout\(\(\) => \{ loadPromoBoard\(\); \}, PROMO_SPORT_RELOAD_DEBOUNCE_MS\)/);
+  assert.match(app, /setTimeout\(\(\) => \{ loadPromoBoard\(\{ background: true \}\); \}, PROMO_SPORT_RELOAD_DEBOUNCE_MS\)/);
   assert.match(app, /buildAllLegsAllBooks\(allOddsData, null, deferredEvDateRange\)/);
   assert.doesNotMatch(
     app,
@@ -86,8 +86,11 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
   // loadPromoBoard / loadFullBoard (network), never on matching-book rematch.
   assert.doesNotMatch(app, /\/api\/betstamp-markets/);
   assert.doesNotMatch(app, /\/api\/fetch-odds/);
-  const fetchBookmakerAt = [...app.matchAll(/fetchBookmakerSnapshot\(/g)].map((m) => m.index);
-  assert.equal(fetchBookmakerAt.length, 2, "Bookmaker snapshot only on promo + full board loads");
+  assert.match(app, /resolveBookmakerSnapshot\(/);
+  assert.match(app, /loadPromoBoard\(\{ background: true \}\)/);
+  assert.match(app, /loadPromoBoard\(\{ forceBookmaker: forceRefresh \}\)/);
+  assert.match(app, /if \(!background\) \{\s*setExcludedPromoLegs\(new Set\(\)\);\s*setPromoLoading\(true\);/);
+  assert.doesNotMatch(app, /fetchBookmakerSnapshot\(\{/);
 }
 
 // Reset effect: team / odds text use debounced values (not every keystroke)
