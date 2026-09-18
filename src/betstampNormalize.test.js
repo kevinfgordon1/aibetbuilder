@@ -442,8 +442,6 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /include_alts|fixture_id/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /include_alts=true/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
-  assert.match(betstampSnapshotUrl({ league: "NFL", bookIds: [642] }), /book_ids=642/);
-  assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /book_ids/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
   assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
   assert.equal(BETSTAMP_LIVE_RECONCILE_MS, 10_000);

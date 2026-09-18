@@ -85,11 +85,11 @@ function futureGame() {
   assert.deepEqual(chips.map((b) => b.key), [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
-    "betcris", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
+    "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
   ]);
   assert.equal(chips.find((b) => b.key === "pinnacle")?.label, "Pinnacle");
   assert.equal(chips.find((b) => b.key === "betus")?.label, "BetUS");
-  for (const key of ["betanysports", "betopenly", "lowvig"]) {
+  for (const key of ["betanysports", "betopenly", "lowvig", "betcris"]) {
     assert.equal(TRUSTED_BOOK_KEYS.has(key), false);
     assert.ok(!chips.some((b) => b.key === key));
   }
@@ -250,7 +250,7 @@ function futureGame() {
   assert.ok(evTrusted[1].includes("draftkings"));
   assert.ok(evTrusted[1].includes("pinnacle"));
   assert.ok(evTrusted[1].includes("betus"));
-  assert.ok(evTrusted[1].includes("betcris"));
+  assert.ok(!evTrusted[1].includes("betcris"));
   assert.ok(!evTrusted[1].includes("betanysports"));
   assert.ok(!evTrusted[1].includes("betopenly"));
   assert.match(ev, /this EV-scanner copy always uses the full TRUSTED_BOOK_KEYS set/);
