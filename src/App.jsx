@@ -76,7 +76,7 @@ import {
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
-import { overlayBookmakerOnCacheRows, resolveBookmakerSnapshot } from "./promoBookmaker.js";
+import { overlayBookmakerOnCacheRows, readBookmakerClientCache, resolveBookmakerSnapshot } from "./promoBookmaker.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -1408,7 +1408,7 @@ export default function App() {
   const [promoScanBusy, setPromoScanBusy] = useState(false);
   const [lastCompletedScanKey, setLastCompletedScanKey] = useState(null);
   const promoFetchGen = useRef(0);
-  const bookmakerCacheRef = useRef({ snap: null, leagues: [] });
+  const bookmakerCacheRef = useRef(readBookmakerClientCache() || { snap: null, leagues: [] });
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
   const soccerPmNoGen = useRef(0);
@@ -1560,12 +1560,22 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
+      // Refresh sets forceBookmaker and bypasses the 5-min client TTL.
+      // /api/betstamp-markets still serves its own 5-min cache (no ?refresh=1),
+      // so Refresh stays fast unless the server snap is stale. Sport chips
+      // and remounts pass forceBookmaker=false and reuse memory/sessionStorage.
       const bookmakerPromise = resolveBookmakerSnapshot({
         sports: plan.featuredSports,
         cached: bookmakerCacheRef.current,
         forceRefresh: forceBookmaker,
       }).then((resolved) => {
-        if (resolved.snap) bookmakerCacheRef.current = { snap: resolved.snap, leagues: resolved.leagues };
+        if (resolved.snap) {
+          bookmakerCacheRef.current = {
+            snap: resolved.snap,
+            leagues: resolved.leagues,
+            fetchedAtByLeague: resolved.fetchedAtByLeague,
+          };
+        }
         return resolved.snap;
       });
       const { featured, events } = await queryOddsCaches(supabase, plan);
@@ -1621,7 +1631,13 @@ export default function App() {
         cached: bookmakerCacheRef.current,
         forceRefresh: true,
       }).then((resolved) => {
-        if (resolved.snap) bookmakerCacheRef.current = { snap: resolved.snap, leagues: resolved.leagues };
+        if (resolved.snap) {
+          bookmakerCacheRef.current = {
+            snap: resolved.snap,
+            leagues: resolved.leagues,
+            fetchedAtByLeague: resolved.fetchedAtByLeague,
+          };
+        }
         return resolved.snap;
       });
       const { featured, futures } = await queryOddsCaches(supabase, plan);

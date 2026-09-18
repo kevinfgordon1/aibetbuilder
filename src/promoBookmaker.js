@@ -36,6 +36,14 @@ export const BOOKMAKER_BOOK_ID = 642;
 export const BOOKMAKER_COMMENCE_WINDOW_MS = 12 * 60 * 60 * 1000;
 export const BOOKMAKER_FETCH_TIMEOUT_MS = 8000;
 export const BOOKMAKER_TITLE = "Bookmaker";
+// Same ~5 min window as /api/betstamp-markets + The Odds API cron.
+// Loads / sport chips / remounts reuse a fresh snap (memory + sessionStorage).
+// Manual Refresh sets forceRefresh and bypasses this client TTL; the server
+// cache still serves Betstamp within 5 minutes so Refresh stays fast.
+export const BOOKMAKER_CACHE_TTL_MS = 5 * 60 * 1000;
+export const BOOKMAKER_CACHE_STORAGE_KEY = "aibetbuilder.bookmakerSnap.v1";
+
+let memoryBookmakerCache = null;
 
 const TEAM_STOP = new Set(["the", "and", "of", "university", "univ", "college"]);
 const TEAM_QUALIFIERS = new Set(["state", "st", "tech", "am", "international"]);
@@ -412,6 +420,102 @@ export function missingBookmakerLeagues(cached, neededLeagues) {
   return (neededLeagues || []).filter((l) => !have.has(String(l).toUpperCase()));
 }
 
+function defaultBookmakerStorage() {
+  try {
+    if (typeof sessionStorage !== "undefined") return sessionStorage;
+  } catch {
+    /* private mode / SSR */
+  }
+  return null;
+}
+
+export function mergeFetchedAtByLeague(a, b) {
+  const out = { ...(a || {}) };
+  for (const [rawKey, rawVal] of Object.entries(b || {})) {
+    const key = String(rawKey).toUpperCase();
+    const n = Number(rawVal);
+    if (!Number.isFinite(n)) continue;
+    if (!Number.isFinite(Number(out[key])) || n > Number(out[key])) out[key] = n;
+  }
+  return out;
+}
+
+export function bookmakerLeagueFetchedAt(cached, league) {
+  const key = String(league || "").toUpperCase();
+  const map = cached && cached.fetchedAtByLeague;
+  if (map && Number.isFinite(Number(map[key]))) return Number(map[key]);
+  if (cached && Number.isFinite(Number(cached.fetchedAt))) return Number(cached.fetchedAt);
+  const iso = cached && cached.snap && cached.snap.fetchedAt;
+  const parsed = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function bookmakerLeagueIsFresh(cached, league, now = Date.now(), ttlMs = BOOKMAKER_CACHE_TTL_MS) {
+  const at = bookmakerLeagueFetchedAt(cached, league);
+  return at > 0 && (now - at) < ttlMs;
+}
+
+export function bookmakerSnapIsFresh(cached, neededLeagues, now = Date.now(), ttlMs = BOOKMAKER_CACHE_TTL_MS) {
+  const needed = neededLeagues || [];
+  if (!needed.length) return true;
+  if (!cached || !cached.snap) return false;
+  return needed.every((l) => bookmakerLeagueIsFresh(cached, l, now, ttlMs));
+}
+
+export function staleBookmakerLeagues(cached, neededLeagues, now = Date.now(), ttlMs = BOOKMAKER_CACHE_TTL_MS) {
+  return (neededLeagues || []).filter((l) => !bookmakerLeagueIsFresh(cached, l, now, ttlMs));
+}
+
+export function coalesceBookmakerCache(cached, store) {
+  if (cached && cached.snap) {
+    if (store && store.snap) {
+      return {
+        snap: mergeBookmakerSnapshots(store.snap, cached.snap),
+        leagues: [...new Set([...(store.leagues || []), ...(cached.leagues || [])])],
+        fetchedAtByLeague: mergeFetchedAtByLeague(store.fetchedAtByLeague, cached.fetchedAtByLeague),
+        fetchedAt: Math.max(Number(store.fetchedAt) || 0, Number(cached.fetchedAt) || 0) || undefined,
+      };
+    }
+    return cached;
+  }
+  return store || null;
+}
+
+export function readBookmakerClientCache({ storage } = {}) {
+  if (memoryBookmakerCache && memoryBookmakerCache.snap) return memoryBookmakerCache;
+  const store = storage !== undefined ? storage : defaultBookmakerStorage();
+  if (!store || typeof store.getItem !== "function") return null;
+  try {
+    const raw = store.getItem(BOOKMAKER_CACHE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.snap) return null;
+    memoryBookmakerCache = parsed;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeBookmakerClientCache(entry, { storage } = {}) {
+  if (!entry || !entry.snap) return;
+  memoryBookmakerCache = entry;
+  const store = storage !== undefined ? storage : defaultBookmakerStorage();
+  if (!store || typeof store.setItem !== "function") return;
+  try {
+    store.setItem(BOOKMAKER_CACHE_STORAGE_KEY, JSON.stringify(entry));
+  } catch {
+    /* quota / private mode — memory still covers remounts in this tab */
+  }
+}
+
+export function resetBookmakerClientCache({ storage, clearStorage = true } = {}) {
+  memoryBookmakerCache = null;
+  if (!clearStorage) return;
+  const store = storage !== undefined ? storage : defaultBookmakerStorage();
+  try { store?.removeItem?.(BOOKMAKER_CACHE_STORAGE_KEY); } catch { /* ignore */ }
+}
+
 function bookmakerMarketKey(m) {
   return `${m?.fixture_id ?? ""}\0${m?.bet_type ?? ""}\0${m?.side ?? ""}\0${m?.number ?? ""}\0${m?.period ?? ""}`;
 }
@@ -453,26 +557,58 @@ export async function resolveBookmakerSnapshot({
   forceRefresh = false,
   fetchFn,
   timeoutMs,
+  now = Date.now(),
+  ttlMs = BOOKMAKER_CACHE_TTL_MS,
+  persist = true,
+  storage,
 } = {}) {
   const needed = bookmakerLeaguesForSports(sports);
-  if (!needed.length) return { snap: null, leagues: [], fromCache: true };
-  if (!forceRefresh && bookmakerSnapCovers(cached, needed)) {
-    return { snap: cached.snap, leagues: cached.leagues, fromCache: true };
+  if (!needed.length) return { snap: null, leagues: [], fetchedAtByLeague: {}, fromCache: true };
+  const store = persist ? readBookmakerClientCache({ storage }) : null;
+  const effective = coalesceBookmakerCache(cached, store);
+  if (!forceRefresh && bookmakerSnapCovers(effective, needed) && bookmakerSnapIsFresh(effective, needed, now, ttlMs)) {
+    const hit = {
+      snap: effective.snap,
+      leagues: effective.leagues,
+      fetchedAtByLeague: effective.fetchedAtByLeague || {},
+      fromCache: true,
+    };
+    if (persist) writeBookmakerClientCache(hit, { storage });
+    return hit;
   }
-  const missing = forceRefresh ? needed : missingBookmakerLeagues(cached, needed);
+  const missing = forceRefresh
+    ? needed
+    : [...new Set([
+      ...missingBookmakerLeagues(effective, needed),
+      ...staleBookmakerLeagues(effective, needed, now, ttlMs),
+    ])];
   const fresh = await fetchBookmakerSnapshot({ leagues: missing, fetchFn, timeoutMs });
   if (!fresh) {
-    if (cached?.snap) return { snap: cached.snap, leagues: cached.leagues, fromCache: true };
-    return { snap: null, leagues: [], fromCache: false };
+    if (effective?.snap) {
+      return {
+        snap: effective.snap,
+        leagues: effective.leagues,
+        fetchedAtByLeague: effective.fetchedAtByLeague || {},
+        fromCache: true,
+      };
+    }
+    return { snap: null, leagues: [], fetchedAtByLeague: {}, fromCache: false };
   }
-  if (forceRefresh || !cached?.snap) {
-    return { snap: fresh, leagues: missing, fromCache: false };
+  const fetchedAtByLeague = { ...(effective?.fetchedAtByLeague || {}) };
+  for (const league of missing) fetchedAtByLeague[String(league).toUpperCase()] = now;
+  let next;
+  if (forceRefresh || !effective?.snap) {
+    next = { snap: fresh, leagues: missing, fetchedAtByLeague, fromCache: false };
+  } else {
+    next = {
+      snap: mergeBookmakerSnapshots(effective.snap, fresh),
+      leagues: [...new Set([...(effective.leagues || []), ...missing])],
+      fetchedAtByLeague,
+      fromCache: false,
+    };
   }
-  return {
-    snap: mergeBookmakerSnapshots(cached.snap, fresh),
-    leagues: [...new Set([...(cached.leagues || []), ...missing])],
-    fromCache: false,
-  };
+  if (persist) writeBookmakerClientCache(next, { storage });
+  return next;
 }
 
 export async function fetchBookmakerSnapshot({
