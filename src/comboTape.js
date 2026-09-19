@@ -481,6 +481,26 @@ export function skipTapeAmerican(row) {
   });
 }
 
+// Row-level later-filled bit — same states as skipLockLine / missLockLine.
+// Missing tape_match is "unknown", not unfilled. tape_match=none is no print.
+export function laterFillOf(row) {
+  if (!row) return "unknown";
+  if (row.skipFill === "filled" || row.skipFill === "none" || row.skipFill === "unknown") {
+    return row.skipFill;
+  }
+  return skipFillState(row.skipTape || row.outcome || row.submission || row);
+}
+
+export function formatLaterFilledSuffix(row) {
+  const state = laterFillOf(row);
+  if (state === "filled") {
+    const am = skipTapeAmerican(row);
+    return am ? `later filled ${am}` : "later filled";
+  }
+  if (state === "none") return "no print";
+  return "later filled unknown";
+}
+
 export function formatSkipReason(row) {
   const skipText = (row && row.skip && row.skip.text)
     || (row && row.bucket === "oversized" ? "oversized" : "skipped");
@@ -488,8 +508,7 @@ export function formatSkipReason(row) {
     const am = skipTapeAmerican(row);
     return am ? `skipped, later filled ${am}` : "skipped, later filled";
   }
-  if (row && row.skipFill === "none") return `${skipText} · no print`;
-  return skipText;
+  return `${skipText} · ${formatLaterFilledSuffix(row)}`;
 }
 
 export function skipFillSummary(stats) {
@@ -593,11 +612,13 @@ export function classifyMiss({ match, outcome, submission, fill, filled = 0, cei
         const beat = beatFromOutcome(outcome);
         return { bucket: "outbid", reason: "outbid", missed: true, beat, tape: beat.known };
       }
-      if (reason === "too_slow") return { bucket: "too_slow", reason: "too_slow", missed: true };
-      if (reason === "no_taker" || reason === "no_purchase") {
-        return { bucket: "no_taker", reason: "no_taker", missed: true };
+      if (reason === "too_slow") {
+        return { bucket: "too_slow", reason: "too_slow", missed: true, skipFill: skipFillState(outcome), skipTape: outcome };
       }
-      return { bucket: "lost", reason: "lost", missed: true };
+      if (reason === "no_taker" || reason === "no_purchase") {
+        return { bucket: "no_taker", reason: "no_taker", missed: true, skipFill: skipFillState(outcome), skipTape: outcome };
+      }
+      return { bucket: "lost", reason: "lost", missed: true, skipFill: skipFillState(outcome), skipTape: outcome };
     }
     return { bucket: "quoted", reason: outcome.outcome || "quoted", missed: false };
   }
@@ -605,11 +626,13 @@ export function classifyMiss({ match, outcome, submission, fill, filled = 0, cei
     return { bucket: "awaiting", reason: "open", missed: false };
   }
   if (isQuotedLost(submission)) {
+    const tape = skipTapeSource(match, submission);
+    const later = { skipFill: skipFillState(tape), skipTape: tape };
     const status = normStatus(submission.status);
     if (status === "cancelled" || status === "canceled") {
-      return { bucket: "no_taker", reason: "cancelled", missed: true };
+      return { bucket: "no_taker", reason: "cancelled", missed: true, ...later };
     }
-    return { bucket: "no_taker", reason: "quoted · no take", missed: true };
+    return { bucket: "no_taker", reason: "quoted · no take", missed: true, ...later };
   }
   // skip_reason lives on combo_submissions. A match-only row would otherwise
   // fall through to generic "skipped" even when the declined twin has a code.

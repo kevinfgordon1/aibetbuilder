@@ -52,6 +52,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   });
   assert.equal(skip.key, "skipped");
   assert.match(skip.label, /skipped/);
+  assert.match(skip.label, /later filled unknown/);
 }
 {
   const poly = attemptFromTapeRow({
@@ -62,17 +63,66 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     venueKey: "polymarket",
   });
   assert.equal(poly.key, "skipped");
-  assert.equal(poly.label, "skipped · game started");
+  assert.equal(poly.label, "skipped · game started · later filled unknown");
   assert.equal(poly.venueKey, "polymarket");
+}
+{
+  const none = attemptFromTapeRow({
+    bucket: "oversized",
+    reason: "oversized",
+    skipFill: "none",
+    skip: { kind: "oversized", text: "skipped oversized 5740 (need ≤633)" },
+  });
+  assert.equal(none.label, "skipped oversized 5740 (need ≤633) · no print");
+}
+{
+  const later = attemptFromTapeRow({
+    bucket: "skipped",
+    reason: "skipped",
+    skipFill: "filled",
+    tapeNo: 0.8,
+    skip: { kind: "skipped", text: "skipped · cap reached" },
+  });
+  assert.equal(later.label, "skipped, later filled +400");
 }
 {
   const c = attemptFromTapeRow({ bucket: "no_taker", reason: "cancelled" });
   assert.equal(c.key, "cancelled");
+  assert.equal(c.label, "cancelled");
 }
 {
   const u = attemptFromTapeRow({ bucket: "no_taker", reason: "quoted · no take", contracts: 80 });
   assert.equal(u.key, "unfilled");
   assert.match(u.label, /unfilled/);
+  assert.match(u.label, /later filled unknown/);
+}
+{
+  const missNone = attemptFromTapeRow({
+    bucket: "no_taker",
+    reason: "quoted · no take",
+    skipFill: "none",
+    contracts: 80,
+  });
+  assert.equal(missNone.label, "unfilled · quoted, no take · no print");
+}
+{
+  const missLater = attemptFromTapeRow({
+    bucket: "no_taker",
+    reason: "quoted · no take",
+    skipFill: "filled",
+    tapeNo: 0.91,
+    contracts: 80,
+  });
+  assert.equal(missLater.label, "unfilled · quoted, no take · later filled +1011");
+}
+{
+  const outbid = attemptFromTapeRow({
+    bucket: "outbid",
+    reason: "outbid",
+    tape: true,
+    beat: { known: true, cents: 3 },
+  });
+  assert.equal(outbid.label, "unfilled · outbid");
 }
 
 // Ari+Jax — armed + never matched (no RFQs yet)
@@ -118,8 +168,13 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.equal(hist.events.some((e) => e.key === "filled"), false);
   const polySkip = hist.events.find((e) => e.row && e.row.rfqId === "r3");
   assert.ok(polySkip);
-  assert.equal(polySkip.label, "skipped · different leg count");
+  assert.equal(polySkip.label, "skipped · different leg count · later filled unknown");
   assert.equal(polySkip.venueKey, "polymarket");
+  const oversized = hist.events.find((e) => e.row && e.row.rfqId === "r1");
+  assert.match(oversized.label, /later filled unknown/);
+  const quotedMiss = hist.events.find((e) => e.row && e.row.rfqId === "r2");
+  assert.match(quotedMiss.label, /unfilled/);
+  assert.match(quotedMiss.label, /later filled unknown/);
 }
 
 {
@@ -139,7 +194,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   const fundsSkip = hist.events.find((e) => e.row && e.row.rfqId === "r-bal");
   assert.ok(fundsSkip);
   assert.equal(fundsSkip.key, "skipped");
-  assert.equal(fundsSkip.label, "skipped · insufficient funds");
+  assert.equal(fundsSkip.label, "skipped · insufficient funds · later filled unknown");
 }
 
 {
@@ -172,6 +227,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     now: Date.parse("2026-09-05T20:00:00Z"),
   });
   assert.equal(attemptSummaryLine(skipHist), "2 skipped · later filled 0 · 2 no print");
+  assert.ok(skipHist.events.filter((e) => e.key === "skipped").every((e) => /no print/.test(e.label)));
   assert.deepEqual(attemptSummaryParts(skipHist), {
     skip: "2 skipped · later filled 0 · 2 no print",
     miss: null,
@@ -201,6 +257,47 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   });
   assert.equal(attemptSummaryLine(missHist), "16 missed · later filled 0 · 16 no taker");
   assert.equal(attemptSummaryFilled(missHist), false);
+  assert.ok(missHist.events.filter((e) => e.key === "unfilled").every((e) => /later filled unknown/.test(e.label)));
+}
+
+// Screenshot lock: skipped oversized 5740 (need ≤633) · later filled unknown
+{
+  const shot = buildLockAttempts({
+    parlay: {
+      id: "p-kc-mil-phi",
+      active: true,
+      created_at: "2026-09-15T18:06:32Z",
+      starts_at: "2026-09-16T00:10:00Z",
+      max_contracts: 633,
+    },
+    submissions: [
+      {
+        parlay_id: "p-kc-mil-phi",
+        rfq_id: "rested",
+        status: "quoted",
+        quote_id: "q-live",
+        is_live: true,
+        contracts: 13,
+        created_at: "2026-09-15T18:06:32Z",
+      },
+      {
+        parlay_id: "p-kc-mil-phi",
+        rfq_id: "oversize",
+        status: "declined",
+        skip_reason: "oversized",
+        contracts: 5740,
+        created_at: "2026-09-15T20:23:00Z",
+      },
+    ],
+    now: Date.parse("2026-09-15T20:30:00Z"),
+  });
+  assert.equal(attemptSummaryLine(shot), "1 skipped · later filled unknown");
+  assert.equal(shot.events[0].label, "armed");
+  const rested = shot.events.find((e) => e.row && e.row.rfqId === "rested");
+  assert.equal(rested.label, "quoted · rested");
+  const over = shot.events.find((e) => e.row && e.row.rfqId === "oversize");
+  assert.match(over.label, /skipped oversized 5740 \(need ≤633\)/);
+  assert.match(over.label, /later filled unknown/);
 }
 
 {
