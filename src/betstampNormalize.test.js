@@ -40,12 +40,15 @@ import {
   bestLineUpdatedAt,
   marketUpdatedAtMs,
 } from "./betstampNormalize.js";
-import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./betstampBooks.js";
+import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS, BETSTAMP_PUBLIC_BOOK_IDS, visibleBetstampBooks } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
 import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS, oddsBoardHideKey } from "./oddsBoard.js";
 
 assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194, 196]);
+assert.deepEqual(BETSTAMP_PUBLIC_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
 assert.equal(BETSTAMP_TRIAL_BOOKS.length, 12);
+assert.equal(visibleBetstampBooks(null).some((b) => b.key === "underdog_predict"), false);
+assert.equal(visibleBetstampBooks({ email: "kev120909@gmail.com" }).some((b) => b.key === "underdog_predict"), true);
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.key, "underdog_predict");
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.label, "Underdog Predict");
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.exchange, true);
@@ -458,6 +461,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(betstampSnapshotUrl({ league: "NFL", bookIds: [642] }), /book_ids=642/);
   assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /book_ids/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
+  assert.match(betstampStreamUrl({ league: "NFL", live: true, bookIds: [100, 200, 196] }), /book_ids=100%2C200%2C196/);
+  assert.doesNotMatch(betstampStreamUrl({ league: "NFL", live: true }), /book_ids/);
   assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
   assert.equal(BETSTAMP_LIVE_RECONCILE_MS, 10_000);
   assert.ok(BETSTAMP_RECONCILE_CLEAR_GRACE_MS >= 0 && BETSTAMP_RECONCILE_CLEAR_GRACE_MS <= 10_000);
@@ -669,7 +674,9 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(app, /import BetstampOddsBoard from "\.\/BetstampOddsBoard\.jsx"/);
   assert.match(app, /activeTab === "odds" && <OddsBoard/);
   assert.match(app, /activeTab === "oddsBetstamp" && canSeeOwnerTools\(user\)/);
-  assert.match(app, /<BetstampOddsBoard/);
+  assert.match(app, /<BetstampOddsBoard user=\{user\}/);
+  assert.match(stamp, /visibleBetstampBooks/);
+  assert.match(stamp, /bookIds/);
   assert.match(app, /onNavTabClick\("oddsBetstamp"/);
   assert.match(app, /href=\{tabHash\("oddsBetstamp"\)\}/);
   assert.match(app, />New Odds Board<\/a>/);
@@ -741,6 +748,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(envEx, /BETSTAMP_API_KEY=\S/);
   assert.match(envEx, /BETSTAMP_TIMEDELTA=/);
   assert.doesNotMatch(envEx, /BETSTAMP_TIMEDELTA=\S/);
+  assert.match(envEx, /VITE_UNDERDOG_PREDICT_ALLOWLIST=/);
   assert.match(envEx, /VITE_BETSTAMP_LIVE_RECONCILE_MS=/);
   assert.doesNotMatch(envEx, /VITE_BETSTAMP_LIVE_RECONCILE_MS=\d/);
   assert.match(vercel, /api\/betstamp-stream\.js/);

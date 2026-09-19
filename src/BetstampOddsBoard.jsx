@@ -15,11 +15,11 @@ import {
   oddsBoardSidePoint,
 } from "./oddsBoard.js";
 import {
-  BETSTAMP_TRIAL_BOOKS,
   BETSTAMP_SPORTS,
   BETSTAMP_DEFAULT_SPORT,
   bookByKey,
   leagueForSport,
+  visibleBetstampBooks,
 } from "./betstampBooks.js";
 import {
   gamesFromBetstampSnapshot,
@@ -252,8 +252,9 @@ function ageTone(ms) {
   return "#f97316";
 }
 
-export default function BetstampOddsBoard() {
-  const books = BETSTAMP_TRIAL_BOOKS;
+export default function BetstampOddsBoard({ user = null } = {}) {
+  const books = useMemo(() => visibleBetstampBooks(user), [user]);
+  const bookIds = useMemo(() => books.map((b) => b.id), [books]);
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
@@ -281,6 +282,10 @@ export default function BetstampOddsBoard() {
   useEffect(() => { gamesRef.current = games; }, [games]);
 
   useEffect(() => {
+    setSelectedBooks(new Set(books.map((b) => b.key)));
+  }, [books]);
+
+  useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 200);
     return () => clearInterval(id);
   }, []);
@@ -298,7 +303,7 @@ export default function BetstampOddsBoard() {
 
     const applySnapshot = async ({ showLoading }) => {
       try {
-        const res = await fetch(betstampSnapshotUrl({ league, live: liveOnly }), {
+        const res = await fetch(betstampSnapshotUrl({ league, live: liveOnly, bookIds }), {
           signal: ctrl.signal,
           cache: "no-store",
         });
@@ -366,7 +371,7 @@ export default function BetstampOddsBoard() {
       pollTimer = setInterval(() => {
         if (pollInFlight || cancelled) return;
         pollInFlight = true;
-        fetch(betstampSnapshotUrl({ league, live: true }), {
+        fetch(betstampSnapshotUrl({ league, live: true, bookIds }), {
           signal: ctrl.signal,
           cache: "no-store",
         })
@@ -402,7 +407,7 @@ export default function BetstampOddsBoard() {
       ctrl.signal.addEventListener("abort", onAbort);
       try {
         await consumeBetstampStream({
-          url: betstampStreamUrl({ league, live: true }),
+          url: betstampStreamUrl({ league, live: true, bookIds }),
           signal: streamCtrl.signal,
           onStatus: (s) => { if (!cancelled && gen === fetchGen.current) setStreamStatus(s); },
           onEvent: (ev) => {
@@ -447,7 +452,7 @@ export default function BetstampOddsBoard() {
       clearTimeout(timer);
       clearInterval(pollTimer);
     };
-  }, [boardSport, liveOnly]);
+  }, [boardSport, liveOnly, bookIds]);
 
   useEffect(() => {
     altFetchGen.current += 1;
@@ -494,6 +499,7 @@ export default function BetstampOddsBoard() {
           live: liveOnly,
           includeAlts: true,
           fixtureId: game.id,
+          bookIds,
         }), { cache: "no-store" });
         const body = await res.json().catch(() => ({}));
         if (gen !== altFetchGen.current) return;

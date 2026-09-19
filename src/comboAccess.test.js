@@ -5,10 +5,17 @@ import { fileURLToPath } from "node:url";
 import {
   OWNER_EMAIL,
   COMBO_LOCKS_ALLOWLIST_ENV,
+  UNDERDOG_PREDICT_ALLOWLIST_ENV,
+  UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT,
   parseComboLocksAllowlist,
   comboLocksAllowlist,
   canSeeComboLocks,
   canSeeOwnerTools,
+  canSeeUnderdogPredict,
+  underdogPredictAllowlist,
+  visibleTrustedBookKeys,
+  visiblePromoBooks,
+  matchingKeysVisibleToUser,
   profileShowsComboPnl,
   parseAppHash,
   comboLockHash,
@@ -17,9 +24,12 @@ import {
   serializeAppHash,
   resolveAppHash,
 } from "./comboAccess.js";
+import { visibleBetstampBooks, visibleBetstampBookIds, UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY, BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
 assert.equal(OWNER_EMAIL, "kev120909@gmail.com");
 assert.equal(COMBO_LOCKS_ALLOWLIST_ENV, "VITE_COMBO_LOCKS_ALLOWLIST");
+assert.equal(UNDERDOG_PREDICT_ALLOWLIST_ENV, "VITE_UNDERDOG_PREDICT_ALLOWLIST");
+assert.equal(UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT, "UNDERDOG_PREDICT_ALLOWLIST");
 
 assert.deepEqual(parseComboLocksAllowlist("a@x.com, uid-1; B@Y.com"), ["a@x.com", "uid-1", "B@Y.com"]);
 assert.deepEqual(parseComboLocksAllowlist(""), []);
@@ -49,6 +59,52 @@ assert.equal(canSeeOwnerTools(null), false);
 assert.equal(canSeeComboLocks({ email: "tester@gmail.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), true);
 assert.equal(canSeeComboLocks({ id: "uid-99", email: "x@y.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-99" }), true);
 assert.equal(canSeeOwnerTools({ email: "tester@gmail.com" }), false);
+
+{
+  const list = underdogPredictAllowlist({ VITE_UNDERDOG_PREDICT_ALLOWLIST: "" });
+  assert.equal(list.has(OWNER_EMAIL), true);
+  assert.equal(list.size, 1);
+}
+{
+  const list = underdogPredictAllowlist({ UNDERDOG_PREDICT_ALLOWLIST: "tester@gmail.com" });
+  assert.equal(list.has(OWNER_EMAIL), true);
+  assert.equal(list.has("tester@gmail.com"), true);
+}
+assert.equal(canSeeUnderdogPredict(kevin), true);
+assert.equal(canSeeUnderdogPredict(kevin, { VITE_UNDERDOG_PREDICT_ALLOWLIST: "" }), true);
+assert.equal(canSeeUnderdogPredict({ email: "KEV120909@GMAIL.COM" }), true);
+assert.equal(canSeeUnderdogPredict(null), false);
+assert.equal(canSeeUnderdogPredict({ email: "stranger@gmail.com", id: "u2" }), false);
+assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }, { VITE_UNDERDOG_PREDICT_ALLOWLIST: "tester@gmail.com" }), true);
+assert.equal(canSeeUnderdogPredict({ id: "uid-udp", email: "x@y.com" }, { UNDERDOG_PREDICT_ALLOWLIST: "uid-udp" }), true);
+assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }), false);
+
+{
+  const trusted = new Set(["kalshi", "bookmaker", "underdog_predict", "polymarket"]);
+  const kevinKeys = visibleTrustedBookKeys(kevin, trusted);
+  const strangerKeys = visibleTrustedBookKeys({ email: "stranger@gmail.com" }, trusted);
+  assert.equal(kevinKeys.has("underdog_predict"), true);
+  assert.equal(kevinKeys.has("bookmaker"), true);
+  assert.equal(strangerKeys.has("underdog_predict"), false);
+  assert.equal(strangerKeys.has("bookmaker"), true);
+  assert.equal(strangerKeys.has("kalshi"), true);
+  const books = [
+    { key: "kalshi" },
+    { key: "bookmaker" },
+    { key: "underdog_predict" },
+    { key: "polymarket" },
+  ];
+  assert.deepEqual(visiblePromoBooks(kevin, books).map((b) => b.key), ["kalshi", "bookmaker", "underdog_predict", "polymarket"]);
+  assert.deepEqual(visiblePromoBooks(null, books).map((b) => b.key), ["kalshi", "bookmaker", "polymarket"]);
+  const matching = matchingKeysVisibleToUser(trusted, { email: "stranger@gmail.com" }, trusted);
+  assert.equal(matching.has("underdog_predict"), false);
+  assert.equal(matching.has("bookmaker"), true);
+  assert.equal(visibleBetstampBooks(kevin).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), true);
+  assert.equal(visibleBetstampBooks(null).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), false);
+  assert.equal(visibleBetstampBookIds({ email: "stranger@gmail.com" }).includes(UNDERDOG_PREDICT_BOOK_ID), false);
+  assert.equal(visibleBetstampBooks(null).length, BETSTAMP_TRIAL_BOOKS.length - 1);
+  assert.equal(UNDERDOG_PREDICT_BOOK_KEY, "underdog_predict");
+}
 
 const stranger = { email: "stranger@gmail.com", id: "u2" };
 const tester = { email: "tester@gmail.com", id: "uid-tester" };
@@ -107,6 +163,11 @@ assert.equal(clearComboHash("#profile"), "#profile");
 
   assert.match(app, /canSeeComboLocks\(user\)/);
   assert.match(app, /canSeeOwnerTools\(user\)/);
+  assert.match(app, /canSeeUnderdogPredict\(user\)/);
+  assert.match(app, /maybeOverlayUnderdogPredictOnCacheRows/);
+  assert.match(app, /includeUnderdog/);
+  assert.match(app, /<BetstampOddsBoard user=\{user\}/);
+  assert.match(app, /trustedVisible\.has\(b\.key\)/);
   assert.match(app, /VITE_COMBO_LOCKS_ALLOWLIST|comboAccess/);
   assert.match(app, /activeTab === "combo" && canSeeComboLocks\(user\) && <ComboLocks/);
   assert.match(app, /activeTab === "missTape" && canSeeOwnerTools\(user\) && <ComboTape/);
@@ -154,6 +215,8 @@ assert.equal(clearComboHash("#profile"), "#profile");
 
   const envEx = fs.readFileSync(path.join(dir, "..", ".env.example"), "utf8");
   assert.match(envEx, /VITE_COMBO_LOCKS_ALLOWLIST=/);
+  assert.match(envEx, /VITE_UNDERDOG_PREDICT_ALLOWLIST=/);
+  assert.match(envEx, /\/api\/betstamp-markets is anon/);
   assert.match(envEx, /kev120909@gmail.com/);
 }
 

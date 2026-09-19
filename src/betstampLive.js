@@ -79,11 +79,14 @@ export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId, book
   return `/api/betstamp-markets?${p}`;
 }
 
-export function betstampStreamUrl({ league, live } = {}) {
+export function betstampStreamUrl({ league, live, bookIds } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);
   if (live === true) p.set("is_live", "true");
   if (live === false) p.set("is_live", "false");
+  if (bookIds != null && bookIds !== "") {
+    p.set("book_ids", Array.isArray(bookIds) ? bookIds.join(",") : String(bookIds));
+  }
   return `/api/betstamp-stream?${p}`;
 }
 

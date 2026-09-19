@@ -27,6 +27,7 @@ import {
   oddsApiOutcomeName,
 } from "./promoBookmaker.js";
 import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
+import { canSeeUnderdogPredict } from "./comboAccess.js";
 
 export { UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY };
 export const UNDERDOG_PREDICT_TITLE = "Underdog Predict";
@@ -115,4 +116,12 @@ export function overlayUnderdogPredictOnCacheRows(rows, snapshot) {
     }
     return row;
   });
+}
+
+/** Overlay when allowlisted; otherwise strip any leftover underdog_predict cells. */
+export function maybeOverlayUnderdogPredictOnCacheRows(rows, snapshot, user, env) {
+  return overlayUnderdogPredictOnCacheRows(
+    rows,
+    canSeeUnderdogPredict(user, env) ? snapshot : null,
+  );
 }

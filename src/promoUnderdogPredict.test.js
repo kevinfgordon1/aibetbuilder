@@ -16,6 +16,7 @@ import {
   UNDERDOG_PREDICT_BOOK_KEY,
   UNDERDOG_PREDICT_TITLE,
   marketIsUnderdogPredict,
+  maybeOverlayUnderdogPredictOnCacheRows,
   overlayUnderdogPredictOnCacheRows,
   overlayUnderdogPredictOnGame,
   overlayUnderdogPredictOnGames,
@@ -96,6 +97,9 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const url = bookmakerSnapshotUrl({ leagues: ["NFL"] });
   assert.match(url, /book_ids=642/);
   assert.match(url, /196/);
+  const publicUrl = bookmakerSnapshotUrl({ leagues: ["NFL"], includeUnderdog: false });
+  assert.match(publicUrl, /book_ids=642/);
+  assert.doesNotMatch(publicUrl, /196/);
 }
 
 {
@@ -215,10 +219,33 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
 }
 
 {
+  const kevin = { email: "Kev120909@gmail.com", id: "supabase-kevin" };
+  const stranger = { email: "stranger@gmail.com", id: "u2" };
+  const seeded = [{
+    sport: "americanfootball_nfl",
+    data: [nflEvent({
+      bookmakers: [
+        ...nflEvent().bookmakers,
+        { key: "underdog_predict", title: "Underdog Predict", markets: [] },
+      ],
+    })],
+  }];
+  const allowed = maybeOverlayUnderdogPredictOnCacheRows(seeded, underdogSnapshot(), kevin);
+  const denied = maybeOverlayUnderdogPredictOnCacheRows(seeded, underdogSnapshot(), stranger);
+  const loggedOut = maybeOverlayUnderdogPredictOnCacheRows(seeded, underdogSnapshot(), null);
+  assert.equal(allowed[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), true);
+  assert.equal(denied[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), false);
+  assert.equal(loggedOut[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), false);
+  assert.equal(denied[0].data[0].bookmakers.some((b) => b.key === "draftkings"), true);
+}
+
+{
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   const ev = fs.readFileSync(path.join(dir, "../lib/promo-ev.js"), "utf8");
-  assert.match(app, /overlayUnderdogPredictOnCacheRows/);
+  assert.match(app, /maybeOverlayUnderdogPredictOnCacheRows/);
   assert.match(app, /from "\.\/promoUnderdogPredict\.js"/);
+  assert.match(app, /canSeeUnderdogPredict\(user\)/);
+  assert.match(app, /includeUnderdog/);
   assert.match(app, /key: "underdog_predict", label: "Underdog Predict"/);
   assert.match(app, /after \$0\.02\/contract fee/);
   assert.doesNotMatch(app, /label: "Fanatics Markets"/);

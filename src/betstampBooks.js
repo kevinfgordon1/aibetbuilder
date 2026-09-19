@@ -1,6 +1,8 @@
 // Trial-key sportsbooks from the Betstamp appendix. Keys stay aligned with the
 // existing Odds Board where the same shop already exists (logos / Best column).
 
+import { canSeeUnderdogPredict } from "./comboAccess.js";
+
 export const BETSTAMP_TRIAL_BOOKS = Object.freeze([
   { id: 100, key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: "https://www.fanduel.com/favicon.ico" },
   { id: 200, key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: "https://www.draftkings.com/favicon.ico" },
@@ -21,6 +23,7 @@ export const UNDERDOG_PREDICT_BOOK_ID = 196;
 export const UNDERDOG_PREDICT_BOOK_KEY = "underdog_predict";
 
 export const BETSTAMP_BOOK_IDS = BETSTAMP_TRIAL_BOOKS.map((b) => b.id);
+export const BETSTAMP_PUBLIC_BOOK_IDS = BETSTAMP_BOOK_IDS.filter((id) => id !== UNDERDOG_PREDICT_BOOK_ID);
 
 const BOOKS_BY_ID = new Map(BETSTAMP_TRIAL_BOOKS.map((b) => [b.id, b]));
 const BOOKS_BY_KEY = new Map(BETSTAMP_TRIAL_BOOKS.map((b) => [b.key, b]));
@@ -62,4 +65,14 @@ export function sportByLeague(league) {
 
 export function leagueForSport(sportId) {
   return sportById(sportId).league;
+}
+
+/** New Odds Board catalog. Underdog Predict (196) is allowlisted (Kevin by default). */
+export function visibleBetstampBooks(user, env) {
+  if (canSeeUnderdogPredict(user, env)) return BETSTAMP_TRIAL_BOOKS;
+  return BETSTAMP_TRIAL_BOOKS.filter((b) => b.id !== UNDERDOG_PREDICT_BOOK_ID);
+}
+
+export function visibleBetstampBookIds(user, env) {
+  return visibleBetstampBooks(user, env).map((b) => b.id);
 }

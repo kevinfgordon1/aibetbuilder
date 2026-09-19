@@ -4,7 +4,7 @@ import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
@@ -77,7 +77,7 @@ import {
   evScanFromLegs,
 } from "./oddsLoad.js";
 import { overlayBookmakerOnCacheRows, readBookmakerClientCache, resolveBookmakerSnapshot } from "./promoBookmaker.js";
-import { overlayUnderdogPredictOnCacheRows } from "./promoUnderdogPredict.js";
+import { maybeOverlayUnderdogPredictOnCacheRows } from "./promoUnderdogPredict.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -1412,6 +1412,7 @@ export default function App() {
   const [promoScanBusy, setPromoScanBusy] = useState(false);
   const [lastCompletedScanKey, setLastCompletedScanKey] = useState(null);
   const promoFetchGen = useRef(0);
+  const underdogOverlayAppliedRef = useRef(false);
   const bookmakerCacheRef = useRef(readBookmakerClientCache() || { snap: null, leagues: [] });
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
@@ -1568,16 +1569,19 @@ export default function App() {
       // The Betstamp snapshot API still serves its own 5-min cache (Promo
       // does not send refresh=1), so Refresh stays fast unless that snap is
       // stale. Sport chips and remounts honor client TTL via memory/session.
+      const includeUnderdog = canSeeUnderdogPredict(user);
       const bookmakerPromise = resolveBookmakerSnapshot({
         sports: plan.featuredSports,
         cached: bookmakerCacheRef.current,
         forceRefresh: forceBookmaker,
+        includeUnderdog,
       }).then((resolved) => {
         if (resolved.snap) {
           bookmakerCacheRef.current = {
             snap: resolved.snap,
             leagues: resolved.leagues,
             fetchedAtByLeague: resolved.fetchedAtByLeague,
+            includeUnderdog: resolved.includeUnderdog,
           };
         }
         return resolved.snap;
@@ -1592,18 +1596,22 @@ export default function App() {
       // Betstamp Bookmaker overlay is best-effort and re-runs every Promo
       // fetch. It strips any cached `bookmaker` key first (odds_cache is Odds
       // API only) then overlays 642 — a blip or failed join omits those cells.
-      // Underdog Predict (196) uses the same snapshot and join guards.
+      // Underdog Predict (196) uses the same snapshot and join guards, but
+      // only for allowlisted users (Kevin by default).
       const bookmakerSnap = await bookmakerPromise.catch(() => null);
-      const featuredRows = overlayUnderdogPredictOnCacheRows(
+      const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
         bookmakerSnap,
+        user,
       );
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
-      const eventRows = overlayUnderdogPredictOnCacheRows(
+      const eventRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap),
         bookmakerSnap,
+        user,
       );
+      underdogOverlayAppliedRef.current = includeUnderdog;
       const nextBoard = applyTransformed(featuredRows, eventRows);
       setOddsSource((prev) => (
         boardHasPromoGames(nextBoard) || !prev.featured.length
@@ -1637,16 +1645,19 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
+      const includeUnderdog = canSeeUnderdogPredict(user);
       const bookmakerPromise = resolveBookmakerSnapshot({
         sports: plan.featuredSports,
         cached: bookmakerCacheRef.current,
         forceRefresh: true,
+        includeUnderdog,
       }).then((resolved) => {
         if (resolved.snap) {
           bookmakerCacheRef.current = {
             snap: resolved.snap,
             leagues: resolved.leagues,
             fetchedAtByLeague: resolved.fetchedAtByLeague,
+            includeUnderdog: resolved.includeUnderdog,
           };
         }
         return resolved.snap;
@@ -1659,10 +1670,12 @@ export default function App() {
         return;
       }
       const bookmakerSnap = await bookmakerPromise.catch(() => null);
-      const featuredRows = overlayUnderdogPredictOnCacheRows(
+      const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
         bookmakerSnap,
+        user,
       );
+      underdogOverlayAppliedRef.current = includeUnderdog;
       // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that
       // payload freezes Chrome. Promo still loads events with a 30-min lookback.
       setAllOddsData(applyTransformed(featuredRows, []));
@@ -1692,7 +1705,17 @@ export default function App() {
     }
   };
 
-  useEffect(() => { fetchOdds({ forceRefresh: false }); }, []);
+  useEffect(() => {
+    if (authLoading) return;
+    fetchOdds({ forceRefresh: false });
+  }, [authLoading]);
+
+  useEffect(() => {
+    if (authLoading || !promoLoaded) return;
+    const want = canSeeUnderdogPredict(user);
+    if (want === underdogOverlayAppliedRef.current) return;
+    loadPromoBoard({ forceBookmaker: false });
+  }, [user, authLoading, promoLoaded]);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 30000);
@@ -1737,7 +1760,12 @@ export default function App() {
   const scanPromoDateRange = useDeferredValue(promoDateRange);
   const scanMarketScope = useDeferredValue(marketScope);
   const scanPromoBook = useDeferredValue(promoBook);
-  const scanMatchingBookKeys = useDeferredValue(matchingBookKeys);
+  const trustedVisible = useMemo(() => visibleTrustedBookKeys(user, TRUSTED_BOOK_KEYS), [user]);
+  const matchingVisible = useMemo(
+    () => matchingKeysVisibleToUser(matchingBookKeys, user, TRUSTED_BOOK_KEYS),
+    [matchingBookKeys, user],
+  );
+  const scanMatchingBookKeys = useDeferredValue(matchingVisible);
   const scanHideLowLiquidity = useDeferredValue(hideLowLiquidity);
   const scanNumLegs = useDeferredValue(numLegs);
   const deferredEvDateRange = useDeferredValue(evDateRange);
@@ -1748,7 +1776,7 @@ export default function App() {
   const scanStakeRef = useRef(scanStake);
   scanStakeRef.current = scanStake;
   const promoFilterPending = promoFilterWorkPending(
-    { sports: promoSports, dateRange: promoDateRange, marketScope, promoBook, matchingBookKeys, hideLowLiquidity, numLegs },
+    { sports: promoSports, dateRange: promoDateRange, marketScope, promoBook, matchingBookKeys: matchingVisible, hideLowLiquidity, numLegs },
     { sports: scanPromoSports, dateRange: scanPromoDateRange, marketScope: scanMarketScope, promoBook: scanPromoBook, matchingBookKeys: scanMatchingBookKeys, hideLowLiquidity: scanHideLowLiquidity, numLegs: scanNumLegs },
   );
 
@@ -1764,13 +1792,13 @@ export default function App() {
   }, [scanPromoBook, scanPromoSports, scanPromoDateRange, promoType, creditConversionPct, refundPct, scanNumLegs, scanMinFinalOdds, scanMaxFinalOdds, scanMinLegOdds, scanMaxLegOdds, scanMarketScope, hideLowLiquidity, scanMatchingBookKeys, scanTeamInclude, scanTeamExclude]);
 
   const promoOddsData = useMemo(() => {
-    if (matchingSetIsFull(scanMatchingBookKeys, TRUSTED_BOOK_KEYS)) return promoBoardData;
+    if (matchingSetIsFull(scanMatchingBookKeys, trustedVisible)) return promoBoardData;
     const { featured, events } = oddsSource;
     return mergeOddsData([
       ...featured.map(row => transformOddsData(row.data, row.sport, scanMatchingBookKeys)),
       ...events.map(row => transformEventOddsData(row.data, row.sport, scanMatchingBookKeys)),
     ]);
-  }, [promoBoardData, oddsSource, scanMatchingBookKeys]);
+  }, [promoBoardData, oddsSource, scanMatchingBookKeys, trustedVisible]);
 
   const soccerOnBoard = useMemo(
     () => (promoOddsData.moneylines || []).some((g) => isSoccerSport(g.sport)),
@@ -2292,7 +2320,7 @@ export default function App() {
 
       {activeTab === "oddsBetstamp" && canSeeOwnerTools(user) && (
         <div style={{ padding: "20px 32px" }}>
-          <BetstampOddsBoard />
+          <BetstampOddsBoard user={user} />
         </div>
       )}
 
@@ -2646,7 +2674,7 @@ export default function App() {
                       </>)}
                       {controlBox(<>
                         <label style={labelStyle}>Matching books</label>
-                        {ALL_BOOKS.filter(b => TRUSTED_BOOK_KEYS.has(b.key)).map(b => (
+                        {ALL_BOOKS.filter(b => trustedVisible.has(b.key)).map(b => (
                           <button key={b.key} onClick={() => toggleMatchingBook(b.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: matchingBookKeys.has(b.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: matchingBookKeys.has(b.key) ? "#3b82f6" : "#6b7280" }}>
                             {b.label}
                           </button>
