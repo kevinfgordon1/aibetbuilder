@@ -17,6 +17,8 @@ import {
   oddsBoardHideKey,
   hideSideFromPriceKey,
   isHiddenOddsCell,
+  oddsMoveDirection,
+  ODDS_FLASH_MS,
   pickBestSidesByPopularLines,
   pickBestByPopularPoints,
   STACKED_BEST_MAX_LINES,
@@ -43,6 +45,21 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(fmtBoardSize(-10), null);
   assert.equal(fmtBoardSize("nope"), null);
   assert.equal(fmtBoardSize(undefined), null);
+}
+
+// ── oddsMoveDirection: higher American is better for the bettor
+{
+  assert.equal(oddsMoveDirection(-110, -105), "up");
+  assert.equal(oddsMoveDirection(-105, -120), "down");
+  assert.equal(oddsMoveDirection(100, 120), "up");
+  assert.equal(oddsMoveDirection(150, 130), "down");
+  assert.equal(oddsMoveDirection(-105, 100), "up");
+  assert.equal(oddsMoveDirection(110, -110), "down");
+  assert.equal(oddsMoveDirection(-110, -110), null);
+  assert.equal(oddsMoveDirection(null, -110), null);
+  assert.equal(oddsMoveDirection(-110, null), null);
+  assert.equal(oddsMoveDirection("+120", 130), "up");
+  assert.equal(ODDS_FLASH_MS >= 600 && ODDS_FLASH_MS <= 1200, true);
 }
 
 // ── bookInitials: favicon fallback

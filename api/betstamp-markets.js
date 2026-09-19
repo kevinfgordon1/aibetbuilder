@@ -9,11 +9,9 @@
 // the New Odds Board can load one game's alts without the full slate.
 // Does not touch The Odds API or odds_cache.
 //
-// Responses are cached ~5 minutes per query (league / book_ids / is_live /
-// include_alts / timedelta / fixture_id). In-memory per instance plus
-// Cache-Control s-maxage so Promo remounts do not re-download Betstamp.
-// ?refresh=1 (or ?force=1) bypasses the server TTL — Promo Refresh does
-// not send this; it only bypasses the client TTL and still hits this cache.
+// Pregame / Promo responses are cached ~5 minutes per query (league /
+// book_ids / is_live / include_alts / timedelta / fixture_id). Live snaps
+// and ?refresh=1 skip that TTL and send Cache-Control: private, no-store.
 //
 // Auth: this route is anon (CORS * + no JWT). 196 stays on the allowlist so
 // Kevin's client can pass book_ids=196. Default / omitted book_ids omit 196.
@@ -27,12 +25,12 @@ const {
   redact,
 } = require('../lib/betstamp');
 
-function applyCacheHeaders(res, result) {
+function applyCacheHeaders(res, result, query) {
   res.setHeader('X-Betstamp-Cache', result.cacheStatus || 'MISS');
   if (result.ageMs != null) {
     res.setHeader('Age', String(Math.max(0, Math.floor(result.ageMs / 1000))));
   }
-  res.setHeader('Cache-Control', snapshotCacheControl(result.remainingMs));
+  res.setHeader('Cache-Control', snapshotCacheControl(result.remainingMs, query));
 }
 
 async function handler(req, res, deps) {
@@ -51,7 +49,7 @@ async function handler(req, res, deps) {
   try {
     const query = readQuery(req);
     const result = await fetchSnapshotWithCache(query, deps);
-    applyCacheHeaders(res, result);
+    applyCacheHeaders(res, result, query);
     res.status(200).json(result.snap);
   } catch (e) {
     res.setHeader('Cache-Control', 'no-store');

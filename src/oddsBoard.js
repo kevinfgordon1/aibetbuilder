@@ -73,6 +73,18 @@ export function fmtBoardSize(v) {
   return `$${Math.round(n)}`;
 }
 
+// Higher American number is better for the bettor (−150 → −110 → +120).
+// Used to flash the odds digits green (improve) or red (worse).
+export const ODDS_FLASH_MS = 900;
+
+export function oddsMoveDirection(prev, next) {
+  if (prev == null || next == null || prev === "" || next === "") return null;
+  const a = typeof prev === "number" ? prev : Number(String(prev).trim().replace(/^\+/, ""));
+  const b = typeof next === "number" ? next : Number(String(next).trim().replace(/^\+/, ""));
+  if (!isFinite(a) || !isFinite(b) || a === b) return null;
+  return b > a ? "up" : "down";
+}
+
 // Compact badge when a book has no favicon. "BetOpenly" → "BO", "Novig" → "NO".
 export function bookInitials(label) {
   const raw = String(label || "").trim();

@@ -1413,6 +1413,7 @@ export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
   const [activeTab, setActiveTab] = useState("promo");
+  const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [showLanding, setShowLanding] = useState(false);
   const [promoType, setPromoType] = useState("boost");
   const [boostPct, setBoostPct] = useState(30);
@@ -2302,19 +2303,29 @@ export default function App() {
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {fetchedAt && (
+          {(fetchedAt || activeTab === "oddsBetstamp") && (
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <OddsUpdatedStamp freshness={cacheFreshness} />
+              {fetchedAt && <OddsUpdatedStamp freshness={cacheFreshness} />}
               <button
-                onClick={() => { fetchOdds({ forceRefresh: true }); logEvent(user, 'odds_refreshed', { trigger: 'manual' }); }}
-                disabled={refreshBusy}
-                title="Re-read the odds cache. Does not call The Odds API."
-                style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: refreshBusy ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: refreshBusy ? 0.6 : 1, transition: "all 0.2s" }}
-                onMouseEnter={e => { if (!refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
-                onMouseLeave={e => { if (!refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
+                onClick={() => {
+                  if (activeTab === "oddsBetstamp") {
+                    setBetstampRefreshKey((n) => n + 1);
+                    logEvent(user, "odds_refreshed", { trigger: "manual_betstamp" });
+                    return;
+                  }
+                  fetchOdds({ forceRefresh: true });
+                  logEvent(user, "odds_refreshed", { trigger: "manual" });
+                }}
+                disabled={activeTab === "oddsBetstamp" ? false : refreshBusy}
+                title={activeTab === "oddsBetstamp"
+                  ? "Re-pull Betstamp for New Odds Board (LIVE bypasses the 5-minute cache)."
+                  : "Re-read the odds cache. Does not call The Odds API."}
+                style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: (activeTab !== "oddsBetstamp" && refreshBusy) ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: (activeTab !== "oddsBetstamp" && refreshBusy) ? 0.6 : 1, transition: "all 0.2s" }}
+                onMouseEnter={e => { if (activeTab === "oddsBetstamp" || !refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
               >
-                <span style={{ display: "inline-block", animation: refreshBusy ? "spin 1s linear infinite" : "none" }}>↻</span>
-                {refreshBusy ? "Refreshing" : "Refresh"}
+                <span style={{ display: "inline-block", animation: (activeTab !== "oddsBetstamp" && refreshBusy) ? "spin 1s linear infinite" : "none" }}>↻</span>
+                {(activeTab !== "oddsBetstamp" && refreshBusy) ? "Refreshing" : "Refresh"}
               </button>
             </div>
           )}
@@ -2387,7 +2398,7 @@ export default function App() {
 
       {activeTab === "oddsBetstamp" && canSeeNewOddsBoard(user) && (
         <div style={{ padding: "20px 32px" }}>
-          <BetstampOddsBoard user={user} />
+          <BetstampOddsBoard user={user} refreshKey={betstampRefreshKey} />
         </div>
       )}
 

@@ -97,10 +97,43 @@ export function formatCompactAge(updatedAt, now = Date.now()) {
   if (updatedAt == null || !isFinite(updatedAt)) return null;
   const ms = Math.max(0, now - updatedAt);
   if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`;
-  if (ms < 86_400_000) return `${Math.max(1, Math.round(ms / 3_600_000))}h`;
-  return `${Math.max(1, Math.round(ms / 86_400_000))}d`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  // Keep the second count through 1m59s. Only coarsen at 2 minutes.
+  if (sec < 120) return `1m${String(sec - 60).padStart(2, "0")}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  if (ms < 86_400_000) return `${Math.max(1, Math.floor(ms / 3_600_000))}h`;
+  return `${Math.max(1, Math.floor(ms / 86_400_000))}d`;
+}
+
+/** Amber once the second-count window ends so a frozen 5m stamp is obvious. */
+export function compactAgeTone(updatedAt, now = Date.now()) {
+  if (updatedAt == null || !isFinite(updatedAt)) return "#6b7280";
+  const ms = Math.max(0, now - updatedAt);
+  if (ms >= 120_000) return "#f59e0b";
+  if (ms >= 60_000) return "#ca8a04";
+  return "#6b7280";
+}
+
+// Quiet soft books (no SSE) whose newest Betstamp print is ≥2m old.
+export function staleLiveBookLabels(games, books, nowMs, { staleMs = 120_000 } = {}) {
+  const now = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
+  const out = [];
+  for (const book of books || []) {
+    if (!book?.key) continue;
+    let newest = null;
+    for (const game of games || []) {
+      if (!game?.is_live) continue;
+      const stamps = game.bookLineUpdatedAt?.[book.key] || {};
+      for (const t of Object.values(stamps)) {
+        if (typeof t === "number" && isFinite(t) && (newest == null || t > newest)) newest = t;
+      }
+    }
+    if (newest != null && now - newest >= staleMs) {
+      out.push({ key: book.key, label: book.label, updatedAt: newest, age: formatCompactAge(newest, now) });
+    }
+  }
+  return out;
 }
 
 export function lineUpdatedAt(game, bookKey, field) {
@@ -160,6 +193,7 @@ const NOT_OFFERED_MARKET_STATUSES = new Set([
 export function marketIsOffered(market) {
   if (!market || typeof market !== "object") return false;
   if (market.suspended === true || market.is_suspended === true || market.isSuspended === true) return false;
+  if (market.is_otb === true || market.otb === true || market.off_the_board === true || market.is_off_the_board === true) return false;
   if (market.active === false || market.is_active === false || market.isActive === false) return false;
   if (market.available === false || market.is_available === false || market.isAvailable === false) return false;
   const status = String(
@@ -167,6 +201,13 @@ export function marketIsOffered(market) {
   ).trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (status && NOT_OFFERED_MARKET_STATUSES.has(status)) return false;
   return true;
+}
+
+export function marketIsLiveQuote(market) {
+  if (!market || typeof market !== "object") return false;
+  if (market.is_live === true || market.live === true) return true;
+  const status = String(market.status ?? market.market_status ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return status === "live" || status === "in_play" || status === "inplay";
 }
 
 export function quotePresenceKey({ fixtureId, bookKey, betType, side } = {}) {
@@ -834,7 +875,14 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   if (!side) return false;
   const field = lineFieldFor(betType, side);
   if (!field) return false;
+  const existingPrice = game.bookOdds?.[bookKey]?.[field];
+  const existingTs = lineUpdatedAt(game, bookKey, field);
+  const incomingLive = marketIsLiveQuote(market);
+  const incomingMarketTs = marketUpdatedAtMs(market, null);
+  const hasQuote = existingPrice != null && isFinite(Number(existingPrice));
   if (!marketIsOffered(market)) {
+    // Pregame / OTB leftovers must not wipe a live print for the same book+side.
+    if (hasQuote && !incomingLive) return false;
     clearSideQuote(game, bookKey, betType, side);
     return {
       bookKey,
@@ -846,18 +894,23 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
       updatedAt: null,
     };
   }
+  if (hasQuote && game.is_live && !incomingLive) return false;
+  // Held live print wins unless Betstamp sends a strictly newer updated_at.
+  if (hasQuote && incomingMarketTs == null) return false;
+  if (hasQuote && existingTs != null && incomingMarketTs <= existingTs) return false;
   const price = toAmericanOdds(market.odds);
   if (price == null) return false;
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
   applySideToOdds(game.bookOdds[bookKey], betType, side, price, marketSize(market), marketLine(market));
   if (market.is_live) game.is_live = true;
-  const ts = marketUpdatedAtMs(market, receivedAt);
-  if (ts != null) {
-    game.bookUpdatedAt[bookKey] = ts;
-    setLineUpdatedAt(game, bookKey, field, ts);
+  // Stamp ages from Betstamp's updated_at only. Receive-time fallbacks were
+  // blocking later live ticks whose market stamp is older than "now".
+  if (incomingMarketTs != null) {
+    game.bookUpdatedAt[bookKey] = incomingMarketTs;
+    setLineUpdatedAt(game, bookKey, field, incomingMarketTs);
   }
-  confirmSideQuote(game, bookKey, field, ts ?? receivedAt);
-  return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: ts };
+  confirmSideQuote(game, bookKey, field, incomingMarketTs ?? receivedAt);
+  return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: incomingMarketTs };
 }
 
 export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = {}) {
@@ -921,7 +974,8 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
 }
 
 // LIVE availability truth: REST mains listing vs previously shown quotes.
-// Present → confirm (keep SSE price). Absent → clear / OFF and out of Best.
+// Present → apply if Betstamp's updated_at is newer (quiet soft books), else
+// keep the held SSE print. Absent → clear / OFF and out of Best.
 // Silence alone is not a suspend — only a snapshot miss (or an explicit
 // suspended status). Halftime still reconciles. `markets == null` is a no-op
 // so a botched payload cannot wipe the board.
@@ -950,6 +1004,11 @@ export function reconcileLiveGames(games, {
 
   for (const game of next) {
     if (!game?.is_live || gameIsFinished(game, seenAt)) continue;
+    for (const market of marketList) {
+      if (!isMainMarket(market)) continue;
+      if (market.fixture_id == null || String(market.fixture_id) !== String(game.id)) continue;
+      applyMarketToGame(game, market, { receivedAt: seenAt });
+    }
     for (const quote of listedBoardQuotes(game)) {
       const key = quotePresenceKey({
         fixtureId: game.id,
@@ -971,17 +1030,6 @@ export function reconcileLiveGames(games, {
         continue;
       }
       clearSideQuote(game, quote.bookKey, quote.betType, quote.side);
-    }
-
-    for (const market of marketList) {
-      if (!isMainMarket(market) || !marketIsOffered(market)) continue;
-      if (market.fixture_id == null || String(market.fixture_id) !== String(game.id)) continue;
-      const bookKey = bookKeyForMarket(market);
-      const side = marketSide(market, game);
-      const field = lineFieldFor(normalizeBetType(market.bet_type), side);
-      if (!bookKey || !side || !field) continue;
-      if (game.bookOdds?.[bookKey]?.[field] != null) continue;
-      applyMarketToGame(game, market, { receivedAt: seenAt });
     }
   }
 

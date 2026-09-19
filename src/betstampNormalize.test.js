@@ -32,6 +32,8 @@ import {
   spreadAwayLine,
   marketSide,
   formatCompactAge,
+  compactAgeTone,
+  staleLiveBookLabels,
   formatWinProb,
   cellShowsWinProb,
   lineFieldFor,
@@ -39,6 +41,8 @@ import {
   lineUpdatedAt,
   bestLineUpdatedAt,
   marketUpdatedAtMs,
+  applyMarketToGame,
+  marketIsLiveQuote,
 } from "./betstampNormalize.js";
 import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS, BETSTAMP_PUBLIC_BOOK_IDS, visibleBetstampBooks } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
@@ -293,8 +297,35 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
 {
   assert.equal(formatCompactAge(1000, 1380), "380ms");
   assert.equal(formatCompactAge(1000, 13_000), "12s");
-  assert.equal(formatCompactAge(1000, 61_000), "1m");
+  assert.equal(formatCompactAge(1000, 46_000), "45s");
+  assert.equal(formatCompactAge(1000, 61_000), "1m00s");
+  assert.equal(formatCompactAge(0, 90_000), "1m30s");
+  assert.equal(formatCompactAge(0, 119_000), "1m59s");
+  assert.equal(formatCompactAge(0, 120_000), "2m");
+  assert.equal(formatCompactAge(0, 180_000), "3m");
   assert.equal(formatCompactAge(null, 1000), null);
+  assert.equal(compactAgeTone(0, 30_000), "#6b7280");
+  assert.equal(compactAgeTone(0, 90_000), "#ca8a04");
+  assert.equal(compactAgeTone(0, 120_000), "#f59e0b");
+  assert.equal(compactAgeTone(0, 300_000), "#f59e0b");
+  {
+    const staleBooks = staleLiveBookLabels(
+      [{
+        is_live: true,
+        bookLineUpdatedAt: {
+          fanduel: { ml_away: 0 },
+          pinnacle: { ml_away: 298_000 },
+        },
+      }],
+      [
+        { key: "fanduel", label: "FanDuel" },
+        { key: "pinnacle", label: "Pinnacle" },
+      ],
+      300_000,
+    );
+    assert.deepEqual(staleBooks.map((b) => b.key), ["fanduel"]);
+    assert.equal(staleBooks[0].age, "5m");
+  }
   assert.equal(lineFieldFor("moneyline", "away"), "ml_away");
   assert.equal(lineFieldFor("total", "over"), "tot_over");
   assert.deepEqual(cellLineFields("spr"), { top: "spr_away", bot: "spr_home" });
@@ -456,6 +487,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(nextBackoffMs(10), 8000);
   assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /league=NFL/);
   assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /is_live=true/);
+  assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /refresh=1/);
+  assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: false }), /refresh=/);
   assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /include_alts|fixture_id/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /include_alts=true/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
@@ -523,8 +556,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(marketIsOffered({ odds: 1.91 }), true);
   assert.equal(marketIsOffered({ odds: 1.91, status: "suspended" }), false);
   assert.equal(marketIsOffered({ odds: 1.91, is_suspended: true }), false);
+  assert.equal(marketIsOffered({ odds: 1.91, is_otb: true }), false);
+  assert.equal(marketIsOffered({ odds: 1.91, off_the_board: true }), false);
   assert.equal(marketIsOffered({ odds: 1.91, active: false }), false);
   assert.equal(marketIsOffered({ odds: 1.91, status: "open" }), true);
+  assert.equal(marketIsLiveQuote({ is_live: true }), true);
+  assert.equal(marketIsLiveQuote({ is_otb: true, is_live: false }), false);
   assert.equal(quotePresenceKey({ fixtureId: "fix-1", bookKey: "draftkings", betType: "Moneyline", side: "away" }), "fix-1|draftkings|moneyline|away");
   assert.equal(quoteOfferKey({ fixtureId: "fix-1", bookKey: "fanduel", betType: "Spread", side: "away", line: -3.5 }), "fix-1|fanduel|spread|away|-3.5");
   assert.equal(quoteOfferKey({ fixtureId: "fix-1", bookKey: "pinnacle", betType: "Total", side: "over", line: 44.5 }), "fix-1|pinnacle|total|over|44.5");
@@ -558,8 +595,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(games[0].bookOdds.fanduel.ml_away, 105);
   assert.equal(listedBoardQuotes(games[0]).length, 2);
 
-  // Present in the next snapshot: keep SSE/REST price (even if snapshot juice differs)
-  // and bump lastConfirmedAt. Do not treat this as a suspend.
+  // Same-stamp snapshot must not clobber a held SSE/REST print. Confirm only.
   const confirmed = reconcileLiveGames(games, {
     nowMs: now + 16_000,
     fixtures: [fixture],
@@ -568,11 +604,24 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       fdAway,
     ],
   });
-  assert.equal(confirmed[0].bookOdds.draftkings.ml_away, 120, "present quote keeps held price");
+  assert.equal(confirmed[0].bookOdds.draftkings.ml_away, 120, "same-stamp snapshot keeps held price");
   assert.equal(confirmed[0].bookOdds.fanduel.ml_away, 105);
   assert.equal(lineIsSuspended(confirmed[0], "draftkings", "ml_away"), false);
   assert.equal(lineConfirmedAt(confirmed[0], "draftkings", "ml_away"), now + 16_000);
   assert.equal(lineUpdatedAt(confirmed[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:05:00.000Z"));
+
+  // Newer Betstamp stamp on a quiet soft book must move the cell (and age).
+  const moved = reconcileLiveGames(games, {
+    nowMs: now + 16_000,
+    fixtures: [fixture],
+    markets: [
+      { ...dkAway, odds: 2.30, updated_at: "2026-09-14T20:10:10.000Z" },
+      fdAway,
+    ],
+  });
+  assert.equal(moved[0].bookOdds.draftkings.ml_away, 130, "newer REST stamp updates a quiet book");
+  assert.equal(lineUpdatedAt(moved[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:10:10.000Z"));
+  assert.equal(moved[0].bookOdds.fanduel.ml_away, 105);
 
   // Missing from the snapshot: clear the zombie, mark OFF, exclude from Best.
   const cleared = reconcileLiveGames(confirmed, {
@@ -632,6 +681,78 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(sseOff[0].bookOdds.draftkings.ml_away, null);
   assert.equal(lineIsSuspended(sseOff[0], "draftkings", "ml_away"), true);
 
+  // Houston @ Texas Tech: live book 196 print must beat a leftover pregame OTB
+  // row and a stale earlier live tick (board was stuck at +129 while Betstamp
+  // already had 2.73 / +173).
+  {
+    const hou = { id: "hou", name: "Houston", abbreviation: "HOU" };
+    const ttu = { id: "ttu", name: "Texas Tech", abbreviation: "TTU" };
+    const liveFix = {
+      id: "hou-ttu-live",
+      league: "NCAAF",
+      is_live: true,
+      start_date: "2026-09-19T00:00:00Z",
+      home_team: ttu,
+      away_team: hou,
+    };
+    const udpLive = {
+      odds: 2.73,
+      side: "HOU",
+      side_type: "Away",
+      bet_type: "Moneyline",
+      period: "FT",
+      is_alt: false,
+      is_live: true,
+      odd_provider_id: 196,
+      fixture_id: "hou-ttu-live",
+      team_id: hou.id,
+      updated_at: "2026-09-19T02:10:25.000Z",
+    };
+    const udpPregameOtb = {
+      odds: 3.52,
+      side: "HOU",
+      side_type: "Away",
+      bet_type: "Moneyline",
+      period: "FT",
+      is_alt: false,
+      is_live: false,
+      is_otb: true,
+      odd_provider_id: 196,
+      fixture_id: "hou-ttu-live",
+      team_id: hou.id,
+      updated_at: "2026-09-18T23:00:00.000Z",
+    };
+    const mixed = gamesFromBetstampSnapshot({
+      markets: [udpPregameOtb, udpLive],
+      fixtures: [liveFix],
+      teams: [hou, ttu],
+      nowMs: Date.parse("2026-09-19T02:10:50.000Z"),
+    });
+    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 173);
+    assert.equal(lineIsSuspended(mixed[0], "underdog_predict", "ml_away"), false);
+
+    const staleLive = applyMarketToGame(mixed[0], {
+      ...udpLive,
+      odds: 2.29,
+      updated_at: "2026-09-19T02:08:00.000Z",
+    }, { receivedAt: Date.parse("2026-09-19T02:10:50.000Z") });
+    assert.equal(staleLive, false, "older live tick must not replace 2.73");
+    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 173);
+
+    const otbAfter = applyMarketToGame(mixed[0], udpPregameOtb, { receivedAt: Date.parse("2026-09-19T02:11:00.000Z") });
+    assert.equal(otbAfter, false, "pregame OTB must not clear the live Underdog cell");
+    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 173);
+    assert.equal(lineIsSuspended(mixed[0], "underdog_predict", "ml_away"), false);
+
+    const nextTick = applyMarketToGame(mixed[0], {
+      ...udpLive,
+      odds: 2.80,
+      updated_at: "2026-09-19T02:11:10.000Z",
+    }, { receivedAt: Date.parse("2026-09-19T02:11:10.400Z") });
+    assert.equal(nextTick.price, 180);
+    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 180);
+  }
+
   // markets == null must not wipe the board (failed/incomplete payload).
   const noop = reconcileLiveGames(games, { nowMs: now + 50_000, markets: null });
   assert.equal(noop[0].bookOdds.draftkings.ml_away, 120);
@@ -669,6 +790,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   const board = fs.readFileSync(path.join(dir, "OddsBoard.jsx"), "utf8");
   const stamp = fs.readFileSync(path.join(dir, "BetstampOddsBoard.jsx"), "utf8");
+  const liveSrc = fs.readFileSync(path.join(dir, "betstampLive.js"), "utf8");
   const envEx = fs.readFileSync(path.join(dir, "..", ".env.example"), "utf8");
   const vercel = fs.readFileSync(path.join(dir, "..", "vercel.json"), "utf8");
   assert.match(app, /import OddsBoard from "\.\/OddsBoard\.jsx"/);
@@ -691,6 +813,16 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /BETSTAMP_LIVE_RECONCILE_MS/);
   assert.match(stamp, /reconcileLiveGames/);
   assert.match(stamp, /data-odds-suspended/);
+  assert.match(stamp, /data-odds-off/);
+  assert.match(stamp, /obb-off/);
+  assert.match(stamp, /Off the board/);
+  assert.match(stamp, /OddsFlashNumber/);
+  assert.match(stamp, /obb-flash-up/);
+  assert.match(stamp, /obb-flash-down/);
+  assert.match(stamp, /BestBookName/);
+  assert.match(stamp, /data-book-full-name/);
+  assert.doesNotMatch(stamp, /function BookMark/);
+  assert.doesNotMatch(stamp, /bookInitials/);
   assert.match(stamp, /data-live-reconcile-ms/);
   assert.match(stamp, /no longer lists/);
   assert.match(stamp, /setInterval\(\(\) => \{/);
@@ -702,6 +834,15 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
   assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|BETSTAMP_LIVE_RECONCILE_MS|data-snapshot-age|reconcileLiveGames|data-odds-suspended/);
   assert.match(stamp, /data-line-age/);
+  assert.match(stamp, /compactAgeTone/);
+  assert.match(stamp, /staleLiveBookLabels/);
+  assert.match(stamp, /data-soft-book-stale/);
+  assert.match(stamp, /data-board-refresh/);
+  assert.match(stamp, /refreshKey/);
+  assert.match(app, /refreshKey=\{betstampRefreshKey\}/);
+  assert.match(app, /manual_betstamp/);
+  assert.match(liveSrc, /p\.set\("refresh", "1"\)/);
+  assert.match(liveSrc, /live === true/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
   assert.match(stamp, /LIVE_BEST_ODDS_BREAK_MAX_AGE_MS/);
