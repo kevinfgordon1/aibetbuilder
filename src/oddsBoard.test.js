@@ -15,6 +15,13 @@ import {
   isLiveGameBreak,
   liveBestOddsMaxAgeMs,
   oddsBoardHideKey,
+  oddsBoardHideGameKey,
+  isOddsBoardGameHideKey,
+  isHiddenOddsGame,
+  hiddenOddsGameIds,
+  toggleOddsBoardHideKey,
+  clearHiddenOddsGames,
+  filterHiddenOddsGames,
   hideSideFromPriceKey,
   isHiddenOddsCell,
   oddsMoveDirection,
@@ -624,6 +631,59 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(isHiddenOddsCell(keys, { gameId: "den-kc", market: "ml", side: "away", bookKey: "fanduel" }), true);
   assert.equal(isHiddenOddsCell(keys, { gameId: "den-kc", market: "ml", side: "home", bookKey: "fanduel" }), false);
   assert.equal(isHiddenOddsCell(keys, { gameId: "den-kc", market: "ml", side: "away", bookKey: "draftkings" }), false);
+}
+
+// ── hide whole game: namespaced key in the same Set; filter + restore
+{
+  assert.equal(oddsBoardHideGameKey("hou-tt"), "game:hou-tt");
+  assert.equal(oddsBoardHideGameKey(""), null);
+  assert.equal(oddsBoardHideGameKey(null), null);
+  assert.equal(isOddsBoardGameHideKey("game:hou-tt"), true);
+  assert.equal(isOddsBoardGameHideKey("hou-tt:spr:away:fanduel"), false);
+
+  const cellKey = oddsBoardHideKey({ gameId: "hou-tt", market: "spr", side: "away", bookKey: "fanduel" });
+  const gameKey = oddsBoardHideGameKey("hou-tt");
+  assert.equal(cellKey, "hou-tt:spr:away:fanduel");
+  assert.notEqual(cellKey, gameKey, "game hide must not collide with a cell key");
+
+  let hidden = new Set();
+  hidden = toggleOddsBoardHideKey(hidden, gameKey);
+  hidden = toggleOddsBoardHideKey(hidden, cellKey);
+  assert.equal(isHiddenOddsGame(hidden, "hou-tt"), true);
+  assert.equal(isHiddenOddsGame(hidden, "psu-ore"), false);
+  assert.equal(isHiddenOddsCell(hidden, { gameId: "hou-tt", market: "spr", side: "away", bookKey: "fanduel" }), true);
+  assert.equal(isHiddenOddsCell(hidden, { gameId: "hou-tt", market: "spr", side: "home", bookKey: "fanduel" }), false);
+  assert.deepEqual(hiddenOddsGameIds(hidden), ["hou-tt"]);
+
+  const board = [
+    { id: "hou-tt", away: "Houston Cougars", home: "Texas Tech" },
+    { id: "psu-ore", away: "Portland State", home: "Oregon" },
+  ];
+  assert.deepEqual(filterHiddenOddsGames(board, hidden).map((g) => g.id), ["psu-ore"]);
+  assert.deepEqual(filterHiddenOddsGames(board, new Set()).map((g) => g.id), ["hou-tt", "psu-ore"]);
+  assert.deepEqual(
+    filterHiddenOddsGames(board, new Set([cellKey])).map((g) => g.id),
+    ["hou-tt", "psu-ore"],
+    "a cell hide does not remove the matchup row",
+  );
+
+  hidden = toggleOddsBoardHideKey(hidden, gameKey);
+  assert.equal(isHiddenOddsGame(hidden, "hou-tt"), false, "toggle unhides the game");
+  assert.equal(isHiddenOddsCell(hidden, { gameId: "hou-tt", market: "spr", side: "away", bookKey: "fanduel" }), true, "cell hide survives game unhide");
+  assert.deepEqual(filterHiddenOddsGames(board, hidden).map((g) => g.id), ["hou-tt", "psu-ore"]);
+
+  hidden = toggleOddsBoardHideKey(hidden, oddsBoardHideGameKey("hou-tt"));
+  hidden = toggleOddsBoardHideKey(hidden, oddsBoardHideGameKey("psu-ore"));
+  const afterShowAll = clearHiddenOddsGames(hidden);
+  assert.deepEqual(hiddenOddsGameIds(afterShowAll), []);
+  assert.deepEqual(filterHiddenOddsGames(board, afterShowAll).map((g) => g.id), ["hou-tt", "psu-ore"]);
+  assert.equal(
+    isHiddenOddsCell(afterShowAll, { gameId: "hou-tt", market: "spr", side: "away", bookKey: "fanduel" }),
+    true,
+    "Show all restores games only — cell hides stay",
+  );
+  assert.equal(isHiddenOddsGame(new Set(), "hou-tt"), false);
+  assert.deepEqual(filterHiddenOddsGames(null, hidden), []);
 }
 
 // ── pick-best with a hidden book: next-best wins; opposite side unchanged
