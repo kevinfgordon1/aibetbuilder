@@ -21,6 +21,7 @@ import {
   leagueForSport,
   visibleBetstampBooks,
 } from "./betstampBooks.js";
+import BookLabel from "./BookLabel.jsx";
 import {
   gamesFromBetstampSnapshot,
   applyFixtureMeta,
@@ -66,7 +67,12 @@ function BookMark({ book, extra = 0, title, size = 13 }) {
           alt=""
           width={size}
           height={size}
-          style={{ borderRadius: 2, display: "block" }}
+          style={{
+            borderRadius: 3,
+            display: "block",
+            objectFit: "contain",
+            background: "rgba(255,255,255,0.92)",
+          }}
           onError={() => setLogoError(true)}
         />
       ) : (
@@ -576,7 +582,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
 
   const visibleBooks = [{ key: "best", label: "Best Odds" }, ...books.filter((b) => selectedBooks.has(b.key))];
   const teamColWidth = 186;
-  const oddsColWidth = 92;
+  const oddsColWidth = 108;
   const metrics = summarizeTickStats(tickStats, nowMs);
 
   const stackedBest = bestView === "stacked";
@@ -784,8 +790,8 @@ export default function BetstampOddsBoard({ user = null } = {}) {
               <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
                 <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#12131a", zIndex: 2 }}>Line</th>
                 {visibleBooks.map((b) => (
-                  <th key={b.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                    {b.label}
+                  <th key={b.key} data-book-header={b.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                    {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
                   </th>
                 ))}
               </tr>
@@ -1030,8 +1036,26 @@ export default function BetstampOddsBoard({ user = null } = {}) {
         </div>
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         {books.map((b) => (
-          <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
-            {b.label}
+          <button
+            key={b.key}
+            type="button"
+            data-book-chip={b.key}
+            onClick={() => toggleBook(b.key)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)",
+              color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563",
+              border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <BookLabel book={b} size={14} />
           </button>
         ))}
       </div>
@@ -1062,8 +1086,8 @@ export default function BetstampOddsBoard({ user = null } = {}) {
             <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
               <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
               {visibleBooks.map((b) => (
-                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                  {b.label}
+                <th key={b.key} data-book-header={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                  {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
                 </th>
               ))}
             </tr>

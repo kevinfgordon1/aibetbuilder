@@ -2,21 +2,22 @@
 // existing Odds Board where the same shop already exists (logos / Best column).
 
 import { canSeeUnderdogPredict } from "./comboAccess.js";
+import { bookLogo } from "./bookLogos.js";
 
 export const BETSTAMP_TRIAL_BOOKS = Object.freeze([
-  { id: 100, key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: "https://www.fanduel.com/favicon.ico" },
-  { id: 200, key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: "https://www.draftkings.com/favicon.ico" },
-  { id: 300, key: "williamhill_us", label: "Caesars", color: "#d4a843", bg: "rgba(212,168,67,0.15)", logo: "https://www.caesars.com/favicon.ico" },
-  { id: 250, key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: "https://www.pinnacle.com/favicon.ico" },
-  { id: 613, key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
-  { id: 642, key: "betcris", label: "BetCris", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
-  { id: 150, key: "circa", label: "Circa", color: "#eab308", bg: "rgba(234,179,8,0.15)", logo: null },
-  { id: 365, key: "bet365", label: "bet365", color: "#027b5b", bg: "rgba(2,123,91,0.15)", logo: null },
-  { id: 191, key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
-  { id: 193, key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
-  { id: 194, key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: "https://kalshi.com/favicon.ico", exchange: true },
+  { id: 100, key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: bookLogo("fanduel") },
+  { id: 200, key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: bookLogo("draftkings") },
+  { id: 300, key: "williamhill_us", label: "Caesars", color: "#d4a843", bg: "rgba(212,168,67,0.15)", logo: bookLogo("williamhill_us") },
+  { id: 250, key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: bookLogo("pinnacle") },
+  { id: 613, key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: bookLogo("betonlineag") },
+  { id: 642, key: "betcris", label: "BetCris", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: bookLogo("betcris") },
+  { id: 150, key: "circa", label: "Circa", color: "#eab308", bg: "rgba(234,179,8,0.15)", logo: bookLogo("circa") },
+  { id: 365, key: "bet365", label: "bet365", color: "#027b5b", bg: "rgba(2,123,91,0.15)", logo: bookLogo("bet365") },
+  { id: 191, key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: bookLogo("prophetx"), exchange: true },
+  { id: 193, key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: bookLogo("polymarket"), exchange: true },
+  { id: 194, key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: bookLogo("kalshi"), exchange: true },
   // Betstamp OpenAPI also lists Fanatics Markets / Crypto.com on 196. UI label is Underdog Predict.
-  { id: 196, key: "underdog_predict", label: "Underdog Predict", color: "#84cc16", bg: "rgba(132,204,22,0.15)", logo: "https://underdogfantasy.com/favicon.ico", exchange: true },
+  { id: 196, key: "underdog_predict", label: "Underdog Predict", color: "#84cc16", bg: "rgba(132,204,22,0.15)", logo: bookLogo("underdog_predict"), exchange: true },
 ]);
 
 export const UNDERDOG_PREDICT_BOOK_ID = 196;
