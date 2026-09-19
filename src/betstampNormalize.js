@@ -187,19 +187,35 @@ const NOT_OFFERED_MARKET_STATUSES = new Set([
   "pulled",
 ]);
 
+export function marketIsOtB(market) {
+  if (!market || typeof market !== "object") return false;
+  return market.is_otb === true
+    || market.otb === true
+    || market.off_the_board === true
+    || market.is_off_the_board === true;
+}
+
+export function marketHasOfferableOdds(market) {
+  return toAmericanOdds(market?.odds) != null;
+}
+
 // Public Betstamp docs do not document a suspend/tombstone field. Honor one
 // when a payload actually sends it; otherwise presence in the REST snapshot
 // is the availability signal.
+//
+// Live soft-book mains often arrive with is_otb=true AND a finite decimal
+// Kevin can still bet (FanDuel/DK/Caesars etc.). Do not hide those. OTB
+// alone is only OFF when there is no offerable price.
 export function marketIsOffered(market) {
   if (!market || typeof market !== "object") return false;
   if (market.suspended === true || market.is_suspended === true || market.isSuspended === true) return false;
-  if (market.is_otb === true || market.otb === true || market.off_the_board === true || market.is_off_the_board === true) return false;
   if (market.active === false || market.is_active === false || market.isActive === false) return false;
   if (market.available === false || market.is_available === false || market.isAvailable === false) return false;
   const status = String(
     market.status ?? market.market_status ?? market.line_status ?? market.odds_status ?? "",
   ).trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (status && NOT_OFFERED_MARKET_STATUSES.has(status)) return false;
+  if (marketIsOtB(market) && !marketHasOfferableOdds(market)) return false;
   return true;
 }
 

@@ -1258,7 +1258,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
-        {" · "}LIVE uses SSE for ticks plus a 10s REST reconcile (refresh=1, no 5-minute cache) — quieter soft books take a newer Betstamp updated_at from that snap; a book/side Betstamp no longer lists (or marks suspended / OTB) shows a clear OFF / off-the-board cell, not a dash. A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend
+        {" · "}LIVE uses SSE for ticks plus a 10s REST reconcile (refresh=1, no 5-minute cache) — quieter soft books take a newer Betstamp updated_at from that snap; a book/side Betstamp no longer lists (or marks suspended, or OTB with no price) shows a clear OFF / off-the-board cell, not a dash. A priced is_otb quote still shows. A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX / Underdog Predict also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}

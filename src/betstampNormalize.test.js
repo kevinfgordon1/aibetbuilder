@@ -12,6 +12,8 @@ import {
   applyStreamMarkets,
   reconcileLiveGames,
   marketIsOffered,
+  marketIsOtB,
+  marketHasOfferableOdds,
   quoteOfferKey,
   quotePresenceKey,
   listedBoardQuotes,
@@ -556,10 +558,18 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(marketIsOffered({ odds: 1.91 }), true);
   assert.equal(marketIsOffered({ odds: 1.91, status: "suspended" }), false);
   assert.equal(marketIsOffered({ odds: 1.91, is_suspended: true }), false);
-  assert.equal(marketIsOffered({ odds: 1.91, is_otb: true }), false);
-  assert.equal(marketIsOffered({ odds: 1.91, off_the_board: true }), false);
+  assert.equal(marketIsOffered({ odds: 1.91, is_otb: true }), true, "priced is_otb stays offered");
+  assert.equal(marketIsOffered({ odds: 1.09, is_otb: true }), true);
+  assert.equal(marketIsOffered({ odds: 6.5, otb: true }), true);
+  assert.equal(marketIsOffered({ odds: 1.91, off_the_board: true }), true);
+  assert.equal(marketIsOffered({ is_otb: true }), false, "OTB with no price is OFF");
+  assert.equal(marketIsOffered({ odds: null, is_otb: true }), false);
+  assert.equal(marketIsOffered({ odds: 1, is_otb: true }), false, "decimal 1 is not offerable");
   assert.equal(marketIsOffered({ odds: 1.91, active: false }), false);
   assert.equal(marketIsOffered({ odds: 1.91, status: "open" }), true);
+  assert.equal(marketIsOtB({ is_otb: true }), true);
+  assert.equal(marketHasOfferableOdds({ odds: 1.09 }), true);
+  assert.equal(marketHasOfferableOdds({ odds: null }), false);
   assert.equal(marketIsLiveQuote({ is_live: true }), true);
   assert.equal(marketIsLiveQuote({ is_otb: true, is_live: false }), false);
   assert.equal(quotePresenceKey({ fixtureId: "fix-1", bookKey: "draftkings", betType: "Moneyline", side: "away" }), "fix-1|draftkings|moneyline|away");
@@ -753,6 +763,115 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
     assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 180);
   }
 
+  // Miami (FL) @ Wake Forest live spread: soft books still send a finite
+  // decimal with is_otb=true. Board must show the quote, not OFF.
+  {
+    const mia = { id: "mia", name: "Miami (FL)", abbreviation: "MIA" };
+    const wake = { id: "wake", name: "Wake Forest", abbreviation: "WF" };
+    const fixtureId = "019e5010-311f-7e7f-80be-57054c43185e";
+    const liveFix = {
+      id: fixtureId,
+      league: "NCAAF",
+      is_live: true,
+      status: "inprogress",
+      start_date: "2026-09-19T03:00:00Z",
+      home_team: wake,
+      away_team: mia,
+      home_score: 20,
+      away_score: 33,
+    };
+    const spreadSide = (providerId, sideType, number, odds, otb) => ({
+      odds,
+      number,
+      side: sideType === "Away" ? "MIA" : "WF",
+      side_type: sideType,
+      bet_type: "Spread",
+      period: "FT",
+      is_alt: false,
+      is_live: true,
+      is_otb: otb,
+      odd_provider_id: providerId,
+      fixture_id: fixtureId,
+      updated_at: "2026-09-19T03:03:00.000Z",
+    });
+    const softIds = [100, 200, 300, 250, 613, 150, 365, 191, 193];
+    const markets = [];
+    for (const id of softIds) {
+      markets.push(spreadSide(id, "Away", -12.5, 1.09, true));
+      markets.push(spreadSide(id, "Home", 12.5, 6.5, true));
+    }
+    markets.push(spreadSide(194, "Away", -12.5, 1.20, false));
+    markets.push(spreadSide(194, "Home", 12.5, 5.0, false));
+    markets.push(spreadSide(196, "Away", -12.5, 1.25, false));
+    markets.push(spreadSide(196, "Home", 12.5, 4.5, false));
+
+    const now = Date.parse("2026-09-19T03:03:10.000Z");
+    const games = gamesFromBetstampSnapshot({
+      markets,
+      fixtures: [liveFix],
+      teams: [mia, wake],
+      nowMs: now,
+    });
+    assert.equal(games.length, 1);
+    const g = games[0];
+    const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+    const liveOpts = { nowMs: now, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+    const softKeys = [
+      "fanduel", "draftkings", "williamhill_us", "pinnacle", "betonlineag",
+      "circa", "bet365", "prophetx", "polymarket",
+    ];
+    for (const key of softKeys) {
+      assert.equal(g.bookOdds[key].spr_away, decimalToAmerican(1.09), `${key} away priced`);
+      assert.equal(g.bookOdds[key].spr_home, decimalToAmerican(6.5), `${key} home priced`);
+      assert.equal(g.bookOdds[key].spr_away_line, -12.5);
+      assert.equal(lineIsSuspended(g, key, "spr_away"), false, `${key} is_otb+price is not OFF`);
+      const cell = getOddsBoardCell({
+        game: g, bookKey: key, market: "spr",
+        selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, ...liveOpts,
+      });
+      assert.equal(cell.top, decimalToAmerican(1.09));
+      assert.equal(cell.bot, decimalToAmerican(6.5));
+    }
+    assert.equal(g.bookOdds.kalshi.spr_away, decimalToAmerican(1.20));
+    assert.equal(g.bookOdds.underdog_predict.spr_away, decimalToAmerican(1.25));
+    assert.equal(lineIsSuspended(g, "kalshi", "spr_away"), false);
+    assert.equal(lineIsSuspended(g, "underdog_predict", "spr_away"), false);
+
+    const held = reconcileLiveGames(games, {
+      nowMs: now + 16_000,
+      fixtures: [liveFix],
+      markets,
+    });
+    assert.equal(held[0].bookOdds.fanduel.spr_away, decimalToAmerican(1.09));
+    assert.equal(lineIsSuspended(held[0], "fanduel", "spr_away"), false);
+    assert.equal(lineIsSuspended(held[0], "draftkings", "spr_home"), false);
+
+    const fdAway = markets.find((m) => m.odd_provider_id === 100 && m.side_type === "Away");
+    const { games: sseOtb } = applyStreamMarkets(games, [{
+      ...fdAway,
+      odds: 1.11,
+      is_otb: true,
+      updated_at: "2026-09-19T03:03:20.000Z",
+    }], { receivedAt: Date.parse("2026-09-19T03:03:20.400Z") });
+    assert.equal(sseOtb[0].bookOdds.fanduel.spr_away, decimalToAmerican(1.11));
+    assert.equal(lineIsSuspended(sseOtb[0], "fanduel", "spr_away"), false);
+
+    const { games: nullOff } = applyStreamMarkets(games, [{
+      ...fdAway,
+      odds: null,
+      is_otb: true,
+    }], { receivedAt: now + 1_000 });
+    assert.equal(nullOff[0].bookOdds.fanduel.spr_away, null);
+    assert.equal(lineIsSuspended(nullOff[0], "fanduel", "spr_away"), true);
+
+    const { games: susOff } = applyStreamMarkets(games, [{
+      ...fdAway,
+      status: "suspended",
+    }], { receivedAt: now + 1_000 });
+    assert.equal(susOff[0].bookOdds.fanduel.spr_away, null);
+    assert.equal(lineIsSuspended(susOff[0], "fanduel", "spr_away"), true);
+  }
+
   // markets == null must not wipe the board (failed/incomplete payload).
   const noop = reconcileLiveGames(games, { nowMs: now + 50_000, markets: null });
   assert.equal(noop[0].bookOdds.draftkings.ml_away, 120);
@@ -825,6 +944,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(stamp, /bookInitials/);
   assert.match(stamp, /data-live-reconcile-ms/);
   assert.match(stamp, /no longer lists/);
+  assert.match(stamp, /OTB with no price/);
+  assert.match(stamp, /priced is_otb quote still shows/);
   assert.match(stamp, /setInterval\(\(\) => \{/);
   assert.match(stamp, /if \(!liveOnly\) \{\s*pollTimer = setInterval/s);
   assert.match(stamp, /clearInterval\(pollTimer\)/);
