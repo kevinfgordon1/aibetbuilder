@@ -14,6 +14,10 @@
 // Cache-Control s-maxage so Promo remounts do not re-download Betstamp.
 // ?refresh=1 (or ?force=1) bypasses the server TTL — Promo Refresh does
 // not send this; it only bypasses the client TTL and still hits this cache.
+//
+// Auth: this route is anon (CORS * + no JWT). 196 stays on the allowlist so
+// Kevin's client can pass book_ids=196. Default / omitted book_ids omit 196.
+// UI hide + client omit is the real gate (canSeeUnderdogPredict).
 
 const {
   readQuery,

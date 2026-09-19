@@ -230,7 +230,7 @@ function futureGame() {
 {
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /Matching books/);
-  assert.match(app, /ALL_BOOKS\.filter\(b => TRUSTED_BOOK_KEYS\.has\(b\.key\)\)\.map/);
+  assert.match(app, /ALL_BOOKS\.filter\(b => trustedVisible\.has\(b\.key\)\)\.map/);
   assert.match(app, /function transformOddsData\(gamesArray, sportKey, trustedBookKeys = TRUSTED_BOOK_KEYS\)/);
   assert.match(app, /transformOddsData\(row\.data, row\.sport, scanMatchingBookKeys\)/);
   assert.match(app, /transformEventOddsData\(row\.data, row\.sport, scanMatchingBookKeys\)/);

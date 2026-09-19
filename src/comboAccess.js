@@ -7,24 +7,34 @@
 //
 // This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
 // Do not use this list to expand Miss tape / Unhedged / New Odds Board — those stay OWNER_EMAIL.
+// Underdog Predict (196) uses its own VITE_UNDERDOG_PREDICT_ALLOWLIST (Kevin always on).
 
 export const OWNER_EMAIL = "kev120909@gmail.com";
 
 /** Vite public env: comma / space / semicolon separated emails or auth uids. */
 export const COMBO_LOCKS_ALLOWLIST_ENV = "VITE_COMBO_LOCKS_ALLOWLIST";
 
-function readEnvAllowlist(env) {
+/** Underdog Predict (Betstamp 196) — New Odds Board column + Promo true-odds. */
+export const UNDERDOG_PREDICT_ALLOWLIST_ENV = "VITE_UNDERDOG_PREDICT_ALLOWLIST";
+export const UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT = "UNDERDOG_PREDICT_ALLOWLIST";
+export const UNDERDOG_PREDICT_BOOK_KEY = "underdog_predict";
+
+function readNamedAllowlist(env, viteKey, altKey) {
   if (env && typeof env === "object") {
-    const direct = env[COMBO_LOCKS_ALLOWLIST_ENV] ?? env.COMBO_LOCKS_ALLOWLIST;
+    const direct = env[viteKey] ?? (altKey ? env[altKey] : undefined);
     if (direct != null && String(direct).trim()) return String(direct);
   }
   try {
     const vite = typeof import.meta !== "undefined" && import.meta.env
-      ? import.meta.env[COMBO_LOCKS_ALLOWLIST_ENV]
+      ? import.meta.env[viteKey]
       : "";
     if (vite != null && String(vite).trim()) return String(vite);
   } catch (_) { /* node tests without Vite */ }
   return "";
+}
+
+function readEnvAllowlist(env) {
+  return readNamedAllowlist(env, COMBO_LOCKS_ALLOWLIST_ENV, "COMBO_LOCKS_ALLOWLIST");
 }
 
 export function parseComboLocksAllowlist(raw) {
@@ -72,6 +82,53 @@ export function profileShowsComboPnl(user, { isOwner = false } = {}, env) {
 export function canSeeOwnerTools(user) {
   if (!user || !user.email) return false;
   return String(user.email).trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
+}
+
+function readUnderdogPredictAllowlist(env) {
+  return readNamedAllowlist(env, UNDERDOG_PREDICT_ALLOWLIST_ENV, UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT);
+}
+
+/** Kevin is always included so a missing env var cannot lock him out. */
+export function underdogPredictAllowlist(env) {
+  const items = new Set([OWNER_EMAIL.toLowerCase()]);
+  for (const token of parseComboLocksAllowlist(readUnderdogPredictAllowlist(env))) {
+    items.add(token.toLowerCase());
+  }
+  return items;
+}
+
+/**
+ * Underdog Predict column / Promo true-odds overlay.
+ * Signed-in email or auth uid, case-insensitive. Logged-out is deny.
+ * Not a query-param gate — anyone can spoof ?book_ids=196.
+ */
+export function canSeeUnderdogPredict(user, env) {
+  if (!user) return false;
+  const allowed = underdogPredictAllowlist(env);
+  return userTokens(user).some((t) => allowed.has(t));
+}
+
+/** TRUSTED_BOOK_KEYS minus underdog_predict unless this user may see it. */
+export function visibleTrustedBookKeys(user, trustedKeys, env) {
+  const keys = new Set(trustedKeys || []);
+  if (!canSeeUnderdogPredict(user, env)) keys.delete(UNDERDOG_PREDICT_BOOK_KEY);
+  return keys;
+}
+
+/** Promo / board book catalogs omit Underdog unless this user may see it. */
+export function visiblePromoBooks(user, allBooks, env) {
+  if (canSeeUnderdogPredict(user, env)) return allBooks || [];
+  return (allBooks || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
+}
+
+/** Matching-book selection intersected with the books this user may see. */
+export function matchingKeysVisibleToUser(matchingKeys, user, trustedKeys, env) {
+  const visible = visibleTrustedBookKeys(user, trustedKeys, env);
+  const next = new Set();
+  for (const k of matchingKeys || []) {
+    if (visible.has(k)) next.add(k);
+  }
+  return next.size ? next : new Set(visible);
 }
 
 /** Public + gated tab slugs written into the hash. Aliases normalize on parse. */

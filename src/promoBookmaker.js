@@ -41,8 +41,8 @@ export const BOOKMAKER_TITLE = "Bookmaker";
 // Manual Refresh sets forceRefresh and bypasses this client TTL; the server
 // cache still serves Betstamp within 5 minutes so Refresh stays fast.
 export const BOOKMAKER_CACHE_TTL_MS = 5 * 60 * 1000;
-// v2: snapshot book_ids include Underdog Predict (196) alongside Bookmaker 642.
-export const BOOKMAKER_CACHE_STORAGE_KEY = "aibetbuilder.bookmakerSnap.v2";
+// v3: book_ids are 642, or 642+196 when the signed-in user may see Underdog.
+export const BOOKMAKER_CACHE_STORAGE_KEY = "aibetbuilder.bookmakerSnap.v3";
 
 let memoryBookmakerCache = null;
 
@@ -403,7 +403,13 @@ export function overlayBookmakerOnCacheRows(rows, snapshot) {
   });
 }
 
-export function bookmakerSnapshotUrl({ leagues } = {}) {
+export function promoBetstampBookIds(includeUnderdog = true) {
+  return includeUnderdog
+    ? [BOOKMAKER_BOOK_ID, UNDERDOG_PREDICT_BOOK_ID]
+    : [BOOKMAKER_BOOK_ID];
+}
+
+export function bookmakerSnapshotUrl({ leagues, includeUnderdog = true } = {}) {
   const list = [...new Set((leagues || []).map((l) => String(l).toUpperCase()).filter((l) => l === "NFL" || l === "NCAAF"))];
   if (!list.length) return null;
   return betstampSnapshotUrl({
@@ -411,7 +417,7 @@ export function bookmakerSnapshotUrl({ leagues } = {}) {
     live: false,
     // Same selected-sports / 5-min TTL path as Bookmaker. 196 rides along so
     // Promo true-odds can overlay Underdog Predict without a second Betstamp pull.
-    bookIds: [BOOKMAKER_BOOK_ID, UNDERDOG_PREDICT_BOOK_ID],
+    bookIds: promoBetstampBookIds(includeUnderdog),
   });
 }
 
@@ -490,6 +496,7 @@ export function coalesceBookmakerCache(cached, store) {
         leagues: [...new Set([...(store.leagues || []), ...(cached.leagues || [])])],
         fetchedAtByLeague: mergeFetchedAtByLeague(store.fetchedAtByLeague, cached.fetchedAtByLeague),
         fetchedAt: Math.max(Number(store.fetchedAt) || 0, Number(cached.fetchedAt) || 0) || undefined,
+        includeUnderdog: !!(store.includeUnderdog || cached.includeUnderdog),
       };
     }
     return cached;
@@ -597,49 +604,56 @@ export async function resolveBookmakerSnapshot({
   ttlMs = BOOKMAKER_CACHE_TTL_MS,
   persist = true,
   storage,
+  includeUnderdog = true,
 } = {}) {
   const needed = bookmakerLeaguesForSports(sports);
-  if (!needed.length) return { snap: null, leagues: [], fetchedAtByLeague: {}, fromCache: true };
+  if (!needed.length) return { snap: null, leagues: [], fetchedAtByLeague: {}, includeUnderdog, fromCache: true };
   const store = persist ? readBookmakerClientCache({ storage }) : null;
   const effective = coalesceBookmakerCache(cached, store);
-  if (!forceRefresh && bookmakerSnapCovers(effective, needed) && bookmakerSnapIsFresh(effective, needed, now, ttlMs)) {
+  const cacheExplicitlyLacksUdp = !!(effective && effective.includeUnderdog === false);
+  const cacheHasUdp = !!(effective && effective.includeUnderdog);
+  const cacheUsable = !includeUnderdog || !cacheExplicitlyLacksUdp;
+  if (!forceRefresh && cacheUsable && bookmakerSnapCovers(effective, needed) && bookmakerSnapIsFresh(effective, needed, now, ttlMs)) {
     const hit = {
       snap: effective.snap,
       leagues: effective.leagues,
       fetchedAtByLeague: effective.fetchedAtByLeague || {},
+      includeUnderdog: cacheHasUdp,
       fromCache: true,
     };
     if (persist) writeBookmakerClientCache(hit, { storage });
     return hit;
   }
-  const missing = forceRefresh
+  const missing = forceRefresh || (includeUnderdog && cacheExplicitlyLacksUdp)
     ? needed
     : [...new Set([
       ...missingBookmakerLeagues(effective, needed),
       ...staleBookmakerLeagues(effective, needed, now, ttlMs),
     ])];
-  const fresh = await fetchBookmakerSnapshot({ leagues: missing, fetchFn, timeoutMs });
+  const fresh = await fetchBookmakerSnapshot({ leagues: missing, fetchFn, timeoutMs, includeUnderdog });
   if (!fresh) {
     if (effective?.snap) {
       return {
         snap: effective.snap,
         leagues: effective.leagues,
         fetchedAtByLeague: effective.fetchedAtByLeague || {},
+        includeUnderdog: cacheHasUdp,
         fromCache: true,
       };
     }
-    return { snap: null, leagues: [], fetchedAtByLeague: {}, fromCache: false };
+    return { snap: null, leagues: [], fetchedAtByLeague: {}, includeUnderdog, fromCache: false };
   }
   const fetchedAtByLeague = { ...(effective?.fetchedAtByLeague || {}) };
   for (const league of missing) fetchedAtByLeague[String(league).toUpperCase()] = now;
   let next;
-  if (forceRefresh || !effective?.snap) {
-    next = { snap: fresh, leagues: missing, fetchedAtByLeague, fromCache: false };
+  if (forceRefresh || !effective?.snap || (includeUnderdog && cacheExplicitlyLacksUdp)) {
+    next = { snap: fresh, leagues: missing, fetchedAtByLeague, includeUnderdog, fromCache: false };
   } else {
     next = {
       snap: mergeBookmakerSnapshots(omitBookmakerLeagues(effective.snap, missing), fresh),
       leagues: [...new Set([...(effective.leagues || []), ...missing])],
       fetchedAtByLeague,
+      includeUnderdog,
       fromCache: false,
     };
   }
@@ -651,8 +665,9 @@ export async function fetchBookmakerSnapshot({
   leagues,
   fetchFn = fetch,
   timeoutMs = BOOKMAKER_FETCH_TIMEOUT_MS,
+  includeUnderdog = true,
 } = {}) {
-  const url = bookmakerSnapshotUrl({ leagues });
+  const url = bookmakerSnapshotUrl({ leagues, includeUnderdog });
   if (!url) return null;
   const ctrl = typeof AbortController === "function" ? new AbortController() : null;
   let timer;

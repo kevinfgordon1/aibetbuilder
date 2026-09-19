@@ -317,6 +317,9 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.match(url, /196/);
   assert.match(url, /is_live=false/);
   assert.equal(bookmakerSnapshotUrl({ leagues: ["MLB"] }), null);
+  const noUdp = bookmakerSnapshotUrl({ leagues: ["NFL"], includeUnderdog: false });
+  assert.match(noUdp, /book_ids=642/);
+  assert.doesNotMatch(noUdp, /196/);
 }
 
 {
@@ -325,6 +328,19 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     fetchFn: async (url) => {
       assert.match(url, /book_ids=642/);
       assert.match(url, /196/);
+      return { ok: true, json: async () => bookmakerSnapshot() };
+    },
+  });
+  assert.equal(snap.fixtures[0].id, "fix-den-kc");
+}
+
+{
+  const snap = await fetchBookmakerSnapshot({
+    leagues: ["NFL"],
+    includeUnderdog: false,
+    fetchFn: async (url) => {
+      assert.match(url, /book_ids=642/);
+      assert.doesNotMatch(url, /196/);
       return { ok: true, json: async () => bookmakerSnapshot() };
     },
   });
@@ -806,6 +822,39 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
       fetchFn: async () => { calls += 1; throw new Error("TTL hit must not network"); },
     });
     assert.equal(within.fromCache, true);
+    assert.equal(calls, 0);
+  }
+
+  {
+    let calls = 0;
+    const miss = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now }, includeUnderdog: false },
+      persist: false,
+      includeUnderdog: true,
+      now,
+      fetchFn: async (url) => {
+        calls += 1;
+        assert.match(String(url), /196/);
+        return { ok: true, json: async () => bookmakerSnapshot({ fixtureId: "fix-udp" }) };
+      },
+    });
+    assert.equal(miss.fromCache, false);
+    assert.equal(miss.includeUnderdog, true);
+    assert.equal(calls, 1);
+  }
+
+  {
+    let calls = 0;
+    const publicHit = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: { snap: nflSnap, leagues: ["NFL"], fetchedAtByLeague: { NFL: now }, includeUnderdog: false },
+      persist: false,
+      includeUnderdog: false,
+      now,
+      fetchFn: async () => { calls += 1; throw new Error("public 642 cache must not network"); },
+    });
+    assert.equal(publicHit.fromCache, true);
     assert.equal(calls, 0);
   }
 
