@@ -314,6 +314,7 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.match(url, /\/api\/betstamp-markets\?/);
   assert.match(url, /league=NFL%2CNCAAF/);
   assert.match(url, /book_ids=642/);
+  assert.match(url, /196/);
   assert.match(url, /is_live=false/);
   assert.equal(bookmakerSnapshotUrl({ leagues: ["MLB"] }), null);
 }
@@ -323,6 +324,7 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     leagues: ["NFL"],
     fetchFn: async (url) => {
       assert.match(url, /book_ids=642/);
+      assert.match(url, /196/);
       return { ok: true, json: async () => bookmakerSnapshot() };
     },
   });

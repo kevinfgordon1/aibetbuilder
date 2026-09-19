@@ -86,6 +86,7 @@ function futureGame() {
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
     "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
+    "underdog_predict",
   ]);
   assert.equal(chips.find((b) => b.key === "pinnacle")?.label, "Pinnacle");
   assert.equal(chips.find((b) => b.key === "betus")?.label, "BetUS");

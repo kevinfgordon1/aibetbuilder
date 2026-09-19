@@ -77,6 +77,7 @@ import {
   evScanFromLegs,
 } from "./oddsLoad.js";
 import { overlayBookmakerOnCacheRows, readBookmakerClientCache, resolveBookmakerSnapshot } from "./promoBookmaker.js";
+import { overlayUnderdogPredictOnCacheRows } from "./promoUnderdogPredict.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -142,6 +143,7 @@ const ALL_BOOKS = [
   { key: "novig", label: "Novig", color: "#a855f7", bg: "rgba(168,85,247,0.15)", logo: null, exchange: true },
   { key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
   { key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
+  { key: "underdog_predict", label: "Underdog Predict", color: "#84cc16", bg: "rgba(132,204,22,0.15)", logo: "https://underdogfantasy.com/favicon.ico", exchange: true },
   { key: "betopenly", label: "BetOpenly", color: "#e879f9", bg: "rgba(232,121,249,0.15)", logo: null, exchange: true },
 ];
 
@@ -149,12 +151,14 @@ const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
   "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
   "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
+  "underdog_predict",
 ]);
 
 const ADJUSTED_BOOK_NOTES = {
   kalshi: "after Kalshi fee",
   prophetx: "after 2% commission",
   polymarket: "after Polymarket taker fee",
+  underdog_predict: "after $0.02/contract fee",
 };
 
 const SPORTS = [
@@ -1588,11 +1592,18 @@ export default function App() {
       // Betstamp Bookmaker overlay is best-effort and re-runs every Promo
       // fetch. It strips any cached `bookmaker` key first (odds_cache is Odds
       // API only) then overlays 642 — a blip or failed join omits those cells.
+      // Underdog Predict (196) uses the same snapshot and join guards.
       const bookmakerSnap = await bookmakerPromise.catch(() => null);
-      const featuredRows = overlayBookmakerOnCacheRows(featured.data, bookmakerSnap);
+      const featuredRows = overlayUnderdogPredictOnCacheRows(
+        overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
+        bookmakerSnap,
+      );
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
-      const eventRows = overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap);
+      const eventRows = overlayUnderdogPredictOnCacheRows(
+        overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap),
+        bookmakerSnap,
+      );
       const nextBoard = applyTransformed(featuredRows, eventRows);
       setOddsSource((prev) => (
         boardHasPromoGames(nextBoard) || !prev.featured.length
@@ -1647,7 +1658,11 @@ export default function App() {
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      const featuredRows = overlayBookmakerOnCacheRows(featured.data, await bookmakerPromise.catch(() => null));
+      const bookmakerSnap = await bookmakerPromise.catch(() => null);
+      const featuredRows = overlayUnderdogPredictOnCacheRows(
+        overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
+        bookmakerSnap,
+      );
       // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that
       // payload freezes Chrome. Promo still loads events with a 30-min lookback.
       setAllOddsData(applyTransformed(featuredRows, []));

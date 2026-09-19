@@ -13,7 +13,12 @@ export const BETSTAMP_TRIAL_BOOKS = Object.freeze([
   { id: 191, key: "prophetx", label: "ProphetX", color: "#f43f5e", bg: "rgba(244,63,94,0.15)", logo: null, exchange: true },
   { id: 193, key: "polymarket", label: "Polymarket", color: "#5b6ef5", bg: "rgba(91,110,245,0.15)", logo: "https://polymarket.com/favicon.ico", exchange: true },
   { id: 194, key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: "https://kalshi.com/favicon.ico", exchange: true },
+  // Betstamp OpenAPI also lists Fanatics Markets / Crypto.com on 196. UI label is Underdog Predict.
+  { id: 196, key: "underdog_predict", label: "Underdog Predict", color: "#84cc16", bg: "rgba(132,204,22,0.15)", logo: "https://underdogfantasy.com/favicon.ico", exchange: true },
 ]);
+
+export const UNDERDOG_PREDICT_BOOK_ID = 196;
+export const UNDERDOG_PREDICT_BOOK_KEY = "underdog_predict";
 
 export const BETSTAMP_BOOK_IDS = BETSTAMP_TRIAL_BOOKS.map((b) => b.id);
 
@@ -39,8 +44,8 @@ export function bookByKey(key) {
   return BOOKS_BY_KEY.get(key) || null;
 }
 
-// Kalshi / Polymarket / ProphetX — same venues the public board treats as PMs.
-export const PM_WIN_PROB_BOOKS = Object.freeze(["kalshi", "polymarket", "prophetx"]);
+// Kalshi / Polymarket / ProphetX / Underdog Predict — same venues the public board treats as PMs.
+export const PM_WIN_PROB_BOOKS = Object.freeze(["kalshi", "polymarket", "prophetx", "underdog_predict"]);
 
 export function isPmWinProbBook(key) {
   return PM_WIN_PROB_BOOKS.includes(String(key || "").toLowerCase());
