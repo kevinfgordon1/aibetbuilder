@@ -9,7 +9,12 @@ import {
   LIVE_BEST_ODDS_MAX_AGE_MS,
   LIVE_BEST_ODDS_BREAK_MAX_AGE_MS,
   oddsBoardHideKey,
+  oddsBoardHideGameKey,
   isHiddenOddsCell,
+  isHiddenOddsGame,
+  toggleOddsBoardHideKey,
+  clearHiddenOddsGames,
+  filterHiddenOddsGames,
   isStackedBestMatch,
   oddsBoardSidePoint,
   oddsMoveDirection,
@@ -179,6 +184,22 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
 function boardHideSide(marketKey, which) {
   if (marketKey === "tot") return which === "top" ? "over" : "under";
   return which === "top" ? "away" : "home";
+}
+
+function matchesBoardSearch(g, q) {
+  if (!q) return true;
+  return (
+    g.away.toLowerCase().includes(q) ||
+    g.home.toLowerCase().includes(q) ||
+    (g.awayAbbr || "").toLowerCase().includes(q) ||
+    (g.homeAbbr || "").toLowerCase().includes(q)
+  );
+}
+
+function gameMatchupLabel(game) {
+  const away = game?.awayAbbr || game?.away || "Away";
+  const home = game?.homeAbbr || game?.home || "Home";
+  return `${away} @ ${home}`;
 }
 
 function BookSideCell({
@@ -562,12 +583,22 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const toggleHiddenCell = (gameId, marketKey, side, bookKey) => {
     const key = oddsBoardHideKey({ gameId, market: marketKey, side, bookKey });
     if (!key) return;
-    setHiddenKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setHiddenKeys((prev) => toggleOddsBoardHideKey(prev, key));
+  };
+
+  const toggleHiddenGame = (gameId) => {
+    const key = oddsBoardHideGameKey(gameId);
+    if (!key) return;
+    setHiddenKeys((prev) => toggleOddsBoardHideKey(prev, key));
+    if (openGame && String(openGame.id) === String(gameId)) {
+      altFetchGen.current += 1;
+      setOpenGame(null);
+      setAltError(null);
+    }
+  };
+
+  const showAllHiddenGames = () => {
+    setHiddenKeys((prev) => clearHiddenOddsGames(prev));
   };
 
   const toggleBook = (bookKey) => {
@@ -583,18 +614,21 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
 
   const filteredGames = useMemo(() => {
     const q = search.toLowerCase();
+    const onBoard = games.filter((g) => {
+      if (g.sport !== boardSport) return false;
+      if (!gameVisibleOnBoard(g, { liveOnly, now: nowMs })) return false;
+      return matchesBoardSearch(g, q);
+    });
+    return filterHiddenOddsGames(onBoard, hiddenKeys);
+  }, [games, boardSport, liveOnly, search, nowMs, hiddenKeys]);
+
+  const hiddenBoardGames = useMemo(() => {
     return games.filter((g) => {
       if (g.sport !== boardSport) return false;
       if (!gameVisibleOnBoard(g, { liveOnly, now: nowMs })) return false;
-      if (!q) return true;
-      return (
-        g.away.toLowerCase().includes(q) ||
-        g.home.toLowerCase().includes(q) ||
-        (g.awayAbbr || "").toLowerCase().includes(q) ||
-        (g.homeAbbr || "").toLowerCase().includes(q)
-      );
+      return isHiddenOddsGame(hiddenKeys, g.id);
     });
-  }, [games, boardSport, liveOnly, search, nowMs]);
+  }, [games, boardSport, liveOnly, nowMs, hiddenKeys]);
 
   const grouped = {};
   filteredGames.forEach((g) => {
@@ -871,7 +905,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       data-live-reconcile-ms={BETSTAMP_LIVE_RECONCILE_MS}
     >
       <style>{`
-        .obb-side { position: relative; }
+        .obb-side, .obb-game { position: relative; }
         .obb-hide {
           position: absolute;
           top: 2px;
@@ -893,12 +927,16 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           font-family: 'DM Sans', sans-serif;
         }
         .obb-side:hover .obb-hide,
-        .obb-side:focus-within .obb-hide {
+        .obb-side:focus-within .obb-hide,
+        .obb-game:hover .obb-hide,
+        .obb-game:focus-within .obb-hide {
           opacity: 0.4;
           pointer-events: auto;
         }
         .obb-side:hover .obb-hide:hover,
-        .obb-side:focus-within .obb-hide:focus {
+        .obb-side:focus-within .obb-hide:focus,
+        .obb-game:hover .obb-hide:hover,
+        .obb-game:focus-within .obb-hide:focus {
           opacity: 0.85;
           color: #9ca3af;
           background: rgba(10,11,15,0.7);
@@ -1170,6 +1208,57 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         ))}
       </div>
 
+      {hiddenBoardGames.length > 0 && (
+        <div
+          data-hidden-games="true"
+          data-hidden-game-count={hiddenBoardGames.length}
+          style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
+            {hiddenBoardGames.length} hidden
+          </span>
+          <span style={{ color: "#4b5563" }}>·</span>
+          <button
+            type="button"
+            data-show-all-games="true"
+            onClick={showAllHiddenGames}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(255,255,255,0.04)",
+              color: "#d1d5db",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Show all
+          </button>
+          {hiddenBoardGames.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              data-unhide-game={g.id}
+              title={`Show ${g.away} @ ${g.home}`}
+              onClick={() => toggleHiddenGame(g.id)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.03)",
+                color: "#9ca3af",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {gameMatchupLabel(g)}
+            </button>
+          ))}
+        </div>
+      )}
+
       {missingKey && (
         <div data-betstamp-missing-key="true" style={{ padding: "28px 20px", borderRadius: 12, border: "1px dashed rgba(234,179,8,0.35)", color: "#e8eaed", marginBottom: 16 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Set <code>BETSTAMP_API_KEY</code> to load this board</div>
@@ -1227,7 +1316,26 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                       onClick={() => openAlts(game)}
                       style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
                     >
-                      <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
+                      <td
+                        className="obb-game"
+                        data-hide-game-cell="true"
+                        style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
+                      >
+                        <button
+                          type="button"
+                          className="obb-hide"
+                          data-hide-game="hide"
+                          data-hide-game-key={oddsBoardHideGameKey(game.id)}
+                          aria-label={`Hide ${game.away} @ ${game.home}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleHiddenGame(game.id);
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
+                          ×
+                        </button>
                         <div style={{ padding: "8px 16px 4px" }}>
                           <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>
                             {game.is_live ? (
@@ -1264,6 +1372,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
+        {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
         {" · "}Best names the winning book in full (FanDuel, not FD) with its logo; +N if tied
         {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). OFF / empty cells do not flash

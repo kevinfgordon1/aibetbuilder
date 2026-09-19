@@ -974,10 +974,17 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(stamp, /4\+ minutes stale/);
   assert.match(stamp, /hiddenKeys/);
   assert.match(stamp, /oddsBoardHideKey/);
+  assert.match(stamp, /oddsBoardHideGameKey/);
+  assert.match(stamp, /isHiddenOddsGame/);
   assert.match(stamp, /data-hide-odds/);
+  assert.match(stamp, /data-hide-game/);
+  assert.match(stamp, /data-hidden-games/);
+  assert.match(stamp, /data-show-all-games/);
   assert.match(stamp, /opacity: 0;/);
   assert.match(stamp, /@media \(hover: none\) \{\s*\n\s*\.obb-hide \{ opacity: 0\.2;/);
   assert.match(stamp, /toggleHiddenCell/);
+  assert.match(stamp, /toggleHiddenGame/);
+  assert.match(stamp, /filterHiddenOddsGames/);
   assert.match(stamp, /useState\(\(\) => new Set\(\)\)/);
   assert.match(stamp, /useState\("single"\)/);
   assert.match(stamp, /data-best-view=\{bestView\}/);
@@ -993,7 +1000,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /pointStacks/);
   assert.doesNotMatch(stamp, /location\.hash|serializeAppHash/);
   assert.doesNotMatch(board, /LIVE_BEST_ODDS_MAX_AGE_MS|maxBestAgeMs/);
-  assert.doesNotMatch(board, /data-hide-odds|oddsBoardHideKey|hiddenKeys/);
+  assert.doesNotMatch(board, /data-hide-odds|oddsBoardHideKey|oddsBoardHideGameKey|hiddenKeys|data-hide-game|data-show-all-games/);
   assert.doesNotMatch(board, /stackedBest|data-best-view|Top 2 lines|data-best-stacks|data-best-point-pairs|pointStacks/);
   assert.match(stamp, /data-win-prob/);
   assert.match(stamp, /formatWinProb/);

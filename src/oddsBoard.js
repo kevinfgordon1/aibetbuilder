@@ -101,11 +101,60 @@ export function bookInitials(label) {
   return word.slice(0, 2).toUpperCase();
 }
 
-// Session hide on New Odds Board: game + market + side + book (not the whole column).
+// Session hide on New Odds Board. Cell keys are game + market + side + book
+// (not the Best column). Whole-game hide uses `game:${fixtureId}` in the same
+// hiddenKeys Set — Betstamp fixture id is stable across snapshot / stream.
+export const ODDS_BOARD_HIDE_GAME_PREFIX = "game:";
+
 export function oddsBoardHideKey({ gameId, market, side, bookKey } = {}) {
   if (gameId == null || gameId === "") return null;
   if (!market || !side || !bookKey || bookKey === "best") return null;
   return `${gameId}:${market}:${side}:${bookKey}`;
+}
+
+export function oddsBoardHideGameKey(gameId) {
+  if (gameId == null || gameId === "") return null;
+  return `${ODDS_BOARD_HIDE_GAME_PREFIX}${gameId}`;
+}
+
+export function isOddsBoardGameHideKey(key) {
+  return typeof key === "string" && key.startsWith(ODDS_BOARD_HIDE_GAME_PREFIX);
+}
+
+export function isHiddenOddsGame(hiddenKeys, gameId) {
+  if (!hiddenKeys || typeof hiddenKeys.has !== "function") return false;
+  const key = oddsBoardHideGameKey(gameId);
+  return !!(key && hiddenKeys.has(key));
+}
+
+export function hiddenOddsGameIds(hiddenKeys) {
+  if (!hiddenKeys || typeof hiddenKeys[Symbol.iterator] !== "function") return [];
+  const ids = [];
+  for (const key of hiddenKeys) {
+    if (isOddsBoardGameHideKey(key)) ids.push(key.slice(ODDS_BOARD_HIDE_GAME_PREFIX.length));
+  }
+  return ids;
+}
+
+export function toggleOddsBoardHideKey(hiddenKeys, key) {
+  const next = new Set(hiddenKeys);
+  if (!key) return next;
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+export function clearHiddenOddsGames(hiddenKeys) {
+  const next = new Set(hiddenKeys);
+  for (const key of next) {
+    if (isOddsBoardGameHideKey(key)) next.delete(key);
+  }
+  return next;
+}
+
+export function filterHiddenOddsGames(games, hiddenKeys) {
+  if (!Array.isArray(games)) return [];
+  return games.filter((g) => !isHiddenOddsGame(hiddenKeys, g?.id));
 }
 
 export function hideSideFromPriceKey(priceKey) {
