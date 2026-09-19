@@ -34,6 +34,7 @@ assert.deepEqual(missingLogos, [], `missing logo files: ${missingLogos.join(", "
 
 assert.equal(visibleBetstampBooks(null).some((b) => b.key === UNDERDOG_PREDICT_BOOK_KEY), false);
 assert.equal(visibleBetstampBooks({ email: "kev120909@gmail.com" }).some((b) => b.key === UNDERDOG_PREDICT_BOOK_KEY), true);
+assert.equal(visibleBetstampBooks({ email: "kmguido97@gmail.com" }).some((b) => b.key === UNDERDOG_PREDICT_BOOK_KEY), true);
 assert.equal(
   visibleBetstampBooks({ email: "stranger@gmail.com" }).some((b) => b.key === UNDERDOG_PREDICT_BOOK_KEY),
   false,
