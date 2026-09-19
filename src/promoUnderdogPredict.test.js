@@ -132,7 +132,8 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(den.price, applyUnderdogPredictFee(100));
   assert.equal(kc.price, applyUnderdogPredictFee(-110));
   assert.equal(den.size, 400);
-  assert.notEqual(den.price, 100, "Promo true odds must apply the $0.02/contract haircut");
+  assert.notEqual(den.price, 100, "Promo true odds must apply the UDX exchange fee");
+  assert.equal(den.price, -107, "Promo overlay uses the 0.072 UDX curve, not flat $0.02 (−108)");
   assert.ok(!bm.markets.some((m) => m.outcomes.some((o) => o.price === 100 && o.name === "Denver Broncos")));
 }
 
@@ -247,7 +248,8 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.match(app, /canSeeUnderdogPredict\(user\)/);
   assert.match(app, /includeUnderdog/);
   assert.match(app, /key: "underdog_predict", label: "Underdog Predict"/);
-  assert.match(app, /after \$0\.02\/contract fee/);
+  assert.match(app, /after UDX exchange fee/);
+  assert.doesNotMatch(app, /after \$0\.02\/contract fee/);
   assert.doesNotMatch(app, /label: "Fanatics Markets"/);
   assert.ok(app.includes("underdog_predict"));
   assert.ok(ev.includes("underdog_predict"));

@@ -4,8 +4,9 @@
 // Odds API games stay the row identity. A Betstamp blip omits Underdog cells.
 //
 // New Odds Board shows raw Betstamp American + win% (same as Kalshi / Poly /
-// ProphetX columns). Promo true odds apply the $0.02/contract face fee here
-// because Underdog is not on The Odds API applyBookAdjustments path.
+// ProphetX columns). Promo true odds apply the UDX fee curve here
+// (rate × p × (1−p), added to cost) because Underdog is not on The Odds API
+// applyBookAdjustments path.
 
 import {
   asList,
