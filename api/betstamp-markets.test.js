@@ -57,6 +57,7 @@ function mockRes() {
     assert.equal(res.body.markets.length, 1);
     assert.equal(res.body.fixtures[0].id, 'f1');
     assert.equal(res.body.query.is_live, 'true');
+    assert.equal(res.headers['Cache-Control'], 'private, no-store');
     assert.equal(res.body.query.timedelta, '240');
     assert.equal(calls.length, 3);
     const marketUrl = calls.find((u) => String(u).includes('/markets'));

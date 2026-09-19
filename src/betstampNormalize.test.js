@@ -33,6 +33,7 @@ import {
   marketSide,
   formatCompactAge,
   compactAgeTone,
+  staleLiveBookLabels,
   formatWinProb,
   cellShowsWinProb,
   lineFieldFor,
@@ -307,6 +308,24 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(compactAgeTone(0, 90_000), "#ca8a04");
   assert.equal(compactAgeTone(0, 120_000), "#f59e0b");
   assert.equal(compactAgeTone(0, 300_000), "#f59e0b");
+  {
+    const staleBooks = staleLiveBookLabels(
+      [{
+        is_live: true,
+        bookLineUpdatedAt: {
+          fanduel: { ml_away: 0 },
+          pinnacle: { ml_away: 298_000 },
+        },
+      }],
+      [
+        { key: "fanduel", label: "FanDuel" },
+        { key: "pinnacle", label: "Pinnacle" },
+      ],
+      300_000,
+    );
+    assert.deepEqual(staleBooks.map((b) => b.key), ["fanduel"]);
+    assert.equal(staleBooks[0].age, "5m");
+  }
   assert.equal(lineFieldFor("moneyline", "away"), "ml_away");
   assert.equal(lineFieldFor("total", "over"), "tot_over");
   assert.deepEqual(cellLineFields("spr"), { top: "spr_away", bot: "spr_home" });
@@ -576,8 +595,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(games[0].bookOdds.fanduel.ml_away, 105);
   assert.equal(listedBoardQuotes(games[0]).length, 2);
 
-  // Present in the next snapshot: keep SSE/REST price (even if snapshot juice differs)
-  // and bump lastConfirmedAt. Do not treat this as a suspend.
+  // Same-stamp snapshot must not clobber a held SSE/REST print. Confirm only.
   const confirmed = reconcileLiveGames(games, {
     nowMs: now + 16_000,
     fixtures: [fixture],
@@ -586,11 +604,24 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       fdAway,
     ],
   });
-  assert.equal(confirmed[0].bookOdds.draftkings.ml_away, 120, "present quote keeps held price");
+  assert.equal(confirmed[0].bookOdds.draftkings.ml_away, 120, "same-stamp snapshot keeps held price");
   assert.equal(confirmed[0].bookOdds.fanduel.ml_away, 105);
   assert.equal(lineIsSuspended(confirmed[0], "draftkings", "ml_away"), false);
   assert.equal(lineConfirmedAt(confirmed[0], "draftkings", "ml_away"), now + 16_000);
   assert.equal(lineUpdatedAt(confirmed[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:05:00.000Z"));
+
+  // Newer Betstamp stamp on a quiet soft book must move the cell (and age).
+  const moved = reconcileLiveGames(games, {
+    nowMs: now + 16_000,
+    fixtures: [fixture],
+    markets: [
+      { ...dkAway, odds: 2.30, updated_at: "2026-09-14T20:10:10.000Z" },
+      fdAway,
+    ],
+  });
+  assert.equal(moved[0].bookOdds.draftkings.ml_away, 130, "newer REST stamp updates a quiet book");
+  assert.equal(lineUpdatedAt(moved[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:10:10.000Z"));
+  assert.equal(moved[0].bookOdds.fanduel.ml_away, 105);
 
   // Missing from the snapshot: clear the zombie, mark OFF, exclude from Best.
   const cleared = reconcileLiveGames(confirmed, {
@@ -804,6 +835,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|BETSTAMP_LIVE_RECONCILE_MS|data-snapshot-age|reconcileLiveGames|data-odds-suspended/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /compactAgeTone/);
+  assert.match(stamp, /staleLiveBookLabels/);
+  assert.match(stamp, /data-soft-book-stale/);
+  assert.match(stamp, /data-board-refresh/);
+  assert.match(stamp, /refreshKey/);
+  assert.match(app, /refreshKey=\{betstampRefreshKey\}/);
+  assert.match(app, /manual_betstamp/);
   assert.match(liveSrc, /p\.set\("refresh", "1"\)/);
   assert.match(liveSrc, /live === true/);
   assert.match(stamp, /bestLineUpdatedAt/);

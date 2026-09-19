@@ -35,6 +35,7 @@ import {
   summarizeTickStats,
   formatCompactAge,
   compactAgeTone,
+  staleLiveBookLabels,
   formatWinProb,
   cellShowsWinProb,
   cellLineFields,
@@ -278,7 +279,7 @@ function ageTone(ms) {
   return "#f97316";
 }
 
-export default function BetstampOddsBoard({ user = null } = {}) {
+export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const books = useMemo(() => visibleBetstampBooks(user), [user]);
   const bookIds = useMemo(() => books.map((b) => b.id), [books]);
   const [market, setMarket] = useState("ml");
@@ -304,6 +305,8 @@ export default function BetstampOddsBoard({ user = null } = {}) {
   const [altLadders, setAltLadders] = useState(null);
   const [altLoading, setAltLoading] = useState(false);
   const [altError, setAltError] = useState(null);
+  const [localRefresh, setLocalRefresh] = useState(0);
+  const boardRefreshKey = Number(refreshKey) + localRefresh;
 
   useEffect(() => { gamesRef.current = games; }, [games]);
 
@@ -478,7 +481,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
       clearTimeout(timer);
       clearInterval(pollTimer);
     };
-  }, [boardSport, liveOnly, bookIds]);
+  }, [boardSport, liveOnly, bookIds, boardRefreshKey]);
 
   useEffect(() => {
     altFetchGen.current += 1;
@@ -604,6 +607,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
   const teamColWidth = 186;
   const oddsColWidth = 108;
   const metrics = summarizeTickStats(tickStats, nowMs);
+  const staleSoft = liveOnly ? staleLiveBookLabels(games, books, nowMs) : [];
 
   const stackedBest = bestView === "stacked";
   const liveBestOpts = { nowMs, hiddenKeys, stackedBest };
@@ -969,6 +973,24 @@ export default function BetstampOddsBoard({ user = null } = {}) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"
+            data-board-refresh="1"
+            onClick={() => setLocalRefresh((n) => n + 1)}
+            title="Re-pull Betstamp (bypasses the 5-minute Promo cache on LIVE)"
+            style={{
+              padding: "6px 14px",
+              borderRadius: 999,
+              border: "1px solid rgba(59,130,246,0.35)",
+              background: "rgba(59,130,246,0.12)",
+              color: "#93c5fd",
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
             onClick={() => setLiveOnly((v) => !v)}
             data-live-toggle={liveOnly ? "on" : "off"}
             style={{
@@ -1035,6 +1057,25 @@ export default function BetstampOddsBoard({ user = null } = {}) {
             <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{metrics.eventCount}</div>
           </div>
         </div>
+        {staleSoft.length > 0 && (
+          <div
+            data-soft-book-stale={staleSoft.map((b) => b.key).join(",")}
+            style={{
+              marginBottom: 10,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(245,158,11,0.35)",
+              background: "rgba(120,53,15,0.35)",
+              color: "#fbbf24",
+              fontSize: 12,
+              fontWeight: 600,
+              lineHeight: 1.4,
+            }}
+          >
+            {staleSoft.map((b) => `${b.label} ${b.age}`).join(" · ")}
+            {" — last Betstamp print, not a frozen Refresh. Last-tick in the header is SSE (Pinnacle / PMs). Soft books often do not tick live."}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
           {books.map((b) => {
             const row = metrics.perBook[b.key];
@@ -1217,7 +1258,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
-        {" · "}LIVE uses SSE for ticks plus a 10s REST presence reconcile — a book/side Betstamp no longer lists (or marks suspended / OTB) shows a clear OFF / off-the-board cell, not a dash. A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend
+        {" · "}LIVE uses SSE for ticks plus a 10s REST reconcile (refresh=1, no 5-minute cache) — quieter soft books take a newer Betstamp updated_at from that snap; a book/side Betstamp no longer lists (or marks suspended / OTB) shows a clear OFF / off-the-board cell, not a dash. A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX / Underdog Predict also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}

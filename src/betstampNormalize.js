@@ -115,6 +115,27 @@ export function compactAgeTone(updatedAt, now = Date.now()) {
   return "#6b7280";
 }
 
+// Quiet soft books (no SSE) whose newest Betstamp print is ≥2m old.
+export function staleLiveBookLabels(games, books, nowMs, { staleMs = 120_000 } = {}) {
+  const now = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
+  const out = [];
+  for (const book of books || []) {
+    if (!book?.key) continue;
+    let newest = null;
+    for (const game of games || []) {
+      if (!game?.is_live) continue;
+      const stamps = game.bookLineUpdatedAt?.[book.key] || {};
+      for (const t of Object.values(stamps)) {
+        if (typeof t === "number" && isFinite(t) && (newest == null || t > newest)) newest = t;
+      }
+    }
+    if (newest != null && now - newest >= staleMs) {
+      out.push({ key: book.key, label: book.label, updatedAt: newest, age: formatCompactAge(newest, now) });
+    }
+  }
+  return out;
+}
+
 export function lineUpdatedAt(game, bookKey, field) {
   if (!game || !bookKey || !field) return null;
   const n = game.bookLineUpdatedAt?.[bookKey]?.[field];
@@ -874,7 +895,9 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
     };
   }
   if (hasQuote && game.is_live && !incomingLive) return false;
-  if (hasQuote && existingTs != null && incomingMarketTs != null && incomingMarketTs < existingTs) return false;
+  // Held live print wins unless Betstamp sends a strictly newer updated_at.
+  if (hasQuote && incomingMarketTs == null) return false;
+  if (hasQuote && existingTs != null && incomingMarketTs <= existingTs) return false;
   const price = toAmericanOdds(market.odds);
   if (price == null) return false;
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
@@ -951,7 +974,8 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
 }
 
 // LIVE availability truth: REST mains listing vs previously shown quotes.
-// Present → confirm (keep SSE price). Absent → clear / OFF and out of Best.
+// Present → apply if Betstamp's updated_at is newer (quiet soft books), else
+// keep the held SSE print. Absent → clear / OFF and out of Best.
 // Silence alone is not a suspend — only a snapshot miss (or an explicit
 // suspended status). Halftime still reconciles. `markets == null` is a no-op
 // so a botched payload cannot wipe the board.
@@ -980,6 +1004,11 @@ export function reconcileLiveGames(games, {
 
   for (const game of next) {
     if (!game?.is_live || gameIsFinished(game, seenAt)) continue;
+    for (const market of marketList) {
+      if (!isMainMarket(market)) continue;
+      if (market.fixture_id == null || String(market.fixture_id) !== String(game.id)) continue;
+      applyMarketToGame(game, market, { receivedAt: seenAt });
+    }
     for (const quote of listedBoardQuotes(game)) {
       const key = quotePresenceKey({
         fixtureId: game.id,
@@ -1001,17 +1030,6 @@ export function reconcileLiveGames(games, {
         continue;
       }
       clearSideQuote(game, quote.bookKey, quote.betType, quote.side);
-    }
-
-    for (const market of marketList) {
-      if (!isMainMarket(market) || !marketIsOffered(market)) continue;
-      if (market.fixture_id == null || String(market.fixture_id) !== String(game.id)) continue;
-      const bookKey = bookKeyForMarket(market);
-      const side = marketSide(market, game);
-      const field = lineFieldFor(normalizeBetType(market.bet_type), side);
-      if (!bookKey || !side || !field) continue;
-      if (game.bookOdds?.[bookKey]?.[field] != null) continue;
-      applyMarketToGame(game, market, { receivedAt: seenAt });
     }
   }
 
