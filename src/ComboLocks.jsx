@@ -1226,7 +1226,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 checked={lockKind(form) === "freebet"}
                 onChange={(e) => setForm({ ...form, kind: e.target.checked ? "freebet" : "cash" })}
               />
-              Free bet — hit pays profit only (stake not returned); miss costs $0
+              Free bet
             </label>
             <div className="row c3" style={{ marginTop: 14 }}>
               <div><label>{lockKind(form) === "freebet" ? "Free bet ($) — face value" : "Stake ($) — your bet"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
