@@ -220,6 +220,36 @@ export function pickBestSide(entries, freshness) {
 // New Odds Board "Top 2 lines" Best: cap stacked spread/total chips.
 export const STACKED_BEST_MAX_LINES = 2;
 
+// Fixed New Odds Board tracks. Live ticks must clip inside these boxes — never
+// grow a column or row. Horizontal scroll is preferred over fluid widths.
+export const OBB_TEAM_COL_WIDTH = 186;
+export const OBB_ODDS_COL_WIDTH = 108;
+export const OBB_BEST_COL_WIDTH = 128;
+export const OBB_SIDE_CELL_HEIGHT = 56;
+
+export function obbColWidth(bookKey) {
+  return bookKey === "best" ? OBB_BEST_COL_WIDTH : OBB_ODDS_COL_WIDTH;
+}
+
+export function obbTableWidth(visibleBooks) {
+  return (visibleBooks || []).reduce((sum, b) => sum + obbColWidth(b?.key), OBB_TEAM_COL_WIDTH);
+}
+
+export function padBestPointStacks(blocks, max = STACKED_BEST_MAX_LINES) {
+  const cap = Number.isFinite(max) && max > 0 ? Math.floor(max) : STACKED_BEST_MAX_LINES;
+  const rows = Array.isArray(blocks) ? blocks.slice(0, cap) : [];
+  while (rows.length < cap) {
+    rows.push({
+      point: `pad-${rows.length}`,
+      count: 0,
+      top: null,
+      bot: null,
+      padded: true,
+    });
+  }
+  return rows;
+}
+
 export function normalizeBoardLine(point) {
   const n = Number(point);
   if (point == null || point === "" || !isFinite(n)) return null;

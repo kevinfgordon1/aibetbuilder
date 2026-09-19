@@ -14,6 +14,7 @@ export default function BookLabel({ book, size = 14, label }) {
         alignItems: "center",
         gap: 6,
         minWidth: 0,
+        maxWidth: "100%",
         verticalAlign: "middle",
       }}
     >
@@ -37,7 +38,7 @@ export default function BookLabel({ book, size = 14, label }) {
           onError={() => setLogoError(true)}
         />
       ) : null}
-      <span>{text}</span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{text}</span>
     </span>
   );
 }

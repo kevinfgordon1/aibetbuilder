@@ -19,6 +19,14 @@ import {
   oddsBoardSidePoint,
   oddsMoveDirection,
   ODDS_FLASH_MS,
+  STACKED_BEST_MAX_LINES,
+  OBB_TEAM_COL_WIDTH,
+  OBB_ODDS_COL_WIDTH,
+  OBB_BEST_COL_WIDTH,
+  OBB_SIDE_CELL_HEIGHT,
+  obbColWidth,
+  obbTableWidth,
+  padBestPointStacks,
 } from "./oddsBoard.js";
 import {
   applyBookColumnOrder,
@@ -75,11 +83,12 @@ function BestBookName({ book, extra = 0, title, size = 13 }) {
       title={title || book.label}
       data-book-mark={book.key}
       data-book-full-name={book.label}
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, verticalAlign: "middle", flexShrink: 0, flexWrap: "wrap", justifyContent: "center" }}
+      className="obb-clip"
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, verticalAlign: "middle", minWidth: 0, maxWidth: "100%", flexWrap: "nowrap", justifyContent: "center" }}
     >
       <BookLabel book={book} size={size} />
       {extra > 0 && (
-        <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", fontFamily: "'DM Sans', sans-serif" }}>+{extra}</span>
+        <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>+{extra}</span>
       )}
     </span>
   );
@@ -116,6 +125,7 @@ function OddsFlashNumber({ price, suspended, flashKey }) {
     <span
       data-odds-flash={flash || "none"}
       className={flash ? `obb-flash obb-flash-${flash}` : undefined}
+      style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
     >
       {price == null ? "—" : formatAmericanOdds(price)}
     </span>
@@ -143,7 +153,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
     return (
       <>
         {line && (
-          <div style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 2, lineHeight: 1.15, textDecoration: "line-through", opacity: 0.7 }}>
+          <div className="obb-clip" style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 2, lineHeight: 1.15, textDecoration: "line-through", opacity: 0.7 }}>
             {line}
           </div>
         )}
@@ -161,8 +171,8 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
   }
   return (
     <>
-      {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
-      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "wrap", lineHeight: 1.15 }}>
+      {line && <div className="obb-clip" style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
+      <div className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "nowrap", lineHeight: 1.15, maxWidth: "100%" }}>
         <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
@@ -173,6 +183,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
         <div
           data-win-prob={winProb}
           title="Implied win probability"
+          className="obb-clip"
           style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
         >
           {winProb}
@@ -182,6 +193,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
         <div
           data-line-age={age}
           title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
+          className="obb-clip"
           style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
         >
           {age}
@@ -273,7 +285,8 @@ function BookSideCell({
       )}
       <div
         data-odds-price={off ? "off" : empty ? "empty" : "set"}
-        style={hidden ? { textDecoration: "line-through", opacity: 0.72 } : undefined}
+        className="obb-clip"
+        style={hidden ? { textDecoration: "line-through", opacity: 0.72, maxWidth: "100%" } : { maxWidth: "100%" }}
       >
         {children}
       </div>
@@ -803,8 +816,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   ));
 
   const visibleBooks = [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))];
-  const teamColWidth = 186;
-  const oddsColWidth = 108;
+  const teamColWidth = OBB_TEAM_COL_WIDTH;
+  const oddsColWidth = OBB_ODDS_COL_WIDTH;
+  const bestColWidth = OBB_BEST_COL_WIDTH;
+  const tableWidth = obbTableWidth(visibleBooks);
+  const colWidthFor = (bookKey) => obbColWidth(bookKey);
   const metrics = summarizeTickStats(tickStats, nowMs);
   const staleSoft = liveOnly ? staleLiveBookLabels(games, books, nowMs) : [];
 
@@ -858,38 +874,30 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   );
 
   const renderPairedPointBlocks = (rowGame, blocks, fields) => {
-    if (!blocks?.length) {
-      return (
-        <div data-best-point-pairs="0" data-best-stacks="0">
-          <OddsSide price={null} size={null} line={null} books={[]} allBooks={books} showBestMark nowMs={nowMs} flashKey={`${rowGame.id}:best:empty`} />
-        </div>
-      );
-    }
+    const padded = padBestPointStacks(blocks, STACKED_BEST_MAX_LINES);
     return (
-      <div data-best-point-pairs={blocks.length} data-best-stacks={blocks.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0 }}>
-        {blocks.map((block, i) => (
+      <div data-best-point-pairs={padded.length} data-best-stacks={padded.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0, width: "100%", overflow: "hidden" }}>
+        {padded.map((block, i) => (
           <div
-            key={block.point}
-            data-best-point={block.point}
+            key={block.padded ? `pad-${i}` : block.point}
+            data-best-point={block.padded ? undefined : block.point}
             data-best-point-count={block.count}
+            data-best-stack-pad={block.padded ? "1" : "0"}
             style={i > 0 ? {
-              marginTop: 4,
-              paddingTop: 4,
               borderTop: "1px solid rgba(16,185,129,0.28)",
               width: "100%",
             } : { width: "100%" }}
           >
-            <div data-best-stack={block.top?.line} data-best-stack-price={block.top?.price} data-best-stack-side="top" style={{ width: "100%" }}>
+            <div className="obb-side" data-best-stack={block.top?.line} data-best-stack-price={block.top?.price} data-best-stack-side="top" style={{ width: "100%" }}>
               {renderStackedSide(rowGame, fields.top, block.top)}
             </div>
             <div
+              className="obb-side"
               data-best-stack={block.bot?.line}
               data-best-stack-price={block.bot?.price}
               data-best-stack-side="bot"
               style={{
                 width: "100%",
-                marginTop: 3,
-                paddingTop: 3,
                 borderTop: "1px solid rgba(16,185,129,0.12)",
               }}
             >
@@ -938,9 +946,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     if (pairBlocks) {
       const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
       return (
-        <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+        <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
           <div
-            className="obb-side"
+            className="obb-side obb-side-paired"
             data-odds-side="paired"
             style={{
               ...sideStyle(true, false, emptyPairs),
@@ -954,8 +962,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     }
 
     return (
-      <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-        <div style={{ display: "flex", flexDirection: "column" }}>
+      <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+        <div style={{ display: "flex", flexDirection: "column", width: "100%", overflow: "hidden" }}>
           <BookSideCell
             gameId={rowGame.id}
             marketKey={marketKey}
@@ -1014,13 +1022,19 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     return (
       <div data-alt-section={section} style={{ marginBottom: 22 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>{title}</div>
-        <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
+        <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+          <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
+            <colgroup>
+              <col data-obb-col="game" style={{ width: teamColWidth }} />
+              {visibleBooks.map((b) => (
+                <col key={b.key} data-obb-col={b.key} style={{ width: colWidthFor(b.key) }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#12131a", zIndex: 2 }}>Line</th>
+                <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 0, background: "#12131a", zIndex: 2 }}>Line</th>
                 {visibleBooks.map((b) => (
-                  <th key={b.key} data-book-header={b.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                  <th key={b.key} data-book-header={b.key} style={{ padding: "10px 6px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
                     {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
                   </th>
                 ))}
@@ -1029,7 +1043,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             <tbody>
               {rows.map((row) => (
                 <tr key={`${section}-${row.line ?? "ml"}`} data-alt-line={row.line ?? "ml"} data-alt-main={row.isMain ? "1" : "0"} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: row.isMain ? "rgba(59,130,246,0.04)" : "transparent" }}>
-                  <td style={{ padding: "6px 12px", width: teamColWidth, position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
+                  <td style={{ padding: "6px 12px", width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
                     <div>{labelFor(row)}</div>
                     {row.isMain && <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginTop: 2 }}>MAIN</div>}
                     {marketKey === "ml" && (
@@ -1065,6 +1079,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     <div
       data-betstamp-board="true"
       data-row-density="compact"
+      data-col-layout="fixed"
+      data-team-col-w={teamColWidth}
+      data-odds-col-w={oddsColWidth}
+      data-best-col-w={bestColWidth}
+      data-side-h={OBB_SIDE_CELL_HEIGHT}
       data-book-order={visibleBookKeys.join(",")}
       data-game-order={visibleGameIds.join(",")}
       data-guard-allow="true"
@@ -1075,6 +1094,43 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     >
       <style>{`
         .obb-side, .obb-game { position: relative; }
+        .obb-grid {
+          table-layout: fixed;
+          border-collapse: collapse;
+        }
+        .obb-grid th, .obb-grid td {
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        .obb-grid thead th {
+          height: 44px;
+          max-height: 44px;
+        }
+        .obb-side {
+          box-sizing: border-box;
+          width: 100%;
+          height: ${OBB_SIDE_CELL_HEIGHT}px;
+          max-height: ${OBB_SIDE_CELL_HEIGHT}px;
+          overflow: hidden;
+        }
+        .obb-side-paired {
+          height: auto;
+          max-height: none;
+          overflow: hidden;
+        }
+        .obb-clip {
+          min-width: 0;
+          max-width: 100%;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .obb-game-name {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 100%;
+        }
         .obb-hide {
           position: absolute;
           top: 2px;
@@ -1175,8 +1231,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          min-width: 52px;
-          padding: 2px 6px;
+          box-sizing: border-box;
+          min-width: 0;
+          max-width: 100%;
+          width: 100%;
+          padding: 2px 4px;
           border-radius: 5px;
           border: 1px dashed rgba(251,191,36,0.55);
           background: rgba(120,53,15,0.55);
@@ -1187,6 +1246,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           line-height: 1.1;
           text-transform: uppercase;
           font-family: 'DM Sans', sans-serif;
+          overflow: hidden;
         }
         .obb-off-sub {
           display: block;
@@ -1496,11 +1556,17 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       )}
 
       {!loading && (
-      <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
+      <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+        <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
+          <colgroup>
+            <col data-obb-col="game" style={{ width: teamColWidth }} />
+            {visibleBooks.map((b) => (
+              <col key={b.key} data-obb-col={b.key} style={{ width: colWidthFor(b.key) }} />
+            ))}
+          </colgroup>
           <thead>
             <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
               {visibleBooks.map((b) => (
                 <th
                   key={b.key}
@@ -1513,9 +1579,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                   onDragLeave={() => {
                     if (dragOver?.kind === "book" && dragOver.key === b.key) setDragOver(null);
                   }}
-                  style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}
+                  style={{ padding: "12px 6px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                  <span className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, maxWidth: "100%" }}>
                     {b.key !== "best" && (
                       <BoardGrip
                         kind="book"
@@ -1570,7 +1636,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                       <td
                         className="obb-game"
                         data-hide-game-cell="true"
-                        style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
+                        style={{ padding: 0, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
                       >
                         <button
                           type="button"
@@ -1603,10 +1669,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
                             )}
                           </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
+                          <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
                             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
                           </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.15 }}>
+                          <div className="obb-game-name" title={game.home} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.15 }}>
                             {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
                           </div>
                           <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
@@ -1638,6 +1704,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
         {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default}
+        {" · "}Book / Best / Game cells stay a fixed size — live ticks, ages, logos, OFF THE BOARD, and Best names clip or ellipsis inside the box. Wide slates scroll sideways instead of stretching columns}
       </div>
 
       {openGame && (

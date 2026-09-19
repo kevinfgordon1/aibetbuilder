@@ -57,7 +57,8 @@ assert.match(board, /b\.key === "best" \? b\.label : <BookLabel book=\{b\} size=
 assert.match(label, /data-book-logo=\{book\.key\}/);
 assert.match(label, /onError=\{\(\) => setLogoError\(true\)\}/);
 assert.match(label, /showLogo \? \(/);
-assert.match(label, /<span>\{text\}<\/span>/);
+  assert.match(label, /\{text\}<\/span>/);
+  assert.match(label, /textOverflow: "ellipsis"/);
 assert.doesNotMatch(label, /bookInitials/);
 assert.match(label, /rgba\(255,255,255,0\.92\)/);
 assert.match(board, /BestBookName/);

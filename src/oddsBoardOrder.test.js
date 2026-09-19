@@ -134,6 +134,8 @@ assert.deepEqual(moveKeyByOffset(["a", "b", "c"], "c", 1, []), ["a", "b", "c"]);
   assert.match(stamp, /obb-grip/);
   assert.match(stamp, /ArrowUp/);
   assert.match(stamp, /ArrowLeft/);
+  assert.match(stamp, /tableLayout: "fixed"/);
+  assert.match(stamp, /data-col-layout="fixed"/);
   assert.doesNotMatch(stamp, /draggable=\{true\}[\s\S]{0,80}data-fixture/, "whole game rows are not the drag handle");
   assert.doesNotMatch(board, /oddsBoardOrder|data-drag-game|data-drag-book/);
   assert.match(pkg, /oddsBoardOrder\.test\.js/);
