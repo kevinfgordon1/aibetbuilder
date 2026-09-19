@@ -42,6 +42,29 @@ function americanFromImpliedPrice(p) {
   return -Math.round(100 / (decimalOdds - 1));
 }
 
+function decimalToAmerican(d) {
+  if (!Number.isFinite(d) || d <= 1) return null;
+  if (d >= 2) return Math.round((d - 1) * 100);
+  return -Math.round(100 / (d - 1));
+}
+
+// Betstamp mains are decimal (1.12 → −833, 2.87 → +187). American is ±100+.
+// Values in [20, 100) are the +8628 phantom zone (87.28 treated as decimal).
+export const TYPICAL_BETSTAMP_DECIMAL_MAX = 20;
+
+export function coerceUnderdogFeeInputToAmerican(raw) {
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n) || n === 0) return null;
+  if (n > 0 && n < 1) {
+    if (n < 0.05) return null;
+    return n >= 0.5 ? -Math.round((100 * n) / (1 - n)) : Math.round((100 * (1 - n)) / n);
+  }
+  if (n === 1) return null;
+  if (n > 1 && n < TYPICAL_BETSTAMP_DECIMAL_MAX) return decimalToAmerican(n);
+  if (n >= TYPICAL_BETSTAMP_DECIMAL_MAX && n < 100) return null;
+  return n;
+}
+
 export function underdogPredictFeePerContract(p) {
   const x = clampUnitInterval(p);
   if (x <= 0 || x >= 1) return 0;
@@ -50,8 +73,8 @@ export function underdogPredictFeePerContract(p) {
 
 export function applyUnderdogPredictFee(rawAmericanOdds) {
   if (rawAmericanOdds === null || rawAmericanOdds === undefined) return rawAmericanOdds;
-  const n = typeof rawAmericanOdds === "number" ? rawAmericanOdds : Number(rawAmericanOdds);
-  if (!Number.isFinite(n) || n === 0) return rawAmericanOdds;
+  const n = coerceUnderdogFeeInputToAmerican(rawAmericanOdds);
+  if (n == null) return Number.isFinite(Number(rawAmericanOdds)) ? null : rawAmericanOdds;
   const p = impliedPriceFromAmerican(n);
   if (p <= 0 || p >= 1) return rawAmericanOdds;
   // Fee is added to cost — p_eff = p + rate·p·(1−p).

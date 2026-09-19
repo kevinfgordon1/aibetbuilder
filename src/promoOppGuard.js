@@ -41,6 +41,15 @@ export function quoteLooksWrongSideOf(reference, candidate) {
   return Math.abs(pa - pb) >= ABSURD_TRUE_EDGE;
 }
 
+// Sign-agnostic implied gap. +8628 vs +110 is the same side but 46pts of p —
+// the sign-only guard lets that rank as a free-bet BEST PICK.
+export function quoteLooksAbsurdVsReference(reference, candidate, edge = ABSURD_TRUE_EDGE) {
+  const pa = impliedFromAmerican(reference);
+  const pb = impliedFromAmerican(candidate);
+  if (pa == null || pb == null) return false;
+  return Math.abs(pa - pb) >= edge;
+}
+
 // bookOdds = our sportsbook price; oppOdds = other-side Yes used as the inverse.
 export function oppQuoteLooksInverted(bookOdds, oppOdds) {
   const book = Number(bookOdds);
@@ -82,6 +91,12 @@ export function quoteConflictsWithSportsbookConsensus(price, sportsbookPrices) {
   const ref = medianAmerican(sportsbookPrices);
   if (ref == null) return false;
   return quoteLooksWrongSideOf(ref, price);
+}
+
+export function quoteMagnitudeConflictsWithSportsbookConsensus(price, sportsbookPrices, edge = DECISIVE_IMPLIED_DEV) {
+  const ref = medianAmerican(sportsbookPrices);
+  if (ref == null) return false;
+  return quoteLooksAbsurdVsReference(ref, price, edge);
 }
 
 // Highest American among quotes that are not sign-flipped vs sportsbook consensus.

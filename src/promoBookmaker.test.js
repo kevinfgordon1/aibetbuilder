@@ -146,6 +146,13 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.equal(teamsLikelySame("Kansas State Wildcats", "Kansas"), false);
   assert.equal(teamsLikelySame("Iowa State Cyclones", "Iowa"), false);
   assert.equal(teamsLikelySame("Arizona State Sun Devils", "Arizona"), false);
+  assert.equal(teamsLikelySame("Western Kentucky", "Kentucky"), false, "WKU must not inherit Kentucky");
+  assert.equal(teamsLikelySame("Western Kentucky Hilltoppers", "Kentucky Wildcats"), false);
+  assert.equal(teamsLikelySame("West Virginia", "Virginia"), false);
+  assert.equal(teamsLikelySame("Eastern Michigan", "Michigan"), false);
+  assert.equal(teamsLikelySame("South Carolina", "Carolina"), false);
+  assert.equal(teamsLikelySame("Western Kentucky Hilltoppers", "Western Kentucky"), true);
+  assert.equal(teamsLikelySame("West Virginia Mountaineers", "West Virginia"), true);
   assert.equal(namesLooselyEqual("Kansas Jayhawks", "Arkansas"), false, "kansas ⊂ arkansas is not a token match");
   assert.equal(namesLooselyEqual("Kansas Jayhawks", "Arkansas Razorbacks"), false);
   assert.equal(teamsLikelySame("Kansas Jayhawks", "Arkansas Razorbacks"), false);
@@ -156,6 +163,11 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.equal(teamMatchScore("Denver Broncos", "", "DEN"), 1);
   assert.equal(teamMatchScore("Kansas Jayhawks", "Kansas State", "KAN"), 1);
   assert.equal(teamMatchScore("Iowa State Cyclones", "Iowa", "IOWA"), 1);
+  const wkuVsKenn = uniquePairScore(
+    { home_team: "Kennesaw State Owls", away_team: "Western Kentucky Hilltoppers" },
+    { home: "Kentucky Wildcats", away: "Kennesaw State Owls", homeAbbr: "UK", awayAbbr: "KENN" },
+  );
+  assert.equal(wkuVsKenn.score, 0, "WKU @ Kennesaw must not join Kentucky @ Kennesaw");
 }
 
 {

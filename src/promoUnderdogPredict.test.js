@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { ALL_BOOKS, TRUSTED_BOOK_KEYS } from "../lib/promo-ev.js";
 import { matchingBookList } from "./promoMatchingBooks.js";
-import { bookKeyForMarket, isPmWinProbBook } from "./betstampNormalize.js";
+import { bookKeyForMarket, isPmWinProbBook, toAmericanOdds } from "./betstampNormalize.js";
 import { transformOddsData } from "./oddsTransform.js";
 import {
   joinOddsEventToBetstampFixture,
@@ -15,14 +16,22 @@ import {
   UNDERDOG_PREDICT_BOOK_ID,
   UNDERDOG_PREDICT_BOOK_KEY,
   UNDERDOG_PREDICT_TITLE,
+  betstampOddsLooksLikeInvertedLongshot,
   marketIsUnderdogPredict,
   maybeOverlayUnderdogPredictOnCacheRows,
   overlayUnderdogPredictOnCacheRows,
   overlayUnderdogPredictOnGame,
   overlayUnderdogPredictOnGames,
+  toUnderdogPredictAmerican,
   underdogPredictBookmakerFromSnapshot,
+  underdogPredictConflictsWithEventBooks,
+  underdogTwoWayLooksIncoherent,
 } from "./promoUnderdogPredict.js";
 import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
+import { calcFreeBetParlayEV } from "./promoFreeBet.js";
+
+const require = createRequire(import.meta.url);
+const { buildAllLegsForBook } = require("../lib/promo-ev.js");
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const future = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
@@ -255,6 +264,189 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.ok(ev.includes("underdog_predict"));
   const appTrusted = app.match(/const TRUSTED_BOOK_KEYS = new Set\(\[([\s\S]*?)\]\);/);
   assert.ok(appTrusted[1].includes("underdog_predict"));
+}
+
+{
+  // Decimal favorites use −100/(d−1), never (d−1)×100 and never 1/tiny-p.
+  assert.equal(toAmericanOdds(1.12), -833);
+  assert.equal(toAmericanOdds(2.87), 187);
+  assert.notEqual(toAmericanOdds(1.12), 8628);
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(87.28), true, "87.28 decimal is 1/p≈0.0115");
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(0.01146), true);
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(1.12), false);
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(2.87), false);
+  assert.equal(toUnderdogPredictAmerican(87.28), null);
+  assert.equal(toUnderdogPredictAmerican(0.01146), null);
+  assert.equal(toUnderdogPredictAmerican(1.12), applyUnderdogPredictFee(-833));
+  assert.equal(toUnderdogPredictAmerican(2.87), applyUnderdogPredictFee(187));
+  assert.ok(toUnderdogPredictAmerican(1.12) < 0, "1.12 stays a favorite after UDX fee");
+  assert.ok(toUnderdogPredictAmerican(1.12) > -1200 && toUnderdogPredictAmerican(1.12) < -700);
+  assert.ok(toUnderdogPredictAmerican(2.87) > 150 && toUnderdogPredictAmerican(2.87) < 200);
+  assert.notEqual(applyUnderdogPredictFee(1.12), 8628);
+  assert.notEqual(applyUnderdogPredictFee(2), -5387, "decimal 2.00 must not be read as American +2");
+  assert.equal(applyUnderdogPredictFee(2), applyUnderdogPredictFee(100));
+  assert.equal(applyUnderdogPredictFee(87.28), null);
+}
+
+{
+  // WKU / Kennesaw: 87.28 on the named dog + 1.93 on the favorite. Sign-only
+  // consensus (+105 vs +8628) would keep the overlay and mint +$179k EV.
+  const kick = future;
+  const event = {
+    id: "odds-wku-kennesaw",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Western Kentucky Hilltoppers",
+    home_team: "Kennesaw State Owls",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: 105 },
+            { name: "Kennesaw State Owls", price: -125 },
+          ],
+        }],
+      },
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: 100 },
+            { name: "Kennesaw State Owls", price: -120 },
+          ],
+        }],
+      },
+    ],
+  };
+  const wkuId = "team-wku";
+  const kenId = "team-kennesaw";
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-wku-kennesaw",
+      league: "NCAAF",
+      start_date: kick,
+      home_team_id: kenId,
+      away_team_id: wkuId,
+    }],
+    teams: [
+      { id: wkuId, name: "Western Kentucky Hilltoppers", abbreviation: "WKU" },
+      { id: kenId, name: "Kennesaw State Owls", abbreviation: "KENN" },
+    ],
+    markets: [
+      { odds: 87.28, side: "WKU", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-kennesaw", team_id: wkuId },
+      { odds: 1.93, side: "KENN", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-kennesaw", team_id: kenId },
+    ],
+  };
+  const rawBm = {
+    key: UNDERDOG_PREDICT_BOOK_KEY,
+    title: UNDERDOG_PREDICT_TITLE,
+    markets: [{
+      key: "h2h",
+      outcomes: [
+        { name: "Western Kentucky Hilltoppers", price: 8628 },
+        { name: "Kennesaw State Owls", price: applyUnderdogPredictFee(-108) },
+      ],
+    }],
+  };
+  assert.equal(underdogTwoWayLooksIncoherent(rawBm), true, "+8628 and −107 are not a 2-way market");
+  assert.equal(underdogPredictConflictsWithEventBooks(event, rawBm), true);
+
+  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
+  const wkuPrice = udp?.markets?.find((m) => m.key === "h2h")?.outcomes?.find((o) => o.name === "Western Kentucky Hilltoppers")?.price;
+  assert.notEqual(wkuPrice, 8628);
+  assert.notEqual(wkuPrice, 8044);
+  if (udp) {
+    const h2h = udp.markets.find((m) => m.key === "h2h");
+    for (const o of h2h?.outcomes || []) {
+      assert.ok(Math.abs(o.price) < 2500, `Underdog ${o.name} ${o.price} must stay in a real ML range`);
+    }
+  }
+  const data = transformOddsData([overlaid], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const ml = data.moneylines[0];
+  assert.notEqual(ml.bookOdds.underdog_predict?.ml_away, 8628);
+  assert.notEqual(ml.best_away, 8628);
+
+  const legs = buildAllLegsForBook(data, "underdog_predict");
+  const wkuLeg = legs.find((l) => /western kentucky/i.test(l.name));
+  assert.equal(wkuLeg, undefined, "WKU +8628 must not become an Underdog promo leg");
+  const phantom = calcFreeBetParlayEV(
+    [{ dk: 8628, bestOpp: -107 }, { dk: 8790, bestOpp: -107 }],
+    100,
+  );
+  assert.ok(phantom.ev > 100000, "precondition: unguarded pair is the +$179k phantom");
+  assert.ok(
+    !legs.some((l) => Math.abs(l.dk) > 2500),
+    "no Underdog promo leg may carry a six-figure-EV American",
+  );
+}
+
+{
+  // Sane 196 decimals still overlay: 1.12 favorite / 2.87 dog + fee, same sides.
+  const kick = future;
+  const event = {
+    id: "odds-wku-sane",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Western Kentucky Hilltoppers",
+    home_team: "Kennesaw State Owls",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: -800 },
+            { name: "Kennesaw State Owls", price: 650 },
+          ],
+        }],
+      },
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: -820 },
+            { name: "Kennesaw State Owls", price: 640 },
+          ],
+        }],
+      },
+    ],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-wku-sane",
+      league: "NCAAF",
+      start_date: kick,
+      home_team_id: "ken-sane",
+      away_team_id: "wku-sane",
+    }],
+    teams: [
+      { id: "wku-sane", name: "Western Kentucky Hilltoppers", abbreviation: "WKU" },
+      { id: "ken-sane", name: "Kennesaw State Owls", abbreviation: "KENN" },
+    ],
+    markets: [
+      { odds: 1.12, side: "WKU", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-sane", team_id: "wku-sane" },
+      { odds: 8.50, side: "KENN", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-sane", team_id: "ken-sane" },
+    ],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
+  assert.ok(udp, "sane 1.12 favorite / ~+750 dog must still overlay");
+  const h2h = udp.markets.find((m) => m.key === "h2h");
+  const wku = h2h.outcomes.find((o) => o.name === "Western Kentucky Hilltoppers");
+  const ken = h2h.outcomes.find((o) => o.name === "Kennesaw State Owls");
+  assert.equal(wku.price, applyUnderdogPredictFee(-833));
+  assert.equal(ken.price, applyUnderdogPredictFee(750));
+  assert.ok(wku.price < 0 && wku.price > -1200);
+  assert.ok(ken.price > 500 && ken.price < 900);
 }
 
 console.log("promoUnderdogPredict.test.js ok");

@@ -7,6 +7,11 @@
 // ProphetX columns). Promo true odds apply the UDX fee curve here
 // (rate × p × (1−p), added to cost) because Underdog is not on The Odds API
 // applyBookAdjustments path.
+//
+// Promo drops inverted-longshot 196 quotes (decimal 87.28 → +8628, or p<5%)
+// before fee, then rejects a 2-way whose implieds do not sum to ~1 and any
+// side ≥25pts of p off sportsbook consensus. Sign-only Bookmaker 642 guards
+// stay unchanged. Kevin-only canSeeUnderdogPredict is unchanged.
 
 import {
   asList,
@@ -26,12 +31,97 @@ import {
   joinOddsEventToBetstampFixture,
   marketHasBookId,
   oddsApiOutcomeName,
+  teamsLikelySame,
 } from "./promoBookmaker.js";
 import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 import { canSeeUnderdogPredict } from "./comboAccess.js";
+import {
+  DECISIVE_IMPLIED_DEV,
+  impliedFromAmerican,
+  quoteLooksAbsurdVsReference,
+} from "./promoOppGuard.js";
 
 export { UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY };
 export const UNDERDOG_PREDICT_TITLE = "Underdog Predict";
+
+// 87.28 decimal → +8628 via (d−1)×100. That is 1/p for p≈0.0115 (inverted
+// favorite), not a real Underdog main. Typical Betstamp ML decimals are 1.01–15.
+export const UNDERDOG_IMPLAUSIBLE_DECIMAL_MIN = 20;
+export const UNDERDOG_TINY_PROB = 0.05;
+export const UNDERDOG_ABSURD_ABS_AMERICAN = 2500;
+export const UNDERDOG_TWO_WAY_SUM_MIN = 0.80;
+export const UNDERDOG_TWO_WAY_SUM_MAX = 1.22;
+
+export function betstampOddsLooksLikeInvertedLongshot(odds) {
+  const n = Number(odds);
+  if (!Number.isFinite(n) || n === 0) return false;
+  if (n > 0 && n < UNDERDOG_TINY_PROB) return true;
+  if (n >= UNDERDOG_IMPLAUSIBLE_DECIMAL_MIN && n < 100) return true;
+  return false;
+}
+
+export function underdogAmericanLooksImplausible(price) {
+  const n = Number(price);
+  return Number.isFinite(n) && n !== 0 && Math.abs(n) >= UNDERDOG_ABSURD_ABS_AMERICAN;
+}
+
+// Betstamp 196 decimal → American, then UDX fee. Never (d−1)×100 on a favorite
+// (1.12 → −833) and never 1/p of a tiny contract as the named team's ML.
+export function toUnderdogPredictAmerican(odds) {
+  if (betstampOddsLooksLikeInvertedLongshot(odds)) return null;
+  const raw = toAmericanOdds(odds);
+  if (raw == null || underdogAmericanLooksImplausible(raw)) return null;
+  const price = applyUnderdogPredictFee(raw);
+  if (price == null || underdogAmericanLooksImplausible(price)) return null;
+  return price;
+}
+
+function medianAmerican(prices) {
+  const s = (prices || []).map(Number).filter((n) => Number.isFinite(n) && n !== 0).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+function h2hOutcomeOnBook(book, teamName) {
+  const market = (book?.markets || []).find((m) => m && m.key === "h2h");
+  if (!market) return null;
+  return (market.outcomes || []).find((o) => o && teamsLikelySame(o.name, teamName)) || null;
+}
+
+export function underdogTwoWayLooksIncoherent(bm) {
+  const h2h = (bm?.markets || []).find((m) => m && m.key === "h2h");
+  const prices = (h2h?.outcomes || []).map((o) => o && o.price).filter((n) => Number.isFinite(Number(n)) && Number(n) !== 0);
+  if (prices.length < 2) return false;
+  const sum = prices.reduce((acc, n) => acc + (impliedFromAmerican(n) || 0), 0);
+  return sum < UNDERDOG_TWO_WAY_SUM_MIN || sum > UNDERDOG_TWO_WAY_SUM_MAX;
+}
+
+export function underdogMagnitudeConflictsWithEventBooks(event, bm) {
+  const h2h = (bm?.markets || []).find((m) => m && m.key === "h2h");
+  if (!h2h) return false;
+  const others = (event?.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
+  if (!others.length) return false;
+  for (const outcome of h2h.outcomes || []) {
+    if (!outcome || outcome.price == null || !outcome.name) continue;
+    const consensus = [];
+    for (const book of others) {
+      const hit = h2hOutcomeOnBook(book, outcome.name);
+      if (hit && hit.price != null) consensus.push(hit.price);
+    }
+    if (!consensus.length) continue;
+    const med = medianAmerican(consensus);
+    if (med != null && quoteLooksAbsurdVsReference(med, outcome.price, DECISIVE_IMPLIED_DEV)) return true;
+  }
+  return false;
+}
+
+export function underdogPredictConflictsWithEventBooks(event, bm) {
+  if (betstampOverlayConflictsWithEventBooks(event, bm, UNDERDOG_PREDICT_BOOK_KEY)) return true;
+  if (underdogTwoWayLooksIncoherent(bm)) return true;
+  if (underdogMagnitudeConflictsWithEventBooks(event, bm)) return true;
+  return false;
+}
 
 function pushOutcome(list, outcome) {
   if (!outcome || !outcome.name || outcome.price == null) return;
@@ -66,9 +156,7 @@ export function underdogPredictBookmakerFromSnapshot(event, snapshot, joinHit) {
     if (market == null || String(market.fixture_id) !== join.fixtureId) continue;
     if (!marketIsUnderdogPredict(market)) continue;
     if (!isMainMarket(market) || !marketIsOffered(market)) continue;
-    const raw = toAmericanOdds(market.odds);
-    if (raw == null) continue;
-    const price = applyUnderdogPredictFee(raw);
+    const price = toUnderdogPredictAmerican(market.odds);
     if (price == null) continue;
     const name = oddsApiOutcomeName(market, event, join);
     if (!name) continue;
@@ -97,7 +185,7 @@ export function overlayUnderdogPredictOnGame(game, snapshot) {
   const bookmakers = (game.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
   const stripped = { ...game, bookmakers };
   let bm = snapshot ? underdogPredictBookmakerFromSnapshot(stripped, snapshot) : null;
-  if (bm && betstampOverlayConflictsWithEventBooks(stripped, bm, UNDERDOG_PREDICT_BOOK_KEY)) bm = null;
+  if (bm && underdogPredictConflictsWithEventBooks(stripped, bm)) bm = null;
   return { ...stripped, bookmakers: bm ? [...bookmakers, bm] : bookmakers };
 }
 

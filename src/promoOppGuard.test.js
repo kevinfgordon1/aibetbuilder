@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import {
   oppQuoteLooksInverted,
   quoteLooksWrongSideOf,
+  quoteLooksAbsurdVsReference,
   pickBestAmericanQuote,
   resolveOppWithSideGuard,
   pickHasInvertedOpp,
@@ -42,6 +43,10 @@ const cjsGuard = require("../lib/promo-opp-guard.js");
 {
   assert.equal(oppQuoteLooksInverted(150, -110), false);
   assert.equal(quoteLooksWrongSideOf(150, -110), false, "12pt edge is not absurd");
+  assert.equal(quoteLooksWrongSideOf(8628, 105), false, "same-sign +8628 vs +105 is not a flip");
+  assert.equal(quoteLooksAbsurdVsReference(105, 8628), true, "same-sign +8628 vs +105 is still garbage");
+  assert.equal(quoteLooksAbsurdVsReference(187, 150), false, "real +187 vs +150 is fine");
+  assert.equal(cjsGuard.quoteLooksAbsurdVsReference(105, 8628), true);
 }
 
 // ── Texas −6000 vs Kalshi dog +3021 stays (user: same direction, fine)
