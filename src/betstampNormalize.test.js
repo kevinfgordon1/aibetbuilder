@@ -985,6 +985,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /toggleHiddenCell/);
   assert.match(stamp, /toggleHiddenGame/);
   assert.match(stamp, /filterHiddenOddsGames/);
+  assert.match(stamp, /Hidden matchups are listed above/);
   assert.match(stamp, /useState\(\(\) => new Set\(\)\)/);
   assert.match(stamp, /useState\("single"\)/);
   assert.match(stamp, /data-best-view=\{bestView\}/);

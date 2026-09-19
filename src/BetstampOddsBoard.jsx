@@ -1295,9 +1295,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             {Object.keys(grouped).length === 0 && (
               <tr>
                 <td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
-                  {missingKey
-                    ? "Waiting on BETSTAMP_API_KEY"
-                    : `No ${liveOnly ? "live" : ""} games found${search ? ` for "${search}"` : ""}`}
+                  {hiddenBoardGames.length
+                    ? "Hidden matchups are listed above — Show all to restore"
+                    : missingKey
+                      ? "Waiting on BETSTAMP_API_KEY"
+                      : `No ${liveOnly ? "live" : ""} games found${search ? ` for "${search}"` : ""}`}
                 </td>
               </tr>
             )}
