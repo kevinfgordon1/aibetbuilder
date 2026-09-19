@@ -927,6 +927,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(board, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
   assert.match(stamp, />New Odds Board</);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
+  assert.match(stamp, /data-row-density="compact"/);
+  assert.match(stamp, /padding: "4px 5px"/);
+  assert.match(stamp, /padding: "5px 12px 3px"/);
+  assert.doesNotMatch(stamp, /padding: "7px 5px"/);
+  assert.doesNotMatch(stamp, /padding: "8px 16px 4px"/);
+  assert.match(stamp, /fontSize: 13/);
   assert.match(stamp, /data-tick-metrics/);
   assert.match(stamp, /BETSTAMP_PREGAME_POLL_MS/);
   assert.match(stamp, /BETSTAMP_LIVE_RECONCILE_MS/);

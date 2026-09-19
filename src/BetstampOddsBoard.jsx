@@ -133,7 +133,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
     return (
       <>
         {line && (
-          <div style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 4, textDecoration: "line-through", opacity: 0.7 }}>
+          <div style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 2, lineHeight: 1.15, textDecoration: "line-through", opacity: 0.7 }}>
             {line}
           </div>
         )}
@@ -151,8 +151,8 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
   }
   return (
     <>
-      {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
-      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, flexWrap: "wrap" }}>
+      {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
+      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "wrap", lineHeight: 1.2 }}>
         <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
@@ -172,7 +172,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
         <div
           data-line-age={age}
           title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
-          style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}
+          style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}
         >
           {age}
         </div>
@@ -268,7 +268,7 @@ function BookSideCell({
         {children}
       </div>
       {hidden && (
-        <div data-odds-hidden-label="true" style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", marginTop: 2, letterSpacing: 0.3, textTransform: "uppercase" }}>
+        <div data-odds-hidden-label="true" style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", marginTop: 1, letterSpacing: 0.3, textTransform: "uppercase", lineHeight: 1.1 }}>
           hidden
         </div>
       )}
@@ -656,7 +656,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   });
 
   const sideStyle = (isBestCol, isBestCell, empty) => ({
-    padding: "7px 5px",
+    padding: "4px 5px",
+    lineHeight: 1.2,
     borderBottom: "1px solid rgba(255,255,255,0.03)",
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 13,
@@ -707,8 +708,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             data-best-point={block.point}
             data-best-point-count={block.count}
             style={i > 0 ? {
-              marginTop: 6,
-              paddingTop: 6,
+              marginTop: 4,
+              paddingTop: 4,
               borderTop: "1px solid rgba(16,185,129,0.28)",
               width: "100%",
             } : { width: "100%" }}
@@ -722,8 +723,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               data-best-stack-side="bot"
               style={{
                 width: "100%",
-                marginTop: 4,
-                paddingTop: 4,
+                marginTop: 3,
+                paddingTop: 3,
                 borderTop: "1px solid rgba(16,185,129,0.12)",
               }}
             >
@@ -863,25 +864,25 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             <tbody>
               {rows.map((row) => (
                 <tr key={`${section}-${row.line ?? "ml"}`} data-alt-line={row.line ?? "ml"} data-alt-main={row.isMain ? "1" : "0"} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: row.isMain ? "rgba(59,130,246,0.04)" : "transparent" }}>
-                  <td style={{ padding: "8px 16px", width: teamColWidth, position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>
+                  <td style={{ padding: "6px 12px", width: teamColWidth, position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
                     <div>{labelFor(row)}</div>
-                    {row.isMain && <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginTop: 3 }}>MAIN</div>}
+                    {row.isMain && <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginTop: 2 }}>MAIN</div>}
                     {marketKey === "ml" && (
-                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6, fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 500 }}>
                         <div>{openGame?.away}</div>
-                        <div style={{ marginTop: 4 }}>{openGame?.home}</div>
+                        <div style={{ marginTop: 3 }}>{openGame?.home}</div>
                       </div>
                     )}
                     {marketKey === "spr" && (
-                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6, fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 500 }}>
                         <div>{openGame?.awayAbbr || openGame?.away} {fmtSignedLine(row.line)}</div>
-                        <div style={{ marginTop: 4 }}>{openGame?.homeAbbr || openGame?.home} {fmtSignedLine(row.line == null ? null : -row.line)}</div>
+                        <div style={{ marginTop: 3 }}>{openGame?.homeAbbr || openGame?.home} {fmtSignedLine(row.line == null ? null : -row.line)}</div>
                       </div>
                     )}
                     {marketKey === "tot" && (
-                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6, fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 500 }}>
                         <div>Over {row.line}</div>
-                        <div style={{ marginTop: 4 }}>Under {row.line}</div>
+                        <div style={{ marginTop: 3 }}>Under {row.line}</div>
                       </div>
                     )}
                   </td>
@@ -898,6 +899,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   return (
     <div
       data-betstamp-board="true"
+      data-row-density="compact"
       data-guard-allow="true"
       data-best-view={bestView}
       data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
@@ -979,7 +981,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           align-items: center;
           justify-content: center;
           min-width: 52px;
-          padding: 4px 8px;
+          padding: 2px 6px;
           border-radius: 5px;
           border: 1px dashed rgba(251,191,36,0.55);
           background: rgba(120,53,15,0.55);
@@ -987,13 +989,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           font-size: 12px;
           font-weight: 800;
           letter-spacing: 0.7px;
-          line-height: 1.15;
+          line-height: 1.1;
           text-transform: uppercase;
           font-family: 'DM Sans', sans-serif;
         }
         .obb-off-sub {
           display: block;
-          margin-top: 2px;
+          margin-top: 1px;
           font-size: 8px;
           font-weight: 700;
           letter-spacing: 0.4px;
@@ -1338,21 +1340,21 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                         >
                           ×
                         </button>
-                        <div style={{ padding: "8px 16px 4px" }}>
-                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>
+                        <div style={{ padding: "5px 12px 3px" }}>
+                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 2, lineHeight: 1.2 }}>
                             {game.is_live ? (
                               <span style={{ color: "#34d399", fontWeight: 700 }}>LIVE</span>
                             ) : (
                               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
                             )}
                           </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 3, lineHeight: 1.2 }}>
                             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
                           </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
                             {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
                           </div>
-                          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "6px 0 4px" }}>Alts →</div>
+                          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "3px 0 1px", lineHeight: 1.2 }}>Alts →</div>
                         </div>
                       </td>
                       {visibleBooks.map((b) => renderBookColumn(game, market, b, getCell(game, b.key), bests))}
