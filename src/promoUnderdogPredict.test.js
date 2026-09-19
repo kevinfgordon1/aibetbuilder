@@ -29,6 +29,11 @@ import {
 } from "./promoUnderdogPredict.js";
 import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
+import {
+  oppQuoteLooksInverted,
+  pickBestAmericanQuote,
+  trueAmericanFromOpp,
+} from "./promoOppGuard.js";
 
 const require = createRequire(import.meta.url);
 const { buildAllLegsForBook } = require("../lib/promo-ev.js");
@@ -270,22 +275,32 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   // Decimal favorites use −100/(d−1), never (d−1)×100 and never 1/tiny-p.
   assert.equal(toAmericanOdds(1.12), -833);
   assert.equal(toAmericanOdds(2.87), 187);
+  assert.equal(toAmericanOdds(93.5), 9250, "live Betstamp 196 longshot is a real decimal");
   assert.notEqual(toAmericanOdds(1.12), 8628);
-  assert.equal(betstampOddsLooksLikeInvertedLongshot(87.28), true, "87.28 decimal is 1/p≈0.0115");
-  assert.equal(betstampOddsLooksLikeInvertedLongshot(0.01146), true);
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(0.01146), true, "tiny p is inverted 1/p, not a decimal");
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(87.28), false, "87–93.5 is a real Betstamp decimal longshot");
+  assert.equal(betstampOddsLooksLikeInvertedLongshot(93.5), false);
   assert.equal(betstampOddsLooksLikeInvertedLongshot(1.12), false);
   assert.equal(betstampOddsLooksLikeInvertedLongshot(2.87), false);
-  assert.equal(toUnderdogPredictAmerican(87.28), null);
   assert.equal(toUnderdogPredictAmerican(0.01146), null);
   assert.equal(toUnderdogPredictAmerican(1.12), applyUnderdogPredictFee(-833));
   assert.equal(toUnderdogPredictAmerican(2.87), applyUnderdogPredictFee(187));
+  assert.equal(toUnderdogPredictAmerican(93.5), applyUnderdogPredictFee(9250));
+  assert.equal(toUnderdogPredictAmerican(1.05), applyUnderdogPredictFee(-2000));
+  assert.equal(toUnderdogPredictAmerican(1.01), applyUnderdogPredictFee(-10000));
+  assert.equal(toUnderdogPredictAmerican(1.02), applyUnderdogPredictFee(-5000));
   assert.ok(toUnderdogPredictAmerican(1.12) < 0, "1.12 stays a favorite after UDX fee");
   assert.ok(toUnderdogPredictAmerican(1.12) > -1200 && toUnderdogPredictAmerican(1.12) < -700);
   assert.ok(toUnderdogPredictAmerican(2.87) > 150 && toUnderdogPredictAmerican(2.87) < 200);
+  assert.ok(toUnderdogPredictAmerican(93.5) > 7000, "93.5 stays a longshot after UDX fee");
+  assert.notEqual(toUnderdogPredictAmerican(93.5), -107);
+  assert.notEqual(toUnderdogPredictAmerican(1.05), -107);
+  assert.ok(toUnderdogPredictAmerican(1.05) < 0, "1.05 stays a favorite after UDX fee");
   assert.notEqual(applyUnderdogPredictFee(1.12), 8628);
   assert.notEqual(applyUnderdogPredictFee(2), -5387, "decimal 2.00 must not be read as American +2");
   assert.equal(applyUnderdogPredictFee(2), applyUnderdogPredictFee(100));
-  assert.equal(applyUnderdogPredictFee(87.28), null);
+  assert.equal(applyUnderdogPredictFee(100), -107, "−107 is UDX fee on +100, not on a 93.5 longshot");
+  assert.equal(applyUnderdogPredictFee(87.28), null, "fee helper still refuses raw 87.28; convert first");
 }
 
 {
@@ -384,6 +399,105 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
     !legs.some((l) => Math.abs(l.dk) > 2500),
     "no Underdog promo leg may carry a six-figure-EV American",
   );
+}
+
+{
+  // Live Betstamp 196 NCAAF probe: WKU Away 93.5 / Home 1.05 are real
+  // decimals, not a convert bug. Overlay still dies vs SB +105/−125, and
+  // a surviving +9250 cell must not cite −107 as the same-selection true.
+  const kick = future;
+  const event = {
+    id: "odds-wku-live-93",
+    sport_key: "americanfootball_ncaaf",
+    sport: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Western Kentucky Hilltoppers",
+    home_team: "Kennesaw State Owls",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: 105 },
+            { name: "Kennesaw State Owls", price: -125 },
+          ],
+        }],
+      },
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: 100 },
+            { name: "Kennesaw State Owls", price: -120 },
+          ],
+        }],
+      },
+    ],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-wku-live-93",
+      league: "NCAAF",
+      start_date: kick,
+      home_team_id: "ken-live",
+      away_team_id: "wku-live",
+    }],
+    teams: [
+      { id: "wku-live", name: "Western Kentucky Hilltoppers", abbreviation: "WKU" },
+      { id: "ken-live", name: "Kennesaw State Owls", abbreviation: "KENN" },
+    ],
+    markets: [
+      { odds: 93.5, side: "WKU", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-live-93", team_id: "wku-live" },
+      { odds: 1.05, side: "KENN", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-live-93", team_id: "ken-live" },
+    ],
+  };
+  const rawPrice = toUnderdogPredictAmerican(93.5);
+  assert.ok(rawPrice > 7000);
+  assert.notEqual(rawPrice, applyUnderdogPredictFee(100));
+  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  assert.equal(overlaid.bookmakers.some((b) => b.key === "underdog_predict"), false, "93.5 vs SB +105 is ≥25pts off");
+
+  const forced = {
+    ...event,
+    bookmakers: [
+      ...event.bookmakers,
+      {
+        key: UNDERDOG_PREDICT_BOOK_KEY,
+        title: UNDERDOG_PREDICT_TITLE,
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Western Kentucky Hilltoppers", price: rawPrice },
+            { name: "Kennesaw State Owls", price: applyUnderdogPredictFee(100) },
+          ],
+        }],
+      },
+    ],
+  };
+  const data = transformOddsData([forced], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const ml = data.moneylines[0];
+  assert.notEqual(ml.best_away, rawPrice, "same-selection true for WKU is the sportsbook, not +9250");
+  assert.notEqual(ml.best_away_book, "underdog_predict");
+  assert.ok(ml.best_away > 0 && ml.best_away < 200);
+  const bestWku = pickBestAmericanQuote([
+    { price: 105, book: "draftkings" },
+    { price: 100, book: "fanduel" },
+    { price: rawPrice, book: "underdog_predict" },
+  ], { allBooks: ALL_BOOKS });
+  assert.equal(bestWku.bestBook, "draftkings");
+
+  const legs = buildAllLegsForBook(data, "underdog_predict");
+  const wkuLeg = legs.find((l) => /western kentucky/i.test(l.name));
+  assert.equal(wkuLeg, undefined, "93.5 longshot without matching true is not an Underdog promo leg");
+  if (wkuLeg) {
+    assert.notEqual(wkuLeg.bestOpp, -107);
+    assert.equal(oppQuoteLooksInverted(wkuLeg.dk, wkuLeg.bestOpp), false);
+    const noteAm = trueAmericanFromOpp(wkuLeg.bestOpp);
+    assert.ok(Math.abs((noteAm || 0) - wkuLeg.dk) < 5000 || wkuLeg.bestOppBook !== "underdog_predict");
+  }
 }
 
 {

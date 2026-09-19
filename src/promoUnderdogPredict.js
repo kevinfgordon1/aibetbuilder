@@ -8,10 +8,12 @@
 // (rate × p × (1−p), added to cost) because Underdog is not on The Odds API
 // applyBookAdjustments path.
 //
-// Promo drops inverted-longshot 196 quotes (decimal 87.28 → +8628, or p<5%)
-// before fee, then rejects a 2-way whose implieds do not sum to ~1 and any
-// side ≥25pts of p off sportsbook consensus. Sign-only Bookmaker 642 guards
-// stay unchanged. Kevin-only canSeeUnderdogPredict is unchanged.
+// Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
+// +9250). Those are not a convert bug. Promo still drops inverted tiny-p
+// (<5%) and rejects a 2-way whose implieds do not sum to ~1 or any side
+// ≥25pts of p off sportsbook consensus, so a 93.5 dog cannot attach −107
+// (UDX fee on +100) as the same-selection true. Sign-only Bookmaker 642
+// guards stay unchanged. Kevin-only canSeeUnderdogPredict is unchanged.
 
 import {
   asList,
@@ -44,9 +46,8 @@ import {
 export { UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY };
 export const UNDERDOG_PREDICT_TITLE = "Underdog Predict";
 
-// 87.28 decimal → +8628 via (d−1)×100. That is 1/p for p≈0.0115 (inverted
-// favorite), not a real Underdog main. Typical Betstamp ML decimals are 1.01–15.
-export const UNDERDOG_IMPLAUSIBLE_DECIMAL_MIN = 20;
+// Tiny p in (0, 0.05) is inverted 1/p, not a Betstamp decimal. Real
+// longshots arrive as 87–93.5 decimal and convert via (d−1)×100.
 export const UNDERDOG_TINY_PROB = 0.05;
 export const UNDERDOG_ABSURD_ABS_AMERICAN = 2500;
 export const UNDERDOG_TWO_WAY_SUM_MIN = 0.80;
@@ -56,7 +57,6 @@ export function betstampOddsLooksLikeInvertedLongshot(odds) {
   const n = Number(odds);
   if (!Number.isFinite(n) || n === 0) return false;
   if (n > 0 && n < UNDERDOG_TINY_PROB) return true;
-  if (n >= UNDERDOG_IMPLAUSIBLE_DECIMAL_MIN && n < 100) return true;
   return false;
 }
 
@@ -65,14 +65,15 @@ export function underdogAmericanLooksImplausible(price) {
   return Number.isFinite(n) && n !== 0 && Math.abs(n) >= UNDERDOG_ABSURD_ABS_AMERICAN;
 }
 
-// Betstamp 196 decimal → American, then UDX fee. Never (d−1)×100 on a favorite
-// (1.12 → −833) and never 1/p of a tiny contract as the named team's ML.
+// Betstamp 196 decimal → American, then UDX fee. 1.12 → −833, 2.87 → +187,
+// 93.5 → +9250-class (real longshot). Never 1/p of a tiny contract. Extreme
+// Americans still overlay; Promo ranking drops them unless they match true.
 export function toUnderdogPredictAmerican(odds) {
   if (betstampOddsLooksLikeInvertedLongshot(odds)) return null;
   const raw = toAmericanOdds(odds);
-  if (raw == null || underdogAmericanLooksImplausible(raw)) return null;
+  if (raw == null) return null;
   const price = applyUnderdogPredictFee(raw);
-  if (price == null || underdogAmericanLooksImplausible(price)) return null;
+  if (price == null || !Number.isFinite(Number(price)) || Number(price) === 0) return null;
   return price;
 }
 
