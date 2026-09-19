@@ -95,7 +95,12 @@ export function oppQuoteLooksInverted(bookOdds, oppOdds) {
   }
   // Same-sign +8628 vs true +107 (opp −107): 47pts of p, not a real dog edge.
   if (Math.abs(edge) >= ABSURD_TRUE_EDGE) return true;
-  if (twoWayQuotesLookIncoherent(book, opp)) return true;
+  // Two-way sum only when the quotes are opposite sides. +200 vs +200 is
+  // the same-selection PM top, not a broken 2-way.
+  if (americanSign(book) !== 0 && americanSign(book) !== americanSign(opp)
+    && twoWayQuotesLookIncoherent(book, opp)) {
+    return true;
+  }
   return false;
 }
 

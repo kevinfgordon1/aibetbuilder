@@ -64,6 +64,7 @@ const cjsGuard = require("../lib/promo-opp-guard.js");
   assert.equal(quoteLooksAbsurdVsReference(8628, shownTrue), true);
   assert.equal(oppQuoteLooksInverted(150, -110), false, "real +EV dog still resolves");
   assert.equal(twoWayQuotesLookIncoherent(150, -110), false);
+  assert.equal(oppQuoteLooksInverted(200, 200), false, "same-selection PM +200 vs +200 is not a 2-way");
 }
 
 // ── Texas −6000 vs Kalshi dog +3021 stays (user: same direction, fine)
