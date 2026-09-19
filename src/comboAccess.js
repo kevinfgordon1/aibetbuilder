@@ -6,10 +6,13 @@
 // so a missing env var cannot lock him out.
 //
 // This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
-// Do not use this list to expand Miss tape / Unhedged / New Odds Board — those stay OWNER_EMAIL.
+// Do not use this list to expand Miss tape / Unhedged — those stay OWNER_EMAIL.
+// New Odds Board is owner plus NEW_ODDS_BOARD_SHARED_EMAILS (Kenneth).
 // Underdog Predict (196) uses its own VITE_UNDERDOG_PREDICT_ALLOWLIST (Kevin always on).
 
 export const OWNER_EMAIL = "kev120909@gmail.com";
+export const KENNETH_GUIDO_EMAIL = "kmguido97@gmail.com";
+export const NEW_ODDS_BOARD_SHARED_EMAILS = Object.freeze([KENNETH_GUIDO_EMAIL]);
 
 /** Vite public env: comma / space / semicolon separated emails or auth uids. */
 export const COMBO_LOCKS_ALLOWLIST_ENV = "VITE_COMBO_LOCKS_ALLOWLIST";
@@ -82,6 +85,23 @@ export function profileShowsComboPnl(user, { isOwner = false } = {}, env) {
 export function canSeeOwnerTools(user) {
   if (!user || !user.email) return false;
   return String(user.email).trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
+}
+
+function userEmailToken(user) {
+  if (!user) return "";
+  const meta = user.user_metadata || {};
+  return String(user.email || meta.email || "").trim().toLowerCase();
+}
+
+/**
+ * New Odds Board tab / #new-odds-board. Owner plus shared customer emails.
+ * Not Underdog Predict and not Miss tape / Unhedged.
+ */
+export function canSeeNewOddsBoard(user) {
+  if (canSeeOwnerTools(user)) return true;
+  const email = userEmailToken(user);
+  if (!email) return false;
+  return NEW_ODDS_BOARD_SHARED_EMAILS.some((item) => item.toLowerCase() === email);
 }
 
 function readUnderdogPredictAllowlist(env) {
@@ -217,8 +237,8 @@ export function clearComboHash(hash) {
 
 /**
  * Gate a parsed hash for the current user. Combo / owner tabs (Miss tape,
- * Unhedged, New Odds Board) never land unless the user is allowed. Denied
- * links fall back to Promo with a soft sign-in / no-access notice.
+ * Unhedged) and New Odds Board never land unless the user is allowed.
+ * Denied links fall back to Promo with a soft sign-in / no-access notice.
  */
 export function resolveAppHash(parsed, user) {
   const route = parsed && typeof parsed === "object" ? parsed : emptyAppRoute();
@@ -238,7 +258,19 @@ export function resolveAppHash(parsed, user) {
       allowed: false,
     };
   }
-  if (tab === "missTape" || tab === "unhedged" || tab === "oddsBetstamp") {
+  if (tab === "oddsBetstamp") {
+    if (canSeeNewOddsBoard(user)) {
+      return { tab, lockId: null, cardId: null, notice: null, allowed: true };
+    }
+    return {
+      tab: "promo",
+      lockId: null,
+      cardId: null,
+      notice: user ? "noaccess" : "signin",
+      allowed: false,
+    };
+  }
+  if (tab === "missTape" || tab === "unhedged") {
     if (canSeeOwnerTools(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }

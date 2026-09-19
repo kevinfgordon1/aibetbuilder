@@ -4,12 +4,13 @@ import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
+import { shouldShowKennethOddsBoardAlert, kennethOddsBoardAnnouncement, KENNETH_ODDS_BOARD_ALERT_ID } from "./targetedAlerts";
 import { buildPromoComboPrefill } from "./comboPrefill";
 import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
@@ -1459,6 +1460,7 @@ export default function App() {
   const [whatsNewSessionDismissed, setWhatsNewSessionDismissed] = useState(false);
   const [whatsNew, setWhatsNew] = useState(null);
   const [whatsNewReady, setWhatsNewReady] = useState(false);
+  const [targetedAlertSessionDismissed, setTargetedAlertSessionDismissed] = useState(false);
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
@@ -1507,6 +1509,7 @@ export default function App() {
       setWhatsNewSessionDismissed(false);
       setWhatsNew(null);
       setWhatsNewReady(false);
+      setTargetedAlertSessionDismissed(false);
       return;
     }
     const loaded = loadProfilePrefs(user, {
@@ -1517,6 +1520,7 @@ export default function App() {
     setProfilePrefsReady(true);
     setWhatsNewSessionDismissed(false);
     setWhatsNewReady(false);
+    setTargetedAlertSessionDismissed(false);
     if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
     if (loaded.promoBook) {
       const route = parseAppHash(window.location.hash);
@@ -1583,7 +1587,10 @@ export default function App() {
       setFocusLockId(null);
     }
     if (activeTab === "profile" && !user) setActiveTab("promo");
-    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "oddsBetstamp") && !canSeeOwnerTools(user)) {
+    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) {
+      setActiveTab("promo");
+    }
+    if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) {
       setActiveTab("promo");
     }
   }, [activeTab, user, authLoading]);
@@ -1592,7 +1599,8 @@ export default function App() {
     if (authLoading) return;
     if (activeTab === "combo" && !canSeeComboLocks(user)) return;
     if (activeTab === "profile" && !user) return;
-    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "oddsBetstamp") && !canSeeOwnerTools(user)) return;
+    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) return;
+    if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
     const desired = serializeAppHash({
       tab: activeTab || "promo",
       lockId: activeTab === "combo" ? focusLockId : null,
@@ -2330,9 +2338,11 @@ export default function App() {
         {canSeeComboLocks(user) && (
           <a href={tabHash("combo")} style={tabStyle("combo")} onClick={onNavTabClick("combo")}>Combo Locks</a>
         )}
+        {canSeeNewOddsBoard(user) && (
+          <a href={tabHash("oddsBetstamp")} style={tabStyle("oddsBetstamp")} onClick={onNavTabClick("oddsBetstamp", "odds_betstamp")}>New Odds Board</a>
+        )}
         {canSeeOwnerTools(user) && (
           <>
-            <a href={tabHash("oddsBetstamp")} style={tabStyle("oddsBetstamp")} onClick={onNavTabClick("oddsBetstamp", "odds_betstamp")}>New Odds Board</a>
             <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
             <a href={tabHash("unhedged")} style={tabStyle("unhedged")} onClick={onNavTabClick("unhedged")}>Unhedged RFQs</a>
           </>
@@ -2375,7 +2385,7 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === "oddsBetstamp" && canSeeOwnerTools(user) && (
+      {activeTab === "oddsBetstamp" && canSeeNewOddsBoard(user) && (
         <div style={{ padding: "20px 32px" }}>
           <BetstampOddsBoard user={user} />
         </div>
@@ -3404,7 +3414,26 @@ export default function App() {
         AI Bet Builder — aibetbuilder.io — For informational purposes only. Not financial advice. Please gamble responsibly.
       </div>
 
-      {user && profilePrefsReady && whatsNewReady && !whatsNewSessionDismissed && shouldShowWhatsNew(whatsNew, profilePrefs) && (
+      {user && profilePrefsReady && shouldShowKennethOddsBoardAlert(user, profilePrefs, { sessionDismissed: targetedAlertSessionDismissed }) && (
+        <WhatsNewModal
+          announcement={kennethOddsBoardAnnouncement()}
+          onDismiss={() => {
+            setTargetedAlertSessionDismissed(true);
+            try {
+              const saved = saveProfilePrefs(user, { ...profilePrefs, seenTargetedAlertId: KENNETH_ODDS_BOARD_ALERT_ID }, {
+                allowedSports: new Set(SPORT_KEYS),
+                allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+              });
+              setProfilePrefs(saved);
+              persistProfilePrefsRemote(supabase, user, saved);
+            } catch {
+              // Session dismiss already applied so the modal cannot trap them.
+            }
+          }}
+        />
+      )}
+
+      {user && profilePrefsReady && whatsNewReady && !whatsNewSessionDismissed && !targetedAlertSessionDismissed && !shouldShowKennethOddsBoardAlert(user, profilePrefs) && shouldShowWhatsNew(whatsNew, profilePrefs) && (
         <WhatsNewModal
           announcement={whatsNew}
           onDismiss={() => {

@@ -91,7 +91,7 @@ export default function WhatsNewModal({ announcement, onDismiss }) {
         </div>
         <div className="wn-actions">
           {cta && cta.label && cta.href ? (
-            <a className="wn-cta" href={cta.href}>{cta.label}</a>
+            <a className="wn-cta" href={cta.href} onClick={close}>{cta.label}</a>
           ) : null}
           <button type="button" className="wn-gotit" data-primary="true" onClick={close}>Got it</button>
         </div>

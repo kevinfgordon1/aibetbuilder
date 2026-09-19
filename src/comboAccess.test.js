@@ -11,7 +11,9 @@ import {
   comboLocksAllowlist,
   canSeeComboLocks,
   canSeeOwnerTools,
+  canSeeNewOddsBoard,
   canSeeUnderdogPredict,
+  KENNETH_GUIDO_EMAIL,
   underdogPredictAllowlist,
   visibleTrustedBookKeys,
   visiblePromoBooks,
@@ -59,6 +61,16 @@ assert.equal(canSeeOwnerTools(null), false);
 assert.equal(canSeeComboLocks({ email: "tester@gmail.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), true);
 assert.equal(canSeeComboLocks({ id: "uid-99", email: "x@y.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-99" }), true);
 assert.equal(canSeeOwnerTools({ email: "tester@gmail.com" }), false);
+
+assert.equal(KENNETH_GUIDO_EMAIL, "kmguido97@gmail.com");
+const kenneth = { id: "uid-kenneth", email: "kmguido97@gmail.com" };
+assert.equal(canSeeNewOddsBoard(kevin), true);
+assert.equal(canSeeNewOddsBoard(kenneth), true);
+assert.equal(canSeeNewOddsBoard({ email: "KMGuido97@Gmail.com" }), true);
+assert.equal(canSeeNewOddsBoard({ email: "stranger@gmail.com" }), false);
+assert.equal(canSeeNewOddsBoard(null), false);
+assert.equal(canSeeOwnerTools(kenneth), false);
+assert.equal(canSeeUnderdogPredict(kenneth), false);
 
 {
   const list = underdogPredictAllowlist({ VITE_UNDERDOG_PREDICT_ALLOWLIST: "" });
@@ -148,6 +160,9 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.equal(strangerBoard.tab, "promo");
   assert.equal(strangerBoard.allowed, false);
   assert.equal(strangerBoard.notice, "noaccess");
+  const kennethBoard = resolveAppHash(parseAppHash("#new-odds-board"), kenneth);
+  assert.equal(kennethBoard.tab, "oddsBetstamp");
+  assert.equal(kennethBoard.allowed, true);
   const signedOutBoard = resolveAppHash(parseAppHash("#new-odds-board"), null);
   assert.equal(signedOutBoard.tab, "promo");
   assert.equal(signedOutBoard.notice, "signin");
@@ -183,7 +198,8 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, /href=\{tabHash\("unhedged"\)\}/);
   assert.match(app, /href=\{tabHash\("profile"\)\}/);
   assert.match(app, /onNavTabClick\("oddsBetstamp"/);
-  assert.match(app, /activeTab === "oddsBetstamp" && canSeeOwnerTools\(user\)/);
+  assert.match(app, /activeTab === "oddsBetstamp" && canSeeNewOddsBoard\(user\)/);
+  assert.match(app, /canSeeNewOddsBoard\(user\)/);
   assert.match(app, />New Odds Board<\/a>/);
   assert.doesNotMatch(app, />New Odds Board<\/button>/);
   assert.doesNotMatch(app, />Betstamp<\/button>/);

@@ -674,7 +674,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(app, /import OddsBoard from "\.\/OddsBoard\.jsx"/);
   assert.match(app, /import BetstampOddsBoard from "\.\/BetstampOddsBoard\.jsx"/);
   assert.match(app, /activeTab === "odds" && <OddsBoard/);
-  assert.match(app, /activeTab === "oddsBetstamp" && canSeeOwnerTools\(user\)/);
+  assert.match(app, /activeTab === "oddsBetstamp" && canSeeNewOddsBoard\(user\)/);
   assert.match(app, /<BetstampOddsBoard user=\{user\}/);
   assert.match(stamp, /visibleBetstampBooks/);
   assert.match(stamp, /bookIds/);

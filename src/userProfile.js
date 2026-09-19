@@ -37,6 +37,7 @@ export function defaultProfilePrefs() {
     sports: DEFAULT_PROFILE_SPORTS.slice(),
     promoBook: DEFAULT_PROFILE_BOOK,
     seenAnnouncementId: "",
+    seenTargetedAlertId: "",
   };
 }
 
@@ -47,6 +48,7 @@ export function persistableProfilePrefs(prefs) {
     sports: next.sports,
     promoBook: next.promoBook,
     seenAnnouncementId: next.seenAnnouncementId,
+    seenTargetedAlertId: next.seenTargetedAlertId,
   };
 }
 
@@ -59,6 +61,9 @@ export function mergeProfilePrefSources(local, remote) {
   if (typeof b.promoBook === "string" && b.promoBook) out.promoBook = b.promoBook;
   if (typeof b.seenAnnouncementId === "string" && b.seenAnnouncementId.trim()) {
     out.seenAnnouncementId = b.seenAnnouncementId.trim();
+  }
+  if (typeof b.seenTargetedAlertId === "string" && b.seenTargetedAlertId.trim()) {
+    out.seenTargetedAlertId = b.seenTargetedAlertId.trim();
   }
   return out;
 }
@@ -94,11 +99,13 @@ export function normalizeProfilePrefs(raw, { allowedSports, allowedBooks } = {})
   const book = typeof src.promoBook === "string" ? src.promoBook : base.promoBook;
   const books = allowedBooks instanceof Set ? allowedBooks : new Set(allowedBooks || []);
   const seen = typeof src.seenAnnouncementId === "string" ? src.seenAnnouncementId.trim() : "";
+  const seenTargeted = typeof src.seenTargetedAlertId === "string" ? src.seenTargetedAlertId.trim() : "";
   return {
     displayName: typeof src.displayName === "string" ? src.displayName.trim() : "",
     sports,
     promoBook: books.size && !books.has(book) ? DEFAULT_PROFILE_BOOK : (book || DEFAULT_PROFILE_BOOK),
     seenAnnouncementId: seen,
+    seenTargetedAlertId: seenTargeted,
   };
 }
 

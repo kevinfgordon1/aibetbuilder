@@ -48,6 +48,7 @@ assert.deepEqual(DEFAULT_PROFILE_SPORTS, [
 assert.deepEqual(defaultProfilePrefs().sports, DEFAULT_PROFILE_SPORTS);
 assert.equal(defaultProfilePrefs().promoBook, DEFAULT_PROFILE_BOOK);
 assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
+assert.equal(defaultProfilePrefs().seenTargetedAlertId, "");
 
 {
   const seeded = seedProfilePrefs(googleUser, null, { allowedSports, allowedBooks });
@@ -84,6 +85,7 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
   assert.deepEqual(saved.sports, ["americanfootball_nfl"]);
   assert.equal(saved.promoBook, "fanduel");
   assert.equal(saved.seenAnnouncementId, "");
+  assert.equal(saved.seenTargetedAlertId, "");
 }
 
 {
@@ -108,6 +110,7 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
     sports: ["baseball_mlb"],
     promoBook: "fanduel",
     seenAnnouncementId: "blast-1",
+    seenTargetedAlertId: "kenneth-new-odds-board",
   }, { storage, allowedSports, allowedBooks });
   assert.equal(store.has(profilePrefsStorageKey("uid-kevin")), true);
   const loaded = loadProfilePrefs(googleUser, { storage, allowedSports, allowedBooks });
@@ -115,6 +118,7 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
   assert.deepEqual(loaded.sports, ["baseball_mlb"]);
   assert.equal(loaded.promoBook, "fanduel");
   assert.equal(loaded.seenAnnouncementId, "blast-1");
+  assert.equal(loaded.seenTargetedAlertId, "kenneth-new-odds-board");
 }
 
 {
@@ -133,10 +137,11 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
 
 {
   const merged = mergeProfilePrefSources(
-    { seenAnnouncementId: "local-old", sports: ["baseball_mlb"] },
-    { seenAnnouncementId: "remote-new", promoBook: "fanduel" },
+    { seenAnnouncementId: "local-old", seenTargetedAlertId: "local-alert", sports: ["baseball_mlb"] },
+    { seenAnnouncementId: "remote-new", seenTargetedAlertId: "remote-alert", promoBook: "fanduel" },
   );
   assert.equal(merged.seenAnnouncementId, "remote-new");
+  assert.equal(merged.seenTargetedAlertId, "remote-alert");
   assert.deepEqual(merged.sports, ["baseball_mlb"]);
   assert.equal(merged.promoBook, "fanduel");
 }
@@ -146,7 +151,10 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
     ...googleUser,
     user_metadata: {
       ...googleUser.user_metadata,
-      [PROFILE_PREFS_META_KEY]: { seenAnnouncementId: "from-supabase" },
+      [PROFILE_PREFS_META_KEY]: {
+        seenAnnouncementId: "from-supabase",
+        seenTargetedAlertId: "from-supabase-alert",
+      },
     },
   };
   const store = new Map();
@@ -156,6 +164,7 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
   };
   const loaded = loadProfilePrefs(remoteUser, { storage, allowedSports, allowedBooks });
   assert.equal(loaded.seenAnnouncementId, "from-supabase");
+  assert.equal(loaded.seenTargetedAlertId, "from-supabase-alert");
 }
 
 {
@@ -173,9 +182,11 @@ assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
     sports: ["baseball_mlb"],
     promoBook: "fanduel",
     seenAnnouncementId: "blast-1",
+    seenTargetedAlertId: "kenneth-new-odds-board",
   });
   assert.equal(result.persisted, true);
   assert.equal(payload.data[PROFILE_PREFS_META_KEY].seenAnnouncementId, "blast-1");
+  assert.equal(payload.data[PROFILE_PREFS_META_KEY].seenTargetedAlertId, "kenneth-new-odds-board");
 }
 
 {
