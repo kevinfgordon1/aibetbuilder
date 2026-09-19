@@ -931,6 +931,15 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /data-drag-game/);
   assert.match(stamp, /data-drag-book/);
   assert.match(stamp, /data-row-density="compact"/);
+  assert.match(stamp, /data-col-lock="fixed"/);
+  assert.match(stamp, /tableLayout: "fixed"/);
+  assert.match(stamp, /OBB_TEAM_COL_PX = 186/);
+  assert.match(stamp, /OBB_ODDS_COL_PX = 108/);
+  assert.match(stamp, /<colgroup>/);
+  assert.match(stamp, /obb-col-game/);
+  assert.match(stamp, /obb-col-odds/);
+  assert.match(stamp, /maxWidth: width/);
+  assert.doesNotMatch(stamp, /borderCollapse: "collapse", width: "100%"/);
   assert.match(stamp, /padding: "3px 4px"/);
   assert.match(stamp, /padding: "4px 10px 2px"/);
   assert.doesNotMatch(stamp, /padding: "7px 5px"/);
