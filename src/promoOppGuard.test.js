@@ -3,6 +3,9 @@ import { createRequire } from "node:module";
 import {
   oppQuoteLooksInverted,
   quoteLooksWrongSideOf,
+  quoteLooksAbsurdVsReference,
+  twoWayQuotesLookIncoherent,
+  trueAmericanFromOpp,
   pickBestAmericanQuote,
   resolveOppWithSideGuard,
   pickHasInvertedOpp,
@@ -11,6 +14,7 @@ import {
 import { formatSignedEvMoney, formatSignedEvPct, formatAmericanOdds } from "./trueOddsLine.js";
 import { transformOddsData } from "./oddsTransform.js";
 import { applyPmBlendToLeg } from "./blendAskLadder.js";
+import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 
 const require = createRequire(import.meta.url);
 const {
@@ -42,6 +46,25 @@ const cjsGuard = require("../lib/promo-opp-guard.js");
 {
   assert.equal(oppQuoteLooksInverted(150, -110), false);
   assert.equal(quoteLooksWrongSideOf(150, -110), false, "12pt edge is not absurd");
+  assert.equal(quoteLooksWrongSideOf(8628, 105), false, "same-sign +8628 vs +105 is not a flip");
+  assert.equal(quoteLooksAbsurdVsReference(105, 8628), true, "same-sign +8628 vs +105 is still garbage");
+  assert.equal(quoteLooksAbsurdVsReference(187, 150), false, "real +187 vs +150 is fine");
+  assert.equal(cjsGuard.quoteLooksAbsurdVsReference(105, 8628), true);
+}
+
+// ── Kevin WKU screenshot: +8628 book vs −107 Underdog true (UDX fee on +100)
+{
+  assert.equal(applyUnderdogPredictFee(100), -107);
+  assert.equal(twoWayQuotesLookIncoherent(8628, -107), true, "+8628 and −107 are not one 2-way");
+  assert.equal(oppQuoteLooksInverted(8628, -107), true, "WKU +8628 cannot use −107 as true");
+  assert.equal(cjsGuard.oppQuoteLooksInverted(8628, -107), true);
+  const shownTrue = trueAmericanFromOpp(-107);
+  assert.ok(shownTrue > 0 && shownTrue < 150, `inverse of −107 is even-money class, got ${shownTrue}`);
+  assert.notEqual(shownTrue, 8628);
+  assert.equal(quoteLooksAbsurdVsReference(8628, shownTrue), true);
+  assert.equal(oppQuoteLooksInverted(150, -110), false, "real +EV dog still resolves");
+  assert.equal(twoWayQuotesLookIncoherent(150, -110), false);
+  assert.equal(oppQuoteLooksInverted(200, 200), false, "same-selection PM +200 vs +200 is not a 2-way");
 }
 
 // ── Texas −6000 vs Kalshi dog +3021 stays (user: same direction, fine)
@@ -74,6 +97,20 @@ const cjsGuard = require("../lib/promo-opp-guard.js");
   ], { allBooks: ALL_BOOKS });
   assert.notEqual(opp.bestBook, "kalshi");
   assert.equal(opp.best, 8000);
+}
+
+{
+  const wku = pickBestAmericanQuote([
+    { price: 105, book: "draftkings", size: null },
+    { price: 100, book: "fanduel", size: null },
+    { price: 8628, book: "underdog_predict", size: 400 },
+  ], { allBooks: ALL_BOOKS });
+  assert.notEqual(wku.bestBook, "underdog_predict");
+  assert.equal(wku.best, 105, "UD +8628 must not be the same-selection true for WKU");
+  assert.equal(cjsGuard.pickBestAmericanQuote([
+    { price: 105, book: "draftkings", size: null },
+    { price: 8628, book: "underdog_predict", size: 400 },
+  ], { allBooks: ALL_BOOKS }).best, 105);
 }
 
 // ── resolveOpp falls back to same-book when trusted Kalshi is inverted
@@ -110,6 +147,17 @@ const cjsGuard = require("../lib/promo-opp-guard.js");
     bookOdds: -20000,
   });
   assert.equal(omitted.bestOpp, null, "omit rather than invent inverted true odds");
+}
+
+{
+  const wku = resolveOppWithSideGuard({
+    trustedOpp: -107,
+    trustedBook: "underdog_predict",
+    sameBookOpp: -107,
+    sameBookKey: "underdog_predict",
+    bookOdds: 8628,
+  });
+  assert.equal(wku.bestOpp, null, "omit WKU +8628 vs Underdog −107 rather than cite the other contract");
 }
 
 // ── transform + buildAllLegs: Iowa cannot resolve to +2000-class true
@@ -189,6 +237,21 @@ const cjsGuard = require("../lib/promo-opp-guard.js");
   const b = { ev: -95.45, legs: [{ dk: -20000, bestOpp: 2042 }] };
   const ranked = rankPicksAfterOppGuard([b, a]);
   assert.equal(ranked[0].ev, -3.78, "re-sort by EV after overlay");
+}
+
+{
+  const phantom = {
+    ev: 179000,
+    legs: [{ dk: 8628, bestOpp: -107, name: "Western Kentucky Hilltoppers ML", bookKey: "underdog_predict", bestOppBook: "underdog_predict" }],
+  };
+  const sane = {
+    ev: 12.4,
+    legs: [{ dk: 150, bestOpp: -110, name: "Sane dog ML" }],
+  };
+  const ranked = rankPicksAfterOppGuard([phantom, sane]);
+  assert.equal(pickHasInvertedOpp(phantom.legs), true);
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].ev, 12.4, "extreme UD longshot without matching true is not BEST PICK");
 }
 
 // ── EV format: never +- or +$-

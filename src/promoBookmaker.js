@@ -47,7 +47,13 @@ export const BOOKMAKER_CACHE_STORAGE_KEY = "aibetbuilder.bookmakerSnap.v3";
 let memoryBookmakerCache = null;
 
 const TEAM_STOP = new Set(["the", "and", "of", "university", "univ", "college"]);
-const TEAM_QUALIFIERS = new Set(["state", "st", "tech", "am", "international"]);
+// Directional tokens stop Western Kentucky ⊂ Kentucky / West Virginia ⊂ Virginia
+// the same way "state" stops Kansas State ⊂ Kansas.
+const TEAM_QUALIFIERS = new Set([
+  "state", "st", "tech", "am", "international",
+  "western", "eastern", "northern", "southern",
+  "west", "east", "north", "south", "central", "middle",
+]);
 
 export function leaguesForSports(sports) {
   const selected = sports instanceof Set ? sports : new Set(sports || []);

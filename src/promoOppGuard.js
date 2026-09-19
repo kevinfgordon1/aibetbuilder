@@ -5,10 +5,13 @@
 // huge underdog "true" (+2000-class vs a −20000 book) and EV collapses to ~−95%.
 //
 // A real +EV dog (book +150 vs fair −110) flips signs too — only absurd
-// |edge| / same-sign heavy favorites are rejected.
+// |edge| / same-sign heavy favorites are rejected. Extreme UD longshots
+// (+8628 vs true −107 / +107) are the same-sign 47pt case: drop them.
 
 export const ABSURD_TRUE_EDGE = 0.40;
 export const DECISIVE_IMPLIED_DEV = 0.25; // ~−200 / +200
+export const TWO_WAY_SUM_MIN = 0.80;
+export const TWO_WAY_SUM_MAX = 1.22;
 
 export function impliedFromAmerican(odds) {
   const n = Number(odds);
@@ -41,7 +44,35 @@ export function quoteLooksWrongSideOf(reference, candidate) {
   return Math.abs(pa - pb) >= ABSURD_TRUE_EDGE;
 }
 
-// bookOdds = our sportsbook price; oppOdds = other-side Yes used as the inverse.
+// Sign-agnostic implied gap. +8628 vs +110 is the same side but 46pts of p —
+// the sign-only guard lets that rank as a free-bet BEST PICK.
+export function quoteLooksAbsurdVsReference(reference, candidate, edge = ABSURD_TRUE_EDGE) {
+  const pa = impliedFromAmerican(reference);
+  const pb = impliedFromAmerican(candidate);
+  if (pa == null || pb == null) return false;
+  return Math.abs(pa - pb) >= edge;
+}
+
+// Opposite-side Yes quotes whose implieds do not sum to a 2-way (~1).
+// WKU +8628 (p≈0.011) vs Underdog −107 (p≈0.517) is 0.53 — not one contract.
+export function twoWayQuotesLookIncoherent(a, b, min = TWO_WAY_SUM_MIN, max = TWO_WAY_SUM_MAX) {
+  const pa = impliedFromAmerican(a);
+  const pb = impliedFromAmerican(b);
+  if (pa == null || pb == null) return false;
+  const sum = pa + pb;
+  return sum < min || sum > max;
+}
+
+// Same-selection fair American implied by an other-side Yes (1 − opp).
+export function trueAmericanFromOpp(oppOdds) {
+  const oppImp = impliedFromAmerican(oppOdds);
+  if (oppImp == null) return null;
+  return probToAmericanOdds(1 - oppImp);
+}
+
+// bookOdds = priced selection; oppOdds = other-side Yes used as the inverse.
+// Rejects inverted favorites, same-sign junk, incoherent 2-ways, and
+// +8628-class longshots whose inverse true is even-money (−107 after UDX).
 export function oppQuoteLooksInverted(bookOdds, oppOdds) {
   const book = Number(bookOdds);
   const opp = Number(oppOdds);
@@ -60,6 +91,14 @@ export function oppQuoteLooksInverted(bookOdds, oppOdds) {
   }
   // Heavy favorite whose "opponent" is also a favorite — not 2-way juice.
   if (americanSign(book) === americanSign(opp) && Math.abs(bookImp - 0.5) >= DECISIVE_IMPLIED_DEV) {
+    return true;
+  }
+  // Same-sign +8628 vs true +107 (opp −107): 47pts of p, not a real dog edge.
+  if (Math.abs(edge) >= ABSURD_TRUE_EDGE) return true;
+  // Two-way sum only when the quotes are opposite sides. +200 vs +200 is
+  // the same-selection PM top, not a broken 2-way.
+  if (americanSign(book) !== 0 && americanSign(book) !== americanSign(opp)
+    && twoWayQuotesLookIncoherent(book, opp)) {
     return true;
   }
   return false;
@@ -84,15 +123,24 @@ export function quoteConflictsWithSportsbookConsensus(price, sportsbookPrices) {
   return quoteLooksWrongSideOf(ref, price);
 }
 
-// Highest American among quotes that are not sign-flipped vs sportsbook consensus.
+export function quoteMagnitudeConflictsWithSportsbookConsensus(price, sportsbookPrices, edge = DECISIVE_IMPLIED_DEV) {
+  const ref = medianAmerican(sportsbookPrices);
+  if (ref == null) return false;
+  return quoteLooksAbsurdVsReference(ref, price, edge);
+}
+
+// Highest American among quotes that match sportsbook consensus on side
+// and magnitude. +8628 vs books +105 is same-sign but must not become
+// the "best" true for that named team (or the other side's inverse).
 export function pickBestAmericanQuote(quotes, { allBooks } = {}) {
   const list = (quotes || []).filter((q) => q && isFinite(Number(q.price)) && Number(q.price) !== 0);
   if (!list.length) return { best: null, bestBook: null, bestSize: null };
   const sbPrices = list
     .filter((q) => !isExchangeBookKey(q.book, allBooks))
     .map((q) => q.price);
-  const usable = list.filter((q) => !quoteConflictsWithSportsbookConsensus(q.price, sbPrices));
-  const pool = usable.length ? usable : list;
+  const signOk = list.filter((q) => !quoteConflictsWithSportsbookConsensus(q.price, sbPrices));
+  const usable = signOk.filter((q) => !quoteMagnitudeConflictsWithSportsbookConsensus(q.price, sbPrices));
+  const pool = usable.length ? usable : (signOk.length ? signOk : list);
   let best = null;
   for (const q of pool) {
     if (best == null || q.price > best.price) best = q;
