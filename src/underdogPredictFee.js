@@ -14,7 +14,8 @@
 // contracts at p≈0.1589 showed $56.16 vs ~$60.55 on this closed form). We
 // calibrate to the published UDX examples, not a one-off slip constant.
 //
-// Keep in lockstep with lib/underdog-predict-fee.js (Odds API / applyBookAdjustments).
+// Keep in lockstep with lib/underdog-predict-fee.js. Unused on Promo /
+// New Odds Board / applyBookAdjustments — sticker American is the fill.
 
 export const UNDERDOG_PREDICT_UDX_FEE_RATE = 0.072;
 

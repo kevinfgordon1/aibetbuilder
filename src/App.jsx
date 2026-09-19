@@ -158,7 +158,6 @@ const ADJUSTED_BOOK_NOTES = {
   kalshi: "after Kalshi fee",
   prophetx: "after 2% commission",
   polymarket: "after Polymarket taker fee",
-  underdog_predict: "after UDX exchange fee",
 };
 
 const SPORTS = [
