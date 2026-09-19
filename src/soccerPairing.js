@@ -82,6 +82,21 @@ export function formatPromoLegMarket(leg) {
   return market;
 }
 
+// Display only. Canonical `leg.game` stays `${away} @ ${home}` for pairing / Combo.
+export function formatPromoLegGame(leg) {
+  if (leg == null) return "";
+  if (typeof leg === "string") return leg.trim();
+  return String(leg.game || "").trim();
+}
+
+// Chip / card subtitle: matchup first, then market (empty for soccer ML), then extras.
+export function joinPromoLegSubtitle(leg, extras = []) {
+  return [formatPromoLegGame(leg), formatPromoLegMarket(leg), ...extras]
+    .map((part) => (part == null ? "" : String(part).trim()))
+    .filter(Boolean)
+    .join(" · ");
+}
+
 // Odds API h2h_lay uses the same outcome name as h2h Yes (team or Draw).
 export function soccerLayOutcomeName(side, away, home) {
   return soccerSideTeam(side, away, home);

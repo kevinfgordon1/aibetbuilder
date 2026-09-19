@@ -26,6 +26,8 @@ import {
   soccerPromoEmptyDetail,
   formatPromoLegTitle,
   formatPromoLegMarket,
+  formatPromoLegGame,
+  joinPromoLegSubtitle,
   SOCCER_PM_NO_BOOK_KEYS,
 } from "./soccerPairing.js";
 import { fetchSoccerPmNos, overlaySoccerPmNos } from "./soccerPmNo.js";
@@ -489,6 +491,12 @@ function PromoLegStartTime({ commence_time }) {
       <DaysAwayWarning commence_time={commence_time} />
     </div>
   );
+}
+
+function PromoLegGameLine({ leg, style }) {
+  const game = formatPromoLegGame(leg);
+  if (!game) return null;
+  return <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, ...style }}>{game}</div>;
 }
 
 // Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
@@ -1118,6 +1126,7 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
               <ExcludeLegButton leg={l} onExclude={onExclude} />
             </div>
+            <PromoLegGameLine leg={l} />
             <PromoLegStartTime commence_time={l.commence_time} />
             {l.lowLiquidity && <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", marginTop: 4 }}>{LOW_LIQUIDITY_LABEL}</div>}
             <UnderdogStaleOddsChip leg={l} />
@@ -1141,7 +1150,7 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
             <ExcludeLegButton leg={l} onExclude={onExclude} />
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
-            <span style={{ fontSize: 11, color: "#6b7280" }}>{formatPromoLegMarket(l)}</span>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>{joinPromoLegSubtitle(l)}</span>
             <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: l.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(l.dk)}</span>
           </div>
           <PromoLegStartTime commence_time={l.commence_time} />
@@ -1389,6 +1398,7 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders,
           <div key={li} style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderBottom: li < rows.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none", alignItems: "center", background: li % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(l)}</div>
+              <PromoLegGameLine leg={l} />
               <PromoLegStartTime commence_time={l.commence_time} />
             </div>
             <div style={{ textAlign: "center" }}>
@@ -3053,7 +3063,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(p.legs[0])}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{[formatPromoLegMarket(p.legs[0]), formatOdds(p.legs[0].dk), formatET(p.legs[0].commence_time)].filter(Boolean).join(" · ")}<DaysAwayWarning commence_time={p.legs[0].commence_time} /></div>
+                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{joinPromoLegSubtitle(p.legs[0], [formatOdds(p.legs[0].dk), formatET(p.legs[0].commence_time)])}<DaysAwayWarning commence_time={p.legs[0].commence_time} /></div>
                                     </div>
                                     <div style={{ textAlign: "right" }}>
                                       <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${Number(stake).toFixed(2)}</div>
@@ -3066,6 +3076,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{p.legs[0].bestOppName}</div>
+                                      <PromoLegGameLine leg={p.legs[0]} />
                                       <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
@@ -3242,7 +3253,7 @@ export default function App() {
                                     <ExcludeLegButton leg={leg} onExclude={excludePromoLeg} />
                                   </div>
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
-                                    <span style={{ fontSize: 11, color: "#6b7280" }}>{[formatPromoLegMarket(leg), activePromoBookData.label].filter(Boolean).join(" — ")}</span>
+                                    <span style={{ fontSize: 11, color: "#6b7280" }}>{joinPromoLegSubtitle(leg, [activePromoBookData.label])}</span>
                                     <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: leg?.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(leg?.dk)}</span>
                                   </div>
                                   <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${fbAmount} free bet</div>
@@ -3251,6 +3262,7 @@ export default function App() {
                                 <div style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "10px 14px" }}>
                                   <div style={{ fontSize: 11, color: "#10b981", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Hedge With Cash</div>
                                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
+                                  <PromoLegGameLine leg={leg} />
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{getBookLabel(leg?.bestOppBook)}</span>
                                     <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: (quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp) > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)}</span>
@@ -3308,7 +3320,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{[formatPromoLegMarket(leg), formatOdds(leg?.dk), formatET(leg?.commence_time)].filter(Boolean).join(" · ")}<DaysAwayWarning commence_time={leg?.commence_time} /></div>
+                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{joinPromoLegSubtitle(leg, [formatOdds(leg?.dk), formatET(leg?.commence_time)])}<DaysAwayWarning commence_time={leg?.commence_time} /></div>
                                       <UnderdogStaleOddsChip leg={leg} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>
@@ -3322,6 +3334,7 @@ export default function App() {
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
                                     <div>
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
+                                      <PromoLegGameLine leg={leg} />
                                       <PromoTrueOddsSubline leg={hedgeLeg || leg} live levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} />
                                     </div>
                                     <div style={{ textAlign: "right" }}>

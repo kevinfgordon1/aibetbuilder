@@ -17,6 +17,8 @@ import {
   formatSoccerThreeWayMlTitle,
   formatPromoLegTitle,
   formatPromoLegMarket,
+  formatPromoLegGame,
+  joinPromoLegSubtitle,
   outcomeMatchesName,
   preferSoccerBinaryNo,
   soccerMlOppResolveArgs,
@@ -104,6 +106,35 @@ assert.equal(isDrawOutcomeName("Arsenal"), false);
   assert.equal(
     formatPromoLegMarket({ name: "Yankees ML", market: "ML", sport: "baseball_mlb" }),
     "ML",
+  );
+  assert.equal(
+    formatPromoLegGame({ name: "Draw", market: "ML", sport: "soccer_epl", game: "Chelsea @ Arsenal" }),
+    "Chelsea @ Arsenal",
+  );
+  assert.equal(formatPromoLegGame({ name: "Draw", market: "ML", sport: "soccer_epl" }), "");
+  assert.equal(formatPromoLegGame(null), "");
+  assert.equal(formatPromoLegGame("Chelsea @ Arsenal"), "Chelsea @ Arsenal");
+  assert.equal(
+    joinPromoLegSubtitle({
+      name: "Draw",
+      market: "ML",
+      sport: "soccer_epl",
+      game: "Chelsea @ Arsenal",
+    }, ["+240", "Sat 10:00 AM ET"]),
+    "Chelsea @ Arsenal · +240 · Sat 10:00 AM ET",
+  );
+  assert.equal(
+    joinPromoLegSubtitle({
+      name: "Yankees ML",
+      market: "ML",
+      sport: "baseball_mlb",
+      game: "Yankees @ Red Sox",
+    }, ["-140"]),
+    "Yankees @ Red Sox · ML · -140",
+  );
+  assert.equal(
+    joinPromoLegSubtitle({ name: "Draw", market: "ML", sport: "soccer_epl" }),
+    "",
   );
 }
 
@@ -274,6 +305,14 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   assert.match(app, /key: "soccer_usa_mls", label: "MLS"/);
   assert.match(app, /SPORT_CHIPS = sportChipOptions\(SPORTS\)/);
   assert.match(app, /function pushSoccerMlLegs/);
+  assert.match(app, /function PromoLegGameLine\(/);
+  assert.match(app, /formatPromoLegGame/);
+  assert.match(app, /joinPromoLegSubtitle/);
+  assert.match(app, /<PromoLegGameLine leg=\{l\} \/>/);
+  assert.match(app, /joinPromoLegSubtitle\(l\)/);
+  assert.match(app, /joinPromoLegSubtitle\(p\.legs\[0\], \[formatOdds\(p\.legs\[0\]\.dk\), formatET\(p\.legs\[0\]\.commence_time\)\]\)/);
+  assert.match(app, /joinPromoLegSubtitle\(leg, \[formatOdds\(leg\?\.dk\), formatET\(leg\?\.commence_time\)\]\)/);
+  assert.match(app, /joinPromoLegSubtitle\(leg, \[activePromoBookData\.label\]\)/);
   assert.match(app, /isSoccerSport\(g\.sport\)/);
   assert.match(app, /soccerPromoEmptyDetail/);
   assert.match(app, /soccerLayBookLabel/);
