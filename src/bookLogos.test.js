@@ -40,6 +40,12 @@ assert.equal(
   false,
 );
 
+const app = fs.readFileSync(path.join(root, "src", "App.jsx"), "utf8");
+assert.match(app, /import \{ bookLogo \} from "\.\/bookLogos\.js"/);
+assert.match(app, /key: "draftkings".*logo: bookLogo\("draftkings"\)/);
+assert.doesNotMatch(app, /draftkings\.com\/favicon\.ico/);
+assert.match(app, /fanduel\.com\/favicon\.ico/, "other original-board logos stay on their existing URLs");
+
 const board = fs.readFileSync(path.join(root, "src", "BetstampOddsBoard.jsx"), "utf8");
 const label = fs.readFileSync(path.join(root, "src", "BookLabel.jsx"), "utf8");
 assert.match(board, /import BookLabel from "\.\/BookLabel\.jsx"/);
