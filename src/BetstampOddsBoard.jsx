@@ -672,6 +672,17 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setBoardOrder(saveOddsBoardOrder(user, next));
   };
 
+  const focusGrip = (kind, key) => {
+    const token = String(key ?? "");
+    if (!token) return;
+    requestAnimationFrame(() => {
+      const sel = kind === "game"
+        ? `[data-drag-game="${CSS.escape(token)}"]`
+        : `[data-drag-book="${CSS.escape(token)}"]`;
+      document.querySelector(sel)?.focus();
+    });
+  };
+
   const slateKey = oddsBoardSlateKey(boardSport, liveOnly);
   const catalogBooks = useMemo(
     () => applyBookColumnOrder(books, boardOrder.bookKeys),
@@ -723,6 +734,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       ...boardOrder,
       gamesBySlate: { ...boardOrder.gamesBySlate, [slateKey]: nextIds },
     });
+    focusGrip("game", gameId);
   };
 
   const moveBook = (fromKey, toKey) => {
@@ -735,6 +747,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     if (bookKey === "best") return;
     const nextKeys = moveKeyByOffset(visibleBookKeys, bookKey, delta, boardOrder.bookKeys);
     persistBoardOrder({ ...boardOrder, bookKeys: nextKeys });
+    focusGrip("book", bookKey);
   };
 
   const resetGameOrder = () => {
