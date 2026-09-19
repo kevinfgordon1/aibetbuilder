@@ -33,6 +33,13 @@ import {
   formatStackedBestLine,
   isStackedBestMatch,
   marketLinePoint,
+  OBB_TEAM_COL_WIDTH,
+  OBB_ODDS_COL_WIDTH,
+  OBB_BEST_COL_WIDTH,
+  OBB_SIDE_CELL_HEIGHT,
+  obbColWidth,
+  obbTableWidth,
+  padBestPointStacks,
 } from "./oddsBoard.js";
 import { BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
@@ -841,6 +848,32 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
 // ── stacked Best helpers: line normalize + popularity ranking
 {
   assert.equal(STACKED_BEST_MAX_LINES, 2);
+}
+
+// ── New Odds Board fixed cell tracks: live ticks must not grow columns
+{
+  assert.equal(OBB_TEAM_COL_WIDTH, 186);
+  assert.equal(OBB_ODDS_COL_WIDTH, 108);
+  assert.equal(OBB_BEST_COL_WIDTH, 128);
+  assert.equal(OBB_SIDE_CELL_HEIGHT, 56);
+  assert.equal(obbColWidth("best"), OBB_BEST_COL_WIDTH);
+  assert.equal(obbColWidth("fanduel"), OBB_ODDS_COL_WIDTH);
+  assert.equal(obbColWidth("draftkings"), OBB_ODDS_COL_WIDTH);
+  assert.equal(
+    obbTableWidth([{ key: "best" }, { key: "fanduel" }, { key: "draftkings" }]),
+    OBB_TEAM_COL_WIDTH + OBB_BEST_COL_WIDTH + OBB_ODDS_COL_WIDTH + OBB_ODDS_COL_WIDTH,
+  );
+  const emptyStacks = padBestPointStacks([], STACKED_BEST_MAX_LINES);
+  assert.equal(emptyStacks.length, STACKED_BEST_MAX_LINES);
+  assert.equal(emptyStacks[0].padded, true);
+  assert.equal(emptyStacks[0].top, null);
+  const oneStack = padBestPointStacks([{ point: 6.5, count: 3, top: { price: -110 }, bot: { price: -108 } }]);
+  assert.equal(oneStack.length, 2);
+  assert.equal(oneStack[0].point, 6.5);
+  assert.equal(oneStack[1].padded, true);
+  const capped = padBestPointStacks([{ point: 1 }, { point: 2 }, { point: 3 }], 2);
+  assert.equal(capped.length, 2);
+  assert.deepEqual(capped.map((b) => b.point), [1, 2]);
   assert.equal(normalizeBoardLine(3.5), 3.5);
   assert.equal(normalizeBoardLine("+2.5"), 2.5);
   assert.equal(normalizeBoardLine(null), null);
