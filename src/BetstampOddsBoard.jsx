@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import {
   fmtBoardSize,
-  bookInitials,
   bestBooksTitle,
   formatDateGroup,
   getOddsBoardCell,
@@ -13,6 +12,8 @@ import {
   isHiddenOddsCell,
   isStackedBestMatch,
   oddsBoardSidePoint,
+  oddsMoveDirection,
+  ODDS_FLASH_MS,
 } from "./oddsBoard.js";
 import {
   BETSTAMP_SPORTS,
@@ -50,56 +51,56 @@ import {
   BETSTAMP_LIVE_RECONCILE_MS,
 } from "./betstampLive.js";
 
-function BookMark({ book, extra = 0, title, size = 13 }) {
-  const [logoError, setLogoError] = useState(false);
+function BestBookName({ book, extra = 0, title, size = 13 }) {
   if (!book) return null;
-  const showLogo = book.logo && !logoError;
-  const initials = bookInitials(book.label);
   return (
     <span
       title={title || book.label}
       data-book-mark={book.key}
-      style={{ display: "inline-flex", alignItems: "center", gap: 3, verticalAlign: "middle", flexShrink: 0 }}
+      data-book-full-name={book.label}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, verticalAlign: "middle", flexShrink: 0, flexWrap: "wrap", justifyContent: "center" }}
     >
-      {showLogo ? (
-        <img
-          src={book.logo}
-          alt=""
-          width={size}
-          height={size}
-          style={{
-            borderRadius: 3,
-            display: "block",
-            objectFit: "contain",
-            background: "rgba(255,255,255,0.92)",
-          }}
-          onError={() => setLogoError(true)}
-        />
-      ) : (
-        <span
-          aria-hidden="true"
-          style={{
-            width: size,
-            height: size,
-            borderRadius: 3,
-            background: book.bg,
-            color: book.color,
-            fontSize: Math.max(8, Math.round(size * 0.58)),
-            fontWeight: 800,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            lineHeight: 1,
-            fontFamily: "'DM Sans', sans-serif",
-            letterSpacing: -0.3,
-          }}
-        >
-          {initials}
-        </span>
-      )}
+      <BookLabel book={book} size={size} />
       {extra > 0 && (
         <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", fontFamily: "'DM Sans', sans-serif" }}>+{extra}</span>
       )}
+    </span>
+  );
+}
+
+function OddsFlashNumber({ price, suspended, flashKey }) {
+  const prevRef = useRef({ key: flashKey, price, suspended: !!suspended });
+  const [flash, setFlash] = useState(null);
+
+  useEffect(() => {
+    const prev = prevRef.current;
+    if (prev.key !== flashKey) {
+      prevRef.current = { key: flashKey, price, suspended: !!suspended };
+      setFlash(null);
+      return undefined;
+    }
+    if (suspended || price == null) {
+      prevRef.current = { key: flashKey, price, suspended: !!suspended };
+      setFlash(null);
+      return undefined;
+    }
+    const dir = !prev.suspended && prev.price != null
+      ? oddsMoveDirection(prev.price, price)
+      : null;
+    prevRef.current = { key: flashKey, price, suspended: false };
+    if (!dir) return undefined;
+    setFlash(dir);
+    const t = setTimeout(() => setFlash(null), ODDS_FLASH_MS);
+    return () => clearTimeout(t);
+  }, [flashKey, price, suspended]);
+
+  if (suspended) return null;
+  return (
+    <span
+      data-odds-flash={flash || "none"}
+      className={flash ? `obb-flash obb-flash-${flash}` : undefined}
+    >
+      {price == null ? "—" : formatAmericanOdds(price)}
     </span>
   );
 }
@@ -114,22 +115,42 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle, showWinProb, suspended }) {
+function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle, showWinProb, suspended, flashKey }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
   const age = price == null || suspended ? null : formatCompactAge(updatedAt, nowMs);
   const clock = updatedAt ? fmtClock(updatedAt) : "";
   const winProb = showWinProb && price != null && !suspended ? formatWinProb(price) : null;
+  if (suspended) {
+    return (
+      <>
+        {line && (
+          <div style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 4, textDecoration: "line-through", opacity: 0.7 }}>
+            {line}
+          </div>
+        )}
+        <div
+          className="obb-off"
+          data-odds-suspended="1"
+          data-odds-off="1"
+          title="Off the board — Betstamp no longer lists this line live"
+        >
+          <span>OFF</span>
+          <span className="obb-off-sub">the board</span>
+        </div>
+      </>
+    );
+  }
   return (
     <>
-      {line && !suspended && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
-      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, flexWrap: "nowrap" }}>
-        <span>{price == null || suspended ? "—" : formatAmericanOdds(price)}</span>
-        {showBestMark && price != null && !suspended && book && (
-          <BookMark book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
+      {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 1 }}>{line}</div>}
+      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, flexWrap: "wrap" }}>
+        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
+        {showBestMark && price != null && book && (
+          <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
-        {!suspended && <LiquidityCue size={size} inline />}
+        <LiquidityCue size={size} inline />
       </div>
       {winProb && (
         <div
@@ -138,15 +159,6 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
           style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
         >
           {winProb}
-        </div>
-      )}
-      {suspended && (
-        <div
-          data-odds-suspended="1"
-          title="Betstamp no longer lists this line live"
-          style={{ fontSize: 9, color: "#f59e0b", fontWeight: 700, marginTop: 2, letterSpacing: 0.3, textTransform: "uppercase", fontFamily: "'DM Sans', sans-serif", lineHeight: 1.1 }}
-        >
-          OFF
         </div>
       )}
       {age && (
@@ -176,6 +188,7 @@ function BookSideCell({
   isBestCol,
   isBestCell,
   empty,
+  off,
   last,
   hidden,
   onToggleHide,
@@ -189,9 +202,15 @@ function BookSideCell({
       className="obb-side"
       data-odds-side={side}
       data-hidden={hidden ? "1" : "0"}
+      data-odds-off={off ? "1" : "0"}
       style={{
-        ...sideStyle(isBestCol, isBestCell && !hidden, empty),
+        ...sideStyle(isBestCol, isBestCell && !hidden && !off, empty && !off),
         ...(last ? { borderBottom: "none" } : {}),
+        ...(off ? {
+          color: "#a8a29e",
+          background: "rgba(68, 45, 12, 0.38)",
+          boxShadow: "inset 0 0 0 1px rgba(245,158,11,0.28)",
+        } : {}),
         ...(hidden ? {
           color: "#6b7280",
           background: "rgba(255,255,255,0.03)",
@@ -220,7 +239,7 @@ function BookSideCell({
         </button>
       )}
       <div
-        data-odds-price={empty ? "empty" : "set"}
+        data-odds-price={off ? "off" : empty ? "empty" : "set"}
         style={hidden ? { textDecoration: "line-through", opacity: 0.72 } : undefined}
       >
         {children}
@@ -629,6 +648,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
       updatedAt={bestLineUpdatedAt(rowGame, field, stack?.books)}
       nowMs={nowMs}
       ageTitle="Newest update among books offering this best price"
+      flashKey={`${rowGame.id}:best:${field}:${stack?.line ?? stack?.point ?? "none"}`}
     />
   );
 
@@ -636,7 +656,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
     if (!blocks?.length) {
       return (
         <div data-best-point-pairs="0" data-best-stacks="0">
-          <OddsSide price={null} size={null} line={null} books={[]} allBooks={books} showBestMark nowMs={nowMs} />
+          <OddsSide price={null} size={null} line={null} books={[]} allBooks={books} showBestMark nowMs={nowMs} flashKey={`${rowGame.id}:best:empty`} />
         </div>
       );
     }
@@ -706,7 +726,10 @@ export default function BetstampOddsBoard({ user = null } = {}) {
       nowMs,
       ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
       suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
+      flashKey: `${rowGame.id}:${marketKey}:${b.key}:${which}`,
     });
+    const topOff = sideProps("top").suspended;
+    const botOff = sideProps("bot").suspended;
     if (pairBlocks) {
       const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
       return (
@@ -737,6 +760,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
             isBestCol={isBestCol}
             isBestCell={isBestAway}
             empty={cell.top === null}
+            off={topOff}
             hidden={topHidden}
             onToggleHide={toggleHiddenCell}
             sideStyle={sideStyle}
@@ -752,6 +776,7 @@ export default function BetstampOddsBoard({ user = null } = {}) {
             isBestCol={isBestCol}
             isBestCell={isBestHome}
             empty={cell.bot === null}
+            off={botOff}
             last
             hidden={botHidden}
             onToggleHide={toggleHiddenCell}
@@ -888,6 +913,49 @@ export default function BetstampOddsBoard({ user = null } = {}) {
         @media (hover: none) {
           .obb-hide { opacity: 0.2; pointer-events: auto; }
           .obb-side[data-hidden="1"] .obb-hide { opacity: 1; }
+        }
+        .obb-flash {
+          display: inline-block;
+          padding: 0 3px;
+          border-radius: 3px;
+          font-variant-numeric: tabular-nums;
+        }
+        @keyframes obb-flash-up {
+          0%, 20% { color: #86efac; background: rgba(16,185,129,0.38); text-shadow: 0 0 10px rgba(52,211,153,0.55); }
+          100% { color: inherit; background: transparent; text-shadow: none; }
+        }
+        @keyframes obb-flash-down {
+          0%, 20% { color: #fca5a5; background: rgba(239,68,68,0.38); text-shadow: 0 0 10px rgba(248,113,113,0.5); }
+          100% { color: inherit; background: transparent; text-shadow: none; }
+        }
+        .obb-flash-up { animation: obb-flash-up 0.9s ease-out; }
+        .obb-flash-down { animation: obb-flash-down 0.9s ease-out; }
+        .obb-off {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          min-width: 52px;
+          padding: 4px 8px;
+          border-radius: 5px;
+          border: 1px dashed rgba(251,191,36,0.55);
+          background: rgba(120,53,15,0.55);
+          color: #fbbf24;
+          font-size: 12px;
+          font-weight: 800;
+          letter-spacing: 0.7px;
+          line-height: 1.15;
+          text-transform: uppercase;
+          font-family: 'DM Sans', sans-serif;
+        }
+        .obb-off-sub {
+          display: block;
+          margin-top: 2px;
+          font-size: 8px;
+          font-weight: 700;
+          letter-spacing: 0.4px;
+          color: #fcd34d;
+          opacity: 0.9;
         }
       `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
@@ -1148,13 +1216,15 @@ export default function BetstampOddsBoard({ user = null } = {}) {
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
-        {" · "}LIVE uses SSE for ticks plus a 10s REST presence reconcile — cells show — / OFF when Betstamp no longer lists that book/side live (silence alone is not a suspend)
+        {" · "}LIVE uses SSE for ticks plus a 10s REST presence reconcile — a book/side Betstamp no longer lists (or marks suspended / OTB) shows a clear OFF / off-the-board cell, not a dash. A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX / Underdog Predict also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
+        {" · "}Best names the winning book in full (FanDuel, not FD) with its logo; +N if tied
+        {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
       </div>

@@ -97,10 +97,13 @@ export function formatCompactAge(updatedAt, now = Date.now()) {
   if (updatedAt == null || !isFinite(updatedAt)) return null;
   const ms = Math.max(0, now - updatedAt);
   if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))}m`;
-  if (ms < 86_400_000) return `${Math.max(1, Math.round(ms / 3_600_000))}h`;
-  return `${Math.max(1, Math.round(ms / 86_400_000))}d`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  // Keep the second count through 1m59s. Only coarsen at 2 minutes.
+  if (sec < 120) return `1m${String(sec - 60).padStart(2, "0")}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  if (ms < 86_400_000) return `${Math.max(1, Math.floor(ms / 3_600_000))}h`;
+  return `${Math.max(1, Math.floor(ms / 86_400_000))}d`;
 }
 
 export function lineUpdatedAt(game, bookKey, field) {
@@ -160,6 +163,7 @@ const NOT_OFFERED_MARKET_STATUSES = new Set([
 export function marketIsOffered(market) {
   if (!market || typeof market !== "object") return false;
   if (market.suspended === true || market.is_suspended === true || market.isSuspended === true) return false;
+  if (market.is_otb === true || market.otb === true || market.off_the_board === true || market.is_off_the_board === true) return false;
   if (market.active === false || market.is_active === false || market.isActive === false) return false;
   if (market.available === false || market.is_available === false || market.isAvailable === false) return false;
   const status = String(
@@ -167,6 +171,13 @@ export function marketIsOffered(market) {
   ).trim().toLowerCase().replace(/[\s-]+/g, "_");
   if (status && NOT_OFFERED_MARKET_STATUSES.has(status)) return false;
   return true;
+}
+
+export function marketIsLiveQuote(market) {
+  if (!market || typeof market !== "object") return false;
+  if (market.is_live === true || market.live === true) return true;
+  const status = String(market.status ?? market.market_status ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return status === "live" || status === "in_play" || status === "inplay";
 }
 
 export function quotePresenceKey({ fixtureId, bookKey, betType, side } = {}) {
@@ -834,7 +845,14 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   if (!side) return false;
   const field = lineFieldFor(betType, side);
   if (!field) return false;
+  const existingPrice = game.bookOdds?.[bookKey]?.[field];
+  const existingTs = lineUpdatedAt(game, bookKey, field);
+  const incomingLive = marketIsLiveQuote(market);
+  const incomingMarketTs = marketUpdatedAtMs(market, null);
+  const hasQuote = existingPrice != null && isFinite(Number(existingPrice));
   if (!marketIsOffered(market)) {
+    // Pregame / OTB leftovers must not wipe a live print for the same book+side.
+    if (hasQuote && !incomingLive) return false;
     clearSideQuote(game, bookKey, betType, side);
     return {
       bookKey,
@@ -846,18 +864,21 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
       updatedAt: null,
     };
   }
+  if (hasQuote && game.is_live && !incomingLive) return false;
+  if (hasQuote && existingTs != null && incomingMarketTs != null && incomingMarketTs < existingTs) return false;
   const price = toAmericanOdds(market.odds);
   if (price == null) return false;
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
   applySideToOdds(game.bookOdds[bookKey], betType, side, price, marketSize(market), marketLine(market));
   if (market.is_live) game.is_live = true;
-  const ts = marketUpdatedAtMs(market, receivedAt);
-  if (ts != null) {
-    game.bookUpdatedAt[bookKey] = ts;
-    setLineUpdatedAt(game, bookKey, field, ts);
+  // Stamp ages from Betstamp's updated_at only. Receive-time fallbacks were
+  // blocking later live ticks whose market stamp is older than "now".
+  if (incomingMarketTs != null) {
+    game.bookUpdatedAt[bookKey] = incomingMarketTs;
+    setLineUpdatedAt(game, bookKey, field, incomingMarketTs);
   }
-  confirmSideQuote(game, bookKey, field, ts ?? receivedAt);
-  return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: ts };
+  confirmSideQuote(game, bookKey, field, incomingMarketTs ?? receivedAt);
+  return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: incomingMarketTs };
 }
 
 export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = {}) {

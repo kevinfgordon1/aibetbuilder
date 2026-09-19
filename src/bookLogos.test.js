@@ -53,5 +53,13 @@ assert.match(label, /showLogo \? \(/);
 assert.match(label, /<span>\{text\}<\/span>/);
 assert.doesNotMatch(label, /bookInitials/);
 assert.match(label, /rgba\(255,255,255,0\.92\)/);
+assert.match(board, /BestBookName/);
+assert.match(board, /data-book-full-name=\{book\.label\}/);
+assert.match(board, /OddsFlashNumber/);
+assert.match(board, /data-odds-flash/);
+assert.match(board, /data-odds-off/);
+assert.match(board, /obb-off-sub/);
+assert.doesNotMatch(board, /bookInitials/);
+assert.doesNotMatch(board, /function BookMark/);
 
 console.log("bookLogos.test.js ok");
