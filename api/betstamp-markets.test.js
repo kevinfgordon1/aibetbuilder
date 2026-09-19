@@ -238,7 +238,8 @@ function mockRes() {
     const fetchOdds = fs.readFileSync(path.join(__dirname, 'fetch-odds.js'), 'utf8');
     assert.match(src, /BETSTAMP_API_KEY/);
     assert.match(src, /fetchSnapshotWithCache/);
-    assert.match(src, /s-maxage/);
+    assert.match(src, /snapshotCacheControl/);
+    assert.match(src, /private, no-store/);
     assert.match(stream, /text\/event-stream/);
     assert.match(stream, /ingest_ts/);
     assert.match(stream, /X-API-KEY/);
