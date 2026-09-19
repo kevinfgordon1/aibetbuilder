@@ -352,6 +352,50 @@ function fmtSignedLine(line) {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+/** Locked New Odds Board columns — live ticks must not resize the grid. */
+const OBB_TEAM_COL_PX = 186;
+const OBB_ODDS_COL_PX = 108;
+
+function obbTableWidth(bookColCount) {
+  return OBB_TEAM_COL_PX + Number(bookColCount) * OBB_ODDS_COL_PX;
+}
+
+function obbTableStyle(bookColCount) {
+  const width = obbTableWidth(bookColCount);
+  return {
+    borderCollapse: "collapse",
+    tableLayout: "fixed",
+    width,
+    minWidth: width,
+    maxWidth: width,
+  };
+}
+
+function OBBColGroup({ bookKeys }) {
+  return (
+    <colgroup>
+      <col className="obb-col-game" style={{ width: OBB_TEAM_COL_PX, minWidth: OBB_TEAM_COL_PX, maxWidth: OBB_TEAM_COL_PX }} />
+      {bookKeys.map((key) => (
+        <col key={key} className="obb-col-odds" style={{ width: OBB_ODDS_COL_PX, minWidth: OBB_ODDS_COL_PX, maxWidth: OBB_ODDS_COL_PX }} />
+      ))}
+    </colgroup>
+  );
+}
+
+function obbOddsTdStyle(bookKey) {
+  return {
+    padding: 0,
+    textAlign: "center",
+    verticalAlign: "middle",
+    width: OBB_ODDS_COL_PX,
+    minWidth: OBB_ODDS_COL_PX,
+    maxWidth: OBB_ODDS_COL_PX,
+    overflow: "hidden",
+    boxSizing: "border-box",
+    borderLeft: bookKey === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none",
+  };
+}
+
 function ageTone(ms) {
   if (ms == null) return "#6b7280";
   if (ms <= 500) return "#10b981";
@@ -803,8 +847,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   ));
 
   const visibleBooks = [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))];
-  const teamColWidth = 186;
-  const oddsColWidth = 108;
+  const teamColWidth = OBB_TEAM_COL_PX;
+  const oddsColWidth = OBB_ODDS_COL_PX;
   const metrics = summarizeTickStats(tickStats, nowMs);
   const staleSoft = liveOnly ? staleLiveBookLabels(games, books, nowMs) : [];
 
@@ -938,7 +982,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     if (pairBlocks) {
       const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
       return (
-        <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+        <td key={b.key} className="obb-col-odds" style={obbOddsTdStyle(b.key)}>
           <div
             className="obb-side"
             data-odds-side="paired"
@@ -954,7 +998,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     }
 
     return (
-      <td key={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+      <td key={b.key} className="obb-col-odds" style={obbOddsTdStyle(b.key)}>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <BookSideCell
             gameId={rowGame.id}
@@ -1015,12 +1059,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       <div data-alt-section={section} style={{ marginBottom: 22 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>{title}</div>
         <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
+          <table className="obb-table" data-col-lock="fixed" style={obbTableStyle(visibleBooks.length)}>
+            <OBBColGroup bookKeys={visibleBooks.map((b) => b.key)} />
             <thead>
               <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#12131a", zIndex: 2 }}>Line</th>
+                <th className="obb-col-game" style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, minWidth: teamColWidth, maxWidth: teamColWidth, boxSizing: "border-box", position: "sticky", left: 0, background: "#12131a", zIndex: 2 }}>Line</th>
                 {visibleBooks.map((b) => (
-                  <th key={b.key} data-book-header={b.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                  <th key={b.key} className="obb-col-odds" data-book-header={b.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, minWidth: oddsColWidth, maxWidth: oddsColWidth, overflow: "hidden", boxSizing: "border-box", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
                     {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
                   </th>
                 ))}
@@ -1029,7 +1074,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             <tbody>
               {rows.map((row) => (
                 <tr key={`${section}-${row.line ?? "ml"}`} data-alt-line={row.line ?? "ml"} data-alt-main={row.isMain ? "1" : "0"} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: row.isMain ? "rgba(59,130,246,0.04)" : "transparent" }}>
-                  <td style={{ padding: "6px 12px", width: teamColWidth, position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
+                  <td className="obb-col-game" style={{ padding: "6px 12px", width: teamColWidth, minWidth: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", boxSizing: "border-box", position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
                     <div>{labelFor(row)}</div>
                     {row.isMain && <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginTop: 2 }}>MAIN</div>}
                     {marketKey === "ml" && (
@@ -1065,6 +1110,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     <div
       data-betstamp-board="true"
       data-row-density="compact"
+      data-col-lock="fixed"
+      data-team-col-px={OBB_TEAM_COL_PX}
+      data-odds-col-px={OBB_ODDS_COL_PX}
       data-book-order={visibleBookKeys.join(",")}
       data-game-order={visibleGameIds.join(",")}
       data-guard-allow="true"
@@ -1075,6 +1123,27 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     >
       <style>{`
         .obb-side, .obb-game { position: relative; }
+        .obb-table {
+          table-layout: fixed;
+          border-collapse: collapse;
+        }
+        .obb-table .obb-col-game {
+          width: 186px;
+          min-width: 186px;
+          max-width: 186px;
+          box-sizing: border-box;
+        }
+        .obb-table .obb-col-odds {
+          width: 108px;
+          min-width: 108px;
+          max-width: 108px;
+          overflow: hidden;
+          box-sizing: border-box;
+        }
+        .obb-table .obb-side {
+          max-width: 100%;
+          overflow-x: hidden;
+        }
         .obb-hide {
           position: absolute;
           top: 2px;
@@ -1497,10 +1566,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
 
       {!loading && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
+        <table className="obb-table" data-col-lock="fixed" style={obbTableStyle(visibleBooks.length)}>
+          <OBBColGroup bookKeys={visibleBooks.map((b) => b.key)} />
           <thead>
             <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
+              <th className="obb-col-game" style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, minWidth: teamColWidth, maxWidth: teamColWidth, boxSizing: "border-box", position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
               {visibleBooks.map((b) => (
                 <th
                   key={b.key}
@@ -1513,7 +1583,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                   onDragLeave={() => {
                     if (dragOver?.kind === "book" && dragOver.key === b.key) setDragOver(null);
                   }}
-                  style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}
+                  className="obb-col-odds"
+                  style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, minWidth: oddsColWidth, maxWidth: oddsColWidth, overflow: "hidden", boxSizing: "border-box", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}
                 >
                   <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
                     {b.key !== "best" && (
@@ -1568,9 +1639,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                       style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
                     >
                       <td
-                        className="obb-game"
+                        className="obb-game obb-col-game"
                         data-hide-game-cell="true"
-                        style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
+                        style={{ padding: 0, width: teamColWidth, minWidth: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", boxSizing: "border-box", position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
                       >
                         <button
                           type="button"
@@ -1638,6 +1709,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
         {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default}
+        {" · "}Column widths stay locked (Game 186px, each book and Best Odds 108px). Live ticks, ages, logos, and OFF THE BOARD wrap or scroll horizontally instead of stretching the grid}
       </div>
 
       {openGame && (
