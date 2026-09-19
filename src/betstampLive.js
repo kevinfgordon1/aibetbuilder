@@ -66,7 +66,7 @@ export function parseSseChunk(buffer) {
   return { events, rest };
 }
 
-export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId, bookIds } = {}) {
+export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId, bookIds, refresh } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);
   if (live === true) p.set("is_live", "true");
@@ -76,6 +76,9 @@ export function betstampSnapshotUrl({ league, live, includeAlts, fixtureId, book
   if (bookIds != null && bookIds !== "") {
     p.set("book_ids", Array.isArray(bookIds) ? bookIds.join(",") : String(bookIds));
   }
+  // LIVE reconcile / Refresh must not reuse the 5-minute Promo snapshot cache
+  // (that frozen payload made every quiet soft book read as exactly "5m").
+  if (refresh === true || (refresh == null && live === true)) p.set("refresh", "1");
   return `/api/betstamp-markets?${p}`;
 }
 

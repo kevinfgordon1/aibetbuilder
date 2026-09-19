@@ -34,6 +34,7 @@ import {
   recordTicks,
   summarizeTickStats,
   formatCompactAge,
+  compactAgeTone,
   formatWinProb,
   cellShowsWinProb,
   cellLineFields,
@@ -165,7 +166,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
         <div
           data-line-age={age}
           title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
-          style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}
+          style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 2, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}
         >
           {age}
         </div>

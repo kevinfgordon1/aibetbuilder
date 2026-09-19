@@ -106,6 +106,15 @@ export function formatCompactAge(updatedAt, now = Date.now()) {
   return `${Math.max(1, Math.floor(ms / 86_400_000))}d`;
 }
 
+/** Amber once the second-count window ends so a frozen 5m stamp is obvious. */
+export function compactAgeTone(updatedAt, now = Date.now()) {
+  if (updatedAt == null || !isFinite(updatedAt)) return "#6b7280";
+  const ms = Math.max(0, now - updatedAt);
+  if (ms >= 120_000) return "#f59e0b";
+  if (ms >= 60_000) return "#ca8a04";
+  return "#6b7280";
+}
+
 export function lineUpdatedAt(game, bookKey, field) {
   if (!game || !bookKey || !field) return null;
   const n = game.bookLineUpdatedAt?.[bookKey]?.[field];

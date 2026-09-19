@@ -32,6 +32,7 @@ import {
   spreadAwayLine,
   marketSide,
   formatCompactAge,
+  compactAgeTone,
   formatWinProb,
   cellShowsWinProb,
   lineFieldFor,
@@ -302,6 +303,10 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(formatCompactAge(0, 120_000), "2m");
   assert.equal(formatCompactAge(0, 180_000), "3m");
   assert.equal(formatCompactAge(null, 1000), null);
+  assert.equal(compactAgeTone(0, 30_000), "#6b7280");
+  assert.equal(compactAgeTone(0, 90_000), "#ca8a04");
+  assert.equal(compactAgeTone(0, 120_000), "#f59e0b");
+  assert.equal(compactAgeTone(0, 300_000), "#f59e0b");
   assert.equal(lineFieldFor("moneyline", "away"), "ml_away");
   assert.equal(lineFieldFor("total", "over"), "tot_over");
   assert.deepEqual(cellLineFields("spr"), { top: "spr_away", bot: "spr_home" });
@@ -463,6 +468,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(nextBackoffMs(10), 8000);
   assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /league=NFL/);
   assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /is_live=true/);
+  assert.match(betstampSnapshotUrl({ league: "NFL", live: true }), /refresh=1/);
+  assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: false }), /refresh=/);
   assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /include_alts|fixture_id/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /include_alts=true/);
   assert.match(betstampSnapshotUrl({ league: "NFL", includeAlts: true, fixtureId: "fix-1" }), /fixture_id=fix-1/);
@@ -752,6 +759,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   const board = fs.readFileSync(path.join(dir, "OddsBoard.jsx"), "utf8");
   const stamp = fs.readFileSync(path.join(dir, "BetstampOddsBoard.jsx"), "utf8");
+  const liveSrc = fs.readFileSync(path.join(dir, "betstampLive.js"), "utf8");
   const envEx = fs.readFileSync(path.join(dir, "..", ".env.example"), "utf8");
   const vercel = fs.readFileSync(path.join(dir, "..", "vercel.json"), "utf8");
   assert.match(app, /import OddsBoard from "\.\/OddsBoard\.jsx"/);
@@ -795,6 +803,9 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(stamp, /data-mnf-focus|focusMnf|is_mnf|Monday Night Football/);
   assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|BETSTAMP_LIVE_RECONCILE_MS|data-snapshot-age|reconcileLiveGames|data-odds-suspended/);
   assert.match(stamp, /data-line-age/);
+  assert.match(stamp, /compactAgeTone/);
+  assert.match(liveSrc, /refresh=1/);
+  assert.match(liveSrc, /live === true/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
   assert.match(stamp, /LIVE_BEST_ODDS_BREAK_MAX_AGE_MS/);
