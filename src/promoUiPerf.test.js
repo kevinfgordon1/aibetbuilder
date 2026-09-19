@@ -59,7 +59,7 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
   assert.match(app, /const scanPromoDateRange = useDeferredValue\(promoDateRange\)/);
   assert.match(app, /const scanMarketScope = useDeferredValue\(marketScope\)/);
   assert.match(app, /const scanPromoBook = useDeferredValue\(promoBook\)/);
-  assert.match(app, /const scanMatchingBookKeys = useDeferredValue\(matchingBookKeys\)/);
+  assert.match(app, /const scanMatchingBookKeys = useDeferredValue\(matchingVisible\)/);
   assert.match(app, /const scanHideLowLiquidity = useDeferredValue\(hideLowLiquidity\)/);
   assert.match(app, /const scanNumLegs = useDeferredValue\(numLegs\)/);
   assert.match(app, /const deferredEvDateRange = useDeferredValue\(evDateRange\)/);

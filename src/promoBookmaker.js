@@ -624,7 +624,7 @@ export async function resolveBookmakerSnapshot({
     if (persist) writeBookmakerClientCache(hit, { storage });
     return hit;
   }
-  const missing = forceRefresh || (includeUnderdog && !cacheHasUdp)
+  const missing = forceRefresh || (includeUnderdog && cacheExplicitlyLacksUdp)
     ? needed
     : [...new Set([
       ...missingBookmakerLeagues(effective, needed),
@@ -646,7 +646,7 @@ export async function resolveBookmakerSnapshot({
   const fetchedAtByLeague = { ...(effective?.fetchedAtByLeague || {}) };
   for (const league of missing) fetchedAtByLeague[String(league).toUpperCase()] = now;
   let next;
-  if (forceRefresh || !effective?.snap || (includeUnderdog && !cacheHasUdp)) {
+  if (forceRefresh || !effective?.snap || (includeUnderdog && cacheExplicitlyLacksUdp)) {
     next = { snap: fresh, leagues: missing, fetchedAtByLeague, includeUnderdog, fromCache: false };
   } else {
     next = {
