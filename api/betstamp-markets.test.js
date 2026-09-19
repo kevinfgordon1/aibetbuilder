@@ -72,6 +72,36 @@ function mockRes() {
   {
     const calls = [];
     const fetchFn = async (url) => {
+      calls.push(String(url));
+      const u = String(url);
+      if (u.includes('/markets')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ markets: [{ id: 'u1', odds: 2.0, fixture_id: 'f1', odd_provider_id: 196 }] }) };
+      }
+      if (u.includes('/fixtures')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ fixtures: [{ id: 'f1', league: 'NFL' }] }) };
+      }
+      if (u.includes('/teams')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ teams: [] }) };
+      }
+      throw new Error('unexpected ' + url);
+    };
+    const res = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '196,999' } }, res, {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real' },
+      fetchFn,
+      gapMs: 0,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.query.book_ids, '196');
+    const marketUrl = calls.find((u) => u.includes('/markets'));
+    assert.match(marketUrl, /book_ids=196/);
+    assert.doesNotMatch(marketUrl, /book_ids=196,999|100,200/);
+    assert.equal(res.body.markets[0].odd_provider_id, 196);
+  }
+
+  {
+    const calls = [];
+    const fetchFn = async (url) => {
       calls.push(url);
       return {
         ok: true,
