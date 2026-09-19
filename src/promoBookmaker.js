@@ -28,7 +28,7 @@ import {
   normalizeBetType,
   toAmericanOdds,
 } from "./betstampNormalize.js";
-import { BETSTAMP_SPORTS } from "./betstampBooks.js";
+import { BETSTAMP_SPORTS, UNDERDOG_PREDICT_BOOK_ID } from "./betstampBooks.js";
 import { betstampSnapshotUrl } from "./betstampLive.js";
 
 export const BOOKMAKER_BOOK_KEY = "bookmaker";
@@ -41,7 +41,8 @@ export const BOOKMAKER_TITLE = "Bookmaker";
 // Manual Refresh sets forceRefresh and bypasses this client TTL; the server
 // cache still serves Betstamp within 5 minutes so Refresh stays fast.
 export const BOOKMAKER_CACHE_TTL_MS = 5 * 60 * 1000;
-export const BOOKMAKER_CACHE_STORAGE_KEY = "aibetbuilder.bookmakerSnap.v1";
+// v2: snapshot book_ids include Underdog Predict (196) alongside Bookmaker 642.
+export const BOOKMAKER_CACHE_STORAGE_KEY = "aibetbuilder.bookmakerSnap.v2";
 
 let memoryBookmakerCache = null;
 
@@ -143,21 +144,30 @@ export function uniquePairScore(event, sides) {
   return { score: 0, swapped: false };
 }
 
-export function fixtureIdsPricedByBookmaker(snapshot) {
+export function marketHasBookId(market, bookId) {
+  const id = Number(market?.odd_provider_id ?? market?.book_id ?? market?.provider_id);
+  return id === Number(bookId);
+}
+
+export function fixtureIdsPricedByBookId(snapshot, bookId) {
   const ids = new Set();
   for (const market of asList(snapshot?.markets, ["markets", "data"])) {
-    if (!marketIsBookmaker(market) || market.fixture_id == null || market.fixture_id === "") continue;
+    if (!marketHasBookId(market, bookId) || market.fixture_id == null || market.fixture_id === "") continue;
     ids.add(String(market.fixture_id));
   }
   return ids;
 }
 
-export function joinOddsEventToBetstampFixture(event, snapshot, { windowMs = BOOKMAKER_COMMENCE_WINDOW_MS } = {}) {
+export function fixtureIdsPricedByBookmaker(snapshot) {
+  return fixtureIdsPricedByBookId(snapshot, BOOKMAKER_BOOK_ID);
+}
+
+export function joinOddsEventToBetstampFixture(event, snapshot, { windowMs = BOOKMAKER_COMMENCE_WINDOW_MS, bookId = BOOKMAKER_BOOK_ID } = {}) {
   if (!event || !snapshot) return null;
   const sport = event.sport_key || event.sport;
   const league = BETSTAMP_SPORTS.find((s) => s.id === sport)?.league;
   if (!league) return null;
-  const pricedIds = fixtureIdsPricedByBookmaker(snapshot);
+  const pricedIds = fixtureIdsPricedByBookId(snapshot, bookId);
   const teamsById = indexById(asList(snapshot.teams, ["teams", "data"]));
   const fixtures = asList(snapshot.fixtures, ["fixtures", "data"]).filter((f) => {
     const raw = String(f?.league || f?.sport || "").toUpperCase();
@@ -341,10 +351,10 @@ function medianAmerican(prices) {
 // 642 landed on the opposite side of the rest of the board (KU +163 attached
 // to Arizona State). Complement of that +163 is displayed −163 / 62% true.
 // Sign vs median is enough — the 40% inverted-opp guard misses this ~25pt gap.
-export function bookmakerConflictsWithEventBooks(event, bm) {
+export function betstampOverlayConflictsWithEventBooks(event, bm, overlayKey = BOOKMAKER_BOOK_KEY) {
   const h2h = (bm?.markets || []).find((m) => m && m.key === "h2h");
   if (!h2h) return false;
-  const others = (event?.bookmakers || []).filter((b) => b && b.key !== BOOKMAKER_BOOK_KEY);
+  const others = (event?.bookmakers || []).filter((b) => b && b.key !== overlayKey);
   if (!others.length) return false;
   for (const outcome of h2h.outcomes || []) {
     if (!outcome || outcome.price == null || !outcome.name) continue;
@@ -360,6 +370,10 @@ export function bookmakerConflictsWithEventBooks(event, bm) {
     if (medSign && bmSign && medSign !== bmSign) return true;
   }
   return false;
+}
+
+export function bookmakerConflictsWithEventBooks(event, bm) {
+  return betstampOverlayConflictsWithEventBooks(event, bm, BOOKMAKER_BOOK_KEY);
 }
 
 export function overlayBookmakerOnGame(game, snapshot) {
@@ -395,7 +409,9 @@ export function bookmakerSnapshotUrl({ leagues } = {}) {
   return betstampSnapshotUrl({
     league: list.join(","),
     live: false,
-    bookIds: [BOOKMAKER_BOOK_ID],
+    // Same selected-sports / 5-min TTL path as Bookmaker. 196 rides along so
+    // Promo true-odds can overlay Underdog Predict without a second Betstamp pull.
+    bookIds: [BOOKMAKER_BOOK_ID, UNDERDOG_PREDICT_BOOK_ID],
   });
 }
 
@@ -517,7 +533,8 @@ export function resetBookmakerClientCache({ storage, clearStorage = true } = {})
 }
 
 function bookmakerMarketKey(m) {
-  return `${m?.fixture_id ?? ""}\0${m?.bet_type ?? ""}\0${m?.side ?? ""}\0${m?.number ?? ""}\0${m?.period ?? ""}`;
+  const bookId = m?.odd_provider_id ?? m?.book_id ?? m?.provider_id ?? "";
+  return `${bookId}\0${m?.fixture_id ?? ""}\0${m?.bet_type ?? ""}\0${m?.side ?? ""}\0${m?.number ?? ""}\0${m?.period ?? ""}`;
 }
 
 export function omitBookmakerLeagues(snap, leagues) {

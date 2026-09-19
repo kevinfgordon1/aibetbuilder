@@ -1120,7 +1120,7 @@ export default function BetstampOddsBoard() {
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
         {" · "}LIVE uses SSE for ticks plus a 10s REST presence reconcile — cells show — / OFF when Betstamp no longer lists that book/side live (silence alone is not a suspend)
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
-        {" · "}Kalshi / Polymarket / ProphetX also show implied win probability (same American → % as the public board)
+        {" · "}Kalshi / Polymarket / ProphetX / Underdog Predict also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}

@@ -42,6 +42,7 @@ const BOOK_LABEL = {
   novig: 'Novig',
   prophetx: 'ProphetX',
   polymarket: 'Polymarket',
+  underdog_predict: 'Underdog Predict',
   betopenly: 'BetOpenly',
 };
 

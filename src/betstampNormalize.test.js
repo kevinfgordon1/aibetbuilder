@@ -44,8 +44,12 @@ import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS } from "./bets
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
 import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS, oddsBoardHideKey } from "./oddsBoard.js";
 
-assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
-assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
+assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194, 196]);
+assert.equal(BETSTAMP_TRIAL_BOOKS.length, 12);
+assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.key, "underdog_predict");
+assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.label, "Underdog Predict");
+assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.exchange, true);
+assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.label || ""));
 
 {
   assert.equal(decimalToAmerican(1.91), -110);
@@ -62,8 +66,10 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(isPmWinProbBook("kalshi"), true);
   assert.equal(isPmWinProbBook("polymarket"), true);
   assert.equal(isPmWinProbBook("prophetx"), true);
+  assert.equal(isPmWinProbBook("underdog_predict"), true);
   assert.equal(isPmWinProbBook("draftkings"), false);
   assert.equal(cellShowsWinProb("kalshi"), true);
+  assert.equal(cellShowsWinProb("underdog_predict"), true);
   assert.equal(cellShowsWinProb("fanduel"), false);
   assert.equal(cellShowsWinProb("best", [{ key: "kalshi" }]), true);
   assert.equal(cellShowsWinProb("best", [{ key: "draftkings" }]), false);
@@ -95,6 +101,8 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
     { id: "6", odds: 1.91, number: 44.5, side: "Under", bet_type: "total", period: "FT", league: "NFL", is_alt: false, is_live: true, odd_provider_id: 250, fixture_id: fixtureId },
     { id: "7", odds: 1.50, number: -7.5, side: "DEN", side_type: "Away", bet_type: "Spread", period: "FT", league: "NFL", is_alt: true, odd_provider_id: 200, fixture_id: fixtureId },
     { id: "8", odds: 1.91, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "1H", odd_provider_id: 200, fixture_id: fixtureId },
+    { id: "9", odds: 2.00, side: "DEN", side_type: "Away", bet_type: "Moneyline", period: "FT", league: "NFL", is_alt: false, is_live: true, odd_provider_id: 196, fixture_id: fixtureId, team_id: den.id },
+    { id: "10", odds: 1.91, side: "KC", side_type: "Home", bet_type: "moneyline", period: "FT", league: "NFL", is_alt: false, is_live: true, odd_provider_id: 196, fixture_id: fixtureId, team_id: kc.id },
   ];
   const games = gamesFromBetstampSnapshot({ markets, fixtures: [fixture], teams: [den, kc] });
   assert.equal(games.length, 1);
@@ -111,8 +119,13 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 11);
   assert.equal(g.bookOdds.pinnacle.tot_over, -110);
   assert.equal(g.bookOdds.pinnacle.tot_line, 44.5);
   assert.equal(g.bookOdds.draftkings.spr_away, null, "alt spread must not overwrite mains");
+  assert.equal(g.bookOdds.underdog_predict.ml_away, 100);
+  assert.equal(g.bookOdds.underdog_predict.ml_home, -110);
 
   const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+  const udp = getOddsBoardCell({ game: g, bookKey: "underdog_predict", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
+  assert.equal(udp.top, 100);
+  assert.equal(cellShowsWinProb("underdog_predict"), true);
   const ml = getOddsBoardCell({ game: g, bookKey: "draftkings", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
   assert.equal(ml.top, -110);
   assert.equal(ml.bot, -105);
