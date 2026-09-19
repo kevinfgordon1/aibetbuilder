@@ -72,7 +72,7 @@ export function trueAmericanFromOpp(oppOdds) {
 
 // bookOdds = priced selection; oppOdds = other-side Yes used as the inverse.
 // Rejects inverted favorites, same-sign junk, incoherent 2-ways, and
-// +8628-class longshots whose inverse true is even-money (−107 after UDX).
+// +8628-class longshots whose inverse true is even-money (−107 / +100 class).
 export function oppQuoteLooksInverted(bookOdds, oppOdds) {
   const book = Number(bookOdds);
   const opp = Number(oppOdds);

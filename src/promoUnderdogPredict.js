@@ -3,17 +3,19 @@
 // 196 row" guard as Bookmaker 642 — do not invent a second matcher.
 // Odds API games stay the row identity. A Betstamp blip omits Underdog cells.
 //
-// New Odds Board shows raw Betstamp American + win% (same as Kalshi / Poly /
-// ProphetX columns). Promo true odds apply the UDX fee curve here
-// (rate × p × (1−p), added to cost) because Underdog is not on The Odds API
-// applyBookAdjustments path.
+// New Odds Board and Promo true/free-bet odds both use converted Betstamp
+// sticker American. Do not apply the UDX 0.072×p×(1−p) cost-add: Kevin's
+// live $1000 bonus (Browns 4.31x → +331 to-win, cash slip 4.31x) already
+// matches the Underdog app. A second haircut would print fee-true +308.
+// applyUnderdogPredictFee stays in the repo unused on this path.
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p
 // (<5%) and rejects a 2-way whose implieds do not sum to ~1 or any side
 // ≥25pts of p off sportsbook consensus, so a 93.5 dog cannot attach −107
-// (UDX fee on +100) as the same-selection true. Sign-only Bookmaker 642
-// guards stay unchanged. Kevin-only canSeeUnderdogPredict is unchanged.
+// (even-money / UDX-on-+100 class) as the same-selection true. Sign-only
+// Bookmaker 642 guards stay unchanged. Kevin-only canSeeUnderdogPredict
+// is unchanged.
 
 import {
   asList,
@@ -35,7 +37,6 @@ import {
   oddsApiOutcomeName,
   teamsLikelySame,
 } from "./promoBookmaker.js";
-import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 import { canSeeUnderdogPredict } from "./comboAccess.js";
 import {
   DECISIVE_IMPLIED_DEV,
@@ -65,14 +66,13 @@ export function underdogAmericanLooksImplausible(price) {
   return Number.isFinite(n) && n !== 0 && Math.abs(n) >= UNDERDOG_ABSURD_ABS_AMERICAN;
 }
 
-// Betstamp 196 decimal → American, then UDX fee. 1.12 → −833, 2.87 → +187,
-// 93.5 → +9250-class (real longshot). Never 1/p of a tiny contract. Extreme
-// Americans still overlay; Promo ranking drops them unless they match true.
+// Betstamp 196 decimal → sticker American. 1.12 → −833, 2.87 → +187,
+// 4.31 → +331, 93.5 → +9250-class (real longshot). Never 1/p of a tiny
+// contract and never the UDX cost-add. Extreme Americans still overlay;
+// Promo ranking drops them unless they match true.
 export function toUnderdogPredictAmerican(odds) {
   if (betstampOddsLooksLikeInvertedLongshot(odds)) return null;
-  const raw = toAmericanOdds(odds);
-  if (raw == null) return null;
-  const price = applyUnderdogPredictFee(raw);
+  const price = toAmericanOdds(odds);
   if (price == null || !Number.isFinite(Number(price)) || Number(price) === 0) return null;
   return price;
 }

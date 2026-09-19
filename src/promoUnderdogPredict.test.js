@@ -143,12 +143,12 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const h2h = bm.markets.find((m) => m.key === "h2h");
   const den = h2h.outcomes.find((o) => o.name === "Denver Broncos");
   const kc = h2h.outcomes.find((o) => o.name === "Kansas City Chiefs");
-  assert.equal(den.price, applyUnderdogPredictFee(100));
-  assert.equal(kc.price, applyUnderdogPredictFee(-110));
+  assert.equal(den.price, 100);
+  assert.equal(kc.price, -110);
   assert.equal(den.size, 400);
-  assert.notEqual(den.price, 100, "Promo true odds must apply the UDX exchange fee");
-  assert.equal(den.price, -107, "Promo overlay uses the 0.072 UDX curve, not flat $0.02 (−108)");
-  assert.ok(!bm.markets.some((m) => m.outcomes.some((o) => o.price === 100 && o.name === "Denver Broncos")));
+  assert.notEqual(den.price, applyUnderdogPredictFee(100), "Promo must not apply the UDX cost-add");
+  assert.notEqual(den.price, -107, "Promo sticker is +100, not fee-true −107");
+  assert.notEqual(den.price, -108, "flat $0.02/contract haircut stays gone");
 }
 
 {
@@ -158,8 +158,8 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(overlaid.bookmakers.some((b) => b.key === "bookmaker"), false);
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   const ml = data.moneylines[0];
-  assert.equal(ml.bookOdds.underdog_predict.ml_away, applyUnderdogPredictFee(100));
-  assert.equal(ml.bookOdds.underdog_predict.ml_home, applyUnderdogPredictFee(-110));
+  assert.equal(ml.bookOdds.underdog_predict.ml_away, 100);
+  assert.equal(ml.bookOdds.underdog_predict.ml_home, -110);
   assert.equal(ml.best_away_book, "underdog_predict");
 }
 
@@ -262,7 +262,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.match(app, /canSeeUnderdogPredict\(user\)/);
   assert.match(app, /includeUnderdog/);
   assert.match(app, /key: "underdog_predict", label: "Underdog Predict"/);
-  assert.match(app, /after UDX exchange fee/);
+  assert.doesNotMatch(app, /after UDX exchange fee/);
   assert.doesNotMatch(app, /after \$0\.02\/contract fee/);
   assert.doesNotMatch(app, /label: "Fanatics Markets"/);
   assert.ok(app.includes("underdog_predict"));
@@ -283,19 +283,20 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(betstampOddsLooksLikeInvertedLongshot(1.12), false);
   assert.equal(betstampOddsLooksLikeInvertedLongshot(2.87), false);
   assert.equal(toUnderdogPredictAmerican(0.01146), null);
-  assert.equal(toUnderdogPredictAmerican(1.12), applyUnderdogPredictFee(-833));
-  assert.equal(toUnderdogPredictAmerican(2.87), applyUnderdogPredictFee(187));
-  assert.equal(toUnderdogPredictAmerican(93.5), applyUnderdogPredictFee(9250));
-  assert.equal(toUnderdogPredictAmerican(1.05), applyUnderdogPredictFee(-2000));
-  assert.equal(toUnderdogPredictAmerican(1.01), applyUnderdogPredictFee(-10000));
-  assert.equal(toUnderdogPredictAmerican(1.02), applyUnderdogPredictFee(-5000));
-  assert.ok(toUnderdogPredictAmerican(1.12) < 0, "1.12 stays a favorite after UDX fee");
+  assert.equal(toUnderdogPredictAmerican(1.12), -833);
+  assert.equal(toUnderdogPredictAmerican(2.87), 187);
+  assert.equal(toUnderdogPredictAmerican(93.5), 9250);
+  assert.equal(toUnderdogPredictAmerican(1.05), -2000);
+  assert.equal(toUnderdogPredictAmerican(1.01), -10000);
+  assert.equal(toUnderdogPredictAmerican(1.02), -5000);
+  assert.ok(toUnderdogPredictAmerican(1.12) < 0, "1.12 stays a favorite");
   assert.ok(toUnderdogPredictAmerican(1.12) > -1200 && toUnderdogPredictAmerican(1.12) < -700);
   assert.ok(toUnderdogPredictAmerican(2.87) > 150 && toUnderdogPredictAmerican(2.87) < 200);
-  assert.ok(toUnderdogPredictAmerican(93.5) > 7000, "93.5 stays a longshot after UDX fee");
+  assert.ok(toUnderdogPredictAmerican(93.5) > 7000, "93.5 stays a longshot");
   assert.notEqual(toUnderdogPredictAmerican(93.5), -107);
   assert.notEqual(toUnderdogPredictAmerican(1.05), -107);
-  assert.ok(toUnderdogPredictAmerican(1.05) < 0, "1.05 stays a favorite after UDX fee");
+  assert.ok(toUnderdogPredictAmerican(1.05) < 0, "1.05 stays a favorite");
+  assert.notEqual(toUnderdogPredictAmerican(1.12), applyUnderdogPredictFee(-833), "Promo does not UDX-haircut 1.12");
   assert.notEqual(applyUnderdogPredictFee(1.12), 8628);
   assert.notEqual(applyUnderdogPredictFee(2), -5387, "decimal 2.00 must not be read as American +2");
   assert.equal(applyUnderdogPredictFee(2), applyUnderdogPredictFee(100));
@@ -501,7 +502,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
 }
 
 {
-  // Sane 196 decimals still overlay: 1.12 favorite / 2.87 dog + fee, same sides.
+  // Sane 196 decimals still overlay: 1.12 favorite / ~+750 dog, sticker American.
   const kick = future;
   const event = {
     id: "odds-wku-sane",
@@ -557,10 +558,84 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const h2h = udp.markets.find((m) => m.key === "h2h");
   const wku = h2h.outcomes.find((o) => o.name === "Western Kentucky Hilltoppers");
   const ken = h2h.outcomes.find((o) => o.name === "Kennesaw State Owls");
-  assert.equal(wku.price, applyUnderdogPredictFee(-833));
-  assert.equal(ken.price, applyUnderdogPredictFee(750));
+  assert.equal(wku.price, -833);
+  assert.equal(ken.price, 750);
   assert.ok(wku.price < 0 && wku.price > -1200);
   assert.ok(ken.price > 500 && ken.price < 900);
+}
+
+{
+  // Kevin Browns $1000 bonus: Betstamp / cash slip 4.31x → $4310.12; bonus
+  // confirm 3.31x → $3310.12 to-win (= sticker profit = American +331).
+  // UDX 0.072×p×(1−p) cost-add would print +308 and double-count.
+  assert.equal(toAmericanOdds(4.31), 331);
+  assert.equal(toUnderdogPredictAmerican(4.31), 331);
+  assert.equal(applyUnderdogPredictFee(331), 308, "precondition: fee-true of +331 is +308");
+  assert.notEqual(toUnderdogPredictAmerican(4.31), 308);
+
+  const kick = future;
+  const event = {
+    id: "odds-cle-browns",
+    sport_key: "americanfootball_nfl",
+    sport: "americanfootball_nfl",
+    commence_time: kick,
+    away_team: "Cleveland Browns",
+    home_team: "Baltimore Ravens",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Cleveland Browns", price: 280 },
+            { name: "Baltimore Ravens", price: -340 },
+          ],
+        }],
+      },
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "Cleveland Browns", price: 270 },
+            { name: "Baltimore Ravens", price: -330 },
+          ],
+        }],
+      },
+    ],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-cle-bal",
+      league: "NFL",
+      start_date: kick,
+      home_team_id: "team-bal",
+      away_team_id: "team-cle",
+    }],
+    teams: [
+      { id: "team-cle", name: "Cleveland Browns", abbreviation: "CLE" },
+      { id: "team-bal", name: "Baltimore Ravens", abbreviation: "BAL" },
+    ],
+    markets: [
+      { odds: 4.31, side: "CLE", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-cle-bal", team_id: "team-cle", size: 1000 },
+      { odds: 1.30, side: "BAL", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-cle-bal", team_id: "team-bal" },
+    ],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
+  assert.ok(udp, "Browns 4.31 vs SB +280 must still overlay");
+  const cle = udp.markets.find((m) => m.key === "h2h")?.outcomes?.find((o) => o.name === "Cleveland Browns");
+  assert.equal(cle.price, 331);
+  assert.notEqual(cle.price, 308);
+  const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const ml = data.moneylines[0];
+  assert.equal(ml.bookOdds.underdog_predict.ml_away, 331);
+  assert.notEqual(ml.bookOdds.underdog_predict.ml_away, 308);
+  const legs = buildAllLegsForBook(data, "underdog_predict");
+  const brownsLeg = legs.find((l) => /browns/i.test(l.name));
+  assert.ok(brownsLeg, "Browns sticker +331 is a real Underdog promo leg");
+  assert.equal(brownsLeg.dk, 331);
 }
 
 console.log("promoUnderdogPredict.test.js ok");
