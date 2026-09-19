@@ -928,8 +928,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, />New Odds Board</);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /data-row-density="compact"/);
-  assert.match(stamp, /padding: "4px 5px"/);
-  assert.match(stamp, /padding: "5px 12px 3px"/);
+  assert.match(stamp, /padding: "3px 4px"/);
+  assert.match(stamp, /padding: "4px 10px 2px"/);
   assert.doesNotMatch(stamp, /padding: "7px 5px"/);
   assert.doesNotMatch(stamp, /padding: "8px 16px 4px"/);
   assert.match(stamp, /fontSize: 13/);

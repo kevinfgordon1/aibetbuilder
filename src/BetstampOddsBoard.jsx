@@ -152,7 +152,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
   return (
     <>
       {line && <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
-      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "wrap", lineHeight: 1.2 }}>
+      <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "wrap", lineHeight: 1.15 }}>
         <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
@@ -172,7 +172,7 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
         <div
           data-line-age={age}
           title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
-          style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.1 }}
+          style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
         >
           {age}
         </div>
@@ -656,8 +656,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   });
 
   const sideStyle = (isBestCol, isBestCell, empty) => ({
-    padding: "4px 5px",
-    lineHeight: 1.2,
+    padding: "3px 4px",
+    lineHeight: 1.15,
     borderBottom: "1px solid rgba(255,255,255,0.03)",
     fontFamily: "'JetBrains Mono', monospace",
     fontSize: 13,
@@ -1340,21 +1340,21 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                         >
                           ×
                         </button>
-                        <div style={{ padding: "5px 12px 3px" }}>
-                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 2, lineHeight: 1.2 }}>
+                        <div style={{ padding: "4px 10px 2px" }}>
+                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 1, lineHeight: 1.15 }}>
                             {game.is_live ? (
                               <span style={{ color: "#34d399", fontWeight: 700 }}>LIVE</span>
                             ) : (
                               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
                             )}
                           </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 3, lineHeight: 1.2 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
                             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
                           </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.15 }}>
                             {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
                           </div>
-                          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "3px 0 1px", lineHeight: 1.2 }}>Alts →</div>
+                          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
                         </div>
                       </td>
                       {visibleBooks.map((b) => renderBookColumn(game, market, b, getCell(game, b.key), bests))}
