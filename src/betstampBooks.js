@@ -67,7 +67,7 @@ export function leagueForSport(sportId) {
   return sportById(sportId).league;
 }
 
-/** New Odds Board catalog. Underdog Predict (196) is allowlisted (Kevin by default). */
+/** New Odds Board catalog. Underdog Predict (196) is allowlisted (Kevin + Kenneth by default). */
 export function visibleBetstampBooks(user, env) {
   if (canSeeUnderdogPredict(user, env)) return BETSTAMP_TRIAL_BOOKS;
   return BETSTAMP_TRIAL_BOOKS.filter((b) => b.id !== UNDERDOG_PREDICT_BOOK_ID);

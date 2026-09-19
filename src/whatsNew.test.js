@@ -212,6 +212,7 @@ function mockClient({ rows = [], updateError = null, insertError = null } = {}) 
   assert.match(modal, /Got it/);
   assert.match(modal, /Escape/);
   assert.match(modal, /aria-label="Close"/);
+  assert.match(modal, /onClick=\{close\}/);
 
   assert.match(composer, /id="wn-title"/);
   assert.match(composer, /id="wn-body"/);
