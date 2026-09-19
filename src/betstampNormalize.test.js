@@ -124,6 +124,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(g.bookOdds.draftkings.spr_away, null, "alt spread must not overwrite mains");
   assert.equal(g.bookOdds.underdog_predict.ml_away, 100);
   assert.equal(g.bookOdds.underdog_predict.ml_home, -110);
+  assert.notEqual(g.bookOdds.underdog_predict.ml_away, -107, "New Odds Board stays raw; UDX fee is Promo-only");
 
   const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
   const udp = getOddsBoardCell({ game: g, bookKey: "underdog_predict", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
