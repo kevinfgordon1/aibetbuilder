@@ -804,7 +804,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(board, /BETSTAMP_PREGAME_POLL_MS|BETSTAMP_LIVE_RECONCILE_MS|data-snapshot-age|reconcileLiveGames|data-odds-suspended/);
   assert.match(stamp, /data-line-age/);
   assert.match(stamp, /compactAgeTone/);
-  assert.match(liveSrc, /refresh=1/);
+  assert.match(liveSrc, /p\.set\("refresh", "1"\)/);
   assert.match(liveSrc, /live === true/);
   assert.match(stamp, /bestLineUpdatedAt/);
   assert.match(stamp, /LIVE_BEST_ODDS_MAX_AGE_MS/);
