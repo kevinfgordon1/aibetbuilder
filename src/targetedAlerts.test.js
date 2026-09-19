@@ -48,9 +48,11 @@ assert.equal(isKennethGuido(null), false);
   const ann = kennethOddsBoardAnnouncement();
   assert.equal(ann.id, KENNETH_ODDS_BOARD_ALERT_ID);
   assert.equal(ann.title, "New Odds Board");
-  assert.match(ann.body, /Kevin shared the live odds board/i);
-  assert.match(ann.body, /moneylines across books/i);
+  assert.match(ann.body, /Kevin shared the live New Odds Board/i);
+  assert.match(ann.body, /live odds and moneylines across the books/i);
+  assert.match(ann.body, /including Underdog Predict/i);
   assert.match(ann.body, /best odds highlighted/i);
+  assert.match(ann.body, /Open it anytime from the top nav/i);
   assert.equal(ann.enabled, true);
   assert.deepEqual(ann.cta, {
     label: "Open New Odds Board",
@@ -75,7 +77,8 @@ assert.equal(canSeeNewOddsBoard(kevin), true);
 assert.equal(canSeeNewOddsBoard(stranger), false);
 assert.equal(canSeeNewOddsBoard(null), false);
 assert.equal(canSeeOwnerTools(kenneth), false);
-assert.equal(canSeeUnderdogPredict(kenneth), false);
+assert.equal(canSeeUnderdogPredict(kenneth), true);
+assert.equal(canSeeUnderdogPredict(kennethCased), true);
 {
   const allowed = resolveAppHash(parseAppHash("#new-odds-board"), kenneth);
   assert.equal(allowed.tab, "oddsBetstamp");
@@ -120,7 +123,10 @@ assert.equal(canSeeUnderdogPredict(kenneth), false);
   assert.match(profile, /seenTargetedAlertId/);
   assert.match(access, /KENNETH_GUIDO_EMAIL/);
   assert.match(access, /canSeeNewOddsBoard/);
-  assert.doesNotMatch(access, /UNDERDOG_PREDICT_ALLOWLIST.*kmguido97/);
+  assert.match(access, /KENNETH_GUIDO_EMAIL\.toLowerCase\(\)/);
+  const envEx = fs.readFileSync(path.join(dir, "..", ".env.example"), "utf8");
+  assert.match(envEx, /kmguido97@gmail.com/);
+  assert.match(envEx, /VITE_UNDERDOG_PREDICT_ALLOWLIST=kev120909@gmail.com,kmguido97@gmail.com/);
 }
 
 console.log("targetedAlerts.test.js ok");

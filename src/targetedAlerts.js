@@ -33,7 +33,7 @@ export function kennethOddsBoardAnnouncement() {
   return {
     id: KENNETH_ODDS_BOARD_ALERT_ID,
     title: "New Odds Board",
-    body: "Kevin shared the live odds board with you — moneylines across books with best odds highlighted.",
+    body: "Kevin shared the live New Odds Board with you — live odds and moneylines across the books (including Underdog Predict) with best odds highlighted. Open it anytime from the top nav.",
     enabled: true,
     cta: {
       label: "Open New Odds Board",

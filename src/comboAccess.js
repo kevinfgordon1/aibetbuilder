@@ -8,7 +8,8 @@
 // This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
 // Do not use this list to expand Miss tape / Unhedged — those stay OWNER_EMAIL.
 // New Odds Board is owner plus NEW_ODDS_BOARD_SHARED_EMAILS (Kenneth).
-// Underdog Predict (196) uses its own VITE_UNDERDOG_PREDICT_ALLOWLIST (Kevin always on).
+// Underdog Predict (196) uses VITE_UNDERDOG_PREDICT_ALLOWLIST; Kevin and Kenneth
+// are always on so a missing env var cannot lock them out.
 
 export const OWNER_EMAIL = "kev120909@gmail.com";
 export const KENNETH_GUIDO_EMAIL = "kmguido97@gmail.com";
@@ -108,9 +109,12 @@ function readUnderdogPredictAllowlist(env) {
   return readNamedAllowlist(env, UNDERDOG_PREDICT_ALLOWLIST_ENV, UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT);
 }
 
-/** Kevin is always included so a missing env var cannot lock him out. */
+/** Kevin and Kenneth are always included so a missing env var cannot lock them out. */
 export function underdogPredictAllowlist(env) {
-  const items = new Set([OWNER_EMAIL.toLowerCase()]);
+  const items = new Set([
+    OWNER_EMAIL.toLowerCase(),
+    KENNETH_GUIDO_EMAIL.toLowerCase(),
+  ]);
   for (const token of parseComboLocksAllowlist(readUnderdogPredictAllowlist(env))) {
     items.add(token.toLowerCase());
   }

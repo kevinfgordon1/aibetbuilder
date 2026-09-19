@@ -70,12 +70,14 @@ assert.equal(canSeeNewOddsBoard({ email: "KMGuido97@Gmail.com" }), true);
 assert.equal(canSeeNewOddsBoard({ email: "stranger@gmail.com" }), false);
 assert.equal(canSeeNewOddsBoard(null), false);
 assert.equal(canSeeOwnerTools(kenneth), false);
-assert.equal(canSeeUnderdogPredict(kenneth), false);
+assert.equal(canSeeUnderdogPredict(kenneth), true);
+assert.equal(canSeeUnderdogPredict({ email: "KMGuido97@Gmail.com" }), true);
 
 {
   const list = underdogPredictAllowlist({ VITE_UNDERDOG_PREDICT_ALLOWLIST: "" });
   assert.equal(list.has(OWNER_EMAIL), true);
-  assert.equal(list.size, 1);
+  assert.equal(list.has(KENNETH_GUIDO_EMAIL), true);
+  assert.equal(list.size, 2);
 }
 {
   const list = underdogPredictAllowlist({ UNDERDOG_PREDICT_ALLOWLIST: "tester@gmail.com" });
@@ -112,6 +114,7 @@ assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }), false);
   assert.equal(matching.has("underdog_predict"), false);
   assert.equal(matching.has("bookmaker"), true);
   assert.equal(visibleBetstampBooks(kevin).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), true);
+  assert.equal(visibleBetstampBooks(kenneth).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), true);
   assert.equal(visibleBetstampBooks(null).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), false);
   assert.equal(visibleBetstampBookIds({ email: "stranger@gmail.com" }).includes(UNDERDOG_PREDICT_BOOK_ID), false);
   assert.equal(visibleBetstampBooks(null).length, BETSTAMP_TRIAL_BOOKS.length - 1);
@@ -234,6 +237,7 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(envEx, /VITE_UNDERDOG_PREDICT_ALLOWLIST=/);
   assert.match(envEx, /\/api\/betstamp-markets is anon/);
   assert.match(envEx, /kev120909@gmail.com/);
+  assert.match(envEx, /kmguido97@gmail.com/);
 }
 
 console.log("comboAccess.test.js ok");
