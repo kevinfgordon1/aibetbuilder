@@ -16,6 +16,10 @@
 // (even-money / UDX-on-+100 class) as the same-selection true. Sign-only
 // Bookmaker 642 guards stay unchanged. Kevin-only canSeeUnderdogPredict
 // is unchanged.
+//
+// Per-selection Betstamp updated_at is copied onto overlay outcomes as
+// updatedAt (ms). Promo cards flag Underdog ticks older than
+// UNDERDOG_STALE_MINUTES (default 60). Missing stamps do not warn.
 
 import {
   asList,
@@ -23,6 +27,7 @@ import {
   marketIsOffered,
   marketLine,
   marketSize,
+  marketUpdatedAtMs,
   normalizeBetType,
   toAmericanOdds,
 } from "./betstampNormalize.js";
@@ -133,10 +138,13 @@ function pushOutcome(list, outcome) {
   else list.push(outcome);
 }
 
-function outcomePayload(name, price, size, point) {
+function outcomePayload(name, price, size, point, updatedAt) {
   const out = { name, price };
   if (size != null) out.size = size;
   if (point != null) out.point = point;
+  if (updatedAt != null && Number.isFinite(Number(updatedAt)) && Number(updatedAt) > 0) {
+    out.updatedAt = Number(updatedAt);
+  }
   return out;
 }
 
@@ -163,13 +171,14 @@ export function underdogPredictBookmakerFromSnapshot(event, snapshot, joinHit) {
     if (!name) continue;
     const size = marketSize(market);
     const line = marketLine(market);
+    const updatedAt = marketUpdatedAtMs(market);
     const bt = normalizeBetType(market.bet_type);
     if (bt === "moneyline") {
-      pushOutcome(h2h, outcomePayload(name, price, size));
+      pushOutcome(h2h, outcomePayload(name, price, size, undefined, updatedAt));
     } else if (bt === "spread" && line != null) {
-      pushOutcome(spreads, outcomePayload(name, price, size, line));
+      pushOutcome(spreads, outcomePayload(name, price, size, line, updatedAt));
     } else if (bt === "total" && line != null) {
-      pushOutcome(totals, outcomePayload(name, price, size, line));
+      pushOutcome(totals, outcomePayload(name, price, size, line, updatedAt));
     }
   }
 

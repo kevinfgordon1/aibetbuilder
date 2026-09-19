@@ -3,6 +3,15 @@
 // still iterate allBooks so an unchecked matching book can price the promo.
 
 import { outcomeSize } from "./trueOddsLine.js";
+
+function outcomeUpdatedAt(outcome) {
+  if (!outcome || typeof outcome !== "object") return null;
+  const raw = outcome.updatedAt ?? outcome.updated_at;
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 import { pickBestAmericanQuote } from "./promoOppGuard.js";
 import {
   isSoccerSport,
@@ -34,6 +43,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
       const outcome = (market.outcomes || []).find(o => outcomeMatchesName(o.name, teamName));
       if (!outcome) return null;
       if (prop === "size") return outcomeSize(outcome);
+      if (prop === "updatedAt") return outcomeUpdatedAt(outcome);
       return outcome[prop] ?? null;
     };
 
@@ -123,6 +133,9 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         ml_away_size: getOdds(b.key, "h2h", away, "size"),
         ml_home_size: getOdds(b.key, "h2h", home, "size"),
         ml_draw_size: getOdds(b.key, "h2h", "Draw", "size"),
+        ml_away_updatedAt: getOdds(b.key, "h2h", away, "updatedAt"),
+        ml_home_updatedAt: getOdds(b.key, "h2h", home, "updatedAt"),
+        ml_draw_updatedAt: getOdds(b.key, "h2h", "Draw", "updatedAt"),
         ml_away_no: getOdds(b.key, "h2h_lay", away),
         ml_home_no: getOdds(b.key, "h2h_lay", home),
         ml_draw_no: getOdds(b.key, "h2h_lay", "Draw"),
@@ -132,14 +145,18 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         spr_away: getOdds(b.key, "spreads", away),
         spr_away_line: getOdds(b.key, "spreads", away, "point"),
         spr_away_size: getOdds(b.key, "spreads", away, "size"),
+        spr_away_updatedAt: getOdds(b.key, "spreads", away, "updatedAt"),
         spr_home: getOdds(b.key, "spreads", home),
         spr_home_line: getOdds(b.key, "spreads", home, "point"),
         spr_home_size: getOdds(b.key, "spreads", home, "size"),
+        spr_home_updatedAt: getOdds(b.key, "spreads", home, "updatedAt"),
         tot_line: getOdds(b.key, "totals", "Over", "point"),
         tot_over: getOdds(b.key, "totals", "Over"),
         tot_over_size: getOdds(b.key, "totals", "Over", "size"),
+        tot_over_updatedAt: getOdds(b.key, "totals", "Over", "updatedAt"),
         tot_under: getOdds(b.key, "totals", "Under"),
         tot_under_size: getOdds(b.key, "totals", "Under", "size"),
+        tot_under_updatedAt: getOdds(b.key, "totals", "Under", "updatedAt"),
       };
     });
 
@@ -221,6 +238,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         best_away, best_home, book: b.key,
         away_odds: awayOutcome.price, home_odds: homeOutcome.price,
         away_size: outcomeSize(awayOutcome), home_size: outcomeSize(homeOutcome),
+        away_updatedAt: outcomeUpdatedAt(awayOutcome), home_updatedAt: outcomeUpdatedAt(homeOutcome),
         away_line: fmtPoint(awayPoint), home_line: fmtPoint(homePoint),
         away_point: awayPoint, home_point: homePoint,
         bestOpp_away: bestOppForAway, bestOpp_home: bestOppForHome,
@@ -262,6 +280,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
         best_away, best_home, book: b.key,
         line, over_odds: overOutcome.price, under_odds: underOutcome.price,
         over_size: outcomeSize(overOutcome), under_size: outcomeSize(underOutcome),
+        over_updatedAt: outcomeUpdatedAt(overOutcome), under_updatedAt: outcomeUpdatedAt(underOutcome),
         bestOpp_over: bestOppForOver, bestOpp_under: bestOppForUnder,
         bestOpp_over_book: bestOppForOverBook, bestOpp_under_book: bestOppForUnderBook,
         bestOpp_over_size: bestOppForOverSize, bestOpp_under_size: bestOppForUnderSize,
