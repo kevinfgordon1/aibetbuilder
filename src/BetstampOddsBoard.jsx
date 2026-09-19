@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import {
   fmtBoardSize,
@@ -20,6 +20,16 @@ import {
   oddsMoveDirection,
   ODDS_FLASH_MS,
 } from "./oddsBoard.js";
+import {
+  applyBookColumnOrder,
+  applyGameRowOrder,
+  groupGamesPreservingOrder,
+  loadOddsBoardOrder,
+  moveKeyAmongVisible,
+  moveKeyByOffset,
+  oddsBoardSlateKey,
+  saveOddsBoardOrder,
+} from "./oddsBoardOrder.js";
 import {
   BETSTAMP_SPORTS,
   BETSTAMP_DEFAULT_SPORT,
@@ -276,6 +286,55 @@ function BookSideCell({
   );
 }
 
+function parseBoardDrag(dt) {
+  if (!dt) return null;
+  const game = dt.getData("application/x-obb-game");
+  if (game) return { kind: "game", key: game };
+  const book = dt.getData("application/x-obb-book");
+  if (book) return { kind: "book", key: book };
+  const plain = dt.getData("text/plain") || "";
+  const m = /^(game|book):(.+)$/.exec(plain);
+  return m ? { kind: m[1], key: m[2] } : null;
+}
+
+function BoardGrip({ kind, itemKey, label, onMove, onDragBegin, onDragEnd }) {
+  return (
+    <button
+      type="button"
+      className="obb-grip"
+      data-drag-game={kind === "game" ? itemKey : undefined}
+      data-drag-book={kind === "book" ? itemKey : undefined}
+      draggable
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onDragStart={(e) => {
+        e.stopPropagation();
+        e.dataTransfer.setData("text/plain", `${kind}:${itemKey}`);
+        e.dataTransfer.setData(`application/x-obb-${kind}`, String(itemKey));
+        e.dataTransfer.effectAllowed = "move";
+        onDragBegin?.(kind, itemKey);
+      }}
+      onDragEnd={() => onDragEnd?.()}
+      onKeyDown={(e) => {
+        const delta = kind === "game"
+          ? (e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0)
+          : (e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0);
+        if (!delta) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onMove?.(itemKey, delta);
+      }}
+    >
+      ⋮⋮
+    </button>
+  );
+}
+
 function fmtMs(v) {
   if (v == null || !isFinite(v)) return "—";
   if (v < 1000) return `${Math.round(v)}ms`;
@@ -321,6 +380,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const altCacheRef = useRef(new Map());
   const altFetchGen = useRef(0);
   const [hiddenKeys, setHiddenKeys] = useState(() => new Set());
+  const [boardOrder, setBoardOrder] = useState(() => loadOddsBoardOrder(user));
+  const [dragging, setDragging] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+  const draggingRef = useRef(null);
   const [bestView, setBestView] = useState("single"); // default = today's single Best
   const [openGame, setOpenGame] = useState(null);
   const [altLadders, setAltLadders] = useState(null);
@@ -334,6 +397,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   useEffect(() => {
     setSelectedBooks(new Set(books.map((b) => b.key)));
   }, [books]);
+
+  useEffect(() => {
+    setBoardOrder(loadOddsBoardOrder(user));
+  }, [user?.id, user?.email]);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 200);
@@ -601,6 +668,20 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setHiddenKeys((prev) => clearHiddenOddsGames(prev));
   };
 
+  const persistBoardOrder = (next) => {
+    setBoardOrder(saveOddsBoardOrder(user, next));
+  };
+
+  const slateKey = oddsBoardSlateKey(boardSport, liveOnly);
+  const catalogBooks = useMemo(
+    () => applyBookColumnOrder(books, boardOrder.bookKeys),
+    [books, boardOrder.bookKeys],
+  );
+  const visibleBookKeys = useMemo(
+    () => catalogBooks.filter((b) => selectedBooks.has(b.key)).map((b) => b.key),
+    [catalogBooks, selectedBooks],
+  );
+
   const toggleBook = (bookKey) => {
     setSelectedBooks((prev) => {
       const next = new Set(prev);
@@ -622,6 +703,80 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     return filterHiddenOddsGames(onBoard, hiddenKeys);
   }, [games, boardSport, liveOnly, search, nowMs, hiddenKeys]);
 
+  const orderedGames = useMemo(
+    () => applyGameRowOrder(filteredGames, boardOrder.gamesBySlate[slateKey] || []),
+    [filteredGames, boardOrder, slateKey],
+  );
+  const visibleGameIds = useMemo(() => orderedGames.map((g) => String(g.id)), [orderedGames]);
+
+  const moveGame = (fromId, toId) => {
+    const nextIds = moveKeyAmongVisible(visibleGameIds, fromId, toId, boardOrder.gamesBySlate[slateKey] || []);
+    persistBoardOrder({
+      ...boardOrder,
+      gamesBySlate: { ...boardOrder.gamesBySlate, [slateKey]: nextIds },
+    });
+  };
+
+  const nudgeGame = (gameId, delta) => {
+    const nextIds = moveKeyByOffset(visibleGameIds, gameId, delta, boardOrder.gamesBySlate[slateKey] || []);
+    persistBoardOrder({
+      ...boardOrder,
+      gamesBySlate: { ...boardOrder.gamesBySlate, [slateKey]: nextIds },
+    });
+  };
+
+  const moveBook = (fromKey, toKey) => {
+    if (fromKey === "best" || toKey === "best") return;
+    const nextKeys = moveKeyAmongVisible(visibleBookKeys, fromKey, toKey, boardOrder.bookKeys);
+    persistBoardOrder({ ...boardOrder, bookKeys: nextKeys });
+  };
+
+  const nudgeBook = (bookKey, delta) => {
+    if (bookKey === "best") return;
+    const nextKeys = moveKeyByOffset(visibleBookKeys, bookKey, delta, boardOrder.bookKeys);
+    persistBoardOrder({ ...boardOrder, bookKeys: nextKeys });
+  };
+
+  const resetGameOrder = () => {
+    const gamesBySlate = { ...boardOrder.gamesBySlate };
+    delete gamesBySlate[slateKey];
+    persistBoardOrder({ ...boardOrder, gamesBySlate });
+  };
+
+  const resetBookOrder = () => {
+    persistBoardOrder({ ...boardOrder, bookKeys: [] });
+  };
+
+  const beginDrag = (kind, key) => {
+    const next = { kind, key };
+    draggingRef.current = next;
+    setDragging(next);
+  };
+
+  const endDrag = () => {
+    draggingRef.current = null;
+    setDragging(null);
+    setDragOver(null);
+  };
+
+  const onBoardDragOver = (kind, key) => (e) => {
+    const active = draggingRef.current;
+    if (!active || active.kind !== kind) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOver?.kind !== kind || dragOver?.key !== key) setDragOver({ kind, key });
+  };
+
+  const onBoardDrop = (kind, key) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const payload = parseBoardDrag(e.dataTransfer) || draggingRef.current;
+    endDrag();
+    if (!payload || payload.kind !== kind) return;
+    if (kind === "game") moveGame(payload.key, key);
+    else moveBook(payload.key, key);
+  };
+
   const hiddenBoardGames = useMemo(() => {
     return games.filter((g) => {
       if (g.sport !== boardSport) return false;
@@ -630,14 +785,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     });
   }, [games, boardSport, liveOnly, nowMs, hiddenKeys]);
 
-  const grouped = {};
-  filteredGames.forEach((g) => {
-    const dateKey = g.is_live ? "Live now" : formatDateGroup(g.commence_time || Date.now());
-    if (!grouped[dateKey]) grouped[dateKey] = [];
-    grouped[dateKey].push(g);
-  });
+  const grouped = groupGamesPreservingOrder(orderedGames, (g) => (
+    g.is_live ? "Live now" : formatDateGroup(g.commence_time || Date.now())
+  ));
 
-  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...books.filter((b) => selectedBooks.has(b.key))];
+  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))];
   const teamColWidth = 186;
   const oddsColWidth = 108;
   const metrics = summarizeTickStats(tickStats, nowMs);
@@ -900,6 +1052,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     <div
       data-betstamp-board="true"
       data-row-density="compact"
+      data-book-order={visibleBookKeys.join(",")}
+      data-game-order={visibleGameIds.join(",")}
       data-guard-allow="true"
       data-best-view={bestView}
       data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
@@ -959,6 +1113,34 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           .obb-hide { opacity: 0.2; pointer-events: auto; }
           .obb-side[data-hidden="1"] .obb-hide { opacity: 1; }
         }
+        .obb-grip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          padding: 0;
+          border: none;
+          border-radius: 3px;
+          background: transparent;
+          color: #6b7280;
+          font-size: 11px;
+          line-height: 1;
+          letter-spacing: -1px;
+          cursor: grab;
+          flex-shrink: 0;
+          font-family: 'DM Sans', sans-serif;
+        }
+        .obb-grip:hover, .obb-grip:focus {
+          color: #e8eaed;
+          background: rgba(255,255,255,0.08);
+          outline: none;
+        }
+        .obb-grip:active { cursor: grabbing; }
+        tr[data-drag-over="1"], th[data-drag-over="1"] {
+          box-shadow: inset 0 2px 0 #3b82f6;
+        }
+        tr[data-dragging="1"], th[data-dragging="1"] { opacity: 0.45; }
         .obb-flash {
           display: inline-block;
           padding: 0 3px;
@@ -1185,7 +1367,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           ))}
         </div>
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
-        {books.map((b) => (
+        {catalogBooks.map((b) => (
           <button
             key={b.key}
             type="button"
@@ -1208,6 +1390,26 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             <BookLabel book={b} size={14} />
           </button>
         ))}
+        {boardOrder.bookKeys.length > 0 && (
+          <button
+            type="button"
+            data-reset-book-order="true"
+            onClick={resetBookOrder}
+            style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "#9ca3af", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+          >
+            Reset books
+          </button>
+        )}
+        {(boardOrder.gamesBySlate[slateKey] || []).length > 0 && (
+          <button
+            type="button"
+            data-reset-game-order="true"
+            onClick={resetGameOrder}
+            style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "#9ca3af", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+          >
+            Reset games
+          </button>
+        )}
       </div>
 
       {hiddenBoardGames.length > 0 && (
@@ -1287,14 +1489,38 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
               <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
               {visibleBooks.map((b) => (
-                <th key={b.key} data-book-header={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-                  {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
+                <th
+                  key={b.key}
+                  data-book-header={b.key}
+                  data-drop-book={b.key !== "best" ? b.key : undefined}
+                  data-drag-over={dragOver?.kind === "book" && dragOver.key === b.key ? "1" : "0"}
+                  data-dragging={dragging?.kind === "book" && dragging.key === b.key ? "1" : "0"}
+                  onDragOver={b.key === "best" ? undefined : onBoardDragOver("book", b.key)}
+                  onDrop={b.key === "best" ? undefined : onBoardDrop("book", b.key)}
+                  onDragLeave={() => {
+                    if (dragOver?.kind === "book" && dragOver.key === b.key) setDragOver(null);
+                  }}
+                  style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+                    {b.key !== "best" && (
+                      <BoardGrip
+                        kind="book"
+                        itemKey={b.key}
+                        label={`Reorder ${b.label} column`}
+                        onMove={nudgeBook}
+                        onDragBegin={beginDrag}
+                        onDragEnd={endDrag}
+                      />
+                    )}
+                    {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
+                  </span>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {Object.keys(grouped).length === 0 && (
+            {grouped.length === 0 && (
               <tr>
                 <td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
                   {hiddenBoardGames.length
@@ -1305,19 +1531,27 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 </td>
               </tr>
             )}
-            {Object.entries(grouped).map(([dateKey, dateGames]) => (
-              <>
-                <tr key={dateKey + "_h"} style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
+            {grouped.map((block, bi) => (
+              <Fragment key={`${block.dateKey}-${block.games[0]?.id || bi}`}>
+                <tr style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{block.dateKey}</td>
                 </tr>
-                {dateGames.map((game) => {
+                {block.games.map((game) => {
                   const bests = getBestForGame(game, market, selectedBooks, books, liveBestOpts);
                   return (
                     <tr
                       key={game.id}
                       data-fixture={game.id}
+                      data-drop-game={game.id}
                       data-open-alts={openGame?.id === game.id ? "1" : "0"}
+                      data-drag-over={dragOver?.kind === "game" && String(dragOver.key) === String(game.id) ? "1" : "0"}
+                      data-dragging={dragging?.kind === "game" && String(dragging.key) === String(game.id) ? "1" : "0"}
                       onClick={() => openAlts(game)}
+                      onDragOver={onBoardDragOver("game", game.id)}
+                      onDrop={onBoardDrop("game", game.id)}
+                      onDragLeave={() => {
+                        if (dragOver?.kind === "game" && String(dragOver.key) === String(game.id)) setDragOver(null);
+                      }}
                       style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
                     >
                       <td
@@ -1341,7 +1575,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                           ×
                         </button>
                         <div style={{ padding: "4px 10px 2px" }}>
-                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 1, lineHeight: 1.15 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#4b5563", marginBottom: 1, lineHeight: 1.15 }}>
+                            <BoardGrip
+                              kind="game"
+                              itemKey={String(game.id)}
+                              label={`Reorder ${game.away} @ ${game.home}`}
+                              onMove={nudgeGame}
+                              onDragBegin={beginDrag}
+                              onDragEnd={endDrag}
+                            />
                             {game.is_live ? (
                               <span style={{ color: "#34d399", fontWeight: 700 }}>LIVE</span>
                             ) : (
@@ -1361,7 +1603,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                     </tr>
                   );
                 })}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -1382,6 +1624,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
+        {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default}
       </div>
 
       {openGame && (
