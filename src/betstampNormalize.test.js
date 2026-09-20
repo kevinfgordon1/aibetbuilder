@@ -1037,8 +1037,15 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /sameAmericanPrice/);
   assert.match(stamp, /AgeNowContext/);
   assert.match(stamp, /AgeNowContext.Provider/);
+  assert.match(stamp, /function AgeNowProvider/);
+  assert.match(stamp, /function BestNowProvider/);
+  assert.match(stamp, /BestNowContext/);
+  assert.match(stamp, /OddsBoardGameRow/);
+  assert.match(stamp, /OddsBoardBookCells/);
+  assert.match(stamp, /data-live-clock="isolated"/);
   assert.match(stamp, /data-game-paint/);
   assert.match(stamp, /memo\(function OddsFlashNumber/);
+  assert.match(stamp, /memo\(function OddsSide/);
   assert.match(stamp, /obb-flash-up/);
   assert.match(stamp, /obb-flash-down/);
   assert.match(stamp, /BestBookName/);
@@ -1057,7 +1064,11 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /liveBoardPaintKey/);
   assert.match(stamp, /registerTickSink/);
   assert.match(stamp, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
+  assert.match(stamp, /setInterval\(\(\) => setAgeNowMs\(Math\.floor\(Date\.now\(\) \/ 1000\) \* 1000\), 1000\)/);
+  assert.match(stamp, /if \(liveOnly\) return undefined/);
+  assert.match(stamp, /15_000/);
   assert.match(stamp, /Same-price ticks, age-only heartbeats/);
+  assert.match(stamp, /isolated 1s age clock/);
   assert.doesNotMatch(stamp, /block\.games\[0\]\?\.id/);
   assert.match(liveSrc, /bookLineConfirmedAt/);
   assert.match(liveSrc, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS/);

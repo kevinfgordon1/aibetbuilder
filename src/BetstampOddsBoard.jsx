@@ -79,7 +79,7 @@ import {
   BETSTAMP_LIVE_RECONCILE_MS,
 } from "./betstampLive.js";
 
-function BestBookName({ book, extra = 0, title, size = 13 }) {
+const BestBookName = memo(function BestBookName({ book, extra = 0, title, size = 13 }) {
   if (!book) return null;
   return (
     <span
@@ -95,9 +95,34 @@ function BestBookName({ book, extra = 0, title, size = 13 }) {
       )}
     </span>
   );
+});
+
+// 1s age clock and 5s Best-freshness clock live in these providers — not in
+// BetstampOddsBoard state. A parent setState every second rebuilt every odds
+// <td> (GAME is sticky/opaque so it visually survived; BEST + books blanked).
+const AgeNowContext = createContext(0);
+const BestNowContext = createContext(0);
+
+function AgeNowProvider({ children }) {
+  const [ageNowMs, setAgeNowMs] = useState(() => Math.floor(Date.now() / 1000) * 1000);
+  useEffect(() => {
+    const id = setInterval(() => setAgeNowMs(Math.floor(Date.now() / 1000) * 1000), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <AgeNowContext.Provider value={ageNowMs}>{children}</AgeNowContext.Provider>;
 }
 
-const AgeNowContext = createContext(0);
+function BestNowProvider({ children }) {
+  const [bestNowMs, setBestNowMs] = useState(() => Math.floor(Date.now() / 5000) * 5000);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = Math.floor(Date.now() / 5000) * 5000;
+      setBestNowMs((prev) => (prev === next ? prev : next));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <BestNowContext.Provider value={bestNowMs}>{children}</BestNowContext.Provider>;
+}
 
 const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey }) {
   const prevRef = useRef({ key: flashKey, price, suspended: !!suspended });
@@ -168,7 +193,7 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
+const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
@@ -218,7 +243,19 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
       )}
     </>
   );
-}
+}, (prev, next) => (
+  prev.flashKey === next.flashKey
+  && !!prev.suspended === !!next.suspended
+  && !!prev.showBestMark === !!next.showBestMark
+  && !!prev.showWinProb === !!next.showWinProb
+  && prev.line === next.line
+  && prev.size === next.size
+  && prev.updatedAt === next.updatedAt
+  && prev.ageTitle === next.ageTitle
+  && sameAmericanPrice(prev.price, next.price)
+  && (prev.books?.[0]?.key || "") === (next.books?.[0]?.key || "")
+  && (prev.books?.length || 0) === (next.books?.length || 0)
+));
 
 function boardHideSide(marketKey, which) {
   if (marketKey === "tot") return which === "top" ? "over" : "under";
@@ -524,6 +561,351 @@ const LiveTickStrip = memo(function LiveTickStrip({
   );
 });
 
+function isBestHighlight(rowGame, marketKey, b, cell, which, singleBest, stacks, stackedBest) {
+  if (b.key === "best") return false;
+  const price = which === "top" ? cell.top : cell.bot;
+  if (price == null) return false;
+  if (stackedBest && marketKey !== "ml") {
+    return isStackedBestMatch(stacks, price, oddsBoardSidePoint(rowGame, b.key, marketKey, which));
+  }
+  return price === singleBest;
+}
+
+function renderStackedSide(rowGame, field, stack, books) {
+  return (
+    <OddsSide
+      price={stack?.price ?? null}
+      size={stack?.size ?? null}
+      line={stack?.lineLabel ?? null}
+      books={stack?.books ?? []}
+      allBooks={books}
+      showBestMark
+      showWinProb={cellShowsWinProb("best", stack?.books)}
+      updatedAt={bestLineUpdatedAt(rowGame, field, stack?.books)}
+      ageTitle="Newest update among books offering this best price"
+      flashKey={`${rowGame.id}:best:${field}:${stack?.line ?? stack?.point ?? "none"}`}
+    />
+  );
+}
+
+function renderPairedPointBlocks(rowGame, blocks, fields, books) {
+  const padded = padBestPointStacks(blocks, STACKED_BEST_MAX_LINES);
+  return (
+    <div data-best-point-pairs={padded.length} data-best-stacks={padded.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0, width: "100%", overflow: "hidden" }}>
+      {padded.map((block, i) => (
+        <div
+          key={block.padded ? `pad-${i}` : block.point}
+          data-best-point={block.padded ? undefined : block.point}
+          data-best-point-count={block.count}
+          data-best-stack-pad={block.padded ? "1" : "0"}
+          style={i > 0 ? {
+            borderTop: "1px solid rgba(16,185,129,0.28)",
+            width: "100%",
+          } : { width: "100%" }}
+        >
+          <div className="obb-side" data-best-stack={block.top?.line} data-best-stack-price={block.top?.price} data-best-stack-side="top" style={{ width: "100%" }}>
+            {renderStackedSide(rowGame, fields.top, block.top, books)}
+          </div>
+          <div
+            className="obb-side"
+            data-best-stack={block.bot?.line}
+            data-best-stack-price={block.bot?.price}
+            data-best-stack-side="bot"
+            style={{
+              width: "100%",
+              borderTop: "1px solid rgba(16,185,129,0.12)",
+            }}
+          >
+            {renderStackedSide(rowGame, fields.bot, block.bot, books)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function renderBookColumn({
+  rowGame,
+  marketKey,
+  b,
+  cell,
+  bests,
+  includeLine = true,
+  hiddenKeys,
+  books,
+  stackedBest,
+  onToggleHide,
+}) {
+  const fields = cellLineFields(marketKey);
+  const isBestCol = b.key === "best";
+  const topHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
+    gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "top"), bookKey: b.key,
+  });
+  const botHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
+    gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "bot"), bookKey: b.key,
+  });
+  const isBestAway = !topHidden && isBestHighlight(rowGame, marketKey, b, cell, "top", bests.bestAway, bests.awayStacks, stackedBest);
+  const isBestHome = !botHidden && isBestHighlight(rowGame, marketKey, b, cell, "bot", bests.bestHome, bests.homeStacks, stackedBest);
+  const pairBlocks = isBestCol && stackedBest && marketKey !== "ml" && cell.pointStacks;
+  const topUpdatedAt = isBestCol
+    ? bestLineUpdatedAt(rowGame, fields.top, cell.topBooks)
+    : lineUpdatedAt(rowGame, b.key, fields.top);
+  const botUpdatedAt = isBestCol
+    ? bestLineUpdatedAt(rowGame, fields.bot, cell.botBooks)
+    : lineUpdatedAt(rowGame, b.key, fields.bot);
+  const sideProps = (which) => ({
+    price: which === "top" ? cell.top : cell.bot,
+    size: which === "top" ? cell.topSize : cell.botSize,
+    line: includeLine ? (which === "top" ? cell.topLine : cell.botLine) : null,
+    books: which === "top" ? cell.topBooks : cell.botBooks,
+    allBooks: books,
+    showBestMark: isBestCol,
+    showWinProb: cellShowsWinProb(b.key, which === "top" ? cell.topBooks : cell.botBooks),
+    updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
+    ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
+    suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
+    flashKey: `${rowGame.id}:${marketKey}:${b.key}:${which}`,
+  });
+  const topOff = sideProps("top").suspended;
+  const botOff = sideProps("bot").suspended;
+  const colW = obbColWidth(b.key);
+  if (pairBlocks) {
+    const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
+    return (
+      <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colW, maxWidth: colW, overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+        <div
+          className="obb-side obb-side-paired"
+          data-odds-side="paired"
+          style={{
+            ...BOARD_SIDE_STYLE(true, false, emptyPairs),
+            borderBottom: "none",
+          }}
+        >
+          {renderPairedPointBlocks(rowGame, cell.pointStacks, fields, books)}
+        </div>
+      </td>
+    );
+  }
+
+  return (
+    <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colW, maxWidth: colW, overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", overflow: "hidden" }}>
+        <BookSideCell
+          gameId={rowGame.id}
+          marketKey={marketKey}
+          which="top"
+          bookKey={b.key}
+          bookLabel={b.label}
+          isBestCol={isBestCol}
+          isBestCell={isBestAway}
+          empty={cell.top === null}
+          off={topOff}
+          hidden={topHidden}
+          onToggleHide={onToggleHide}
+          sideStyle={BOARD_SIDE_STYLE}
+        >
+          <OddsSide {...sideProps("top")} />
+        </BookSideCell>
+        <BookSideCell
+          gameId={rowGame.id}
+          marketKey={marketKey}
+          which="bot"
+          bookKey={b.key}
+          bookLabel={b.label}
+          isBestCol={isBestCol}
+          isBestCell={isBestHome}
+          empty={cell.bot === null}
+          off={botOff}
+          last
+          hidden={botHidden}
+          onToggleHide={onToggleHide}
+          sideStyle={BOARD_SIDE_STYLE}
+        >
+          <OddsSide {...sideProps("bot")} />
+        </BookSideCell>
+      </div>
+    </td>
+  );
+}
+
+function renderOddsColumns({
+  rowGame,
+  marketKey,
+  books,
+  visibleBooks,
+  selectedBooks,
+  hiddenKeys,
+  stackedBest,
+  nowMs,
+  onToggleHide,
+  includeLine,
+}) {
+  const liveBestOpts = { nowMs, hiddenKeys, stackedBest };
+  const bests = getBestForGame(rowGame, marketKey, selectedBooks, books, liveBestOpts);
+  return visibleBooks.map((b) => {
+    const cell = getOddsBoardCell({
+      game: rowGame,
+      bookKey: b.key,
+      market: marketKey,
+      selectedBookKeys: selectedBooks,
+      allBooks: books,
+      ...liveBestOpts,
+    });
+    return renderBookColumn({
+      rowGame,
+      marketKey,
+      b,
+      cell,
+      bests,
+      includeLine: includeLine ?? (marketKey === "ml"),
+      hiddenKeys,
+      books,
+      stackedBest,
+      onToggleHide,
+    });
+  });
+}
+
+// Book cells only. GAME is a sibling <td> so the 1s age clock / 5s Best
+// clock cannot remount the sticky matchup column.
+const OddsBoardBookCells = memo(function OddsBoardBookCells({
+  game,
+  market,
+  books,
+  visibleBooks,
+  selectedBooks,
+  hiddenKeys,
+  stackedBest,
+  onToggleHide,
+}) {
+  const bestNowMs = useContext(BestNowContext);
+  return renderOddsColumns({
+    rowGame: game,
+    marketKey: market,
+    books,
+    visibleBooks,
+    selectedBooks,
+    hiddenKeys,
+    stackedBest,
+    nowMs: bestNowMs,
+    onToggleHide,
+  });
+});
+
+const OddsBoardGameRow = memo(function OddsBoardGameRow({
+  game,
+  market,
+  books,
+  visibleBooks,
+  selectedBooks,
+  hiddenKeys,
+  stackedBest,
+  open,
+  dragging,
+  dragOver,
+  onOpenAlts,
+  onToggleHideCell,
+  onToggleHideGame,
+  onNudgeGame,
+  onDragBegin,
+  onDragEnd,
+  onBoardDragOver,
+  onBoardDrop,
+  onBoardDragLeave,
+}) {
+  return (
+    <tr
+      data-fixture={game.id}
+      data-game-paint={liveGamePaintKey(game)}
+      data-drop-game={game.id}
+      data-open-alts={open ? "1" : "0"}
+      data-drag-over={dragOver ? "1" : "0"}
+      data-dragging={dragging ? "1" : "0"}
+      onClick={() => onOpenAlts(game)}
+      onDragOver={onBoardDragOver("game", game.id)}
+      onDrop={onBoardDrop("game", game.id)}
+      onDragLeave={() => onBoardDragLeave("game", game.id)}
+      style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
+    >
+      <td
+        className="obb-game"
+        data-hide-game-cell="true"
+        style={{ padding: 0, width: OBB_TEAM_COL_WIDTH, maxWidth: OBB_TEAM_COL_WIDTH, overflow: "hidden", position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
+      >
+        <button
+          type="button"
+          className="obb-hide"
+          data-hide-game="hide"
+          data-hide-game-key={oddsBoardHideGameKey(game.id)}
+          aria-label={`Hide ${game.away} @ ${game.home}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleHideGame(game.id);
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          ×
+        </button>
+        <div style={{ padding: "4px 10px 2px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#4b5563", marginBottom: 1, lineHeight: 1.15 }}>
+            <BoardGrip
+              kind="game"
+              itemKey={String(game.id)}
+              label={`Reorder ${game.away} @ ${game.home}`}
+              onMove={onNudgeGame}
+              onDragBegin={onDragBegin}
+              onDragEnd={onDragEnd}
+            />
+            {game.is_live ? (
+              <span style={{ color: "#34d399", fontWeight: 700 }}>LIVE</span>
+            ) : (
+              new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
+            )}
+          </div>
+          <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
+            {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
+          </div>
+          <div className="obb-game-name" title={game.home} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.15 }}>
+            {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
+          </div>
+          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
+        </div>
+      </td>
+      <OddsBoardBookCells
+        game={game}
+        market={market}
+        books={books}
+        visibleBooks={visibleBooks}
+        selectedBooks={selectedBooks}
+        hiddenKeys={hiddenKeys}
+        stackedBest={stackedBest}
+        onToggleHide={onToggleHideCell}
+      />
+    </tr>
+  );
+}, (prev, next) => (
+  liveGamePaintKey(prev.game) === liveGamePaintKey(next.game)
+  && prev.market === next.market
+  && prev.stackedBest === next.stackedBest
+  && prev.open === next.open
+  && prev.dragging === next.dragging
+  && prev.dragOver === next.dragOver
+  && prev.books === next.books
+  && prev.visibleBooks === next.visibleBooks
+  && prev.selectedBooks === next.selectedBooks
+  && prev.hiddenKeys === next.hiddenKeys
+  && prev.onOpenAlts === next.onOpenAlts
+  && prev.onToggleHideCell === next.onToggleHideCell
+  && prev.onToggleHideGame === next.onToggleHideGame
+  && prev.onNudgeGame === next.onNudgeGame
+  && prev.onDragBegin === next.onDragBegin
+  && prev.onDragEnd === next.onDragEnd
+  && prev.onBoardDragOver === next.onBoardDragOver
+  && prev.onBoardDrop === next.onBoardDrop
+  && prev.onBoardDragLeave === next.onBoardDragLeave
+));
+
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const books = useMemo(() => visibleBetstampBooks(user), [user?.id, user?.email]);
   const bookIds = useMemo(() => books.map((b) => b.id), [books]);
@@ -542,6 +924,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const [snapshotAt, setSnapshotAt] = useState(null);
   const gamesRef = useRef([]);
   const tickSinkRef = useRef(null);
+  const moveGameRef = useRef(null);
+  const moveBookRef = useRef(null);
+  const openAltsRef = useRef(null);
+  const nudgeGameRef = useRef(null);
   const registerTickSink = useCallback((fn) => { tickSinkRef.current = fn; }, []);
   const fetchGen = useRef(0);
   const altCacheRef = useRef(new Map());
@@ -576,9 +962,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   }, [user?.id, user?.email]);
 
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    // LIVE ages/Best clocks are isolated (AgeNowProvider / BestNowProvider).
+    // A 1s setState here remounted every odds cell — GAME survived because
+    // it is sticky with an opaque background (Kevin's ~1s blank heartbeat).
+    if (liveOnly) return undefined;
+    const id = setInterval(() => setNowMs(Date.now()), 15_000);
     return () => clearInterval(id);
-  }, []);
+  }, [liveOnly]);
 
   useEffect(() => {
     const gen = ++fetchGen.current;
@@ -816,23 +1206,27 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       }
     })();
   };
+  openAltsRef.current = openAlts;
 
-  const toggleHiddenCell = (gameId, marketKey, side, bookKey) => {
+  const toggleHiddenCell = useCallback((gameId, marketKey, side, bookKey) => {
     const key = oddsBoardHideKey({ gameId, market: marketKey, side, bookKey });
     if (!key) return;
     setHiddenKeys((prev) => toggleOddsBoardHideKey(prev, key));
-  };
+  }, []);
 
-  const toggleHiddenGame = (gameId) => {
+  const toggleHiddenGame = useCallback((gameId) => {
     const key = oddsBoardHideGameKey(gameId);
     if (!key) return;
     setHiddenKeys((prev) => toggleOddsBoardHideKey(prev, key));
-    if (openGame && String(openGame.id) === String(gameId)) {
-      altFetchGen.current += 1;
-      setOpenGame(null);
-      setAltError(null);
-    }
-  };
+    setOpenGame((cur) => {
+      if (cur && String(cur.id) === String(gameId)) {
+        altFetchGen.current += 1;
+        setAltError(null);
+        return null;
+      }
+      return cur;
+    });
+  }, []);
 
   const showAllHiddenGames = () => {
     setHiddenKeys((prev) => clearHiddenOddsGames(prev));
@@ -921,6 +1315,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     persistBoardOrder({ ...boardOrder, bookKeys: nextKeys });
     focusGrip("book", bookKey);
   };
+  moveGameRef.current = moveGame;
+  moveBookRef.current = moveBook;
+  nudgeGameRef.current = nudgeGame;
 
   const resetGameOrder = () => {
     const gamesBySlate = { ...boardOrder.gamesBySlate };
@@ -932,35 +1329,44 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     persistBoardOrder({ ...boardOrder, bookKeys: [] });
   };
 
-  const beginDrag = (kind, key) => {
+  const beginDrag = useCallback((kind, key) => {
     const next = { kind, key };
     draggingRef.current = next;
     setDragging(next);
-  };
+  }, []);
 
-  const endDrag = () => {
+  const endDrag = useCallback(() => {
     draggingRef.current = null;
     setDragging(null);
     setDragOver(null);
-  };
+  }, []);
 
-  const onBoardDragOver = (kind, key) => (e) => {
+  const onBoardDragOver = useCallback((kind, key) => (e) => {
     const active = draggingRef.current;
     if (!active || active.kind !== kind) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    if (dragOver?.kind !== kind || dragOver?.key !== key) setDragOver({ kind, key });
-  };
+    setDragOver((cur) => (cur?.kind === kind && cur?.key === key ? cur : { kind, key }));
+  }, []);
 
-  const onBoardDrop = (kind, key) => (e) => {
+  const onBoardDrop = useCallback((kind, key) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     const payload = parseBoardDrag(e.dataTransfer) || draggingRef.current;
-    endDrag();
+    draggingRef.current = null;
+    setDragging(null);
+    setDragOver(null);
     if (!payload || payload.kind !== kind) return;
-    if (kind === "game") moveGame(payload.key, key);
-    else moveBook(payload.key, key);
-  };
+    if (kind === "game") moveGameRef.current?.(payload.key, key);
+    else moveBookRef.current?.(payload.key, key);
+  }, []);
+
+  const openAltsStable = useCallback((game) => openAltsRef.current?.(game), []);
+  const nudgeGameStable = useCallback((id, delta) => nudgeGameRef.current?.(id, delta), []);
+
+  const onBoardDragLeave = useCallback((kind, key) => {
+    setDragOver((cur) => (cur?.kind === kind && String(cur.key) === String(key) ? null : cur));
+  }, []);
 
   const hiddenBoardGames = useMemo(() => {
     return games.filter((g) => {
@@ -970,202 +1376,34 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     });
   }, [games, boardSport, liveOnly, hiddenKeys, liveOnly ? 0 : nowMs]);
 
-  const grouped = groupGamesPreservingOrder(orderedGames, (g) => (
+  const grouped = useMemo(() => groupGamesPreservingOrder(orderedGames, (g) => (
     g.is_live ? "Live now" : formatDateGroup(g.commence_time || Date.now())
-  ));
+  )), [orderedGames]);
 
-  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))];
+  const visibleBooks = useMemo(
+    () => [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))],
+    [catalogBooks, selectedBooks],
+  );
   const teamColWidth = OBB_TEAM_COL_WIDTH;
   const oddsColWidth = OBB_ODDS_COL_WIDTH;
   const bestColWidth = OBB_BEST_COL_WIDTH;
   const tableWidth = obbTableWidth(visibleBooks);
   const colWidthFor = (bookKey) => obbColWidth(bookKey);
-  const ageNowMs = Math.floor(nowMs / 1000) * 1000;
-  // Best 60s gate does not need 1s precision — a 5s bucket stops the
-  // whole slate restyling (green Best highlight) every clock tick.
-  const bestNowMs = Math.floor(nowMs / 5000) * 5000;
 
   const stackedBest = bestView === "stacked";
-  const liveBestOpts = { nowMs: bestNowMs, hiddenKeys, stackedBest };
 
-  const getCell = (game, bookKey) => getOddsBoardCell({
-    game,
-    bookKey,
-    market,
-    selectedBookKeys: selectedBooks,
-    allBooks: books,
-    ...liveBestOpts,
+  const renderOddsPair = (rowGame, marketKey) => renderOddsColumns({
+    rowGame,
+    marketKey,
+    books,
+    visibleBooks,
+    selectedBooks,
+    hiddenKeys,
+    stackedBest,
+    nowMs: Date.now(),
+    onToggleHide: toggleHiddenCell,
+    includeLine: marketKey === "ml",
   });
-
-  const sideStyle = BOARD_SIDE_STYLE;
-
-  const isBestHighlight = (rowGame, marketKey, b, cell, which, singleBest, stacks) => {
-    if (b.key === "best") return false;
-    const price = which === "top" ? cell.top : cell.bot;
-    if (price == null) return false;
-    if (stackedBest && marketKey !== "ml") {
-      return isStackedBestMatch(stacks, price, oddsBoardSidePoint(rowGame, b.key, marketKey, which));
-    }
-    return price === singleBest;
-  };
-
-  const renderStackedSide = (rowGame, field, stack) => (
-    <OddsSide
-      price={stack?.price ?? null}
-      size={stack?.size ?? null}
-      line={stack?.lineLabel ?? null}
-      books={stack?.books ?? []}
-      allBooks={books}
-      showBestMark
-      showWinProb={cellShowsWinProb("best", stack?.books)}
-      updatedAt={bestLineUpdatedAt(rowGame, field, stack?.books)}
-      ageTitle="Newest update among books offering this best price"
-      flashKey={`${rowGame.id}:best:${field}:${stack?.line ?? stack?.point ?? "none"}`}
-    />
-  );
-
-  const renderPairedPointBlocks = (rowGame, blocks, fields) => {
-    const padded = padBestPointStacks(blocks, STACKED_BEST_MAX_LINES);
-    return (
-      <div data-best-point-pairs={padded.length} data-best-stacks={padded.length} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0, width: "100%", overflow: "hidden" }}>
-        {padded.map((block, i) => (
-          <div
-            key={block.padded ? `pad-${i}` : block.point}
-            data-best-point={block.padded ? undefined : block.point}
-            data-best-point-count={block.count}
-            data-best-stack-pad={block.padded ? "1" : "0"}
-            style={i > 0 ? {
-              borderTop: "1px solid rgba(16,185,129,0.28)",
-              width: "100%",
-            } : { width: "100%" }}
-          >
-            <div className="obb-side" data-best-stack={block.top?.line} data-best-stack-price={block.top?.price} data-best-stack-side="top" style={{ width: "100%" }}>
-              {renderStackedSide(rowGame, fields.top, block.top)}
-            </div>
-            <div
-              className="obb-side"
-              data-best-stack={block.bot?.line}
-              data-best-stack-price={block.bot?.price}
-              data-best-stack-side="bot"
-              style={{
-                width: "100%",
-                borderTop: "1px solid rgba(16,185,129,0.12)",
-              }}
-            >
-              {renderStackedSide(rowGame, fields.bot, block.bot)}
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const renderBookColumn = (rowGame, marketKey, b, cell, bests, { includeLine = true } = {}) => {
-    const fields = cellLineFields(marketKey);
-    const isBestCol = b.key === "best";
-    const topHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
-      gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "top"), bookKey: b.key,
-    });
-    const botHidden = !isBestCol && isHiddenOddsCell(hiddenKeys, {
-      gameId: rowGame.id, market: marketKey, side: boardHideSide(marketKey, "bot"), bookKey: b.key,
-    });
-    const isBestAway = !topHidden && isBestHighlight(rowGame, marketKey, b, cell, "top", bests.bestAway, bests.awayStacks);
-    const isBestHome = !botHidden && isBestHighlight(rowGame, marketKey, b, cell, "bot", bests.bestHome, bests.homeStacks);
-    const pairBlocks = isBestCol && stackedBest && marketKey !== "ml" && cell.pointStacks;
-    const topUpdatedAt = isBestCol
-      ? bestLineUpdatedAt(rowGame, fields.top, cell.topBooks)
-      : lineUpdatedAt(rowGame, b.key, fields.top);
-    const botUpdatedAt = isBestCol
-      ? bestLineUpdatedAt(rowGame, fields.bot, cell.botBooks)
-      : lineUpdatedAt(rowGame, b.key, fields.bot);
-    const sideProps = (which) => ({
-      price: which === "top" ? cell.top : cell.bot,
-      size: which === "top" ? cell.topSize : cell.botSize,
-      line: includeLine ? (which === "top" ? cell.topLine : cell.botLine) : null,
-      books: which === "top" ? cell.topBooks : cell.botBooks,
-      allBooks: books,
-      showBestMark: isBestCol,
-      showWinProb: cellShowsWinProb(b.key, which === "top" ? cell.topBooks : cell.botBooks),
-      updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
-      ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
-      suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
-      flashKey: `${rowGame.id}:${marketKey}:${b.key}:${which}`,
-    });
-    const topOff = sideProps("top").suspended;
-    const botOff = sideProps("bot").suspended;
-    if (pairBlocks) {
-      const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
-      return (
-        <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-          <div
-            className="obb-side obb-side-paired"
-            data-odds-side="paired"
-            style={{
-              ...sideStyle(true, false, emptyPairs),
-              borderBottom: "none",
-            }}
-          >
-            {renderPairedPointBlocks(rowGame, cell.pointStacks, fields)}
-          </div>
-        </td>
-      );
-    }
-
-    return (
-      <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
-        <div style={{ display: "flex", flexDirection: "column", width: "100%", overflow: "hidden" }}>
-          <BookSideCell
-            gameId={rowGame.id}
-            marketKey={marketKey}
-            which="top"
-            bookKey={b.key}
-            bookLabel={b.label}
-            isBestCol={isBestCol}
-            isBestCell={isBestAway}
-            empty={cell.top === null}
-            off={topOff}
-            hidden={topHidden}
-            onToggleHide={toggleHiddenCell}
-            sideStyle={sideStyle}
-          >
-            <OddsSide {...sideProps("top")} />
-          </BookSideCell>
-          <BookSideCell
-            gameId={rowGame.id}
-            marketKey={marketKey}
-            which="bot"
-            bookKey={b.key}
-            bookLabel={b.label}
-            isBestCol={isBestCol}
-            isBestCell={isBestHome}
-            empty={cell.bot === null}
-            off={botOff}
-            last
-            hidden={botHidden}
-            onToggleHide={toggleHiddenCell}
-            sideStyle={sideStyle}
-          >
-            <OddsSide {...sideProps("bot")} />
-          </BookSideCell>
-        </div>
-      </td>
-    );
-  };
-
-  const renderOddsPair = (rowGame, marketKey) => {
-    const bests = getBestForGame(rowGame, marketKey, selectedBooks, books, liveBestOpts);
-    return visibleBooks.map((b) => {
-      const cell = getOddsBoardCell({
-        game: rowGame,
-        bookKey: b.key,
-        market: marketKey,
-        selectedBookKeys: selectedBooks,
-        allBooks: books,
-        ...liveBestOpts,
-      });
-      return renderBookColumn(rowGame, marketKey, b, cell, bests, { includeLine: marketKey === "ml" });
-    });
-  };
 
   const renderAltSection = (title, section, rows, marketKey, labelFor) => {
     if (!rows.length) return null;
@@ -1226,6 +1464,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   };
 
   return (
+    <AgeNowProvider>
+    <BestNowProvider>
     <div
       data-betstamp-board="true"
       data-row-density="compact"
@@ -1242,6 +1482,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       data-live-best-break-age-ms={LIVE_BEST_ODDS_BREAK_MAX_AGE_MS}
       data-live-reconcile-ms={BETSTAMP_LIVE_RECONCILE_MS}
       data-live-paint-key={liveBoardPaintKey(games) ? "1" : "0"}
+      data-live-clock="isolated"
     >
       <style>{`
         .obb-side, .obb-game { position: relative; }
@@ -1628,7 +1869,6 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       )}
 
       {!loading && (
-      <AgeNowContext.Provider value={ageNowMs}>
       <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
           <colgroup>
@@ -1688,80 +1928,35 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 <tr style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                   <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{block.dateKey}</td>
                 </tr>
-                {block.games.map((game) => {
-                  const bests = getBestForGame(game, market, selectedBooks, books, liveBestOpts);
-                  return (
-                    <tr
-                      key={game.id}
-                      data-fixture={game.id}
-                      data-game-paint={liveGamePaintKey(game)}
-                      data-drop-game={game.id}
-                      data-open-alts={openGame?.id === game.id ? "1" : "0"}
-                      data-drag-over={dragOver?.kind === "game" && String(dragOver.key) === String(game.id) ? "1" : "0"}
-                      data-dragging={dragging?.kind === "game" && String(dragging.key) === String(game.id) ? "1" : "0"}
-                      onClick={() => openAlts(game)}
-                      onDragOver={onBoardDragOver("game", game.id)}
-                      onDrop={onBoardDrop("game", game.id)}
-                      onDragLeave={() => {
-                        if (dragOver?.kind === "game" && String(dragOver.key) === String(game.id)) setDragOver(null);
-                      }}
-                      style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
-                    >
-                      <td
-                        className="obb-game"
-                        data-hide-game-cell="true"
-                        style={{ padding: 0, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
-                      >
-                        <button
-                          type="button"
-                          className="obb-hide"
-                          data-hide-game="hide"
-                          data-hide-game-key={oddsBoardHideGameKey(game.id)}
-                          aria-label={`Hide ${game.away} @ ${game.home}`}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            toggleHiddenGame(game.id);
-                          }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
-                          ×
-                        </button>
-                        <div style={{ padding: "4px 10px 2px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#4b5563", marginBottom: 1, lineHeight: 1.15 }}>
-                            <BoardGrip
-                              kind="game"
-                              itemKey={String(game.id)}
-                              label={`Reorder ${game.away} @ ${game.home}`}
-                              onMove={nudgeGame}
-                              onDragBegin={beginDrag}
-                              onDragEnd={endDrag}
-                            />
-                            {game.is_live ? (
-                              <span style={{ color: "#34d399", fontWeight: 700 }}>LIVE</span>
-                            ) : (
-                              new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
-                            )}
-                          </div>
-                          <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
-                            {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
-                          </div>
-                          <div className="obb-game-name" title={game.home} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.15 }}>
-                            {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
-                          </div>
-                          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
-                        </div>
-                      </td>
-                      {visibleBooks.map((b) => renderBookColumn(game, market, b, getCell(game, b.key), bests))}
-                    </tr>
-                  );
-                })}
+                {block.games.map((game) => (
+                  <OddsBoardGameRow
+                    key={game.id}
+                    game={game}
+                    market={market}
+                    books={books}
+                    visibleBooks={visibleBooks}
+                    selectedBooks={selectedBooks}
+                    hiddenKeys={hiddenKeys}
+                    stackedBest={stackedBest}
+                    open={openGame?.id === game.id}
+                    dragging={dragging?.kind === "game" && String(dragging.key) === String(game.id)}
+                    dragOver={dragOver?.kind === "game" && String(dragOver.key) === String(game.id)}
+                    onOpenAlts={openAltsStable}
+                    onToggleHideCell={toggleHiddenCell}
+                    onToggleHideGame={toggleHiddenGame}
+                    onNudgeGame={nudgeGameStable}
+                    onDragBegin={beginDrag}
+                    onDragEnd={endDrag}
+                    onBoardDragOver={onBoardDragOver}
+                    onBoardDrop={onBoardDrop}
+                    onBoardDragLeave={onBoardDragLeave}
+                  />
+                ))}
               </Fragment>
             ))}
           </tbody>
         </table>
       </div>
-      </AgeNowContext.Provider>
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
@@ -1775,7 +1970,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
         {" · "}Best names the winning book in full (FanDuel, not FD) with its logo; +N if tied
-        {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). Same-price ticks, age-only heartbeats, and the 1s clock do not flash or remount the grid. OFF / empty cells do not flash
+        {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). Same-price ticks, age-only heartbeats, and the isolated 1s age clock do not flash or remount the grid. OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
         {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default}
@@ -1852,5 +2047,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         </div>
       )}
     </div>
+    </BestNowProvider>
+    </AgeNowProvider>
   );
 }
