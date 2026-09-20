@@ -169,6 +169,11 @@ export function lineConfirmedAt(game, bookKey, field) {
   return typeof n === "number" && isFinite(n) ? n : null;
 }
 
+// Last time *we* saw this quote (receive / reconcile), not Betstamp's print time.
+export function quoteLastSeenMs(game, bookKey, field) {
+  return lineConfirmedAt(game, bookKey, field) ?? lineUpdatedAt(game, bookKey, field);
+}
+
 const NOT_OFFERED_MARKET_STATUSES = new Set([
   "suspended",
   "suspend",
@@ -199,22 +204,31 @@ export function marketHasOfferableOdds(market) {
   return toAmericanOdds(market?.odds) != null;
 }
 
+// Explicit take-down — not mere is_otb. Live soft books flap is_otb with and
+// without a decimal; that must not paint OFF. Suspend / inactive / taken_down
+// still tombs immediately.
+export function marketIsExplicitlySuspended(market) {
+  if (!market || typeof market !== "object") return false;
+  if (market.suspended === true || market.is_suspended === true || market.isSuspended === true) return true;
+  if (market.active === false || market.is_active === false || market.isActive === false) return true;
+  if (market.available === false || market.is_available === false || market.isAvailable === false) return true;
+  const status = String(
+    market.status ?? market.market_status ?? market.line_status ?? market.odds_status ?? "",
+  ).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return !!(status && NOT_OFFERED_MARKET_STATUSES.has(status));
+}
+
 // Public Betstamp docs do not document a suspend/tombstone field. Honor one
 // when a payload actually sends it; otherwise presence in the REST snapshot
 // is the availability signal.
 //
 // Live soft-book mains often arrive with is_otb=true AND a finite decimal
 // Kevin can still bet (FanDuel/DK/Caesars etc.). Do not hide those. OTB
-// alone is only OFF when there is no offerable price.
+// alone is only OFF when there is no offerable price *and* reconcile has
+// held that miss past the last-seen grace (SSE must not yank on the flap).
 export function marketIsOffered(market) {
   if (!market || typeof market !== "object") return false;
-  if (market.suspended === true || market.is_suspended === true || market.isSuspended === true) return false;
-  if (market.active === false || market.is_active === false || market.isActive === false) return false;
-  if (market.available === false || market.is_available === false || market.isAvailable === false) return false;
-  const status = String(
-    market.status ?? market.market_status ?? market.line_status ?? market.odds_status ?? "",
-  ).trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (status && NOT_OFFERED_MARKET_STATUSES.has(status)) return false;
+  if (marketIsExplicitlySuspended(market)) return false;
   if (marketIsOtB(market) && !marketHasOfferableOdds(market)) return false;
   return true;
 }
@@ -257,6 +271,51 @@ const BOARD_QUOTE_SPECS = [
   { betType: "total", side: "under", field: "tot_under", lineField: "tot_line" },
 ];
 
+const PAINT_ODDS_FIELDS = [
+  "ml_away", "ml_home", "ml_draw",
+  "spr_away", "spr_away_line", "spr_home", "spr_home_line",
+  "tot_over", "tot_under", "tot_line",
+];
+
+// Display identity for the live grid. Price / line / OFF / score / break —
+// not updatedAt. Age-only SSE heartbeats must not rebuild every cell
+// (Kevin's recording: whole slate blanks ~1s then snaps back).
+export function liveBoardPaintKey(games) {
+  if (!games?.length) return "";
+  const chunks = [];
+  for (const g of games) {
+    chunks.push(
+      g?.id ?? "",
+      g?.is_live ? "1" : "0",
+      g?.away_score ?? "",
+      g?.home_score ?? "",
+      g?.status ?? "",
+      g?.period ?? "",
+      g?.is_halftime ? "1" : "0",
+      g?.in_break ? "1" : "0",
+    );
+    const odds = g?.bookOdds || {};
+    const sus = g?.bookLineSuspended || {};
+    const books = Object.keys(odds).sort();
+    for (const book of books) {
+      const o = odds[book] || {};
+      const s = sus[book] || {};
+      chunks.push(book);
+      for (const field of PAINT_ODDS_FIELDS) {
+        chunks.push(o[field] ?? "");
+      }
+      for (const field of PAINT_ODDS_FIELDS) {
+        chunks.push(s[field] ? "1" : "0");
+      }
+    }
+  }
+  return chunks.join("\x1f");
+}
+
+export function liveGamePaintKey(game) {
+  return liveBoardPaintKey(game ? [game] : []);
+}
+
 export function listedBoardQuotes(game) {
   const out = [];
   for (const [bookKey, odds] of Object.entries(game?.bookOdds || {})) {
@@ -292,6 +351,18 @@ export function offeredPresenceKeysFromMarkets(markets, gamesById) {
     if (key) keys.add(key);
   }
   return keys;
+}
+
+// Fixtures the snapshot actually mentioned (any FT main, even unoffered).
+// A live game with zero rows is a truncated pull, not "every book went OFF".
+export function fixtureIdsFromMarkets(markets) {
+  const ids = new Set();
+  for (const market of asList(markets, ["markets", "data"])) {
+    if (!isMainMarket(market)) continue;
+    const fid = market.fixture_id != null ? String(market.fixture_id) : null;
+    if (fid) ids.add(fid);
+  }
+  return ids;
 }
 
 function cloneBookMap(src) {
@@ -897,8 +968,12 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   const incomingMarketTs = marketUpdatedAtMs(market, null);
   const hasQuote = existingPrice != null && isFinite(Number(existingPrice));
   if (!marketIsOffered(market)) {
-    // Pregame / OTB leftovers must not wipe a live print for the same book+side.
-    if (hasQuote && !incomingLive) return false;
+    // SSE owns prices. Unpriced is_otb / pregame leftovers / blank cells must
+    // not paint OFF — live soft books flap those flags every few hundred ms.
+    // Only an explicit suspend / inactive / taken_down tombs immediately.
+    // REST reconcile (last-seen grace) is availability truth.
+    if (!hasQuote) return false;
+    if (!marketIsExplicitlySuspended(market)) return false;
     clearSideQuote(game, bookKey, betType, side);
     return {
       bookKey,
@@ -925,7 +1000,8 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
     game.bookUpdatedAt[bookKey] = incomingMarketTs;
     setLineUpdatedAt(game, bookKey, field, incomingMarketTs);
   }
-  confirmSideQuote(game, bookKey, field, incomingMarketTs ?? receivedAt);
+  // confirmedAt is last-seen wall time so reconcile grace survives stale prints.
+  confirmSideQuote(game, bookKey, field, receivedAt ?? incomingMarketTs);
   return { bookKey, betType, side, price, label: tickLabel(market, game, side, betType), updatedAt: incomingMarketTs };
 }
 
@@ -965,7 +1041,7 @@ export function gamesFromBetstampSnapshot({ markets, fixtures, teams, nowMs } = 
   return list;
 }
 
-export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
+export function applyStreamMarkets(games, markets, { receivedAt, nowMs, allowNewGames = true } = {}) {
   const next = cloneBoardGames(games);
   const byId = new Map(next.map((g) => [String(g.id), g]));
   const applied = [];
@@ -974,6 +1050,9 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
     const fid = market?.fixture_id != null ? String(market.fixture_id) : null;
     if (!fid) continue;
     if (!byId.has(fid)) {
+      // Live board passes allowNewGames:false — a stray tick must not inject
+      // a stub row (often sorts first, remounts the Live now group).
+      if (allowNewGames === false) continue;
       const stub = stubGameFromMarket(market, nowMs);
       if (gameIsFinished(stub, seenAt)) continue;
       byId.set(fid, stub);
@@ -991,10 +1070,11 @@ export function applyStreamMarkets(games, markets, { receivedAt, nowMs } = {}) {
 
 // LIVE availability truth: REST mains listing vs previously shown quotes.
 // Present → apply if Betstamp's updated_at is newer (quiet soft books), else
-// keep the held SSE print. Absent → clear / OFF and out of Best.
-// Silence alone is not a suspend — only a snapshot miss (or an explicit
-// suspended status). Halftime still reconciles. `markets == null` is a no-op
-// so a botched payload cannot wipe the board.
+// keep the held SSE print. Absent → clear / OFF and out of Best *after*
+// last-seen grace. Silence alone is not a suspend. Halftime still reconciles.
+// `markets == null` or an empty list is a no-op so a botched / truncated
+// payload cannot wipe the board. A fixture the snap never mentioned is
+// treated as incomplete, not "every book went OFF".
 export function reconcileLiveGames(games, {
   markets,
   fixtures,
@@ -1003,6 +1083,8 @@ export function reconcileLiveGames(games, {
   clearGraceMs = BETSTAMP_RECONCILE_CLEAR_GRACE_MS,
 } = {}) {
   if (markets == null) return games || [];
+  const marketList = asList(markets, ["markets", "data"]);
+  if (!marketList.length) return games || [];
   const seenAt = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
   const next = cloneBoardGames(games);
   const byId = new Map(next.map((g) => [String(g.id), g]));
@@ -1016,10 +1098,11 @@ export function reconcileLiveGames(games, {
   }
 
   const offered = offeredPresenceKeysFromMarkets(markets, byId);
-  const marketList = asList(markets, ["markets", "data"]);
+  const mentioned = fixtureIdsFromMarkets(marketList);
 
   for (const game of next) {
     if (!game?.is_live || gameIsFinished(game, seenAt)) continue;
+    if (!mentioned.has(String(game.id))) continue;
     for (const market of marketList) {
       if (!isMainMarket(market)) continue;
       if (market.fixture_id == null || String(market.fixture_id) !== String(game.id)) continue;
@@ -1036,12 +1119,12 @@ export function reconcileLiveGames(games, {
         confirmSideQuote(game, quote.bookKey, quote.field, seenAt);
         continue;
       }
-      const updatedAt = quote.updatedAt;
+      const lastSeen = quoteLastSeenMs(game, quote.bookKey, quote.field);
       if (
-        updatedAt != null
-        && isFinite(updatedAt)
+        lastSeen != null
+        && isFinite(lastSeen)
         && clearGraceMs > 0
-        && (seenAt - updatedAt) < clearGraceMs
+        && (seenAt - lastSeen) < clearGraceMs
       ) {
         continue;
       }

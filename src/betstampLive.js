@@ -15,8 +15,16 @@ export const BETSTAMP_LIVE_RECONCILE_MS = resolvePollMs(
   10_000,
 );
 
-// Skip clearing a quote SSE wrote this recently — snapshot can lag a fresh tick.
-export const BETSTAMP_RECONCILE_CLEAR_GRACE_MS = 5_000;
+// Hold a listed quote this long after we last *saw* it (bookLineConfirmedAt,
+// receive time — not Betstamp updated_at). Quiet soft books carry stamps
+// minutes old; a 5s updated_at grace meant one thin 10s snap yanked them
+// OFF, then the next SSE/REST print restored them (the live spasm).
+// 25s ≈ two missed reconciles + slack. Override via VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS
+// (clamped 10s–60s, same resolver as the reconcile interval).
+export const BETSTAMP_RECONCILE_CLEAR_GRACE_MS = resolvePollMs(
+  readEnvMs("VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS"),
+  25_000,
+);
 
 function readEnvMs(name) {
   try {
