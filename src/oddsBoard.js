@@ -236,6 +236,12 @@ export const OBB_ODDS_COL_WIDTH = 108;
 export const OBB_BEST_COL_WIDTH = 128;
 export const OBB_SIDE_CELL_HEIGHT = 56;
 
+// Main-grid cells show the point on spread/total. Moneyline is price only.
+// Alt-drawer rows already print the line in the first column.
+export function boardShowsPointLine(market) {
+  return market === "spr" || market === "tot";
+}
+
 export function obbColWidth(bookKey) {
   return bookKey === "best" ? OBB_BEST_COL_WIDTH : OBB_ODDS_COL_WIDTH;
 }
