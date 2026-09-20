@@ -312,6 +312,10 @@ export function liveBoardPaintKey(games) {
   return chunks.join("\x1f");
 }
 
+export function liveGamePaintKey(game) {
+  return liveBoardPaintKey(game ? [game] : []);
+}
+
 export function listedBoardQuotes(game) {
   const out = [];
   for (const [bookKey, odds] of Object.entries(game?.bookOdds || {})) {

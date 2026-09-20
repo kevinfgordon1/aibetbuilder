@@ -5,6 +5,8 @@ import {
   fmtBoardSize,
   bookInitials,
   pickBestSide,
+  sameAmericanPrice,
+  americanPriceValue,
   bestBooksTitle,
   getOddsBoardCell,
   getBestForGame,
@@ -73,6 +75,12 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
   assert.equal(oddsMoveDirection(null, -110), null);
   assert.equal(oddsMoveDirection(-110, null), null);
   assert.equal(oddsMoveDirection("+120", 130), "up");
+  assert.equal(oddsMoveDirection(-110, "-110"), null, "string vs number is not a move");
+  assert.equal(sameAmericanPrice(-110, "-110"), true);
+  assert.equal(sameAmericanPrice(-110, -105), false);
+  assert.equal(sameAmericanPrice(null, null), true);
+  assert.equal(sameAmericanPrice(-110, null), false);
+  assert.equal(americanPriceValue("+120"), 120);
   assert.equal(ODDS_FLASH_MS >= 600 && ODDS_FLASH_MS <= 1200, true);
 }
 

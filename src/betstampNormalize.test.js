@@ -1034,6 +1034,11 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /obb-off/);
   assert.match(stamp, /Off the board/);
   assert.match(stamp, /OddsFlashNumber/);
+  assert.match(stamp, /sameAmericanPrice/);
+  assert.match(stamp, /AgeNowContext/);
+  assert.match(stamp, /AgeNowContext.Provider/);
+  assert.match(stamp, /data-game-paint/);
+  assert.match(stamp, /memo\(function OddsFlashNumber/);
   assert.match(stamp, /obb-flash-up/);
   assert.match(stamp, /obb-flash-down/);
   assert.match(stamp, /BestBookName/);

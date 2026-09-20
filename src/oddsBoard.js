@@ -77,11 +77,20 @@ export function fmtBoardSize(v) {
 // Used to flash the odds digits green (improve) or red (worse).
 export const ODDS_FLASH_MS = 900;
 
+export function americanPriceValue(v) {
+  if (v == null || v === "") return null;
+  const n = typeof v === "number" ? v : Number(String(v).trim().replace(/^\+/, ""));
+  return isFinite(n) ? n : null;
+}
+
+export function sameAmericanPrice(prev, next) {
+  return americanPriceValue(prev) === americanPriceValue(next);
+}
+
 export function oddsMoveDirection(prev, next) {
-  if (prev == null || next == null || prev === "" || next === "") return null;
-  const a = typeof prev === "number" ? prev : Number(String(prev).trim().replace(/^\+/, ""));
-  const b = typeof next === "number" ? next : Number(String(next).trim().replace(/^\+/, ""));
-  if (!isFinite(a) || !isFinite(b) || a === b) return null;
+  const a = americanPriceValue(prev);
+  const b = americanPriceValue(next);
+  if (a == null || b == null || a === b) return null;
   return b > a ? "up" : "down";
 }
 

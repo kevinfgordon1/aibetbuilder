@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import {
   fmtBoardSize,
@@ -18,6 +18,7 @@ import {
   isStackedBestMatch,
   oddsBoardSidePoint,
   oddsMoveDirection,
+  sameAmericanPrice,
   ODDS_FLASH_MS,
   STACKED_BEST_MAX_LINES,
   OBB_TEAM_COL_WIDTH,
@@ -52,6 +53,7 @@ import {
   applyStreamMarkets,
   reconcileLiveGames,
   liveBoardPaintKey,
+  liveGamePaintKey,
   gameVisibleOnBoard,
   unwrapStreamPayload,
   emptyTickStats,
@@ -95,7 +97,9 @@ function BestBookName({ book, extra = 0, title, size = 13 }) {
   );
 }
 
-function OddsFlashNumber({ price, suspended, flashKey }) {
+const AgeNowContext = createContext(0);
+
+const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey }) {
   const prevRef = useRef({ key: flashKey, price, suspended: !!suspended });
   const [flash, setFlash] = useState(null);
 
@@ -131,6 +135,27 @@ function OddsFlashNumber({ price, suspended, flashKey }) {
       {price == null ? "—" : formatAmericanOdds(price)}
     </span>
   );
+}, (prev, next) => (
+  prev.flashKey === next.flashKey
+  && !!prev.suspended === !!next.suspended
+  && sameAmericanPrice(prev.price, next.price)
+));
+
+function LineAge({ updatedAt, ageTitle }) {
+  const nowMs = useContext(AgeNowContext);
+  const age = formatCompactAge(updatedAt, nowMs);
+  if (!age) return null;
+  const clock = updatedAt ? fmtClock(updatedAt) : "";
+  return (
+    <div
+      data-line-age={age}
+      title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
+      className="obb-clip"
+      style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
+    >
+      {age}
+    </div>
+  );
 }
 
 function LiquidityCue({ size, inline = false }) {
@@ -143,12 +168,10 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, nowMs, ageTitle, showWinProb, suspended, flashKey }) {
+function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
-  const age = price == null || suspended ? null : formatCompactAge(updatedAt, nowMs);
-  const clock = updatedAt ? fmtClock(updatedAt) : "";
   const winProb = showWinProb && price != null && !suspended ? formatWinProb(price) : null;
   if (suspended) {
     return (
@@ -190,15 +213,8 @@ function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt,
           {winProb}
         </div>
       )}
-      {age && (
-        <div
-          data-line-age={age}
-          title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
-          className="obb-clip"
-          style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
-        >
-          {age}
-        </div>
+      {price != null && (
+        <LineAge updatedAt={updatedAt} ageTitle={ageTitle} />
       )}
     </>
   );
@@ -965,9 +981,12 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const tableWidth = obbTableWidth(visibleBooks);
   const colWidthFor = (bookKey) => obbColWidth(bookKey);
   const ageNowMs = Math.floor(nowMs / 1000) * 1000;
+  // Best 60s gate does not need 1s precision — a 5s bucket stops the
+  // whole slate restyling (green Best highlight) every clock tick.
+  const bestNowMs = Math.floor(nowMs / 5000) * 5000;
 
   const stackedBest = bestView === "stacked";
-  const liveBestOpts = { nowMs: ageNowMs, hiddenKeys, stackedBest };
+  const liveBestOpts = { nowMs: bestNowMs, hiddenKeys, stackedBest };
 
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
@@ -1000,7 +1019,6 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       showBestMark
       showWinProb={cellShowsWinProb("best", stack?.books)}
       updatedAt={bestLineUpdatedAt(rowGame, field, stack?.books)}
-      nowMs={ageNowMs}
       ageTitle="Newest update among books offering this best price"
       flashKey={`${rowGame.id}:best:${field}:${stack?.line ?? stack?.point ?? "none"}`}
     />
@@ -1069,7 +1087,6 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       showBestMark: isBestCol,
       showWinProb: cellShowsWinProb(b.key, which === "top" ? cell.topBooks : cell.botBooks),
       updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
-      nowMs: ageNowMs,
       ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
       suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
       flashKey: `${rowGame.id}:${marketKey}:${b.key}:${which}`,
@@ -1611,6 +1628,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       )}
 
       {!loading && (
+      <AgeNowContext.Provider value={ageNowMs}>
       <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
           <colgroup>
@@ -1676,6 +1694,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                     <tr
                       key={game.id}
                       data-fixture={game.id}
+                      data-game-paint={liveGamePaintKey(game)}
                       data-drop-game={game.id}
                       data-open-alts={openGame?.id === game.id ? "1" : "0"}
                       data-drag-over={dragOver?.kind === "game" && String(dragOver.key) === String(game.id) ? "1" : "0"}
@@ -1742,6 +1761,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           </tbody>
         </table>
       </div>
+      </AgeNowContext.Provider>
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
