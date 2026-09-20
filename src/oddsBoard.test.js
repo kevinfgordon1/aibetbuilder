@@ -42,6 +42,7 @@ import {
   obbColWidth,
   obbTableWidth,
   padBestPointStacks,
+  boardShowsPointLine,
 } from "./oddsBoard.js";
 import { BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
@@ -856,6 +857,14 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
 // ── stacked Best helpers: line normalize + popularity ranking
 {
   assert.equal(STACKED_BEST_MAX_LINES, 2);
+}
+
+// ── Main grid shows the point on spread/total; moneyline is price only
+{
+  assert.equal(boardShowsPointLine("ml"), false);
+  assert.equal(boardShowsPointLine("spr"), true);
+  assert.equal(boardShowsPointLine("tot"), true);
+  assert.equal(boardShowsPointLine(null), false);
 }
 
 // ── New Odds Board fixed cell tracks: live ticks must not grow columns

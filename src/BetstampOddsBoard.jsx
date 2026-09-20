@@ -28,6 +28,7 @@ import {
   obbColWidth,
   obbTableWidth,
   padBestPointStacks,
+  boardShowsPointLine,
 } from "./oddsBoard.js";
 import {
   applyBookColumnOrder,
@@ -202,7 +203,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
     return (
       <>
         {line && (
-          <div className="obb-clip" style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 2, lineHeight: 1.15, textDecoration: "line-through", opacity: 0.7 }}>
+          <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "#78716c", fontWeight: 500, marginBottom: 2, lineHeight: 1.15, textDecoration: "line-through", opacity: 0.7 }}>
             {line}
           </div>
         )}
@@ -220,7 +221,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
   }
   return (
     <>
-      {line && <div className="obb-clip" style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
+      {line && <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
       <div className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "nowrap", lineHeight: 1.15, maxWidth: "100%" }}>
         <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
         {showBestMark && price != null && book && (
@@ -757,7 +758,7 @@ function renderOddsColumns({
       b,
       cell,
       bests,
-      includeLine: includeLine ?? (marketKey === "ml"),
+      includeLine: includeLine ?? boardShowsPointLine(marketKey),
       hiddenKeys,
       books,
       stackedBest,
@@ -789,6 +790,7 @@ const OddsBoardBookCells = memo(function OddsBoardBookCells({
     stackedBest,
     nowMs: bestNowMs,
     onToggleHide,
+    includeLine: boardShowsPointLine(market),
   });
 });
 
@@ -1402,7 +1404,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     stackedBest,
     nowMs: Date.now(),
     onToggleHide: toggleHiddenCell,
-    includeLine: marketKey === "ml",
+    // Alt rows already show the point in the first column.
+    includeLine: false,
   });
 
   const renderAltSection = (title, section, rows, marketKey, labelFor) => {

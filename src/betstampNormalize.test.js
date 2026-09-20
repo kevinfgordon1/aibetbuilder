@@ -283,7 +283,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
     fixtures: [{
       id: "fix-1",
       league: "NFL",
-      start_date: "2026-09-20T17:00:00Z",
+      start_date: "2026-12-20T17:00:00Z",
       home_team: { name: "Bills", abbreviation: "BUF" },
       away_team: { name: "Jets", abbreviation: "NYJ" },
     }],
@@ -448,7 +448,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
     fixtures: [{
       id: "fix-pm",
       league: "NFL",
-      start_date: "2026-09-20T17:00:00Z",
+      start_date: "2026-12-20T17:00:00Z",
       home_team: { name: "Chiefs", abbreviation: "KC" },
       away_team: { name: "Broncos", abbreviation: "DEN" },
     }],
@@ -960,7 +960,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   const pregameFix = {
     id: "fix-pre",
     league: "NFL",
-    start_date: "2026-09-20T17:00:00Z",
+    start_date: "2026-12-20T17:00:00Z",
     home_team: { name: "Chiefs", abbreviation: "KC" },
     away_team: { name: "Broncos", abbreviation: "DEN" },
   };
@@ -1042,6 +1042,14 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /BestNowContext/);
   assert.match(stamp, /OddsBoardGameRow/);
   assert.match(stamp, /OddsBoardBookCells/);
+  assert.match(stamp, /boardShowsPointLine/);
+  assert.match(stamp, /includeLine: boardShowsPointLine\(market\)/);
+  assert.match(stamp, /includeLine: includeLine \?\? boardShowsPointLine\(marketKey\)/);
+  assert.match(stamp, /data-odds-line=\{line\}/);
+  assert.match(stamp, /Alt rows already show the point in the first column/);
+  assert.match(stamp, /includeLine: false/);
+  assert.doesNotMatch(stamp, /includeLine: includeLine \?\? \(marketKey === "ml"\)/);
+  assert.doesNotMatch(stamp, /includeLine: marketKey === "ml"/);
   assert.match(stamp, /data-live-clock="isolated"/);
   assert.match(stamp, /data-game-paint/);
   assert.match(stamp, /memo\(function OddsFlashNumber/);
