@@ -11,6 +11,7 @@ import {
   fixtureLiveMeta,
   applyStreamMarkets,
   reconcileLiveGames,
+  liveBoardPaintKey,
   marketIsOffered,
   marketIsOtB,
   marketIsExplicitlySuspended,
@@ -940,6 +941,21 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   }], { receivedAt: now, allowNewGames: false });
   assert.equal(noStub.some((g) => String(g.id) === "ghost-fix"), false, "live board does not inject stub rows");
 
+  const paintA = liveBoardPaintKey(games);
+  const agedOnly = applyStreamMarkets(games, [{
+    ...dkAway,
+    odds: 2.20,
+    updated_at: "2026-09-14T20:10:30.000Z",
+  }], { receivedAt: now + 30_000 }).games;
+  assert.equal(agedOnly[0].bookOdds.draftkings.ml_away, 120);
+  assert.equal(liveBoardPaintKey(agedOnly), paintA, "same American + line must not rebuild the grid");
+  const movedPrice = applyStreamMarkets(games, [{
+    ...dkAway,
+    odds: 2.30,
+    updated_at: "2026-09-14T20:10:40.000Z",
+  }], { receivedAt: now + 40_000 }).games;
+  assert.notEqual(liveBoardPaintKey(movedPrice), paintA, "real American move must paint");
+
   // Pregame rebuild drops a book that disappeared from the snapshot.
   const pregameFix = {
     id: "fix-pre",
@@ -1031,6 +1047,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(stamp, /allowNewGames: false/);
   assert.match(stamp, /bookIdsKey/);
   assert.match(stamp, /key=\{block\.dateKey\}/);
+  assert.match(stamp, /LiveTickStrip/);
+  assert.match(stamp, /commitGames/);
+  assert.match(stamp, /liveBoardPaintKey/);
+  assert.match(stamp, /registerTickSink/);
+  assert.match(stamp, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
+  assert.match(stamp, /Same-price ticks, age-only heartbeats/);
   assert.doesNotMatch(stamp, /block\.games\[0\]\?\.id/);
   assert.match(liveSrc, /bookLineConfirmedAt/);
   assert.match(liveSrc, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS/);

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import {
   fmtBoardSize,
@@ -51,6 +51,7 @@ import {
   applyFixtureMeta,
   applyStreamMarkets,
   reconcileLiveGames,
+  liveBoardPaintKey,
   gameVisibleOnBoard,
   unwrapStreamPayload,
   emptyTickStats,
@@ -372,6 +373,141 @@ function ageTone(ms) {
   return "#f97316";
 }
 
+const BOARD_SIDE_STYLE = (isBestCol, isBestCell, empty) => ({
+  padding: "3px 4px",
+  lineHeight: 1.15,
+  borderBottom: "1px solid rgba(255,255,255,0.03)",
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: 13,
+  fontWeight: 700,
+  color: empty ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed",
+  background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent",
+});
+
+const LiveTickStrip = memo(function LiveTickStrip({
+  liveOnly,
+  books,
+  games,
+  snapshotAt,
+  streamStatus,
+  register,
+  resetKey,
+}) {
+  const [tickStats, setTickStats] = useState(() => emptyTickStats());
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (typeof register !== "function") return undefined;
+    register((applied, receivedAt) => {
+      setTickStats((prev) => recordTicks(prev, applied, { receivedAt }));
+    });
+    return () => register(null);
+  }, [register]);
+
+  useEffect(() => {
+    setTickStats(emptyTickStats());
+  }, [resetKey, liveOnly]);
+
+  const metrics = summarizeTickStats(tickStats, nowMs);
+  const staleSoft = liveOnly ? staleLiveBookLabels(games, books, nowMs) : [];
+
+  return (
+    <div
+      data-tick-metrics="true"
+      style={{
+        marginBottom: 16,
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: "1px solid rgba(16,185,129,0.18)",
+        background: "rgba(16,185,129,0.05)",
+      }}
+    >
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Stream</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: streamStatus === "live" ? "#34d399" : "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+            {liveOnly ? streamStatus : "snapshot"}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>
+            {liveOnly ? "Reconciled" : "Refreshed"}
+          </div>
+          <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+            {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
+          <div data-last-tick-age style={{ fontSize: 20, fontWeight: 800, color: ageTone(metrics.lastTickAgeMs), fontFamily: "'JetBrains Mono', monospace" }}>
+            {liveOnly ? fmtMs(metrics.lastTickAgeMs) : "—"}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>p50 inter-arrival</div>
+          <div data-p50 style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p50InterArrivalMs)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>p95 inter-arrival</div>
+          <div data-p95 style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p95InterArrivalMs)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Tick lag</div>
+          <div data-tick-lag style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.lastLagMs)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Ticks</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{metrics.eventCount}</div>
+        </div>
+      </div>
+      {staleSoft.length > 0 && (
+        <div
+          data-soft-book-stale={staleSoft.map((b) => b.key).join(",")}
+          style={{
+            marginBottom: 10,
+            padding: "8px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(245,158,11,0.35)",
+            background: "rgba(120,53,15,0.35)",
+            color: "#fbbf24",
+            fontSize: 12,
+            fontWeight: 600,
+            lineHeight: 1.4,
+          }}
+        >
+          {staleSoft.map((b) => `${b.label} ${b.age}`).join(" · ")}
+          {" — last Betstamp print, not a frozen Refresh. Last-tick in the header is SSE (Pinnacle / PMs). Soft books often do not tick live."}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+        {books.map((b) => {
+          const row = metrics.perBook[b.key];
+          return (
+            <span key={b.key} data-book-age={b.key} style={{ fontSize: 10, color: "#9ca3af", fontFamily: "'JetBrains Mono', monospace" }}>
+              {b.label} {row ? fmtMs(nowMs - row.lastAt) : "—"}
+            </span>
+          );
+        })}
+      </div>
+      {!!metrics.ticks.length && (
+        <div data-tick-log="true" style={{ marginTop: 10, maxHeight: 92, overflow: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#9ca3af" }}>
+          {metrics.ticks.slice(0, 12).map((t, i) => (
+            <div key={`${t.t}-${i}`}>
+              {fmtClock(t.t)}  {(bookByKey(t.bookKey)?.label || t.bookKey || "").padEnd(10)}  {t.label}  {formatAmericanOdds(t.price)}
+              {t.lagMs != null ? `  lag ${fmtMs(t.lagMs)}` : ""}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const books = useMemo(() => visibleBetstampBooks(user), [user?.id, user?.email]);
   const bookIds = useMemo(() => books.map((b) => b.id), [books]);
@@ -386,10 +522,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const [missingKey, setMissingKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [streamStatus, setStreamStatus] = useState("idle");
-  const [tickStats, setTickStats] = useState(() => emptyTickStats());
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [snapshotAt, setSnapshotAt] = useState(null);
   const gamesRef = useRef([]);
+  const tickSinkRef = useRef(null);
+  const registerTickSink = useCallback((fn) => { tickSinkRef.current = fn; }, []);
   const fetchGen = useRef(0);
   const altCacheRef = useRef(new Map());
   const altFetchGen = useRef(0);
@@ -406,7 +543,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const [localRefresh, setLocalRefresh] = useState(0);
   const boardRefreshKey = Number(refreshKey) + localRefresh;
 
-  useEffect(() => { gamesRef.current = games; }, [games]);
+  const commitGames = (next, { force = false } = {}) => {
+    const prev = gamesRef.current;
+    gamesRef.current = next;
+    if (!force && liveBoardPaintKey(prev) === liveBoardPaintKey(next)) return false;
+    setGames(next);
+    return true;
+  };
 
   useEffect(() => {
     setSelectedBooks(new Set(books.map((b) => b.key)));
@@ -417,7 +560,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   }, [user?.id, user?.email]);
 
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 200);
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -428,7 +571,6 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setLoading(true);
     setLoadError(null);
     setMissingKey(false);
-    setTickStats(emptyTickStats());
     setSnapshotAt(null);
     setStreamStatus(liveOnly ? "connecting" : "idle");
 
@@ -444,7 +586,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           setMissingKey(true);
           setLoadError(body.error || "BETSTAMP_API_KEY is not set");
           if (showLoading) {
-            setGames([]);
+            commitGames([], { force: true });
             setLoading(false);
           }
           return false;
@@ -452,7 +594,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         if (!res.ok || body.ok === false) {
           if (showLoading) {
             setLoadError(body.error || `Snapshot failed (${res.status})`);
-            setGames([]);
+            commitGames([], { force: true });
             setLoading(false);
           }
           return false;
@@ -464,8 +606,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           teams: body.teams,
           nowMs: fetchedAt,
         });
-        setGames(next);
-        gamesRef.current = next;
+        commitGames(next, { force: true });
         setSnapshotAt(fetchedAt);
         setLoadError(null);
         if (showLoading) setLoading(false);
@@ -522,10 +663,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               teams: body.teams,
               nowMs: fetchedAt,
             });
-            if (next !== gamesRef.current) {
-              gamesRef.current = next;
-              setGames(next);
-            }
+            commitGames(next);
             setSnapshotAt(fetchedAt);
           })
           .catch(() => {})
@@ -555,9 +693,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               allowNewGames: false,
             });
             if (!applied.length) return;
-            gamesRef.current = next;
-            setGames(next);
-            setTickStats((prev) => recordTicks(prev, applied, { receivedAt: recv }));
+            commitGames(next);
+            tickSinkRef.current?.(applied, recv);
           },
         });
       } catch (err) {
@@ -729,7 +866,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       return matchesBoardSearch(g, q);
     });
     return filterHiddenOddsGames(onBoard, hiddenKeys);
-  }, [games, boardSport, liveOnly, search, nowMs, hiddenKeys]);
+    // LIVE rows ignore `now` (is_live short-circuit). Do not rebuild the
+    // slate on the age clock — that remounted every odds cell ~1s.
+  }, [games, boardSport, liveOnly, search, hiddenKeys, liveOnly ? 0 : nowMs]);
 
   const orderedGames = useMemo(
     () => applyGameRowOrder(filteredGames, boardOrder.gamesBySlate[slateKey] || []),
@@ -813,7 +952,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       if (!gameVisibleOnBoard(g, { liveOnly, now: nowMs })) return false;
       return isHiddenOddsGame(hiddenKeys, g.id);
     });
-  }, [games, boardSport, liveOnly, nowMs, hiddenKeys]);
+  }, [games, boardSport, liveOnly, hiddenKeys, liveOnly ? 0 : nowMs]);
 
   const grouped = groupGamesPreservingOrder(orderedGames, (g) => (
     g.is_live ? "Live now" : formatDateGroup(g.commence_time || Date.now())
@@ -825,11 +964,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const bestColWidth = OBB_BEST_COL_WIDTH;
   const tableWidth = obbTableWidth(visibleBooks);
   const colWidthFor = (bookKey) => obbColWidth(bookKey);
-  const metrics = summarizeTickStats(tickStats, nowMs);
-  const staleSoft = liveOnly ? staleLiveBookLabels(games, books, nowMs) : [];
+  const ageNowMs = Math.floor(nowMs / 1000) * 1000;
 
   const stackedBest = bestView === "stacked";
-  const liveBestOpts = { nowMs, hiddenKeys, stackedBest };
+  const liveBestOpts = { nowMs: ageNowMs, hiddenKeys, stackedBest };
 
   const getCell = (game, bookKey) => getOddsBoardCell({
     game,
@@ -840,16 +978,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     ...liveBestOpts,
   });
 
-  const sideStyle = (isBestCol, isBestCell, empty) => ({
-    padding: "3px 4px",
-    lineHeight: 1.15,
-    borderBottom: "1px solid rgba(255,255,255,0.03)",
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: 13,
-    fontWeight: 700,
-    color: empty ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed",
-    background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent",
-  });
+  const sideStyle = BOARD_SIDE_STYLE;
 
   const isBestHighlight = (rowGame, marketKey, b, cell, which, singleBest, stacks) => {
     if (b.key === "best") return false;
@@ -871,7 +1000,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       showBestMark
       showWinProb={cellShowsWinProb("best", stack?.books)}
       updatedAt={bestLineUpdatedAt(rowGame, field, stack?.books)}
-      nowMs={nowMs}
+      nowMs={ageNowMs}
       ageTitle="Newest update among books offering this best price"
       flashKey={`${rowGame.id}:best:${field}:${stack?.line ?? stack?.point ?? "none"}`}
     />
@@ -940,7 +1069,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       showBestMark: isBestCol,
       showWinProb: cellShowsWinProb(b.key, which === "top" ? cell.topBooks : cell.botBooks),
       updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
-      nowMs,
+      nowMs: ageNowMs,
       ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
       suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
       flashKey: `${rowGame.id}:${marketKey}:${b.key}:${which}`,
@@ -1095,6 +1224,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
       data-live-best-break-age-ms={LIVE_BEST_ODDS_BREAK_MAX_AGE_MS}
       data-live-reconcile-ms={BETSTAMP_LIVE_RECONCILE_MS}
+      data-live-paint-key={liveBoardPaintKey(games) ? "1" : "0"}
     >
       <style>{`
         .obb-side, .obb-game { position: relative; }
@@ -1308,94 +1438,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         </div>
       </div>
 
-      <div
-        data-tick-metrics="true"
-        style={{
-          marginBottom: 16,
-          padding: "12px 14px",
-          borderRadius: 12,
-          border: "1px solid rgba(16,185,129,0.18)",
-          background: "rgba(16,185,129,0.05)",
-        }}
-      >
-        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Stream</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: streamStatus === "live" ? "#34d399" : "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
-              {liveOnly ? streamStatus : "snapshot"}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>
-              {liveOnly ? "Reconciled" : "Refreshed"}
-            </div>
-            <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
-              {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
-            <div data-last-tick-age style={{ fontSize: 20, fontWeight: 800, color: ageTone(metrics.lastTickAgeMs), fontFamily: "'JetBrains Mono', monospace" }}>
-              {liveOnly ? fmtMs(metrics.lastTickAgeMs) : "—"}
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>p50 inter-arrival</div>
-            <div data-p50 style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p50InterArrivalMs)}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>p95 inter-arrival</div>
-            <div data-p95 style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p95InterArrivalMs)}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Tick lag</div>
-            <div data-tick-lag style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.lastLagMs)}</div>
-          </div>
-          <div>
-            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Ticks</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{metrics.eventCount}</div>
-          </div>
-        </div>
-        {staleSoft.length > 0 && (
-          <div
-            data-soft-book-stale={staleSoft.map((b) => b.key).join(",")}
-            style={{
-              marginBottom: 10,
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid rgba(245,158,11,0.35)",
-              background: "rgba(120,53,15,0.35)",
-              color: "#fbbf24",
-              fontSize: 12,
-              fontWeight: 600,
-              lineHeight: 1.4,
-            }}
-          >
-            {staleSoft.map((b) => `${b.label} ${b.age}`).join(" · ")}
-            {" — last Betstamp print, not a frozen Refresh. Last-tick in the header is SSE (Pinnacle / PMs). Soft books often do not tick live."}
-          </div>
-        )}
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          {books.map((b) => {
-            const row = metrics.perBook[b.key];
-            return (
-              <span key={b.key} data-book-age={b.key} style={{ fontSize: 10, color: "#9ca3af", fontFamily: "'JetBrains Mono', monospace" }}>
-                {b.label} {row ? fmtMs(nowMs - row.lastAt) : "—"}
-              </span>
-            );
-          })}
-        </div>
-        {!!metrics.ticks.length && (
-          <div data-tick-log="true" style={{ marginTop: 10, maxHeight: 92, overflow: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#9ca3af" }}>
-            {metrics.ticks.slice(0, 12).map((t, i) => (
-              <div key={`${t.t}-${i}`}>
-                {fmtClock(t.t)}  {(bookByKey(t.bookKey)?.label || t.bookKey || "").padEnd(10)}  {t.label}  {formatAmericanOdds(t.price)}
-                {t.lagMs != null ? `  lag ${fmtMs(t.lagMs)}` : ""}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <LiveTickStrip
+        liveOnly={liveOnly}
+        books={books}
+        games={games}
+        snapshotAt={snapshotAt}
+        streamStatus={streamStatus}
+        register={registerTickSink}
+        resetKey={`${boardSport}:${bookIdsKey}:${boardRefreshKey}`}
+      />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {BETSTAMP_SPORTS.map((s) => (
@@ -1704,7 +1755,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board}
         {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
         {" · "}Best names the winning book in full (FanDuel, not FD) with its logo; +N if tied
-        {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). OFF / empty cells do not flash
+        {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). Same-price ticks, age-only heartbeats, and the 1s clock do not flash or remount the grid. OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
         {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default}

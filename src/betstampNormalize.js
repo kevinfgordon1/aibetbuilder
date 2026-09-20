@@ -271,6 +271,47 @@ const BOARD_QUOTE_SPECS = [
   { betType: "total", side: "under", field: "tot_under", lineField: "tot_line" },
 ];
 
+const PAINT_ODDS_FIELDS = [
+  "ml_away", "ml_home", "ml_draw",
+  "spr_away", "spr_away_line", "spr_home", "spr_home_line",
+  "tot_over", "tot_under", "tot_line",
+];
+
+// Display identity for the live grid. Price / line / OFF / score / break —
+// not updatedAt. Age-only SSE heartbeats must not rebuild every cell
+// (Kevin's recording: whole slate blanks ~1s then snaps back).
+export function liveBoardPaintKey(games) {
+  if (!games?.length) return "";
+  const chunks = [];
+  for (const g of games) {
+    chunks.push(
+      g?.id ?? "",
+      g?.is_live ? "1" : "0",
+      g?.away_score ?? "",
+      g?.home_score ?? "",
+      g?.status ?? "",
+      g?.period ?? "",
+      g?.is_halftime ? "1" : "0",
+      g?.in_break ? "1" : "0",
+    );
+    const odds = g?.bookOdds || {};
+    const sus = g?.bookLineSuspended || {};
+    const books = Object.keys(odds).sort();
+    for (const book of books) {
+      const o = odds[book] || {};
+      const s = sus[book] || {};
+      chunks.push(book);
+      for (const field of PAINT_ODDS_FIELDS) {
+        chunks.push(o[field] ?? "");
+      }
+      for (const field of PAINT_ODDS_FIELDS) {
+        chunks.push(s[field] ? "1" : "0");
+      }
+    }
+  }
+  return chunks.join("\x1f");
+}
+
 export function listedBoardQuotes(game) {
   const out = [];
   for (const [bookKey, odds] of Object.entries(game?.bookOdds || {})) {
