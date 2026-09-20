@@ -373,8 +373,9 @@ function ageTone(ms) {
 }
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
-  const books = useMemo(() => visibleBetstampBooks(user), [user]);
+  const books = useMemo(() => visibleBetstampBooks(user), [user?.id, user?.email]);
   const bookIds = useMemo(() => books.map((b) => b.id), [books]);
+  const bookIdsKey = bookIds.join(",");
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
@@ -521,8 +522,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               teams: body.teams,
               nowMs: fetchedAt,
             });
-            gamesRef.current = next;
-            setGames(next);
+            if (next !== gamesRef.current) {
+              gamesRef.current = next;
+              setGames(next);
+            }
             setSnapshotAt(fetchedAt);
           })
           .catch(() => {})
@@ -549,6 +552,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             const { games: next, applied } = applyStreamMarkets(gamesRef.current, markets, {
               receivedAt: recv,
               nowMs: receivedAt,
+              allowNewGames: false,
             });
             if (!applied.length) return;
             gamesRef.current = next;
@@ -582,7 +586,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       clearTimeout(timer);
       clearInterval(pollTimer);
     };
-  }, [boardSport, liveOnly, bookIds, boardRefreshKey]);
+  }, [boardSport, liveOnly, bookIdsKey, boardRefreshKey]);
 
   useEffect(() => {
     altFetchGen.current += 1;
@@ -1610,8 +1614,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 </td>
               </tr>
             )}
-            {grouped.map((block, bi) => (
-              <Fragment key={`${block.dateKey}-${block.games[0]?.id || bi}`}>
+            {grouped.map((block) => (
+              <Fragment key={block.dateKey}>
                 <tr style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                   <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{block.dateKey}</td>
                 </tr>
@@ -1691,7 +1695,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
         Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
         {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
-        {" · "}LIVE uses SSE for ticks plus a 10s REST reconcile (refresh=1, no 5-minute cache) — quieter soft books take a newer Betstamp updated_at from that snap; a book/side Betstamp no longer lists (or marks suspended, or OTB with no price) shows a clear OFF / off-the-board cell, not a dash. A priced is_otb quote still shows. A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend
+        {" · "}LIVE uses SSE for ticks plus a 10s REST reconcile (refresh=1, no 5-minute cache) — quieter soft books take a newer Betstamp updated_at from that snap; a book/side missing from several reconciles (or an explicit suspend / taken_down) shows OFF / off-the-board, not a dash. A priced is_otb quote still shows. A live unpriced is_otb tick does not yank a held print (that flap was the spasm). A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend. An empty or fixture-less snap is a no-op
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX / Underdog Predict also show implied win probability (same American → % as the public board)
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}

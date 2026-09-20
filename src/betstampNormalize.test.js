@@ -13,7 +13,10 @@ import {
   reconcileLiveGames,
   marketIsOffered,
   marketIsOtB,
+  marketIsExplicitlySuspended,
   marketHasOfferableOdds,
+  quoteLastSeenMs,
+  fixtureIdsFromMarkets,
   quoteOfferKey,
   quotePresenceKey,
   listedBoardQuotes,
@@ -501,7 +504,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(betstampStreamUrl({ league: "NFL", live: true }), /book_ids/);
   assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
   assert.equal(BETSTAMP_LIVE_RECONCILE_MS, 10_000);
-  assert.ok(BETSTAMP_RECONCILE_CLEAR_GRACE_MS >= 0 && BETSTAMP_RECONCILE_CLEAR_GRACE_MS <= 10_000);
+  assert.equal(BETSTAMP_RECONCILE_CLEAR_GRACE_MS, 25_000);
 }
 
 {
@@ -568,6 +571,11 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(marketIsOffered({ odds: 1.91, active: false }), false);
   assert.equal(marketIsOffered({ odds: 1.91, status: "open" }), true);
   assert.equal(marketIsOtB({ is_otb: true }), true);
+  assert.equal(marketIsExplicitlySuspended({ is_otb: true }), false, "is_otb alone is not a suspend");
+  assert.equal(marketIsExplicitlySuspended({ is_otb: true, odds: null }), false);
+  assert.equal(marketIsExplicitlySuspended({ status: "suspended" }), true);
+  assert.equal(marketIsExplicitlySuspended({ is_suspended: true, odds: 1.91 }), true);
+  assert.equal(marketIsExplicitlySuspended({ active: false }), true);
   assert.equal(marketHasOfferableOdds({ odds: 1.09 }), true);
   assert.equal(marketHasOfferableOdds({ odds: null }), false);
   assert.equal(marketIsLiveQuote({ is_live: true }), true);
@@ -633,9 +641,19 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(lineUpdatedAt(moved[0], "draftkings", "ml_away"), Date.parse("2026-09-14T20:10:10.000Z"));
   assert.equal(moved[0].bookOdds.fanduel.ml_away, 105);
 
-  // Missing from the snapshot: clear the zombie, mark OFF, exclude from Best.
+  // One thin snap inside last-seen grace must not yank a quiet book (the spasm).
+  const heldThin = reconcileLiveGames(confirmed, {
+    nowMs: now + 20_000,
+    fixtures: [fixture],
+    markets: [fdAway],
+  });
+  assert.equal(heldThin[0].bookOdds.draftkings.ml_away, 120, "miss inside last-seen grace keeps held print");
+  assert.equal(lineIsSuspended(heldThin[0], "draftkings", "ml_away"), false);
+  assert.equal(quoteLastSeenMs(heldThin[0], "draftkings", "ml_away"), now + 16_000);
+
+  // Missing past last-seen grace: clear the zombie, mark OFF, exclude from Best.
   const cleared = reconcileLiveGames(confirmed, {
-    nowMs: now + 32_000,
+    nowMs: now + 42_000,
     fixtures: [fixture],
     markets: [fdAway],
   });
@@ -644,7 +662,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(lineIsSuspended(cleared[0], "draftkings", "ml_away"), true);
   assert.equal(lineUpdatedAt(cleared[0], "draftkings", "ml_away"), null);
   const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
-  const liveOpts = { nowMs: now + 32_000, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+  const liveOpts = { nowMs: now + 42_000, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
   const bestAfterClear = getOddsBoardCell({
     game: cleared[0], bookKey: "best", market: "ml",
     selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS, ...liveOpts,
@@ -861,8 +879,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       odds: null,
       is_otb: true,
     }], { receivedAt: now + 1_000 });
-    assert.equal(nullOff[0].bookOdds.fanduel.spr_away, null);
-    assert.equal(lineIsSuspended(nullOff[0], "fanduel", "spr_away"), true);
+    assert.equal(nullOff[0].bookOdds.fanduel.spr_away, decimalToAmerican(1.09), "live unpriced is_otb does not yank a held print");
+    assert.equal(lineIsSuspended(nullOff[0], "fanduel", "spr_away"), false);
 
     const { games: susOff } = applyStreamMarkets(games, [{
       ...fdAway,
@@ -872,9 +890,55 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
     assert.equal(lineIsSuspended(susOff[0], "fanduel", "spr_away"), true);
   }
 
-  // markets == null must not wipe the board (failed/incomplete payload).
+  // markets == null / [] must not wipe the board (failed/incomplete payload).
   const noop = reconcileLiveGames(games, { nowMs: now + 50_000, markets: null });
   assert.equal(noop[0].bookOdds.draftkings.ml_away, 120);
+  const emptyList = reconcileLiveGames(games, { nowMs: now + 50_000, markets: [] });
+  assert.equal(emptyList, games, "empty markets list is a same-ref no-op");
+  assert.equal(emptyList[0].bookOdds.draftkings.ml_away, 120);
+
+  // Fixture the snap never mentioned is incomplete, not a mass OFF.
+  assert.deepEqual([...fixtureIdsFromMarkets([{ ...fdAway, fixture_id: "other-live" }])], ["other-live"]);
+  const omitted = reconcileLiveGames(games, {
+    nowMs: now + 80_000,
+    fixtures: [fixture],
+    markets: [{ ...fdAway, fixture_id: "other-live" }],
+  });
+  const omittedHeld = omitted.find((g) => g.id === "fix-recon");
+  assert.equal(omittedHeld.bookOdds.draftkings.ml_away, 120, "unmentioned live fixture keeps held quotes");
+  assert.equal(omittedHeld.bookOdds.fanduel.ml_away, 105);
+  assert.equal(lineIsSuspended(omittedHeld, "draftkings", "ml_away"), false);
+
+  // Quiet book's Betstamp updated_at is minutes old; last-seen grace still holds.
+  assert.equal(quoteLastSeenMs(games[0], "draftkings", "ml_away"), now);
+  const stalePrint = reconcileLiveGames(games, {
+    nowMs: now + 10_000,
+    fixtures: [fixture],
+    markets: [fdAway],
+  });
+  assert.equal(stalePrint[0].bookOdds.draftkings.ml_away, 120, "stale updated_at does not expire last-seen grace");
+  assert.equal(lineIsSuspended(stalePrint[0], "draftkings", "ml_away"), false);
+
+  // Oscillating live is_otb ticks must not flap the cell OFF/ON.
+  let flapping = games;
+  for (let i = 0; i < 6; i++) {
+    const { games: next } = applyStreamMarkets(flapping, [{
+      ...dkAway,
+      odds: i % 2 ? null : 2.20,
+      is_otb: true,
+      updated_at: new Date(now + i * 400).toISOString(),
+    }], { receivedAt: now + i * 400 });
+    flapping = next;
+    assert.equal(flapping[0].bookOdds.draftkings.ml_away, 120, `otb flap ${i} keeps held ML`);
+    assert.equal(lineIsSuspended(flapping[0], "draftkings", "ml_away"), false);
+  }
+
+  const { games: noStub } = applyStreamMarkets(games, [{
+    ...dkAway,
+    fixture_id: "ghost-fix",
+    is_live: true,
+  }], { receivedAt: now, allowNewGames: false });
+  assert.equal(noStub.some((g) => String(g.id) === "ghost-fix"), false, "live board does not inject stub rows");
 
   // Pregame rebuild drops a book that disappeared from the snapshot.
   const pregameFix = {
@@ -962,8 +1026,16 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(stamp, /bookInitials/);
   assert.match(stamp, /data-live-reconcile-ms/);
   assert.match(stamp, /no longer lists/);
-  assert.match(stamp, /OTB with no price/);
+  assert.match(stamp, /unpriced is_otb tick does not yank/);
   assert.match(stamp, /priced is_otb quote still shows/);
+  assert.match(stamp, /allowNewGames: false/);
+  assert.match(stamp, /bookIdsKey/);
+  assert.match(stamp, /key=\{block\.dateKey\}/);
+  assert.doesNotMatch(stamp, /block\.games\[0\]\?\.id/);
+  assert.match(liveSrc, /bookLineConfirmedAt/);
+  assert.match(liveSrc, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS/);
+  assert.match(envEx, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS=/);
+  assert.doesNotMatch(envEx, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS=\d/);
   assert.match(stamp, /setInterval\(\(\) => \{/);
   assert.match(stamp, /if \(!liveOnly\) \{\s*pollTimer = setInterval/s);
   assert.match(stamp, /clearInterval\(pollTimer\)/);
