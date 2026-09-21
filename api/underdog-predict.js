@@ -7,11 +7,12 @@
 // A side whose quote updated_at is older than 24 hours
 // (UNDERDOG_BOARD_OMIT_MS) is omitted (missing timestamps stay). A side
 // aged 1–24 hours stays in this payload; Promo ranking still skips it
-// after 1 hour (UNDERDOG_STALE_MS). That is per side: Miami −1112 from
-// match 183027 (updated_at 2026-09-13, ~8d) is dropped while a fresh
-// Central Michigan quote on the same game can remain. Two-way moneylines
-// whose implied probabilities sum outside 0.80–1.22 are omitted
-// (Akron −527 / Central Michigan −715). Phone PE only.
+// after 1 hour (UNDERDOG_STALE_MS). Two-way moneylines whose implied
+// probabilities sum outside 0.80–1.22 are omitted
+// (Akron −527 / Central Michigan −715). After those filters, h2h sides
+// with |american| >= 2000 are omitted (phone caps +3230 and −10000),
+// and a moneyline with only one side left is omitted. Spreads and totals
+// on that game stay. A normal −110 / −110 pair stays. Phone PE only.
 // Defaults (override with server env, never VITE_):
 //   UNDERDOG_STATE_CONFIG_ID=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
 //   UNDERDOG_PRODUCT_EXPERIENCE_ID=018e1234-5678-9abc-def0-123456789009

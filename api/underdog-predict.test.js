@@ -734,11 +734,7 @@ function linesFor(sport) {
       ],
     });
     const priced = gamesFromContentLines(miami, 'CFB', now);
-    assert.equal(priced.length, 1);
-    assert.equal(priced[0].matchId, 183027);
-    assert.equal(priced[0].sport, 'NCAAF');
-    assert.deepEqual(priced[0].lines.map((l) => l.american), [3230], 'stale Miami −1112 is omitted; fresh CMU stays');
-    assert.equal(priced[0].lines[0].name, 'Central Michigan Chippewas');
+    assert.equal(priced.length, 0, 'CMU +3230 is omitted after stale Miami −1112 leaves a one-sided moneyline');
     const akronGames = gamesFromContentLines(akron, 'CFB', now);
     assert.equal(akronGames.length, 1);
     assert.ok(akronGames[0].lines.every((l) => l.market === 'spreads'), 'incoherent −527 / −715 moneyline is omitted; spread stays');
@@ -760,10 +756,7 @@ function linesFor(sport) {
     };
     const res = mockRes();
     await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn, now });
-    const game = res.body.games.find((g) => g.matchId === 183027);
-    assert.ok(game);
-    assert.equal(game.lines.some((l) => l.american === -1112), false, 'API omits the 8-day Miami side');
-    assert.equal(game.lines.find((l) => l.name === 'Central Michigan Chippewas').american, 3230);
+    assert.equal(res.body.games.find((g) => g.matchId === 183027), undefined, 'API omits the CMU +3230 orphan after the 8-day Miami side');
     assert.equal(res.body.games.find((g) => g.matchId === 226516), undefined, 'incoherent Akron / CMU moneyline is omitted');
     const evenApi = res.body.games.find((g) => g.matchId === 183100);
     assert.equal(evenApi.lines.filter((l) => l.market === 'h2h').length, 2);
@@ -843,6 +836,163 @@ function linesFor(sport) {
     assert.equal(game.lines.find((l) => l.name === 'Pittsburgh Steelers').american, 180, '2h side is still in the API');
     assert.equal(game.lines.find((l) => l.name === 'Baltimore Ravens').american, -200, 'fresh side is still in the API');
     assert.equal(res.body.games.find((g) => g.matchId === 183201), undefined, '25h game is omitted from the API');
+    assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
+  }
+
+  {
+    // Live 2026-09-21 phone feed: +3230 (7) and −10000 (5) still passed the
+    // implied-sum check (~1.02) and one-sided leftovers stayed after the
+    // other side was board-omitted. Cap |american| >= 2000, then drop an
+    // orphan moneyline. −110 / −110 stays. Spreads and totals stay.
+    const { UNDERDOG_H2H_AMERICAN_ABS_MAX, UNDERDOG_BOARD_OMIT_MS, UNDERDOG_STALE_MS } = require('../lib/underdog-freshness');
+    assert.equal(UNDERDOG_H2H_AMERICAN_ABS_MAX, 2000);
+    assert.equal(UNDERDOG_STALE_MS, 60 * 60 * 1000);
+    assert.equal(UNDERDOG_BOARD_OMIT_MS, 24 * 60 * 60 * 1000);
+    const now = Date.parse('2026-09-21T20:20:00.000Z');
+    const fresh = new Date(now - 10 * 60 * 1000).toISOString();
+    const dayOld = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+    const capped = contentBody({
+      id: 183300,
+      sportId: 'CFB',
+      title: 'Stonehill Skyhawks @ Ohio Bobcats',
+      lines: [
+        line('STO @ OHIO Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          { ...opt('Stonehill Skyhawks', 'away', 'Stonehill to win', '+3230'), updated_at: fresh },
+          { ...opt('Ohio Bobcats', 'home', 'Ohio to win', '-10000'), updated_at: fresh },
+        ]),
+        line('STO @ OHIO Total', 'total', 'Total Points', 'total', '54.5', [
+          { ...opt('Over', 'higher', 'Over 54.5', '-110'), updated_at: fresh },
+          { ...opt('Under', 'lower', 'Under 54.5', '-110'), updated_at: fresh },
+        ]),
+      ],
+    });
+    const chalkOnly = contentBody({
+      id: 183301,
+      sportId: 'CFB',
+      title: 'South Dakota State Jackrabbits @ Ohio State Buckeyes',
+      lines: [
+        line('SDST @ OSU Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          { ...opt('Ohio State Buckeyes', 'home', 'Ohio State to win', '-10000'), updated_at: fresh },
+        ]),
+      ],
+    });
+    const longshotOnly = contentBody({
+      id: 183302,
+      sportId: 'CFB',
+      title: 'Bucknell Bison @ Pitt Panthers',
+      lines: [
+        line('BUCK @ PITT Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          { ...opt('Bucknell Bison', 'away', 'Bucknell to win', '+3230'), updated_at: fresh },
+        ]),
+        line('BUCK @ PITT Spread', 'spread', 'Spread', 'spread', '28.5', [
+          { ...opt('Bucknell Bison', 'away', 'BUCK +28.5', '-110'), updated_at: fresh },
+          { ...opt('Pitt Panthers', 'home', 'PITT -28.5', '-110'), updated_at: fresh },
+        ]),
+      ],
+    });
+    const orphan = contentBody({
+      id: 183303,
+      sportId: 'CFB',
+      title: 'Orphan Dogs @ Orphan Cats',
+      lines: [
+        line('ORP Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          { ...opt('Orphan Dogs', 'away', 'Dogs to win', '+180'), updated_at: dayOld },
+          { ...opt('Orphan Cats', 'home', 'Cats to win', '-150'), updated_at: fresh },
+        ]),
+        line('ORP Spread', 'spread', 'Spread', 'spread', '-3.5', [
+          { ...opt('Orphan Dogs', 'away', 'Dogs +3.5', '-105'), updated_at: fresh },
+          { ...opt('Orphan Cats', 'home', 'Cats -3.5', '-115'), updated_at: fresh },
+        ]),
+      ],
+    });
+    const juice = contentBody({
+      id: 183304,
+      sportId: 'CFB',
+      title: 'Juice Dogs @ Juice Cats',
+      lines: [
+        line('JCE Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          { ...opt('Juice Dogs', 'away', 'Dogs to win', '-110'), updated_at: fresh },
+          { ...opt('Juice Cats', 'home', 'Cats to win', '-110'), updated_at: fresh },
+        ]),
+      ],
+    });
+    const cmuSpread = contentBody({
+      id: 183027,
+      sportId: 'CFB',
+      title: 'Central Michigan Chippewas @ Miami (FL) Hurricanes',
+      lines: [
+        line('CMU @ MIA Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          { ...opt('Central Michigan Chippewas', 'away', 'CMU to win', '+3230'), updated_at: '2026-09-21T19:35:16.513Z' },
+          { ...opt('Miami (FL) Hurricanes', 'home', 'Miami to win', '-1112'), updated_at: '2026-09-13T02:16:09.235Z' },
+        ]),
+        line('CMU @ MIA Spread', 'spread', 'Spread', 'spread', '-21.5', [
+          { ...opt('Central Michigan Chippewas', 'away', 'CMU +21.5', '-110'), updated_at: fresh },
+          { ...opt('Miami (FL) Hurricanes', 'home', 'Miami -21.5', '-110'), updated_at: fresh },
+        ]),
+      ],
+    });
+
+    const cappedGames = gamesFromContentLines(capped, 'CFB', now);
+    assert.equal(cappedGames.length, 1);
+    assert.equal(cappedGames[0].lines.some((l) => l.american === 3230), false, '+3230 moneyline is omitted');
+    assert.equal(cappedGames[0].lines.some((l) => l.american === -10000), false, '−10000 moneyline is omitted');
+    assert.ok(cappedGames[0].lines.every((l) => l.market === 'totals'), 'capped h2h is omitted; total stays');
+    assert.equal(gamesFromContentLines(chalkOnly, 'CFB', now).length, 0, '−10000 alone is omitted');
+    const bucknell = gamesFromContentLines(longshotOnly, 'CFB', now);
+    assert.equal(bucknell[0].lines.some((l) => l.american === 3230), false, '+3230 alone is omitted');
+    assert.ok(bucknell[0].lines.every((l) => l.market === 'spreads'), 'spread stays after the capped moneyline is omitted');
+    const orphanGames = gamesFromContentLines(orphan, 'CFB', now);
+    assert.equal(orphanGames[0].lines.some((l) => l.market === 'h2h'), false, 'orphan single h2h is omitted');
+    assert.equal(orphanGames[0].lines.some((l) => l.american === -150), false);
+    assert.ok(orphanGames[0].lines.every((l) => l.market === 'spreads'));
+    const juiceGames = gamesFromContentLines(juice, 'CFB', now);
+    assert.deepEqual(juiceGames[0].lines.map((l) => l.american), [-110, -110], '−110 / −110 stays');
+    const cmu = gamesFromContentLines(cmuSpread, 'CFB', now);
+    assert.equal(cmu.length, 1);
+    assert.equal(cmu[0].lines.some((l) => l.market === 'h2h'), false, 'CMU +3230 orphan after Miami board-omit is dropped');
+    assert.equal(cmu[0].lines.some((l) => l.american === 3230 || l.american === -1112), false);
+    assert.ok(cmu[0].lines.every((l) => l.market === 'spreads'), 'CMU @ Miami spread stays');
+
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(String(url));
+      const sport = sportOf(url);
+      const filterId = filterOf(url);
+      if (String(url).includes('/lobbies/scaffolds/sports')) {
+        return jsonRes(200, scaffoldFor(sport, MONEYLINE_FILTER_IDS[sport] || MONEYLINE_FILTER_IDS.CFB));
+      }
+      if (String(url).includes('/lobbies/content/lines') && sport === 'CFB' && filterId === MONEYLINE_FILTER_IDS.CFB) {
+        return jsonRes(200, concatContent(capped, chalkOnly, longshotOnly, orphan, juice, cmuSpread));
+      }
+      if (String(url).includes('/lobbies/content/lines') && sport === 'CFB' && filterId === SPREAD_FILTER_IDS.CFB) {
+        return jsonRes(200, concatContent(longshotOnly, orphan, cmuSpread));
+      }
+      if (String(url).includes('/lobbies/content/lines') && sport === 'CFB' && filterId === TOTAL_FILTER_IDS.CFB) {
+        return jsonRes(200, capped);
+      }
+      return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn, now });
+    const stonehill = res.body.games.find((g) => g.matchId === 183300);
+    assert.ok(stonehill);
+    assert.equal(stonehill.lines.some((l) => l.american === 3230 || l.american === -10000), false);
+    assert.ok(stonehill.lines.every((l) => l.market === 'totals'));
+    assert.equal(res.body.games.find((g) => g.matchId === 183301), undefined, 'API omits Ohio State −10000');
+    const pitt = res.body.games.find((g) => g.matchId === 183302);
+    assert.ok(pitt);
+    assert.equal(pitt.lines.some((l) => l.market === 'h2h' || l.american === 3230), false);
+    assert.ok(pitt.lines.every((l) => l.market === 'spreads'));
+    const orphanApi = res.body.games.find((g) => g.matchId === 183303);
+    assert.ok(orphanApi);
+    assert.equal(orphanApi.lines.some((l) => l.market === 'h2h'), false, 'API omits the orphan moneyline');
+    assert.ok(orphanApi.lines.every((l) => l.market === 'spreads'));
+    const juiceApi = res.body.games.find((g) => g.matchId === 183304);
+    assert.deepEqual(juiceApi.lines.map((l) => l.american), [-110, -110]);
+    const cmuApi = res.body.games.find((g) => g.matchId === 183027);
+    assert.ok(cmuApi, 'CMU @ Miami stays for the spread');
+    assert.equal(cmuApi.lines.some((l) => l.market === 'h2h'), false);
+    assert.equal(cmuApi.lines.some((l) => l.american === 3230 || l.american === -1112), false);
     assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
   }
 
