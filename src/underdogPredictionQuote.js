@@ -28,11 +28,13 @@
 //       match_id on that URL is ignored.
 //
 // Game-moneyline app prices therefore are not durably anonymous. Promo
-// does not log in. Cash uses a joined prediction quote when one is
-// supplied, and otherwise the Betstamp sticker plus the Kalshi-style
-// r=0.1015 fallback. Free bets stay on the gross sticker. A prediction
-// quote with no sticker is not turned into a leg: free bets settle at
-// gross, and the phone price is not that gross.
+// does not log in. Every promo path (free bet, cash, boost, no-sweat)
+// uses a joined prediction quote when one is supplied, and otherwise the
+// Betstamp sticker plus the Kalshi-style r=0.1015 fallback. The free-bet
+// formula is unchanged; the American it consumes is this phone price.
+// A prediction quote with no sticker can still form a Promo leg at that
+// phone American. The Odds Board keeps the gross sticker and does not
+// invent a bookmaker from prediction-only quotes.
 
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
@@ -223,6 +225,92 @@ function quoteMatchesOutcome(quote, outcome, marketKey, away, home) {
   return namesMatch(quote.name, outcome.name);
 }
 
+function quotesOf(payload) {
+  if (!payload) return [];
+  return Array.isArray(payload) ? payload : predictionQuotesFromPayload(payload);
+}
+
+function canonicalTeam(name, away, home) {
+  if (namesMatch(name, away)) return away;
+  if (namesMatch(name, home)) return home;
+  return null;
+}
+
+function sideLabel(quote) {
+  const raw = `${quote && quote.choice ? quote.choice : ""} ${quote && quote.name ? quote.name : ""}`.toLowerCase();
+  if (/\b(over|higher)\b/.test(raw)) return "Over";
+  if (/\b(under|lower)\b/.test(raw)) return "Under";
+  return null;
+}
+
+function pushUnique(list, outcome) {
+  if (!outcome || !outcome.name || outcome.price == null) return;
+  const pointKey = outcome.point == null ? "" : String(outcome.point);
+  const key = `${outcome.name}\0${pointKey}`;
+  if (list.some((o) => `${o.name}\0${o.point == null ? "" : String(o.point)}` === key)) return;
+  list.push(outcome);
+}
+
+function phoneOutcome(name, quote, point) {
+  const out = {
+    name,
+    price: quote.american,
+    predictionAmerican: quote.american,
+  };
+  if (quote.probability != null) out.contractProbability = quote.probability;
+  if (point != null) out.point = point;
+  return out;
+}
+
+// Phone American is both outcome.price and predictionAmerican so Promo does
+// not fee-adjust an already-true quote. Futures are omitted. No Betstamp
+// sticker is required. The Odds Board does not call this.
+export function predictionOnlyBookmakerFromQuotes(game, payload) {
+  const quotes = quotesOf(payload);
+  if (!game || !quotes.length) return null;
+  const away = game.away_team;
+  const home = game.home_team;
+  const h2h = [];
+  const spreads = [];
+  const totals = [];
+  const teamTotals = [];
+  for (const quote of quotes) {
+    if (!quote || quote.american == null || quote.market === "future") continue;
+    if (quote.market === "h2h" || quote.market == null) {
+      if (quote.market == null && SIDE_CHOICES.has(String(quote.choice || "").toLowerCase())) continue;
+      const name = canonicalTeam(quote.name, away, home);
+      if (!name) continue;
+      pushUnique(h2h, phoneOutcome(name, quote));
+      continue;
+    }
+    if (quote.market === "spreads" && quote.point != null) {
+      const name = canonicalTeam(quote.name, away, home);
+      if (!name) continue;
+      pushUnique(spreads, phoneOutcome(name, quote, quote.point));
+      continue;
+    }
+    if (quote.market === "totals" && quote.point != null) {
+      const side = sideLabel(quote);
+      if (!side) continue;
+      pushUnique(totals, phoneOutcome(side, quote, quote.point));
+      continue;
+    }
+    if (quote.market === "team_total" && quote.point != null) {
+      const side = sideLabel(quote);
+      const team = canonicalTeam(quote.name, away, home);
+      if (!side || !team) continue;
+      pushUnique(teamTotals, { ...phoneOutcome(side, quote, quote.point), description: team });
+    }
+  }
+  const markets = [];
+  if (h2h.length) markets.push({ key: "h2h", outcomes: h2h });
+  if (spreads.length) markets.push({ key: "spreads", outcomes: spreads });
+  if (totals.length) markets.push({ key: "totals", outcomes: totals });
+  if (teamTotals.length) markets.push({ key: "team_totals", outcomes: teamTotals });
+  if (!markets.length) return null;
+  return { key: UNDERDOG_PREDICT_BOOK_KEY, markets };
+}
+
 function attachQuote(outcome, marketKey, quotes, away, home) {
   if (!outcome || outcome.price == null || !outcome.name) return outcome;
   const hit = quotes.find((q) => quoteMatchesOutcome(q, outcome, marketKey, away, home));
@@ -232,9 +320,10 @@ function attachQuote(outcome, marketKey, quotes, away, home) {
   return next;
 }
 
-// Sticker stays on outcome.price. predictionAmerican is the cash phone
-// price. No Underdog bookmaker → game unchanged (prediction-only is not
-// a free-bet or cash leg).
+// Sticker stays on outcome.price when a Betstamp bookmaker is already
+// present. predictionAmerican is the phone price for every promo path.
+// This attach step does not invent a bookmaker. Prediction-only Promo
+// legs use predictionOnlyBookmakerFromQuotes.
 export function applyUnderdogLobbyPredictions(game, payload) {
   if (!game || typeof game !== "object" || !payload) return game;
   const quotes = Array.isArray(payload) ? payload : predictionQuotesFromPayload(payload);

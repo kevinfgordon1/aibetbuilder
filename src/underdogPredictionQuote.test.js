@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   applyUnderdogLobbyPredictions,
   classifyUnderdogLineMarket,
+  predictionOnlyBookmakerFromQuotes,
   predictionQuoteFromOption,
   predictionQuotesFromPayload,
 } from "./underdogPredictionQuote.js";
@@ -120,7 +121,19 @@ const giantsOption = {
     home_team: "Los Angeles Rams",
     bookmakers: [{ key: "draftkings", markets: [] }],
   }, payload);
-  assert.equal(noBook.bookmakers.length, 1, "prediction-only does not invent an Underdog leg");
+  assert.equal(noBook.bookmakers.length, 1, "attach does not invent a bookmaker");
+  const synthesized = predictionOnlyBookmakerFromQuotes({
+    away_team: "New York Giants",
+    home_team: "Los Angeles Rams",
+  }, payload);
+  assert.equal(synthesized.key, "underdog_predict");
+  const synth = synthesized.markets.find((m) => m.key === "h2h").outcomes;
+  const giantsPhone = synth.find((o) => o.name === "New York Giants");
+  assert.equal(giantsPhone.price, 245, "prediction-only leg uses the phone American");
+  assert.equal(giantsPhone.predictionAmerican, 245);
+  assert.equal(giantsPhone.contractProbability, 0.27);
+  assert.equal(synth.find((o) => o.name === "Los Angeles Rams").price, -313);
+  assert.equal(synthesized.markets.some((m) => (m.outcomes || []).some((o) => o.price === 1500)), false, "futures are not game legs");
 }
 
 console.log("underdogPredictionQuote.test.js ok");

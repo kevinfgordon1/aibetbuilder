@@ -603,8 +603,9 @@ function passesOddsBounds(odds, minOdds, maxOdds) {
 }
 
 function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any", maxLegOdds = null, opts = null) {
-  // Cash / +EV uses the fee-inclusive Underdog price. Free bets pass
-  // underdogCash false and keep the gross sticker.
+  // Phone American for Underdog when underdogCash is set: joined
+  // odds.prediction, else the 0.1015 fee fallback. Promo always sets it,
+  // including free bets. Omit it to keep the Betstamp sticker (Odds Board).
   const underdogCash = !!(opts && opts.underdogCash);
   const legs = [];
   const now = new Date();
@@ -1688,6 +1689,8 @@ export default function App() {
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
         bookmakerSnap,
         user,
+        undefined,
+        { predictionOnly: true },
       );
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
@@ -1695,6 +1698,8 @@ export default function App() {
         overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap),
         bookmakerSnap,
         user,
+        undefined,
+        { predictionOnly: true },
       );
       underdogOverlayAppliedRef.current = includeUnderdog;
       const nextBoard = applyTransformed(featuredRows, eventRows);
@@ -2009,7 +2014,7 @@ export default function App() {
   const dropThinPoolLegs = scanHideLowLiquidity;
   const promoLegs = useMemo(() => {
     if (waitForSoccerPm) return [];
-    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: promoType !== "freebet" });
+    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true });
     const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
