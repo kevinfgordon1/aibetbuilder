@@ -26,7 +26,7 @@ import {
   serializeAppHash,
   resolveAppHash,
 } from "./comboAccess.js";
-import { visibleBetstampBooks, visibleBetstampBookIds, UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY, BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
+import { visibleBetstampBooks, visibleBetstampBookIds, requestableBetstampBookIds, UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY, BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
 assert.equal(OWNER_EMAIL, "kev120909@gmail.com");
 assert.equal(COMBO_LOCKS_ALLOWLIST_ENV, "VITE_COMBO_LOCKS_ALLOWLIST");
@@ -118,6 +118,7 @@ assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }), false);
   assert.equal(visibleBetstampBooks(null).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), false);
   assert.equal(visibleBetstampBookIds({ email: "stranger@gmail.com" }).includes(UNDERDOG_PREDICT_BOOK_ID), false);
   assert.equal(visibleBetstampBookIds(null).includes(400), true, "BetMGM 400 is public on New Odds Board");
+  assert.equal(requestableBetstampBookIds(null).includes(400), false, "BetMGM 400 is not requested from Betstamp");
   assert.equal(visibleBetstampBooks(null).length, BETSTAMP_TRIAL_BOOKS.length - 1);
   assert.equal(UNDERDOG_PREDICT_BOOK_KEY, "underdog_predict");
 }

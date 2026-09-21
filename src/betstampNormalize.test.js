@@ -50,7 +50,7 @@ import {
   applyMarketToGame,
   marketIsLiveQuote,
 } from "./betstampNormalize.js";
-import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS, BETSTAMP_PUBLIC_BOOK_IDS, visibleBetstampBooks } from "./betstampBooks.js";
+import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS, BETSTAMP_PUBLIC_BOOK_IDS, visibleBetstampBooks, requestableBetstampBookIds } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
 import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS, oddsBoardHideKey } from "./oddsBoard.js";
 
@@ -60,6 +60,9 @@ assert.equal(BETSTAMP_TRIAL_BOOKS.length, 13);
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 400)?.key, "betmgm");
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 400)?.label, "BetMGM");
 assert.equal(visibleBetstampBooks(null).some((b) => b.key === "betmgm"), true);
+assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 400)?.betstampRequest, false);
+assert.equal(requestableBetstampBookIds(null).includes(400), false, "do not send BetMGM 400 to Betstamp");
+assert.equal(requestableBetstampBookIds(null).includes(100), true);
 assert.equal(visibleBetstampBooks(null).some((b) => b.key === "underdog_predict"), false);
 assert.equal(visibleBetstampBooks({ email: "kev120909@gmail.com" }).some((b) => b.key === "underdog_predict"), true);
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.key, "underdog_predict");
@@ -1002,6 +1005,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(app, /activeTab === "oddsBetstamp" && canSeeNewOddsBoard\(user\)/);
   assert.match(app, /<BetstampOddsBoard user=\{user\}/);
   assert.match(stamp, /visibleBetstampBooks/);
+  assert.match(stamp, /requestableBetstampBookIds/);
   assert.match(stamp, /bookIds/);
   assert.match(app, /onNavTabClick\("oddsBetstamp"/);
   assert.match(app, /href=\{tabHash\("oddsBetstamp"\)\}/);

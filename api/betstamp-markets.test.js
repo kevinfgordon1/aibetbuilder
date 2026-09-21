@@ -64,7 +64,7 @@ function mockRes() {
     const fixtureUrl = calls.find((u) => String(u).includes('/fixtures'));
     const teamUrl = calls.find((u) => String(u).includes('/teams'));
     assert.match(String(marketUrl), /book_ids=/);
-    assert.match(String(marketUrl), /400/, 'default REST book_ids include BetMGM 400');
+    assert.doesNotMatch(String(marketUrl), /400/, 'default REST book_ids omit BetMGM 400');
     assert.match(String(marketUrl), /timedelta=240/);
     assert.match(String(fixtureUrl), /timedelta=240/);
     assert.doesNotMatch(String(teamUrl), /timedelta=/);
@@ -100,6 +100,54 @@ function mockRes() {
     assert.match(marketUrl, /book_ids=196/);
     assert.doesNotMatch(marketUrl, /book_ids=196,999|100,200/);
     assert.equal(res.body.markets[0].odd_provider_id, 196);
+  }
+
+  {
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(String(url));
+      const u = String(url);
+      if (u.includes('/markets')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ markets: [{ id: 'm1', odds: 1.91, fixture_id: 'f1' }] }) };
+      }
+      if (u.includes('/fixtures')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ fixtures: [{ id: 'f1', league: 'NFL' }] }) };
+      }
+      if (u.includes('/teams')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ teams: [] }) };
+      }
+      throw new Error('unexpected ' + url);
+    };
+    const res = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', is_live: 'true', book_ids: '100,200,400' } }, res, {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real' },
+      fetchFn,
+      gapMs: 0,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.query.book_ids, '100,200');
+    const marketUrl = calls.find((u) => u.includes('/markets'));
+    assert.match(marketUrl, /book_ids=100%2C200|book_ids=100,200/);
+    assert.doesNotMatch(marketUrl, /400/);
+  }
+
+  {
+    const fetchFn = async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ error: { code: 'forbidden', book_ids: [400] } }),
+    });
+    const res = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '100,200' } }, res, {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real' },
+      fetchFn,
+      gapMs: 0,
+    });
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.ok, false);
+    assert.match(res.body.error, /forbidden/);
+    assert.doesNotMatch(res.body.error, /\[object Object\]/);
   }
 
   {

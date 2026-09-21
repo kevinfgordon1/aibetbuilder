@@ -46,6 +46,7 @@ import {
   bookByKey,
   leagueForSport,
   visibleBetstampBooks,
+  requestableBetstampBookIds,
 } from "./betstampBooks.js";
 import BookLabel from "./BookLabel.jsx";
 import {
@@ -910,7 +911,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const books = useMemo(() => visibleBetstampBooks(user), [user?.id, user?.email]);
-  const bookIds = useMemo(() => books.map((b) => b.id), [books]);
+  const bookIds = useMemo(() => requestableBetstampBookIds(user), [user?.id, user?.email]);
   const bookIdsKey = bookIds.join(",");
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
