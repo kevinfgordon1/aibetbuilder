@@ -49,6 +49,7 @@ import {
   marketUpdatedAtMs,
   applyMarketToGame,
   marketIsLiveQuote,
+  bookKeyForMarket,
 } from "./betstampNormalize.js";
 import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS, BETSTAMP_PUBLIC_BOOK_IDS, visibleBetstampBooks, requestableBetstampBookIds } from "./betstampBooks.js";
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
@@ -63,6 +64,47 @@ assert.equal(visibleBetstampBooks(null).some((b) => b.key === "betmgm"), true);
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 400)?.betstampRequest, false);
 assert.equal(requestableBetstampBookIds(null).includes(400), false, "do not send BetMGM 400 to Betstamp");
 assert.equal(requestableBetstampBookIds(null).includes(100), true);
+assert.equal(bookKeyForMarket({ odd_provider_id: 400 }), "betmgm");
+assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true, bookIds: requestableBetstampBookIds(null) }), /400/);
+assert.doesNotMatch(betstampStreamUrl({ league: "NFL", live: true, bookIds: requestableBetstampBookIds(null) }), /400/);
+{
+  const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
+  const emptyMg = {
+    id: "fix-mgm",
+    is_live: true,
+    bookOdds: { betmgm: { ml_away: null, ml_home: null, spr_away: null, spr_home: null, tot_over: null, tot_under: null } },
+    bookLineSuspended: {},
+  };
+  const mgMl = getOddsBoardCell({ game: emptyMg, bookKey: "betmgm", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
+  const mgSpr = getOddsBoardCell({ game: emptyMg, bookKey: "betmgm", market: "spr", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
+  assert.equal(mgMl.top, null);
+  assert.equal(mgMl.bot, null);
+  assert.equal(mgSpr.topLine, null);
+  const { games: withMgm } = applyStreamMarkets([{
+    id: "fix-mgm",
+    is_live: true,
+    away: "Denver Broncos",
+    home: "Kansas City Chiefs",
+    awayAbbr: "DEN",
+    homeAbbr: "KC",
+    bookOdds: { betmgm: { ml_away: null, ml_home: null } },
+    bookLineUpdatedAt: {},
+    bookLineConfirmedAt: {},
+    bookLineSuspended: {},
+  }], [{
+    odds: 1.91,
+    side: "DEN",
+    side_type: "Away",
+    bet_type: "Moneyline",
+    period: "FT",
+    is_alt: false,
+    is_live: true,
+    odd_provider_id: 400,
+    fixture_id: "fix-mgm",
+    updated_at: "2026-09-21T03:00:00.000Z",
+  }], { receivedAt: Date.parse("2026-09-21T03:00:00.000Z") });
+  assert.equal(withMgm[0].bookOdds.betmgm.ml_away, -110, "a 400 tick still maps onto the BetMGM column");
+}
 assert.equal(visibleBetstampBooks(null).some((b) => b.key === "underdog_predict"), false);
 assert.equal(visibleBetstampBooks({ email: "kev120909@gmail.com" }).some((b) => b.key === "underdog_predict"), true);
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.key, "underdog_predict");
