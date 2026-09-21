@@ -9,9 +9,17 @@ const {
   DEFAULT_CLIENT_VERSION,
   DEFAULT_PRODUCT_EXPERIENCE_ID,
   DEFAULT_STATE_CONFIG_ID,
+  INDEX_SPORTS,
+  MATCH_LIMIT,
+  MATCH_LIMIT_CEILING,
+  SPORT_BY_UNDERDOG_ID,
+  gamesWithLines,
+  indexGames,
   linesFromContent,
   matchGroupedLinesUrl,
   readConfig,
+  sportLobbyUrl,
+  widerMatchLimit,
 } = require('../lib/underdog-lobby');
 
 const PHONE_EXPERIENCE_ID = '018e1234-5678-9abc-def0-123456789009';
@@ -81,20 +89,104 @@ const scaffoldSectionsOnly = {
   sections: [{ id: 'popular', title: 'New York Giants +245', content_type: 'match_scoreboard' }],
 };
 
-const indexBody = {
-  games: [{
-    id: 178911,
-    sport_id: 'NFL',
-    status: 'scheduled',
-    full_team_names_title: 'New York Giants @ Los Angeles Rams',
-    scheduled_at: '2026-09-22T00:15:00Z',
-  }, {
-    id: 1,
-    sport_id: 'MLB',
-    status: 'scheduled',
-    full_team_names_title: 'New York Yankees @ Boston Red Sox',
-  }],
-};
+function lobbyBody(games) {
+  const body = { games: {}, match_groups: [], over_under_lines: {} };
+  for (const game of games) {
+    body.games[game.id] = {
+      id: game.id,
+      sport_id: game.sportId,
+      status: game.status || 'scheduled',
+      full_team_names_title: game.title,
+      scheduled_at: game.scheduledAt || null,
+    };
+    const ids = [];
+    for (const [i, row] of (game.lines || []).entries()) {
+      const id = `${game.id}-${i}`;
+      ids.push(id);
+      body.over_under_lines[id] = row;
+    }
+    body.match_groups.push({ id: game.id, type: 'Game', over_under_line_ids: ids });
+  }
+  return body;
+}
+
+const nflLobby = lobbyBody([{
+  id: 178911,
+  sportId: 'NFL',
+  title: 'New York Giants @ Los Angeles Rams',
+  scheduledAt: '2026-09-22T00:15:00Z',
+  lines: [
+    line('NYG @ LAR Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+      opt('New York Giants', 'away', 'Giants to win', '+245', '+252'),
+      opt('Los Angeles Rams', 'home', 'Rams to win', '-313', '-280'),
+    ]),
+    line('NYG @ LAR Spread', 'spread', 'Spread', 'spread', '-6.5', [
+      opt('New York Giants', 'away', 'NYG +6.5', '+100'),
+      opt('Los Angeles Rams', 'home', 'LAR -6.5', '-122'),
+    ]),
+  ],
+}]);
+
+const mlbLobby = lobbyBody([{
+  id: 142714,
+  sportId: 'MLB',
+  title: 'Cleveland Guardians @ Boston Red Sox',
+  scheduledAt: '2026-09-22T22:45:00Z',
+  lines: [
+    line('CLE @ BOS Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+      opt('Cleveland Guardians', 'away', 'Guardians to win', '+104'),
+      opt('Boston Red Sox', 'home', 'Red Sox to win', '-134'),
+    ]),
+  ],
+}]);
+
+const cfbLobby = lobbyBody([{
+  id: 183024,
+  sportId: 'CFB',
+  title: 'Clemson Tigers @ California Golden Bears',
+  scheduledAt: '2026-09-26T02:30:00Z',
+  lines: [
+    line('CLEM @ CAL Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+      opt('Clemson Tigers', 'away', 'Clemson to win', '-118'),
+      opt('California Golden Bears', 'home', 'Cal to win', '-113'),
+    ]),
+  ],
+}]);
+
+const fantasyOnlyLobby = lobbyBody([{
+  id: 99,
+  sportId: 'CFB',
+  title: 'Fantasy Only @ Nowhere',
+  lines: [
+    line('Fantasy Only Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+      {
+        selection_header: 'Fantasy Only',
+        choice: 'away',
+        choice_display: 'to win',
+        american_price: '+252',
+        odds: { prediction: null, fantasy: { american: '+252' } },
+      },
+    ]),
+  ],
+}]);
+
+function sportOf(url) {
+  const match = /[?&]sport_id=([A-Z0-9]+)/.exec(String(url));
+  return match ? match[1] : null;
+}
+
+function limitOf(url) {
+  const match = /[?&]match_limit=(\d+)/.exec(String(url));
+  return match ? Number(match[1]) : null;
+}
+
+function lobbiesFor(url) {
+  const sport = sportOf(url);
+  if (sport === 'NFL') return nflLobby;
+  if (sport === 'MLB') return mlbLobby;
+  if (sport === 'CFB') return cfbLobby;
+  return { games: {}, match_groups: [], over_under_lines: {} };
+}
 
 (async () => {
   {
@@ -118,6 +210,49 @@ const indexBody = {
     assert.doesNotMatch(url, /scaffolds/);
     assert.doesNotMatch(url, new RegExp(STICKER_EXPERIENCE_ID));
     assert.doesNotMatch(url, /betstamp|book_ids=196/);
+    const cfbUrl = sportLobbyUrl(cfg, 'CFB', MATCH_LIMIT);
+    assert.match(cfbUrl, /\/v1\/lobbies\/content\/match_grouped_lines\?/);
+    assert.match(cfbUrl, /sport_id=CFB/);
+    assert.match(cfbUrl, new RegExp(`match_limit=${MATCH_LIMIT}`));
+    assert.match(cfbUrl, /market_categories(?:\[\]|%5B%5D)=core/);
+    assert.match(cfbUrl, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
+    assert.match(cfbUrl, new RegExp(`state_config_id=${DEFAULT_STATE_CONFIG_ID}`));
+    assert.doesNotMatch(cfbUrl, /\/v1\/over_under_lines/);
+    assert.doesNotMatch(cfbUrl, new RegExp(STICKER_EXPERIENCE_ID));
+    assert.doesNotMatch(cfbUrl, /betstamp|book_ids=196/);
+    assert.equal(widerMatchLimit(MATCH_LIMIT, MATCH_LIMIT), MATCH_LIMIT_CEILING);
+    assert.equal(widerMatchLimit(226, MATCH_LIMIT), null);
+    assert.equal(widerMatchLimit(MATCH_LIMIT_CEILING, MATCH_LIMIT_CEILING), null);
+  }
+
+  {
+    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB']);
+    assert.equal(SPORT_BY_UNDERDOG_ID.NFL, 'NFL');
+    assert.equal(SPORT_BY_UNDERDOG_ID.CFB, 'NCAAF');
+    assert.equal(SPORT_BY_UNDERDOG_ID.MLB, 'MLB');
+    const indexed = indexGames({
+      games: [
+        { id: 178911, sport_id: 'NFL', status: 'scheduled', full_team_names_title: 'New York Giants @ Los Angeles Rams' },
+        { id: 183024, sport_id: 'CFB', status: 'scheduled', full_team_names_title: 'Clemson Tigers @ California Golden Bears' },
+        { id: 142714, sport_id: 'MLB', status: 'scheduled', full_team_names_title: 'Cleveland Guardians @ Boston Red Sox' },
+        { id: 7, sport_id: 'WNBA', status: 'scheduled', full_team_names_title: 'Dallas Wings @ Phoenix Mercury' },
+        { id: 8, sport_id: 'NFL', status: 'closed', full_team_names_title: 'Old Away @ Old Home' },
+      ],
+    });
+    assert.deepEqual(indexed.map((g) => [g.matchId, g.sport]), [
+      [178911, 'NFL'],
+      [183024, 'NCAAF'],
+      [142714, 'MLB'],
+    ]);
+    const priced = gamesWithLines(cfbLobby, 'CFB');
+    assert.equal(priced.length, 1);
+    assert.equal(priced[0].sport, 'NCAAF');
+    assert.equal(priced[0].away, 'Clemson Tigers');
+    assert.equal(priced[0].lines.find((l) => l.market === 'h2h' && l.name === 'Clemson Tigers').american, -118);
+    assert.deepEqual(gamesWithLines(fantasyOnlyLobby, 'CFB'), [], 'fantasy american is not a phone quote');
+    const mlbPriced = gamesWithLines(mlbLobby, 'MLB');
+    assert.equal(mlbPriced[0].sport, 'MLB');
+    assert.equal(mlbPriced[0].lines.find((l) => l.name === 'Cleveland Guardians').american, 104);
   }
 
   {
@@ -139,30 +274,37 @@ const indexBody = {
     const calls = [];
     const fetchFn = async (url, init) => {
       calls.push({ url: String(url), headers: (init && init.headers) || {} });
-      if (String(url).includes('/over_under_lines')) return jsonRes(200, indexBody);
-      if (String(url).includes('/lobbies/content/match_grouped_lines') && String(url).includes('match_id=178911')) {
-        return jsonRes(200, giantsContent);
-      }
+      assert.doesNotMatch(String(url), /\/v1\/over_under_lines/);
+      if (String(url).includes('/lobbies/content/match_grouped_lines')) return jsonRes(200, lobbiesFor(url));
       return jsonRes(404, { error: { detail: 'missing' } });
     };
     const res = mockRes();
     await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn });
     assert.equal(res.body.missingConfig, false);
-    assert.equal(res.body.games.length, 1);
-    const game = res.body.games[0];
+    assert.equal(res.body.configRejected, false);
+    assert.equal(res.body.games.length, 3);
+    const game = res.body.games.find((g) => g.matchId === 178911);
     const giants = game.lines.find((l) => l.name === 'New York Giants' && l.market === 'h2h');
     const rams = game.lines.find((l) => l.name === 'Los Angeles Rams' && l.market === 'h2h');
+    assert.equal(game.sport, 'NFL');
     assert.equal(giants.american, 245, 'phone odds.prediction, not fantasy +252');
     assert.equal(rams.american, -313);
     assert.notEqual(giants.american, 252);
     assert.notEqual(giants.american, 240);
-    const priceCall = calls.find((c) => c.url.includes('/lobbies/content/match_grouped_lines'));
-    assert.ok(priceCall, 'fetches match_grouped_lines');
-    assert.match(priceCall.url, new RegExp(PHONE_EXPERIENCE_ID));
-    assert.equal(priceCall.headers.accept, 'application/json');
-    assert.equal(priceCall.headers['client-type'], 'web');
-    assert.equal(priceCall.headers['client-version'], '20260918170103');
-    assert.ok(!calls.some((c) => /scaffolds|betstamp/i.test(c.url)));
+    const mlb = res.body.games.find((g) => g.sport === 'MLB');
+    assert.equal(mlb.away, 'Cleveland Guardians');
+    assert.equal(mlb.lines.find((l) => l.name === 'Cleveland Guardians').american, 104);
+    const cfb = res.body.games.find((g) => g.matchId === 183024);
+    assert.equal(cfb.sport, 'NCAAF');
+    assert.equal(cfb.lines.find((l) => l.name === 'Clemson Tigers').american, -118);
+    const sports = calls.map((c) => sportOf(c.url));
+    assert.deepEqual(sports.sort(), ['CFB', 'MLB', 'NFL']);
+    assert.ok(calls.every((c) => c.url.includes('/lobbies/content/match_grouped_lines')));
+    assert.ok(calls.every((c) => c.url.includes(PHONE_EXPERIENCE_ID)));
+    assert.equal(calls[0].headers.accept, 'application/json');
+    assert.equal(calls[0].headers['client-type'], 'web');
+    assert.equal(calls[0].headers['client-version'], '20260918170103');
+    assert.ok(!calls.some((c) => /scaffolds|betstamp|over_under_lines/i.test(c.url)));
   }
 
   {
@@ -171,7 +313,6 @@ const indexBody = {
       env: {},
       cache: new Map(),
       fetchFn: async (url) => {
-        if (String(url).includes('/over_under_lines')) return jsonRes(200, indexBody);
         if (String(url).includes('match_grouped_lines')) return jsonRes(200, scaffoldSectionsOnly);
         return jsonRes(404, {});
       },
@@ -185,8 +326,8 @@ const indexBody = {
       env: {},
       cache: new Map(),
       fetchFn: async (url) => {
-        if (String(url).includes('/over_under_lines')) return jsonRes(200, indexBody);
-        return jsonRes(404, { error: { detail: 'not found' } });
+        if (String(url).includes('match_grouped_lines')) return jsonRes(404, { error: { detail: 'not found' } });
+        return jsonRes(404, {});
       },
     });
     assert.equal(res.body.configRejected, true);
@@ -202,6 +343,61 @@ const indexBody = {
     });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.body.games, [], 'fetch failure omits Underdog');
+  }
+
+  {
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(String(url));
+      const sport = sportOf(url);
+      const limit = limitOf(url);
+      if (sport === 'CFB' && limit === 1) return jsonRes(200, cfbLobby);
+      if (sport === 'CFB' && limit === MATCH_LIMIT_CEILING) {
+        return jsonRes(200, lobbyBody([
+          cfbLobby.games[183024] && {
+            id: 183024,
+            sportId: 'CFB',
+            title: 'Clemson Tigers @ California Golden Bears',
+            lines: cfbLobby.over_under_lines['183024-0'] ? [cfbLobby.over_under_lines['183024-0']] : [],
+          },
+          {
+            id: 187129,
+            sportId: 'CFB',
+            title: 'Texas Longhorns @ Tennessee Volunteers',
+            lines: [
+              line('TEX @ TENN Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+                opt('Texas Longhorns', 'away', 'Texas to win', '+140'),
+                opt('Tennessee Volunteers', 'home', 'Tennessee to win', '-166'),
+              ]),
+            ],
+          },
+        ].filter((g) => g && g.id)));
+      }
+      if (limit === 1) return jsonRes(200, sport === 'MLB' ? mlbLobby : nflLobby);
+      return jsonRes(200, lobbiesFor(url));
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn, matchLimit: 1 });
+    assert.equal(res.body.games.filter((g) => g.sport === 'NCAAF').length, 2, 'a full limit is refetched once');
+    assert.ok(calls.some((url) => sportOf(url) === 'CFB' && limitOf(url) === 1));
+    assert.ok(calls.some((url) => sportOf(url) === 'CFB' && limitOf(url) === MATCH_LIMIT_CEILING));
+    assert.ok(res.body.games.some((g) => g.matchId === 187129 && g.sport === 'NCAAF'));
+  }
+
+  {
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, {
+      env: {},
+      cache: new Map(),
+      fetchFn: async (url) => {
+        if (sportOf(url) === 'MLB') return jsonRes(404, { error: { detail: 'not found' } });
+        return jsonRes(200, lobbiesFor(url));
+      },
+    });
+    assert.equal(res.body.configRejected, false, 'one sport 404 does not drop the others');
+    assert.equal(res.body.games.some((g) => g.sport === 'MLB'), false);
+    assert.equal(res.body.games.some((g) => g.sport === 'NFL'), true);
+    assert.equal(res.body.games.some((g) => g.sport === 'NCAAF'), true);
   }
 
   {

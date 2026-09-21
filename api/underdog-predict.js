@@ -1,7 +1,8 @@
 'use strict';
 
 // GET /api/underdog-predict — Underdog phone prices for Promo and the
-// New Odds Board. Fetches /v1/lobbies/content/match_grouped_lines.
+// New Odds Board. Indexes NFL, CFB (app sport NCAAF), and MLB from
+// /v1/lobbies/content/match_grouped_lines?sport_id=… (odds.prediction).
 // Defaults (override with server env, never VITE_):
 //   UNDERDOG_STATE_CONFIG_ID=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
 //   UNDERDOG_PRODUCT_EXPERIENCE_ID=018e1234-5678-9abc-def0-123456789009
