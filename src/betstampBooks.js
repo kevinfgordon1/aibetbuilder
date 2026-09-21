@@ -7,6 +7,7 @@ import { bookLogo } from "./bookLogos.js";
 export const BETSTAMP_TRIAL_BOOKS = Object.freeze([
   { id: 100, key: "fanduel", label: "FanDuel", color: "#1493ff", bg: "rgba(20,147,255,0.15)", logo: bookLogo("fanduel") },
   { id: 200, key: "draftkings", label: "DraftKings", color: "#53d769", bg: "rgba(83,215,105,0.15)", logo: bookLogo("draftkings") },
+  { id: 400, key: "betmgm", label: "BetMGM", color: "#c4a962", bg: "rgba(196,169,98,0.15)", logo: bookLogo("betmgm") },
   { id: 300, key: "williamhill_us", label: "Caesars", color: "#d4a843", bg: "rgba(212,168,67,0.15)", logo: bookLogo("williamhill_us") },
   { id: 250, key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: bookLogo("pinnacle") },
   { id: 613, key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: bookLogo("betonlineag") },

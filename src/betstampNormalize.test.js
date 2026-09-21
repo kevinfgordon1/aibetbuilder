@@ -54,9 +54,12 @@ import { isPmWinProbBook, BETSTAMP_TRIAL_BOOKS, BETSTAMP_BOOK_IDS, BETSTAMP_PUBL
 import { parseSseChunk, nextBackoffMs, betstampSnapshotUrl, betstampStreamUrl, BETSTAMP_PREGAME_POLL_MS, BETSTAMP_LIVE_RECONCILE_MS, BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
 import { getOddsBoardCell, LIVE_BEST_ODDS_MAX_AGE_MS, oddsBoardHideKey } from "./oddsBoard.js";
 
-assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194, 196]);
-assert.deepEqual(BETSTAMP_PUBLIC_BOOK_IDS, [100, 200, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
-assert.equal(BETSTAMP_TRIAL_BOOKS.length, 12);
+assert.deepEqual(BETSTAMP_BOOK_IDS, [100, 200, 400, 300, 250, 613, 642, 150, 365, 191, 193, 194, 196]);
+assert.deepEqual(BETSTAMP_PUBLIC_BOOK_IDS, [100, 200, 400, 300, 250, 613, 642, 150, 365, 191, 193, 194]);
+assert.equal(BETSTAMP_TRIAL_BOOKS.length, 13);
+assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 400)?.key, "betmgm");
+assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 400)?.label, "BetMGM");
+assert.equal(visibleBetstampBooks(null).some((b) => b.key === "betmgm"), true);
 assert.equal(visibleBetstampBooks(null).some((b) => b.key === "underdog_predict"), false);
 assert.equal(visibleBetstampBooks({ email: "kev120909@gmail.com" }).some((b) => b.key === "underdog_predict"), true);
 assert.equal(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196)?.key, "underdog_predict");
@@ -502,6 +505,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(betstampSnapshotUrl({ league: "NFL", live: true }), /book_ids/);
   assert.match(betstampStreamUrl({ league: "NCAAF", live: false }), /is_live=false/);
   assert.match(betstampStreamUrl({ league: "NFL", live: true, bookIds: [100, 200, 196] }), /book_ids=100%2C200%2C196/);
+  assert.match(betstampStreamUrl({ league: "NFL", live: true, bookIds: [100, 200, 400] }), /book_ids=100%2C200%2C400/);
   assert.doesNotMatch(betstampStreamUrl({ league: "NFL", live: true }), /book_ids/);
   assert.ok(BETSTAMP_PREGAME_POLL_MS >= 15_000 && BETSTAMP_PREGAME_POLL_MS <= 30_000);
   assert.equal(BETSTAMP_LIVE_RECONCILE_MS, 10_000);

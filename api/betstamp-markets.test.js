@@ -63,6 +63,8 @@ function mockRes() {
     const marketUrl = calls.find((u) => String(u).includes('/markets'));
     const fixtureUrl = calls.find((u) => String(u).includes('/fixtures'));
     const teamUrl = calls.find((u) => String(u).includes('/teams'));
+    assert.match(String(marketUrl), /book_ids=/);
+    assert.match(String(marketUrl), /400/, 'default REST book_ids include BetMGM 400');
     assert.match(String(marketUrl), /timedelta=240/);
     assert.match(String(fixtureUrl), /timedelta=240/);
     assert.doesNotMatch(String(teamUrl), /timedelta=/);
