@@ -3,11 +3,13 @@
 // 196 row" guard as Bookmaker 642 — do not invent a second matcher.
 // Odds API games stay the row identity. A Betstamp blip omits Underdog cells.
 //
-// New Odds Board and Promo true/free-bet odds both use converted Betstamp
-// sticker American. Do not apply the UDX 0.072×p×(1−p) cost-add: Kevin's
-// live $1000 bonus (Browns 4.31x → +331 to-win, cash slip 4.31x) already
-// matches the Underdog app. A second haircut would print fee-true +308.
-// applyUnderdogPredictFee stays in the repo unused on this path.
+// Overlay stores Betstamp 196 gross sticker American (3.52 → +252). New Odds
+// Board uses betstampNormalize and stays on that sticker. Promo free bets
+// also use the sticker — Kevin's Browns bonus matched +331 / 4.31x, and a
+// fee haircut would make free-bet EV worse. Promo cash (profit boost, no
+// sweat, +EV) rewrites underdog_predict dk via underdogPredictCashAmerican
+// so the phone's fee-inclusive price is what the leg and EV use (Giants
+// +252 → ~+245). Do not apply the legacy UDX 0.072 cost-add on this overlay.
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p

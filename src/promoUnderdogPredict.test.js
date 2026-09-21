@@ -27,7 +27,7 @@ import {
   underdogPredictConflictsWithEventBooks,
   underdogTwoWayLooksIncoherent,
 } from "./promoUnderdogPredict.js";
-import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
+import { applyUnderdogPredictFee, underdogPredictCashAmerican, underdogPredictCashQuote } from "./underdogPredictFee.js";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 import {
   oppQuoteLooksInverted,
@@ -36,7 +36,7 @@ import {
 } from "./promoOppGuard.js";
 
 const require = createRequire(import.meta.url);
-const { buildAllLegsForBook } = require("../lib/promo-ev.js");
+const { buildAllLegsForBook, calcParlayEV } = require("../lib/promo-ev.js");
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const future = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
@@ -263,6 +263,10 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.match(app, /includeUnderdog/);
   assert.match(app, /key: "underdog_predict", label: "Underdog Predict"/);
   assert.doesNotMatch(app, /after UDX exchange fee/);
+  assert.match(app, /underdogCash: promoType !== "freebet"/);
+  assert.match(ev, /applyUnderdogCashLegPrices/);
+  const worker = fs.readFileSync(path.join(dir, "../lib/ev-parlay-alert.js"), "utf8");
+  assert.match(worker, /underdogCash: true/);
   assert.doesNotMatch(app, /after \$0\.02\/contract fee/);
   assert.doesNotMatch(app, /label: "Fanatics Markets"/);
   assert.ok(app.includes("underdog_predict"));
@@ -636,6 +640,109 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const brownsLeg = legs.find((l) => /browns/i.test(l.name));
   assert.ok(brownsLeg, "Browns sticker +331 is a real Underdog promo leg");
   assert.equal(brownsLeg.dk, 331);
+  const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
+  const cashBrowns = cashLegs.find((l) => /browns/i.test(l.name));
+  assert.equal(cashBrowns.dk, underdogPredictCashAmerican(331));
+  assert.notEqual(cashBrowns.dk, 308, "cash path is not the legacy UDX haircut");
+  assert.notEqual(cashBrowns.dk, 331);
+  const freeBetEv = calcFreeBetParlayEV([brownsLeg], 1000).ev;
+  const cashAsFreeBetEv = calcFreeBetParlayEV([cashBrowns], 1000).ev;
+  assert.ok(freeBetEv > cashAsFreeBetEv, "free-bet EV stays on the sticker and must not pick up the cash haircut");
+  assert.equal(cashBrowns.bestOpp, brownsLeg.bestOpp, "opponent true-prob quote stays sticker");
+}
+
+{
+  // Giants ML: Betstamp/Kalshi gross +252 / 3.52x. Underdog cash slip is
+  // p=0.27 → 344.82 contracts, $6.90 fee, 3.45x / +245. Without a separate
+  // probability field the sticker inverts through Kalshi θ=0.07 to +244.
+  const slip = underdogPredictCashQuote({ probability: 0.27, stake: 100 });
+  assert.equal(slip.american, 245);
+  assert.ok(Math.abs(slip.contracts - 344.82) < 0.02);
+  assert.ok(Math.abs(slip.fee - 6.9) < 0.02);
+  assert.equal(toUnderdogPredictAmerican(3.52), 252);
+  assert.equal(underdogPredictCashAmerican(252), 244);
+  assert.ok(Math.abs(underdogPredictCashAmerican(252) - 245) <= 1);
+
+  const kick = future;
+  const event = {
+    id: "odds-nyg-lar",
+    sport_key: "americanfootball_nfl",
+    sport: "americanfootball_nfl",
+    commence_time: kick,
+    away_team: "New York Giants",
+    home_team: "Los Angeles Rams",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "New York Giants", price: 240 },
+            { name: "Los Angeles Rams", price: -280 },
+          ],
+        }],
+      },
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "New York Giants", price: 235 },
+            { name: "Los Angeles Rams", price: -270 },
+          ],
+        }],
+      },
+    ],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-nyg-lar",
+      league: "NFL",
+      start_date: kick,
+      home_team_id: "team-lar",
+      away_team_id: "team-nyg",
+    }],
+    teams: [
+      { id: "team-nyg", name: "New York Giants", abbreviation: "NYG" },
+      { id: "team-lar", name: "Los Angeles Rams", abbreviation: "LAR" },
+    ],
+    markets: [
+      { odds: 3.52, side: "NYG", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-nyg-lar", team_id: "team-nyg", size: 400 },
+      { odds: 1.39, side: "LAR", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-nyg-lar", team_id: "team-lar" },
+    ],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
+  assert.ok(udp, "Giants 3.52 must overlay as sticker");
+  const giantsOutcome = udp.markets.find((m) => m.key === "h2h")?.outcomes?.find((o) => o.name === "New York Giants");
+  assert.equal(giantsOutcome.price, 252, "overlay keeps the gross sticker");
+  const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const ml = data.moneylines[0];
+  assert.equal(ml.bookOdds.underdog_predict.ml_away, 252);
+  assert.equal(ml.bookOdds.draftkings.ml_away, 240);
+  const stickerLegs = buildAllLegsForBook(data, "underdog_predict");
+  const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
+  const stickerGiants = stickerLegs.find((l) => /giants/i.test(l.name));
+  const cashGiants = cashLegs.find((l) => /giants/i.test(l.name));
+  assert.equal(stickerGiants.dk, 252);
+  assert.equal(cashGiants.dk, 244);
+  assert.equal(cashGiants.bestOpp, stickerGiants.bestOpp);
+  const capped = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 250, { underdogCash: true });
+  assert.ok(capped.find((l) => /giants/i.test(l.name)), "cash +244 still fits a +250 max that the +252 sticker misses");
+  const minned = buildAllLegsForBook(data, "underdog_predict", null, 250, "any", null, { underdogCash: true });
+  assert.equal(minned.find((l) => /giants/i.test(l.name)), undefined);
+  const dkPlain = buildAllLegsForBook(data, "draftkings");
+  const dkCashFlag = buildAllLegsForBook(data, "draftkings", null, null, "any", null, { underdogCash: true });
+  const dkGiants = dkPlain.find((l) => /giants/i.test(l.name));
+  const dkGiantsFlag = dkCashFlag.find((l) => /giants/i.test(l.name));
+  assert.equal(dkGiants.dk, 240);
+  assert.equal(dkGiantsFlag.dk, dkGiants.dk);
+  assert.equal(dkGiantsFlag.bestOpp, dkGiants.bestOpp);
+  const boostSticker = calcParlayEV([stickerGiants], 0, 100);
+  const boostCash = calcParlayEV([cashGiants], 0, 100);
+  assert.ok(boostCash.parlayDec < boostSticker.parlayDec);
+  assert.equal(calcFreeBetParlayEV([stickerGiants], 100).parlayDec, boostSticker.parlayDec);
 }
 
 console.log("promoUnderdogPredict.test.js ok");
