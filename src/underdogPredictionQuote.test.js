@@ -28,6 +28,29 @@ const giantsOption = {
   assert.equal(quote.american, 245, "odds.prediction wins over american_price and odds.fantasy");
   assert.equal(quote.decimal, 3.45);
   assert.equal(quote.probability, 0.27);
+  assert.equal(quote.updatedAt, null);
+}
+
+{
+  const miamiTs = Date.parse("2026-09-13T02:16:09.235Z");
+  const cmuTs = Date.parse("2026-09-21T19:35:16.513Z");
+  const miami = predictionQuoteFromOption({
+    selection_header: "Miami (FL) Hurricanes",
+    updated_at: cmuTs,
+    odds: { prediction: { american: "-1112", decimal: "1.09", updatedAt: "2026-09-13T02:16:09.235Z" } },
+  });
+  assert.equal(miami.american, -1112);
+  assert.equal(miami.updatedAt, miamiTs, "odds.prediction.updatedAt is the quote clock");
+  const cmu = predictionQuoteFromOption({
+    selection_header: "Central Michigan Chippewas",
+    updated_at: "2026-09-21T19:35:16.513Z",
+    odds: { prediction: { american: "+3230", decimal: "33.3" } },
+  });
+  assert.equal(cmu.updatedAt, cmuTs, "option updated_at is used when prediction has no clock");
+  assert.equal(cjsQuotes.predictionQuoteFromOption({
+    selection_header: "Miami (FL) Hurricanes",
+    odds: { prediction: { american: "-1112", updatedAt: "2026-09-13T02:16:09.235Z" } },
+  }).updatedAt, miamiTs);
 }
 
 {

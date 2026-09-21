@@ -18,9 +18,11 @@
 // Bookmaker 642 guards stay unchanged. Kevin-only canSeeUnderdogPredict
 // is unchanged.
 //
-// Per-selection Betstamp updated_at is copied onto overlay outcomes as
+// Per-selection phone updated_at is copied onto overlay outcomes as
 // updatedAt (ms). Promo cards flag Underdog ticks older than
 // UNDERDOG_STALE_MINUTES (default 60). Missing stamps do not warn.
+// Ranking drops a stale Underdog *offer* (see underdogOfferIsRankable);
+// the other side of the game is judged on its own timestamp.
 
 import {
   asList,

@@ -659,6 +659,118 @@ function linesFor(sport) {
     assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
   }
 
+  {
+    const now = Date.parse('2026-09-21T20:20:00.000Z');
+    const miami = contentBody({
+      id: 183027,
+      sportId: 'CFB',
+      title: 'Central Michigan Chippewas @ Miami (FL) Hurricanes',
+      lines: [
+        line('CMU @ MIA Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          {
+            ...opt('Central Michigan Chippewas', 'away', 'CMU to win', '+3230'),
+            updated_at: '2026-09-21T19:35:16.513Z',
+          },
+          {
+            ...opt('Miami (FL) Hurricanes', 'home', 'Miami to win', '-1112'),
+            updated_at: '2026-09-13T02:16:09.235Z',
+          },
+        ]),
+      ],
+    });
+    const akron = contentBody({
+      id: 226516,
+      sportId: 'CFB',
+      title: 'Akron Zips @ Central Michigan Chippewas',
+      lines: [
+        line('AKR @ CMU Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          {
+            ...opt('Akron Zips', 'away', 'Akron to win', '-527'),
+            updated_at: '2026-09-21T20:00:00.000Z',
+          },
+          {
+            ...opt('Central Michigan Chippewas', 'home', 'CMU to win', '-715'),
+            updated_at: '2026-09-21T20:00:00.000Z',
+          },
+        ]),
+        line('AKR @ CMU Spread', 'spread', 'Spread', 'spread', '-3.5', [
+          {
+            ...opt('Akron Zips', 'away', 'AKR +3.5', '+100'),
+            updated_at: '2026-09-21T20:00:00.000Z',
+          },
+          {
+            ...opt('Central Michigan Chippewas', 'home', 'CMU -3.5', '-120'),
+            updated_at: '2026-09-21T20:00:00.000Z',
+          },
+        ]),
+      ],
+    });
+    const akronMlOnly = contentBody({
+      id: 226516,
+      sportId: 'CFB',
+      title: 'Akron Zips @ Central Michigan Chippewas',
+      lines: [
+        line('AKR @ CMU Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          {
+            ...opt('Akron Zips', 'away', 'Akron to win', '-527'),
+            updated_at: '2026-09-21T20:00:00.000Z',
+          },
+          {
+            ...opt('Central Michigan Chippewas', 'home', 'CMU to win', '-715'),
+            updated_at: '2026-09-21T20:00:00.000Z',
+          },
+        ]),
+      ],
+    });
+    const juice = contentBody({
+      id: 183100,
+      sportId: 'CFB',
+      title: 'Even Dogs @ Even Cats',
+      lines: [
+        line('Even Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Even Dogs', 'away', 'Dogs to win', '-110'),
+          opt('Even Cats', 'home', 'Cats to win', '-110'),
+        ]),
+      ],
+    });
+    const priced = gamesFromContentLines(miami, 'CFB', now);
+    assert.equal(priced.length, 1);
+    assert.equal(priced[0].matchId, 183027);
+    assert.equal(priced[0].sport, 'NCAAF');
+    assert.deepEqual(priced[0].lines.map((l) => l.american), [3230], 'stale Miami −1112 is omitted; fresh CMU stays');
+    assert.equal(priced[0].lines[0].name, 'Central Michigan Chippewas');
+    const akronGames = gamesFromContentLines(akron, 'CFB', now);
+    assert.equal(akronGames.length, 1);
+    assert.ok(akronGames[0].lines.every((l) => l.market === 'spreads'), 'incoherent −527 / −715 moneyline is omitted; spread stays');
+    assert.equal(akronGames[0].lines.some((l) => l.american === -527), false);
+    const even = gamesFromContentLines(juice, 'CFB', now);
+    assert.equal(even[0].lines.length, 2, 'missing timestamps are not stale, and −110 / −110 stays');
+
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(String(url));
+      const sport = sportOf(url);
+      if (String(url).includes('/lobbies/scaffolds/sports')) {
+        return jsonRes(200, scaffoldFor(sport, MONEYLINE_FILTER_IDS[sport] || MONEYLINE_FILTER_IDS.CFB));
+      }
+      if (String(url).includes('/lobbies/content/lines') && sport === 'CFB' && filterOf(url) === MONEYLINE_FILTER_IDS.CFB) {
+        return jsonRes(200, concatContent(miami, akronMlOnly, juice));
+      }
+      return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn, now });
+    const game = res.body.games.find((g) => g.matchId === 183027);
+    assert.ok(game);
+    assert.equal(game.lines.some((l) => l.american === -1112), false, 'API omits the 8-day Miami side');
+    assert.equal(game.lines.find((l) => l.name === 'Central Michigan Chippewas').american, 3230);
+    assert.equal(res.body.games.find((g) => g.matchId === 226516), undefined, 'incoherent Akron / CMU moneyline is omitted');
+    const evenApi = res.body.games.find((g) => g.matchId === 183100);
+    assert.equal(evenApi.lines.filter((l) => l.market === 'h2h').length, 2);
+    assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
+    assert.ok(!calls.some((url) => /betstamp|book_ids=196/.test(url)));
+  }
+
   console.log('underdog-predict.test.js ok');
 })().catch((err) => {
   console.error(err);

@@ -87,6 +87,8 @@ import {
   assignBookUpdatedAt,
   describePromoUnderdogStaleWarning,
   describeUnderdogOfferStaleWarning,
+  underdogOfferIsRankable,
+  underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
@@ -617,9 +619,11 @@ function oppositePromoAmerican(book, sticker, prediction) {
 
 function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any", maxLegOdds = null, opts = null) {
   // Every Promo path uses joined odds.prediction for Underdog. A missing
-  // quote omits that leg. opts.underdogCash does not restore a sticker or
-  // a fee-adjusted sticker. The Odds Board reads bookOdds, not these legs.
-  void opts;
+  // quote omits that leg. A stale Underdog offer (its own updated_at older
+  // than UNDERDOG_STALE_MS) is not a candidate. opts.underdogCash does not
+  // restore a sticker or a fee-adjusted sticker. The Odds Board reads
+  // bookOdds, not these legs. opts.now freezes the freshness clock in tests.
+  const quoteNow = opts && opts.now != null ? Number(opts.now) : Date.now();
   const legs = [];
   const now = new Date();
 
@@ -635,7 +639,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (g.is_three_way) return;
       const awayOdds = g.bookOdds?.[book]?.ml_away;
       const homeOdds = g.bookOdds?.[book]?.ml_home;
-      if (awayOdds == null || homeOdds == null) return;
+      if (underdogPairIncomplete(book, awayOdds, homeOdds)) return;
       const awayOffer = underdogCashOfferAmerican(book, awayOdds, true, g.bookOdds?.[book]?.ml_away_prediction);
       const homeOffer = underdogCashOfferAmerican(book, homeOdds, true, g.bookOdds?.[book]?.ml_home_prediction);
       if (awayOffer != null && passesOddsBounds(awayOffer, minLegOdds, maxLegOdds))
@@ -654,7 +658,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (g.book !== book) return;
       const awayOdds = g.away_odds;
       const homeOdds = g.home_odds;
-      if (awayOdds == null || homeOdds == null) return;
+      if (underdogPairIncomplete(book, awayOdds, homeOdds)) return;
       const ak = `${g.away}@${g.home}_away_${g.away_line}`;
       const hk = `${g.away}@${g.home}_home_${g.home_line}`;
       const awayOffer = underdogCashOfferAmerican(book, awayOdds, true, g.away_prediction);
@@ -673,7 +677,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (g.book !== book) return;
       const overOdds = g.over_odds;
       const underOdds = g.under_odds;
-      if (overOdds == null || underOdds == null) return;
+      if (underdogPairIncomplete(book, overOdds, underOdds)) return;
       const ok = `${g.away}@${g.home}_over_${g.line}`;
       const uk = `${g.away}@${g.home}_under_${g.line}`;
       const overOffer = underdogCashOfferAmerican(book, overOdds, true, g.over_prediction);
@@ -692,7 +696,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (g.book !== book) return;
       const overOdds = g.over_odds;
       const underOdds = g.under_odds;
-      if (overOdds == null || underOdds == null) return;
+      if (underdogPairIncomplete(book, overOdds, underOdds)) return;
       const ok = `${g.away}@${g.home}_TT_${g.team}_o_${g.line}`;
       const uk = `${g.away}@${g.home}_TT_${g.team}_u_${g.line}`;
       const overOffer = underdogCashOfferAmerican(book, overOdds, true, g.over_prediction);
@@ -703,7 +707,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
-  return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds));
+  return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow));
 }
 
 function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
@@ -724,7 +728,7 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (g.is_three_way) return;
         const awayOdds = g.bookOdds?.[book.key]?.ml_away;
         const homeOdds = g.bookOdds?.[book.key]?.ml_home;
-        if (awayOdds == null || homeOdds == null) return;
+        if (underdogPairIncomplete(book.key, awayOdds, homeOdds)) return;
         const ak = `${g.away}@${g.home}_ML_away_${book.key}`;
         const hk = `${g.away}@${g.home}_ML_home_${book.key}`;
         if (!seen.has(ak)) { seen.add(ak); legs.push(assignBookUpdatedAt({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, trustedSize: g.best_home_size, sameBookOpp: homeOdds, sameBookKey: book.key, sameBookSize: g.bookOdds?.[book.key]?.ml_home_size, bookOdds: awayOdds }) }, g.bookOdds?.[book.key]?.ml_away_updatedAt)); }
@@ -739,7 +743,7 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (g.book !== book.key) return;
         const awayOdds = g.away_odds;
         const homeOdds = g.home_odds;
-        if (awayOdds == null || homeOdds == null) return;
+        if (underdogPairIncomplete(book.key, awayOdds, homeOdds)) return;
         const ak = `${g.away}@${g.home}_SPR_away_${g.away_line}_${book.key}`;
         const hk = `${g.away}@${g.home}_SPR_home_${g.home_line}_${book.key}`;
         if (!seen.has(ak)) { seen.add(ak); legs.push(assignBookUpdatedAt({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book.key, sameBookSize: g.home_size, bookOdds: awayOdds }) }, g.away_updatedAt ?? g.bookOdds?.[book.key]?.spr_away_updatedAt)); }
@@ -754,7 +758,7 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (g.book !== book.key) return;
         const overOdds = g.over_odds;
         const underOdds = g.under_odds;
-        if (overOdds == null || underOdds == null) return;
+        if (underdogPairIncomplete(book.key, overOdds, underOdds)) return;
         const ok = `${g.away}@${g.home}_TOT_over_${g.line}_${book.key}`;
         const uk = `${g.away}@${g.home}_TOT_under_${g.line}_${book.key}`;
         if (!seen.has(ok)) { seen.add(ok); legs.push(assignBookUpdatedAt({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book.key, sameBookSize: g.under_size, bookOdds: overOdds }) }, g.over_updatedAt ?? g.bookOdds?.[book.key]?.tot_over_updatedAt)); }
@@ -769,7 +773,7 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (g.book !== book.key) return;
         const overOdds = g.over_odds;
         const underOdds = g.under_odds;
-        if (overOdds == null || underOdds == null) return;
+        if (underdogPairIncomplete(book.key, overOdds, underOdds)) return;
         const ok = `${g.away}@${g.home}_TT_${g.team}_o_${g.line}_${book.key}`;
         const uk = `${g.away}@${g.home}_TT_${g.team}_u_${g.line}_${book.key}`;
         if (!seen.has(ok)) { seen.add(ok); legs.push(assignBookUpdatedAt({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book.key, sameBookSize: g.under_size, bookOdds: overOdds }) }, g.over_updatedAt)); }
@@ -779,7 +783,9 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
   });
 
   // +EV is a cash bet. Underdog dk is the fee-inclusive phone price.
-  return applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
+  // Stale Underdog offers are not scored.
+  const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
+  return priced.filter((l) => underdogOfferIsRankable(l));
 }
 
 function parlayLegKey(p) {

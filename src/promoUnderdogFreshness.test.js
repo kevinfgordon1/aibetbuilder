@@ -19,12 +19,15 @@ import {
   isUnderdogOddsStale,
   isUnderdogPredictBook,
   parseUnderdogUpdatedAtMs,
+  underdogOfferIsRankable,
   underdogOfferUpdatedAtFromLeg,
+  underdogPairIncomplete,
   underdogStaleAgeLabel,
 } from "./promoUnderdogFreshness.js";
 
 const require = createRequire(import.meta.url);
-const { buildAllLegsForBook } = require("../lib/promo-ev.js");
+const { buildAllLegsForBook, findTopParlays } = require("../lib/promo-ev.js");
+const cjsFresh = require("../lib/underdog-freshness.js");
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
@@ -59,6 +62,38 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.equal(isUnderdogOddsStale(undefined, now), false);
   assert.equal(isUnderdogOddsStale("", now), false);
   assert.equal(isUnderdogOddsStale("not-a-date", now), false);
+  assert.equal(cjsFresh.UNDERDOG_STALE_MS, UNDERDOG_STALE_MS);
+  assert.equal(cjsFresh.isUnderdogOddsStale(now - UNDERDOG_STALE_MS - 1, now), true);
+  assert.equal(cjsFresh.isUnderdogOddsStale(null, now), false);
+}
+
+{
+  const now = Date.parse("2026-09-21T20:20:00.000Z");
+  const miamiTs = Date.parse("2026-09-13T02:16:09.235Z");
+  const cmuTs = Date.parse("2026-09-21T19:35:16.513Z");
+  const staleLeg = { bookKey: "underdog_predict", bookUpdatedAt: miamiTs, dk: -1112, name: "Miami (FL) Hurricanes ML" };
+  const freshLeg = { bookKey: "underdog_predict", bookUpdatedAt: cmuTs, dk: 3230, name: "Central Michigan Chippewas ML" };
+  const missingLeg = { bookKey: "underdog_predict", dk: 150, name: "Raiders ML" };
+  const dkLeg = { bookKey: "draftkings", bookUpdatedAt: miamiTs, dk: -110, name: "Chiefs ML" };
+  assert.equal(underdogOfferIsRankable(staleLeg, now), false);
+  assert.equal(underdogOfferIsRankable(freshLeg, now), true);
+  assert.equal(underdogOfferIsRankable(missingLeg, now), true, "missing stamp is not a false stale");
+  assert.equal(underdogOfferIsRankable(dkLeg, now), true, "other books stay rankable");
+  assert.equal(cjsFresh.underdogOfferIsRankable(staleLeg, now), false);
+  assert.equal(cjsFresh.underdogOfferIsRankable(freshLeg, now), true);
+  assert.equal(underdogPairIncomplete("underdog_predict", 3230, null), false, "one fresh Underdog side can still be an offer");
+  assert.equal(underdogPairIncomplete("underdog_predict", null, null), true);
+  assert.equal(underdogPairIncomplete("draftkings", -110, null), true);
+  assert.equal(cjsFresh.h2hPairIncoherent([
+    { market: "h2h", american: -527 },
+    { market: "h2h", american: -715 },
+  ]), true, "Akron −527 / CMU −715 is not a two-way");
+  assert.equal(cjsFresh.h2hPairIncoherent([
+    { market: "h2h", american: -110 },
+    { market: "h2h", american: -110 },
+  ]), false, "−110 / −110 stays");
+  assert.equal(underdogStaleAgeLabel(miamiTs, now), "~8d ago");
+  assert.ok((now - miamiTs) / 3_600_000 > 200, "Miami quote is ~210 hours old");
 }
 
 {
@@ -195,15 +230,15 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.equal(ml.bookOdds.underdog_predict.ml_home_updatedAt, kcTs);
   assert.equal(ml.bookOdds.draftkings.ml_away_updatedAt, null);
 
-  const legs = buildAllLegsForBook(data, "underdog_predict");
+  const now = Date.parse("2026-09-19T18:00:00.000Z");
+  const legs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { now });
   const denLeg = legs.find((l) => /broncos/i.test(l.name));
   const kcLeg = legs.find((l) => /chiefs/i.test(l.name));
-  assert.equal(denLeg.bookUpdatedAt, denTs);
+  assert.equal(denLeg, undefined, "Denver ~4h 50m is not a Promo candidate");
   assert.equal(kcLeg.bookUpdatedAt, kcTs);
-
-  const now = Date.parse("2026-09-19T18:00:00.000Z");
-  assert.ok(describeUnderdogOfferStaleWarning(denLeg, now), "Denver ~4h 50m old flags");
   assert.equal(describeUnderdogOfferStaleWarning(kcLeg, now), null, "KC 45m old stays quiet");
+  assert.ok(describeUnderdogStaleWarning(denTs, now), "Denver stamp still warns if a card shows it");
+  assert.ok(!findTopParlays(legs, 1, 0, 100).some((p) => (p.legs || []).some((l) => /broncos/i.test(l.name))));
 }
 
 {
@@ -263,15 +298,126 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   });
   const pitH2h = overlaid.bookmakers.find((b) => b.key === "underdog_predict")?.markets?.find((m) => m.key === "h2h");
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
-  const legs = buildAllLegsForBook(data, "underdog_predict");
+  const legs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { now });
   const steelers = legs.find((l) => /steelers/i.test(l.name));
   const ravens = legs.find((l) => /ravens/i.test(l.name));
-  assert.ok(steelers && ravens);
-  assert.equal(steelers.dk, 194);
-  assert.ok(describeUnderdogOfferStaleWarning(steelers, now), "Steelers tick ~3h 50m old flags");
+  assert.equal(steelers, undefined, "stale Steelers offer is not ranked");
+  assert.ok(ravens);
   assert.equal(describeUnderdogOfferStaleWarning(ravens, now), null, "Ravens minutes-old tick stays quiet");
-  assert.ok(describePromoUnderdogStaleWarning([steelers], now));
+  assert.ok(describeUnderdogStaleWarning(Date.parse("2026-09-19T16:10:00.000Z"), now), "Steelers tick still warns");
   assert.equal(describePromoUnderdogStaleWarning([ravens], now), null);
+}
+
+{
+  // Match 183027, Central Michigan @ Miami (FL). Live phone lines on
+  // 2026-09-21: Miami odds.prediction −1112 with updated_at
+  // 2026-09-13T02:16:09.235Z (~210h / ~8d) and Central Michigan +3230 at
+  // 2026-09-21T19:35:16.513Z. At 20:20Z CMU is still inside 60 minutes.
+  const now = Date.parse("2026-09-21T20:20:00.000Z");
+  const miamiTs = "2026-09-13T02:16:09.235Z";
+  const cmuTs = "2026-09-21T19:35:16.513Z";
+  const event = {
+    id: "odds-cmu-mia",
+    sport_key: "americanfootball_ncaaf",
+    commence_time: kick,
+    away_team: "Central Michigan Chippewas",
+    home_team: "Miami (FL) Hurricanes",
+    bookmakers: [{
+      key: "draftkings",
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Central Michigan Chippewas", price: 1800 },
+          { name: "Miami (FL) Hurricanes", price: -4000 },
+        ],
+      }],
+    }],
+  };
+  const lobby = {
+    match_grouped_lines: [{
+      title: "Moneyline",
+      options: [
+        {
+          selection_header: "Central Michigan Chippewas",
+          updated_at: cmuTs,
+          odds: { prediction: { american: "+3230", decimal: "33.3" } },
+        },
+        {
+          selection_header: "Miami (FL) Hurricanes",
+          odds: { prediction: { american: "-1112", decimal: "1.09", updatedAt: miamiTs } },
+        },
+      ],
+    }],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, null, lobby);
+  const h2h = overlaid.bookmakers.find((b) => b.key === "underdog_predict").markets.find((m) => m.key === "h2h");
+  const miamiOutcome = h2h.outcomes.find((o) => /miami/i.test(o.name));
+  const cmuOutcome = h2h.outcomes.find((o) => /central michigan/i.test(o.name));
+  assert.equal(miamiOutcome.price, -1112);
+  assert.equal(miamiOutcome.updatedAt, Date.parse(miamiTs), "odds.prediction.updatedAt is the Miami quote clock");
+  assert.equal(cmuOutcome.updatedAt, Date.parse(cmuTs));
+  const data = transformOddsData([overlaid], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const legs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { now });
+  const miami = legs.find((l) => /miami/i.test(l.name));
+  const cmu = legs.find((l) => /central michigan/i.test(l.name));
+  assert.equal(miami, undefined, "frozen Miami −1112 is not a Promo candidate");
+  assert.ok(cmu, "fresh Central Michigan side is still a candidate");
+  assert.equal(cmu.dk, 3230);
+  const ranked = findTopParlays(legs, 1, 0, 100);
+  assert.ok(ranked.length >= 1);
+  assert.ok(ranked.every((p) => !(p.legs || []).some((l) => /miami/i.test(l.name) && l.dk === -1112)));
+  assert.equal(ranked[0].legs[0].name, cmu.name);
+
+  const freshNow = Date.parse(miamiTs) + 30 * 60 * 1000;
+  const freshLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { now: freshNow });
+  const freshMiami = freshLegs.find((l) => /miami/i.test(l.name));
+  assert.ok(freshMiami, "a fresh Miami quote is still ranked");
+  assert.equal(freshMiami.dk, -1112);
+  const freshRanked = findTopParlays(freshLegs, 1, 0, 100);
+  assert.ok(freshRanked.some((p) => (p.legs || []).some((l) => l.dk === -1112)), "when the Miami quote is fresh it is ranked");
+
+  const cmuOnly = overlayUnderdogPredictOnGame(event, null, {
+    match_grouped_lines: [{
+      title: "Moneyline",
+      options: [{
+        selection_header: "Central Michigan Chippewas",
+        updated_at: cmuTs,
+        odds: { prediction: { american: "+3230", decimal: "33.3" } },
+      }],
+    }],
+  });
+  const oneSide = buildAllLegsForBook(
+    transformOddsData([cmuOnly], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS),
+    "underdog_predict",
+    null,
+    null,
+    "any",
+    null,
+    { now },
+  );
+  assert.equal(oneSide.find((l) => /miami/i.test(l.name)), undefined);
+  assert.ok(oneSide.find((l) => /central michigan/i.test(l.name)), "omitting stale Miami does not drop fresh CMU");
+
+  const unstamped = overlayUnderdogPredictOnGame(event, null, {
+    match_grouped_lines: [{
+      title: "Moneyline",
+      options: [
+        { selection_header: "Central Michigan Chippewas", odds: { prediction: { american: "+3230" } } },
+        { selection_header: "Miami (FL) Hurricanes", odds: { prediction: { american: "-1112" } } },
+      ],
+    }],
+  });
+  const kept = buildAllLegsForBook(
+    transformOddsData([unstamped], "americanfootball_ncaaf", TRUSTED_BOOK_KEYS, ALL_BOOKS),
+    "underdog_predict",
+    null,
+    null,
+    "any",
+    null,
+    { now },
+  );
+  assert.ok(kept.find((l) => /miami/i.test(l.name)), "missing timestamp is not treated as stale");
+  assert.ok(kept.find((l) => /central michigan/i.test(l.name)));
 }
 
 {
@@ -285,9 +431,12 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.match(app, /⚠ \{warn\.message\}/);
   assert.match(app, /assignBookUpdatedAt/);
   assert.match(app, /ml_away_updatedAt/);
-  // Flag only — do not hide or de-rank cards from staleness.
+  assert.match(app, /underdogOfferIsRankable\(l, quoteNow\)/);
+  assert.match(app, /underdogOfferIsRankable\(l\)/);
+  const promoEv = fs.readFileSync(path.join(dir, "../lib/promo-ev.js"), "utf8");
+  assert.match(promoEv, /underdogOfferIsRankable\(l, quoteNow\)/);
+  // Banner stays. Ranking excludes the stale offer instead of hiding cards in JSX.
   assert.doesNotMatch(app, /isUnderdogOddsStale\([^)]+\)\s*\?\s*null/);
-  assert.doesNotMatch(app, /filter\(\s*\(.*stale/);
 }
 
 console.log("promoUnderdogFreshness.test.js ok");

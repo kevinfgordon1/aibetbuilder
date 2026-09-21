@@ -1,9 +1,12 @@
-// Underdog Predict quote freshness for Promo cards.
+// Underdog Predict quote freshness for Promo cards and phone lines.
 //
-// Missing timestamp → no flag (no false alarm). Only underdog_predict is
-// warned; other sportsbooks stay quiet even if they later grow a stamp.
-// Age is wall clock vs the phone quote updated_at. Cards are not hidden
-// or re-ranked — flag only.
+// Missing timestamp → not stale (no false alarm). Only underdog_predict
+// offer quotes are gated; other sportsbooks stay quiet even if they later
+// grow a stamp. Age is wall clock vs that side's phone quote updated_at
+// (per selection, not per game). A stale offer (> UNDERDOG_STALE_MS,
+// default 60 minutes) is not a Promo candidate: ranking, Best Pick, and
+// EV scoring skip it. The warning banner still covers any stale Underdog
+// quote that is shown another way.
 
 import { formatCompactAge } from "./betstampNormalize.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
@@ -85,6 +88,27 @@ export function underdogHedgeUpdatedAtFromLeg(leg) {
 
 export function describeUnderdogOfferStaleWarning(leg, now = Date.now(), maxAgeMs = UNDERDOG_STALE_MS) {
   return describeUnderdogStaleWarning(underdogOfferUpdatedAtFromLeg(leg), now, maxAgeMs);
+}
+
+/**
+ * Promo / EV candidate gate. Non-Underdog legs stay. An Underdog offer is
+ * dropped only when its own quote timestamp exists and is older than the
+ * threshold. The other side of the same game is a separate quote.
+ */
+export function underdogOfferIsRankable(leg, now = Date.now(), maxAgeMs = UNDERDOG_STALE_MS) {
+  if (!leg || !isUnderdogPredictBook(leg.bookKey)) return true;
+  return !isUnderdogOddsStale(underdogOfferUpdatedAtFromLeg(leg), now, maxAgeMs);
+}
+
+/**
+ * True when this book's two-way row cannot price an offer. Underdog may
+ * publish one fresh side after the stale side was omitted. Other books
+ * still need both prices.
+ */
+export function underdogPairIncomplete(bookKey, left, right) {
+  if (left == null && right == null) return true;
+  if (isUnderdogPredictBook(bookKey)) return false;
+  return left == null || right == null;
 }
 
 export function describePromoUnderdogStaleWarning(legs, now = Date.now(), maxAgeMs = UNDERDOG_STALE_MS) {

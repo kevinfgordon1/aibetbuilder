@@ -137,11 +137,16 @@ export function predictionQuoteFromOption(opt) {
   if (!Number.isFinite(decimal) || decimal <= 1) decimal = null;
   if (american == null && decimal != null) american = decimalToAmerican(decimal);
   if (american == null) return null;
+  // Per-side quote clock. Live lines stamp the option (Miami match 183027
+  // updated_at 2026-09-13 while Central Michigan on the same game is fresh).
+  // Prefer odds.prediction.updatedAt when the payload nests the clock there.
   return {
     american,
     decimal,
     probability: parseUnitProbability(pred.probability),
-    updatedAt: parseUpdatedAt(opt.updated_at || opt.updatedAt),
+    updatedAt: parseUpdatedAt(
+      (pred.updatedAt || pred.updated_at) || opt.updated_at || opt.updatedAt,
+    ),
   };
 }
 
