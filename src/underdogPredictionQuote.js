@@ -29,12 +29,14 @@
 //
 // Game-moneyline app prices therefore are not durably anonymous. Promo
 // does not log in. Every promo path (free bet, cash, boost, no-sweat)
-// uses a joined prediction quote when one is supplied, and otherwise the
-// Betstamp sticker plus the Kalshi-style r=0.1015 fallback. The free-bet
-// formula is unchanged; the American it consumes is this phone price.
-// A prediction quote with no sticker can still form a Promo leg at that
-// phone American. The Odds Board keeps the gross sticker and does not
-// invent a bookmaker from prediction-only quotes.
+// uses a joined prediction quote when one is supplied, and omits the
+// Underdog leg when it is missing. Do not substitute the Betstamp sticker
+// or a fee-adjusted sticker. The free-bet formula is unchanged; the
+// American it consumes is this phone price. A prediction quote with no
+// sticker can still form a Promo leg at that phone American. The Odds
+// Board keeps the gross sticker and does not invent a bookmaker from
+// prediction-only quotes. Omitting a game moneyline until state_config_id
+// supplies odds.prediction is the correct Promo behavior.
 
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";

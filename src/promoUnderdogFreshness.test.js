@@ -182,6 +182,7 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.equal(kc.updatedAt, kcTs);
   assert.notEqual(den.updatedAt, kc.updatedAt);
 
+  for (const outcome of h2h.outcomes) outcome.predictionAmerican = outcome.price;
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   const ml = data.moneylines[0];
   assert.equal(ml.bookOdds.underdog_predict.ml_away_updatedAt, denTs);
@@ -246,6 +247,8 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
     ],
   };
   const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const pitH2h = overlaid.bookmakers.find((b) => b.key === "underdog_predict")?.markets?.find((m) => m.key === "h2h");
+  for (const outcome of pitH2h.outcomes) outcome.predictionAmerican = outcome.price;
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   const legs = buildAllLegsForBook(data, "underdog_predict");
   const steelers = legs.find((l) => /steelers/i.test(l.name));

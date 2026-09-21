@@ -5,15 +5,16 @@
 //
 // Overlay stores Betstamp 196 gross sticker American (3.52 → +252) on
 // outcome.price. New Odds Board uses betstampNormalize and stays on that
-// sticker. Every Promo path (free bet, cash, boost, no-sweat) uses the
-// phone American instead: a joined Underdog odds.prediction (Giants +245 /
-// 3.45x, app-identical), otherwise underdogPredictCashAmerican (sticker
-// +252 → +244 at UNDERDOG_PREDICT_CASH_FEE_RATE). Do not fee-adjust a
-// prediction price, and do not apply the legacy UDX 0.072 cost-add.
-// Free-bet EV math is unchanged; only the American fed into it is the
-// phone price. A prediction quote with no Betstamp sticker still becomes
-// an Underdog bookmaker on the Promo overlay, priced at that phone
-// American. The Odds Board overlay does not synthesize those lines.
+// sticker. Every Promo path (free bet, cash, boost, no-sweat) uses only a
+// joined Underdog odds.prediction american (Giants +245 / 3.45x,
+// app-identical). A missing prediction omits that Underdog Promo leg.
+// Do not substitute the Betstamp sticker or a fee-adjusted sticker, and
+// do not apply the legacy UDX 0.072 cost-add. Free-bet EV math is
+// unchanged; only the American fed into it is the phone price. A
+// prediction quote with no Betstamp sticker still becomes an Underdog
+// bookmaker on the Promo overlay, priced at that phone American. The
+// Odds Board overlay does not synthesize those lines. Game-moneyline
+// prediction may be empty until a lobby state_config_id supplies quotes.
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p

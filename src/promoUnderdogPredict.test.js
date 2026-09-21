@@ -27,7 +27,7 @@ import {
   underdogPredictConflictsWithEventBooks,
   underdogTwoWayLooksIncoherent,
 } from "./promoUnderdogPredict.js";
-import { applyUnderdogPredictFee, underdogPredictCashAmerican, underdogPredictCashQuote } from "./underdogPredictFee.js";
+import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 import {
   oppQuoteLooksInverted,
@@ -641,32 +641,17 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(ml.bookOdds.underdog_predict.ml_away, 331);
   assert.notEqual(ml.bookOdds.underdog_predict.ml_away, 308);
   const legs = buildAllLegsForBook(data, "underdog_predict");
-  const brownsLeg = legs.find((l) => /browns/i.test(l.name));
-  assert.ok(brownsLeg, "Browns sticker +331 stays on the stored row");
-  assert.equal(brownsLeg.dk, 331);
   const phoneLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
-  const phoneBrowns = phoneLegs.find((l) => /browns/i.test(l.name));
-  assert.equal(phoneBrowns.dk, underdogPredictCashAmerican(331));
-  assert.notEqual(phoneBrowns.dk, 308, "phone path is not the legacy UDX haircut");
-  assert.notEqual(phoneBrowns.dk, 331);
-  const freeOnPhone = calcFreeBetParlayEV([phoneBrowns], 1000).ev;
-  const freeOnSticker = calcFreeBetParlayEV([brownsLeg], 1000).ev;
-  assert.ok(freeOnSticker > freeOnPhone, "promo free-bet EV uses the phone American, not the sticker");
-  assert.equal(calcFreeBetParlayEV([phoneBrowns], 1000).parlayDec, calcParlayEV([phoneBrowns], 0, 1000).parlayDec, "free-bet and cash share the phone American");
-  assert.equal(phoneBrowns.bestOpp, brownsLeg.bestOpp, "opponent true-prob quote stays the other book's price");
+  assert.equal(legs.find((l) => /browns/i.test(l.name)), undefined, "missing prediction omits the Browns promo leg");
+  assert.equal(phoneLegs.find((l) => /browns/i.test(l.name)), undefined);
+  assert.ok(!legs.some((l) => l.bookKey === "underdog_predict" && (l.dk === 331 || l.dk === 308)));
+  assert.ok(!phoneLegs.some((l) => l.dk === 331 || l.dk === 308));
 }
 
 {
-  // Giants ML: Betstamp/Kalshi gross +252 / 3.52x. Underdog cash slip is
-  // p=0.27 → 344.82 contracts, $6.90 fee, 3.45x / +245. Without a separate
-  // probability field the sticker inverts through Kalshi θ=0.07 to +244.
-  const slip = underdogPredictCashQuote({ probability: 0.27, stake: 100 });
-  assert.equal(slip.american, 245);
-  assert.ok(Math.abs(slip.contracts - 344.82) < 0.02);
-  assert.ok(Math.abs(slip.fee - 6.9) < 0.02);
+  // Giants ML: Betstamp gross +252 / 3.52x stays on the board. Without
+  // odds.prediction, Promo must not show +252 or a fee-adjusted +244.
   assert.equal(toUnderdogPredictAmerican(3.52), 252);
-  assert.equal(underdogPredictCashAmerican(252), 244);
-  assert.ok(Math.abs(underdogPredictCashAmerican(252) - 245) <= 1);
 
   const kick = future;
   const event = {
@@ -728,15 +713,9 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(ml.bookOdds.draftkings.ml_away, 240);
   const stickerLegs = buildAllLegsForBook(data, "underdog_predict");
   const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
-  const stickerGiants = stickerLegs.find((l) => /giants/i.test(l.name));
-  const cashGiants = cashLegs.find((l) => /giants/i.test(l.name));
-  assert.equal(stickerGiants.dk, 252);
-  assert.equal(cashGiants.dk, 244);
-  assert.equal(cashGiants.bestOpp, stickerGiants.bestOpp);
-  const capped = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 250, { underdogCash: true });
-  assert.ok(capped.find((l) => /giants/i.test(l.name)), "cash +244 still fits a +250 max that the +252 sticker misses");
-  const minned = buildAllLegsForBook(data, "underdog_predict", null, 250, "any", null, { underdogCash: true });
-  assert.equal(minned.find((l) => /giants/i.test(l.name)), undefined);
+  assert.equal(stickerLegs.find((l) => /giants/i.test(l.name)), undefined, "missing prediction is not a free-bet sticker leg");
+  assert.equal(cashLegs.find((l) => /giants/i.test(l.name)), undefined, "missing prediction is not a cash fee fallback");
+  assert.ok(!stickerLegs.concat(cashLegs).some((l) => l.bookKey === "underdog_predict" && (l.dk === 252 || l.dk === 244)));
   const dkPlain = buildAllLegsForBook(data, "draftkings");
   const dkCashFlag = buildAllLegsForBook(data, "draftkings", null, null, "any", null, { underdogCash: true });
   const dkGiants = dkPlain.find((l) => /giants/i.test(l.name));
@@ -744,11 +723,6 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(dkGiants.dk, 240);
   assert.equal(dkGiantsFlag.dk, dkGiants.dk);
   assert.equal(dkGiantsFlag.bestOpp, dkGiants.bestOpp);
-  const boostSticker = calcParlayEV([stickerGiants], 0, 100);
-  const boostCash = calcParlayEV([cashGiants], 0, 100);
-  assert.ok(boostCash.parlayDec < boostSticker.parlayDec);
-  assert.equal(calcFreeBetParlayEV([cashGiants], 100).parlayDec, boostCash.parlayDec, "free-bet EV uses the fee-true phone American");
-  assert.notEqual(calcFreeBetParlayEV([cashGiants], 100).parlayDec, boostSticker.parlayDec);
 }
 
 {
@@ -849,17 +823,20 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away, 252);
   assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away_prediction, 245);
   assert.equal(data.moneylines[0].bookOdds.draftkings.ml_away, 240);
-  const storedLegs = buildAllLegsForBook(data, "underdog_predict");
+  const freeLegs = buildAllLegsForBook(data, "underdog_predict");
   const promoLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
-  const storedGiants = storedLegs.find((l) => /giants/i.test(l.name));
+  const freeGiants = freeLegs.find((l) => /giants/i.test(l.name));
   const promoGiants = promoLegs.find((l) => /giants/i.test(l.name));
   const promoRams = promoLegs.find((l) => /rams/i.test(l.name));
-  assert.equal(storedGiants.dk, 252, "stored row keeps the gross sticker for the Odds Board");
-  assert.equal(promoGiants.dk, 245, "promo free bet and cash use the phone price");
-  assert.notEqual(promoGiants.dk, underdogPredictCashAmerican(245), "do not fee-adjust an already-true prediction price");
+  const freeRams = freeLegs.find((l) => /rams/i.test(l.name));
+  assert.equal(freeGiants.dk, 245, "free bet uses the phone price");
+  assert.equal(promoGiants.dk, 245, "cash uses the same phone price");
+  assert.equal(freeRams.dk, -313);
   assert.equal(promoRams.dk, -313);
-  assert.equal(promoGiants.bestOpp, storedGiants.bestOpp);
-  assert.equal(calcFreeBetParlayEV([promoGiants], 100).parlayDec, calcParlayEV([promoGiants], 0, 100).parlayDec);
+  assert.notEqual(promoGiants.dk, 252);
+  assert.notEqual(promoGiants.dk, 244);
+  assert.equal(promoGiants.bestOpp, freeGiants.bestOpp);
+  assert.equal(calcFreeBetParlayEV([freeGiants], 100).parlayDec, calcParlayEV([promoGiants], 0, 100).parlayDec, "free-bet formula is unchanged; both paths share +245");
   const atPhone = buildAllLegsForBook(data, "underdog_predict", null, 245, "any", null, { underdogCash: true });
   assert.equal(atPhone.find((l) => /giants/i.test(l.name)).dk, 245);
   const belowPhone = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 244, { underdogCash: true });
