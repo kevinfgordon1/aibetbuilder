@@ -132,7 +132,8 @@ export function canSeeUnderdogPredict(user, env) {
   return userTokens(user).some((t) => allowed.has(t));
 }
 
-/** TRUSTED_BOOK_KEYS minus underdog_predict unless this user may see it. */
+/** Drop a leftover underdog_predict key unless this user may see the feed.
+ *  Underdog is not in TRUSTED_BOOK_KEYS, so it is never a matching book. */
 export function visibleTrustedBookKeys(user, trustedKeys, env) {
   const keys = new Set(trustedKeys || []);
   if (!canSeeUnderdogPredict(user, env)) keys.delete(UNDERDOG_PREDICT_BOOK_KEY);

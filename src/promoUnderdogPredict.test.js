@@ -106,11 +106,11 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(UNDERDOG_PREDICT_BOOK_ID, 196);
   assert.equal(UNDERDOG_PREDICT_BOOK_KEY, "underdog_predict");
   assert.equal(UNDERDOG_PREDICT_TITLE, "Underdog Predict");
-  assert.equal(TRUSTED_BOOK_KEYS.has("underdog_predict"), true);
+  assert.equal(TRUSTED_BOOK_KEYS.has("underdog_predict"), false);
   assert.equal(ALL_BOOKS.find((b) => b.key === "underdog_predict")?.label, "Underdog Predict");
   assert.equal(ALL_BOOKS.find((b) => b.key === "underdog_predict")?.exchange, true);
   assert.equal(isPmWinProbBook("underdog_predict"), true);
-  assert.equal(matchingBookList(ALL_BOOKS, TRUSTED_BOOK_KEYS).some((b) => b.key === "underdog_predict"), true);
+  assert.equal(matchingBookList(ALL_BOOKS, TRUSTED_BOOK_KEYS).some((b) => b.key === "underdog_predict"), false);
 }
 
 {
@@ -179,7 +179,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const ml = data.moneylines[0];
   assert.equal(ml.bookOdds.underdog_predict.ml_away, 100);
   assert.equal(ml.bookOdds.underdog_predict.ml_home, -110);
-  assert.equal(ml.best_away_book, "underdog_predict");
+  assert.equal(ml.best_away_book, "draftkings", "Underdog phone quotes stay on the offer; trusted best stays DraftKings");
 }
 
 {
@@ -297,7 +297,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.ok(app.includes("underdog_predict"));
   assert.ok(ev.includes("underdog_predict"));
   const appTrusted = app.match(/const TRUSTED_BOOK_KEYS = new Set\(\[([\s\S]*?)\]\);/);
-  assert.ok(appTrusted[1].includes("underdog_predict"));
+  assert.ok(!appTrusted[1].includes("underdog_predict"));
 }
 
 {
