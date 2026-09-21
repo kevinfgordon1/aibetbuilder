@@ -18,7 +18,7 @@ export const NEW_ODDS_BOARD_SHARED_EMAILS = Object.freeze([KENNETH_GUIDO_EMAIL])
 /** Vite public env: comma / space / semicolon separated emails or auth uids. */
 export const COMBO_LOCKS_ALLOWLIST_ENV = "VITE_COMBO_LOCKS_ALLOWLIST";
 
-/** Underdog Predict (Betstamp 196) — New Odds Board column + Promo true-odds. */
+/** Underdog Predict phone prices — New Odds Board column + Promo true-odds. */
 export const UNDERDOG_PREDICT_ALLOWLIST_ENV = "VITE_UNDERDOG_PREDICT_ALLOWLIST";
 export const UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT = "UNDERDOG_PREDICT_ALLOWLIST";
 export const UNDERDOG_PREDICT_BOOK_KEY = "underdog_predict";
@@ -124,7 +124,7 @@ export function underdogPredictAllowlist(env) {
 /**
  * Underdog Predict column / Promo true-odds overlay.
  * Signed-in email or auth uid, case-insensitive. Logged-out is deny.
- * Not a query-param gate — anyone can spoof ?book_ids=196.
+ * Prices come from /api/underdog-predict, not Betstamp book 196.
  */
 export function canSeeUnderdogPredict(user, env) {
   if (!user) return false;

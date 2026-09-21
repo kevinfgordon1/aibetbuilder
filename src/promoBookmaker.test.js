@@ -326,7 +326,7 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.match(url, /\/api\/betstamp-markets\?/);
   assert.match(url, /league=NFL%2CNCAAF/);
   assert.match(url, /book_ids=642/);
-  assert.match(url, /196/);
+  assert.doesNotMatch(url, /196/);
   assert.match(url, /is_live=false/);
   assert.equal(bookmakerSnapshotUrl({ leagues: ["MLB"] }), null);
   const noUdp = bookmakerSnapshotUrl({ leagues: ["NFL"], includeUnderdog: false });
@@ -339,7 +339,7 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     leagues: ["NFL"],
     fetchFn: async (url) => {
       assert.match(url, /book_ids=642/);
-      assert.match(url, /196/);
+      assert.doesNotMatch(url, /196/);
       return { ok: true, json: async () => bookmakerSnapshot() };
     },
   });
@@ -519,7 +519,7 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   // string home_team + home_id/home_abbr, KU home vs ASU, 642 KU 2.63 / ASU 1.526.
   // Side map must keep +163 on Kansas. Complement of a misplaced +163 is the
   // screenshot −163 (62.0%) / +24.7% edge vs FanDuel +168.
-  const kick = "2026-09-19T16:00:00Z";
+  const kick = future;
   const jayhawks = {
     id: "odds-ku-asu",
     sport_key: "americanfootball_ncaaf",
@@ -847,7 +847,7 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
       now,
       fetchFn: async (url) => {
         calls += 1;
-        assert.match(String(url), /196/);
+        assert.doesNotMatch(String(url), /196/);
         return { ok: true, json: async () => bookmakerSnapshot({ fixtureId: "fix-udp" }) };
       },
     });

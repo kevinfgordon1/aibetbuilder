@@ -959,10 +959,10 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   const bookKey = bookKeyForMarket(market);
   if (!bookKey) return false;
   // Book 196 is not the Underdog phone price. Live NYG decimal 3.4 converts
-  // to +240 (LAR 1.33 → −303) while the phone is still +245. Do not paint
-  // that American, and do not fee-adjust it into a phone quote. Phone odds
-  // are odds.prediction, which this feed does not carry, so the cell stays
-  // empty. Promo joins prediction separately and omits the leg when missing.
+  // to +240 (LAR 1.33 → −303) while the phone is +245 / 3.45. Do not paint
+  // that American, and do not fee-adjust it into a phone quote. The board
+  // fills this cell from /api/underdog-predict (odds.prediction) after the
+  // snapshot. A missing phone quote leaves the cell empty.
   if (bookKey === UNDERDOG_PREDICT_BOOK_KEY) return false;
   const betType = normalizeBetType(market.bet_type);
   const side = marketSide(market, game);
@@ -1116,6 +1116,9 @@ export function reconcileLiveGames(games, {
       applyMarketToGame(game, market, { receivedAt: seenAt });
     }
     for (const quote of listedBoardQuotes(game)) {
+      // Phone quotes are not Betstamp 196. Reconcile must not tombstone them
+      // when book 196 is absent from the snapshot.
+      if (quote.bookKey === UNDERDOG_PREDICT_BOOK_KEY) continue;
       const key = quotePresenceKey({
         fixtureId: game.id,
         bookKey: quote.bookKey,

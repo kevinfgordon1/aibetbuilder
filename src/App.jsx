@@ -82,6 +82,7 @@ import {
 } from "./oddsLoad.js";
 import { overlayBookmakerOnCacheRows, readBookmakerClientCache, resolveBookmakerSnapshot } from "./promoBookmaker.js";
 import { maybeOverlayUnderdogPredictOnCacheRows } from "./promoUnderdogPredict.js";
+import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import {
   assignBookUpdatedAt,
   describePromoUnderdogStaleWarning,
@@ -1675,11 +1676,14 @@ export default function App() {
       // does not send refresh=1), so Refresh stays fast unless that snap is
       // stale. Sport chips and remounts honor client TTL via memory/session.
       const includeUnderdog = canSeeUnderdogPredict(user);
+      const phonePromise = includeUnderdog
+        ? fetchUnderdogPhone().catch(() => ({ ok: false, games: [] }))
+        : Promise.resolve(null);
       const bookmakerPromise = resolveBookmakerSnapshot({
         sports: plan.featuredSports,
         cached: bookmakerCacheRef.current,
         forceRefresh: forceBookmaker,
-        includeUnderdog,
+        includeUnderdog: false,
       }).then((resolved) => {
         if (resolved.snap) {
           bookmakerCacheRef.current = {
@@ -1701,12 +1705,13 @@ export default function App() {
       // Betstamp Bookmaker overlay is best-effort and re-runs every Promo
       // fetch. It strips any cached `bookmaker` key first (odds_cache is Odds
       // API only) then overlays 642 — a blip or failed join omits those cells.
-      // Underdog Predict (196) uses the same snapshot and join guards, but
-      // only for allowlisted users (Kevin by default).
+      // Underdog Predict is /api/underdog-predict (odds.prediction only),
+      // for allowlisted users. A missing phone quote omits the line.
       const bookmakerSnap = await bookmakerPromise.catch(() => null);
+      const phone = await phonePromise;
       const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
-        bookmakerSnap,
+        phone,
         user,
         undefined,
         { predictionOnly: true },
@@ -1715,7 +1720,7 @@ export default function App() {
       // block Promo — featured main lines are enough to use the builder.
       const eventRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap),
-        bookmakerSnap,
+        phone,
         user,
         undefined,
         { predictionOnly: true },
@@ -1755,11 +1760,14 @@ export default function App() {
     });
     try {
       const includeUnderdog = canSeeUnderdogPredict(user);
+      const phonePromise = includeUnderdog
+        ? fetchUnderdogPhone().catch(() => ({ ok: false, games: [] }))
+        : Promise.resolve(null);
       const bookmakerPromise = resolveBookmakerSnapshot({
         sports: plan.featuredSports,
         cached: bookmakerCacheRef.current,
         forceRefresh: true,
-        includeUnderdog,
+        includeUnderdog: false,
       }).then((resolved) => {
         if (resolved.snap) {
           bookmakerCacheRef.current = {
@@ -1779,10 +1787,13 @@ export default function App() {
         return;
       }
       const bookmakerSnap = await bookmakerPromise.catch(() => null);
+      const phone = await phonePromise;
       const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
-        bookmakerSnap,
+        phone,
         user,
+        undefined,
+        { predictionOnly: true },
       );
       underdogOverlayAppliedRef.current = includeUnderdog;
       // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that

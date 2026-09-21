@@ -45,6 +45,7 @@ import {
   BETSTAMP_DEFAULT_SPORT,
   bookByKey,
   leagueForSport,
+  UNDERDOG_PREDICT_BOOK_ID,
   visibleBetstampBooks,
 } from "./betstampBooks.js";
 import BookLabel from "./BookLabel.jsx";
@@ -71,6 +72,8 @@ import {
   bestLineUpdatedAt,
   fixtureAltLadders,
 } from "./betstampNormalize.js";
+import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
+import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import {
   betstampSnapshotUrl,
   betstampStreamUrl,
@@ -910,8 +913,13 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const books = useMemo(() => visibleBetstampBooks(user), [user?.id, user?.email]);
-  const bookIds = useMemo(() => books.map((b) => b.id), [books]);
+  const seeUnderdog = books.some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID);
+  const bookIds = useMemo(
+    () => books.map((b) => b.id).filter((id) => id !== UNDERDOG_PREDICT_BOOK_ID),
+    [books],
+  );
   const bookIdsKey = bookIds.join(",");
+  const phoneRef = useRef(null);
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
@@ -982,12 +990,36 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setSnapshotAt(null);
     setStreamStatus(liveOnly ? "connecting" : "idle");
 
-    const applySnapshot = async ({ showLoading }) => {
+    const loadPhone = async () => {
+      if (!seeUnderdog) {
+        phoneRef.current = null;
+        return null;
+      }
       try {
-        const res = await fetch(betstampSnapshotUrl({ league, live: liveOnly, bookIds }), {
+        const body = await fetchUnderdogPhone((url, init) => fetch(url, {
+          ...(init || {}),
           signal: ctrl.signal,
           cache: "no-store",
-        });
+        }));
+        const slate = body && Array.isArray(body.games) ? body : { ok: false, games: [] };
+        phoneRef.current = slate;
+        return slate;
+      } catch (err) {
+        if (ctrl.signal.aborted) throw err;
+        phoneRef.current = { ok: false, games: [] };
+        return phoneRef.current;
+      }
+    };
+
+    const applySnapshot = async ({ showLoading }) => {
+      try {
+        const [res, phone] = await Promise.all([
+          fetch(betstampSnapshotUrl({ league, live: liveOnly, bookIds }), {
+            signal: ctrl.signal,
+            cache: "no-store",
+          }),
+          loadPhone(),
+        ]);
         const body = await res.json().catch(() => ({}));
         if (gen !== fetchGen.current) return false;
         if (body.missingKey || res.status === 503) {
@@ -1008,12 +1040,12 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           return false;
         }
         const fetchedAt = Date.now();
-        const next = gamesFromBetstampSnapshot({
+        const next = applyUnderdogPhoneQuotes(gamesFromBetstampSnapshot({
           markets: body.markets,
           fixtures: body.fixtures,
           teams: body.teams,
           nowMs: fetchedAt,
-        });
+        }), seeUnderdog ? phone : null);
         commitGames(next, { force: true });
         setSnapshotAt(fetchedAt);
         setLoadError(null);
@@ -1051,26 +1083,28 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       pollTimer = setInterval(() => {
         if (pollInFlight || cancelled) return;
         pollInFlight = true;
-        fetch(betstampSnapshotUrl({ league, live: true, bookIds }), {
-          signal: ctrl.signal,
-          cache: "no-store",
-        })
-          .then(async (res) => {
+        Promise.all([
+          fetch(betstampSnapshotUrl({ league, live: true, bookIds }), {
+            signal: ctrl.signal,
+            cache: "no-store",
+          }).then(async (res) => {
             const body = await res.json().catch(() => ({}));
             return { res, body };
-          })
-          .then(({ res, body }) => {
+          }),
+          loadPhone(),
+        ])
+          .then(([{ res, body }, phone]) => {
             if (cancelled || gen !== fetchGen.current) return;
             if (!body || body.ok === false || body.missingKey || (res && !res.ok)) return;
             if (body.markets == null) return;
             const fetchedAt = Date.now();
             const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
-            const next = reconcileLiveGames(withMeta, {
+            const next = applyUnderdogPhoneQuotes(reconcileLiveGames(withMeta, {
               markets: body.markets,
               fixtures: body.fixtures,
               teams: body.teams,
               nowMs: fetchedAt,
-            });
+            }), seeUnderdog ? phone : null);
             commitGames(next);
             setSnapshotAt(fetchedAt);
           })
@@ -1095,12 +1129,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             const { markets, ingestTs } = unwrapStreamPayload(ev.data);
             if (!markets.length) return;
             const recv = typeof ingestTs === "number" ? ingestTs : receivedAt;
-            const { games: next, applied } = applyStreamMarkets(gamesRef.current, markets, {
+            const { games: streamed, applied } = applyStreamMarkets(gamesRef.current, markets, {
               receivedAt: recv,
               nowMs: receivedAt,
               allowNewGames: false,
             });
             if (!applied.length) return;
+            const next = applyUnderdogPhoneQuotes(streamed, seeUnderdog ? phoneRef.current : null);
             commitGames(next);
             tickSinkRef.current?.(applied, recv);
           },
@@ -1131,7 +1166,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       clearTimeout(timer);
       clearInterval(pollTimer);
     };
-  }, [boardSport, liveOnly, bookIdsKey, boardRefreshKey]);
+  }, [boardSport, liveOnly, bookIdsKey, boardRefreshKey, seeUnderdog]);
 
   useEffect(() => {
     altFetchGen.current += 1;

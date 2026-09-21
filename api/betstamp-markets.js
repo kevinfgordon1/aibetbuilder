@@ -14,11 +14,12 @@
 // and ?refresh=1 skip that TTL and send Cache-Control: private, no-store.
 //
 // Auth: this route is anon (CORS * + no JWT). 196 stays on the allowlist so
-// Kevin's client can pass book_ids=196. Default / omitted book_ids omit 196
-// and 400 (BetMGM) — the trial key 403s the whole /markets request when 400
-// is in book_ids. Opt in with BETSTAMP_INCLUDE_BETMGM=1. A 403 that still
-// includes unauthorized books retries without them.
-// UI hide + client omit is the real gate (canSeeUnderdogPredict).
+// an explicit book_ids=196 still parses. Promo and the New Odds Board do
+// not send 196; Underdog cells come from /api/underdog-predict. Default /
+// omitted book_ids omit 196 and 400 (BetMGM) — the trial key 403s the whole
+// /markets request when 400 is in book_ids. Opt in with
+// BETSTAMP_INCLUDE_BETMGM=1. A 403 that still includes unauthorized books
+// retries without them. The board refuses to paint 196.
 
 const {
   readQuery,

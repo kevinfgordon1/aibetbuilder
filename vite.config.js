@@ -11,11 +11,13 @@ function betstampLocalApi() {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url || ''
         const path = url.split('?')[0]
-        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream') return next()
+        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream' && path !== '/api/underdog-predict') return next()
         try {
           const handler = path === '/api/betstamp-stream'
             ? require('./api/betstamp-stream.js')
-            : require('./api/betstamp-markets.js')
+            : path === '/api/underdog-predict'
+              ? require('./api/underdog-predict.js')
+              : require('./api/betstamp-markets.js')
           if (typeof res.status !== 'function') {
             res.status = (code) => {
               res.statusCode = code

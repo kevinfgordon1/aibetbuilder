@@ -28,7 +28,7 @@ import {
   normalizeBetType,
   toAmericanOdds,
 } from "./betstampNormalize.js";
-import { BETSTAMP_SPORTS, UNDERDOG_PREDICT_BOOK_ID } from "./betstampBooks.js";
+import { BETSTAMP_SPORTS } from "./betstampBooks.js";
 import { betstampSnapshotUrl } from "./betstampLive.js";
 
 export const BOOKMAKER_BOOK_KEY = "bookmaker";
@@ -409,10 +409,10 @@ export function overlayBookmakerOnCacheRows(rows, snapshot) {
   });
 }
 
-export function promoBetstampBookIds(includeUnderdog = true) {
-  return includeUnderdog
-    ? [BOOKMAKER_BOOK_ID, UNDERDOG_PREDICT_BOOK_ID]
-    : [BOOKMAKER_BOOK_ID];
+export function promoBetstampBookIds(_includeUnderdog = true) {
+  // Bookmaker 642 only. Underdog phone prices come from /api/underdog-predict,
+  // never Betstamp 196.
+  return [BOOKMAKER_BOOK_ID];
 }
 
 export function bookmakerSnapshotUrl({ leagues, includeUnderdog = true } = {}) {
@@ -421,8 +421,7 @@ export function bookmakerSnapshotUrl({ leagues, includeUnderdog = true } = {}) {
   return betstampSnapshotUrl({
     league: list.join(","),
     live: false,
-    // Same selected-sports / 5-min TTL path as Bookmaker. 196 rides along so
-    // Promo true-odds can overlay Underdog Predict without a second Betstamp pull.
+    // Bookmaker 642 only. Underdog is /api/underdog-predict, not book 196.
     bookIds: promoBetstampBookIds(includeUnderdog),
   });
 }
