@@ -40,6 +40,9 @@
     },
     "api/betstamp-stream.js": {
       "maxDuration": 300
+    },
+    "api/underdog-predict.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

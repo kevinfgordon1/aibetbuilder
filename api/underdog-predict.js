@@ -1,0 +1,50 @@
+'use strict';
+
+// GET /api/underdog-predict — Underdog phone prices for Promo and the
+// New Odds Board. Fetches /v1/lobbies/content/match_grouped_lines.
+// Defaults (override with server env, never VITE_):
+//   UNDERDOG_STATE_CONFIG_ID=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
+//   UNDERDOG_PRODUCT_EXPERIENCE_ID=018e1234-5678-9abc-def0-123456789009
+//   UNDERDOG_CLIENT_VERSION=20260918170103
+// The other experience id returns the sticker (+252). A failed fetch
+// yields games: [] so callers omit the line. Never Betstamp book 196.
+
+const { fetchUnderdogPhone } = require('../lib/underdog-lobby');
+
+async function handler(req, res, deps) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(204).end();
+    return;
+  }
+  if (req.method && req.method !== 'GET') {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(405).json({ ok: false, error: 'GET only', games: [] });
+    return;
+  }
+  try {
+    const result = await fetchUnderdogPhone(deps);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Underdog-Cache', result.cacheStatus || 'MISS');
+    res.status(200).json({
+      ok: result.ok !== false,
+      missingConfig: !!result.missingConfig,
+      configRejected: !!result.configRejected,
+      games: result.games || [],
+      error: result.error || null,
+    });
+  } catch (e) {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.status(200).json({
+      ok: false,
+      missingConfig: false,
+      configRejected: false,
+      games: [],
+      error: (e && e.message) || 'Underdog request failed',
+    });
+  }
+}
+
+module.exports = handler;

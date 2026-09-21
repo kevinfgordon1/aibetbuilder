@@ -15,9 +15,10 @@
 // calibrate to the published UDX examples, not a one-off slip constant.
 //
 // Keep in lockstep with lib/underdog-predict-fee.js.
-// Legacy UDX curve stays for reference. Every Promo path uses
-// UNDERDOG_PREDICT_CASH_FEE_RATE when no prediction quote is joined.
-// New Odds Board stays on the gross sticker.
+// Legacy UDX curve stays for reference and is not a Promo price.
+// Promo Underdog Americans are the joined odds.prediction quote only.
+// New Odds Board paints /api/underdog-predict (odds.prediction), never
+// Betstamp 196. Do not fee-adjust 196 into a phone quote.
 
 export const UNDERDOG_PREDICT_UDX_FEE_RATE = 0.072;
 
@@ -86,64 +87,18 @@ export function applyUnderdogPredictFee(rawAmericanOdds) {
   return american == null ? rawAmericanOdds : american;
 }
 
-// Promo phone price for free bet, cash, boost, and no-sweat. Primary quote
-// is Underdog odds.prediction american (Giants +245 / 3.45, probability 27)
-// joined as predictionAmerican — use it verbatim. Betstamp 196 / odds.fantasy
-// stay the gross sticker (+252 / 3.52) on the row and on the Odds Board.
-// Fallback when prediction is absent: invert Kalshi θ=0.07 out of the sticker,
-// then r = 0.1015 → p=0.27 gives 344.82 contracts, $6.90, +245; sticker alone
-// inverts to +244. Free-bet EV still uses free-bet math; the American input
-// is this same phone price. Keep in lockstep with lib/underdog-predict-fee.js.
+// Promo phone price for free bet, cash, boost, and no-sweat. The only
+// quote is Underdog odds.prediction american (Giants +245 / 3.45,
+// probability 27) joined as predictionAmerican — use it verbatim.
+// Betstamp 196 / odds.fantasy are not a Promo or board price. The New
+// Odds Board paints /api/underdog-predict (Giants +245 / 3.45) and leaves
+// the cell empty when that quote is missing. A missing prediction omits
+// the Promo leg.
+// Do not invent a phone price from the sticker. Free-bet EV math is
+// unchanged; this American is the input. Keep in lockstep with
+// lib/underdog-predict-fee.js.
 
-export const UNDERDOG_PREDICT_CASH_FEE_RATE = 0.1015;
-export const UNDERDOG_STICKER_KALSHI_FEE_RATE = 0.07;
 const UNDERDOG_PREDICT_BOOK_KEY = "underdog_predict";
-
-export function contractProbabilityFromKalshiSticker(stickerAmerican, theta = UNDERDOG_STICKER_KALSHI_FEE_RATE) {
-  const pEff = impliedPriceFromAmerican(stickerAmerican);
-  const t = Number(theta);
-  if (!(pEff > 0 && pEff < 1) || !(t > 0)) return null;
-  const disc = (1 + t) * (1 + t) - 4 * t * pEff;
-  if (disc < 0) return null;
-  const p = ((1 + t) - Math.sqrt(disc)) / (2 * t);
-  if (!(p > 0 && p < 1)) return null;
-  return p;
-}
-
-export function underdogPredictCashQuote({ probability, stickerAmerican, stake = 100, rate = UNDERDOG_PREDICT_CASH_FEE_RATE } = {}) {
-  let p = Number(probability);
-  if (p > 1 && p <= 100) p = p / 100;
-  if (!(p > 0 && p < 1)) {
-    const sticker = coerceUnderdogFeeInputToAmerican(stickerAmerican);
-    p = sticker == null ? NaN : contractProbabilityFromKalshiSticker(sticker);
-  }
-  if (!(p > 0 && p < 1)) return null;
-  const s = Number(stake);
-  const r = Number(rate);
-  if (!(s > 0) || !(r >= 0)) return null;
-  const effPrice = p * (1 + r * (1 - p));
-  if (!(effPrice > 0 && effPrice < 1)) return null;
-  const contracts = s / effPrice;
-  const fee = r * contracts * p * (1 - p);
-  const decimal = contracts / s;
-  const american = decimalToAmerican(decimal);
-  if (american == null) return null;
-  return { probability: p, stake: s, rate: r, contracts, fee, decimal, american };
-}
-
-export function underdogPredictCashAmerican(raw, opts = {}) {
-  if (raw === null || raw === undefined) return raw;
-  const sticker = coerceUnderdogFeeInputToAmerican(raw);
-  if (sticker == null) return Number.isFinite(Number(raw)) ? null : raw;
-  const quote = underdogPredictCashQuote({
-    probability: opts.probability,
-    stickerAmerican: sticker,
-    stake: opts.stake,
-    rate: opts.rate,
-  });
-  if (!quote || quote.american == null) return sticker;
-  return quote.american;
-}
 
 function predictionAmericanOrNull(raw) {
   if (raw == null || raw === "") return null;
@@ -156,13 +111,9 @@ function predictionAmericanOrNull(raw) {
   return n;
 }
 
-export function underdogCashOfferAmerican(bookKey, american, enabled, predictionAmerican) {
-  if (!enabled || bookKey !== UNDERDOG_PREDICT_BOOK_KEY) return american;
-  const quoted = predictionAmericanOrNull(predictionAmerican);
-  if (quoted != null) return quoted;
-  if (american == null) return american;
-  const next = underdogPredictCashAmerican(american);
-  return next == null ? american : next;
+export function underdogCashOfferAmerican(bookKey, american, _enabled, predictionAmerican) {
+  if (bookKey !== UNDERDOG_PREDICT_BOOK_KEY) return american;
+  return predictionAmericanOrNull(predictionAmerican);
 }
 
 export function withUnderdogPrediction(leg, predictionAmerican, contractProbability) {
@@ -219,17 +170,16 @@ export function stampUnderdogPredictionLegs(legs, data) {
   });
 }
 
-export function applyUnderdogCashLegPrices(legs, enabled) {
-  if (!enabled) return legs || [];
-  return (legs || []).map((leg) => {
-    if (!leg || leg.bookKey !== UNDERDOG_PREDICT_BOOK_KEY || leg.dk == null) return leg;
-    const quoted = predictionAmericanOrNull(leg.predictionAmerican);
-    if (quoted != null) {
-      if (quoted === leg.dk) return leg;
-      return { ...leg, dk: quoted };
+export function applyUnderdogCashLegPrices(legs, _enabled) {
+  const out = [];
+  for (const leg of legs || []) {
+    if (!leg || leg.bookKey !== UNDERDOG_PREDICT_BOOK_KEY) {
+      out.push(leg);
+      continue;
     }
-    const dk = underdogPredictCashAmerican(leg.dk, { probability: leg.contractProbability });
-    if (dk == null || dk === leg.dk) return leg;
-    return { ...leg, dk };
-  });
+    const quoted = predictionAmericanOrNull(leg.predictionAmerican);
+    if (quoted == null) continue;
+    out.push(quoted === leg.dk ? leg : { ...leg, dk: quoted });
+  }
+  return out;
 }

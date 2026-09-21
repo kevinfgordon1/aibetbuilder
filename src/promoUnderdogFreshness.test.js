@@ -174,14 +174,21 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
       },
     ],
   };
-  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const overlaid = overlayUnderdogPredictOnGame(event, null, {
+    match_grouped_lines: [{
+      title: "Moneyline",
+      options: [
+        { selection_header: "Denver Broncos", updated_at: "2026-09-19T13:10:00.000Z", odds: { prediction: { american: "+100", decimal: "2.00" } } },
+        { selection_header: "Kansas City Chiefs", updated_at: "2026-09-19T17:15:00.000Z", odds: { prediction: { american: "-110", decimal: "1.91" } } },
+      ],
+    }],
+  });
   const h2h = overlaid.bookmakers.find((b) => b.key === "underdog_predict")?.markets?.find((m) => m.key === "h2h");
   const den = h2h.outcomes.find((o) => o.name === "Denver Broncos");
   const kc = h2h.outcomes.find((o) => o.name === "Kansas City Chiefs");
-  assert.equal(den.updatedAt, denTs, "overlay keeps per-selection Betstamp updated_at");
+  assert.equal(den.updatedAt, denTs, "overlay keeps per-selection phone updated_at");
   assert.equal(kc.updatedAt, kcTs);
   assert.notEqual(den.updatedAt, kc.updatedAt);
-
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   const ml = data.moneylines[0];
   assert.equal(ml.bookOdds.underdog_predict.ml_away_updatedAt, denTs);
@@ -245,7 +252,16 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
       },
     ],
   };
-  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const overlaid = overlayUnderdogPredictOnGame(event, null, {
+    match_grouped_lines: [{
+      title: "Moneyline",
+      options: [
+        { selection_header: "Pittsburgh Steelers", updated_at: "2026-09-19T16:10:00.000Z", odds: { prediction: { american: "+194", decimal: "2.94" } } },
+        { selection_header: "Baltimore Ravens", updated_at: "2026-09-19T19:52:00.000Z", odds: { prediction: { american: "-333", decimal: "1.30" } } },
+      ],
+    }],
+  });
+  const pitH2h = overlaid.bookmakers.find((b) => b.key === "underdog_predict")?.markets?.find((m) => m.key === "h2h");
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   const legs = buildAllLegsForBook(data, "underdog_predict");
   const steelers = legs.find((l) => /steelers/i.test(l.name));

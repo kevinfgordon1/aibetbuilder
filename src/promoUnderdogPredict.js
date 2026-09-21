@@ -1,19 +1,14 @@
-// Overlay Betstamp Underdog Predict (book id 196) mains onto Odds API Promo events.
-// Join is the same unique-pair / commence-window / "fixture must already have a
-// 196 row" guard as Bookmaker 642 — do not invent a second matcher.
-// Odds API games stay the row identity. A Betstamp blip omits Underdog cells.
+// Underdog Predict on Promo is the first-party odds.prediction phone price
+// only. Betstamp book 196 is not a display or EV input (NYG 3.4 → +240 is
+// not the phone +245 / 3.45). A missing prediction omits the leg. Do not
+// fee-adjust Betstamp into a phone quote. Free-bet EV math is unchanged;
+// the American it consumes is the phone price.
 //
-// Overlay stores Betstamp 196 gross sticker American (3.52 → +252) on
-// outcome.price. New Odds Board uses betstampNormalize and stays on that
-// sticker. Every Promo path (free bet, cash, boost, no-sweat) uses the
-// phone American instead: a joined Underdog odds.prediction (Giants +245 /
-// 3.45x, app-identical), otherwise underdogPredictCashAmerican (sticker
-// +252 → +244 at UNDERDOG_PREDICT_CASH_FEE_RATE). Do not fee-adjust a
-// prediction price, and do not apply the legacy UDX 0.072 cost-add.
-// Free-bet EV math is unchanged; only the American fed into it is the
-// phone price. A prediction quote with no Betstamp sticker still becomes
-// an Underdog bookmaker on the Promo overlay, priced at that phone
-// American. The Odds Board overlay does not synthesize those lines.
+// Game-moneyline prediction is /api/underdog-predict →
+// /v1/lobbies/content/match_grouped_lines (not the scaffold). Defaults:
+// state_config_id f8996742-f10c-4d32-955a-dcbcaa5dc5c0 and phone
+// product_experience_id 018e1234-5678-9abc-def0-123456789009. A failed
+// fetch omits the line.
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p
@@ -49,7 +44,7 @@ import {
   teamsLikelySame,
 } from "./promoBookmaker.js";
 import { canSeeUnderdogPredict } from "./comboAccess.js";
-import { applyUnderdogLobbyPredictions, predictionOnlyBookmakerFromQuotes } from "./underdogPredictionQuote.js";
+import { findUnderdogPhoneGame, predictionOnlyBookmakerFromQuotes } from "./underdogPredictionQuote.js";
 import {
   DECISIVE_IMPLIED_DEV,
   impliedFromAmerican,
@@ -197,38 +192,41 @@ export function underdogPredictBookmakerFromSnapshot(event, snapshot, joinHit) {
   return { key: UNDERDOG_PREDICT_BOOK_KEY, title: UNDERDOG_PREDICT_TITLE, markets };
 }
 
-export function overlayUnderdogPredictOnGame(game, snapshot, lobby, opts) {
+function lobbyQuotes(payload, game) {
+  if (!payload) return null;
+  if (payload.games && Array.isArray(payload.games)) {
+    const hit = findUnderdogPhoneGame(payload, game.away_team || game.away, game.home_team || game.home);
+    return hit ? hit.lines : [];
+  }
+  return payload.underdogLobby || payload.predictionLines || payload;
+}
+
+export function overlayUnderdogPredictOnGame(game, _snapshot, lobby, _opts) {
   if (!game || typeof game !== "object") return game;
   const bookmakers = (game.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
   const stripped = { ...game, bookmakers };
-  let bm = snapshot ? underdogPredictBookmakerFromSnapshot(stripped, snapshot) : null;
-  if (bm && underdogPredictConflictsWithEventBooks(stripped, bm)) bm = null;
-  const next = { ...stripped, bookmakers: bm ? [...bookmakers, bm] : bookmakers };
-  const payload = lobby || (snapshot && (snapshot.underdogLobby || snapshot.predictionLines)) || null;
-  if (!payload) return next;
-  if (bm) return applyUnderdogLobbyPredictions(next, payload);
-  // Promo only. Odds Board omits predictionOnly and keeps sticker-backed rows.
-  if (!opts || !opts.predictionOnly) return next;
+  const payload = lobbyQuotes(lobby, stripped);
+  if (!payload || (Array.isArray(payload) && !payload.length)) return stripped;
   const synthesized = predictionOnlyBookmakerFromQuotes(stripped, payload);
-  if (!synthesized) return next;
+  if (!synthesized) return stripped;
   const titled = { ...synthesized, title: UNDERDOG_PREDICT_TITLE };
-  if (underdogPredictConflictsWithEventBooks(stripped, titled)) return next;
+  if (underdogPredictConflictsWithEventBooks(stripped, titled)) return stripped;
   return { ...stripped, bookmakers: [...bookmakers, titled] };
 }
 
-export function overlayUnderdogPredictOnGames(games, snapshot, opts) {
+export function overlayUnderdogPredictOnGames(games, phone, opts) {
   if (!Array.isArray(games)) return games;
-  return games.map((game) => overlayUnderdogPredictOnGame(game, snapshot, null, opts));
+  return games.map((game) => overlayUnderdogPredictOnGame(game, null, phone, opts));
 }
 
-export function overlayUnderdogPredictOnCacheRows(rows, snapshot, opts) {
+export function overlayUnderdogPredictOnCacheRows(rows, phone, opts) {
   return (rows || []).map((row) => {
     if (!row) return row;
     if (Array.isArray(row.data)) {
-      return { ...row, data: overlayUnderdogPredictOnGames(row.data, snapshot, opts) };
+      return { ...row, data: overlayUnderdogPredictOnGames(row.data, phone, opts) };
     }
     if (row.data && typeof row.data === "object") {
-      return { ...row, data: overlayUnderdogPredictOnGame(row.data, snapshot, null, opts) };
+      return { ...row, data: overlayUnderdogPredictOnGame(row.data, null, phone, opts) };
     }
     return row;
   });

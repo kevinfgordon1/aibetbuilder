@@ -135,13 +135,17 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(g.bookOdds.pinnacle.tot_over, -110);
   assert.equal(g.bookOdds.pinnacle.tot_line, 44.5);
   assert.equal(g.bookOdds.draftkings.spr_away, null, "alt spread must not overwrite mains");
-  assert.equal(g.bookOdds.underdog_predict.ml_away, 100);
-  assert.equal(g.bookOdds.underdog_predict.ml_home, -110);
-  assert.notEqual(g.bookOdds.underdog_predict.ml_away, -107, "New Odds Board stays raw Betstamp sticker");
+  assert.equal(toAmericanOdds(2.00), 100, "book 196 decimal still converts; the board must not show it");
+  assert.equal(g.bookOdds.underdog_predict.ml_away, null, "Betstamp 196 is not the phone price");
+  assert.equal(g.bookOdds.underdog_predict.ml_home, null);
+  assert.notEqual(g.bookOdds.underdog_predict.ml_away, -107, "do not fee-adjust book 196 into a phone quote");
 
   const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
   const udp = getOddsBoardCell({ game: g, bookKey: "underdog_predict", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
-  assert.equal(udp.top, 100);
+  assert.equal(udp.top, null);
+  assert.equal(udp.bot, null);
+  const mlBest = getOddsBoardCell({ game: g, bookKey: "best", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
+  assert.equal(mlBest.top, -110, "Best must not pick the omitted book 196 +100");
   assert.equal(cellShowsWinProb("underdog_predict"), true);
   const ml = getOddsBoardCell({ game: g, bookKey: "draftkings", market: "ml", selectedBookKeys: selected, allBooks: BETSTAMP_TRIAL_BOOKS });
   assert.equal(ml.top, -110);
@@ -714,9 +718,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(sseOff[0].bookOdds.draftkings.ml_away, null);
   assert.equal(lineIsSuspended(sseOff[0], "draftkings", "ml_away"), true);
 
-  // Houston @ Texas Tech: live book 196 print must beat a leftover pregame OTB
-  // row and a stale earlier live tick (board was stuck at +129 while Betstamp
-  // already had 2.73 / +173).
+  // Book 196 is not painted, including a newer live tick. Live-vs-OTB
+  // ordering for other books is covered by DraftKings above.
   {
     const hou = { id: "hou", name: "Houston", abbreviation: "HOU" };
     const ttu = { id: "ttu", name: "Texas Tech", abbreviation: "TTU" };
@@ -761,20 +764,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       teams: [hou, ttu],
       nowMs: Date.parse("2026-09-19T02:10:50.000Z"),
     });
-    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 173);
-    assert.equal(lineIsSuspended(mixed[0], "underdog_predict", "ml_away"), false);
-
-    const staleLive = applyMarketToGame(mixed[0], {
-      ...udpLive,
-      odds: 2.29,
-      updated_at: "2026-09-19T02:08:00.000Z",
-    }, { receivedAt: Date.parse("2026-09-19T02:10:50.000Z") });
-    assert.equal(staleLive, false, "older live tick must not replace 2.73");
-    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 173);
-
-    const otbAfter = applyMarketToGame(mixed[0], udpPregameOtb, { receivedAt: Date.parse("2026-09-19T02:11:00.000Z") });
-    assert.equal(otbAfter, false, "pregame OTB must not clear the live Underdog cell");
-    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 173);
+    assert.equal(toAmericanOdds(2.73), 173);
+    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, null);
     assert.equal(lineIsSuspended(mixed[0], "underdog_predict", "ml_away"), false);
 
     const nextTick = applyMarketToGame(mixed[0], {
@@ -782,8 +773,43 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       odds: 2.80,
       updated_at: "2026-09-19T02:11:10.000Z",
     }, { receivedAt: Date.parse("2026-09-19T02:11:10.400Z") });
-    assert.equal(nextTick.price, 180);
-    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, 180);
+    assert.equal(nextTick, false);
+    assert.equal(mixed[0].bookOdds.underdog_predict.ml_away, null);
+    assert.notEqual(mixed[0].bookOdds.underdog_predict.ml_away, 180);
+  }
+
+  // Production NYG @ LAR book 196: 3.4 → +240 and 1.33 → −303. Phone is
+  // +245. Show neither the Betstamp American nor a fee invented from it.
+  {
+    const nyg = { id: "nyg", name: "New York Giants", abbreviation: "NYG" };
+    const lar = { id: "lar", name: "Los Angeles Rams", abbreviation: "LAR" };
+    const fix = {
+      id: "nyg-lar-live",
+      league: "NFL",
+      start_date: "2026-09-22T00:15:00Z",
+      home_team_id: lar.id,
+      away_team_id: nyg.id,
+    };
+    const games = gamesFromBetstampSnapshot({
+      markets: [
+        { odds: 3.4, side: "NYG", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "nyg-lar-live", team_id: nyg.id, updated_at: "2026-09-21T18:25:00.000Z" },
+        { odds: 1.33, side: "LAR", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "nyg-lar-live", team_id: lar.id, updated_at: "2026-09-21T18:25:00.000Z" },
+      ],
+      fixtures: [fix],
+      teams: [nyg, lar],
+      nowMs: Date.parse("2026-09-21T18:26:00.000Z"),
+    });
+    assert.equal(toAmericanOdds(3.4), 240);
+    assert.equal(toAmericanOdds(1.33), -303);
+    assert.equal(games[0].bookOdds.underdog_predict.ml_away, null);
+    assert.equal(games[0].bookOdds.underdog_predict.ml_home, null);
+    const streamed = applyStreamMarkets(games, [{
+      odds: 3.4, side: "NYG", side_type: "Away", bet_type: "Moneyline", period: "FT",
+      is_alt: false, odd_provider_id: 196, fixture_id: "nyg-lar-live", team_id: nyg.id,
+      updated_at: "2026-09-21T18:26:00.000Z",
+    }], { receivedAt: Date.parse("2026-09-21T18:26:00.400Z") });
+    assert.equal(streamed.applied.length, 0);
+    assert.equal(streamed.games[0].bookOdds.underdog_predict.ml_away, null);
   }
 
   // Miami (FL) @ Wake Forest live spread: soft books still send a finite
@@ -856,7 +882,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       assert.equal(cell.bot, decimalToAmerican(6.5));
     }
     assert.equal(g.bookOdds.kalshi.spr_away, decimalToAmerican(1.20));
-    assert.equal(g.bookOdds.underdog_predict.spr_away, decimalToAmerican(1.25));
+    assert.equal(g.bookOdds.underdog_predict.spr_away, null, "book 196 spread is not a phone price");
+    assert.equal(g.bookOdds.underdog_predict.spr_home, null);
     assert.equal(lineIsSuspended(g, "kalshi", "spr_away"), false);
     assert.equal(lineIsSuspended(g, "underdog_predict", "spr_away"), false);
 

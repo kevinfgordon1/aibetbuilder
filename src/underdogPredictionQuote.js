@@ -1,40 +1,30 @@
 // Underdog first-party prediction prices (the phone), distinct from
 // odds.fantasy and from Betstamp book 196.
 //
-// Live capture, match_id 178911 (NYG @ LAR), logged-in scaffold:
+// Live capture, match_id 178911 (NYG @ LAR), 2026-09-21:
+//   GET /v1/lobbies/content/match_grouped_lines
+//       product_experience_id=018e1234-5678-9abc-def0-123456789009
+//       state_config_id=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
+//       client-version: 20260918170103, client-type: web
 //   Giants odds.prediction { american:+245, decimal:3.45, probability:27 }
 //   Rams   odds.prediction { american:-313, decimal:1.32, probability:74 }
-//   Top-level american_price / decimal_price matched those prediction
-//   fields. That is the app (3.45x / +245), not the gross sticker
-//   (+252 / 3.52). Prefer odds.prediction.american. Use american_price
-//   only when a prediction object is present and its american is blank.
-//   Never read odds.fantasy for Promo cash.
+// Prices live on over_under_lines options, not on the scaffold.
+// /v1/lobbies/scaffolds/matches returns sections only — no americans.
+// Do not parse a phone price from a scaffold body.
+// product_experience_id b34dfd93-d0e8-4da3-8bf4-45c15c548dec is the
+// sticker (+252). Do not substitute it for the phone id above.
+// Prefer odds.prediction.american. Use american_price only when a
+// prediction object is present and its american is blank. Never read
+// odds.fantasy for Promo or the board.
 //
-// Anonymous probe (no Authorization, no cookies):
-//   GET /v1/lobbies/scaffolds/matches?include_prediction_markets=true
-//       &market_view=compact&match_id=178911&match_type=Game&product=fantasy
-//     → 400 until state_config_id is set. A fake UUID 404s (the id is
-//       looked up) without asking for a session. A fake
-//       product_experience_id 400s even with product=fantasy.
-//   GET /v1/user → 401. GET /v1/geo_comply/license and
-//       /beta/v5/over_under_lines → 426 upgrade_required. A date-shaped
-//       Client-Version still 426s, so a current app build is required
-//       before geo can mint state_config_id.
-//   GET /v1/over_under_lines?include_prediction_markets=true&product=fantasy
-//     → 200 with no Client-Version and no state_config_id. odds.prediction
-//       is filled for futures (american_price matches prediction.american;
-//       odds.fantasy is null). Game moneylines are not in that payload
-//       (178911 is player props; prediction is null without the flag).
-//       match_id on that URL is ignored.
-//
-// Game-moneyline app prices therefore are not durably anonymous. Promo
-// does not log in. Every promo path (free bet, cash, boost, no-sweat)
-// uses a joined prediction quote when one is supplied, and otherwise the
-// Betstamp sticker plus the Kalshi-style r=0.1015 fallback. The free-bet
+// Game moneylines need UNDERDOG_STATE_CONFIG_ID. A valid id is looked up
+// without a user session. This process cannot mint the id (geo license
+// stays 426). Promo and the New Odds Board use that phone quote for
+// display and EV, and omit the Underdog line when it is missing. Do not
+// substitute Betstamp book 196 or a fee-adjusted sticker. The free-bet
 // formula is unchanged; the American it consumes is this phone price.
-// A prediction quote with no sticker can still form a Promo leg at that
-// phone American. The Odds Board keeps the gross sticker and does not
-// invent a bookmaker from prediction-only quotes.
+// A prediction quote with no sticker still forms a Promo leg and a New
+// Odds Board cell at that phone American.
 
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
@@ -71,6 +61,15 @@ function parseUnitProbability(raw) {
 function parsePoint(raw) {
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+// Spread stat_value is one number for both sides (NYG @ LAR is -6.5).
+// The phone handicap is on choice_display ("NYG +6.5" / "LAR -6.5").
+function spreadPointFromOption(line, opt) {
+  const display = [opt && opt.choice_display, opt && opt.choice_display_name].filter(Boolean).join(" ");
+  const signed = display.match(/([+-]\d+(?:\.\d+)?)/);
+  if (signed) return parsePoint(signed[1]);
+  return parsePoint(line && line.stat_value);
 }
 
 function textOf(line, groupName) {
@@ -142,7 +141,14 @@ export function predictionQuoteFromOption(opt) {
     american,
     decimal,
     probability: parseUnitProbability(pred.probability),
+    updatedAt: parseUpdatedAt(opt.updated_at || opt.updatedAt),
   };
+}
+
+function parseUpdatedAt(raw) {
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Date.parse(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function labelOf(node, fallback) {
@@ -180,14 +186,14 @@ export function predictionQuotesFromPayload(payload) {
   const seen = new Set();
   for (const { line, groupName } of collectLines(payload)) {
     const market = classifyUnderdogLineMarket(line, groupName);
-    const point = market === "spreads" || market === "totals" || market === "team_total"
-      ? parsePoint(line.stat_value)
-      : null;
     for (const opt of line.options) {
       const quote = predictionQuoteFromOption(opt);
       if (!quote) continue;
       const name = optionName(opt);
       if (!name) continue;
+      let point = null;
+      if (market === "spreads") point = spreadPointFromOption(line, opt);
+      else if (market === "totals" || market === "team_total") point = parsePoint(line.stat_value);
       const row = {
         name,
         american: quote.american,
@@ -196,6 +202,7 @@ export function predictionQuotesFromPayload(payload) {
         market,
         choice: opt.choice || null,
         point,
+        updatedAt: quote.updatedAt || null,
       };
       const key = `${row.market}|${row.name}|${row.american}|${row.point ?? ""}`;
       if (seen.has(key)) continue;
@@ -259,17 +266,137 @@ function phoneOutcome(name, quote, point) {
   };
   if (quote.probability != null) out.contractProbability = quote.probability;
   if (point != null) out.point = point;
+  if (quote.updatedAt != null) out.updatedAt = quote.updatedAt;
   return out;
+}
+
+function eventTeams(game) {
+  return {
+    away: game.away_team || game.away || "",
+    home: game.home_team || game.home || "",
+  };
+}
+
+function isPhoneSlate(payload) {
+  return !!(payload && Array.isArray(payload.games) && payload.games.some((g) => g && (Array.isArray(g.lines) || typeof g.away === "string")));
+}
+
+export function findUnderdogPhoneGame(slate, away, home) {
+  if (!isPhoneSlate(slate)) return null;
+  return slate.games.find((g) => {
+    if (!g) return false;
+    const direct = namesMatch(g.away, away) && namesMatch(g.home, home);
+    const flipped = namesMatch(g.away, home) && namesMatch(g.home, away);
+    return direct || flipped;
+  }) || null;
+}
+
+function blankBoardUnderdogOdds() {
+  return {
+    ml_away: null,
+    ml_home: null,
+    ml_draw: null,
+    ml_away_size: null,
+    ml_home_size: null,
+    spr_away: null,
+    spr_away_line: null,
+    spr_away_size: null,
+    spr_home: null,
+    spr_home_line: null,
+    spr_home_size: null,
+    tot_line: null,
+    tot_over: null,
+    tot_over_size: null,
+    tot_under: null,
+    tot_under_size: null,
+  };
+}
+
+function stampPhone(stamps, field, line) {
+  if (line && line.updatedAt != null) stamps[field] = line.updatedAt;
+}
+
+function fillBoardUnderdogOdds(odds, stamps, game, lines) {
+  const away = game.away || game.away_team;
+  const home = game.home || game.home_team;
+  let spreadPoint = null;
+  let totalPoint = null;
+  for (const line of lines || []) {
+    if (!line || line.american == null || line.market === "future") continue;
+    if (line.market === "h2h" || line.market == null) {
+      if (namesMatch(line.name, away)) {
+        odds.ml_away = line.american;
+        stampPhone(stamps, "ml_away", line);
+      } else if (namesMatch(line.name, home)) {
+        odds.ml_home = line.american;
+        stampPhone(stamps, "ml_home", line);
+      }
+      continue;
+    }
+    if (line.market === "spreads" && line.point != null && spreadPoint == null) spreadPoint = Math.abs(line.point);
+    if (line.market === "totals" && line.point != null && totalPoint == null) totalPoint = line.point;
+  }
+  for (const line of lines || []) {
+    if (!line || line.american == null) continue;
+    if (line.market === "spreads" && line.point != null && Math.abs(line.point) === spreadPoint) {
+      if (namesMatch(line.name, away)) {
+        odds.spr_away = line.american;
+        odds.spr_away_line = line.point;
+        stampPhone(stamps, "spr_away", line);
+      } else if (namesMatch(line.name, home)) {
+        odds.spr_home = line.american;
+        odds.spr_home_line = line.point;
+        stampPhone(stamps, "spr_home", line);
+      }
+    }
+    if (line.market === "totals" && line.point === totalPoint) {
+      const side = sideLabel(line);
+      if (side === "Over") {
+        odds.tot_over = line.american;
+        odds.tot_line = line.point;
+        stampPhone(stamps, "tot_over", line);
+      } else if (side === "Under") {
+        odds.tot_under = line.american;
+        odds.tot_line = line.point;
+        stampPhone(stamps, "tot_under", line);
+      }
+    }
+  }
+  return odds;
+}
+
+// Replace Underdog cells with phone lines. A null slate leaves games alone
+// (phone fetch has not returned). A slate with no matching game clears the
+// cell — Betstamp 196 is never left in place.
+export function applyUnderdogPhoneQuotes(games, slate) {
+  if (!slate) return games || [];
+  const phoneGames = isPhoneSlate(slate) ? slate.games : [];
+  return (games || []).map((game) => {
+    if (!game) return game;
+    const hit = findUnderdogPhoneGame({ games: phoneGames }, game.away || game.away_team, game.home || game.home_team);
+    const odds = blankBoardUnderdogOdds();
+    const stamps = {};
+    if (hit) fillBoardUnderdogOdds(odds, stamps, game, hit.lines);
+    const bookLineSuspended = { ...(game.bookLineSuspended || {}) };
+    if (bookLineSuspended.underdog_predict) bookLineSuspended.underdog_predict = {};
+    const bookLineUpdatedAt = { ...(game.bookLineUpdatedAt || {}) };
+    bookLineUpdatedAt.underdog_predict = stamps;
+    return {
+      ...game,
+      bookOdds: { ...(game.bookOdds || {}), underdog_predict: odds },
+      bookLineUpdatedAt,
+      bookLineSuspended,
+    };
+  });
 }
 
 // Phone American is both outcome.price and predictionAmerican so Promo does
 // not fee-adjust an already-true quote. Futures are omitted. No Betstamp
-// sticker is required. The Odds Board does not call this.
+// sticker is required.
 export function predictionOnlyBookmakerFromQuotes(game, payload) {
   const quotes = quotesOf(payload);
   if (!game || !quotes.length) return null;
-  const away = game.away_team;
-  const home = game.home_team;
+  const { away, home } = eventTeams(game);
   const h2h = [];
   const spreads = [];
   const totals = [];

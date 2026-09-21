@@ -27,7 +27,7 @@ import {
   underdogPredictConflictsWithEventBooks,
   underdogTwoWayLooksIncoherent,
 } from "./promoUnderdogPredict.js";
-import { applyUnderdogPredictFee, underdogPredictCashAmerican, underdogPredictCashQuote } from "./underdogPredictFee.js";
+import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 import {
   oppQuoteLooksInverted,
@@ -58,6 +58,19 @@ function nflEvent(overrides = {}) {
       },
     ],
     ...overrides,
+  };
+}
+
+function phoneLobby(away, home, awayAm, homeAm) {
+  return {
+    games: [{
+      away,
+      home,
+      lines: [
+        { market: "h2h", name: away, american: awayAm },
+        { market: "h2h", name: home, american: homeAm },
+      ],
+    }],
   };
 }
 
@@ -110,7 +123,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
 {
   const url = bookmakerSnapshotUrl({ leagues: ["NFL"] });
   assert.match(url, /book_ids=642/);
-  assert.match(url, /196/);
+  assert.doesNotMatch(url, /196/, "Promo Betstamp pull does not request book 196");
   const publicUrl = bookmakerSnapshotUrl({ leagues: ["NFL"], includeUnderdog: false });
   assert.match(publicUrl, /book_ids=642/);
   assert.doesNotMatch(publicUrl, /196/);
@@ -152,7 +165,13 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
 }
 
 {
-  const overlaid = overlayUnderdogPredictOnGame(nflEvent(), underdogSnapshot());
+  const bare = overlayUnderdogPredictOnGame(nflEvent(), underdogSnapshot());
+  assert.equal(bare.bookmakers.some((b) => b.key === "underdog_predict"), false, "Betstamp 196 does not create an Underdog book");
+  const overlaid = overlayUnderdogPredictOnGame(
+    nflEvent(),
+    underdogSnapshot(),
+    phoneLobby("Denver Broncos", "Kansas City Chiefs", 100, -110),
+  );
   assert.equal(overlaid.bookmakers.some((b) => b.key === "draftkings"), true);
   assert.equal(overlaid.bookmakers.filter((b) => b.key === "underdog_predict").length, 1);
   assert.equal(overlaid.bookmakers.some((b) => b.key === "bookmaker"), false);
@@ -227,7 +246,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const rows = overlayUnderdogPredictOnCacheRows([
     { sport: "americanfootball_nfl", data: [nflEvent()] },
     { sport: "baseball_mlb", data: [{ id: "mlb", sport_key: "baseball_mlb", commence_time: future, away_team: "Yankees", home_team: "Red Sox", bookmakers: [] }] },
-  ], underdogSnapshot());
+  ], phoneLobby("Denver Broncos", "Kansas City Chiefs", 100, -110));
   assert.equal(rows[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), true);
   assert.equal(rows[1].data[0].bookmakers.some((b) => b.key === "underdog_predict"), false);
   assert.equal(overlayUnderdogPredictOnGames(null, underdogSnapshot()), null);
@@ -245,9 +264,10 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
       ],
     })],
   }];
-  const allowed = maybeOverlayUnderdogPredictOnCacheRows(seeded, underdogSnapshot(), kevin);
-  const denied = maybeOverlayUnderdogPredictOnCacheRows(seeded, underdogSnapshot(), stranger);
-  const loggedOut = maybeOverlayUnderdogPredictOnCacheRows(seeded, underdogSnapshot(), null);
+  const phone = phoneLobby("Denver Broncos", "Kansas City Chiefs", 100, -110);
+  const allowed = maybeOverlayUnderdogPredictOnCacheRows(seeded, phone, kevin);
+  const denied = maybeOverlayUnderdogPredictOnCacheRows(seeded, phone, stranger);
+  const loggedOut = maybeOverlayUnderdogPredictOnCacheRows(seeded, phone, null);
   assert.equal(allowed[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), true);
   assert.equal(denied[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), false);
   assert.equal(loggedOut[0].data[0].bookmakers.some((b) => b.key === "underdog_predict"), false);
@@ -260,12 +280,13 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.match(app, /maybeOverlayUnderdogPredictOnCacheRows/);
   assert.match(app, /from "\.\/promoUnderdogPredict\.js"/);
   assert.match(app, /canSeeUnderdogPredict\(user\)/);
+  assert.match(app, /fetchUnderdogPhone/);
   assert.match(app, /includeUnderdog/);
   assert.match(app, /key: "underdog_predict", label: "Underdog Predict"/);
   assert.doesNotMatch(app, /after UDX exchange fee/);
   assert.match(app, /underdogCash: true/);
   assert.doesNotMatch(app, /underdogCash: promoType !== "freebet"/);
-  assert.equal((app.match(/predictionOnly: true/g) || []).length, 2, "Promo overlay accepts prediction-only phone lines; Odds Board does not");
+  assert.equal((app.match(/predictionOnly: true/g) || []).length, 3, "Promo and the full board both overlay phone quotes");
   assert.match(app, /stampUnderdogPredictionLegs/);
   assert.match(ev, /applyUnderdogCashLegPrices/);
   assert.match(ev, /stampUnderdogPredictionLegs/);
@@ -560,9 +581,10 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
       { odds: 8.50, side: "KENN", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-wku-sane", team_id: "ken-sane" },
     ],
   };
-  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  assert.equal(overlayUnderdogPredictOnGame(event, snap).bookmakers.some((b) => b.key === "underdog_predict"), false, "Betstamp 1.12 is not the phone price");
+  const overlaid = overlayUnderdogPredictOnGame(event, null, phoneLobby("Western Kentucky Hilltoppers", "Kennesaw State Owls", -833, 750));
   const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
-  assert.ok(udp, "sane 1.12 favorite / ~+750 dog must still overlay");
+  assert.ok(udp, "phone −833 / +750 still overlays");
   const h2h = udp.markets.find((m) => m.key === "h2h");
   const wku = h2h.outcomes.find((o) => o.name === "Western Kentucky Hilltoppers");
   const ken = h2h.outcomes.find((o) => o.name === "Kennesaw State Owls");
@@ -631,42 +653,20 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
     ],
   };
   const overlaid = overlayUnderdogPredictOnGame(event, snap);
-  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
-  assert.ok(udp, "Browns 4.31 vs SB +280 must still overlay");
-  const cle = udp.markets.find((m) => m.key === "h2h")?.outcomes?.find((o) => o.name === "Cleveland Browns");
-  assert.equal(cle.price, 331);
-  assert.notEqual(cle.price, 308);
+  assert.equal(overlaid.bookmakers.some((b) => b.key === "underdog_predict"), false, "Betstamp 4.31 is not a Browns phone price");
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
-  const ml = data.moneylines[0];
-  assert.equal(ml.bookOdds.underdog_predict.ml_away, 331);
-  assert.notEqual(ml.bookOdds.underdog_predict.ml_away, 308);
   const legs = buildAllLegsForBook(data, "underdog_predict");
-  const brownsLeg = legs.find((l) => /browns/i.test(l.name));
-  assert.ok(brownsLeg, "Browns sticker +331 stays on the stored row");
-  assert.equal(brownsLeg.dk, 331);
   const phoneLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
-  const phoneBrowns = phoneLegs.find((l) => /browns/i.test(l.name));
-  assert.equal(phoneBrowns.dk, underdogPredictCashAmerican(331));
-  assert.notEqual(phoneBrowns.dk, 308, "phone path is not the legacy UDX haircut");
-  assert.notEqual(phoneBrowns.dk, 331);
-  const freeOnPhone = calcFreeBetParlayEV([phoneBrowns], 1000).ev;
-  const freeOnSticker = calcFreeBetParlayEV([brownsLeg], 1000).ev;
-  assert.ok(freeOnSticker > freeOnPhone, "promo free-bet EV uses the phone American, not the sticker");
-  assert.equal(calcFreeBetParlayEV([phoneBrowns], 1000).parlayDec, calcParlayEV([phoneBrowns], 0, 1000).parlayDec, "free-bet and cash share the phone American");
-  assert.equal(phoneBrowns.bestOpp, brownsLeg.bestOpp, "opponent true-prob quote stays the other book's price");
+  assert.equal(legs.find((l) => /browns/i.test(l.name)), undefined, "missing prediction omits the Browns promo leg");
+  assert.equal(phoneLegs.find((l) => /browns/i.test(l.name)), undefined);
+  assert.ok(!legs.some((l) => l.bookKey === "underdog_predict" && (l.dk === 331 || l.dk === 308)));
+  assert.ok(!phoneLegs.some((l) => l.dk === 331 || l.dk === 308));
 }
 
 {
-  // Giants ML: Betstamp/Kalshi gross +252 / 3.52x. Underdog cash slip is
-  // p=0.27 → 344.82 contracts, $6.90 fee, 3.45x / +245. Without a separate
-  // probability field the sticker inverts through Kalshi θ=0.07 to +244.
-  const slip = underdogPredictCashQuote({ probability: 0.27, stake: 100 });
-  assert.equal(slip.american, 245);
-  assert.ok(Math.abs(slip.contracts - 344.82) < 0.02);
-  assert.ok(Math.abs(slip.fee - 6.9) < 0.02);
+  // Giants ML: Betstamp 3.52 / +252 is not a Promo line. Without
+  // odds.prediction, Promo must not show +252, +240, or a fee-adjusted +244.
   assert.equal(toUnderdogPredictAmerican(3.52), 252);
-  assert.equal(underdogPredictCashAmerican(252), 244);
-  assert.ok(Math.abs(underdogPredictCashAmerican(252) - 245) <= 1);
 
   const kick = future;
   const event = {
@@ -718,25 +718,18 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
     ],
   };
   const overlaid = overlayUnderdogPredictOnGame(event, snap);
-  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
-  assert.ok(udp, "Giants 3.52 must overlay as sticker");
-  const giantsOutcome = udp.markets.find((m) => m.key === "h2h")?.outcomes?.find((o) => o.name === "New York Giants");
-  assert.equal(giantsOutcome.price, 252, "overlay keeps the gross sticker");
+  assert.equal(overlaid.bookmakers.some((b) => b.key === "underdog_predict"), false, "Betstamp 3.52 is not the Giants phone price");
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
   const ml = data.moneylines[0];
-  assert.equal(ml.bookOdds.underdog_predict.ml_away, 252);
+  assert.equal(ml.bookOdds.underdog_predict.ml_away, null);
+  assert.notEqual(ml.bookOdds.underdog_predict.ml_away, 252);
+  assert.notEqual(ml.bookOdds.underdog_predict.ml_away, 240);
   assert.equal(ml.bookOdds.draftkings.ml_away, 240);
   const stickerLegs = buildAllLegsForBook(data, "underdog_predict");
   const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
-  const stickerGiants = stickerLegs.find((l) => /giants/i.test(l.name));
-  const cashGiants = cashLegs.find((l) => /giants/i.test(l.name));
-  assert.equal(stickerGiants.dk, 252);
-  assert.equal(cashGiants.dk, 244);
-  assert.equal(cashGiants.bestOpp, stickerGiants.bestOpp);
-  const capped = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 250, { underdogCash: true });
-  assert.ok(capped.find((l) => /giants/i.test(l.name)), "cash +244 still fits a +250 max that the +252 sticker misses");
-  const minned = buildAllLegsForBook(data, "underdog_predict", null, 250, "any", null, { underdogCash: true });
-  assert.equal(minned.find((l) => /giants/i.test(l.name)), undefined);
+  assert.equal(stickerLegs.find((l) => /giants/i.test(l.name)), undefined, "missing prediction is not a free-bet sticker leg");
+  assert.equal(cashLegs.find((l) => /giants/i.test(l.name)), undefined, "missing prediction is not a cash fee fallback");
+  assert.ok(!stickerLegs.concat(cashLegs).some((l) => l.bookKey === "underdog_predict" && (l.dk === 252 || l.dk === 244)));
   const dkPlain = buildAllLegsForBook(data, "draftkings");
   const dkCashFlag = buildAllLegsForBook(data, "draftkings", null, null, "any", null, { underdogCash: true });
   const dkGiants = dkPlain.find((l) => /giants/i.test(l.name));
@@ -744,17 +737,12 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(dkGiants.dk, 240);
   assert.equal(dkGiantsFlag.dk, dkGiants.dk);
   assert.equal(dkGiantsFlag.bestOpp, dkGiants.bestOpp);
-  const boostSticker = calcParlayEV([stickerGiants], 0, 100);
-  const boostCash = calcParlayEV([cashGiants], 0, 100);
-  assert.ok(boostCash.parlayDec < boostSticker.parlayDec);
-  assert.equal(calcFreeBetParlayEV([cashGiants], 100).parlayDec, boostCash.parlayDec, "free-bet EV uses the fee-true phone American");
-  assert.notEqual(calcFreeBetParlayEV([cashGiants], 100).parlayDec, boostSticker.parlayDec);
 }
 
 {
   // Logged-in scaffold match_id 178911: odds.prediction is the phone price.
-  // Fantasy/Betstamp gross stays on the stored row for the Odds Board.
-  // Promo free bets and cash both display and price the phone American.
+  // Fantasy/Betstamp gross stays on the stored promo row, not on the New
+  // Odds Board. Promo free bets and cash both display and price the phone American.
   const kick = future;
   const event = {
     id: "odds-nyg-lar-pred",
@@ -840,34 +828,39 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const h2h = udp.markets.find((m) => m.key === "h2h").outcomes;
   const giantsOutcome = h2h.find((o) => o.name === "New York Giants");
   const ramsOutcome = h2h.find((o) => o.name === "Los Angeles Rams");
-  assert.equal(giantsOutcome.price, 252, "board/overlay sticker stays Betstamp gross");
+  assert.equal(giantsOutcome.price, 245, "overlay price is the phone American");
   assert.equal(giantsOutcome.predictionAmerican, 245);
   assert.equal(giantsOutcome.contractProbability, 0.27);
-  assert.equal(ramsOutcome.price, toAmericanOdds(1.39));
+  assert.equal(ramsOutcome.price, -313);
   assert.equal(ramsOutcome.predictionAmerican, -313);
   const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
-  assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away, 252);
+  assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away, 245);
   assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away_prediction, 245);
   assert.equal(data.moneylines[0].bookOdds.draftkings.ml_away, 240);
-  const storedLegs = buildAllLegsForBook(data, "underdog_predict");
+  const freeLegs = buildAllLegsForBook(data, "underdog_predict");
   const promoLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
-  const storedGiants = storedLegs.find((l) => /giants/i.test(l.name));
+  const freeGiants = freeLegs.find((l) => /giants/i.test(l.name));
   const promoGiants = promoLegs.find((l) => /giants/i.test(l.name));
   const promoRams = promoLegs.find((l) => /rams/i.test(l.name));
-  assert.equal(storedGiants.dk, 252, "stored row keeps the gross sticker for the Odds Board");
-  assert.equal(promoGiants.dk, 245, "promo free bet and cash use the phone price");
-  assert.notEqual(promoGiants.dk, underdogPredictCashAmerican(245), "do not fee-adjust an already-true prediction price");
+  const freeRams = freeLegs.find((l) => /rams/i.test(l.name));
+  assert.equal(freeGiants.dk, 245, "free bet uses the phone price");
+  assert.equal(promoGiants.dk, 245, "cash uses the same phone price");
+  assert.equal(freeRams.dk, -313);
   assert.equal(promoRams.dk, -313);
-  assert.equal(promoGiants.bestOpp, storedGiants.bestOpp);
-  assert.equal(calcFreeBetParlayEV([promoGiants], 100).parlayDec, calcParlayEV([promoGiants], 0, 100).parlayDec);
+  assert.notEqual(promoGiants.dk, 252);
+  assert.notEqual(promoGiants.dk, 244);
+  assert.equal(promoGiants.bestOpp, freeGiants.bestOpp);
+  assert.equal(calcFreeBetParlayEV([freeGiants], 100).parlayDec, calcParlayEV([promoGiants], 0, 100).parlayDec, "free-bet formula is unchanged; both paths share +245");
   const atPhone = buildAllLegsForBook(data, "underdog_predict", null, 245, "any", null, { underdogCash: true });
   assert.equal(atPhone.find((l) => /giants/i.test(l.name)).dk, 245);
   const belowPhone = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 244, { underdogCash: true });
   assert.equal(belowPhone.find((l) => /giants/i.test(l.name)), undefined);
   const withFlag = overlayUnderdogPredictOnGame(event, snap, lobby, { predictionOnly: true });
   const flagged = withFlag.bookmakers.find((b) => b.key === "underdog_predict").markets.find((m) => m.key === "h2h").outcomes.find((o) => o.name === "New York Giants");
-  assert.equal(flagged.price, 252, "a joined sticker stays the board price even when prediction-only is allowed");
+  assert.equal(flagged.price, 245, "prediction-only price is the phone American");
   assert.equal(flagged.predictionAmerican, 245);
+  assert.notEqual(flagged.price, 252);
+  assert.notEqual(flagged.price, 240);
 }
 
 {
@@ -921,7 +914,7 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
     }],
   };
   const board = overlayUnderdogPredictOnGame(event, null, lobby);
-  assert.equal(board.bookmakers.some((b) => b.key === "underdog_predict"), false, "Odds Board does not invent a prediction-only book");
+  assert.equal(board.bookmakers.some((b) => b.key === "underdog_predict"), true, "phone quote is the Underdog book with or without a Betstamp row");
   const promo = overlayUnderdogPredictOnGame(event, null, lobby, { predictionOnly: true });
   const udp = promo.bookmakers.find((b) => b.key === "underdog_predict");
   assert.ok(udp, "Promo forms an Underdog book from the phone quote alone");

@@ -1,9 +1,9 @@
-// Underdog Predict (Betstamp 196) quote freshness for Promo cards.
+// Underdog Predict quote freshness for Promo cards.
 //
-// Missing timestamp → no flag (no false alarm). Only book 196 / underdog_predict
-// is warned; other sportsbooks stay quiet even if they later grow a stamp.
-// Age is wall clock vs the per-selection Betstamp updated_at. Cards are not
-// hidden or re-ranked — flag only.
+// Missing timestamp → no flag (no false alarm). Only underdog_predict is
+// warned; other sportsbooks stay quiet even if they later grow a stamp.
+// Age is wall clock vs the phone quote updated_at. Cards are not hidden
+// or re-ranked — flag only.
 
 import { formatCompactAge } from "./betstampNormalize.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";

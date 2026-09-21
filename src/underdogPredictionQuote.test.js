@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   applyUnderdogLobbyPredictions,
+  applyUnderdogPhoneQuotes,
   classifyUnderdogLineMarket,
   predictionOnlyBookmakerFromQuotes,
   predictionQuoteFromOption,
@@ -134,6 +135,30 @@ const giantsOption = {
   assert.equal(giantsPhone.contractProbability, 0.27);
   assert.equal(synth.find((o) => o.name === "Los Angeles Rams").price, -313);
   assert.equal(synthesized.markets.some((m) => (m.outcomes || []).some((o) => o.price === 1500)), false, "futures are not game legs");
+}
+
+{
+  const board = applyUnderdogPhoneQuotes([{
+    away: "New York Giants",
+    home: "Los Angeles Rams",
+    bookOdds: { underdog_predict: { ml_away: 240, ml_home: -303 } },
+  }], {
+    games: [{
+      away: "New York Giants",
+      home: "Los Angeles Rams",
+      lines: [
+        { market: "h2h", name: "New York Giants", american: 245, updatedAt: 111 },
+        { market: "h2h", name: "Los Angeles Rams", american: -313, updatedAt: 222 },
+      ],
+    }],
+  });
+  assert.equal(board[0].bookOdds.underdog_predict.ml_away, 245);
+  assert.equal(board[0].bookOdds.underdog_predict.ml_home, -313);
+  assert.equal(board[0].bookLineUpdatedAt.underdog_predict.ml_away, 111);
+  assert.notEqual(board[0].bookOdds.underdog_predict.ml_away, 240);
+  const cleared = applyUnderdogPhoneQuotes(board, { games: [] });
+  assert.equal(cleared[0].bookOdds.underdog_predict.ml_away, null);
+  assert.equal(applyUnderdogPhoneQuotes(board, null)[0].bookOdds.underdog_predict.ml_away, 245);
 }
 
 console.log("underdogPredictionQuote.test.js ok");
