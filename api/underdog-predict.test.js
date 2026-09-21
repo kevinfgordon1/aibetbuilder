@@ -9,7 +9,7 @@ const {
   DEFAULT_CLIENT_VERSION,
   DEFAULT_PRODUCT_EXPERIENCE_ID,
   DEFAULT_STATE_CONFIG_ID,
-  FALLBACK_PICKEM_STATS,
+  MONEYLINE_FILTER_IDS,
   INDEX_SPORTS,
   SPORT_BY_UNDERDOG_ID,
   TEAM_PICKS_MARKET_GROUP,
@@ -18,7 +18,7 @@ const {
   indexGames,
   linesFromContent,
   matchGroupedLinesUrl,
-  pickemStatsFromScaffold,
+  moneylineFilterFromScaffold,
   readConfig,
   sportScaffoldUrl,
 } = require('../lib/underdog-lobby');
@@ -136,6 +136,10 @@ const nflLines = contentBody({
       opt('New York Giants', 'away', 'Giants to win', '+245', '+252'),
       opt('Los Angeles Rams', 'home', 'Rams to win', '-313', '-280'),
     ]),
+    line('NYG @ LAR Spread', 'spread', 'Spread', 'spread', '-6.5', [
+      opt('New York Giants', 'away', 'NYG +6.5', '+100'),
+      opt('Los Angeles Rams', 'home', 'LAR -6.5', '-122'),
+    ]),
   ],
 });
 
@@ -230,14 +234,14 @@ function linesFor(sport) {
     assert.match(url, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
     assert.doesNotMatch(url, new RegExp(STICKER_EXPERIENCE_ID));
     assert.doesNotMatch(url, /betstamp|book_ids=196/);
-    const linesUrl = contentLinesUrl(cfg, 'CFB', FALLBACK_PICKEM_STATS.CFB[0].id);
+    const linesUrl = contentLinesUrl(cfg, 'CFB', MONEYLINE_FILTER_IDS.CFB);
     assert.match(linesUrl, /\/v1\/lobbies\/content\/lines\?/);
     assert.match(linesUrl, /filter_type=PickemStat/);
     assert.match(linesUrl, /sport_id=CFB/);
     assert.match(linesUrl, /include_live=true/);
     assert.match(linesUrl, /show_mass_option_markets=false/);
     assert.match(linesUrl, /product=fantasy/);
-    assert.match(linesUrl, new RegExp(`filter_id=${FALLBACK_PICKEM_STATS.CFB[0].id}`));
+    assert.match(linesUrl, new RegExp(`filter_id=${MONEYLINE_FILTER_IDS.CFB}`));
     assert.match(linesUrl, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
     assert.match(linesUrl, new RegExp(`state_config_id=${DEFAULT_STATE_CONFIG_ID}`));
     assert.doesNotMatch(linesUrl, /\/v1\/over_under_lines/);
@@ -249,9 +253,9 @@ function linesFor(sport) {
     assert.match(scaffoldUrl, /filter_type=MarketGroup/);
     assert.match(scaffoldUrl, /sport_id=NFL/);
     assert.match(scaffoldUrl, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
-    assert.equal(FALLBACK_PICKEM_STATS.CFB.find((s) => s.label === 'Moneyline').id, 'e669e437-9dc7-48d8-9d93-2aabd5a13d10');
-    assert.equal(FALLBACK_PICKEM_STATS.MLB.find((s) => s.label === 'Moneyline').id, '3f157ade-e2af-41ff-a5c6-9e0ca4f8c018');
-    assert.equal(FALLBACK_PICKEM_STATS.NFL.find((s) => s.label === 'Moneyline').id, '0251dd94-773d-47ec-878d-8a7349b8b967');
+    assert.equal(MONEYLINE_FILTER_IDS.CFB, 'e669e437-9dc7-48d8-9d93-2aabd5a13d10');
+    assert.equal(MONEYLINE_FILTER_IDS.MLB, '3f157ade-e2af-41ff-a5c6-9e0ca4f8c018');
+    assert.equal(MONEYLINE_FILTER_IDS.NFL, '0251dd94-773d-47ec-878d-8a7349b8b967');
   }
 
   {
@@ -273,8 +277,8 @@ function linesFor(sport) {
       [183024, 'NCAAF'],
       [142714, 'MLB'],
     ]);
-    const pills = pickemStatsFromScaffold(scaffoldFor('CFB', FALLBACK_PICKEM_STATS.CFB[0].id));
-    assert.deepEqual(pills.map((p) => p.label), ['Moneyline']);
+    assert.equal(moneylineFilterFromScaffold(scaffoldFor('CFB', MONEYLINE_FILTER_IDS.CFB)), MONEYLINE_FILTER_IDS.CFB);
+    assert.equal(moneylineFilterFromScaffold(scaffoldSectionsOnly), null);
     const priced = gamesFromContentLines(cfbLines, 'CFB');
     assert.equal(priced.length, 1);
     assert.equal(priced[0].sport, 'NCAAF');
@@ -309,15 +313,15 @@ function linesFor(sport) {
       const sport = sportOf(url);
       if (String(url).includes('/lobbies/scaffolds/sports')) {
         const filterId = sport === 'CFB'
-          ? FALLBACK_PICKEM_STATS.CFB[0].id
+          ? MONEYLINE_FILTER_IDS.CFB
           : '11111111-2222-4333-8444-555555555555';
         return jsonRes(200, scaffoldFor(sport, filterId));
       }
       if (String(url).includes('/lobbies/content/lines')) {
         const filterId = filterOf(url);
-        if (sport === 'CFB' && filterId === FALLBACK_PICKEM_STATS.CFB[0].id) return jsonRes(200, cfbLines);
-        if (sport === 'NFL' && filterId === FALLBACK_PICKEM_STATS.NFL[0].id) return jsonRes(200, nflLines);
-        if (sport === 'MLB' && filterId === FALLBACK_PICKEM_STATS.MLB[0].id) return jsonRes(200, mlbLines);
+        if (sport === 'CFB' && filterId === MONEYLINE_FILTER_IDS.CFB) return jsonRes(200, cfbLines);
+        if (sport === 'NFL' && filterId === MONEYLINE_FILTER_IDS.NFL) return jsonRes(200, nflLines);
+        if (sport === 'MLB' && filterId === MONEYLINE_FILTER_IDS.MLB) return jsonRes(200, mlbLines);
         return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
       }
       return jsonRes(404, { error: { detail: 'missing' } });
@@ -334,6 +338,8 @@ function linesFor(sport) {
     assert.equal(giants.american, 245, 'phone odds.prediction, not fantasy +252');
     assert.equal(rams.american, -313);
     assert.notEqual(giants.american, 252);
+    assert.ok(res.body.games.every((g) => g.lines.every((l) => l.market === 'h2h')), 'index is moneylines only');
+    assert.equal(game.lines.some((l) => l.market === 'spreads'), false);
     const mlb = res.body.games.find((g) => g.sport === 'MLB');
     assert.equal(mlb.away, 'Cleveland Guardians');
     assert.equal(mlb.lines.find((l) => l.name === 'Cleveland Guardians').american, 104);
@@ -341,9 +347,10 @@ function linesFor(sport) {
     assert.equal(cfb.sport, 'NCAAF');
     assert.equal(cfb.lines.find((l) => l.name === 'Ole Miss Rebels').american, 127);
     const lineCalls = calls.filter((c) => c.url.includes('/lobbies/content/lines'));
-    assert.ok(lineCalls.some((c) => sportOf(c.url) === 'CFB' && filterOf(c.url) === FALLBACK_PICKEM_STATS.CFB[0].id));
-    assert.ok(lineCalls.some((c) => sportOf(c.url) === 'NFL' && filterOf(c.url) === FALLBACK_PICKEM_STATS.NFL[0].id));
-    assert.ok(lineCalls.some((c) => sportOf(c.url) === 'MLB' && filterOf(c.url) === FALLBACK_PICKEM_STATS.MLB[0].id));
+    assert.ok(lineCalls.some((c) => sportOf(c.url) === 'CFB' && filterOf(c.url) === MONEYLINE_FILTER_IDS.CFB));
+    assert.ok(lineCalls.some((c) => sportOf(c.url) === 'NFL' && filterOf(c.url) === MONEYLINE_FILTER_IDS.NFL));
+    assert.ok(lineCalls.some((c) => sportOf(c.url) === 'MLB' && filterOf(c.url) === MONEYLINE_FILTER_IDS.MLB));
+    assert.ok(lineCalls.every((c) => c.url.includes('filter_type=PickemStat')));
     assert.ok(calls.every((c) => c.url.includes(PHONE_EXPERIENCE_ID)));
     assert.equal(calls[0].headers.accept, 'application/json');
     assert.equal(calls[0].headers['client-type'], 'web');
@@ -400,7 +407,7 @@ function linesFor(sport) {
         const sport = sportOf(url);
         if (String(url).includes('/scaffolds/')) return jsonRes(200, { sections: [] });
         if (sport === 'MLB') return jsonRes(404, { error: { detail: 'not found' } });
-        if (String(url).includes('/content/lines') && filterOf(url) === FALLBACK_PICKEM_STATS[sport][0].id) {
+        if (String(url).includes('/content/lines') && filterOf(url) === MONEYLINE_FILTER_IDS[sport]) {
           return jsonRes(200, linesFor(sport));
         }
         return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
