@@ -3,10 +3,14 @@
 // Missing timestamp → not stale (no false alarm). Only underdog_predict
 // offer quotes are gated; other sportsbooks stay quiet even if they later
 // grow a stamp. Age is wall clock vs that side's phone quote updated_at
-// (per selection, not per game). A stale offer (> UNDERDOG_STALE_MS,
-// default 60 minutes) is not a Promo candidate: ranking, Best Pick, and
-// EV scoring skip it. The warning banner still covers any stale Underdog
-// quote that is shown another way.
+// (per selection, not per game).
+//
+// Two clocks, kept in lockstep with lib/underdog-freshness.js:
+//   UNDERDOG_STALE_MS (1 hour) — ranking, Best Pick, and EV skip an offer
+//     older than this. The warning banner uses the same clock, including
+//     for a 1h–24h quote that is still shown on the board.
+//   UNDERDOG_BOARD_OMIT_MS (24 hours) — /api/underdog-predict and the New
+//     Odds Board omit a side only when its quote is older than this.
 
 import { formatCompactAge } from "./betstampNormalize.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
@@ -14,6 +18,7 @@ import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
 export { UNDERDOG_PREDICT_BOOK_KEY };
 export const UNDERDOG_STALE_MINUTES = 60;
 export const UNDERDOG_STALE_MS = UNDERDOG_STALE_MINUTES * 60 * 1000;
+export const UNDERDOG_BOARD_OMIT_MS = 24 * 60 * 60 * 1000;
 export const UNDERDOG_STALE_WARNING =
   "Underdog odds last updated over 1 hour ago — double-check in the app.";
 

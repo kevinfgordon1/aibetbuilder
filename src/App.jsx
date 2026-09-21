@@ -620,9 +620,11 @@ function oppositePromoAmerican(book, sticker, prediction) {
 function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, dateRange = "any", maxLegOdds = null, opts = null) {
   // Every Promo path uses joined odds.prediction for Underdog. A missing
   // quote omits that leg. A stale Underdog offer (its own updated_at older
-  // than UNDERDOG_STALE_MS) is not a candidate. opts.underdogCash does not
-  // restore a sticker or a fee-adjusted sticker. The Odds Board reads
-  // bookOdds, not these legs. opts.now freezes the freshness clock in tests.
+  // than UNDERDOG_STALE_MS, 1 hour) is not a Promo candidate. The board
+  // keeps that side until UNDERDOG_BOARD_OMIT_MS (24 hours).
+  // opts.underdogCash does not restore a sticker or a fee-adjusted sticker.
+  // The Odds Board reads bookOdds, not these legs. opts.now freezes the
+  // freshness clock in tests.
   const quoteNow = opts && opts.now != null ? Number(opts.now) : Date.now();
   const legs = [];
   const now = new Date();
