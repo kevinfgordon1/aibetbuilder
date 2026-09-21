@@ -13,6 +13,9 @@ const {
   parseSseChunk,
   wrapSseEvent,
   betstampFetch,
+  booksToDropOnForbidden,
+  dropBooksFromParams,
+  markRejectedBookIds,
 } = require('../lib/betstamp');
 
 async function handler(req, res, deps = {}) {
@@ -30,26 +33,49 @@ async function handler(req, res, deps = {}) {
     return;
   }
 
-  const params = buildMarketParams(readQuery(req), deps.env);
-  const url = streamUrl(params);
+  const rejected = deps.rejectedBookIds;
+  const params = buildMarketParams(readQuery(req), deps.env, rejected);
   const fetchFn = deps.fetchFn || fetch;
 
   let upstream;
   try {
-    upstream = await betstampFetch(url, {
+    upstream = await betstampFetch(streamUrl(params), {
       key,
       fetchFn,
       timeoutMs: deps.connectTimeoutMs || 20000,
       accept: 'text/event-stream',
     });
+    if (upstream && !upstream.ok && upstream.status === 403) {
+      const drop = booksToDropOnForbidden(params.bookIds, `Betstamp stream ${upstream.status}`);
+      const retried = dropBooksFromParams(params, drop);
+      if (retried) {
+        markRejectedBookIds(drop, rejected);
+        Object.assign(params, retried);
+        upstream = await betstampFetch(streamUrl(params), {
+          key,
+          fetchFn,
+          timeoutMs: deps.connectTimeoutMs || 20000,
+          accept: 'text/event-stream',
+        });
+      }
+    }
   } catch (e) {
-    res.status(502).json({ ok: false, error: redact(e && e.message ? e.message : e) });
+    res.status(502).json({ ok: false, error: redact(e) || 'Betstamp stream unavailable' });
     return;
   }
 
   if (!upstream || !upstream.ok || !upstream.body) {
     const status = (upstream && upstream.status) || 502;
-    res.status(status).json({ ok: false, error: 'Betstamp stream unavailable' });
+    let detail = 'Betstamp stream unavailable';
+    try {
+      if (upstream && typeof upstream.text === 'function') {
+        const text = await upstream.text();
+        let json = null;
+        try { json = text ? JSON.parse(text) : null; } catch (_) { json = null; }
+        detail = redact((json && (json.error || json.message || json.detail)) || text) || detail;
+      }
+    } catch (_) { /* keep fallback */ }
+    res.status(status).json({ ok: false, error: detail });
     return;
   }
 

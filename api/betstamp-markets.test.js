@@ -64,7 +64,7 @@ function mockRes() {
     const fixtureUrl = calls.find((u) => String(u).includes('/fixtures'));
     const teamUrl = calls.find((u) => String(u).includes('/teams'));
     assert.match(String(marketUrl), /book_ids=/);
-    assert.match(String(marketUrl), /400/, 'default REST book_ids include BetMGM 400');
+    assert.doesNotMatch(String(marketUrl), /(?:^|[?&]|%2C|,)400(?:$|&|%2C|,)/, 'default REST book_ids omit BetMGM 400');
     assert.match(String(marketUrl), /timedelta=240/);
     assert.match(String(fixtureUrl), /timedelta=240/);
     assert.doesNotMatch(String(teamUrl), /timedelta=/);
@@ -232,6 +232,64 @@ function mockRes() {
     });
     assert.equal(expired.headers['X-Betstamp-Cache'], 'MISS');
     assert.equal(calls.length, 6);
+  }
+
+  {
+    const res = mockRes();
+    const fetchFn = async () => ({
+      ok: false,
+      status: 403,
+      text: async () => JSON.stringify({ error: { code: 'forbidden', message: 'book 400 not entitled' } }),
+    });
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '100,200' } }, res, {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real' },
+      fetchFn,
+      gapMs: 0,
+    });
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.ok, false);
+    assert.doesNotMatch(String(res.body.error), /\[object Object\]/);
+    assert.match(String(res.body.error), /book 400 not entitled|Betstamp /);
+  }
+
+  {
+    const marketCalls = [];
+    const fetchFn = async (url) => {
+      const u = String(url);
+      if (u.includes('/markets')) {
+        marketCalls.push(u);
+        const books = new URL(u).searchParams.get('book_ids') || '';
+        if (books.split(',').includes('400')) {
+          return {
+            ok: false,
+            status: 403,
+            text: async () => JSON.stringify({ error: { message: 'unauthorized book 400' } }),
+          };
+        }
+        return { ok: true, status: 200, text: async () => JSON.stringify({ markets: [{ id: 'ok', fixture_id: 'f1' }] }) };
+      }
+      if (u.includes('/fixtures')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ fixtures: [{ id: 'f1', league: 'NFL' }] }) };
+      }
+      if (u.includes('/teams')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ teams: [] }) };
+      }
+      throw new Error('unexpected ' + url);
+    };
+    const res = mockRes();
+    await handler({ method: 'GET', query: { league: 'NFL', book_ids: '100,400', is_live: 'true' } }, res, {
+      env: { BETSTAMP_API_KEY: 'test-key-not-real', BETSTAMP_INCLUDE_BETMGM: '1' },
+      fetchFn,
+      gapMs: 0,
+      rejectedBookIds: new Set(),
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.fixtures[0].id, 'f1');
+    assert.equal(marketCalls.length, 2);
+    assert.equal(new URL(marketCalls[0]).searchParams.get('book_ids').split(',').includes('400'), true);
+    assert.equal(new URL(marketCalls[1]).searchParams.get('book_ids').split(',').includes('400'), false);
+    assert.equal(res.body.query.book_ids.split(',').includes('400'), false);
   }
 
   {
