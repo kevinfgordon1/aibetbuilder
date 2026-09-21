@@ -6,10 +6,13 @@
 // Overlay stores Betstamp 196 gross sticker American (3.52 → +252). New Odds
 // Board uses betstampNormalize and stays on that sticker. Promo free bets
 // also use the sticker — Kevin's Browns bonus matched +331 / 4.31x, and a
-// fee haircut would make free-bet EV worse. Promo cash (profit boost, no
-// sweat, +EV) rewrites underdog_predict dk via underdogPredictCashAmerican
-// so the phone's fee-inclusive price is what the leg and EV use (Giants
-// +252 → ~+245). Do not apply the legacy UDX 0.072 cost-add on this overlay.
+// fee haircut would make free-bet EV worse. Promo cash prefers a joined
+// Underdog odds.prediction american (Giants +245 / 3.45x, app-identical)
+// and otherwise rewrites underdog_predict dk via underdogPredictCashAmerican
+// (sticker +252 → +244). Do not fee-adjust a prediction price, and do not
+// apply the legacy UDX 0.072 cost-add on this overlay. A prediction quote
+// with no Betstamp sticker is not overlaid: free bets settle at gross, and
+// the phone price is not that gross.
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p
@@ -45,6 +48,7 @@ import {
   teamsLikelySame,
 } from "./promoBookmaker.js";
 import { canSeeUnderdogPredict } from "./comboAccess.js";
+import { applyUnderdogLobbyPredictions } from "./underdogPredictionQuote.js";
 import {
   DECISIVE_IMPLIED_DEV,
   impliedFromAmerican,
@@ -192,13 +196,16 @@ export function underdogPredictBookmakerFromSnapshot(event, snapshot, joinHit) {
   return { key: UNDERDOG_PREDICT_BOOK_KEY, title: UNDERDOG_PREDICT_TITLE, markets };
 }
 
-export function overlayUnderdogPredictOnGame(game, snapshot) {
+export function overlayUnderdogPredictOnGame(game, snapshot, lobby) {
   if (!game || typeof game !== "object") return game;
   const bookmakers = (game.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
   const stripped = { ...game, bookmakers };
   let bm = snapshot ? underdogPredictBookmakerFromSnapshot(stripped, snapshot) : null;
   if (bm && underdogPredictConflictsWithEventBooks(stripped, bm)) bm = null;
-  return { ...stripped, bookmakers: bm ? [...bookmakers, bm] : bookmakers };
+  const next = { ...stripped, bookmakers: bm ? [...bookmakers, bm] : bookmakers };
+  const payload = lobby || (snapshot && (snapshot.underdogLobby || snapshot.predictionLines)) || null;
+  if (!payload || !bm) return next;
+  return applyUnderdogLobbyPredictions(next, payload);
 }
 
 export function overlayUnderdogPredictOnGames(games, snapshot) {

@@ -95,7 +95,7 @@ import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard, rankPicksAfterOppGuard } from "./promoOppGuard.js";
-import { applyUnderdogCashLegPrices, underdogCashOfferAmerican } from "./underdogPredictFee.js";
+import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
@@ -571,7 +571,7 @@ function pushSoccerMlLegs(legs, g, bookKey, { seen, minLegOdds, maxLegOdds, unde
   for (const side of SOCCER_ML_SIDES) {
     const odds = g.bookOdds?.[bookKey]?.[`ml_${side}`];
     if (odds == null) continue;
-    const offered = underdogCashOfferAmerican(bookKey, odds, underdogCash);
+    const offered = underdogCashOfferAmerican(bookKey, odds, underdogCash, g.bookOdds?.[bookKey]?.[`ml_${side}_prediction`]);
     if (!passesOddsBounds(offered, minLegOdds ?? null, maxLegOdds ?? null)) continue;
     const dedupe = `${g.away}@${g.home}_ML_${side}_${bookKey}`;
     if (seen) {
@@ -622,9 +622,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       const awayOdds = g.bookOdds?.[book]?.ml_away;
       const homeOdds = g.bookOdds?.[book]?.ml_home;
       if (awayOdds == null || homeOdds == null) return;
-      if (passesOddsBounds(underdogCashOfferAmerican(book, awayOdds, underdogCash), minLegOdds, maxLegOdds))
+      if (passesOddsBounds(underdogCashOfferAmerican(book, awayOdds, underdogCash, g.bookOdds?.[book]?.ml_away_prediction), minLegOdds, maxLegOdds))
         legs.push(assignBookUpdatedAt({ name: `${g.away} ML`, dk: awayOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.home} ML`, ...resolveOpp({ trustedOpp: g.best_home, trustedBook: g.best_home_book, trustedCount: g.ml_opp_count_away, trustedSize: g.best_home_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.bookOdds?.[book]?.ml_home_size, bookOdds: awayOdds }) }, g.bookOdds?.[book]?.ml_away_updatedAt));
-      if (passesOddsBounds(underdogCashOfferAmerican(book, homeOdds, underdogCash), minLegOdds, maxLegOdds))
+      if (passesOddsBounds(underdogCashOfferAmerican(book, homeOdds, underdogCash, g.bookOdds?.[book]?.ml_home_prediction), minLegOdds, maxLegOdds))
         legs.push(assignBookUpdatedAt({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, trustedSize: g.best_away_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.bookOdds?.[book]?.ml_away_size, bookOdds: homeOdds }) }, g.bookOdds?.[book]?.ml_home_updatedAt));
     });
   }
@@ -641,8 +641,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (awayOdds == null || homeOdds == null) return;
       const ak = `${g.away}@${g.home}_away_${g.away_line}`;
       const hk = `${g.away}@${g.home}_home_${g.home_line}`;
-      if (!seen.has(ak) && passesOddsBounds(underdogCashOfferAmerican(book, awayOdds, underdogCash), minLegOdds, maxLegOdds)) { seen.add(ak); legs.push(assignBookUpdatedAt({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.home_size, bookOdds: awayOdds }) }, g.away_updatedAt ?? g.bookOdds?.[book]?.spr_away_updatedAt)); }
-      if (!seen.has(hk) && passesOddsBounds(underdogCashOfferAmerican(book, homeOdds, underdogCash), minLegOdds, maxLegOdds)) { seen.add(hk); legs.push(assignBookUpdatedAt({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.away_size, bookOdds: homeOdds }) }, g.home_updatedAt ?? g.bookOdds?.[book]?.spr_home_updatedAt)); }
+      if (!seen.has(ak) && passesOddsBounds(underdogCashOfferAmerican(book, awayOdds, underdogCash, g.away_prediction), minLegOdds, maxLegOdds)) { seen.add(ak); legs.push(assignBookUpdatedAt({ name: `${g.away} ${g.away_line}`, dk: awayOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_away, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_away, trustedBook: g.bestOpp_away_book, trustedCount: g.bestOppCount_away, trustedSize: g.bestOpp_away_size, sameBookOpp: homeOdds, sameBookKey: book, sameBookSize: g.home_size, bookOdds: awayOdds }) }, g.away_updatedAt ?? g.bookOdds?.[book]?.spr_away_updatedAt)); }
+      if (!seen.has(hk) && passesOddsBounds(underdogCashOfferAmerican(book, homeOdds, underdogCash, g.home_prediction), minLegOdds, maxLegOdds)) { seen.add(hk); legs.push(assignBookUpdatedAt({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book, sameBookSize: g.away_size, bookOdds: homeOdds }) }, g.home_updatedAt ?? g.bookOdds?.[book]?.spr_home_updatedAt)); }
     });
   }
 
@@ -658,8 +658,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_over_${g.line}`;
       const uk = `${g.away}@${g.home}_under_${g.line}`;
-      if (!seen.has(ok) && passesOddsBounds(underdogCashOfferAmerican(book, overOdds, underdogCash), minLegOdds, maxLegOdds)) { seen.add(ok); legs.push(assignBookUpdatedAt({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size, bookOdds: overOdds }) }, g.over_updatedAt ?? g.bookOdds?.[book]?.tot_over_updatedAt)); }
-      if (!seen.has(uk) && passesOddsBounds(underdogCashOfferAmerican(book, underOdds, underdogCash), minLegOdds, maxLegOdds)) { seen.add(uk); legs.push(assignBookUpdatedAt({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size, bookOdds: underOdds }) }, g.under_updatedAt ?? g.bookOdds?.[book]?.tot_under_updatedAt)); }
+      if (!seen.has(ok) && passesOddsBounds(underdogCashOfferAmerican(book, overOdds, underdogCash, g.over_prediction), minLegOdds, maxLegOdds)) { seen.add(ok); legs.push(assignBookUpdatedAt({ name: `${g.away}/${g.home} o${g.line}`, dk: overOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size, bookOdds: overOdds }) }, g.over_updatedAt ?? g.bookOdds?.[book]?.tot_over_updatedAt)); }
+      if (!seen.has(uk) && passesOddsBounds(underdogCashOfferAmerican(book, underOdds, underdogCash, g.under_prediction), minLegOdds, maxLegOdds)) { seen.add(uk); legs.push(assignBookUpdatedAt({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size, bookOdds: underOdds }) }, g.under_updatedAt ?? g.bookOdds?.[book]?.tot_under_updatedAt)); }
     });
   }
 
@@ -675,12 +675,12 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       if (overOdds == null || underOdds == null) return;
       const ok = `${g.away}@${g.home}_TT_${g.team}_o_${g.line}`;
       const uk = `${g.away}@${g.home}_TT_${g.team}_u_${g.line}`;
-      if (!seen.has(ok) && passesOddsBounds(underdogCashOfferAmerican(book, overOdds, underdogCash), minLegOdds, maxLegOdds)) { seen.add(ok); legs.push(assignBookUpdatedAt({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size, bookOdds: overOdds }) }, g.over_updatedAt)); }
-      if (!seen.has(uk) && passesOddsBounds(underdogCashOfferAmerican(book, underOdds, underdogCash), minLegOdds, maxLegOdds)) { seen.add(uk); legs.push(assignBookUpdatedAt({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size, bookOdds: underOdds }) }, g.under_updatedAt)); }
+      if (!seen.has(ok) && passesOddsBounds(underdogCashOfferAmerican(book, overOdds, underdogCash, g.over_prediction), minLegOdds, maxLegOdds)) { seen.add(ok); legs.push(assignBookUpdatedAt({ name: `${g.team} TT o${g.line}`, dk: overOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_over, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_over, trustedBook: g.bestOpp_over_book, trustedCount: g.bestOppCount_over, trustedSize: g.bestOpp_over_size, sameBookOpp: underOdds, sameBookKey: book, sameBookSize: g.under_size, bookOdds: overOdds }) }, g.over_updatedAt)); }
+      if (!seen.has(uk) && passesOddsBounds(underdogCashOfferAmerican(book, underOdds, underdogCash, g.under_prediction), minLegOdds, maxLegOdds)) { seen.add(uk); legs.push(assignBookUpdatedAt({ name: `${g.team} TT u${g.line}`, dk: underOdds, market: "TT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book, sameBookSize: g.over_size, bookOdds: underOdds }) }, g.under_updatedAt)); }
     });
   }
 
-  const priced = applyUnderdogCashLegPrices(legs.filter((l) => l.bestOpp != null), underdogCash);
+  const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), underdogCash);
   if (!underdogCash) return priced;
   return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds));
 }
@@ -758,7 +758,7 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
   });
 
   // +EV is a cash bet. Underdog dk is the fee-inclusive phone price.
-  return applyUnderdogCashLegPrices(legs.filter((l) => l.bestOpp != null), true);
+  return applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
 }
 
 function parlayLegKey(p) {

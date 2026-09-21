@@ -47,6 +47,9 @@ assert.ok(Math.abs(slip.contracts - 344.82) < 0.02);
 assert.ok(Math.abs(slip.fee - 6.9) < 0.02);
 assert.equal(underdogPredictCashAmerican(252), 244);
 assert.equal(underdogPredictCashAmerican(252, { probability: 0.27 }), 245);
+assert.equal(underdogPredictCashAmerican(252, { probability: 27 }), 245);
+assert.equal(underdogPredictCashAmerican(252, { probability: 27 }), cjs.underdogPredictCashAmerican(252, { probability: 27 }));
+assert.equal(cjs.applyUnderdogCashLegPrices([{ bookKey: "underdog_predict", dk: 252, predictionAmerican: "+245" }], true)[0].dk, 245);
 assert.equal(underdogPredictCashAmerican(252), cjs.underdogPredictCashAmerican(252));
 assert.equal(
   underdogPredictCashAmerican(331, { probability: 0.22 }),
