@@ -7,6 +7,7 @@ import { ALL_BOOKS, TRUSTED_BOOK_KEYS } from "../lib/promo-ev.js";
 import { transformOddsData } from "./oddsTransform.js";
 import { overlayUnderdogPredictOnGame } from "./promoUnderdogPredict.js";
 import {
+  UNDERDOG_BOARD_OMIT_MS,
   UNDERDOG_PREDICT_BOOK_KEY,
   UNDERDOG_STALE_MINUTES,
   UNDERDOG_STALE_MS,
@@ -35,6 +36,8 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
 {
   assert.equal(UNDERDOG_STALE_MINUTES, 60);
   assert.equal(UNDERDOG_STALE_MS, 60 * 60 * 1000);
+  assert.equal(UNDERDOG_BOARD_OMIT_MS, 24 * 60 * 60 * 1000);
+  assert.ok(UNDERDOG_BOARD_OMIT_MS > UNDERDOG_STALE_MS);
   assert.equal(isUnderdogPredictBook(UNDERDOG_PREDICT_BOOK_KEY), true);
   assert.equal(isUnderdogPredictBook("draftkings"), false);
   assert.match(UNDERDOG_STALE_WARNING, /double-check in the app/i);
@@ -63,8 +66,14 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.equal(isUnderdogOddsStale("", now), false);
   assert.equal(isUnderdogOddsStale("not-a-date", now), false);
   assert.equal(cjsFresh.UNDERDOG_STALE_MS, UNDERDOG_STALE_MS);
+  assert.equal(cjsFresh.UNDERDOG_BOARD_OMIT_MS, UNDERDOG_BOARD_OMIT_MS);
   assert.equal(cjsFresh.isUnderdogOddsStale(now - UNDERDOG_STALE_MS - 1, now), true);
   assert.equal(cjsFresh.isUnderdogOddsStale(null, now), false);
+  // Board omit is a wider clock than the 1h warning / rank gate.
+  assert.equal(cjsFresh.isUnderdogOddsStale(now - 2 * 60 * 60 * 1000, now, UNDERDOG_BOARD_OMIT_MS), false);
+  assert.equal(cjsFresh.isUnderdogOddsStale(now - 25 * 60 * 60 * 1000, now, UNDERDOG_BOARD_OMIT_MS), true);
+  assert.equal(cjsFresh.isUnderdogOddsStale(now - UNDERDOG_BOARD_OMIT_MS, now, UNDERDOG_BOARD_OMIT_MS), false);
+  assert.equal(cjsFresh.isUnderdogOddsStale(null, now, UNDERDOG_BOARD_OMIT_MS), false);
 }
 
 {
@@ -94,6 +103,34 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   ]), false, "−110 / −110 stays");
   assert.equal(underdogStaleAgeLabel(miamiTs, now), "~8d ago");
   assert.ok((now - miamiTs) / 3_600_000 > 200, "Miami quote is ~210 hours old");
+
+  const twoHours = now - 2 * 60 * 60 * 1000;
+  const freshMs = now - 10 * 60 * 1000;
+  const dayOld = now - 25 * 60 * 60 * 1000;
+  const twoHourLeg = { bookKey: "underdog_predict", bookUpdatedAt: twoHours, dk: 180, name: "Pittsburgh Steelers ML" };
+  assert.equal(underdogOfferIsRankable(twoHourLeg, now), false, "2h offer is not a Promo candidate");
+  assert.equal(cjsFresh.underdogOfferIsRankable(twoHourLeg, now), false);
+  assert.ok(describeUnderdogOfferStaleWarning(twoHourLeg, now), "1h warning still fires for a 2h quote that the board can show");
+  const boardKept = cjsFresh.sanitizeUnderdogPhoneLines([
+    { market: "h2h", name: "Pittsburgh Steelers", american: 180, updatedAt: twoHours },
+    { market: "h2h", name: "Baltimore Ravens", american: -200, updatedAt: freshMs },
+  ], now);
+  assert.deepEqual(boardKept.map((l) => l.american).sort((a, b) => a - b), [-200, 180], "2h side stays for the board");
+  assert.deepEqual(cjsFresh.sanitizeUnderdogPhoneLines([
+    { market: "h2h", name: "Day Old Dogs", american: 150, updatedAt: dayOld },
+    { market: "h2h", name: "Day Old Cats", american: -170, updatedAt: dayOld },
+  ], now), [], "25h sides are omitted from the board payload");
+  assert.equal(cjsFresh.sanitizeUnderdogPhoneLines([
+    { market: "h2h", name: "No Stamp", american: -110, updatedAt: null },
+    { market: "h2h", name: "No Stamp Home", american: -110 },
+  ], now).length, 2, "missing timestamp is not a board omit");
+  const incoherentAged = cjsFresh.sanitizeUnderdogPhoneLines([
+    { market: "h2h", name: "Akron Zips", american: -527, updatedAt: twoHours },
+    { market: "h2h", name: "Central Michigan Chippewas", american: -715, updatedAt: twoHours },
+    { market: "spreads", name: "Akron Zips", american: 100, updatedAt: twoHours, point: 3.5 },
+  ], now);
+  assert.ok(incoherentAged.every((l) => l.market !== "h2h"), "2h incoherent moneyline is still omitted");
+  assert.equal(incoherentAged.length, 1);
 }
 
 {
@@ -306,6 +343,50 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.equal(describeUnderdogOfferStaleWarning(ravens, now), null, "Ravens minutes-old tick stays quiet");
   assert.ok(describeUnderdogStaleWarning(Date.parse("2026-09-19T16:10:00.000Z"), now), "Steelers tick still warns");
   assert.equal(describePromoUnderdogStaleWarning([ravens], now), null);
+}
+
+{
+  // 2h is past the Promo rank gate and inside the 24h board window.
+  const now = Date.parse("2026-09-21T20:20:00.000Z");
+  const twoHours = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+  const freshIso = new Date(now - 10 * 60 * 1000).toISOString();
+  const event = {
+    id: "odds-pit-bal-2h",
+    sport_key: "americanfootball_nfl",
+    commence_time: kick,
+    away_team: "Pittsburgh Steelers",
+    home_team: "Baltimore Ravens",
+    bookmakers: [{
+      key: "draftkings",
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Pittsburgh Steelers", price: 170 },
+          { name: "Baltimore Ravens", price: -190 },
+        ],
+      }],
+    }],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, null, {
+    match_grouped_lines: [{
+      title: "Moneyline",
+      options: [
+        { selection_header: "Pittsburgh Steelers", updated_at: twoHours, odds: { prediction: { american: "+180", decimal: "2.80" } } },
+        { selection_header: "Baltimore Ravens", updated_at: freshIso, odds: { prediction: { american: "-200", decimal: "1.50" } } },
+      ],
+    }],
+  });
+  const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const legs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { now });
+  const steelers = legs.find((l) => /steelers/i.test(l.name));
+  const ravens = legs.find((l) => /ravens/i.test(l.name));
+  assert.equal(steelers, undefined, "2h Steelers offer is omitted from Promo ranking");
+  assert.ok(ravens, "10m Ravens offer is still ranked");
+  const ranked = findTopParlays(legs, 1, 0, 100);
+  assert.ok(ranked.length >= 1);
+  assert.ok(ranked.every((p) => !(p.legs || []).some((l) => /steelers/i.test(l.name) && l.dk === 180)));
+  assert.equal(ranked[0].legs[0].dk, -200);
+  assert.ok(describeUnderdogStaleWarning(twoHours, now), "warning banner still fires at 1h");
 }
 
 {

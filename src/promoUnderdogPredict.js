@@ -21,8 +21,10 @@
 // Per-selection phone updated_at is copied onto overlay outcomes as
 // updatedAt (ms). Promo cards flag Underdog ticks older than
 // UNDERDOG_STALE_MINUTES (default 60). Missing stamps do not warn.
-// Ranking drops a stale Underdog *offer* (see underdogOfferIsRankable);
-// the other side of the game is judged on its own timestamp.
+// Ranking drops a stale Underdog *offer* older than UNDERDOG_STALE_MS
+// (1 hour; see underdogOfferIsRankable). The board and
+// /api/underdog-predict omit a side only after UNDERDOG_BOARD_OMIT_MS
+// (24 hours). The other side of the game is judged on its own timestamp.
 
 import {
   asList,

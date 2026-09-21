@@ -771,6 +771,81 @@ function linesFor(sport) {
     assert.ok(!calls.some((url) => /betstamp|book_ids=196/.test(url)));
   }
 
+  {
+    // Board / API omit is 24h. A 2h quote stays; a 25h quote is dropped.
+    // Promo ranking (1h) is covered in promoUnderdogFreshness.test.js.
+    const { UNDERDOG_BOARD_OMIT_MS, UNDERDOG_STALE_MS } = require('../lib/underdog-freshness');
+    assert.equal(UNDERDOG_STALE_MS, 60 * 60 * 1000);
+    assert.equal(UNDERDOG_BOARD_OMIT_MS, 24 * 60 * 60 * 1000);
+    const now = Date.parse('2026-09-21T20:20:00.000Z');
+    const twoHours = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    const fresh = new Date(now - 10 * 60 * 1000).toISOString();
+    const twentyFiveHours = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+    const split = contentBody({
+      id: 183200,
+      sportId: 'CFB',
+      title: 'Pittsburgh Steelers @ Baltimore Ravens',
+      lines: [
+        line('PIT @ BAL Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          {
+            ...opt('Pittsburgh Steelers', 'away', 'Steelers to win', '+180'),
+            updated_at: twoHours,
+          },
+          {
+            ...opt('Baltimore Ravens', 'home', 'Ravens to win', '-200'),
+            updated_at: fresh,
+          },
+        ]),
+      ],
+    });
+    const dayOld = contentBody({
+      id: 183201,
+      sportId: 'CFB',
+      title: 'Day Old Dogs @ Day Old Cats',
+      lines: [
+        line('OLD Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          {
+            ...opt('Day Old Dogs', 'away', 'Dogs to win', '+150'),
+            updated_at: twentyFiveHours,
+          },
+          {
+            ...opt('Day Old Cats', 'home', 'Cats to win', '-170'),
+            updated_at: twentyFiveHours,
+          },
+        ]),
+      ],
+    });
+    const priced = gamesFromContentLines(split, 'CFB', now);
+    assert.equal(priced.length, 1);
+    assert.deepEqual(
+      priced[0].lines.map((l) => l.american).sort((a, b) => a - b),
+      [-200, 180],
+      '2h Steelers quote stays on the board payload; 10m Ravens stays',
+    );
+    assert.equal(gamesFromContentLines(dayOld, 'CFB', now).length, 0, '25h quotes are omitted');
+
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(String(url));
+      const sport = sportOf(url);
+      if (String(url).includes('/lobbies/scaffolds/sports')) {
+        return jsonRes(200, scaffoldFor(sport, MONEYLINE_FILTER_IDS[sport] || MONEYLINE_FILTER_IDS.CFB));
+      }
+      if (String(url).includes('/lobbies/content/lines') && sport === 'CFB' && filterOf(url) === MONEYLINE_FILTER_IDS.CFB) {
+        return jsonRes(200, concatContent(split, dayOld));
+      }
+      return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn, now });
+    const game = res.body.games.find((g) => g.matchId === 183200);
+    assert.ok(game, '2h game is present on GET /api/underdog-predict');
+    assert.equal(game.lines.find((l) => l.name === 'Pittsburgh Steelers').american, 180, '2h side is still in the API');
+    assert.equal(game.lines.find((l) => l.name === 'Baltimore Ravens').american, -200, 'fresh side is still in the API');
+    assert.equal(res.body.games.find((g) => g.matchId === 183201), undefined, '25h game is omitted from the API');
+    assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
+  }
+
   console.log('underdog-predict.test.js ok');
 })().catch((err) => {
   console.error(err);

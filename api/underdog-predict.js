@@ -4,12 +4,14 @@
 // New Odds Board. Indexes NFL, CFB (app sport NCAAF), and MLB moneylines,
 // spreads, and totals from /v1/lobbies/content/lines (Team Picks
 // PickemStat pills, phone PE). A market with no prediction quote is omitted.
-// A side whose quote updated_at is older than 60 minutes is omitted too
-// (missing timestamps stay). That is per side: Miami −1112 from match
-// 183027 (updated_at 2026-09-13) is dropped while a fresh Central Michigan
-// quote on the same game can remain. Two-way moneylines whose implied
-// probabilities sum outside 0.80–1.22 are omitted (Akron −527 / Central
-// Michigan −715). Phone PE only.
+// A side whose quote updated_at is older than 24 hours
+// (UNDERDOG_BOARD_OMIT_MS) is omitted (missing timestamps stay). A side
+// aged 1–24 hours stays in this payload; Promo ranking still skips it
+// after 1 hour (UNDERDOG_STALE_MS). That is per side: Miami −1112 from
+// match 183027 (updated_at 2026-09-13, ~8d) is dropped while a fresh
+// Central Michigan quote on the same game can remain. Two-way moneylines
+// whose implied probabilities sum outside 0.80–1.22 are omitted
+// (Akron −527 / Central Michigan −715). Phone PE only.
 // Defaults (override with server env, never VITE_):
 //   UNDERDOG_STATE_CONFIG_ID=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
 //   UNDERDOG_PRODUCT_EXPERIENCE_ID=018e1234-5678-9abc-def0-123456789009
