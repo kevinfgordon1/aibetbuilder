@@ -10,6 +10,8 @@ const {
   DEFAULT_PRODUCT_EXPERIENCE_ID,
   DEFAULT_STATE_CONFIG_ID,
   MONEYLINE_FILTER_IDS,
+  SPREAD_FILTER_IDS,
+  TOTAL_FILTER_IDS,
   INDEX_SPORTS,
   SPORT_BY_UNDERDOG_ID,
   TEAM_PICKS_MARKET_GROUP,
@@ -19,6 +21,8 @@ const {
   linesFromContent,
   matchGroupedLinesUrl,
   moneylineFilterFromScaffold,
+  spreadFilterFromScaffold,
+  totalFilterFromScaffold,
   readConfig,
   sportScaffoldUrl,
 } = require('../lib/underdog-lobby');
@@ -214,6 +218,37 @@ function scaffoldFor(sport, filterId) {
   };
 }
 
+function teamPicksScaffold(sport, ids) {
+  const section = (title, filterId) => ({
+    content_type: 'lines',
+    title,
+    data_source: {
+      url: `https://api.underdogfantasy.com/v1/lobbies/content/lines?filter_id=${filterId}&filter_type=PickemStat&sport_id=${sport}`,
+    },
+  });
+  return {
+    sections: [
+      { content_type: 'market_filters', title: 'MarketFilters' },
+      section('Moneyline', ids.moneyline),
+      section('Spread', ids.spread),
+      section('Total Points', ids.total),
+      section('Receiving Yards', 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'),
+    ],
+  };
+}
+
+function concatContent(...bodies) {
+  const games = {};
+  const appearances = {};
+  const over_under_lines = {};
+  for (const body of bodies) {
+    Object.assign(games, body.games || {});
+    Object.assign(appearances, body.appearances || {});
+    Object.assign(over_under_lines, body.over_under_lines || {});
+  }
+  return { games, appearances, over_under_lines };
+}
+
 function linesFor(sport) {
   if (sport === 'NFL') return nflLines;
   if (sport === 'MLB') return mlbLines;
@@ -256,6 +291,12 @@ function linesFor(sport) {
     assert.equal(MONEYLINE_FILTER_IDS.CFB, 'e669e437-9dc7-48d8-9d93-2aabd5a13d10');
     assert.equal(MONEYLINE_FILTER_IDS.MLB, '3f157ade-e2af-41ff-a5c6-9e0ca4f8c018');
     assert.equal(MONEYLINE_FILTER_IDS.NFL, '0251dd94-773d-47ec-878d-8a7349b8b967');
+    assert.equal(SPREAD_FILTER_IDS.NFL, '42ae12ae-89ce-49f3-80fa-2dc1ab9338f8');
+    assert.equal(SPREAD_FILTER_IDS.CFB, 'dae11c40-9758-4142-af39-79c75d6fcc46');
+    assert.equal(SPREAD_FILTER_IDS.MLB, 'f71ad294-b93c-4c62-be04-d123e7640775');
+    assert.equal(TOTAL_FILTER_IDS.NFL, '8f654930-4852-4510-babc-58ba0ff9840f');
+    assert.equal(TOTAL_FILTER_IDS.CFB, '0fa6fdd2-afb1-4c3a-bb35-98da0b814ef1');
+    assert.equal(TOTAL_FILTER_IDS.MLB, 'efa4c7d0-9e4a-46cf-89f3-24005a3b7c94');
   }
 
   {
@@ -279,6 +320,22 @@ function linesFor(sport) {
     ]);
     assert.equal(moneylineFilterFromScaffold(scaffoldFor('CFB', MONEYLINE_FILTER_IDS.CFB)), MONEYLINE_FILTER_IDS.CFB);
     assert.equal(moneylineFilterFromScaffold(scaffoldSectionsOnly), null);
+    const pills = teamPicksScaffold('NFL', {
+      moneyline: MONEYLINE_FILTER_IDS.NFL,
+      spread: SPREAD_FILTER_IDS.NFL,
+      total: TOTAL_FILTER_IDS.NFL,
+    });
+    assert.equal(spreadFilterFromScaffold(pills), SPREAD_FILTER_IDS.NFL);
+    assert.equal(totalFilterFromScaffold(pills), TOTAL_FILTER_IDS.NFL);
+    assert.equal(spreadFilterFromScaffold(scaffoldSectionsOnly), null);
+    assert.equal(totalFilterFromScaffold(scaffoldSectionsOnly), null);
+    const runs = teamPicksScaffold('MLB', {
+      moneyline: MONEYLINE_FILTER_IDS.MLB,
+      spread: SPREAD_FILTER_IDS.MLB,
+      total: TOTAL_FILTER_IDS.MLB,
+    });
+    runs.sections.find((section) => section.title === 'Total Points').title = 'Total Runs';
+    assert.equal(totalFilterFromScaffold(runs), TOTAL_FILTER_IDS.MLB);
     const priced = gamesFromContentLines(cfbLines, 'CFB');
     assert.equal(priced.length, 1);
     assert.equal(priced[0].sport, 'NCAAF');
@@ -338,7 +395,7 @@ function linesFor(sport) {
     assert.equal(giants.american, 245, 'phone odds.prediction, not fantasy +252');
     assert.equal(rams.american, -313);
     assert.notEqual(giants.american, 252);
-    assert.ok(res.body.games.every((g) => g.lines.every((l) => l.market === 'h2h')), 'index is moneylines only');
+    assert.ok(res.body.games.every((g) => g.lines.every((l) => l.market === 'h2h')), 'empty spread and total feeds leave moneylines');
     assert.equal(game.lines.some((l) => l.market === 'spreads'), false);
     const mlb = res.body.games.find((g) => g.sport === 'MLB');
     assert.equal(mlb.away, 'Cleveland Guardians');
@@ -357,6 +414,172 @@ function linesFor(sport) {
     assert.equal(calls[0].headers['client-version'], '20260918170103');
     assert.ok(!calls.some((c) => /betstamp|over_under_lines|match_grouped_lines/i.test(c.url)));
     assert.ok(!calls.some((c) => c.url.includes(STICKER_EXPERIENCE_ID)));
+  }
+
+  {
+    const empty = { games: {}, appearances: {}, over_under_lines: {} };
+    const giantsMl = contentBody({
+      id: 178911,
+      sportId: 'NFL',
+      title: 'New York Giants @ Los Angeles Rams',
+      lines: [
+        line('NYG @ LAR Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('New York Giants', 'away', 'Giants to win', '+245', '+252'),
+          opt('Los Angeles Rams', 'home', 'Rams to win', '-313', '-280'),
+        ]),
+      ],
+    });
+    const ravensMl = contentBody({
+      id: 175974,
+      sportId: 'NFL',
+      title: 'Baltimore Ravens @ Dallas Cowboys',
+      lines: [
+        line('BAL @ DAL Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Baltimore Ravens', 'away', 'Ravens to win', '-157'),
+          opt('Dallas Cowboys', 'home', 'Cowboys to win', '+130'),
+        ]),
+      ],
+    });
+    const giantsSpread = contentBody({
+      id: 178911,
+      sportId: 'NFL',
+      title: 'New York Giants @ Los Angeles Rams',
+      lines: [
+        line('NYG @ LAR Spread', 'spread', 'Spread', 'spread', '-6.5', [
+          opt('New York Giants', 'away', 'NYG +6.5', '+100', '+110'),
+          opt('Los Angeles Rams', 'home', 'LAR -6.5', '-122'),
+        ]),
+      ],
+    });
+    const giantsTotal = contentBody({
+      id: 178911,
+      sportId: 'NFL',
+      title: 'New York Giants @ Los Angeles Rams',
+      lines: [
+        line('NYG @ LAR Total Points O/U', 'points', 'Total Points', 'over_under', '47.5', [
+          opt('NYG @ LAR', 'higher', 'Higher', '-113', '+200'),
+          opt('NYG @ LAR', 'lower', 'Lower', '-109'),
+        ]),
+      ],
+    });
+    const oleMiss = contentBody({
+      id: 224202,
+      sportId: 'CFB',
+      title: 'Ole Miss Rebels @ Florida Gators',
+      lines: [
+        line('MISS @ FLA Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Ole Miss Rebels', 'away', 'Ole Miss to win', '+127', '+129'),
+          opt('Florida Gators', 'home', 'Florida to win', '-157'),
+        ]),
+      ],
+    });
+    const oleMissSpread = contentBody({
+      id: 224202,
+      sportId: 'CFB',
+      title: 'Ole Miss Rebels @ Florida Gators',
+      lines: [
+        line('MISS @ FLA Spread', 'spread', 'Spread', 'spread', '-2.5', [
+          opt('Ole Miss Rebels', 'away', 'MISS +2.5', '+106'),
+          opt('Florida Gators', 'home', 'FLA -2.5', '-134'),
+        ]),
+      ],
+    });
+    const oleMissTotal = contentBody({
+      id: 224202,
+      sportId: 'CFB',
+      title: 'Ole Miss Rebels @ Florida Gators',
+      lines: [
+        line('MISS @ FLA Total Points O/U', 'points', 'Total Points', 'over_under', '51.5', [
+          opt('MISS @ FLA', 'higher', 'Higher', '-136'),
+          opt('MISS @ FLA', 'lower', 'Lower', '+104'),
+        ]),
+      ],
+    });
+    const mlbMl = contentBody({
+      id: 142331,
+      sportId: 'MLB',
+      title: 'Chicago White Sox @ Kansas City Royals',
+      lines: [
+        line('CWS @ KC Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Chicago White Sox', 'away', 'White Sox to win', '-122'),
+          opt('Kansas City Royals', 'home', 'Royals to win', '+102'),
+        ]),
+      ],
+    });
+    const mlbTotal = contentBody({
+      id: 142331,
+      sportId: 'MLB',
+      title: 'Chicago White Sox @ Kansas City Royals',
+      lines: [
+        line('CWS @ KC Total Runs O/U', 'points', 'Total Runs', 'over_under', '8.5', [
+          opt('CWS @ KC', 'higher', 'Higher', '+100'),
+          opt('CWS @ KC', 'lower', 'Lower', '-120'),
+        ]),
+      ],
+    });
+    const calls = [];
+    const fetchFn = async (url) => {
+      const sport = sportOf(url);
+      const filterId = filterOf(url);
+      calls.push(String(url));
+      if (String(url).includes('/lobbies/scaffolds/sports')) {
+        return jsonRes(200, teamPicksScaffold(sport, {
+          moneyline: MONEYLINE_FILTER_IDS.CFB,
+          spread: SPREAD_FILTER_IDS.CFB,
+          total: TOTAL_FILTER_IDS.CFB,
+        }));
+      }
+      if (!String(url).includes('/lobbies/content/lines')) return jsonRes(404, {});
+      if (sport === 'NFL' && filterId === MONEYLINE_FILTER_IDS.NFL) return jsonRes(200, concatContent(giantsMl, ravensMl));
+      if (sport === 'NFL' && filterId === SPREAD_FILTER_IDS.NFL) return jsonRes(200, giantsSpread);
+      if (sport === 'NFL' && filterId === TOTAL_FILTER_IDS.NFL) return jsonRes(200, giantsTotal);
+      if (sport === 'CFB' && filterId === MONEYLINE_FILTER_IDS.CFB) return jsonRes(200, oleMiss);
+      if (sport === 'CFB' && filterId === SPREAD_FILTER_IDS.CFB) return jsonRes(200, oleMissSpread);
+      if (sport === 'CFB' && filterId === TOTAL_FILTER_IDS.CFB) return jsonRes(200, oleMissTotal);
+      if (sport === 'MLB' && filterId === MONEYLINE_FILTER_IDS.MLB) return jsonRes(200, mlbMl);
+      if (sport === 'MLB' && filterId === TOTAL_FILTER_IDS.MLB) return jsonRes(200, mlbTotal);
+      return jsonRes(200, empty);
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn });
+    const giants = res.body.games.find((g) => g.matchId === 178911);
+    assert.equal(giants.sport, 'NFL');
+    assert.equal(giants.lines.find((l) => l.market === 'h2h' && l.name === 'New York Giants').american, 245);
+    assert.notEqual(giants.lines.find((l) => l.market === 'h2h' && l.name === 'New York Giants').american, 252);
+    const giantSpread = giants.lines.find((l) => l.market === 'spreads' && l.name === 'New York Giants');
+    const ramSpread = giants.lines.find((l) => l.market === 'spreads' && l.name === 'Los Angeles Rams');
+    assert.equal(giantSpread.american, 100);
+    assert.notEqual(giantSpread.american, 110);
+    assert.equal(giantSpread.point, 6.5);
+    assert.equal(ramSpread.point, -6.5);
+    const over = giants.lines.find((l) => l.market === 'totals' && l.choice === 'higher');
+    const under = giants.lines.find((l) => l.market === 'totals' && l.choice === 'lower');
+    assert.equal(over.american, -113);
+    assert.notEqual(over.american, 200);
+    assert.equal(over.point, 47.5);
+    assert.equal(under.american, -109);
+    assert.equal(under.point, 47.5);
+    const ravens = res.body.games.find((g) => g.matchId === 175974);
+    assert.ok(ravens.lines.every((l) => l.market === 'h2h'), 'missing spread and total are omitted');
+    const cfb = res.body.games.find((g) => g.matchId === 224202);
+    assert.equal(cfb.sport, 'NCAAF');
+    assert.equal(cfb.lines.find((l) => l.market === 'h2h' && l.name === 'Ole Miss Rebels').american, 127);
+    assert.equal(cfb.lines.find((l) => l.market === 'spreads' && l.name === 'Ole Miss Rebels').point, 2.5);
+    assert.equal(cfb.lines.find((l) => l.market === 'totals' && l.choice === 'higher').point, 51.5);
+    const mlb = res.body.games.find((g) => g.matchId === 142331);
+    assert.equal(mlb.sport, 'MLB');
+    assert.equal(mlb.lines.some((l) => l.market === 'h2h'), true);
+    assert.equal(mlb.lines.some((l) => l.market === 'spreads'), false, 'empty MLB spread feed omits the market');
+    assert.equal(mlb.lines.find((l) => l.market === 'totals' && l.choice === 'higher').point, 8.5);
+    const lineCalls = calls.filter((url) => url.includes('/lobbies/content/lines'));
+    assert.ok(lineCalls.some((url) => sportOf(url) === 'NFL' && filterOf(url) === SPREAD_FILTER_IDS.CFB));
+    assert.ok(lineCalls.some((url) => sportOf(url) === 'NFL' && filterOf(url) === SPREAD_FILTER_IDS.NFL));
+    assert.ok(lineCalls.some((url) => sportOf(url) === 'NFL' && filterOf(url) === TOTAL_FILTER_IDS.NFL));
+    assert.equal(lineCalls.filter((url) => sportOf(url) === 'CFB' && filterOf(url) === SPREAD_FILTER_IDS.CFB).length, 1);
+    assert.ok(!lineCalls.some((url) => filterOf(url) === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'));
+    assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
+    assert.ok(!calls.some((url) => url.includes(STICKER_EXPERIENCE_ID)));
+    assert.ok(!calls.some((url) => /betstamp|book_ids=196|match_grouped_lines/.test(url)));
   }
 
   {
