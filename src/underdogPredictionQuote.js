@@ -33,8 +33,8 @@
 // Underdog leg when it is missing. Do not substitute the Betstamp sticker
 // or a fee-adjusted sticker. The free-bet formula is unchanged; the
 // American it consumes is this phone price. A prediction quote with no
-// sticker can still form a Promo leg at that phone American. The Odds
-// Board keeps the gross sticker and does not invent a bookmaker from
+// sticker can still form a Promo leg at that phone American. The New Odds
+// Board does not paint Betstamp 196 and does not invent a bookmaker from
 // prediction-only quotes. Omitting a game moneyline until state_config_id
 // supplies odds.prediction is the correct Promo behavior.
 

@@ -6,6 +6,7 @@ import {
   BETSTAMP_TRIAL_BOOKS,
   isPmWinProbBook,
   sportByLeague,
+  UNDERDOG_PREDICT_BOOK_KEY,
 } from "./betstampBooks.js";
 import { americanToImpliedProb, impliedProbToAmerican } from "./blendAskLadder.js";
 import { BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
@@ -957,6 +958,12 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   if (!(allowAlt ? isBoardMarket(market) : isMainMarket(market))) return false;
   const bookKey = bookKeyForMarket(market);
   if (!bookKey) return false;
+  // Book 196 is not the Underdog phone price. Live NYG decimal 3.4 converts
+  // to +240 (LAR 1.33 → −303) while the phone is still +245. Do not paint
+  // that American, and do not fee-adjust it into a phone quote. Phone odds
+  // are odds.prediction, which this feed does not carry, so the cell stays
+  // empty. Promo joins prediction separately and omits the leg when missing.
+  if (bookKey === UNDERDOG_PREDICT_BOOK_KEY) return false;
   const betType = normalizeBetType(market.bet_type);
   const side = marketSide(market, game);
   if (!side) return false;

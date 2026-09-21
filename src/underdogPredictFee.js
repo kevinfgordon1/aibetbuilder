@@ -17,7 +17,8 @@
 // Keep in lockstep with lib/underdog-predict-fee.js.
 // Legacy UDX curve stays for reference and is not a Promo price.
 // Promo Underdog Americans are the joined odds.prediction quote only.
-// New Odds Board stays on the gross sticker.
+// New Odds Board does not paint Betstamp 196. Do not fee-adjust it into
+// a phone quote.
 
 export const UNDERDOG_PREDICT_UDX_FEE_RATE = 0.072;
 
@@ -89,8 +90,10 @@ export function applyUnderdogPredictFee(rawAmericanOdds) {
 // Promo phone price for free bet, cash, boost, and no-sweat. The only
 // quote is Underdog odds.prediction american (Giants +245 / 3.45,
 // probability 27) joined as predictionAmerican — use it verbatim.
-// Betstamp 196 / odds.fantasy stay the gross sticker (+252 / 3.52) on the
-// row and on the Odds Board. A missing prediction omits the Promo leg.
+// Betstamp 196 / odds.fantasy stay the gross sticker (+252 / 3.52, or a
+// later 3.4 / +240) on the promo row only so a prediction can be joined.
+// They are not a Promo price. New Odds Board leaves that cell empty.
+// A missing prediction omits the Promo leg.
 // Do not invent a phone price from the sticker. Free-bet EV math is
 // unchanged; this American is the input. Keep in lockstep with
 // lib/underdog-predict-fee.js.

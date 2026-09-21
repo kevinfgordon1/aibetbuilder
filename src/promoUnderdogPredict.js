@@ -3,10 +3,12 @@
 // 196 row" guard as Bookmaker 642 — do not invent a second matcher.
 // Odds API games stay the row identity. A Betstamp blip omits Underdog cells.
 //
-// Overlay stores Betstamp 196 gross sticker American (3.52 → +252) on
-// outcome.price. New Odds Board uses betstampNormalize and stays on that
-// sticker. Every Promo path (free bet, cash, boost, no-sweat) uses only a
-// joined Underdog odds.prediction american (Giants +245 / 3.45x,
+// Overlay stores Betstamp 196 gross sticker American (3.52 → +252, or a
+// later 3.4 → +240) on outcome.price so a prediction can be joined beside
+// it. Promo never displays that sticker. New Odds Board does not paint
+// book 196 at all (betstampNormalize): it is not the phone price, and it
+// is not fee-adjusted into one. Every Promo path (free bet, cash, boost,
+// no-sweat) uses only a joined Underdog odds.prediction american (Giants +245 / 3.45x,
 // app-identical). A missing prediction omits that Underdog Promo leg.
 // Do not substitute the Betstamp sticker or a fee-adjusted sticker, and
 // do not apply the legacy UDX 0.072 cost-add. Free-bet EV math is

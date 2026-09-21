@@ -649,8 +649,9 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
 }
 
 {
-  // Giants ML: Betstamp gross +252 / 3.52x stays on the board. Without
+  // Giants ML: the promo row still stores the Betstamp sticker. Without
   // odds.prediction, Promo must not show +252 or a fee-adjusted +244.
+  // New Odds Board omits book 196 (see betstampNormalize.test.js).
   assert.equal(toUnderdogPredictAmerican(3.52), 252);
 
   const kick = future;
@@ -727,8 +728,8 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
 
 {
   // Logged-in scaffold match_id 178911: odds.prediction is the phone price.
-  // Fantasy/Betstamp gross stays on the stored row for the Odds Board.
-  // Promo free bets and cash both display and price the phone American.
+  // Fantasy/Betstamp gross stays on the stored promo row, not on the New
+  // Odds Board. Promo free bets and cash both display and price the phone American.
   const kick = future;
   const event = {
     id: "odds-nyg-lar-pred",
