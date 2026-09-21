@@ -443,7 +443,7 @@ function namesOf(parlays) {
   assert.match(app, /const \[maxLegOdds, setMaxLegOdds\] = useState\(""\)/);
   assert.match(app, /parsedMaxFinal/);
   assert.match(app, /parsedMaxLeg/);
-  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg\)/);
+  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, \{ underdogCash: promoType !== "freebet" \}\)/);
   assert.match(app, /maxFinalOdds: parsedMaxFinal/);
   assert.match(app, /parts\.push\(`max \$\{maxFinalOdds\}`\)/);
   assert.match(app, /parts\.push\(`legs max \$\{maxLegOdds\}`\)/);

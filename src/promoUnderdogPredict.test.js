@@ -27,7 +27,7 @@ import {
   underdogPredictConflictsWithEventBooks,
   underdogTwoWayLooksIncoherent,
 } from "./promoUnderdogPredict.js";
-import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
+import { applyUnderdogPredictFee, underdogPredictCashAmerican, underdogPredictCashQuote } from "./underdogPredictFee.js";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 import {
   oppQuoteLooksInverted,
@@ -36,7 +36,7 @@ import {
 } from "./promoOppGuard.js";
 
 const require = createRequire(import.meta.url);
-const { buildAllLegsForBook } = require("../lib/promo-ev.js");
+const { buildAllLegsForBook, calcParlayEV } = require("../lib/promo-ev.js");
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const future = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
@@ -263,6 +263,12 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.match(app, /includeUnderdog/);
   assert.match(app, /key: "underdog_predict", label: "Underdog Predict"/);
   assert.doesNotMatch(app, /after UDX exchange fee/);
+  assert.match(app, /underdogCash: promoType !== "freebet"/);
+  assert.match(app, /stampUnderdogPredictionLegs/);
+  assert.match(ev, /applyUnderdogCashLegPrices/);
+  assert.match(ev, /stampUnderdogPredictionLegs/);
+  const worker = fs.readFileSync(path.join(dir, "../lib/ev-parlay-alert.js"), "utf8");
+  assert.match(worker, /underdogCash: true/);
   assert.doesNotMatch(app, /after \$0\.02\/contract fee/);
   assert.doesNotMatch(app, /label: "Fanatics Markets"/);
   assert.ok(app.includes("underdog_predict"));
@@ -636,6 +642,222 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   const brownsLeg = legs.find((l) => /browns/i.test(l.name));
   assert.ok(brownsLeg, "Browns sticker +331 is a real Underdog promo leg");
   assert.equal(brownsLeg.dk, 331);
+  const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
+  const cashBrowns = cashLegs.find((l) => /browns/i.test(l.name));
+  assert.equal(cashBrowns.dk, underdogPredictCashAmerican(331));
+  assert.notEqual(cashBrowns.dk, 308, "cash path is not the legacy UDX haircut");
+  assert.notEqual(cashBrowns.dk, 331);
+  const freeBetEv = calcFreeBetParlayEV([brownsLeg], 1000).ev;
+  const cashAsFreeBetEv = calcFreeBetParlayEV([cashBrowns], 1000).ev;
+  assert.ok(freeBetEv > cashAsFreeBetEv, "free-bet EV stays on the sticker and must not pick up the cash haircut");
+  assert.equal(cashBrowns.bestOpp, brownsLeg.bestOpp, "opponent true-prob quote stays sticker");
+}
+
+{
+  // Giants ML: Betstamp/Kalshi gross +252 / 3.52x. Underdog cash slip is
+  // p=0.27 → 344.82 contracts, $6.90 fee, 3.45x / +245. Without a separate
+  // probability field the sticker inverts through Kalshi θ=0.07 to +244.
+  const slip = underdogPredictCashQuote({ probability: 0.27, stake: 100 });
+  assert.equal(slip.american, 245);
+  assert.ok(Math.abs(slip.contracts - 344.82) < 0.02);
+  assert.ok(Math.abs(slip.fee - 6.9) < 0.02);
+  assert.equal(toUnderdogPredictAmerican(3.52), 252);
+  assert.equal(underdogPredictCashAmerican(252), 244);
+  assert.ok(Math.abs(underdogPredictCashAmerican(252) - 245) <= 1);
+
+  const kick = future;
+  const event = {
+    id: "odds-nyg-lar",
+    sport_key: "americanfootball_nfl",
+    sport: "americanfootball_nfl",
+    commence_time: kick,
+    away_team: "New York Giants",
+    home_team: "Los Angeles Rams",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "New York Giants", price: 240 },
+            { name: "Los Angeles Rams", price: -280 },
+          ],
+        }],
+      },
+      {
+        key: "fanduel",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "New York Giants", price: 235 },
+            { name: "Los Angeles Rams", price: -270 },
+          ],
+        }],
+      },
+    ],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-nyg-lar",
+      league: "NFL",
+      start_date: kick,
+      home_team_id: "team-lar",
+      away_team_id: "team-nyg",
+    }],
+    teams: [
+      { id: "team-nyg", name: "New York Giants", abbreviation: "NYG" },
+      { id: "team-lar", name: "Los Angeles Rams", abbreviation: "LAR" },
+    ],
+    markets: [
+      { odds: 3.52, side: "NYG", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-nyg-lar", team_id: "team-nyg", size: 400 },
+      { odds: 1.39, side: "LAR", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-nyg-lar", team_id: "team-lar" },
+    ],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, snap);
+  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
+  assert.ok(udp, "Giants 3.52 must overlay as sticker");
+  const giantsOutcome = udp.markets.find((m) => m.key === "h2h")?.outcomes?.find((o) => o.name === "New York Giants");
+  assert.equal(giantsOutcome.price, 252, "overlay keeps the gross sticker");
+  const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const ml = data.moneylines[0];
+  assert.equal(ml.bookOdds.underdog_predict.ml_away, 252);
+  assert.equal(ml.bookOdds.draftkings.ml_away, 240);
+  const stickerLegs = buildAllLegsForBook(data, "underdog_predict");
+  const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
+  const stickerGiants = stickerLegs.find((l) => /giants/i.test(l.name));
+  const cashGiants = cashLegs.find((l) => /giants/i.test(l.name));
+  assert.equal(stickerGiants.dk, 252);
+  assert.equal(cashGiants.dk, 244);
+  assert.equal(cashGiants.bestOpp, stickerGiants.bestOpp);
+  const capped = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 250, { underdogCash: true });
+  assert.ok(capped.find((l) => /giants/i.test(l.name)), "cash +244 still fits a +250 max that the +252 sticker misses");
+  const minned = buildAllLegsForBook(data, "underdog_predict", null, 250, "any", null, { underdogCash: true });
+  assert.equal(minned.find((l) => /giants/i.test(l.name)), undefined);
+  const dkPlain = buildAllLegsForBook(data, "draftkings");
+  const dkCashFlag = buildAllLegsForBook(data, "draftkings", null, null, "any", null, { underdogCash: true });
+  const dkGiants = dkPlain.find((l) => /giants/i.test(l.name));
+  const dkGiantsFlag = dkCashFlag.find((l) => /giants/i.test(l.name));
+  assert.equal(dkGiants.dk, 240);
+  assert.equal(dkGiantsFlag.dk, dkGiants.dk);
+  assert.equal(dkGiantsFlag.bestOpp, dkGiants.bestOpp);
+  const boostSticker = calcParlayEV([stickerGiants], 0, 100);
+  const boostCash = calcParlayEV([cashGiants], 0, 100);
+  assert.ok(boostCash.parlayDec < boostSticker.parlayDec);
+  assert.equal(calcFreeBetParlayEV([stickerGiants], 100).parlayDec, boostSticker.parlayDec);
+}
+
+{
+  // Logged-in scaffold match_id 178911: odds.prediction is the phone price.
+  // Fantasy/Betstamp gross stays on the sticker for free bets and the board.
+  const kick = future;
+  const event = {
+    id: "odds-nyg-lar-pred",
+    sport_key: "americanfootball_nfl",
+    sport: "americanfootball_nfl",
+    commence_time: kick,
+    away_team: "New York Giants",
+    home_team: "Los Angeles Rams",
+    bookmakers: [
+      {
+        key: "draftkings",
+        markets: [{
+          key: "h2h",
+          outcomes: [
+            { name: "New York Giants", price: 240 },
+            { name: "Los Angeles Rams", price: -280 },
+          ],
+        }],
+      },
+    ],
+  };
+  const snap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-nyg-lar-pred",
+      league: "NFL",
+      start_date: kick,
+      home_team_id: "team-lar",
+      away_team_id: "team-nyg",
+    }],
+    teams: [
+      { id: "team-nyg", name: "New York Giants", abbreviation: "NYG" },
+      { id: "team-lar", name: "Los Angeles Rams", abbreviation: "LAR" },
+    ],
+    markets: [
+      { odds: 3.52, side: "NYG", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-nyg-lar-pred", team_id: "team-nyg" },
+      { odds: 1.39, side: "LAR", side_type: "Home", bet_type: "moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-nyg-lar-pred", team_id: "team-lar" },
+    ],
+  };
+  const lobby = {
+    match_grouped_lines: [
+      {
+        title: "Moneyline",
+        options: [
+          {
+            selection_header: "New York Giants",
+            choice_display: "New York Giants",
+            american_price: "+245",
+            decimal_price: "3.45",
+            odds: {
+              prediction: { american: "+245", decimal: "3.45", probability: 27 },
+              fantasy: { american: "+252", decimal: "3.52", probability: "27" },
+            },
+          },
+          {
+            selection_header: "Los Angeles Rams",
+            choice_display: "Los Angeles Rams",
+            american_price: "-313",
+            decimal_price: "1.32",
+            odds: {
+              prediction: { american: "-313", decimal: "1.32", probability: "74" },
+              fantasy: { american: "-280", decimal: "1.36", probability: "74" },
+            },
+          },
+        ],
+      },
+      {
+        title: "2026/27 NFC Champion",
+        over_under: { title: "2026/27 NFC Champion", category: "future" },
+        options: [
+          {
+            selection_header: "New York Giants",
+            american_price: "+1500",
+            decimal_price: "16.0",
+            odds: { prediction: { american: "+1500", decimal: "16.0", probability: "6" }, fantasy: null },
+          },
+        ],
+      },
+    ],
+  };
+  const overlaid = overlayUnderdogPredictOnGame(event, snap, lobby);
+  const udp = overlaid.bookmakers.find((b) => b.key === "underdog_predict");
+  const h2h = udp.markets.find((m) => m.key === "h2h").outcomes;
+  const giantsOutcome = h2h.find((o) => o.name === "New York Giants");
+  const ramsOutcome = h2h.find((o) => o.name === "Los Angeles Rams");
+  assert.equal(giantsOutcome.price, 252, "board/overlay sticker stays Betstamp gross");
+  assert.equal(giantsOutcome.predictionAmerican, 245);
+  assert.equal(giantsOutcome.contractProbability, 0.27);
+  assert.equal(ramsOutcome.price, toAmericanOdds(1.39));
+  assert.equal(ramsOutcome.predictionAmerican, -313);
+  const data = transformOddsData([overlaid], "americanfootball_nfl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away, 252);
+  assert.equal(data.moneylines[0].bookOdds.underdog_predict.ml_away_prediction, 245);
+  assert.equal(data.moneylines[0].bookOdds.draftkings.ml_away, 240);
+  const freeLegs = buildAllLegsForBook(data, "underdog_predict");
+  const cashLegs = buildAllLegsForBook(data, "underdog_predict", null, null, "any", null, { underdogCash: true });
+  const freeGiants = freeLegs.find((l) => /giants/i.test(l.name));
+  const cashGiants = cashLegs.find((l) => /giants/i.test(l.name));
+  const cashRams = cashLegs.find((l) => /rams/i.test(l.name));
+  assert.equal(freeGiants.dk, 252, "free bet stays on the gross sticker");
+  assert.equal(cashGiants.dk, 245, "cash uses the app prediction price");
+  assert.notEqual(cashGiants.dk, underdogPredictCashAmerican(245), "do not fee-adjust an already-true prediction price");
+  assert.equal(cashRams.dk, -313);
+  assert.equal(cashGiants.bestOpp, freeGiants.bestOpp);
+  const atPhone = buildAllLegsForBook(data, "underdog_predict", null, 245, "any", null, { underdogCash: true });
+  assert.equal(atPhone.find((l) => /giants/i.test(l.name)).dk, 245);
+  const belowPhone = buildAllLegsForBook(data, "underdog_predict", null, null, "any", 244, { underdogCash: true });
+  assert.equal(belowPhone.find((l) => /giants/i.test(l.name)), undefined);
 }
 
 console.log("promoUnderdogPredict.test.js ok");
