@@ -15,8 +15,9 @@
 // calibrate to the published UDX examples, not a one-off slip constant.
 //
 // Keep in lockstep with lib/underdog-predict-fee.js.
-// Legacy UDX curve stays for reference. Promo cash uses
-// UNDERDOG_PREDICT_CASH_FEE_RATE. New Odds Board stays on the gross sticker.
+// Legacy UDX curve stays for reference. Every Promo path uses
+// UNDERDOG_PREDICT_CASH_FEE_RATE when no prediction quote is joined.
+// New Odds Board stays on the gross sticker.
 
 export const UNDERDOG_PREDICT_UDX_FEE_RATE = 0.072;
 
@@ -85,13 +86,14 @@ export function applyUnderdogPredictFee(rawAmericanOdds) {
   return american == null ? rawAmericanOdds : american;
 }
 
-// Promo cash price. Primary quote is Underdog odds.prediction american
-// (Giants +245 / 3.45, probability 27) joined as predictionAmerican — use it
-// verbatim. Betstamp 196 / odds.fantasy stay the gross sticker (+252 / 3.52).
+// Promo phone price for free bet, cash, boost, and no-sweat. Primary quote
+// is Underdog odds.prediction american (Giants +245 / 3.45, probability 27)
+// joined as predictionAmerican — use it verbatim. Betstamp 196 / odds.fantasy
+// stay the gross sticker (+252 / 3.52) on the row and on the Odds Board.
 // Fallback when prediction is absent: invert Kalshi θ=0.07 out of the sticker,
 // then r = 0.1015 → p=0.27 gives 344.82 contracts, $6.90, +245; sticker alone
-// inverts to +244. Free bets stay on the sticker. Keep in lockstep with
-// lib/underdog-predict-fee.js.
+// inverts to +244. Free-bet EV still uses free-bet math; the American input
+// is this same phone price. Keep in lockstep with lib/underdog-predict-fee.js.
 
 export const UNDERDOG_PREDICT_CASH_FEE_RATE = 0.1015;
 export const UNDERDOG_STICKER_KALSHI_FEE_RATE = 0.07;
