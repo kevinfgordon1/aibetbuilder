@@ -14,7 +14,10 @@
 // and ?refresh=1 skip that TTL and send Cache-Control: private, no-store.
 //
 // Auth: this route is anon (CORS * + no JWT). 196 stays on the allowlist so
-// Kevin's client can pass book_ids=196. Default / omitted book_ids omit 196.
+// Kevin's client can pass book_ids=196. Default / omitted book_ids omit 196
+// and 400 (BetMGM) — the trial key 403s the whole /markets request when 400
+// is in book_ids. Opt in with BETSTAMP_INCLUDE_BETMGM=1. A 403 that still
+// includes unauthorized books retries without them.
 // UI hide + client omit is the real gate (canSeeUnderdogPredict).
 
 const {
@@ -56,7 +59,7 @@ async function handler(req, res, deps) {
     const status = e && e.status ? e.status : 502;
     res.status(status).json({
       ok: false,
-      error: redact(e && e.message ? e.message : e),
+      error: redact(e) || 'Betstamp request failed',
       missingKey: !!(e && e.missingKey),
       markets: [],
       fixtures: [],
