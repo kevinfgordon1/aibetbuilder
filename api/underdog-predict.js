@@ -1,10 +1,13 @@
 'use strict';
 
 // GET /api/underdog-predict — Underdog phone prices for Promo and the
-// New Odds Board. Reads UNDERDOG_STATE_CONFIG_ID (and optional
-// UNDERDOG_PRODUCT_EXPERIENCE_ID / UNDERDOG_CLIENT_VERSION) on the server.
-// Never returns Betstamp book 196. A missing config yields games: [] so
-// callers omit the Underdog line instead of filling from Betstamp.
+// New Odds Board. Fetches /v1/lobbies/content/match_grouped_lines.
+// Defaults (override with server env, never VITE_):
+//   UNDERDOG_STATE_CONFIG_ID=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
+//   UNDERDOG_PRODUCT_EXPERIENCE_ID=018e1234-5678-9abc-def0-123456789009
+//   UNDERDOG_CLIENT_VERSION=20260918170103
+// The other experience id returns the sticker (+252). A failed fetch
+// yields games: [] so callers omit the line. Never Betstamp book 196.
 
 const { fetchUnderdogPhone } = require('../lib/underdog-lobby');
 

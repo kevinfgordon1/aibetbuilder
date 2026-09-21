@@ -4,9 +4,11 @@
 // fee-adjust Betstamp into a phone quote. Free-bet EV math is unchanged;
 // the American it consumes is the phone price.
 //
-// Game-moneyline prediction needs UNDERDOG_STATE_CONFIG_ID on the server
-// (/api/underdog-predict). A user session is not required once that id is
-// valid. Geo license still cannot mint the id from this app.
+// Game-moneyline prediction is /api/underdog-predict →
+// /v1/lobbies/content/match_grouped_lines (not the scaffold). Defaults:
+// state_config_id f8996742-f10c-4d32-955a-dcbcaa5dc5c0 and phone
+// product_experience_id 018e1234-5678-9abc-def0-123456789009. A failed
+// fetch omits the line.
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p

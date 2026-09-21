@@ -1,31 +1,21 @@
 // Underdog first-party prediction prices (the phone), distinct from
 // odds.fantasy and from Betstamp book 196.
 //
-// Live capture, match_id 178911 (NYG @ LAR), logged-in scaffold:
+// Live capture, match_id 178911 (NYG @ LAR), 2026-09-21:
+//   GET /v1/lobbies/content/match_grouped_lines
+//       product_experience_id=018e1234-5678-9abc-def0-123456789009
+//       state_config_id=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
+//       client-version: 20260918170103, client-type: web
 //   Giants odds.prediction { american:+245, decimal:3.45, probability:27 }
 //   Rams   odds.prediction { american:-313, decimal:1.32, probability:74 }
-//   Top-level american_price / decimal_price matched those prediction
-//   fields. That is the app (3.45x / +245), not the gross sticker
-//   (+252 / 3.52). Prefer odds.prediction.american. Use american_price
-//   only when a prediction object is present and its american is blank.
-//   Never read odds.fantasy for Promo cash.
-//
-// Anonymous probe (no Authorization, no cookies):
-//   GET /v1/lobbies/scaffolds/matches?include_prediction_markets=true
-//       &market_view=compact&match_id=178911&match_type=Game&product=fantasy
-//     → 400 until state_config_id is set. A fake UUID 404s (the id is
-//       looked up) without asking for a session. A fake
-//       product_experience_id 400s even with product=fantasy.
-//   GET /v1/user → 401. GET /v1/geo_comply/license and
-//       /beta/v5/over_under_lines → 426 upgrade_required. A date-shaped
-//       Client-Version still 426s, so a current app build is required
-//       before geo can mint state_config_id.
-//   GET /v1/over_under_lines?include_prediction_markets=true&product=fantasy
-//     → 200 with no Client-Version and no state_config_id. odds.prediction
-//       is filled for futures (american_price matches prediction.american;
-//       odds.fantasy is null). Game moneylines are not in that payload
-//       (178911 is player props; prediction is null without the flag).
-//       match_id on that URL is ignored.
+// Prices live on over_under_lines options, not on the scaffold.
+// /v1/lobbies/scaffolds/matches returns sections only — no americans.
+// Do not parse a phone price from a scaffold body.
+// product_experience_id b34dfd93-d0e8-4da3-8bf4-45c15c548dec is the
+// sticker (+252). Do not substitute it for the phone id above.
+// Prefer odds.prediction.american. Use american_price only when a
+// prediction object is present and its american is blank. Never read
+// odds.fantasy for Promo or the board.
 //
 // Game moneylines need UNDERDOG_STATE_CONFIG_ID. A valid id is looked up
 // without a user session. This process cannot mint the id (geo license
@@ -71,6 +61,15 @@ function parseUnitProbability(raw) {
 function parsePoint(raw) {
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+// Spread stat_value is one number for both sides (NYG @ LAR is -6.5).
+// The phone handicap is on choice_display ("NYG +6.5" / "LAR -6.5").
+function spreadPointFromOption(line, opt) {
+  const display = [opt && opt.choice_display, opt && opt.choice_display_name].filter(Boolean).join(" ");
+  const signed = display.match(/([+-]\d+(?:\.\d+)?)/);
+  if (signed) return parsePoint(signed[1]);
+  return parsePoint(line && line.stat_value);
 }
 
 function textOf(line, groupName) {
@@ -187,14 +186,14 @@ export function predictionQuotesFromPayload(payload) {
   const seen = new Set();
   for (const { line, groupName } of collectLines(payload)) {
     const market = classifyUnderdogLineMarket(line, groupName);
-    const point = market === "spreads" || market === "totals" || market === "team_total"
-      ? parsePoint(line.stat_value)
-      : null;
     for (const opt of line.options) {
       const quote = predictionQuoteFromOption(opt);
       if (!quote) continue;
       const name = optionName(opt);
       if (!name) continue;
+      let point = null;
+      if (market === "spreads") point = spreadPointFromOption(line, opt);
+      else if (market === "totals" || market === "team_total") point = parsePoint(line.stat_value);
       const row = {
         name,
         american: quote.american,
