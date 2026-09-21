@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import {
   applyUnderdogLobbyPredictions,
   applyUnderdogPhoneQuotes,
@@ -7,6 +8,9 @@ import {
   predictionQuoteFromOption,
   predictionQuotesFromPayload,
 } from "./underdogPredictionQuote.js";
+
+const require = createRequire(import.meta.url);
+const cjsQuotes = require("../lib/underdog-prediction-quote.js");
 
 const giantsOption = {
   selection_header: "New York Giants",
@@ -88,6 +92,7 @@ const giantsOption = {
     }],
   };
   const quotes = predictionQuotesFromPayload(payload);
+  assert.deepEqual(cjsQuotes.predictionQuotesFromPayload(payload), quotes, "CJS server parser matches the ESM phone parser");
   const giants = quotes.filter((q) => q.name === "New York Giants");
   assert.equal(giants.length, 2);
   assert.ok(giants.some((q) => q.market === "h2h" && q.american === 245));

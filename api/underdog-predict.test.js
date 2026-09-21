@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const handler = require('./underdog-predict');
 const {
   DEFAULT_CLIENT_VERSION,
@@ -108,6 +111,8 @@ const indexBody = {
     assert.match(url, /include_live=true/);
     assert.match(url, /show_more_picks_cta=false/);
     assert.match(url, /two_box_enabled_surface=false/);
+    assert.equal(cfg.base, 'https://api.underdogfantasy.com');
+    assert.match(url, /^https:\/\/api\.underdogfantasy\.com\/v1\/lobbies\/content\/match_grouped_lines\?/);
     assert.match(url, new RegExp(`state_config_id=${DEFAULT_STATE_CONFIG_ID}`));
     assert.match(url, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
     assert.doesNotMatch(url, /scaffolds/);
@@ -197,6 +202,22 @@ const indexBody = {
     });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.body.games, [], 'fetch failure omits Underdog');
+  }
+
+  {
+    const root = path.join(__dirname, '..');
+    const lobbySrc = fs.readFileSync(path.join(root, 'lib/underdog-lobby.js'), 'utf8');
+    const apiSrc = fs.readFileSync(path.join(root, 'api/underdog-predict.js'), 'utf8');
+    assert.doesNotMatch(lobbySrc, /require\(['"]\.\.\/src\//);
+    assert.doesNotMatch(apiSrc, /require\(['"]\.\.\/src\//);
+    // Vercel Node does not enable require(esm). This is the boot path that
+    // returned FUNCTION_INVOCATION_FAILED when the lobby required src/.
+    const loaded = spawnSync(process.execPath, [
+      '--no-experimental-require-module',
+      '-e',
+      "const handler = require('./api/underdog-predict.js'); if (typeof handler !== 'function') throw new Error('handler missing'); require('./lib/underdog-lobby.js');",
+    ], { cwd: root, encoding: 'utf8' });
+    assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
   }
 
   console.log('underdog-predict.test.js ok');
