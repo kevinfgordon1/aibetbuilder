@@ -117,6 +117,7 @@ assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }), false);
   assert.equal(visibleBetstampBooks(kenneth).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), true);
   assert.equal(visibleBetstampBooks(null).some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID), false);
   assert.equal(visibleBetstampBookIds({ email: "stranger@gmail.com" }).includes(UNDERDOG_PREDICT_BOOK_ID), false);
+  assert.equal(visibleBetstampBookIds(null).includes(400), true, "BetMGM 400 is public on New Odds Board");
   assert.equal(visibleBetstampBooks(null).length, BETSTAMP_TRIAL_BOOKS.length - 1);
   assert.equal(UNDERDOG_PREDICT_BOOK_KEY, "underdog_predict");
 }

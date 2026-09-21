@@ -10,6 +10,7 @@ const logoDir = path.join(root, "public", "book-logos");
 
 assert.equal(BOOK_LOGO_DIR, "/book-logos");
 assert.equal(bookLogo("fanduel"), "/book-logos/fanduel.png");
+assert.equal(bookLogo("betmgm"), "/book-logos/betmgm.png");
 assert.equal(bookLogo("underdog_predict"), "/book-logos/underdog_predict.png");
 assert.equal(bookLogo(""), null);
 assert.equal(bookLogo(null), null);
