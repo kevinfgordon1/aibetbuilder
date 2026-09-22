@@ -74,10 +74,6 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
 }
 
-// Shown under True Odds. The American here is the opponent quote that inverse
-// bet complements — never the fair price of the promo selection.
-export const TRUE_ODDS_INVERSE_HINT = "True Odds is the inverse of this best opp";
-
 export function labelBestOppLine(lineText, selection) {
   const body = String(lineText || "").trim();
   if (!body) return "";
