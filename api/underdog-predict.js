@@ -22,6 +22,17 @@
 
 const { fetchUnderdogPhone } = require('../lib/underdog-lobby');
 
+function queryLive(req) {
+  let raw = '';
+  if (req && req.query && req.query.live != null) {
+    raw = Array.isArray(req.query.live) ? req.query.live.join(',') : String(req.query.live);
+  }
+  if (!raw && req && req.url) {
+    try { raw = new URL(req.url, 'http://localhost').searchParams.get('live') || ''; } catch (_) { raw = ''; }
+  }
+  return raw === '1' || raw === 'true';
+}
+
 async function handler(req, res, deps) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -36,7 +47,8 @@ async function handler(req, res, deps) {
     return;
   }
   try {
-    const result = await fetchUnderdogPhone(deps);
+    const live = deps && Object.prototype.hasOwnProperty.call(deps, 'live') ? !!deps.live : queryLive(req);
+    const result = await fetchUnderdogPhone({ ...(deps || {}), live });
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Underdog-Cache', result.cacheStatus || 'MISS');
     res.status(200).json({

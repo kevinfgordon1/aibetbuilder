@@ -41,6 +41,12 @@
     "api/betstamp-stream.js": {
       "maxDuration": 300
     },
+    "api/polymarket-stream.js": {
+      "maxDuration": 300
+    },
+    "api/kalshi-stream.js": {
+      "maxDuration": 300
+    },
     "api/underdog-predict.js": {
       "maxDuration": 60
     }
