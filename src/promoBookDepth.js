@@ -31,19 +31,11 @@ function readCache(key) {
   return hit.levels;
 }
 
-export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
-  const wanted = legsNeedingDepth(legs);
-  if (!wanted.length) return {};
-  const out = {};
-  const missing = [];
-  for (const leg of wanted) {
-    const key = depthCacheKey(leg);
-    const cached = readCache(key);
-    if (cached) out[key] = cached;
-    else missing.push(leg);
-  }
-  if (!missing.length) return out;
+// /api/book-depth slices to MAX_LEGS (8). A visible promo page can name more
+// unique PM legs than that, so chunk or the later cards never get a ladder.
+const DEPTH_BATCH = 8;
 
+async function fetchDepthChunk(missing, fetchImpl) {
   const inflightKey = missing.map(depthCacheKey).sort().join("\n");
   let pending = inflight.get(inflightKey);
   if (!pending) {
@@ -74,6 +66,7 @@ export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
   }
 
   const results = await pending;
+  const out = {};
   for (const row of results) {
     const key = row && row.key;
     const levels = Array.isArray(row && row.levels) ? row.levels : [];
@@ -81,6 +74,26 @@ export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
     cache.set(key, { at: Date.now(), levels });
     out[key] = levels;
   }
+  return out;
+}
+
+export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
+  const wanted = legsNeedingDepth(legs);
+  if (!wanted.length) return {};
+  const out = {};
+  const missing = [];
+  for (const leg of wanted) {
+    const key = depthCacheKey(leg);
+    const cached = readCache(key);
+    if (cached) out[key] = cached;
+    else missing.push(leg);
+  }
+  if (!missing.length) return out;
+
+  const chunks = [];
+  for (let i = 0; i < missing.length; i += DEPTH_BATCH) chunks.push(missing.slice(i, i + DEPTH_BATCH));
+  const parts = await Promise.all(chunks.map((chunk) => fetchDepthChunk(chunk, fetchImpl)));
+  for (const part of parts) Object.assign(out, part);
   return out;
 }
 

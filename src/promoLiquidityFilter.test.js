@@ -237,10 +237,11 @@ const singleZeroBoost = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 
 
 // ── App.jsx Extra Filters: chip row + pool + ranked list use shared helper
 {
-  assert.match(app, /import \{\s*HIDE_LOW_LIQUIDITY_LABEL,\s*LIQUIDITY_FILTER_ALL_LABEL,\s*liquidityFilterSummary,\s*filterLowLiquidityLegs,\s*filterLowLiquidityPicks,\s*\} from "\.\/promoLiquidityFilter\.js"/);
+  assert.match(app, /import \{\s*HIDE_LOW_LIQUIDITY_LABEL,\s*LIQUIDITY_FILTER_ALL_LABEL,\s*liquidityFilterSummary,\s*filterLowLiquidityLegs,\s*\} from "\.\/promoLiquidityFilter\.js"/);
   assert.match(app, /const \[hideLowLiquidity, setHideLowLiquidity\] = useState\(true\)/);
   assert.match(app, /filterLowLiquidityLegs\(/);
-  assert.match(app, /filterLowLiquidityPicks\(/);
+  const rankSrc = fs.readFileSync(path.join(dir, "promoListRank.js"), "utf8");
+  assert.match(rankSrc, /filterLowLiquidityPicks\(/);
   assert.match(app, /hideLowLiquidity/);
   assert.match(app, /liquidityFilterSummary\(hideLowLiquidity\)/);
   assert.match(app, /<label style=\{labelStyle\}>Liquidity<\/label>/);

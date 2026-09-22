@@ -54,13 +54,11 @@ import {
   LIQUIDITY_FILTER_ALL_LABEL,
   liquidityFilterSummary,
   filterLowLiquidityLegs,
-  filterLowLiquidityPicks,
 } from "./promoLiquidityFilter.js";
 import {
   parseTeamFilterTokens,
   filterLegsByTeamExclude,
   filterLegsByTeamInclude,
-  filterPicksByTeamName,
   pinTeamIncludeLegs,
   pickMatchesTeamInclude,
   teamFilterSummary,
@@ -97,11 +95,12 @@ import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
-import { resolveOppWithSideGuard, rankPicksAfterOppGuard } from "./promoOppGuard.js";
+import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
+import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
 import {
   PROMO_SPORT_RELOAD_DEBOUNCE_MS,
   PROMO_CARD_LAYER_STYLE,
@@ -110,7 +109,6 @@ import {
 } from "./promoUiPerf.js";
 import {
   applyPmBlendToLeg,
-  preferCompletePmHedge,
   pickHasLowLiquidity,
   trueOppAmerican,
   LOW_LIQUIDITY_LABEL,
@@ -1278,13 +1276,6 @@ function UnderdogStaleOddsChip({ leg, now, style }) {
   );
 }
 
-function attachPmBlendToPick(p, ctx) {
-  const nLegs = (p.legs || []).length;
-  const { displayLegs } = applyBlendToLegs(p.legs || [], {}, { ...ctx, numLegs: nLegs });
-  const next = overlayParlayMetrics(p, displayLegs, ctx);
-  return { ...next, legs: displayLegs };
-}
-
 function attachBoostLockToPick(p, nextStake) {
   if (!p.legs || p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
   const lock = calcBoostLock(quotedOppAmerican(p.legs[0]), nextStake, p.boostedProfit);
@@ -1302,19 +1293,39 @@ function attachNoSweatLockToPick(p, nextStake) {
   return { ...p, lock, isGuaranteed: lock.valid };
 }
 
-function rankPromoPicks(picks, ctx, attachLock) {
-  const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx)));
-  const guarded = rankPicksAfterOppGuard(tagged);
-  const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(guarded) : guarded;
-  const liquid = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
-  return filterPicksByTeamName(liquid, ctx.includeTeamTokens, ctx.excludeTeamTokens);
+function usePromoPageLadders(picks, pageSize) {
+  const wantedRef = useRef([]);
+  const wantedKey = useMemo(() => {
+    const list = Array.isArray(picks) ? picks : [];
+    const n = Math.min(list.length, Math.max(0, pageSize | 0));
+    const legs = collectPromoDepthLegs(list.slice(0, n));
+    wantedRef.current = legs;
+    return legs.map(depthCacheKey).join("\n");
+  }, [picks, pageSize]);
+  const [state, setState] = useState({ key: undefined, map: null });
+  useEffect(() => {
+    const wanted = wantedRef.current;
+    let cancelled = false;
+    if (!wanted.length) {
+      setState({ key: wantedKey, map: {} });
+      return undefined;
+    }
+    fetchPromoBookDepth(wanted).then((map) => {
+      if (!cancelled) setState({ key: wantedKey, map: map || {} });
+    });
+    return () => { cancelled = true; };
+  }, [wantedKey]);
+  if (state.key !== wantedKey) return null;
+  return state.map;
 }
 
-function usePromoDepthBlend(legs, live, ctx = {}) {
+function usePromoDepthBlend(legs, live, ctx = {}, laddersOverride) {
   const [ladders, setLadders] = useState(null);
+  const external = laddersOverride != null;
   const wantedKey = (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook)).map(depthCacheKey).join("\n");
   const ctxKey = [ctx.promoType, ctx.numLegs, ctx.stake, ctx.boostPct, ctx.refundPct, ctx.creditConversionPct, ctx.boostedProfit, ctx.winProfit, ctx.creditValue].join("|");
   useEffect(() => {
+    if (external) return;
     if (!live) {
       setLadders(null);
       return;
@@ -1329,25 +1340,23 @@ function usePromoDepthBlend(legs, live, ctx = {}) {
       if (!cancelled) setLadders(map || {});
     });
     return () => { cancelled = true; };
-  }, [live, wantedKey]);
+  }, [live, wantedKey, external]);
   return useMemo(() => {
-    const map = ladders || {};
+    const map = external ? (laddersOverride || {}) : (ladders || {});
     const { displayLegs, blends } = applyBlendToLegs(legs, map, ctx);
-    return { ladders: map, blends, displayLegs, ready: ladders != null, ctx };
-  }, [legs, ladders, ctxKey]);
+    return { ladders: map, blends, displayLegs, ready: external || ladders != null, ctx };
+  }, [legs, ladders, ctxKey, external, laddersOverride]);
 }
 
-function overlayParlayMetrics(p, displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }) {
-  const prev = p.legs || [];
-  const next = displayLegs || prev;
-  const changed = prev.some((l, i) => next[i] && next[i].bestOpp !== l.bestOpp);
-  if (!changed) return p;
-  if (promoType === "nosweat") return { ...p, ...calcNoSweatFromLegs(next, stake, refundPct, creditConversionPct) };
-  if (promoType === "freebet") return { ...p, ...calcFreeBetParlayEV(next, stake) };
-  return { ...p, ...calcParlayEV(next, boostPct, stake) };
+function overlayParlayMetrics(p, displayLegs, ctx) {
+  return overlayBlendedParlay(p, displayLegs, ctx, {
+    calcNoSweatFromLegs,
+    calcFreeBetParlayEV,
+    calcParlayEV,
+  });
 }
 
-function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditConversionPct, children }) {
+function PromoPickView({ p, live, ladders, promoType, stake, boostPct, refundPct, creditConversionPct, children }) {
   const ctx = useMemo(() => ({
     promoType,
     numLegs: (p.legs || []).length,
@@ -1359,7 +1368,7 @@ function PromoPickView({ p, live, promoType, stake, boostPct, refundPct, creditC
     winProfit: p.winProfit,
     creditValue: p.creditValue,
   }), [p.legs, p.boostedProfit, p.winProfit, p.creditValue, promoType, stake, boostPct, refundPct, creditConversionPct]);
-  const overlay = usePromoDepthBlend(p.legs, live, ctx);
+  const overlay = usePromoDepthBlend(p.legs, live, ctx, ladders);
   const view = useMemo(
     () => overlayParlayMetrics(p, overlay.displayLegs, { promoType, stake, boostPct, refundPct, creditConversionPct }),
     [p, overlay.displayLegs, promoType, stake, boostPct, refundPct, creditConversionPct],
@@ -2186,6 +2195,7 @@ export default function App() {
       topNoSweats,
       { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
       (p) => attachNoSweatLockToPick(p, stake),
+      overlayParlayMetrics,
     );
   }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
@@ -2196,6 +2206,7 @@ export default function App() {
       topParlays,
       { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
       (p) => attachBoostLockToPick(p, stake),
+      overlayParlayMetrics,
     );
   }, [topParlays, numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
@@ -2209,8 +2220,32 @@ export default function App() {
       topFreeBets,
       { promoType: "freebet", numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
       (p) => attachFreeBetLock(p, stake),
+      overlayParlayMetrics,
     );
   }, [topFreeBets, numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
+
+  // Top-of-book rank first, then the same $500 depth blend the cards show.
+  // Only the visible page is walked (Show more grows the window). Until the
+  // ladders arrive, order and EV stay on the top-of-book blend together.
+  const activePromoBase = promoType === "nosweat" ? topNoSweatsWithLock
+    : promoType === "freebet" ? topFreeBetsWithLock
+      : topParlaysWithHedge;
+  const pageLadders = usePromoPageLadders(activePromoBase, promoPage);
+  const promoDepthRank = useMemo(() => {
+    const ctx = promoType === "nosweat"
+      ? { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens }
+      : promoType === "freebet"
+        ? { promoType: "freebet", numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens }
+        : { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens };
+    const attach = promoType === "nosweat"
+      ? (p) => attachNoSweatLockToPick(p, stake)
+      : promoType === "freebet"
+        ? (p) => attachFreeBetLock(p, stake)
+        : (p) => attachBoostLockToPick(p, stake);
+    return visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
+      rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders));
+  }, [activePromoBase, promoPage, pageLadders, promoType, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens, boostPct]);
+  const promoRankedCount = promoDepthRank.visible.length + promoDepthRank.rest.length;
 
   const promoBusyForEmpty = promoLoading || waitForSoccerPm;
   const boostEmptyState = promoScanEmptyState({
@@ -2218,21 +2253,21 @@ export default function App() {
     promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
-    resultCount: topParlaysWithHedge.length,
+    resultCount: promoType === "boost" ? promoRankedCount : topParlaysWithHedge.length,
   });
   const noSweatEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
-    resultCount: topNoSweatsWithLock.length,
+    resultCount: promoType === "nosweat" ? promoRankedCount : topNoSweatsWithLock.length,
   });
   const freeBetEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
     scanBusy: promoScanBusy,
     scanCompletedForCurrent,
-    resultCount: topFreeBetsWithLock.length,
+    resultCount: promoType === "freebet" ? promoRankedCount : topFreeBetsWithLock.length,
   });
   const soccerEmptyDetail = soccerPromoEmptyDetail({
     soccerSelected: soccerKeysSelected(promoSports),
@@ -2253,8 +2288,8 @@ export default function App() {
       if (idx < 0) return;
       focusedCardApplied.current = focusCardId;
       if (idx >= promoPage) setPromoPage(idx + 1);
-      if (promoType === "freebet") setExpandedFreeBet(idx);
-      else setExpandedPromo(idx);
+      if (promoType === "freebet") setExpandedFreeBet(focusCardId);
+      else setExpandedPromo(focusCardId);
       const t = window.setTimeout(() => {
         document.getElementById("pick-" + focusCardId)?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 80);
@@ -2888,14 +2923,14 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
-                  {topParlaysWithHedge.slice(0, promoPage).map((p, i) => {
-                    const isExpanded = expandedPromo === i;
+                  {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
                     const promoId = encodePromoCardId({ promoType: "boost", book: promoBook, stake, legs: p.legs });
+                    const isExpanded = expandedPromo === promoId;
 
                     return (
-                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="boost" stake={stake} boostPct={boostPct}>
+                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType="boost" stake={stake} boostPct={boostPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const promoShareModel = buildShareCardModel({
@@ -2914,7 +2949,7 @@ export default function App() {
                     return (
                       <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
-                          setExpandedPromo(isExpanded ? null : i);
+                          setExpandedPromo(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'boost', book: promoBook, legs: p.legs.map(l => l.name) });
@@ -2936,7 +2971,7 @@ export default function App() {
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
@@ -3005,14 +3040,14 @@ export default function App() {
                     );
                   })}
 
-                  {topParlaysWithHedge.length > promoPage && (
+                  {promoDepthRank.rest.length > 0 && (
                     <button
                       onClick={() => setPromoPage(prev => prev + 5)}
                       style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
                       onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
                       onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
                     >
-                      Show more ({topParlaysWithHedge.length - promoPage} remaining)
+                      Show more ({promoDepthRank.rest.length} remaining)
                     </button>
                   )}
                 </div>
@@ -3035,13 +3070,13 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
-                  {topNoSweatsWithLock.slice(0, promoPage).map((p, i) => {
-                    const isExpanded = expandedPromo === i;
+                  {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
+                    const isExpanded = expandedPromo === promoId;
 
                     return (
-                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
+                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
@@ -3064,7 +3099,7 @@ export default function App() {
                     return (
                       <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
-                          setExpandedPromo(isExpanded ? null : i);
+                          setExpandedPromo(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'nosweat' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'nosweat', book: promoBook, legs: p.legs.map(l => l.name) });
@@ -3092,7 +3127,7 @@ export default function App() {
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: evColor }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
-                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
+                          {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
                           </div>
@@ -3218,14 +3253,14 @@ export default function App() {
                     );
                   })}
 
-                  {topNoSweatsWithLock.length > promoPage && (
+                  {promoDepthRank.rest.length > 0 && (
                     <button
                       onClick={() => setPromoPage(prev => prev + 5)}
                       style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
                       onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
                       onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
                     >
-                      Show more ({topNoSweatsWithLock.length - promoPage} remaining)
+                      Show more ({promoDepthRank.rest.length} remaining)
                     </button>
                   )}
                 </div>
@@ -3248,8 +3283,7 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking free-bet parlays — Free Bet $ stays usable.</div>
                     </div>
                   )}
-                  {topFreeBetsWithLock.slice(0, promoPage).map((p, i) => {
-                    const isExpanded = expandedFreeBet === i;
+                  {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs?.length === 1;
                     const showLock = isSingle && !!p.lock?.valid;
                     const fbAmount = stake;
@@ -3257,9 +3291,10 @@ export default function App() {
                     const lock = showLock ? p.lock : null;
                     const adjustmentNote = showLock ? getAdjustmentNote(leg?.bestOppBook) : null;
                     const promoId = encodePromoCardId({ promoType: "freebet", book: promoBook, stake, legs: p.legs });
+                    const isExpanded = expandedFreeBet === promoId;
 
                     return (
-                      <PromoPickView key={promoId} p={p} live={i === 0 || isExpanded} promoType="freebet" stake={stake}>
+                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType="freebet" stake={stake}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
@@ -3281,7 +3316,7 @@ export default function App() {
                     return (
                       <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
-                          setExpandedFreeBet(isExpanded ? null : i);
+                          setExpandedFreeBet(isExpanded ? null : promoId);
                           if (!isExpanded) {
                             window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet' });
                             logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'freebet', book: promoBook, legs: (p.legs || []).map(l => l.name) });
@@ -3348,7 +3383,7 @@ export default function App() {
                                 <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                                 <span>EV: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
-                              {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={i === 0 || isExpanded} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
+                              {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={false} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>
                           )}
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
@@ -3480,14 +3515,14 @@ export default function App() {
                     );
                   })}
 
-                  {topFreeBetsWithLock.length > promoPage && (
+                  {promoDepthRank.rest.length > 0 && (
                     <button
                       onClick={() => setPromoPage(prev => prev + 5)}
                       style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
                       onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
                       onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
                     >
-                      Show more ({topFreeBetsWithLock.length - promoPage} remaining)
+                      Show more ({promoDepthRank.rest.length} remaining)
                     </button>
                   )}
                 </div>
