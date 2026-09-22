@@ -1165,7 +1165,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     };
 
     const runVenue = async (url) => {
-      // Opt-in. Default off so Betstamp columns stay the live source.
+      // On for production builds. VITE_FIRST_PARTY_PM_LIVE=0 opts out. Betstamp SSE stays.
       if (!liveOnly || !firstPartyPmLiveEnabled() || cancelled) return;
       let venueAttempt = 0;
       while (!cancelled && !ctrl.signal.aborted) {

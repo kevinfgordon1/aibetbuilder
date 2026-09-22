@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   firstPartyPmLiveEnabled,
+  firstPartyPmLiveFromEnv,
   polymarketStreamUrl,
   kalshiStreamUrl,
   matchGameForQuote,
@@ -8,7 +9,25 @@ import {
 } from "./venueLive.js";
 import { applyStreamMarkets, gamesFromBetstampSnapshot } from "./betstampNormalize.js";
 
-assert.equal(firstPartyPmLiveEnabled(), false);
+const prevLive = process.env.VITE_FIRST_PARTY_PM_LIVE;
+try {
+  delete process.env.VITE_FIRST_PARTY_PM_LIVE;
+  assert.equal(firstPartyPmLiveEnabled(), false, "unset stays off outside production builds");
+  process.env.VITE_FIRST_PARTY_PM_LIVE = "1";
+  assert.equal(firstPartyPmLiveEnabled(), true);
+  process.env.VITE_FIRST_PARTY_PM_LIVE = "0";
+  assert.equal(firstPartyPmLiveEnabled(), false, "0 opts out");
+} finally {
+  if (prevLive == null) delete process.env.VITE_FIRST_PARTY_PM_LIVE;
+  else process.env.VITE_FIRST_PARTY_PM_LIVE = prevLive;
+}
+
+assert.equal(firstPartyPmLiveFromEnv(undefined, false), false);
+assert.equal(firstPartyPmLiveFromEnv(undefined, true), true, "unset defaults on for production builds");
+assert.equal(firstPartyPmLiveFromEnv("", true), true);
+assert.equal(firstPartyPmLiveFromEnv("0", true), false);
+assert.equal(firstPartyPmLiveFromEnv("1", false), true);
+assert.equal(firstPartyPmLiveFromEnv("true", false), true);
 assert.equal(polymarketStreamUrl({ league: "NFL" }), "/api/polymarket-stream?league=NFL");
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "/api/kalshi-stream?league=MLB");
 
