@@ -2,6 +2,9 @@
 // Odds API games stay the row identity. A Betstamp blip omits Bookmaker cells
 // instead of failing the scan. Dropped Betstamp lines are stripped — never
 // left as zombie prices (The Odds API has no `bookmaker` key).
+// A fetch that fails after the client TTL or Refresh (401, proxy ok:false,
+// timeout, 5xx) clears the client snap. Promo must not keep yesterday's
+// Bookmaker while Betstamp is dead.
 //
 // Join is unique name-level only (both teams) and only onto fixtures that
 // already have a 642 row. /fixtures is the full slate — a KU name hit with
@@ -526,7 +529,10 @@ export function readBookmakerClientCache({ storage } = {}) {
 }
 
 export function writeBookmakerClientCache(entry, { storage } = {}) {
-  if (!entry || !entry.snap) return;
+  if (!entry || !entry.snap) {
+    clearBookmakerClientCache({ storage });
+    return;
+  }
   memoryBookmakerCache = entry;
   const store = storage !== undefined ? storage : defaultBookmakerStorage();
   if (!store || typeof store.setItem !== "function") return;
@@ -542,6 +548,10 @@ export function resetBookmakerClientCache({ storage, clearStorage = true } = {})
   if (!clearStorage) return;
   const store = storage !== undefined ? storage : defaultBookmakerStorage();
   try { store?.removeItem?.(BOOKMAKER_CACHE_STORAGE_KEY); } catch { /* ignore */ }
+}
+
+export function clearBookmakerClientCache(opts) {
+  resetBookmakerClientCache(opts);
 }
 
 function bookmakerMarketKey(m) {
@@ -637,15 +647,11 @@ export async function resolveBookmakerSnapshot({
     ])];
   const fresh = await fetchBookmakerSnapshot({ leagues: missing, fetchFn, timeoutMs, includeUnderdog });
   if (!fresh) {
-    if (effective?.snap) {
-      return {
-        snap: effective.snap,
-        leagues: effective.leagues,
-        fetchedAtByLeague: effective.fetchedAtByLeague || {},
-        includeUnderdog: cacheHasUdp,
-        fromCache: true,
-      };
-    }
+    // null covers 401, proxy { ok:false } ("Invalid API key"), timeout, and
+    // 5xx. Returning effective.snap kept yesterday's Bookmaker up after the
+    // week key expired. Callers must drop their cached snap when fromCache
+    // is false (App's bookmakerCacheRef).
+    if (persist) clearBookmakerClientCache({ storage });
     return { snap: null, leagues: [], fetchedAtByLeague: {}, includeUnderdog, fromCache: false };
   }
   const fetchedAtByLeague = { ...(effective?.fetchedAtByLeague || {}) };

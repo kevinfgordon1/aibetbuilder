@@ -1666,6 +1666,26 @@ export default function App() {
     return mergeOddsData([...featured, ...eventTransformed]);
   };
 
+  // A failed Betstamp fetch (401 / ok:false / timeout after TTL or Refresh)
+  // returns snap:null and fromCache:false. Drop the ref too — the next chip
+  // load would otherwise TTL-hit yesterday's Bookmaker. No-league skips stay
+  // fromCache and keep a still-fresh snap.
+  const applyResolvedBookmaker = (resolved) => {
+    if (resolved && resolved.snap) {
+      bookmakerCacheRef.current = {
+        snap: resolved.snap,
+        leagues: resolved.leagues,
+        fetchedAtByLeague: resolved.fetchedAtByLeague,
+        includeUnderdog: resolved.includeUnderdog,
+      };
+      return resolved.snap;
+    }
+    if (resolved && resolved.fromCache === false) {
+      bookmakerCacheRef.current = { snap: null, leagues: [], fetchedAtByLeague: {} };
+    }
+    return null;
+  };
+
   const loadPromoBoard = async ({ background = false, forceBookmaker = false } = {}) => {
     const gen = ++promoFetchGen.current;
     if (!background) {
@@ -1692,19 +1712,14 @@ export default function App() {
         cached: bookmakerCacheRef.current,
         forceRefresh: forceBookmaker,
         includeUnderdog: false,
-      }).then((resolved) => {
-        if (resolved.snap) {
-          bookmakerCacheRef.current = {
-            snap: resolved.snap,
-            leagues: resolved.leagues,
-            fetchedAtByLeague: resolved.fetchedAtByLeague,
-            includeUnderdog: resolved.includeUnderdog,
-          };
-        }
-        return resolved.snap;
       });
       const { featured, events } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
+      // Apply before the odds-usable check so a 401 still drops the ref when
+      // the Odds API cache errors. Otherwise the next chip load TTL-hits it.
+      const resolvedBookmaker = await bookmakerPromise.catch(() => null);
+      if (gen !== promoFetchGen.current) return;
+      const bookmakerSnap = applyResolvedBookmaker(resolvedBookmaker);
       if (!featuredRowsUsable(featured)) {
         setOddsLoadCause(featured.error || { message: "Could not load live odds." });
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
@@ -1713,9 +1728,10 @@ export default function App() {
       // Betstamp Bookmaker overlay is best-effort and re-runs every Promo
       // fetch. It strips any cached `bookmaker` key first (odds_cache is Odds
       // API only) then overlays 642 — a blip or failed join omits those cells.
+      // A failed snapshot clears the client cache so Promo does not keep
+      // yesterday's Bookmaker after an expired Betstamp key.
       // Underdog Predict is /api/underdog-predict (odds.prediction only),
       // for allowlisted users. A missing phone quote omits the line.
-      const bookmakerSnap = await bookmakerPromise.catch(() => null);
       const phone = await phonePromise;
       const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
@@ -1776,25 +1792,17 @@ export default function App() {
         cached: bookmakerCacheRef.current,
         forceRefresh: true,
         includeUnderdog: false,
-      }).then((resolved) => {
-        if (resolved.snap) {
-          bookmakerCacheRef.current = {
-            snap: resolved.snap,
-            leagues: resolved.leagues,
-            fetchedAtByLeague: resolved.fetchedAtByLeague,
-            includeUnderdog: resolved.includeUnderdog,
-          };
-        }
-        return resolved.snap;
       });
       const { featured, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
+      const resolvedBookmaker = await bookmakerPromise.catch(() => null);
+      if (gen !== fullFetchGen.current) return;
+      const bookmakerSnap = applyResolvedBookmaker(resolvedBookmaker);
       if (!featuredRowsUsable(featured)) {
         setOddsLoadCause(featured.error || { message: "Could not load live odds." });
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      const bookmakerSnap = await bookmakerPromise.catch(() => null);
       const phone = await phonePromise;
       const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
         overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
