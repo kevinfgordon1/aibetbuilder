@@ -2427,7 +2427,7 @@ export default function App() {
                 }}
                 disabled={activeTab === "oddsBetstamp" ? false : refreshBusy}
                 title={activeTab === "oddsBetstamp"
-                  ? "Re-pull Betstamp for New Odds Board (LIVE bypasses the 5-minute cache)."
+                  ? "Re-pull Polymarket, Kalshi, and Underdog for New Odds Board."
                   : "Re-read the odds cache. Does not call The Odds API."}
                 style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: (activeTab !== "oddsBetstamp" && refreshBusy) ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: (activeTab !== "oddsBetstamp" && refreshBusy) ? 0.6 : 1, transition: "all 0.2s" }}
                 onMouseEnter={e => { if (activeTab === "oddsBetstamp" || !refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}

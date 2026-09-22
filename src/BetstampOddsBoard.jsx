@@ -45,19 +45,12 @@ import {
   BETSTAMP_DEFAULT_SPORT,
   bookByKey,
   leagueForSport,
-  UNDERDOG_PREDICT_BOOK_ID,
-  visibleBetstampBooks,
 } from "./betstampBooks.js";
 import BookLabel from "./BookLabel.jsx";
 import {
-  gamesFromBetstampSnapshot,
-  applyFixtureMeta,
-  applyStreamMarkets,
-  reconcileLiveGames,
   liveBoardPaintKey,
   liveGamePaintKey,
   gameVisibleOnBoard,
-  unwrapStreamPayload,
   emptyTickStats,
   recordTicks,
   summarizeTickStats,
@@ -70,24 +63,22 @@ import {
   lineUpdatedAt,
   lineIsSuspended,
   bestLineUpdatedAt,
-  fixtureAltLadders,
 } from "./betstampNormalize.js";
-import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import {
   firstPartyPmLiveEnabled,
   polymarketStreamUrl,
   kalshiStreamUrl,
-  venueQuotesToMarkets,
 } from "./venueLive.js";
+import { consumeBetstampStream, nextBackoffMs } from "./betstampLive.js";
 import {
-  betstampSnapshotUrl,
-  betstampStreamUrl,
-  consumeBetstampStream,
-  nextBackoffMs,
-  BETSTAMP_PREGAME_POLL_MS,
-  BETSTAMP_LIVE_RECONCILE_MS,
-} from "./betstampLive.js";
+  FREE_FEED_POLL_MS,
+  FREE_FEED_LIVE_POLL_MS,
+  freeFeedBooks,
+  gamesFromFreeFeeds,
+  mainLaddersFromGame,
+  mergeVenueQuotes,
+} from "./freeFeedBoard.js";
 
 const BestBookName = memo(function BestBookName({ book, extra = 0, title, size = 13 }) {
   if (!book) return null;
@@ -220,7 +211,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
           className="obb-off"
           data-odds-suspended="1"
           data-odds-off="1"
-          title="Off the board — Betstamp no longer lists this line live"
+          title="Off the board — this feed no longer lists this line"
         >
           <span>OFF</span>
           <span className="obb-off-sub">the board</span>
@@ -918,22 +909,20 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 ));
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
-  const books = useMemo(() => visibleBetstampBooks(user), [user?.id, user?.email]);
-  const seeUnderdog = books.some((b) => b.id === UNDERDOG_PREDICT_BOOK_ID);
-  const bookIds = useMemo(
-    () => books.map((b) => b.id).filter((id) => id !== UNDERDOG_PREDICT_BOOK_ID),
-    [books],
-  );
-  const bookIdsKey = bookIds.join(",");
-  const phoneRef = useRef(null);
+  const venuesOn = firstPartyPmLiveEnabled();
+  const books = useMemo(() => {
+    const catalog = freeFeedBooks(user);
+    if (venuesOn) return catalog;
+    return catalog.filter((b) => b.key === "underdog_predict");
+  }, [user?.id, user?.email, venuesOn]);
+  const seeUnderdog = books.some((b) => b.key === "underdog_predict");
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
   const [boardSport, setBoardSport] = useState(BETSTAMP_DEFAULT_SPORT);
   const [liveOnly, setLiveOnly] = useState(false); // Pregame default. Never auto-enable LIVE.
   const [games, setGames] = useState([]);
-  const [loadError, setLoadError] = useState(null);
-  const [missingKey, setMissingKey] = useState(false);
+  const [feedNote, setFeedNote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [streamStatus, setStreamStatus] = useState("idle");
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -946,7 +935,6 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const nudgeGameRef = useRef(null);
   const registerTickSink = useCallback((fn) => { tickSinkRef.current = fn; }, []);
   const fetchGen = useRef(0);
-  const altCacheRef = useRef(new Map());
   const altFetchGen = useRef(0);
   const [hiddenKeys, setHiddenKeys] = useState(() => new Set());
   const [boardOrder, setBoardOrder] = useState(() => loadOddsBoardOrder(user));
@@ -990,212 +978,106 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     const gen = ++fetchGen.current;
     const league = leagueForSport(boardSport);
     const ctrl = new AbortController();
+    let cancelled = false;
     setLoading(true);
-    setLoadError(null);
-    setMissingKey(false);
+    setFeedNote(null);
     setSnapshotAt(null);
-    setStreamStatus(liveOnly ? "connecting" : "idle");
+    setStreamStatus(liveOnly && venuesOn ? "connecting" : "idle");
+
+    const quoteRef = { polymarket: [], kalshi: [] };
+    let phone = null;
+    let sawPhone = !seeUnderdog;
+    let phoneFailed = false;
+    let firstPaint = true;
+
+    const publish = () => {
+      if (cancelled || gen !== fetchGen.current) return;
+      const next = gamesFromFreeFeeds({
+        league,
+        polymarket: venuesOn ? quoteRef.polymarket : [],
+        kalshi: venuesOn ? quoteRef.kalshi : [],
+        underdog: seeUnderdog && sawPhone ? phone : null,
+        nowMs: Date.now(),
+      });
+      commitGames(next, { force: firstPaint });
+      firstPaint = false;
+      setSnapshotAt(Date.now());
+      setLoading(false);
+      setFeedNote(phoneFailed
+        ? "Underdog phone didn't respond. Polymarket and Kalshi still show when they have a game."
+        : null);
+    };
 
     const loadPhone = async () => {
       if (!seeUnderdog) {
-        phoneRef.current = null;
-        return null;
+        sawPhone = true;
+        phone = null;
+        return;
       }
       try {
         const body = await fetchUnderdogPhone((url, init) => fetch(url, {
           ...(init || {}),
           signal: ctrl.signal,
           cache: "no-store",
-        }), { live: liveOnly && firstPartyPmLiveEnabled() });
-        const slate = body && Array.isArray(body.games) ? body : { ok: false, games: [] };
-        phoneRef.current = slate;
-        return slate;
+        }), { live: liveOnly });
+        if (cancelled || ctrl.signal.aborted) return;
+        phone = body && Array.isArray(body.games) ? body : { ok: false, games: [] };
+        sawPhone = true;
+        phoneFailed = body && body.ok === false && !(body.games && body.games.length);
       } catch (err) {
-        if (ctrl.signal.aborted) throw err;
-        phoneRef.current = { ok: false, games: [] };
-        return phoneRef.current;
+        if (cancelled || ctrl.signal.aborted) return;
+        phone = { ok: false, games: [] };
+        sawPhone = true;
+        phoneFailed = true;
       }
     };
 
-    const applySnapshot = async ({ showLoading }) => {
-      try {
-        const [res, phone] = await Promise.all([
-          fetch(betstampSnapshotUrl({ league, live: liveOnly, bookIds }), {
-            signal: ctrl.signal,
-            cache: "no-store",
-          }),
-          loadPhone(),
-        ]);
-        const body = await res.json().catch(() => ({}));
-        if (gen !== fetchGen.current) return false;
-        if (body.missingKey || res.status === 503) {
-          setMissingKey(true);
-          setLoadError(body.error || "BETSTAMP_API_KEY is not set");
-          if (showLoading) {
-            commitGames([], { force: true });
-            setLoading(false);
-          }
-          return false;
-        }
-        if (!res.ok || body.ok === false) {
-          if (showLoading) {
-            setLoadError(body.error || `Snapshot failed (${res.status})`);
-            commitGames([], { force: true });
-            setLoading(false);
-          }
-          return false;
-        }
-        const fetchedAt = Date.now();
-        const next = applyUnderdogPhoneQuotes(gamesFromBetstampSnapshot({
-          markets: body.markets,
-          fixtures: body.fixtures,
-          teams: body.teams,
-          nowMs: fetchedAt,
-        }), seeUnderdog ? phone : null);
-        commitGames(next, { force: true });
-        setSnapshotAt(fetchedAt);
-        setLoadError(null);
-        if (showLoading) setLoading(false);
-        return true;
-      } catch (err) {
-        if (ctrl.signal.aborted || gen !== fetchGen.current) return false;
-        if (showLoading) {
-          setLoadError(err.message || "Could not load snapshot");
-          setLoading(false);
-        }
-        return false;
-      }
-    };
-
-    let cancelled = false;
-    let attempt = 0;
-    let timer;
     let pollTimer;
     let pollInFlight = false;
+    const venueTimers = [];
 
-    // Pregame: always run the interval while liveOnly is false. Do not wait
-    // for the first snapshot — a hung first GET must not freeze ages.
-    // LIVE: SSE owns prices; REST reconcile (~10s) is availability truth
-    // (clear books Betstamp no longer lists) and still refreshes fixture
-    // halt/halftime so the 60s Best gate can relax at the break.
-    applySnapshot({ showLoading: true });
+    // Pregame and LIVE both poll the phone. Do not wait on the first GET —
+    // a hung Underdog request must not freeze the other feeds.
+    loadPhone().then(() => { if (!cancelled) publish(); });
     if (!liveOnly) {
       pollTimer = setInterval(() => {
         if (pollInFlight || cancelled) return;
         pollInFlight = true;
-        applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
-      }, BETSTAMP_PREGAME_POLL_MS);
+        loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { pollInFlight = false; });
+      }, FREE_FEED_POLL_MS);
     } else {
       pollTimer = setInterval(() => {
         if (pollInFlight || cancelled) return;
         pollInFlight = true;
-        Promise.all([
-          fetch(betstampSnapshotUrl({ league, live: true, bookIds }), {
-            signal: ctrl.signal,
-            cache: "no-store",
-          }).then(async (res) => {
-            const body = await res.json().catch(() => ({}));
-            return { res, body };
-          }),
-          loadPhone(),
-        ])
-          .then(([{ res, body }, phone]) => {
-            if (cancelled || gen !== fetchGen.current) return;
-            if (!body || body.ok === false || body.missingKey || (res && !res.ok)) return;
-            if (body.markets == null) return;
-            const fetchedAt = Date.now();
-            const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
-            const next = applyUnderdogPhoneQuotes(reconcileLiveGames(withMeta, {
-              markets: body.markets,
-              fixtures: body.fixtures,
-              teams: body.teams,
-              nowMs: fetchedAt,
-            }), seeUnderdog ? phone : null);
-            commitGames(next);
-            setSnapshotAt(fetchedAt);
-          })
-          .catch(() => {})
-          .finally(() => { pollInFlight = false; });
-      }, BETSTAMP_LIVE_RECONCILE_MS);
+        loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { pollInFlight = false; });
+      }, FREE_FEED_LIVE_POLL_MS);
     }
 
-    const runStream = async () => {
-      if (!liveOnly || cancelled) return;
-      const streamCtrl = new AbortController();
-      const onAbort = () => streamCtrl.abort();
-      ctrl.signal.addEventListener("abort", onAbort);
-      try {
-        await consumeBetstampStream({
-          url: betstampStreamUrl({ league, live: true, bookIds }),
-          signal: streamCtrl.signal,
-          onStatus: (s) => { if (!cancelled && gen === fetchGen.current) setStreamStatus(s); },
-          onEvent: (ev) => {
-            if (cancelled || gen !== fetchGen.current) return;
-            const receivedAt = Date.now();
-            const { markets, ingestTs } = unwrapStreamPayload(ev.data);
-            if (!markets.length) return;
-            const recv = typeof ingestTs === "number" ? ingestTs : receivedAt;
-            const { games: streamed, applied } = applyStreamMarkets(gamesRef.current, markets, {
-              receivedAt: recv,
-              nowMs: receivedAt,
-              allowNewGames: false,
-            });
-            if (!applied.length) return;
-            const next = applyUnderdogPhoneQuotes(streamed, seeUnderdog ? phoneRef.current : null);
-            commitGames(next);
-            tickSinkRef.current?.(applied, recv);
-          },
-        });
-      } catch (err) {
-        if (cancelled || streamCtrl.signal.aborted) return;
-        if (err && err.status === 503) {
-          setMissingKey(true);
-          setLoadError(err.message || "BETSTAMP_API_KEY is not set");
-          setStreamStatus("error");
-          return;
-        }
-        setStreamStatus("reconnect");
-      } finally {
-        ctrl.signal.removeEventListener("abort", onAbort);
-      }
-      if (cancelled || !liveOnly) return;
-      const wait = nextBackoffMs(attempt);
-      attempt += 1;
-      timer = setTimeout(runStream, wait);
-    };
-
-    const runVenue = async (url) => {
-      // On for production builds. VITE_FIRST_PARTY_PM_LIVE=0 opts out. Betstamp SSE stays.
-      if (!liveOnly || !firstPartyPmLiveEnabled() || cancelled) return;
+    const runVenue = async (book, url) => {
+      // VITE_FIRST_PARTY_PM_LIVE=0 turns this venue off. Unset stays on.
+      if (!venuesOn || cancelled) return;
       let venueAttempt = 0;
       while (!cancelled && !ctrl.signal.aborted) {
         try {
           await consumeBetstampStream({
             url,
             signal: ctrl.signal,
+            onStatus: (s) => {
+              if (cancelled || gen !== fetchGen.current || !liveOnly) return;
+              if (s === "live" || s === "connecting" || s === "reconnect") setStreamStatus(s);
+            },
             onEvent: (ev) => {
               if (cancelled || gen !== fetchGen.current) return;
-              const receivedAt = Date.now();
               const payload = ev && ev.data && ev.data.payload;
               const quotes = payload && payload.quotes;
               if (!quotes || !quotes.length) return;
-              const ingestTs = ev.data.ingest_ts;
-              const markets = venueQuotesToMarkets(gamesRef.current, quotes, { liveBoard: true });
-              if (!markets.length) return;
-              const recv = typeof ingestTs === "number" ? ingestTs : receivedAt;
-              const { games: streamed, applied } = applyStreamMarkets(gamesRef.current, markets, {
-                receivedAt: recv,
-                nowMs: receivedAt,
-                allowNewGames: false,
-              });
-              if (!applied.length) return;
-              const next = applyUnderdogPhoneQuotes(streamed, seeUnderdog ? phoneRef.current : null);
-              commitGames(next);
-              tickSinkRef.current?.(applied, recv);
+              quoteRef[book] = mergeVenueQuotes(quoteRef[book], quotes);
+              publish();
             },
           });
         } catch {
           if (cancelled || ctrl.signal.aborted) return;
+          if (liveOnly) setStreamStatus("reconnect");
         }
         if (cancelled || ctrl.signal.aborted) return;
         const wait = nextBackoffMs(venueAttempt);
@@ -1207,21 +1089,25 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       }
     };
 
-    const venueTimers = [];
-    if (liveOnly) {
-      runStream();
-      runVenue(polymarketStreamUrl({ league }));
-      runVenue(kalshiStreamUrl({ league }));
+    if (venuesOn) {
+      runVenue("polymarket", polymarketStreamUrl({ league }));
+      runVenue("kalshi", kalshiStreamUrl({ league }));
+    } else if (!seeUnderdog) {
+      publish();
     }
+
+    const loadGuard = setTimeout(() => {
+      if (!cancelled && gen === fetchGen.current) setLoading(false);
+    }, 12000);
 
     return () => {
       cancelled = true;
       ctrl.abort();
-      clearTimeout(timer);
+      clearTimeout(loadGuard);
       clearInterval(pollTimer);
       venueTimers.forEach((t) => clearTimeout(t));
     };
-  }, [boardSport, liveOnly, bookIdsKey, boardRefreshKey, seeUnderdog]);
+  }, [boardSport, liveOnly, boardRefreshKey, seeUnderdog, venuesOn]);
 
   useEffect(() => {
     altFetchGen.current += 1;
@@ -1248,57 +1134,20 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
 
   const openAlts = (game) => {
     if (!game?.id) return;
-    const gen = ++altFetchGen.current;
+    altFetchGen.current += 1;
     setOpenGame(game);
-    const cached = altCacheRef.current.get(String(game.id));
-    if (cached) {
-      setAltLadders(cached);
-      setAltError(null);
-      setAltLoading(false);
-    } else {
-      setAltLadders(null);
-      setAltLoading(true);
-      setAltError(null);
-    }
-    const league = game.league || leagueForSport(boardSport);
-    (async () => {
-      try {
-        const res = await fetch(betstampSnapshotUrl({
-          league,
-          live: liveOnly,
-          includeAlts: true,
-          fixtureId: game.id,
-          bookIds,
-        }), { cache: "no-store" });
-        const body = await res.json().catch(() => ({}));
-        if (gen !== altFetchGen.current) return;
-        if (body.missingKey || res.status === 503) {
-          setAltError(body.error || "BETSTAMP_API_KEY is not set");
-          setAltLoading(false);
-          return;
-        }
-        if (!res.ok || body.ok === false) {
-          setAltError(body.error || `Alt snapshot failed (${res.status})`);
-          setAltLoading(false);
-          return;
-        }
-        const ladders = fixtureAltLadders({
-          markets: body.markets,
-          game,
-          nowMs: Date.now(),
-        });
-        altCacheRef.current.set(String(game.id), ladders);
-        setAltLadders(ladders);
-        setAltLoading(false);
-        setAltError(null);
-      } catch (err) {
-        if (gen !== altFetchGen.current) return;
-        setAltError(err.message || "Could not load alt lines");
-        setAltLoading(false);
-      }
-    })();
+    setAltLadders(mainLaddersFromGame(game));
+    setAltError(null);
+    setAltLoading(false);
   };
   openAltsRef.current = openAlts;
+
+  useEffect(() => {
+    if (!openGame) return;
+    const fresh = games.find((g) => String(g.id) === String(openGame.id));
+    if (!fresh) return;
+    setAltLadders(mainLaddersFromGame(fresh));
+  }, [games, openGame]);
 
   const toggleHiddenCell = useCallback((gameId, marketKey, side, bookKey) => {
     const key = oddsBoardHideKey({ gameId, market: marketKey, side, bookKey });
@@ -1561,6 +1410,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     <BestNowProvider>
     <div
       data-betstamp-board="true"
+      data-free-feeds="polymarket,kalshi,underdog"
       data-row-density="compact"
       data-col-layout="fixed"
       data-team-col-w={teamColWidth}
@@ -1573,7 +1423,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       data-best-view={bestView}
       data-live-best-age-ms={LIVE_BEST_ODDS_MAX_AGE_MS}
       data-live-best-break-age-ms={LIVE_BEST_ODDS_BREAK_MAX_AGE_MS}
-      data-live-reconcile-ms={BETSTAMP_LIVE_RECONCILE_MS}
+      data-live-reconcile-ms={liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS}
       data-live-paint-key={liveBoardPaintKey(games) ? "1" : "0"}
       data-live-clock="isolated"
     >
@@ -1747,7 +1597,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-            Parallel live feed — the Odds Board tab is unchanged.
+            Polymarket, Kalshi, and Underdog Predict. No sportsbook columns.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1755,7 +1605,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             type="button"
             data-board-refresh="1"
             onClick={() => setLocalRefresh((n) => n + 1)}
-            title="Re-pull Betstamp (bypasses the 5-minute Promo cache on LIVE)"
+            title="Re-pull Polymarket, Kalshi, and Underdog"
             style={{
               padding: "6px 14px",
               borderRadius: 999,
@@ -1796,7 +1646,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         snapshotAt={snapshotAt}
         streamStatus={streamStatus}
         register={registerTickSink}
-        resetKey={`${boardSport}:${bookIdsKey}:${boardRefreshKey}`}
+        resetKey={`${boardSport}:${liveOnly}:${boardRefreshKey}`}
       />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -1942,23 +1792,14 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         </div>
       )}
 
-      {missingKey && (
-        <div data-betstamp-missing-key="true" style={{ padding: "28px 20px", borderRadius: 12, border: "1px dashed rgba(234,179,8,0.35)", color: "#e8eaed", marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Set <code>BETSTAMP_API_KEY</code> to load this board</div>
-          <div style={{ fontSize: 13, color: "#9ca3af", lineHeight: 1.5 }}>
-            Add the trial key as a server-only env var in Vercel (Production + Preview + Development) and in local <code>.env.local</code>. Never prefix it with <code>VITE_</code> — the browser talks to <code>/api/betstamp-markets</code> and <code>/api/betstamp-stream</code> only.
-          </div>
-        </div>
-      )}
-
-      {loadError && !missingKey && (
-        <div style={{ padding: "20px", borderRadius: 12, border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", marginBottom: 16, fontSize: 13 }}>
-          {loadError}
+      {feedNote && (
+        <div data-feed-note="true" style={{ padding: "12px 16px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", color: "#9ca3af", marginBottom: 16, fontSize: 13 }}>
+          {feedNote}
         </div>
       )}
 
       {loading && (
-        <div style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>Loading snapshot…</div>
+        <div style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>Loading Polymarket, Kalshi, and Underdog…</div>
       )}
 
       {!loading && (
@@ -2010,9 +1851,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 <td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
                   {hiddenBoardGames.length
                     ? "Hidden matchups are listed above — Show all to restore"
-                    : missingKey
-                      ? "Waiting on BETSTAMP_API_KEY"
-                      : `No ${liveOnly ? "live" : ""} games found${search ? ` for "${search}"` : ""}`}
+                    : `No ${liveOnly ? "live" : "pregame"} games on Polymarket, Kalshi, or Underdog${search ? ` for "${search}"` : ""}`}
                 </td>
               </tr>
             )}
@@ -2052,17 +1891,18 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       </div>
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
-        Trial books only · mains (moneyline / spread / total, period FT) · decimal odds converted to American
-        {" · "}Pregame re-polls the REST snapshot every 20s so line ages stay honest and books that disappeared clear
-        {" · "}LIVE uses SSE for ticks plus a 10s REST reconcile (refresh=1, no 5-minute cache) — quieter soft books take a newer Betstamp updated_at from that snap; a book/side missing from several reconciles (or an explicit suspend / taken_down) shows OFF / off-the-board, not a dash. A priced is_otb quote still shows. A live unpriced is_otb tick does not yank a held print (that flap was the spasm). A blank — is “never offered / no quote,” not OFF. Silence alone is not a suspend. An empty or fixture-less snap is a no-op
-        {" · "}Click a game for that fixture's full alt ladder (fetched only then)
-        {" · "}Kalshi / Polymarket / ProphetX / Underdog Predict also show implied win probability (same American → % as the public board)
+        Polymarket, Kalshi, and Underdog Predict only. No DraftKings, FanDuel, or other sportsbook columns.
+        {" · "}Moneyline from all three. Underdog also has the main spread and total; Polymarket and Kalshi cells stay blank there.
+        {" · "}A blank — means this feed has no quote for that side. It is not an error.
+        {" · "}Pregame polls Underdog and keeps the Polymarket and Kalshi streams open. LIVE uses the same feeds, including in-game Underdog.
+        {" · "}Click a game to see the main lines already on the board. These feeds do not publish an alternate ladder.
+        {" · "}Kalshi, Polymarket, and Underdog Predict show implied win probability
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board}
-        {" · "}Live mode is SSE after one REST snapshot — last-tick age and p50/p95 inter-arrival prove the ~400ms claim. Availability comes from the reconcile snapshot, not from SSE silence
-        {" · "}Best names the winning book in full (FanDuel, not FD) with its logo; +N if tied
+        {" · "}LIVE keeps the Polymarket and Kalshi streams open and refreshes Underdog on the phone interval. A feed with no price stays blank
+        {" · "}Best names the winning book in full with its logo; +N if tied
         {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). Same-price ticks, age-only heartbeats, and the isolated 1s age clock do not flash or remount the grid. OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
         {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
@@ -2112,7 +1952,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                   {openGame.away} @ {openGame.home}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                  Alternate lines · moneyline / spread / total FT · this fixture only
+                  Main lines on this board. Polymarket and Kalshi are moneyline; Underdog may also show the main spread and total. No alternate ladder.
                 </div>
               </div>
             </div>
@@ -2131,7 +1971,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 {renderAltSection("Totals", "tot", altLadders.totals, "tot", (row) => `Total ${row.line}`)}
                 {!altLadders.moneyline && !altLadders.spreads.length && !altLadders.totals.length && (
                   <div style={{ padding: "36px 12px", textAlign: "center", color: "#6b7280", fontSize: 14 }}>
-                    No FT moneyline / spread / total alts for this fixture.
+                    No moneyline, spread, or total from these feeds for this game.
                   </div>
                 )}
               </>

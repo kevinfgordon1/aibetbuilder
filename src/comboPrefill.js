@@ -118,6 +118,18 @@ export function normalize(s) {
     .trim();
 }
 
+// Full display name for an NFL/MLB side. Aliases are stored lowercase;
+// aliases[0] is the city + nickname ("atlanta falcons").
+export function canonicalTeamName(raw, sport = "mlb") {
+  const id = identifyTeam(raw, sport);
+  if (!id) return null;
+  const teams = sport === "nfl" ? NFL_TEAMS : sport === "mlb" ? MLB_TEAMS : null;
+  const team = teams && teams.find((t) => t.id === id);
+  const full = team && team.aliases && team.aliases[0];
+  if (!full) return null;
+  return full.replace(/\b[a-z0-9]/g, (c) => c.toUpperCase());
+}
+
 export function identifyTeam(raw, sport = "mlb") {
   const index = SPORT_INDEX[sport] || SPORT_INDEX.mlb;
   const n = normalize(String(raw || "").replace(/\b(ml|moneyline)\b/gi, ""));
