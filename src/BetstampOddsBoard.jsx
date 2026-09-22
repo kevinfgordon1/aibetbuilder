@@ -75,6 +75,12 @@ import {
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import {
+  firstPartyPmLiveEnabled,
+  polymarketStreamUrl,
+  kalshiStreamUrl,
+  venueQuotesToMarkets,
+} from "./venueLive.js";
+import {
   betstampSnapshotUrl,
   betstampStreamUrl,
   consumeBetstampStream,
@@ -1000,7 +1006,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           ...(init || {}),
           signal: ctrl.signal,
           cache: "no-store",
-        }));
+        }), { live: liveOnly && firstPartyPmLiveEnabled() });
         const slate = body && Array.isArray(body.games) ? body : { ok: false, games: [] };
         phoneRef.current = slate;
         return slate;
@@ -1158,13 +1164,62 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       timer = setTimeout(runStream, wait);
     };
 
-    if (liveOnly) runStream();
+    const runVenue = async (url) => {
+      // Opt-in. Default off so Betstamp columns stay the live source.
+      if (!liveOnly || !firstPartyPmLiveEnabled() || cancelled) return;
+      let venueAttempt = 0;
+      while (!cancelled && !ctrl.signal.aborted) {
+        try {
+          await consumeBetstampStream({
+            url,
+            signal: ctrl.signal,
+            onEvent: (ev) => {
+              if (cancelled || gen !== fetchGen.current) return;
+              const receivedAt = Date.now();
+              const payload = ev && ev.data && ev.data.payload;
+              const quotes = payload && payload.quotes;
+              if (!quotes || !quotes.length) return;
+              const ingestTs = ev.data.ingest_ts;
+              const markets = venueQuotesToMarkets(gamesRef.current, quotes, { liveBoard: true });
+              if (!markets.length) return;
+              const recv = typeof ingestTs === "number" ? ingestTs : receivedAt;
+              const { games: streamed, applied } = applyStreamMarkets(gamesRef.current, markets, {
+                receivedAt: recv,
+                nowMs: receivedAt,
+                allowNewGames: false,
+              });
+              if (!applied.length) return;
+              const next = applyUnderdogPhoneQuotes(streamed, seeUnderdog ? phoneRef.current : null);
+              commitGames(next);
+              tickSinkRef.current?.(applied, recv);
+            },
+          });
+        } catch {
+          if (cancelled || ctrl.signal.aborted) return;
+        }
+        if (cancelled || ctrl.signal.aborted) return;
+        const wait = nextBackoffMs(venueAttempt);
+        venueAttempt += 1;
+        await new Promise((resolve) => {
+          const t = setTimeout(resolve, wait);
+          venueTimers.push(t);
+        });
+      }
+    };
+
+    const venueTimers = [];
+    if (liveOnly) {
+      runStream();
+      runVenue(polymarketStreamUrl({ league }));
+      runVenue(kalshiStreamUrl({ league }));
+    }
 
     return () => {
       cancelled = true;
       ctrl.abort();
       clearTimeout(timer);
       clearInterval(pollTimer);
+      venueTimers.forEach((t) => clearTimeout(t));
     };
   }, [boardSport, liveOnly, bookIdsKey, boardRefreshKey, seeUnderdog]);
 

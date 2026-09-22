@@ -807,7 +807,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       odds: 3.4, side: "NYG", side_type: "Away", bet_type: "Moneyline", period: "FT",
       is_alt: false, odd_provider_id: 196, fixture_id: "nyg-lar-live", team_id: nyg.id,
       updated_at: "2026-09-21T18:26:00.000Z",
-    }], { receivedAt: Date.parse("2026-09-21T18:26:00.400Z") });
+    }], {
+      receivedAt: Date.parse("2026-09-21T18:26:00.400Z"),
+      // commence is 2026-09-22T00:15Z. Without nowMs, gameIsFinished uses
+      // the wall clock and drops the row once that kickoff has passed.
+      nowMs: Date.parse("2026-09-21T18:26:00.400Z"),
+    });
     assert.equal(streamed.applied.length, 0);
     assert.equal(streamed.games[0].bookOdds.underdog_predict.ml_away, null);
   }
