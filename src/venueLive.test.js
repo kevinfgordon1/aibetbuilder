@@ -4,6 +4,7 @@ import {
   firstPartyPmLiveFromEnv,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  novigStreamUrl,
   matchGameForQuote,
   venueQuotesToMarkets,
 } from "./venueLive.js";
@@ -33,6 +34,7 @@ assert.equal(firstPartyPmLiveFromEnv("1"), true);
 assert.equal(firstPartyPmLiveFromEnv("true"), true);
 assert.equal(polymarketStreamUrl({ league: "NFL" }), "/api/polymarket-stream?league=NFL");
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "/api/kalshi-stream?league=MLB");
+assert.equal(novigStreamUrl({ league: "NCAAF" }), "/api/novig-stream?league=NCAAF");
 
 const games = gamesFromBetstampSnapshot({
   markets: [{

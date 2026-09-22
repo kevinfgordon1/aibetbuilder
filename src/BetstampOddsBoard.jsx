@@ -69,6 +69,7 @@ import {
   firstPartyPmLiveEnabled,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  novigStreamUrl,
 } from "./venueLive.js";
 import { consumeBetstampStream, nextBackoffMs } from "./betstampLive.js";
 import {
@@ -910,11 +911,16 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const venuesOn = firstPartyPmLiveEnabled();
+  // Novig stays off until /api/novig-stream says the server has credentials.
+  // needs-credentials omits the column. A blank column means the key is set
+  // and this slate has no Novig price.
+  const [novigOn, setNovigOn] = useState(false);
   const books = useMemo(() => {
-    const catalog = freeFeedBooks(user);
-    if (venuesOn) return catalog;
-    return catalog.filter((b) => b.key === "underdog_predict");
-  }, [user?.id, user?.email, venuesOn]);
+    let catalog = freeFeedBooks(user);
+    if (!venuesOn) catalog = catalog.filter((b) => b.key === "underdog_predict");
+    if (!novigOn) catalog = catalog.filter((b) => b.key !== "novig");
+    return catalog;
+  }, [user?.id, user?.email, venuesOn, novigOn]);
   const seeUnderdog = books.some((b) => b.key === "underdog_predict");
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
@@ -984,7 +990,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setSnapshotAt(null);
     setStreamStatus(liveOnly && venuesOn ? "connecting" : "idle");
 
-    const quoteRef = { polymarket: [], kalshi: [] };
+    const quoteRef = { polymarket: [], kalshi: [], novig: [] };
     let phone = null;
     let sawPhone = !seeUnderdog;
     let phoneFailed = false;
@@ -996,6 +1002,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         league,
         polymarket: venuesOn ? quoteRef.polymarket : [],
         kalshi: venuesOn ? quoteRef.kalshi : [],
+        novig: venuesOn ? quoteRef.novig : [],
         underdog: seeUnderdog && sawPhone ? phone : null,
         nowMs: Date.now(),
       });
@@ -1004,7 +1011,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       setSnapshotAt(Date.now());
       setLoading(false);
       setFeedNote(phoneFailed
-        ? "Underdog phone didn't respond. Polymarket and Kalshi still show when they have a game."
+        ? "Underdog phone didn't respond. Polymarket and Kalshi still show when they have a game. Novig shows when the server has credentials."
         : null);
     };
 
@@ -1069,6 +1076,14 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             onEvent: (ev) => {
               if (cancelled || gen !== fetchGen.current) return;
               const payload = ev && ev.data && ev.data.payload;
+              if (book === "novig") {
+                const missing = payload && (
+                  payload.mode === "needs-credentials"
+                  || payload.note === "novig_needs_credentials"
+                );
+                setNovigOn(!missing);
+                if (missing) return;
+              }
               const quotes = payload && payload.quotes;
               if (!quotes || !quotes.length) return;
               quoteRef[book] = mergeVenueQuotes(quoteRef[book], quotes);
@@ -1092,6 +1107,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     if (venuesOn) {
       runVenue("polymarket", polymarketStreamUrl({ league }));
       runVenue("kalshi", kalshiStreamUrl({ league }));
+      runVenue("novig", novigStreamUrl({ league }));
     } else if (!seeUnderdog) {
       publish();
     }
@@ -1410,7 +1426,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     <BestNowProvider>
     <div
       data-betstamp-board="true"
-      data-free-feeds="polymarket,kalshi,underdog"
+      data-free-feeds="polymarket,kalshi,novig,underdog"
       data-row-density="compact"
       data-col-layout="fixed"
       data-team-col-w={teamColWidth}

@@ -49,8 +49,25 @@ export function bookByKey(key) {
   return BOOKS_BY_KEY.get(key) || null;
 }
 
-// Kalshi / Polymarket / ProphetX / Underdog Predict — same venues the public board treats as PMs.
-export const PM_WIN_PROB_BOOKS = Object.freeze(["kalshi", "polymarket", "prophetx", "underdog_predict"]);
+// Board-local id. Novig is not a Betstamp provider, so it stays out of
+// BETSTAMP_TRIAL_BOOKS / BETSTAMP_BOOK_IDS. bookById still resolves it so
+// New Odds Board quotes can paint the column.
+export const NOVIG_BOARD_BOOK_ID = 195;
+export const NOVIG_BOARD_BOOK = Object.freeze({
+  id: NOVIG_BOARD_BOOK_ID,
+  key: "novig",
+  label: "Novig",
+  color: "#a855f7",
+  bg: "rgba(168,85,247,0.15)",
+  logo: null,
+  exchange: true,
+});
+
+BOOKS_BY_ID.set(NOVIG_BOARD_BOOK.id, NOVIG_BOARD_BOOK);
+BOOKS_BY_KEY.set(NOVIG_BOARD_BOOK.key, NOVIG_BOARD_BOOK);
+
+// Kalshi / Polymarket / Novig / ProphetX / Underdog Predict — same venues the public board treats as PMs.
+export const PM_WIN_PROB_BOOKS = Object.freeze(["kalshi", "polymarket", "novig", "prophetx", "underdog_predict"]);
 
 export function isPmWinProbBook(key) {
   return PM_WIN_PROB_BOOKS.includes(String(key || "").toLowerCase());
