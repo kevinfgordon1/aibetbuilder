@@ -199,7 +199,15 @@ export function underdogPredictBookmakerFromSnapshot(event, snapshot, joinHit) {
 function lobbyQuotes(payload, game) {
   if (!payload) return null;
   if (payload.games && Array.isArray(payload.games)) {
-    const hit = findUnderdogPhoneGame(payload, game.away_team || game.away, game.home_team || game.home);
+    // Phone lobby only. Betstamp book 196 is not consulted. Same teams on
+    // consecutive days stay separate: the lobby row whose scheduledAt is
+    // closest to commence_time, inside a few hours, or no Underdog line.
+    const hit = findUnderdogPhoneGame(
+      payload,
+      game.away_team || game.away,
+      game.home_team || game.home,
+      game.commence_time || game.scheduledAt || game.scheduled_at || null,
+    );
     return hit ? hit.lines : [];
   }
   return payload.underdogLobby || payload.predictionLines || payload;

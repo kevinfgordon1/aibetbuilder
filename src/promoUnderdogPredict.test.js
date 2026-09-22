@@ -930,4 +930,121 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.equal(calcFreeBetParlayEV([giants], 100).parlayDec, calcParlayEV([giants], 0, 100).parlayDec);
 }
 
+{
+  // 2026-09-22 ET: Caesars Cubs ML for tomorrow's Marlins @ Cubs (Odds API
+  // commence ~ Sep 23 23:41Z) showed best opp +170 Underdog Marlins. That
+  // +170 was today's game. The phone lobby has three Marlins @ Cubs rows:
+  // Sep 22 23:40Z +170, Sep 23 23:40Z +150, Sep 24 18:20Z +163.
+  const liveBase = Date.parse("2026-09-22T23:40:00Z");
+  const minStart = Date.now() + 6 * 60 * 60 * 1000;
+  const day = 24 * 60 * 60 * 1000;
+  const base = liveBase >= minStart ? liveBase : liveBase + Math.ceil((minStart - liveBase) / day) * day;
+  const today = new Date(base).toISOString();
+  const tomorrowPhone = new Date(base + day).toISOString();
+  const tomorrowOdds = new Date(base + day + 60 * 1000).toISOString();
+  const dayAfter = new Date(base + 42 * 60 * 60 * 1000 + 40 * 60 * 1000).toISOString();
+  const phoneLine = (name, american) => ({ market: "h2h", name, american });
+  const lobby = {
+    games: [
+      {
+        away: "Miami Marlins",
+        home: "Chicago Cubs",
+        scheduledAt: today,
+        lines: [phoneLine("Miami Marlins", 170), phoneLine("Chicago Cubs", -210)],
+      },
+      {
+        away: "Miami Marlins",
+        home: "Chicago Cubs",
+        scheduledAt: tomorrowPhone,
+        lines: [phoneLine("Miami Marlins", 150), phoneLine("Chicago Cubs", -180)],
+      },
+      {
+        away: "Miami Marlins",
+        home: "Chicago Cubs",
+        scheduledAt: dayAfter,
+        lines: [phoneLine("Miami Marlins", 163), phoneLine("Chicago Cubs", -195)],
+      },
+    ],
+  };
+  const cubsEvent = (id, commence) => ({
+    id,
+    sport_key: "baseball_mlb",
+    sport: "baseball_mlb",
+    commence_time: commence,
+    away_team: "Miami Marlins",
+    home_team: "Chicago Cubs",
+    bookmakers: [{
+      key: "williamhill_us",
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Miami Marlins", price: 140 },
+          { name: "Chicago Cubs", price: -176 },
+        ],
+      }],
+    }],
+  });
+  // Betstamp 196 decimal 2.70 is +170. Overlay must not use it.
+  const misleadingSnap = {
+    ok: true,
+    fixtures: [{
+      id: "fix-mia-chc",
+      league: "MLB",
+      start_date: tomorrowOdds,
+      away_team_id: "mia",
+      home_team_id: "chc",
+    }],
+    teams: [
+      { id: "mia", name: "Miami Marlins", abbreviation: "MIA" },
+      { id: "chc", name: "Chicago Cubs", abbreviation: "CHC" },
+    ],
+    markets: [
+      { odds: 2.70, side: "MIA", side_type: "Away", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-mia-chc", team_id: "mia" },
+      { odds: 1.48, side: "CHC", side_type: "Home", bet_type: "Moneyline", period: "FT", is_alt: false, odd_provider_id: 196, fixture_id: "fix-mia-chc", team_id: "chc" },
+    ],
+  };
+  const todayEvent = cubsEvent("odds-mia-chc-today", today);
+  const tomorrowEvent = cubsEvent("odds-mia-chc-tomorrow", tomorrowOdds);
+  const laterEvent = cubsEvent("odds-mia-chc-later", new Date(base + 3 * day).toISOString());
+  const overlaid = overlayUnderdogPredictOnGames([todayEvent, tomorrowEvent, laterEvent], lobby);
+  const tomorrowWithSnap = overlayUnderdogPredictOnGame(tomorrowEvent, misleadingSnap, lobby);
+  const marlinsPrice = (game) => {
+    const bm = (game.bookmakers || []).find((b) => b.key === "underdog_predict");
+    if (!bm) return null;
+    const h2h = (bm.markets || []).find((m) => m.key === "h2h");
+    const side = (h2h?.outcomes || []).find((o) => o.name === "Miami Marlins");
+    return side ? side.price : null;
+  };
+  assert.equal(marlinsPrice(overlaid[0]), 170, "today's event keeps today's Underdog +170");
+  assert.equal(marlinsPrice(overlaid[1]), 150, "tomorrow's event uses tomorrow's Underdog +150");
+  assert.notEqual(marlinsPrice(overlaid[1]), 170);
+  assert.notEqual(marlinsPrice(overlaid[1]), 163);
+  assert.equal(marlinsPrice(tomorrowWithSnap), 150, "phone lobby wins over a Betstamp 196 +170");
+  assert.equal(overlaid[2].bookmakers.some((b) => b.key === "underdog_predict"), false, "a series game outside the window omits Underdog");
+
+  const data = transformOddsData(overlaid.slice(0, 2), "baseball_mlb", TRUSTED_BOOK_KEYS, ALL_BOOKS);
+  const caesars = buildAllLegsForBook(data, "williamhill_us");
+  const todayCard = caesars.find((l) => l.name === "Chicago Cubs ML" && l.commence_time === today);
+  const tomorrowCard = caesars.find((l) => l.name === "Chicago Cubs ML" && l.commence_time === tomorrowOdds);
+  assert.ok(todayCard, "today's Caesars Cubs card is built");
+  assert.ok(tomorrowCard, "tomorrow's Caesars Cubs card is built");
+  assert.equal(todayCard.dk, -176);
+  assert.equal(todayCard.bestOpp, 170);
+  assert.equal(todayCard.bestOppBook, "underdog_predict");
+  assert.equal(todayCard.bestOppName, "Miami Marlins ML");
+  assert.equal(tomorrowCard.dk, -176);
+  assert.equal(tomorrowCard.bestOpp, 150, "tomorrow's Cubs card best opp is Underdog Marlins +150");
+  assert.equal(tomorrowCard.bestOppBook, "underdog_predict");
+  assert.equal(tomorrowCard.bestOppName, "Miami Marlins ML");
+  assert.notEqual(tomorrowCard.bestOpp, 170);
+  const later = buildAllLegsForBook(
+    transformOddsData([overlaid[2]], "baseball_mlb", TRUSTED_BOOK_KEYS, ALL_BOOKS),
+    "williamhill_us",
+  ).find((l) => l.name === "Chicago Cubs ML");
+  assert.ok(later);
+  assert.notEqual(later.bestOpp, 170);
+  assert.notEqual(later.bestOpp, 150);
+  assert.notEqual(later.bestOppBook, "underdog_predict");
+}
+
 console.log("promoUnderdogPredict.test.js ok");
