@@ -1,14 +1,25 @@
 // First-party live quotes → New Odds Board markets.
-// Off unless VITE_FIRST_PARTY_PM_LIVE=1. Betstamp SSE stays either way.
+// Production builds default on (import.meta.env.PROD, and .env.production).
+// VITE_FIRST_PARTY_PM_LIVE=0 opts out; =1 or =true forces on. Unset stays
+// off in dev and node tests. Betstamp SSE stays either way.
 // Quotes carry a 0–1 best ask; toAmericanOdds already treats that as a
 // contract price. Fixture ids stay Betstamp's — we only match team names.
 
+export function firstPartyPmLiveFromEnv(raw, prod) {
+  if (raw == null || raw === "") return prod === true;
+  return raw === "1" || raw === "true";
+}
+
 export function firstPartyPmLiveEnabled() {
   let raw;
+  let prod = false;
   try {
     const env = import.meta && import.meta.env;
-    if (env && env.VITE_FIRST_PARTY_PM_LIVE != null && env.VITE_FIRST_PARTY_PM_LIVE !== "") {
-      raw = env.VITE_FIRST_PARTY_PM_LIVE;
+    if (env) {
+      prod = env.PROD === true;
+      if (env.VITE_FIRST_PARTY_PM_LIVE != null && env.VITE_FIRST_PARTY_PM_LIVE !== "") {
+        raw = env.VITE_FIRST_PARTY_PM_LIVE;
+      }
     }
   } catch {
     /* node tests have no Vite env */
@@ -22,7 +33,7 @@ export function firstPartyPmLiveEnabled() {
       /* ignore */
     }
   }
-  return raw === "1" || raw === "true";
+  return firstPartyPmLiveFromEnv(raw, prod);
 }
 
 export function polymarketStreamUrl({ league } = {}) {
