@@ -996,6 +996,38 @@ function linesFor(sport) {
     assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
   }
 
+  {
+    const liveBody = contentBody({
+      id: 178911,
+      sportId: 'NFL',
+      title: 'Atlanta Falcons @ Green Bay Packers',
+      status: 'scoring',
+      lines: [
+        line('ATL @ GB Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Atlanta Falcons', 'away', 'Falcons to win', '+150'),
+          opt('Green Bay Packers', 'home', 'Packers to win', '-180'),
+        ]),
+      ],
+    });
+    const liveGames = gamesFromContentLines(liveBody, 'NFL');
+    assert.equal(liveGames.length, 1);
+    assert.equal(liveGames[0].live, true);
+    assert.equal(liveGames[0].status, 'scoring');
+    const scheduled = gamesFromContentLines(contentBody({
+      id: 2,
+      sportId: 'NFL',
+      title: 'Atlanta Falcons @ Green Bay Packers',
+      status: 'scheduled',
+      lines: [
+        line('ATL @ GB Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Atlanta Falcons', 'away', 'Falcons to win', '+150'),
+          opt('Green Bay Packers', 'home', 'Packers to win', '-180'),
+        ]),
+      ],
+    }), 'NFL');
+    assert.equal(scheduled[0].live, false);
+  }
+
   console.log('underdog-predict.test.js ok');
 })().catch((err) => {
   console.error(err);
