@@ -1,13 +1,12 @@
-// First-party live quotes → New Odds Board markets.
-// Production builds default on (import.meta.env.PROD, and .env.production).
-// VITE_FIRST_PARTY_PM_LIVE=0 opts out; =1 or =true forces on. Unset stays
-// off in dev and node tests. Betstamp SSE stays either way.
-// Quotes carry a 0–1 best ask; toAmericanOdds already treats that as a
-// contract price. Fixture ids stay Betstamp's — we only match team names.
+// First-party Polymarket + Kalshi quotes for the New Odds Board.
+// Always on unless VITE_FIRST_PARTY_PM_LIVE is 0 / false / off.
+// That var is a kill switch only — the board does not wait for a prod build.
+// Quotes carry a 0–1 best ask; toAmericanOdds treats that as a contract price.
 
-export function firstPartyPmLiveFromEnv(raw, prod) {
-  if (raw == null || raw === "") return prod === true;
-  return raw === "1" || raw === "true";
+export function firstPartyPmLiveFromEnv(raw) {
+  if (raw == null || raw === "") return true;
+  const s = String(raw).trim().toLowerCase();
+  return s !== "0" && s !== "false" && s !== "off";
 }
 
 export function firstPartyPmLiveEnabled() {
@@ -48,6 +47,20 @@ export function kalshiStreamUrl({ league } = {}) {
   if (league) p.set("league", league);
   const q = p.toString();
   return q ? `/api/kalshi-stream?${q}` : "/api/kalshi-stream";
+}
+
+export function novigStreamUrl({ league } = {}) {
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `/api/novig-stream?${q}` : "/api/novig-stream";
+}
+
+export function fourcastersStreamUrl({ league } = {}) {
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `/api/4casters-stream?${q}` : "/api/4casters-stream";
 }
 
 function normName(value) {
