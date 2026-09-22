@@ -137,4 +137,33 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   assert.equal(called, false, "sportsbook legs do not hit /api/book-depth");
 }
 
+{
+  _resetPromoBookDepthCache();
+  const many = Array.from({ length: 9 }, (_, i) => ({
+    ...pxLeg,
+    game: `Game ${i}`,
+    name: `Side ${i}`,
+    bestOppName: `Opp ${i}`,
+  }));
+  const sizes = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    sizes.push(body.legs.length);
+    return {
+      ok: true,
+      async json() {
+        return {
+          results: body.legs.map((leg) => ({
+            key: depthCacheKey(leg),
+            levels: [{ american: leg.bestOpp || 104, size: 100 }],
+          })),
+        };
+      },
+    };
+  };
+  const map = await fetchPromoBookDepth(many, { fetchImpl });
+  assert.deepEqual(sizes, [8, 1], "depth requests stay within the API leg cap");
+  assert.equal(Object.keys(map).length, 9);
+}
+
 console.log("promoBookDepth.test.js ok");

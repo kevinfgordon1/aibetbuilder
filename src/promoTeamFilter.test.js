@@ -150,7 +150,7 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
 
 // ── App.jsx Extra Filters: two inputs + pool + ranked list use shared helper
 {
-  assert.match(app, /import \{\s*parseTeamFilterTokens,\s*filterLegsByTeamExclude,\s*filterLegsByTeamInclude,\s*filterPicksByTeamName,\s*pinTeamIncludeLegs,\s*pickMatchesTeamInclude,\s*teamFilterSummary,\s*\} from "\.\/promoTeamFilter\.js"/);
+  assert.match(app, /import \{\s*parseTeamFilterTokens,\s*filterLegsByTeamExclude,\s*filterLegsByTeamInclude,\s*pinTeamIncludeLegs,\s*pickMatchesTeamInclude,\s*teamFilterSummary,\s*\} from "\.\/promoTeamFilter\.js"/);
   assert.match(app, /const \[promoTeamInclude, setPromoTeamInclude\] = useState\(""\)/);
   assert.match(app, /const \[promoTeamExclude, setPromoTeamExclude\] = useState\(""\)/);
   assert.match(app, /useDebouncedValue\(promoTeamInclude/);
@@ -158,7 +158,8 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   assert.match(app, /parseTeamFilterTokens\(/);
   assert.match(app, /filterLegsByTeamExclude\(/);
   assert.match(app, /filterLegsByTeamInclude\(/);
-  assert.match(app, /filterPicksByTeamName\(/);
+  const rankSrc = fs.readFileSync(path.join(dir, "promoListRank.js"), "utf8");
+  assert.match(rankSrc, /filterPicksByTeamName\(/);
   assert.match(app, /pinTeamIncludeLegs\(/);
   assert.match(app, /teamFilterSummary\(/);
   assert.match(app, /<label style=\{labelStyle\}>Must include<\/label>/);
