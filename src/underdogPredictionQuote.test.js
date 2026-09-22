@@ -4,9 +4,11 @@ import {
   applyUnderdogLobbyPredictions,
   applyUnderdogPhoneQuotes,
   classifyUnderdogLineMarket,
+  findUnderdogPhoneGame,
   predictionOnlyBookmakerFromQuotes,
   predictionQuoteFromOption,
   predictionQuotesFromPayload,
+  UNDERDOG_PHONE_COMMENCE_WINDOW_MS,
 } from "./underdogPredictionQuote.js";
 
 const require = createRequire(import.meta.url);
@@ -187,6 +189,87 @@ const giantsOption = {
   const cleared = applyUnderdogPhoneQuotes(board, { games: [] });
   assert.equal(cleared[0].bookOdds.underdog_predict.ml_away, null);
   assert.equal(applyUnderdogPhoneQuotes(board, null)[0].bookOdds.underdog_predict.ml_away, 245);
+}
+
+{
+  // Marlins @ Cubs, 2026-09-22..24. Odds API has Sep 22 23:40Z and Sep 23
+  // 23:41Z. The phone lobby lists three games. Team-only .find() painted
+  // today's Marlins +170 onto tomorrow's card.
+  assert.equal(UNDERDOG_PHONE_COMMENCE_WINDOW_MS, 4 * 60 * 60 * 1000);
+  const today = "2026-09-22T23:40:00Z";
+  const tomorrowOdds = "2026-09-23T23:41:00Z";
+  const tomorrowPhone = "2026-09-23T23:40:00Z";
+  const dayAfter = "2026-09-24T18:20:00Z";
+  const slate = {
+    games: [
+      {
+        away: "Miami Marlins",
+        home: "Chicago Cubs",
+        scheduledAt: today,
+        lines: [
+          { market: "h2h", name: "Miami Marlins", american: 170 },
+          { market: "h2h", name: "Chicago Cubs", american: -210 },
+        ],
+      },
+      {
+        away: "Miami Marlins",
+        home: "Chicago Cubs",
+        scheduledAt: tomorrowPhone,
+        lines: [
+          { market: "h2h", name: "Miami Marlins", american: 150 },
+          { market: "h2h", name: "Chicago Cubs", american: -180 },
+        ],
+      },
+      {
+        away: "Miami Marlins",
+        home: "Chicago Cubs",
+        scheduled_at: dayAfter,
+        lines: [
+          { market: "h2h", name: "Miami Marlins", american: 163 },
+          { market: "h2h", name: "Chicago Cubs", american: -195 },
+        ],
+      },
+    ],
+  };
+  const todayHit = findUnderdogPhoneGame(slate, "Miami Marlins", "Chicago Cubs", today);
+  const tomorrowHit = findUnderdogPhoneGame(slate, "Miami Marlins", "Chicago Cubs", tomorrowOdds);
+  const dayAfterHit = findUnderdogPhoneGame(slate, "Chicago Cubs", "Miami Marlins", dayAfter);
+  assert.equal(todayHit.lines.find((l) => l.name === "Miami Marlins").american, 170);
+  assert.equal(tomorrowHit.lines.find((l) => l.name === "Miami Marlins").american, 150, "tomorrow uses +150, not today's +170");
+  assert.equal(dayAfterHit.lines.find((l) => l.name === "Miami Marlins").american, 163);
+  const orphan = new Date(Date.parse(dayAfter) + 24 * 60 * 60 * 1000).toISOString();
+  assert.equal(findUnderdogPhoneGame(slate, "Miami Marlins", "Chicago Cubs", orphan), null, "no Underdog row inside the window");
+  const fiveHours = new Date(Date.parse(today) + 5 * 60 * 60 * 1000).toISOString();
+  assert.equal(
+    findUnderdogPhoneGame({ games: [slate.games[0]] }, "Miami Marlins", "Chicago Cubs", fiveHours),
+    null,
+    "the only same-team row still does not attach from the next session",
+  );
+
+  // Two games inside the window: closest kickoff, not the first row.
+  const early = today;
+  const late = new Date(Date.parse(today) + 3 * 60 * 60 * 1000).toISOString();
+  const nearLate = new Date(Date.parse(late) + 10 * 60 * 1000).toISOString();
+  const dh = findUnderdogPhoneGame({
+    games: [
+      { away: "Miami Marlins", home: "Chicago Cubs", scheduledAt: early, lines: [{ market: "h2h", name: "Miami Marlins", american: 170 }] },
+      { away: "Miami Marlins", home: "Chicago Cubs", scheduledAt: late, lines: [{ market: "h2h", name: "Miami Marlins", american: 150 }] },
+    ],
+  }, "Miami Marlins", "Chicago Cubs", nearLate);
+  assert.equal(dh.lines[0].american, 150);
+
+  const board = applyUnderdogPhoneQuotes([
+    { away: "Miami Marlins", home: "Chicago Cubs", commence_time: today, bookOdds: { underdog_predict: { ml_away: 999 } } },
+    { away: "Miami Marlins", home: "Chicago Cubs", commence_time: tomorrowOdds, bookOdds: { underdog_predict: { ml_away: 999 } } },
+    { away: "Miami Marlins", home: "Chicago Cubs", commence_time: orphan, bookOdds: { underdog_predict: { ml_away: 999 } } },
+  ], slate);
+  assert.equal(board[0].bookOdds.underdog_predict.ml_away, 170);
+  assert.equal(board[0].bookOdds.underdog_predict.ml_home, -210);
+  assert.equal(board[1].bookOdds.underdog_predict.ml_away, 150, "board tomorrow does not inherit today's +170");
+  assert.equal(board[1].bookOdds.underdog_predict.ml_home, -180);
+  assert.equal(board[2].bookOdds.underdog_predict.ml_away, null, "out-of-window board game drops Underdog");
+  assert.notEqual(board[2].bookOdds.underdog_predict.ml_away, 170);
+  assert.notEqual(board[2].bookOdds.underdog_predict.ml_away, 163);
 }
 
 console.log("underdogPredictionQuote.test.js ok");

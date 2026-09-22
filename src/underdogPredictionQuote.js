@@ -286,14 +286,63 @@ function isPhoneSlate(payload) {
   return !!(payload && Array.isArray(payload.games) && payload.games.some((g) => g && (Array.isArray(g.lines) || typeof g.away === "string")));
 }
 
-export function findUnderdogPhoneGame(slate, away, home) {
+// Join an Underdog lobby row onto an Odds API / board event by teams and
+// kickoff. Four hours covers the minute-level skew between Underdog
+// scheduled_at and Odds API commence_time (Marlins @ Cubs was 23:40Z vs
+// 23:41Z). A consecutive-day series game is ~24h away and must not attach.
+// Another game inside the window loses to the closer kickoff.
+export const UNDERDOG_PHONE_COMMENCE_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+function kickoffMs(value) {
+  if (value == null || value === "") return NaN;
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : NaN;
+  const n = Date.parse(value);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function phoneGameKickoffMs(game) {
+  if (!game || typeof game !== "object") return NaN;
+  return kickoffMs(game.scheduledAt ?? game.scheduled_at ?? game.commence_time ?? game.start_date);
+}
+
+function phoneTeamsMatch(game, away, home) {
+  if (!game) return false;
+  const direct = namesMatch(game.away, away) && namesMatch(game.home, home);
+  const flipped = namesMatch(game.away, home) && namesMatch(game.home, away);
+  return direct || flipped;
+}
+
+// commence is the Odds API / board commence_time. When the event and the
+// lobby both have a kickoff, return the closest team match inside
+// UNDERDOG_PHONE_COMMENCE_WINDOW_MS, or null. Do not fall back to another
+// day's price. A single lobby row with no scheduledAt still matches (phone
+// payloads that never stamped a time). Two same-team rows with no kickoff
+// to compare are omitted — .find() would overlay the first series game
+// onto every later one.
+export function findUnderdogPhoneGame(slate, away, home, commence) {
   if (!isPhoneSlate(slate)) return null;
-  return slate.games.find((g) => {
-    if (!g) return false;
-    const direct = namesMatch(g.away, away) && namesMatch(g.home, home);
-    const flipped = namesMatch(g.away, home) && namesMatch(g.home, away);
-    return direct || flipped;
-  }) || null;
+  const matches = slate.games.filter((g) => phoneTeamsMatch(g, away, home));
+  if (!matches.length) return null;
+  const eventMs = kickoffMs(commence);
+  if (Number.isFinite(eventMs)) {
+    let best = null;
+    let bestDelta = Infinity;
+    let sawKickoff = false;
+    for (const game of matches) {
+      const ms = phoneGameKickoffMs(game);
+      if (!Number.isFinite(ms)) continue;
+      sawKickoff = true;
+      const delta = Math.abs(ms - eventMs);
+      if (delta > UNDERDOG_PHONE_COMMENCE_WINDOW_MS) continue;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = game;
+      }
+    }
+    if (sawKickoff) return best;
+  }
+  if (matches.length === 1) return matches[0];
+  return null;
 }
 
 function blankBoardUnderdogOdds() {
@@ -371,14 +420,20 @@ function fillBoardUnderdogOdds(odds, stamps, game, lines) {
 }
 
 // Replace Underdog cells with phone lines. A null slate leaves games alone
-// (phone fetch has not returned). A slate with no matching game clears the
-// cell — Betstamp 196 is never left in place.
+// (phone fetch has not returned). A slate with no same-team game inside the
+// kickoff window clears the cell — Betstamp 196 is never left in place, and
+// another day's series price is not used.
 export function applyUnderdogPhoneQuotes(games, slate) {
   if (!slate) return games || [];
   const phoneGames = isPhoneSlate(slate) ? slate.games : [];
   return (games || []).map((game) => {
     if (!game) return game;
-    const hit = findUnderdogPhoneGame({ games: phoneGames }, game.away || game.away_team, game.home || game.home_team);
+    const hit = findUnderdogPhoneGame(
+      { games: phoneGames },
+      game.away || game.away_team,
+      game.home || game.home_team,
+      game.commence_time || game.scheduledAt || game.scheduled_at || null,
+    );
     const odds = blankBoardUnderdogOdds();
     const stamps = {};
     if (hit) fillBoardUnderdogOdds(odds, stamps, game, hit.lines);
