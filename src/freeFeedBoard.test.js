@@ -13,10 +13,10 @@ import {
 
 const now = Date.parse("2026-09-22T18:00:00Z");
 
-assert.deepEqual(freeFeedBooks(null).map((b) => b.key), ["polymarket", "kalshi", "novig"]);
+assert.deepEqual(freeFeedBooks(null).map((b) => b.key), ["polymarket", "kalshi", "novig", "fourcasters"]);
 assert.deepEqual(
   freeFeedBooks({ email: "kev120909@gmail.com" }).map((b) => b.key),
-  ["polymarket", "kalshi", "novig", "underdog_predict"],
+  ["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"],
 );
 assert.equal(freeFeedBooks(null).some((b) => b.key === "draftkings" || b.key === "fanduel" || b.key === "prophetx"), false);
 
@@ -108,6 +108,7 @@ const phoneOnly = gamesFromFreeFeeds({ league: "NFL", underdog, nowMs: now });
 assert.equal(phoneOnly.length, 1);
 assert.equal(phoneOnly[0].bookOdds.polymarket.ml_away, null, "missing book is an empty cell");
 assert.equal(phoneOnly[0].bookOdds.novig.ml_away, null, "Novig with no quote is an empty cell");
+assert.equal(phoneOnly[0].bookOdds.fourcasters.ml_away, null, "4Casters with no quote is an empty cell");
 assert.equal(phoneOnly[0].bookOdds.underdog_predict.ml_away, 245);
 
 const withNovig = gamesFromFreeFeeds({
@@ -179,6 +180,76 @@ assert.equal(withNovig[0].bookOdds.novig.spr_away, toAmericanOdds(0.52));
 assert.equal(withNovig[0].bookOdds.novig.spr_away_line, 3.5);
 assert.equal(withNovig[0].bookOdds.novig.tot_over, toAmericanOdds(0.48));
 assert.equal(withNovig[0].bookOdds.novig.tot_line, 47.5);
+
+const withFourcasters = gamesFromFreeFeeds({
+  league: "NFL",
+  fourcasters: [
+    {
+      book: "fourcasters",
+      book_id: 197,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Atlanta Falcons",
+      bet_type: "moneyline",
+      odds: 150,
+      is_live: false,
+      start: "2026-09-25T00:15:00Z",
+      updated_at: now,
+      token_id: "fc-away",
+    },
+    {
+      book: "fourcasters",
+      book_id: 197,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Green Bay Packers",
+      bet_type: "moneyline",
+      odds: -170,
+      is_live: false,
+      updated_at: now,
+      token_id: "fc-home",
+    },
+    {
+      book: "fourcasters",
+      book_id: 197,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Atlanta Falcons",
+      bet_type: "spread",
+      odds: -110,
+      line: 3.5,
+      is_live: false,
+      updated_at: now,
+      token_id: "fc-spr-away",
+    },
+    {
+      book: "fourcasters",
+      book_id: 197,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Over",
+      bet_type: "total",
+      odds: -105,
+      line: 47.5,
+      is_live: false,
+      updated_at: now,
+      token_id: "fc-over",
+    },
+  ],
+  nowMs: now,
+});
+assert.equal(withFourcasters.length, 1);
+assert.equal(withFourcasters[0].id, "ff:NFL:ATL:GB");
+assert.equal(withFourcasters[0].bookOdds.fourcasters.ml_away, 150);
+assert.equal(withFourcasters[0].bookOdds.fourcasters.ml_home, -170);
+assert.equal(withFourcasters[0].bookOdds.fourcasters.spr_away, -110);
+assert.equal(withFourcasters[0].bookOdds.fourcasters.spr_away_line, 3.5);
+assert.equal(withFourcasters[0].bookOdds.fourcasters.tot_over, -105);
+assert.equal(withFourcasters[0].bookOdds.fourcasters.tot_line, 47.5);
 
 const live = gamesFromFreeFeeds({
   league: "NFL",
@@ -263,8 +334,10 @@ assert.match(board, /gamesFromFreeFeeds/);
 assert.match(board, /polymarketStreamUrl/);
 assert.match(board, /kalshiStreamUrl/);
 assert.match(board, /novigStreamUrl/);
+assert.match(board, /fourcastersStreamUrl/);
+assert.match(board, /fourcasters_needs_credentials/);
 assert.match(board, /fetchUnderdogPhone/);
-assert.match(board, /data-free-feeds="polymarket,kalshi,novig,underdog"/);
+assert.match(board, /data-free-feeds="polymarket,kalshi,novig,fourcasters,underdog"/);
 assert.doesNotMatch(board, /\/api\/betstamp-stream/);
 assert.doesNotMatch(board, /\/api\/betstamp-markets/);
 assert.doesNotMatch(board, /betstampSnapshotUrl|betstampStreamUrl/);

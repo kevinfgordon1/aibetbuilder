@@ -53,6 +53,9 @@
     "api/novig-stream.js": {
       "maxDuration": 300
     },
+    "api/4casters-stream.js": {
+      "maxDuration": 300
+    },
     "api/underdog-predict.js": {
       "maxDuration": 60
     }

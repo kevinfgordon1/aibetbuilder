@@ -1,7 +1,7 @@
 // New Odds Board fixture list and prices from first-party feeds only.
-// Polymarket CLOB, Kalshi public markets, Novig tape (when credentials
-// are set), Underdog phone. No Betstamp fixtures and no DraftKings /
-// FanDuel / Pinnacle columns.
+// Polymarket CLOB, Kalshi public markets, Novig tape and 4Casters price
+// stream (when credentials are set), Underdog phone. No Betstamp fixtures
+// and no DraftKings / FanDuel / Pinnacle columns.
 //
 // NFL and MLB sides join on the Combo Locks team index (city, nickname,
 // and code are the same team). NCAAF joins on the team-name matcher.
@@ -9,12 +9,12 @@
 // for a few hours — Kalshi does not flag in-game.
 
 import { canonicalTeamName, identifyTeam } from "./comboPrefill.js";
-import { NOVIG_BOARD_BOOK, sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
+import { FOURCASTERS_BOARD_BOOK, NOVIG_BOARD_BOOK, sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
 import { applyStreamMarkets, emptyBookOddsForBooks } from "./betstampNormalize.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 
-export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "underdog_predict"]);
+export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 30_000;
 // Open quote after kickoff, before we treat the game as finished.
@@ -23,6 +23,7 @@ const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
 function freeFeedCatalog(user, env) {
   const allowed = new Map(visibleBetstampBooks(user, env).map((b) => [b.key, b]));
   allowed.set(NOVIG_BOARD_BOOK.key, NOVIG_BOARD_BOOK);
+  allowed.set(FOURCASTERS_BOARD_BOOK.key, FOURCASTERS_BOARD_BOOK);
   return FREE_FEED_BOOK_ORDER.map((key) => allowed.get(key)).filter(Boolean);
 }
 
@@ -262,6 +263,7 @@ export function gamesFromFreeFeeds({
   polymarket = [],
   kalshi = [],
   novig = [],
+  fourcasters = [],
   underdog = null,
   nowMs = Date.now(),
 } = {}) {
@@ -282,7 +284,7 @@ export function gamesFromFreeFeeds({
       nowMs: seenAt,
     });
   }
-  for (const quote of [...(polymarket || []), ...(kalshi || []), ...(novig || [])]) {
+  for (const quote of [...(polymarket || []), ...(kalshi || []), ...(novig || []), ...(fourcasters || [])]) {
     if (!quote) continue;
     const quoteLeague = String(quote.league || lg).toUpperCase();
     if (quoteLeague !== lg) continue;
@@ -301,7 +303,7 @@ export function gamesFromFreeFeeds({
       game.status = "live";
     }
   }
-  const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || []), ...(novig || [])].filter((q) => (
+  const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || []), ...(novig || []), ...(fourcasters || [])].filter((q) => (
     q && String(q.league || lg).toUpperCase() === lg
   )), lg);
   const painted = applyStreamMarkets(games, markets, {
