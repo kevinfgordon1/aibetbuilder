@@ -96,7 +96,7 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
-import { formatTrueOddsWithBlend, labelBestOppLine, TRUE_ODDS_INVERSE_HINT, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
+import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard, rankPicksAfterOppGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
@@ -1407,7 +1407,6 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
         {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
         <LowLiquidityFlag show={line.lowLiquidity} style={{ marginLeft: 6 }} />
       </div>
-      <div style={{ color: "#4b5563", marginTop: 2 }}>{TRUE_ODDS_INVERSE_HINT}</div>
       {line.secondary ? <div style={{ color: "#4b5563", marginTop: 2 }}>{line.secondary}</div> : null}
       {trail ? <div style={{ color: "#4b5563", marginTop: 2 }}>{trail}</div> : null}
     </div>

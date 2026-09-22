@@ -10,7 +10,6 @@ import {
   formatTrueOddsBookLine,
   formatTrueOddsWithBlend,
   labelBestOppLine,
-  TRUE_ODDS_INVERSE_HINT,
   formatDepthTrail,
   restLevelsFromLadder,
   blendAskLadderToPayout,
@@ -225,8 +224,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.match(labeled, /^Best opp:/);
   assert.match(labeled, /Underdog Predict/);
   assert.match(labeled, /Rockies ML/);
-  assert.match(TRUE_ODDS_INVERSE_HINT, /inverse/i);
-  assert.doesNotMatch(TRUE_ODDS_INVERSE_HINT, /\+163 on Underdog Predict/);
+  assert.doesNotMatch(labeled, /True Odds is the inverse of this best opp/);
   assert.equal(labelBestOppLine("+140 on Pinnacle"), "Best opp: +140 on Pinnacle");
   assert.equal(labelBestOppLine("Best opp: +140 on Pinnacle"), "Best opp: +140 on Pinnacle");
   const sized = labelBestOppLine(
