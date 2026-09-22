@@ -1185,7 +1185,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.doesNotMatch(stamp, /\/api\/betstamp-markets/);
   assert.doesNotMatch(stamp, /\/api\/betstamp-stream/);
   assert.doesNotMatch(stamp, /betstampSnapshotUrl|betstampStreamUrl/);
-  assert.match(stamp, /data-free-feeds="polymarket,kalshi,novig,underdog"/);
+  assert.match(stamp, /data-free-feeds="polymarket,kalshi,novig,fourcasters,underdog"/);
   assert.match(stamp, /data-alt-drawer/);
   assert.match(stamp, /mainLaddersFromGame/);
   assert.doesNotMatch(stamp, /includeAlts|fixtureAltLadders/);

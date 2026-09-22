@@ -56,6 +56,13 @@ export function novigStreamUrl({ league } = {}) {
   return q ? `/api/novig-stream?${q}` : "/api/novig-stream";
 }
 
+export function fourcastersStreamUrl({ league } = {}) {
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `/api/4casters-stream?${q}` : "/api/4casters-stream";
+}
+
 function normName(value) {
   return String(value || "")
     .toLowerCase()
