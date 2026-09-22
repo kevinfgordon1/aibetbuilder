@@ -1,6 +1,7 @@
-// New Odds Board fixture list and prices from keyless feeds only.
-// Polymarket CLOB, Kalshi public markets, Underdog phone. No Betstamp
-// fixtures and no DraftKings / FanDuel / Pinnacle columns.
+// New Odds Board fixture list and prices from first-party feeds only.
+// Polymarket CLOB, Kalshi public markets, Novig tape (when credentials
+// are set), Underdog phone. No Betstamp fixtures and no DraftKings /
+// FanDuel / Pinnacle columns.
 //
 // NFL and MLB sides join on the Combo Locks team index (city, nickname,
 // and code are the same team). NCAAF joins on the team-name matcher.
@@ -8,24 +9,27 @@
 // for a few hours — Kalshi does not flag in-game.
 
 import { canonicalTeamName, identifyTeam } from "./comboPrefill.js";
-import { sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
+import { NOVIG_BOARD_BOOK, sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
 import { applyStreamMarkets, emptyBookOddsForBooks } from "./betstampNormalize.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 
-export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "underdog_predict"]);
+export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 30_000;
 // Open quote after kickoff, before we treat the game as finished.
 const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
 
-const FREE_BOOKS = visibleBetstampBooks({ email: "kev120909@gmail.com" }).filter((b) => (
-  FREE_FEED_BOOK_ORDER.includes(b.key)
-));
+function freeFeedCatalog(user, env) {
+  const allowed = new Map(visibleBetstampBooks(user, env).map((b) => [b.key, b]));
+  allowed.set(NOVIG_BOARD_BOOK.key, NOVIG_BOARD_BOOK);
+  return FREE_FEED_BOOK_ORDER.map((key) => allowed.get(key)).filter(Boolean);
+}
+
+const FREE_BOOKS = freeFeedCatalog({ email: "kev120909@gmail.com" });
 
 export function freeFeedBooks(user, env) {
-  const allowed = new Map(visibleBetstampBooks(user, env).map((b) => [b.key, b]));
-  return FREE_FEED_BOOK_ORDER.map((key) => allowed.get(key)).filter(Boolean);
+  return freeFeedCatalog(user, env);
 }
 
 function sportKey(league) {
@@ -203,22 +207,33 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
   const markets = [];
   for (const quote of quotes || []) {
     if (!quote || quote.odds == null) continue;
-    if (quote.bet_type && quote.bet_type !== "moneyline") continue;
+    const betType = String(quote.bet_type || "moneyline").toLowerCase();
+    if (betType !== "moneyline" && betType !== "spread" && betType !== "total") continue;
     const league = String(quote.league || fallbackLeague || "").toUpperCase();
     const game = findGame(games, league, quote.away, quote.home);
     if (!game) continue;
-    const sideType = quoteSideType(game, quote);
+    let sideType = null;
+    if (betType === "total") {
+      const side = String(quote.side || quote.side_type || "").toLowerCase();
+      if (side === "over" || side === "o") sideType = "Over";
+      else if (side === "under" || side === "u") sideType = "Under";
+    } else {
+      sideType = quoteSideType(game, quote);
+    }
     if (!sideType) continue;
+    const line = quote.line != null ? quote.line : quote.number;
     markets.push({
       fixture_id: game.id,
       odd_provider_id: quote.book_id,
-      bet_type: "Moneyline",
+      bet_type: betType,
       period: "FT",
-      is_alt: false,
-      side: quote.side,
+      is_alt: quote.is_alt === true,
+      side: betType === "total" ? sideType : quote.side,
       side_type: sideType,
       odds: quote.odds,
       size: quote.size,
+      line,
+      number: line,
       is_live: quote.is_live === true || game.is_live === true,
       updated_at: quote.updated_at,
     });
@@ -246,6 +261,7 @@ export function gamesFromFreeFeeds({
   league,
   polymarket = [],
   kalshi = [],
+  novig = [],
   underdog = null,
   nowMs = Date.now(),
 } = {}) {
@@ -266,7 +282,7 @@ export function gamesFromFreeFeeds({
       nowMs: seenAt,
     });
   }
-  for (const quote of [...(polymarket || []), ...(kalshi || [])]) {
+  for (const quote of [...(polymarket || []), ...(kalshi || []), ...(novig || [])]) {
     if (!quote) continue;
     const quoteLeague = String(quote.league || lg).toUpperCase();
     if (quoteLeague !== lg) continue;
@@ -285,7 +301,7 @@ export function gamesFromFreeFeeds({
       game.status = "live";
     }
   }
-  const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || [])].filter((q) => (
+  const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || []), ...(novig || [])].filter((q) => (
     q && String(q.league || lg).toUpperCase() === lg
   )), lg);
   const painted = applyStreamMarkets(games, markets, {

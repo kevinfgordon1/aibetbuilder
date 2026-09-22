@@ -49,6 +49,13 @@ export function kalshiStreamUrl({ league } = {}) {
   return q ? `/api/kalshi-stream?${q}` : "/api/kalshi-stream";
 }
 
+export function novigStreamUrl({ league } = {}) {
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `/api/novig-stream?${q}` : "/api/novig-stream";
+}
+
 function normName(value) {
   return String(value || "")
     .toLowerCase()

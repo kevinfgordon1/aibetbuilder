@@ -13,10 +13,10 @@ import {
 
 const now = Date.parse("2026-09-22T18:00:00Z");
 
-assert.deepEqual(freeFeedBooks(null).map((b) => b.key), ["polymarket", "kalshi"]);
+assert.deepEqual(freeFeedBooks(null).map((b) => b.key), ["polymarket", "kalshi", "novig"]);
 assert.deepEqual(
   freeFeedBooks({ email: "kev120909@gmail.com" }).map((b) => b.key),
-  ["polymarket", "kalshi", "underdog_predict"],
+  ["polymarket", "kalshi", "novig", "underdog_predict"],
 );
 assert.equal(freeFeedBooks(null).some((b) => b.key === "draftkings" || b.key === "fanduel" || b.key === "prophetx"), false);
 
@@ -107,7 +107,78 @@ assert.equal(ladders.totals[0].line, 47.5);
 const phoneOnly = gamesFromFreeFeeds({ league: "NFL", underdog, nowMs: now });
 assert.equal(phoneOnly.length, 1);
 assert.equal(phoneOnly[0].bookOdds.polymarket.ml_away, null, "missing book is an empty cell");
+assert.equal(phoneOnly[0].bookOdds.novig.ml_away, null, "Novig with no quote is an empty cell");
 assert.equal(phoneOnly[0].bookOdds.underdog_predict.ml_away, 245);
+
+const withNovig = gamesFromFreeFeeds({
+  league: "NFL",
+  novig: [
+    {
+      book: "novig",
+      book_id: 195,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Atlanta Falcons",
+      bet_type: "moneyline",
+      odds: 0.285,
+      is_live: false,
+      start: "2026-09-25T00:15:00Z",
+      updated_at: now,
+      token_id: "nv-away",
+    },
+    {
+      book: "novig",
+      book_id: 195,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Green Bay Packers",
+      bet_type: "moneyline",
+      odds: 0.72,
+      is_live: false,
+      updated_at: now,
+      token_id: "nv-home",
+    },
+    {
+      book: "novig",
+      book_id: 195,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Atlanta Falcons",
+      bet_type: "spread",
+      odds: 0.52,
+      line: 3.5,
+      is_live: false,
+      updated_at: now,
+      token_id: "nv-spr-away",
+    },
+    {
+      book: "novig",
+      book_id: 195,
+      league: "NFL",
+      away: "Atlanta Falcons",
+      home: "Green Bay Packers",
+      side: "Over",
+      bet_type: "total",
+      odds: 0.48,
+      line: 47.5,
+      is_live: false,
+      updated_at: now,
+      token_id: "nv-over",
+    },
+  ],
+  nowMs: now,
+});
+assert.equal(withNovig.length, 1);
+assert.equal(withNovig[0].id, "ff:NFL:ATL:GB");
+assert.equal(withNovig[0].bookOdds.novig.ml_away, toAmericanOdds(0.285));
+assert.equal(withNovig[0].bookOdds.novig.ml_home, toAmericanOdds(0.72));
+assert.equal(withNovig[0].bookOdds.novig.spr_away, toAmericanOdds(0.52));
+assert.equal(withNovig[0].bookOdds.novig.spr_away_line, 3.5);
+assert.equal(withNovig[0].bookOdds.novig.tot_over, toAmericanOdds(0.48));
+assert.equal(withNovig[0].bookOdds.novig.tot_line, 47.5);
 
 const live = gamesFromFreeFeeds({
   league: "NFL",
@@ -191,8 +262,9 @@ const board = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.u
 assert.match(board, /gamesFromFreeFeeds/);
 assert.match(board, /polymarketStreamUrl/);
 assert.match(board, /kalshiStreamUrl/);
+assert.match(board, /novigStreamUrl/);
 assert.match(board, /fetchUnderdogPhone/);
-assert.match(board, /data-free-feeds="polymarket,kalshi,underdog"/);
+assert.match(board, /data-free-feeds="polymarket,kalshi,novig,underdog"/);
 assert.doesNotMatch(board, /\/api\/betstamp-stream/);
 assert.doesNotMatch(board, /\/api\/betstamp-markets/);
 assert.doesNotMatch(board, /betstampSnapshotUrl|betstampStreamUrl/);
