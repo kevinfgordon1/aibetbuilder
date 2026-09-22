@@ -74,6 +74,19 @@ export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}
   return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
 }
 
+// Shown under True Odds. The American here is the opponent quote that inverse
+// bet complements — never the fair price of the promo selection.
+export const TRUE_ODDS_INVERSE_HINT = "True Odds is the inverse of this best opp";
+
+export function labelBestOppLine(lineText, selection) {
+  const body = String(lineText || "").trim();
+  if (!body) return "";
+  if (/^Best opp:/i.test(body)) return body;
+  const sel = selection == null ? "" : String(selection).trim();
+  const named = sel ? `${body} · ${sel}` : body;
+  return `Best opp: ${named}`;
+}
+
 // Precomputed `blend` wins ($500 profit excl. stake). Hedge-mode blends still display if passed.
 // If `blend` is omitted, a raw ladder still defaults to the $500-profit walk.
 // Passing `blend: null` means "do not re-walk" (sportsbook / no PM book).

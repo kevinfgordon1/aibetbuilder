@@ -9,6 +9,8 @@ import {
   formatAvailableSizeClause,
   formatTrueOddsBookLine,
   formatTrueOddsWithBlend,
+  labelBestOppLine,
+  TRUE_ODDS_INVERSE_HINT,
   formatDepthTrail,
   restLevelsFromLadder,
   blendAskLadderToPayout,
@@ -211,6 +213,31 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   });
   assert.equal(shortHedge.lowLiquidity, true);
   assert.match(shortHedge.text, /of \$333\.33 hedge available/);
+}
+
+// ── Best-opp subline is labeled; raw "{odds} on {book}" is not the True Odds line
+{
+  const raw = formatTrueOddsWithBlend({ odds: 163, bookLabel: "Underdog Predict" });
+  assert.equal(raw.text, "+163 on Underdog Predict");
+  const labeled = labelBestOppLine(raw.text, "Colorado Rockies ML");
+  assert.equal(labeled, "Best opp: +163 on Underdog Predict · Colorado Rockies ML");
+  assert.notEqual(labeled, "+163 on Underdog Predict");
+  assert.match(labeled, /^Best opp:/);
+  assert.match(labeled, /Underdog Predict/);
+  assert.match(labeled, /Rockies ML/);
+  assert.match(TRUE_ODDS_INVERSE_HINT, /inverse/i);
+  assert.doesNotMatch(TRUE_ODDS_INVERSE_HINT, /\+163 on Underdog Predict/);
+  assert.equal(labelBestOppLine("+140 on Pinnacle"), "Best opp: +140 on Pinnacle");
+  assert.equal(labelBestOppLine("Best opp: +140 on Pinnacle"), "Best opp: +140 on Pinnacle");
+  const sized = labelBestOppLine(
+    formatTrueOddsBookLine({ odds: 163, bookLabel: "Underdog Predict", size: 80 }),
+    "Colorado Rockies ML",
+  );
+  assert.equal(
+    sized,
+    "Best opp: +163 on Underdog Predict · $80 currently available · Colorado Rockies ML",
+  );
+  assert.notEqual(sized, "+163 on Underdog Predict · $80 currently available");
 }
 
 // ── American odds: +plus / −minus, never "+-105"

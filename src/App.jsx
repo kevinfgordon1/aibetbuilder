@@ -96,7 +96,7 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
-import { formatTrueOddsWithBlend, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
+import { formatTrueOddsWithBlend, labelBestOppLine, TRUE_ODDS_INVERSE_HINT, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard, rankPicksAfterOppGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
@@ -1393,6 +1393,9 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
     levels: ladder,
     blend: blendedLeg.pmBlend,
   });
+  // Inverse bet: True Odds is the complement of this opponent American.
+  // Label the quote so "+163 on Underdog Predict" is not read as this side's fair.
+  const bestOppLine = labelBestOppLine(line.text, leg.bestOppName);
   const trailTop = Array.isArray(ladder) && ladder.length
     ? ladder[0].american
     : (quotedOppAmerican(leg) ?? leg.bestOpp);
@@ -1400,10 +1403,11 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
   return (
     <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, ...style }}>
       <div>
-        {line.text}
+        {bestOppLine}
         {note && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({note})</span>}
         <LowLiquidityFlag show={line.lowLiquidity} style={{ marginLeft: 6 }} />
       </div>
+      <div style={{ color: "#4b5563", marginTop: 2 }}>{TRUE_ODDS_INVERSE_HINT}</div>
       {line.secondary ? <div style={{ color: "#4b5563", marginTop: 2 }}>{line.secondary}</div> : null}
       {trail ? <div style={{ color: "#4b5563", marginTop: 2 }}>{trail}</div> : null}
     </div>
