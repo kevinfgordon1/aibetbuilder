@@ -781,15 +781,15 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.equal(added.leagues.includes("NCAAF"), true);
   assert.equal(added.fetchedAtByLeague.NFL, now);
   assert.equal(added.fetchedAtByLeague.NCAAF, now);
-  const kept = await resolveBookmakerSnapshot({
+  const dropped = await resolveBookmakerSnapshot({
     sports: ["americanfootball_nfl", "americanfootball_ncaaf"],
     cached: cachedNfl,
     persist: false,
     now,
-    fetchFn: async () => ({ ok: false }),
+    fetchFn: async () => ({ ok: false, status: 401, json: async () => ({ ok: false, error: "Invalid API key", missingKey: false }) }),
   });
-  assert.equal(kept.fromCache, true);
-  assert.equal(kept.snap, cachedNfl.snap);
+  assert.equal(dropped.fromCache, false);
+  assert.equal(dropped.snap, null);
   let forceUrl = null;
   const forced = await resolveBookmakerSnapshot({
     sports: ["americanfootball_nfl"],
@@ -968,6 +968,112 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
     writeBookmakerClientCache(staleStore, { storage: memoryStorage() });
     resetBookmakerClientCache();
   }
+
+  {
+    const store = memoryStorage();
+    const seeded = {
+      snap: nflSnap,
+      leagues: ["NFL"],
+      fetchedAtByLeague: { NFL: now },
+      includeUnderdog: false,
+    };
+    writeBookmakerClientCache(seeded, { storage: store });
+    assert.equal(readBookmakerClientCache({ storage: store })?.snap.fixtures[0].id, "fix-den-kc");
+
+    const unauthorized = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: seeded,
+      persist: true,
+      storage: store,
+      now: now + BOOKMAKER_CACHE_TTL_MS + 1,
+      fetchFn: async () => ({
+        ok: false,
+        status: 401,
+        json: async () => ({ ok: false, error: "Invalid API key", missingKey: false, markets: [] }),
+      }),
+    });
+    assert.equal(unauthorized.snap, null);
+    assert.equal(unauthorized.fromCache, false);
+    assert.equal(store.getItem(BOOKMAKER_CACHE_STORAGE_KEY), null);
+    assert.equal(readBookmakerClientCache({ storage: store }), null);
+    const stripped = overlayBookmakerOnCacheRows([{
+      sport: "americanfootball_nfl",
+      data: [nflEvent({
+        bookmakers: [
+          { key: "draftkings", markets: [] },
+          { key: "bookmaker", title: "Bookmaker", markets: [{ key: "h2h", outcomes: [{ name: "Penn State Nittany Lions", price: -334 }] }] },
+        ],
+      })],
+    }], unauthorized.snap);
+    assert.equal(stripped[0].data[0].bookmakers.some((b) => b.key === "bookmaker"), false);
+
+    const proxyFalse = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: seeded,
+      persist: true,
+      storage: store,
+      forceRefresh: true,
+      now: now + BOOKMAKER_CACHE_TTL_MS + 2,
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: false, error: "invalid API key", missingKey: false }),
+      }),
+    });
+    assert.equal(proxyFalse.snap, null);
+    assert.equal(proxyFalse.fromCache, false);
+    assert.equal(readBookmakerClientCache({ storage: store }), null);
+
+    writeBookmakerClientCache(seeded, { storage: store });
+    const timedOut = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: seeded,
+      persist: true,
+      storage: store,
+      now: now + BOOKMAKER_CACHE_TTL_MS + 3,
+      fetchFn: async () => { throw new Error("bookmaker timeout"); },
+    });
+    assert.equal(timedOut.snap, null);
+    assert.equal(store.getItem(BOOKMAKER_CACHE_STORAGE_KEY), null);
+
+    const recovered = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: null,
+      persist: true,
+      storage: store,
+      now: now + BOOKMAKER_CACHE_TTL_MS + 4,
+      fetchFn: async () => ({ ok: true, json: async () => bookmakerSnapshot({ fixtureId: "fix-recovered" }) }),
+    });
+    assert.equal(recovered.fromCache, false);
+    assert.equal(recovered.snap.fixtures[0].id, "fix-recovered");
+    assert.equal(readBookmakerClientCache({ storage: store })?.snap.fixtures[0].id, "fix-recovered");
+    assert.ok(store.getItem(BOOKMAKER_CACHE_STORAGE_KEY));
+
+    const forced = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: readBookmakerClientCache({ storage: store }),
+      forceRefresh: true,
+      persist: true,
+      storage: store,
+      now: now + BOOKMAKER_CACHE_TTL_MS + 5,
+      fetchFn: async () => ({ ok: false, status: 401 }),
+    });
+    assert.equal(forced.snap, null);
+    assert.equal(forced.fromCache, false);
+    assert.equal(readBookmakerClientCache({ storage: store }), null);
+    const remount = await resolveBookmakerSnapshot({
+      sports: ["americanfootball_nfl"],
+      cached: null,
+      persist: true,
+      storage: store,
+      now: now + 10_000,
+      fetchFn: async () => ({ ok: false, status: 401 }),
+    });
+    assert.equal(remount.snap, null);
+    writeBookmakerClientCache(null, { storage: store });
+    assert.equal(store.getItem(BOOKMAKER_CACHE_STORAGE_KEY), null);
+    resetBookmakerClientCache({ storage: store });
+  }
 }
 
 {
@@ -980,6 +1086,8 @@ function bookmakerSnapshot({ fixtureId = "fix-den-kc", commence = future, extraF
   assert.match(app, /resolveBookmakerSnapshot/);
   assert.match(app, /bookmakerCacheRef/);
   assert.match(app, /readBookmakerClientCache/);
+  assert.match(app, /fromCache === false/);
+  assert.match(app, /bookmakerCacheRef\.current = \{ snap: null, leagues: \[\]/);
   assert.match(app, /fetchedAtByLeague/);
   assert.match(app, /Betstamp Bookmaker overlay is best-effort/);
   assert.doesNotMatch(app, /promoBetcris/);
