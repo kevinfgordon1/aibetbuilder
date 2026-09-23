@@ -12,9 +12,11 @@
 //
 // Betstamp 196 decimals include real cupcake longshots (~87–93.5 → +8600–
 // +9250). Those are not a convert bug. Promo still drops inverted tiny-p
-// (<5%) and rejects a 2-way whose implieds do not sum to ~1 or any side
-// ≥25pts of p off sportsbook consensus, so a 93.5 dog cannot attach −107
-// (even-money / UDX-on-+100 class) as the same-selection true. Sign-only
+// (<5%) and rejects a 2-way whose implieds do not sum to ~1. The 0.25
+// sportsbook-median gate still drops absurd sides (a 93.5 dog cannot attach
+// −107). Promo ranking uses a tighter 0.08 gate (UNDERDOG_PROMO_MEDIAN_DEV)
+// so a same-event soft offer such as Padres +165 vs median +106 is omitted
+// from Best Pick. New Odds Board does not use this overlay. Sign-only
 // Bookmaker 642 guards stay unchanged. Kevin-only canSeeUnderdogPredict
 // is unchanged.
 //
@@ -64,6 +66,15 @@ export const UNDERDOG_TINY_PROB = 0.05;
 export const UNDERDOG_ABSURD_ABS_AMERICAN = 2500;
 export const UNDERDOG_TWO_WAY_SUM_MIN = 0.80;
 export const UNDERDOG_TWO_WAY_SUM_MAX = 1.22;
+// Promo only. Same-event sportsbook median vs the phone moneyline.
+// 0.25 (DECISIVE_IMPLIED_DEV) let Padres +165 through a ~+106 median
+// (about 0.108 implied). 0.08 drops that card. A smaller edge stays.
+// Odds Board overlays keep 0.25. New Odds Board does not call this.
+export const UNDERDOG_PROMO_MEDIAN_DEV = 0.08;
+
+export function underdogPromoOverlayOpts() {
+  return { predictionOnly: true, medianDev: UNDERDOG_PROMO_MEDIAN_DEV };
+}
 
 export function betstampOddsLooksLikeInvertedLongshot(odds) {
   const n = Number(odds);
@@ -109,7 +120,7 @@ export function underdogTwoWayLooksIncoherent(bm) {
   return sum < UNDERDOG_TWO_WAY_SUM_MIN || sum > UNDERDOG_TWO_WAY_SUM_MAX;
 }
 
-export function underdogMagnitudeConflictsWithEventBooks(event, bm) {
+export function underdogMagnitudeConflictsWithEventBooks(event, bm, edge = DECISIVE_IMPLIED_DEV) {
   const h2h = (bm?.markets || []).find((m) => m && m.key === "h2h");
   if (!h2h) return false;
   const others = (event?.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
@@ -123,15 +134,15 @@ export function underdogMagnitudeConflictsWithEventBooks(event, bm) {
     }
     if (!consensus.length) continue;
     const med = medianAmerican(consensus);
-    if (med != null && quoteLooksAbsurdVsReference(med, outcome.price, DECISIVE_IMPLIED_DEV)) return true;
+    if (med != null && quoteLooksAbsurdVsReference(med, outcome.price, edge)) return true;
   }
   return false;
 }
 
-export function underdogPredictConflictsWithEventBooks(event, bm) {
+export function underdogPredictConflictsWithEventBooks(event, bm, edge = DECISIVE_IMPLIED_DEV) {
   if (betstampOverlayConflictsWithEventBooks(event, bm, UNDERDOG_PREDICT_BOOK_KEY)) return true;
   if (underdogTwoWayLooksIncoherent(bm)) return true;
-  if (underdogMagnitudeConflictsWithEventBooks(event, bm)) return true;
+  if (underdogMagnitudeConflictsWithEventBooks(event, bm, edge)) return true;
   return false;
 }
 
@@ -213,7 +224,7 @@ function lobbyQuotes(payload, game) {
   return payload.underdogLobby || payload.predictionLines || payload;
 }
 
-export function overlayUnderdogPredictOnGame(game, _snapshot, lobby, _opts) {
+export function overlayUnderdogPredictOnGame(game, _snapshot, lobby, opts) {
   if (!game || typeof game !== "object") return game;
   const bookmakers = (game.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
   const stripped = { ...game, bookmakers };
@@ -222,7 +233,8 @@ export function overlayUnderdogPredictOnGame(game, _snapshot, lobby, _opts) {
   const synthesized = predictionOnlyBookmakerFromQuotes(stripped, payload);
   if (!synthesized) return stripped;
   const titled = { ...synthesized, title: UNDERDOG_PREDICT_TITLE };
-  if (underdogPredictConflictsWithEventBooks(stripped, titled)) return stripped;
+  const medianDev = opts && opts.medianDev != null ? Number(opts.medianDev) : DECISIVE_IMPLIED_DEV;
+  if (underdogPredictConflictsWithEventBooks(stripped, titled, medianDev)) return stripped;
   return { ...stripped, bookmakers: [...bookmakers, titled] };
 }
 

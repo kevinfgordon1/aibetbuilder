@@ -79,7 +79,7 @@ import {
   evScanFromLegs,
 } from "./oddsLoad.js";
 import { overlayBookmakerOnCacheRows, readBookmakerClientCache, resolveBookmakerSnapshot } from "./promoBookmaker.js";
-import { maybeOverlayUnderdogPredictOnCacheRows } from "./promoUnderdogPredict.js";
+import { maybeOverlayUnderdogPredictOnCacheRows, underdogPromoOverlayOpts } from "./promoUnderdogPredict.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import {
   assignBookUpdatedAt,
@@ -1750,7 +1750,7 @@ export default function App() {
         phone,
         user,
         undefined,
-        { predictionOnly: true },
+        underdogPromoOverlayOpts(),
       );
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
@@ -1759,7 +1759,7 @@ export default function App() {
         phone,
         user,
         undefined,
-        { predictionOnly: true },
+        underdogPromoOverlayOpts(),
       );
       underdogOverlayAppliedRef.current = includeUnderdog;
       const nextBoard = applyTransformed(featuredRows, eventRows);
