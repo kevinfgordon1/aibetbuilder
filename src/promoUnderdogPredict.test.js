@@ -24,19 +24,23 @@ import {
   overlayUnderdogPredictOnGames,
   toUnderdogPredictAmerican,
   underdogPredictBookmakerFromSnapshot,
+  UNDERDOG_PROMO_MEDIAN_DEV,
+  underdogMagnitudeConflictsWithEventBooks,
   underdogPredictConflictsWithEventBooks,
+  underdogPromoOverlayOpts,
   underdogTwoWayLooksIncoherent,
 } from "./promoUnderdogPredict.js";
 import { applyUnderdogPredictFee } from "./underdogPredictFee.js";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 import {
+  impliedFromAmerican,
   oppQuoteLooksInverted,
   pickBestAmericanQuote,
   trueAmericanFromOpp,
 } from "./promoOppGuard.js";
 
 const require = createRequire(import.meta.url);
-const { buildAllLegsForBook, calcParlayEV } = require("../lib/promo-ev.js");
+const { buildAllLegsForBook, calcParlayEV, findTopParlays } = require("../lib/promo-ev.js");
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const future = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
@@ -286,7 +290,8 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.doesNotMatch(app, /after UDX exchange fee/);
   assert.match(app, /underdogCash: true/);
   assert.doesNotMatch(app, /underdogCash: promoType !== "freebet"/);
-  assert.equal((app.match(/predictionOnly: true/g) || []).length, 3, "Promo and the full board both overlay phone quotes");
+  assert.equal((app.match(/underdogPromoOverlayOpts\(\)/g) || []).length, 2, "Promo overlay uses the 0.08 same-event median gate");
+  assert.equal((app.match(/predictionOnly: true/g) || []).length, 1, "full board still overlays phone quotes without the promo gate");
   assert.match(app, /stampUnderdogPredictionLegs/);
   assert.match(ev, /applyUnderdogCashLegPrices/);
   assert.match(ev, /stampUnderdogPredictionLegs/);
@@ -1045,6 +1050,97 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.notEqual(later.bestOpp, 170);
   assert.notEqual(later.bestOpp, 150);
   assert.notEqual(later.bestOppBook, "underdog_predict");
+}
+
+{
+  // Sep 22 2026 Padres @ Dodgers. Underdog +165 vs the same-event median
+  // +106 is about 0.108 implied. The 0.25 gate let that rank as Best Pick
+  // against BetOnline −119. Promo’s 0.08 gate drops it. A smaller same-game
+  // edge still ranks. True odds stay the inverse of best opp. The kickoff
+  // join is unchanged. Callers that do not pass underdogPromoOverlayOpts
+  // (Odds Board / +EV) keep the phone price. New Odds Board does not use
+  // this overlay.
+  assert.equal(UNDERDOG_PROMO_MEDIAN_DEV, 0.08);
+  assert.equal(underdogPromoOverlayOpts().medianDev, 0.08);
+  assert.equal(underdogPromoOverlayOpts().predictionOnly, true);
+
+  const softGap = Math.abs(impliedFromAmerican(106) - impliedFromAmerican(165));
+  const realGap = Math.abs(impliedFromAmerican(106) - impliedFromAmerican(140));
+  assert.ok(softGap > 0.10 && softGap < 0.12, `Padres gap ${softGap} is the ~0.108 case`);
+  assert.ok(realGap > 0 && realGap < UNDERDOG_PROMO_MEDIAN_DEV, `smaller edge ${realGap} stays under 0.08`);
+
+  const event = {
+    id: "odds-sd-lad-soft",
+    sport_key: "baseball_mlb",
+    sport: "baseball_mlb",
+    commence_time: future,
+    away_team: "San Diego Padres",
+    home_team: "Los Angeles Dodgers",
+    bookmakers: [
+      ["draftkings", -126, 100],
+      ["fanduel", -125, 104],
+      ["betonlineag", -119, 106],
+      ["pinnacle", -124, 110],
+      ["williamhill_us", -130, 112],
+    ].map(([key, lad, sd]) => ({
+      key,
+      markets: [{
+        key: "h2h",
+        outcomes: [
+          { name: "Los Angeles Dodgers", price: lad },
+          { name: "San Diego Padres", price: sd },
+        ],
+      }],
+    })),
+  };
+  const phone = (padresAmerican) => phoneLobby("San Diego Padres", "Los Angeles Dodgers", padresAmerican, -125);
+  const softBm = {
+    key: "underdog_predict",
+    markets: [{
+      key: "h2h",
+      outcomes: [
+        { name: "San Diego Padres", price: 165 },
+        { name: "Los Angeles Dodgers", price: -125 },
+      ],
+    }],
+  };
+  assert.equal(underdogMagnitudeConflictsWithEventBooks(event, softBm), false, "0.25 gate still allows +165");
+  assert.equal(
+    underdogMagnitudeConflictsWithEventBooks(event, softBm, UNDERDOG_PROMO_MEDIAN_DEV),
+    true,
+    "0.08 gate rejects +165 vs median +106",
+  );
+
+  const shownOnBoard = overlayUnderdogPredictOnGame(event, null, phone(165));
+  assert.ok(
+    shownOnBoard.bookmakers.some((b) => b.key === "underdog_predict"),
+    "a non-promo overlay still keeps the phone +165",
+  );
+
+  const dropped = overlayUnderdogPredictOnGame(event, null, phone(165), underdogPromoOverlayOpts());
+  assert.equal(dropped.bookmakers.some((b) => b.key === "underdog_predict"), false);
+  const droppedLegs = buildAllLegsForBook(
+    transformOddsData([dropped], "baseball_mlb", TRUSTED_BOOK_KEYS, ALL_BOOKS),
+    "underdog_predict",
+  );
+  assert.equal(droppedLegs.find((l) => /padres/i.test(l.name)), undefined, "Padres +165 is not a Promo leg");
+  assert.equal(findTopParlays(droppedLegs, 1, 0, 100).some((p) => /padres/i.test(p.legs[0].name)), false);
+
+  const kept = overlayUnderdogPredictOnGame(event, null, phone(140), underdogPromoOverlayOpts());
+  const keptLegs = buildAllLegsForBook(
+    transformOddsData([kept], "baseball_mlb", TRUSTED_BOOK_KEYS, ALL_BOOKS),
+    "underdog_predict",
+  );
+  const padres = keptLegs.find((l) => l.name === "San Diego Padres ML");
+  assert.ok(padres, "Underdog +140 vs median +106 still builds");
+  assert.equal(padres.dk, 140);
+  assert.equal(padres.bestOpp, -119, "true odds still come from best opposite");
+  assert.equal(padres.bestOppBook, "betonlineag");
+  assert.equal(trueAmericanFromOpp(padres.bestOpp), 119);
+  const ranked = findTopParlays(keptLegs, 1, 0, 100);
+  const padresPick = ranked.find((p) => p.legs[0].name === "San Diego Padres ML");
+  assert.ok(padresPick, "smaller edge still ranks");
+  assert.ok(padresPick.ev > 0);
 }
 
 console.log("promoUnderdogPredict.test.js ok");
