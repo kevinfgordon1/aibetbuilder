@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, quoteRestingOrder } from "./liveDeskPrice";
+import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder } from "./liveDeskPrice";
 
 let supabaseClient = null;
 function supabase() {
@@ -25,6 +25,12 @@ async function authHeaders() {
     accept: "application/json",
     authorization: "Bearer " + token,
   };
+}
+
+function plain(value, fallback = "") {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return fallback;
 }
 
 function money(n) {
@@ -74,6 +80,34 @@ const field = {
   fontWeight: 700,
 };
 
+class DeskErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div style={{ padding: "8px 0 24px" }}>
+        <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>Live Trading Desk</div>
+        <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", color: "#fecaca", fontSize: 13 }}>
+          {deskErrorText(this.state.error, "The desk hit a display error.")}
+        </div>
+        <button
+          type="button"
+          onClick={() => this.setState({ error: null })}
+          style={{ marginTop: 12, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+        >Try again</button>
+      </div>
+    );
+  }
+}
+
 function Chip({ on, children, onClick, disabled }) {
   return (
     <button
@@ -95,7 +129,7 @@ function Chip({ on, children, onClick, disabled }) {
   );
 }
 
-export default function LiveTradingDesk({ user }) {
+function LiveTradingDeskView({ user }) {
   const [board, setBoard] = useState(null);
   const [slug, setSlug] = useState("");
   const [slugDraft, setSlugDraft] = useState("");
@@ -115,14 +149,18 @@ export default function LiveTradingDesk({ user }) {
 
   const quote = useMemo(() => {
     if (!market) return null;
-    return quoteRestingOrder({
-      american,
-      outcome,
-      action,
-      tick: market.tick,
-      dollars,
-      minQty: market.minQty,
-    });
+    try {
+      return quoteRestingOrder({
+        american,
+        outcome,
+        action,
+        tick: market.tick,
+        dollars,
+        minQty: market.minQty,
+      });
+    } catch (err) {
+      return { ok: false, error: deskErrorText(err, "Could not price that order.") };
+    }
   }, [market, american, outcome, action, dollars]);
 
   async function load(nextSlug, { silent } = {}) {
@@ -143,7 +181,7 @@ export default function LiveTradingDesk({ user }) {
       try { data = await res.json(); } catch (_) { data = null; }
       if (id !== seq.current) return;
       if (!res.ok || !data || data.ok === false) {
-        setError((data && data.error) || "Could not load the desk (" + res.status + ").");
+        setError(deskErrorText(data && data.error, "Could not load the desk (" + res.status + ")."));
         setLoading(false);
         return;
       }
@@ -215,7 +253,7 @@ export default function LiveTradingDesk({ user }) {
       let data = null;
       try { data = await res.json(); } catch (_) { data = null; }
       if (!res.ok || !data || data.ok === false) {
-        setError((data && data.error) || "Order was not accepted (" + res.status + ").");
+        setError(deskErrorText(data && data.error, "Order was not accepted (" + res.status + ")."));
         return;
       }
       const snap = data.snap || {};
@@ -255,7 +293,7 @@ export default function LiveTradingDesk({ user }) {
       let data = null;
       try { data = await res.json(); } catch (_) { data = null; }
       if (!res.ok || !data || data.ok === false) {
-        setError((data && data.error) || "Cancel failed (" + res.status + ").");
+        setError(deskErrorText(data && data.error, "Cancel failed (" + res.status + ")."));
         return;
       }
       setCancelId("");
@@ -270,10 +308,13 @@ export default function LiveTradingDesk({ user }) {
 
   if (!canSeeOwnerTools(user)) return null;
 
-  const positions = (board && board.positions) || [];
-  const orders = (board && board.orders) || [];
-  const activity = (board && board.activity) || [];
-  const outcomeName = market ? (outcome === "short" ? market.shortName : market.longName) : "";
+  const positions = Array.isArray(board && board.positions) ? board.positions : [];
+  const orders = Array.isArray(board && board.orders) ? board.orders : [];
+  const activity = Array.isArray(board && board.activity) ? board.activity : [];
+  const boardShapeError = board && (
+    !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity)
+  ) ? "The desk returned an unexpected board." : "";
+  const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
   const canSubmit = !!(market && market.tradable && quote && quote.ok && !busy);
 
   return (
@@ -299,8 +340,8 @@ export default function LiveTradingDesk({ user }) {
         >Refresh</button>
       </div>
 
-      {error && (
-        <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", color: "#fecaca", fontSize: 13 }}>{error}</div>
+      {(error || boardShapeError) && (
+        <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.35)", color: "#fecaca", fontSize: 13 }}>{deskErrorText(error || boardShapeError)}</div>
       )}
       {notice && (
         <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.35)", color: "#a7f3d0", fontSize: 13 }}>{notice}</div>
@@ -313,11 +354,12 @@ export default function LiveTradingDesk({ user }) {
           {loading && !board && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>Loading Polymarket US…</div>}
           {!loading && positions.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>No open Polymarket US positions.</div>}
           <div className="desk-list">
-            {positions.map((row) => {
+            {positions.filter((row) => row && typeof row === "object").map((row, index) => {
               const on = row.slug === slug;
+              const rowKey = typeof row.slug === "string" && row.slug ? row.slug : "pos-" + index;
               return (
                 <button
-                  key={row.slug}
+                  key={rowKey}
                   type="button"
                   onClick={() => selectPosition(row)}
                   style={{
@@ -330,11 +372,11 @@ export default function LiveTradingDesk({ user }) {
                     cursor: "pointer",
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{row.title}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(row.title, "Position")}</div>
                   <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 4 }}>
-                    {(row.side === "short" ? "Short " : "Long ") + (row.team || (row.side === "short" ? "No" : "Yes"))}
+                    {(row.side === "short" ? "Short " : "Long ") + plain(row.team, row.side === "short" ? "No" : "Yes")}
                     {" · "}
-                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{row.net}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{plain(row.net, "—")}</span>
                     {row.cost != null ? " · cost " + money(row.cost) : ""}
                   </div>
                 </button>
@@ -357,8 +399,8 @@ export default function LiveTradingDesk({ user }) {
           </form>
           {market && (
             <div style={{ marginTop: 10, fontSize: 13, color: "#cbd5e1" }}>
-              <div style={{ fontWeight: 700, color: "#f8fafc" }}>{market.title}</div>
-              <div style={{ marginTop: 4 }}>Yes {market.longName} · No {market.shortName} · tick {market.tick}</div>
+              <div style={{ fontWeight: 700, color: "#f8fafc" }}>{plain(market.title, market.slug || "Market")}</div>
+              <div style={{ marginTop: 4 }}>Yes {plain(market.longName, "Yes")} · No {plain(market.shortName, "No")} · tick {plain(market.tick, "—")}</div>
               {!market.tradable && <div style={{ color: "#fbbf24", marginTop: 4 }}>This market is not open.</div>}
             </div>
           )}
@@ -366,8 +408,8 @@ export default function LiveTradingDesk({ user }) {
           <form onSubmit={submit} style={{ marginTop: 14 }}>
             <div style={label}>Side</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Chip on={outcome === "long"} disabled={!market} onClick={() => setOutcome("long")}>{market ? market.longName : "Yes"}</Chip>
-              <Chip on={outcome === "short"} disabled={!market} onClick={() => setOutcome("short")}>{market ? market.shortName : "No"}</Chip>
+              <Chip on={outcome === "long"} disabled={!market} onClick={() => setOutcome("long")}>{market ? plain(market.longName, "Yes") : "Yes"}</Chip>
+              <Chip on={outcome === "short"} disabled={!market} onClick={() => setOutcome("short")}>{market ? plain(market.shortName, "No") : "No"}</Chip>
               <Chip on={action === "buy"} disabled={!market} onClick={() => setAction("buy")}>Buy</Chip>
               <Chip on={action === "sell"} disabled={!market} onClick={() => setAction("sell")}>Sell</Chip>
             </div>
@@ -404,17 +446,17 @@ export default function LiveTradingDesk({ user }) {
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>Type American odds. The desk snaps to the Polymarket tick in your favor and shows that price before you rest it.</div>
               )}
               {market && String(american).trim() && quote && !quote.ok && (
-                <div style={{ color: "#fecaca", fontSize: 13 }}>{quote.error}</div>
+                <div style={{ color: "#fecaca", fontSize: 13 }}>{deskErrorText(quote.error, "That price cannot be rested.")}</div>
               )}
               {market && quote && quote.ok && (
                 <div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 20, fontWeight: 800 }}>
-                    {action === "buy" ? "Buy" : "Sell"} {outcomeName} {quote.snappedAmericanLabel}
+                    {action === "buy" ? "Buy" : "Sell"} {outcomeName} {plain(quote.snappedAmericanLabel, "")}
                   </div>
                   <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 6 }}>
-                    {quote.centsLabel} on {outcomeName}
-                    {outcome === "short" ? " · YES book " + quote.yesCentsLabel : ""}
-                    {" · "}{quote.contracts} contracts · {quote.riskLabel} at risk
+                    {plain(quote.centsLabel, "")} on {outcomeName}
+                    {outcome === "short" ? " · YES book " + plain(quote.yesCentsLabel, "") : ""}
+                    {" · "}{plain(quote.contracts, "—")} contracts · {plain(quote.riskLabel, "")} at risk
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
                     Buys floor the tick (you pay less). Sells ceil the tick (you receive more). Never a worse American than you typed. Good-till-cancel limit — a price through the market can fill now; the rest stays until you cancel.
@@ -446,14 +488,14 @@ export default function LiveTradingDesk({ user }) {
           <div style={{ fontSize: 13, fontWeight: 800 }}>Open orders</div>
           {orders.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>No resting orders.</div>}
           <div className="desk-list">
-            {orders.map((order) => (
-              <div key={order.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            {orders.filter((order) => order && typeof order === "object").map((order, index) => (
+              <div key={typeof order.id === "string" && order.id ? order.id : "ord-" + index} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{order.title}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(order.title, "Order")}</div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>
-                    {order.action === "sell" ? "Sell" : "Buy"} {order.outcomeName} {order.americanLabel}
-                    <span style={{ color: "#9ca3af" }}> · {order.centsLabel}</span>
-                    {order.quantity != null ? " · " + order.quantity : ""}
+                    {order.action === "sell" ? "Sell" : "Buy"} {plain(order.outcomeName, "")} {plain(order.americanLabel, "")}
+                    <span style={{ color: "#9ca3af" }}> · {plain(order.centsLabel, "")}</span>
+                    {typeof order.quantity === "number" || typeof order.quantity === "string" ? " · " + order.quantity : ""}
                   </div>
                   {stateLabel(order.state) && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{stateLabel(order.state)}</div>}
                 </div>
@@ -483,13 +525,13 @@ export default function LiveTradingDesk({ user }) {
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>American is the YES (long) price. No fill alerts on this desk.</div>
           {activity.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>No recent trades.</div>}
           <div className="desk-list">
-            {activity.map((row) => (
-              <div key={row.id} style={{ padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{row.title}</div>
+            {activity.filter((row) => row && typeof row === "object").map((row, index) => (
+              <div key={typeof row.id === "string" && row.id ? row.id : "fill-" + index} style={{ padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(row.title, "Trade")}</div>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>
-                  {row.longName} {row.americanLabel}
-                  <span style={{ color: "#9ca3af" }}> · {row.centsLabel}</span>
-                  {row.qty != null ? " · " + row.qty : ""}
+                  {plain(row.longName, "Yes")} {plain(row.americanLabel, "")}
+                  <span style={{ color: "#9ca3af" }}> · {plain(row.centsLabel, "")}</span>
+                  {typeof row.qty === "number" || typeof row.qty === "string" ? " · " + row.qty : ""}
                 </div>
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{whenLabel(row.time)}{stateLabel(row.state) ? " · " + stateLabel(row.state) : ""}</div>
               </div>
@@ -498,5 +540,13 @@ export default function LiveTradingDesk({ user }) {
         </section>
       </div>
     </div>
+  );
+}
+
+export default function LiveTradingDesk(props) {
+  return (
+    <DeskErrorBoundary>
+      <LiveTradingDeskView {...props} />
+    </DeskErrorBoundary>
   );
 }

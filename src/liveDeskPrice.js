@@ -399,9 +399,20 @@ export function mapOpenOrders(payload, marketsBySlug = {}) {
   }).filter((row) => row && row.id);
 }
 
+export function deskErrorText(value, fallback = "Could not load the desk.") {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (value && typeof value === "object") {
+    if (typeof value.message === "string" && value.message.trim()) return value.message.trim();
+    if (typeof value.error === "string" && value.error.trim()) return value.error.trim();
+  }
+  return fallback;
+}
+
 export function mapActivities(payload, marketsBySlug = {}) {
-  const list = (payload && payload.activities) || [];
+  const list = payload && payload.activities;
   const rows = [];
+  if (!Array.isArray(list)) return rows;
   for (const item of list) {
     if (!item || item.type && item.type !== "ACTIVITY_TYPE_TRADE") continue;
     const trade = item.trade || (item.price ? item : null);

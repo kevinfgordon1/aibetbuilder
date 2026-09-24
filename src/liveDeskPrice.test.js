@@ -10,6 +10,8 @@ import {
   readMarketSides,
   mapPositions,
   mapOpenOrders,
+  mapActivities,
+  deskErrorText,
   formatAmerican,
   toMicro,
 } from "./liveDeskPrice.js";
@@ -219,6 +221,38 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(orders[0].action, "buy");
   assert.equal(orders[0].americanLabel, formatAmerican(americanFromMicro(600000)));
   assert.equal(orders[0].americanLabel, "-150");
+}
+
+{
+  assert.deepEqual(mapActivities({ activities: {} }), []);
+  assert.deepEqual(mapActivities({ activities: null }), []);
+  assert.deepEqual(mapActivities(null), []);
+  const rows = mapActivities({
+    activities: [{
+      type: "ACTIVITY_TYPE_TRADE",
+      trade: {
+        id: "t1",
+        marketSlug: "aec-nfl-lac-ten-2025-11-02",
+        price: { value: "0.600", currency: "USD" },
+        qtyDecimal: "10",
+        createTime: "2026-09-24T00:00:00Z",
+      },
+    }],
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].americanLabel, "-150");
+}
+
+{
+  // Vercel FUNCTION_INVOCATION_FAILED is { error: { code, message } }.
+  // Rendering that object is what blanked the desk.
+  assert.equal(
+    deskErrorText({ code: "500", message: "A server error has occurred" }),
+    "A server error has occurred",
+  );
+  assert.equal(deskErrorText("Sign in required."), "Sign in required.");
+  assert.equal(deskErrorText(null, "Could not load the desk (500)."), "Could not load the desk (500).");
+  assert.equal(deskErrorText({}), "Could not load the desk.");
 }
 
 console.log("liveDeskPrice.test.js ok");

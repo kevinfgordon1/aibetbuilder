@@ -5,8 +5,32 @@
 // Every call checks the signed-in Supabase user is OWNER_EMAIL. UI hide is not the gate.
 'use strict';
 
-const access = require('../src/comboAccess.js');
-const price = require('../src/liveDeskPrice.js');
+// src/comboAccess.js and src/liveDeskPrice.js are ESM. Static require()
+// throws ERR_REQUIRE_ESM on the Vercel Node runtime, the function dies
+// during load, and Vercel answers 500 JSON { error: { code, message } }.
+// The desk renders that object and React unmounts the page. Dynamic
+// import() works from this CommonJS route.
+let access = null;
+let price = null;
+let modsPromise = null;
+
+function ensureMods() {
+  if (access && price) return Promise.resolve();
+  if (!modsPromise) {
+    modsPromise = Promise.all([
+      import('../src/comboAccess.js'),
+      import('../src/liveDeskPrice.js'),
+    ]).then(([accessMod, priceMod]) => {
+      access = accessMod;
+      price = priceMod;
+    }).catch((err) => {
+      modsPromise = null;
+      throw err;
+    });
+  }
+  return modsPromise;
+}
+
 const auth = require('./polymarket-us-auth');
 const { createPolymarketUsClient } = require('./polymarket-us-client');
 
@@ -119,6 +143,10 @@ async function loadMarkets(client, slugs) {
   return out;
 }
 
+function asList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function decoratePositions(rows, markets) {
   return rows.map((row) => {
     const m = markets[row.slug];
@@ -148,11 +176,11 @@ async function snapshot(client, slug) {
   ]);
   const positions = price.mapPositions(positionsRaw);
   const slugs = positions.map((p) => p.slug);
-  const orderList = (ordersRaw && ordersRaw.orders) || [];
+  const orderList = asList(ordersRaw && ordersRaw.orders);
   for (const order of orderList) {
     if (order && order.marketSlug) slugs.push(order.marketSlug);
   }
-  for (const item of (activityRaw && activityRaw.activities) || []) {
+  for (const item of asList(activityRaw && activityRaw.activities)) {
     if (item && item.trade && item.trade.marketSlug) slugs.push(item.trade.marketSlug);
   }
   if (slug) slugs.push(slug);
@@ -227,19 +255,20 @@ async function handler(req, res) {
     json(res, 405, { ok: false, error: 'Method not allowed' });
     return;
   }
-  const owner = await deps.requireOwner(req);
-  if (!owner.ok) {
-    json(res, owner.status || 401, { ok: false, error: owner.error || 'Unauthorized' });
-    return;
-  }
-  const creds = deps.creds();
-  if (!creds.ok) {
-    const missing = auth.missingKeysError(creds.missing);
-    json(res, 503, missing);
-    return;
-  }
-  const client = clientFromCreds(creds);
   try {
+    await ensureMods();
+    const owner = await deps.requireOwner(req);
+    if (!owner.ok) {
+      json(res, owner.status || 401, { ok: false, error: owner.error || 'Unauthorized' });
+      return;
+    }
+    const creds = deps.creds();
+    if (!creds.ok) {
+      const missing = auth.missingKeysError(creds.missing);
+      json(res, 503, missing);
+      return;
+    }
+    const client = clientFromCreds(creds);
     if (req.method === 'GET') {
       const q = (req.query) || {};
       let slug = q.slug || '';
