@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const auth = require('./polymarket-us-auth');
@@ -19,8 +20,26 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(text, /canSeeComboLocks/);
   assert.doesNotMatch(text, /clob\.polymarket\.com/);
   assert.doesNotMatch(text, /telegram/i);
+  assert.doesNotMatch(text, /require\('\.\.\/src\/comboAccess\.js'\)/);
+  assert.doesNotMatch(text, /require\('\.\.\/src\/liveDeskPrice\.js'\)/);
+  assert.match(text, /import\('\.\.\/src\/comboAccess\.js'\)/);
+  assert.match(text, /import\('\.\.\/src\/liveDeskPrice\.js'\)/);
   const vercel = require('../vercel.json');
   assert.equal(vercel.functions['api/live-trading-desk.js'].maxDuration, 15);
+  const ui = fs.readFileSync(path.join(__dirname, '../src/LiveTradingDesk.jsx'), 'utf8');
+  assert.match(ui, /getDerivedStateFromError/);
+  assert.match(ui, /Array\.isArray\(board && board\.positions\)/);
+  assert.match(ui, /deskErrorText/);
+}
+
+{
+  const loaded = spawnSync(process.execPath, [
+    '--no-experimental-require-module',
+    '-e',
+    'require("./api/live-trading-desk.js"); console.log("loaded")',
+  ], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+  assert.equal(loaded.status, 0, loaded.stderr || loaded.stdout);
+  assert.match(loaded.stdout, /loaded/);
 }
 
 {
@@ -322,6 +341,40 @@ const goodCreds = () => ({
       'gateway.polymarket.us GET',
       'api.polymarket.us GET',
     ]);
+  }
+
+  handler._setDeps({
+    requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+    creds: goodCreds,
+    fetchImpl: async (url, opts) => {
+      const method = (opts && opts.method) || 'GET';
+      const u = new URL(url);
+      if (u.host === 'gateway.polymarket.us') return jsonRes(200, MARKET);
+      if (method === 'GET' && u.pathname === '/v1/portfolio/positions') {
+        return jsonRes(200, {
+          positions: {
+            'aec-nfl-lac-ten-2025-11-02': {
+              netPositionDecimal: '3',
+              marketMetadata: { slug: 'aec-nfl-lac-ten-2025-11-02', title: 'Los Angeles vs. Tennessee' },
+            },
+          },
+          eof: true,
+        });
+      }
+      if (method === 'GET' && u.pathname === '/v1/orders/open') return jsonRes(200, { orders: { not: 'an array' } });
+      if (method === 'GET' && u.pathname === '/v1/portfolio/activities') return jsonRes(200, { activities: { not: 'an array' } });
+      return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
+    },
+  });
+  {
+    const res = mockRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer tok' }, url: '/api/live-trading-desk' }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.ok, true);
+    assert.equal(Array.isArray(res.out.body.positions), true);
+    assert.equal(res.out.body.positions.length, 1);
+    assert.deepEqual(res.out.body.orders, []);
+    assert.deepEqual(res.out.body.activity, []);
   }
 
   console.log('live-trading-desk.test.js ok');
