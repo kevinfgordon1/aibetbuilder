@@ -24,12 +24,17 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(text, /require\('\.\.\/src\/liveDeskPrice\.js'\)/);
   assert.match(text, /import\('\.\.\/src\/comboAccess\.js'\)/);
   assert.match(text, /import\('\.\.\/src\/liveDeskPrice\.js'\)/);
+  assert.match(text, /import\('\.\.\/src\/liveDeskGames\.js'\)/);
+  assert.doesNotMatch(text, /require\('\.\.\/src\/liveDeskGames\.js'\)/);
   const vercel = require('../vercel.json');
   assert.equal(vercel.functions['api/live-trading-desk.js'].maxDuration, 15);
   const ui = fs.readFileSync(path.join(__dirname, '../src/LiveTradingDesk.jsx'), 'utf8');
   assert.match(ui, /getDerivedStateFromError/);
   assert.match(ui, /Array\.isArray\(board && board\.positions\)/);
   assert.match(ui, /deskErrorText/);
+  assert.match(ui, /id="desk-game"/);
+  assert.match(ui, /id="desk-market"/);
+  assert.match(ui, /Moneyline only for now/);
 }
 
 {
@@ -343,6 +348,66 @@ const goodCreds = () => ({
     ]);
   }
 
+  {
+    const before = calls.length;
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-lac-ten-2025-11-02',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'long',
+        action: 'sell',
+        american: -150,
+        dollars: 25,
+      },
+    }, res);
+    assert.equal(res.out.statusCode, 400);
+    assert.match(res.out.body.error, /selected NFL game/);
+    assert.equal(calls.length, before, 'wrong game is rejected before Polymarket');
+  }
+
+  {
+    const before = calls.length;
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'asc-nfl-lac-ten-2025-11-02-pos-3pt5',
+        outcome: 'long',
+        action: 'sell',
+        american: -150,
+        dollars: 25,
+      },
+    }, res);
+    assert.equal(res.out.statusCode, 400);
+    assert.match(res.out.body.error, /moneyline/);
+    assert.equal(calls.length, before, 'spread slug is rejected before Polymarket');
+  }
+
+  {
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-lac-ten-2025-11-02',
+        gameId: 'nfl-lac-ten-2025-11-02',
+        outcome: 'short',
+        action: 'buy',
+        american: '−150',
+        dollars: 25,
+      },
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.snap.outcomeName, 'Tennessee Titans');
+  }
+
   handler._setDeps({
     requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
     creds: goodCreds,
@@ -375,6 +440,78 @@ const goodCreds = () => ({
     assert.equal(res.out.body.positions.length, 1);
     assert.deepEqual(res.out.body.orders, []);
     assert.deepEqual(res.out.body.activity, []);
+    assert.equal(Array.isArray(res.out.body.games), true);
+    assert.deepEqual(res.out.body.marketTypes.map((t) => t.id), ['moneyline']);
+  }
+
+  handler._resetDeps();
+  {
+    const kick = new Date(Date.now() + 3 * 3600 * 1000).toISOString();
+    const league = {
+      events: [{
+        slug: 'nfl-atl-gb-2026-09-24',
+        markets: [
+          {
+            id: 'spread-1',
+            slug: 'asc-nfl-atl-gb-2026-09-24-pos-3pt5',
+            marketType: 'spreads',
+            sportsMarketType: 'football_team_full_game_spread',
+            sportsMarketTypeV2: 'SPORTS_MARKET_TYPE_SPREAD',
+            line: 3.5,
+            gameStartTime: kick,
+          },
+          {
+            id: 'total-1',
+            slug: 'tsc-nfl-atl-gb-2026-09-24-47pt5',
+            marketType: 'totals',
+            sportsMarketType: 'football_team_full_game_total',
+            sportsMarketTypeV2: 'SPORTS_MARKET_TYPE_TOTAL',
+            line: 47.5,
+            gameStartTime: kick,
+          },
+          {
+            id: 'ml-1',
+            slug: 'aec-nfl-atl-gb-2026-09-24',
+            marketType: 'moneyline',
+            sportsMarketType: 'football_team_full_game_winner',
+            sportsMarketTypeV2: 'SPORTS_MARKET_TYPE_MONEYLINE',
+            gameStartTime: kick,
+            marketSides: [
+              { long: true, team: { safeName: 'ATL Falcons', ordering: 'away' } },
+              { long: false, team: { safeName: 'GB Packers', ordering: 'home' } },
+            ],
+          },
+        ],
+      }],
+    };
+    const seen = [];
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const u = new URL(url);
+        seen.push(u.pathname);
+        if (u.pathname.startsWith('/v2/leagues/nfl/events')) return jsonRes(200, league);
+        if (u.host === 'gateway.polymarket.us') return jsonRes(200, MARKET);
+        if (method === 'GET' && u.pathname === '/v1/portfolio/positions') return jsonRes(200, { positions: {}, eof: true });
+        if (method === 'GET' && u.pathname === '/v1/orders/open') return jsonRes(200, { orders: [] });
+        if (method === 'GET' && u.pathname === '/v1/portfolio/activities') return jsonRes(200, { activities: [] });
+        return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
+      },
+    });
+    const res = mockRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer tok' }, url: '/api/live-trading-desk' }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.games.length, 1);
+    assert.equal(res.out.body.games[0].id, 'nfl-atl-gb-2026-09-24');
+    assert.equal(res.out.body.games[0].markets.length, 1);
+    assert.equal(res.out.body.games[0].markets[0].id, 'moneyline');
+    assert.equal(res.out.body.games[0].markets[0].slug, 'aec-nfl-atl-gb-2026-09-24');
+    assert.equal(res.out.body.games[0].markets.some((m) => m.id !== 'moneyline'), false);
+    assert.match(res.out.body.games[0].label, /NFL · ATL Falcons @ GB Packers/);
+    assert.ok(seen.some((p) => p.startsWith('/v2/leagues/nfl/events')));
+    assert.equal(res.out.body.market, null);
   }
 
   console.log('live-trading-desk.test.js ok');
