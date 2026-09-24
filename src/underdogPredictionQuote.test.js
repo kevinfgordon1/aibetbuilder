@@ -272,4 +272,95 @@ const giantsOption = {
   assert.notEqual(board[2].bookOdds.underdog_predict.ml_away, 163);
 }
 
+{
+  // Padres @ Dodgers, live 2026-09-24. Odds API Sep 23 10:11 PM ET is
+  // 2026-09-24T02:11Z. Phone: that night Dodgers -1.5 -109 (match 143677,
+  // scheduled 02:10Z); next night Dodgers -1.5 +122 (match 143943, 02:10Z
+  // on Sep 25). Team-only attach painted +122 onto the Sep 23 card.
+  const tonight = "2026-09-24T02:11:00Z";
+  const tonightPhone = "2026-09-24T02:10:00Z";
+  const tomorrow = "2026-09-25T02:11:00Z";
+  const tomorrowPhone = "2026-09-25T02:10:00Z";
+  const ladSd = {
+    games: [
+      {
+        away: "San Diego Padres",
+        home: "Los Angeles Dodgers",
+        scheduledAt: tonightPhone,
+        lines: [
+          { market: "h2h", name: "San Diego Padres", american: 180 },
+          { market: "h2h", name: "Los Angeles Dodgers", american: -223 },
+          { market: "spreads", name: "San Diego Padres", point: 1.5, american: -113 },
+          { market: "spreads", name: "Los Angeles Dodgers", point: -1.5, american: -109 },
+          { market: "totals", name: "Over", point: 8.5, american: 104, choice: "over" },
+          { market: "totals", name: "Under", point: 8.5, american: -127, choice: "under" },
+        ],
+      },
+      {
+        away: "San Diego Padres",
+        home: "Los Angeles Dodgers",
+        scheduledAt: tomorrowPhone,
+        lines: [
+          { market: "h2h", name: "San Diego Padres", american: 144 },
+          { market: "h2h", name: "Los Angeles Dodgers", american: -179 },
+          { market: "spreads", name: "San Diego Padres", point: 1.5, american: -157 },
+          { market: "spreads", name: "Los Angeles Dodgers", point: -1.5, american: 122 },
+          { market: "totals", name: "Over", point: 8.5, american: -110, choice: "over" },
+          { market: "totals", name: "Under", point: 8.5, american: -110, choice: "under" },
+        ],
+      },
+    ],
+  };
+  const dodgersSpread = (game) => (game && game.lines || []).find((l) => l.market === "spreads" && l.name === "Los Angeles Dodgers");
+  const tonightHit = findUnderdogPhoneGame(ladSd, "San Diego Padres", "Los Angeles Dodgers", tonight);
+  const tomorrowHit = findUnderdogPhoneGame(ladSd, "Los Angeles Dodgers", "San Diego Padres", tomorrow);
+  assert.equal(dodgersSpread(tonightHit).american, -109, "Sep 23 card keeps Dodgers -1.5 -109");
+  assert.notEqual(dodgersSpread(tonightHit).american, 122);
+  assert.equal(dodgersSpread(tomorrowHit).american, 122, "Sep 24 card keeps Dodgers -1.5 +122");
+  assert.equal(
+    findUnderdogPhoneGame({ games: [ladSd.games[1]] }, "San Diego Padres", "Los Angeles Dodgers", tonight),
+    null,
+    "tomorrow is the only phone row and still does not attach to tonight",
+  );
+  assert.equal(
+    findUnderdogPhoneGame({
+      games: [{ away: "San Diego Padres", home: "Los Angeles Dodgers", lines: [{ market: "spreads", name: "Los Angeles Dodgers", point: -1.5, american: 122 }] }],
+    }, "San Diego Padres", "Los Angeles Dodgers", tonight),
+    null,
+    "a phone row with no kickoff does not attach to a timed event",
+  );
+
+  // 11:30 PM ET and 2:00 AM ET are 2.5h apart but different New York dates.
+  const lateNight = "2026-09-24T03:30:00Z";
+  const afterMidnight = "2026-09-24T06:00:00Z";
+  const crossMidnight = findUnderdogPhoneGame({
+    games: [
+      { away: "San Diego Padres", home: "Los Angeles Dodgers", scheduledAt: "2026-09-24T03:40:00Z", lines: [{ market: "spreads", name: "Los Angeles Dodgers", point: -1.5, american: -109 }] },
+      { away: "San Diego Padres", home: "Los Angeles Dodgers", scheduledAt: afterMidnight, lines: [{ market: "spreads", name: "Los Angeles Dodgers", point: -1.5, american: 122 }] },
+    ],
+  }, "San Diego Padres", "Los Angeles Dodgers", lateNight);
+  assert.equal(dodgersSpread(crossMidnight).american, -109, "same New York date wins inside the 4h window");
+  assert.equal(
+    findUnderdogPhoneGame({
+      games: [{ away: "San Diego Padres", home: "Los Angeles Dodgers", scheduledAt: afterMidnight, lines: [{ market: "spreads", name: "Los Angeles Dodgers", point: -1.5, american: 122 }] }],
+    }, "San Diego Padres", "Los Angeles Dodgers", lateNight),
+    null,
+    "next New York date inside 4h does not attach",
+  );
+
+  const board = applyUnderdogPhoneQuotes([
+    { away: "San Diego Padres", home: "Los Angeles Dodgers", commence_time: tonight },
+    { away: "San Diego Padres", home: "Los Angeles Dodgers", commence_time: tomorrow },
+  ], ladSd);
+  assert.equal(board[0].bookOdds.underdog_predict.spr_home, -109);
+  assert.equal(board[0].bookOdds.underdog_predict.spr_home_line, -1.5);
+  assert.equal(board[0].bookOdds.underdog_predict.ml_home, -223);
+  assert.equal(board[0].bookOdds.underdog_predict.tot_over, 104);
+  assert.equal(board[0].bookOdds.underdog_predict.tot_line, 8.5);
+  assert.equal(board[1].bookOdds.underdog_predict.spr_home, 122);
+  assert.notEqual(board[0].bookOdds.underdog_predict.spr_home, 122);
+  assert.notEqual(board[0].bookOdds.underdog_predict.ml_home, -179);
+  assert.notEqual(board[0].bookOdds.underdog_predict.tot_over, -110);
+}
+
 console.log("underdogPredictionQuote.test.js ok");

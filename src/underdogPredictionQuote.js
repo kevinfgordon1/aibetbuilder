@@ -289,9 +289,20 @@ function isPhoneSlate(payload) {
 // Join an Underdog lobby row onto an Odds API / board event by teams and
 // kickoff. Four hours covers the minute-level skew between Underdog
 // scheduled_at and Odds API commence_time (Marlins @ Cubs was 23:40Z vs
-// 23:41Z). A consecutive-day series game is ~24h away and must not attach.
-// Another game inside the window loses to the closer kickoff.
+// 23:41Z). The same America/New_York calendar date is required as well, so
+// a late West-coast game and the next morning's series game cannot match
+// even when they sit inside four hours. A consecutive-night series (~24h,
+// Padres @ Dodgers Sep 23 10:11 PM ET vs Sep 24) must not attach. Another
+// game inside the window loses to the closer kickoff. No row in that
+// window means omit Underdog — do not reuse another night.
 export const UNDERDOG_PHONE_COMMENCE_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+const NY_CALENDAR_DATE = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 function kickoffMs(value) {
   if (value == null || value === "") return NaN;
@@ -312,13 +323,20 @@ function phoneTeamsMatch(game, away, home) {
   return direct || flipped;
 }
 
-// commence is the Odds API / board commence_time. When the event and the
-// lobby both have a kickoff, return the closest team match inside
-// UNDERDOG_PHONE_COMMENCE_WINDOW_MS, or null. Do not fall back to another
-// day's price. A single lobby row with no scheduledAt still matches (phone
-// payloads that never stamped a time). Two same-team rows with no kickoff
-// to compare are omitted — .find() would overlay the first series game
-// onto every later one.
+function sameNewYorkCalendarDate(aMs, bMs) {
+  return NY_CALENDAR_DATE.format(new Date(aMs)) === NY_CALENDAR_DATE.format(new Date(bMs));
+}
+
+// commence is the Odds API / board commence_time. When the event has a
+// kickoff, return the closest team match inside
+// UNDERDOG_PHONE_COMMENCE_WINDOW_MS on the same America/New_York date, or
+// null. Do not fall back to another night, and do not use a lobby row that
+// never stamped scheduledAt — that row cannot prove it is this game.
+// A single lobby row with no scheduledAt still matches an event that also
+// has no kickoff (phone payloads that never stamped a time). Two same-team
+// rows with no kickoff to compare are omitted — .find() would overlay the
+// first series game onto every later one. Moneyline, spread, and total
+// lines ride on the matched game; they do not join separately.
 export function findUnderdogPhoneGame(slate, away, home, commence) {
   if (!isPhoneSlate(slate)) return null;
   const matches = slate.games.filter((g) => phoneTeamsMatch(g, away, home));
@@ -327,11 +345,10 @@ export function findUnderdogPhoneGame(slate, away, home, commence) {
   if (Number.isFinite(eventMs)) {
     let best = null;
     let bestDelta = Infinity;
-    let sawKickoff = false;
     for (const game of matches) {
       const ms = phoneGameKickoffMs(game);
       if (!Number.isFinite(ms)) continue;
-      sawKickoff = true;
+      if (!sameNewYorkCalendarDate(ms, eventMs)) continue;
       const delta = Math.abs(ms - eventMs);
       if (delta > UNDERDOG_PHONE_COMMENCE_WINDOW_MS) continue;
       if (delta < bestDelta) {
@@ -339,9 +356,9 @@ export function findUnderdogPhoneGame(slate, away, home, commence) {
         best = game;
       }
     }
-    if (sawKickoff) return best;
+    return best;
   }
-  if (matches.length === 1) return matches[0];
+  if (matches.length === 1 && !Number.isFinite(phoneGameKickoffMs(matches[0]))) return matches[0];
   return null;
 }
 
