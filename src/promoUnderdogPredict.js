@@ -200,8 +200,9 @@ function lobbyQuotes(payload, game) {
   if (!payload) return null;
   if (payload.games && Array.isArray(payload.games)) {
     // Phone lobby only. Betstamp book 196 is not consulted. Same teams on
-    // consecutive days stay separate: the lobby row whose scheduledAt is
-    // closest to commence_time, inside a few hours, or no Underdog line.
+    // consecutive nights stay separate: closest scheduledAt inside 4h on
+    // the same America/New_York date, or no Underdog line. Spreads and
+    // totals use that same game. A later night must not overwrite the price.
     const hit = findUnderdogPhoneGame(
       payload,
       game.away_team || game.away,

@@ -61,11 +61,12 @@ function nflEvent(overrides = {}) {
   };
 }
 
-function phoneLobby(away, home, awayAm, homeAm) {
+function phoneLobby(away, home, awayAm, homeAm, scheduledAt = future) {
   return {
     games: [{
       away,
       home,
+      scheduledAt,
       lines: [
         { market: "h2h", name: away, american: awayAm },
         { market: "h2h", name: home, american: homeAm },
@@ -1045,6 +1046,125 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.notEqual(later.bestOpp, 170);
   assert.notEqual(later.bestOpp, 150);
   assert.notEqual(later.bestOppBook, "underdog_predict");
+}
+
+{
+  // Live 2026-09-24: Sep 23 10:11 PM ET (2026-09-24T02:11Z) Underdog Dodgers
+  // -1.5 is -109. The next night is +122. Promo stamped +122 onto the Sep 23
+  // card (best opp stayed tonight's Novig) because the phone-price map and
+  // the spread dedupe key ignored kickoff. Moneyline, spread, and total
+  // must each stay on their own night.
+  const liveBase = Date.parse("2026-09-24T02:11:00Z");
+  const minStart = Date.now() + 6 * 60 * 60 * 1000;
+  const day = 24 * 60 * 60 * 1000;
+  const base = liveBase >= minStart ? liveBase : liveBase + Math.ceil((minStart - liveBase) / day) * day;
+  const tonight = new Date(base).toISOString();
+  const tonightPhone = new Date(base - 60 * 1000).toISOString();
+  const tomorrow = new Date(base + day).toISOString();
+  const tomorrowPhone = new Date(base + day - 60 * 1000).toISOString();
+  const phoneLine = (market, name, american, point, choice) => ({ market, name, american, point, choice });
+  const lobby = {
+    games: [
+      {
+        away: "San Diego Padres",
+        home: "Los Angeles Dodgers",
+        scheduledAt: tonightPhone,
+        lines: [
+          phoneLine("h2h", "San Diego Padres", 180),
+          phoneLine("h2h", "Los Angeles Dodgers", -223),
+          phoneLine("spreads", "San Diego Padres", -113, 1.5),
+          phoneLine("spreads", "Los Angeles Dodgers", -109, -1.5),
+          phoneLine("totals", "Over", 104, 8.5, "over"),
+          phoneLine("totals", "Under", -127, 8.5, "under"),
+        ],
+      },
+      {
+        away: "San Diego Padres",
+        home: "Los Angeles Dodgers",
+        scheduledAt: tomorrowPhone,
+        lines: [
+          phoneLine("h2h", "San Diego Padres", 144),
+          phoneLine("h2h", "Los Angeles Dodgers", -179),
+          phoneLine("spreads", "San Diego Padres", -157, 1.5),
+          phoneLine("spreads", "Los Angeles Dodgers", 122, -1.5),
+          phoneLine("totals", "Over", -110, 8.5, "over"),
+          phoneLine("totals", "Under", -110, 8.5, "under"),
+        ],
+      },
+    ],
+  };
+  const seriesEvent = (id, commence, novigHome, novigAway) => ({
+    id,
+    sport_key: "baseball_mlb",
+    commence_time: commence,
+    away_team: "San Diego Padres",
+    home_team: "Los Angeles Dodgers",
+    bookmakers: [{
+      key: "novig",
+      markets: [
+        {
+          key: "h2h",
+          outcomes: [
+            { name: "San Diego Padres", price: novigAway },
+            { name: "Los Angeles Dodgers", price: novigHome },
+          ],
+        },
+        {
+          key: "spreads",
+          outcomes: [
+            { name: "San Diego Padres", price: commence === tonight ? -102 : -141, point: 1.5 },
+            { name: "Los Angeles Dodgers", price: commence === tonight ? 100 : 133, point: -1.5 },
+          ],
+        },
+        {
+          key: "totals",
+          outcomes: [
+            { name: "Over", price: commence === tonight ? 111 : -102, point: 8.5 },
+            { name: "Under", price: commence === tonight ? -115 : -104, point: 8.5 },
+          ],
+        },
+      ],
+    }],
+  });
+  const overlaid = overlayUnderdogPredictOnGames([
+    seriesEvent("lad-sd-tonight", tonight, -203, 199),
+    seriesEvent("lad-sd-tomorrow", tomorrow, -167, 156),
+  ], lobby);
+  const dodgersPrice = (game) => {
+    const bm = (game.bookmakers || []).find((b) => b.key === "underdog_predict");
+    const spr = (bm?.markets || []).find((m) => m.key === "spreads");
+    return (spr?.outcomes || []).find((o) => o.name === "Los Angeles Dodgers")?.price;
+  };
+  assert.equal(dodgersPrice(overlaid[0]), -109);
+  assert.equal(dodgersPrice(overlaid[1]), 122);
+  const legs = buildAllLegsForBook(
+    transformOddsData(overlaid, "baseball_mlb", TRUSTED_BOOK_KEYS, ALL_BOOKS),
+    "underdog_predict",
+    null,
+    null,
+    "any",
+    null,
+    { underdogCash: true },
+  );
+  const spread = (commence) => legs.find((l) => l.market === "SPR" && l.name === "Los Angeles Dodgers -1.5" && l.commence_time === commence);
+  const ml = (commence) => legs.find((l) => l.market === "ML" && l.name === "Los Angeles Dodgers ML" && l.commence_time === commence);
+  const total = (commence) => legs.find((l) => l.market === "TOT" && l.name.includes("o8.5") && l.commence_time === commence);
+  const tonightSpread = spread(tonight);
+  const tomorrowSpread = spread(tomorrow);
+  assert.ok(tonightSpread, "tonight's Dodgers -1.5 is a promo leg");
+  assert.ok(tomorrowSpread, "tomorrow's Dodgers -1.5 is a separate promo leg");
+  assert.equal(tonightSpread.dk, -109, "tonight does not inherit tomorrow's +122");
+  assert.notEqual(tonightSpread.dk, 122);
+  assert.equal(tonightSpread.bestOpp, -102);
+  assert.equal(tonightSpread.bestOppBook, "novig");
+  assert.equal(tomorrowSpread.dk, 122);
+  assert.equal(tomorrowSpread.bestOpp, -141);
+  assert.equal(ml(tonight).dk, -223);
+  assert.equal(ml(tomorrow).dk, -179);
+  assert.notEqual(ml(tonight).dk, -179);
+  assert.equal(total(tonight).dk, 104);
+  assert.equal(total(tomorrow).dk, -110);
+  assert.notEqual(total(tonight).dk, -110);
 }
 
 console.log("promoUnderdogPredict.test.js ok");

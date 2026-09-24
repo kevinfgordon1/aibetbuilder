@@ -7,6 +7,7 @@ import {
   applyUnderdogPredictFee,
   underdogCashOfferAmerican,
   applyUnderdogCashLegPrices,
+  stampUnderdogPredictionLegs,
 } from "./underdogPredictFee.js";
 
 const require = createRequire(import.meta.url);
@@ -48,5 +49,27 @@ assert.equal(applyUnderdogCashLegPrices([{ bookKey: "underdog_predict", dk: 252,
 assert.equal(cjs.applyUnderdogCashLegPrices([{ bookKey: "underdog_predict", dk: 252, predictionAmerican: "+245" }], true)[0].dk, 245);
 assert.notEqual(applyUnderdogCashLegPrices([{ bookKey: "underdog_predict", dk: 252, predictionAmerican: 245 }], true)[0].dk, 244);
 assert.notEqual(applyUnderdogCashLegPrices([{ bookKey: "underdog_predict", dk: 252, predictionAmerican: 245 }], true)[0].dk, 252);
+
+{
+  const tonight = "2026-09-24T02:11:00Z";
+  const tomorrow = "2026-09-25T02:11:00Z";
+  const rows = {
+    run_lines: [
+      { book: "underdog_predict", away: "San Diego Padres", home: "Los Angeles Dodgers", away_line: "+1.5", home_line: "-1.5", commence_time: tonight, home_prediction: -109 },
+      { book: "underdog_predict", away: "San Diego Padres", home: "Los Angeles Dodgers", away_line: "+1.5", home_line: "-1.5", commence_time: tomorrow, home_prediction: 122 },
+    ],
+  };
+  const legs = [
+    { bookKey: "underdog_predict", dk: -109, name: "Los Angeles Dodgers -1.5", game: "San Diego Padres @ Los Angeles Dodgers", commence_time: tonight },
+    { bookKey: "underdog_predict", dk: 122, name: "Los Angeles Dodgers -1.5", game: "San Diego Padres @ Los Angeles Dodgers", commence_time: tomorrow },
+  ];
+  const esmStamped = stampUnderdogPredictionLegs(legs, rows);
+  const cjsStamped = cjs.stampUnderdogPredictionLegs(legs, rows);
+  assert.equal(esmStamped[0].predictionAmerican, -109);
+  assert.equal(esmStamped[1].predictionAmerican, 122);
+  assert.equal(cjsStamped[0].predictionAmerican, esmStamped[0].predictionAmerican);
+  assert.equal(cjsStamped[1].predictionAmerican, esmStamped[1].predictionAmerican);
+  assert.notEqual(esmStamped[0].predictionAmerican, 122);
+}
 
 console.log("underdogPredictFee.test.js ok");
