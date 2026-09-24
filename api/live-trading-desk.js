@@ -1,7 +1,8 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
-// GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades
-// POST { op: "place", marketSlug, outcome, action, american, dollars }
+// GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, NFL slate
+// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId? }
 // POST { op: "cancel", orderId, marketSlug }
+// gameId, when sent, must be the NFL event whose moneyline slug is marketSlug.
 // Every call checks the signed-in Supabase user is OWNER_EMAIL. UI hide is not the gate.
 'use strict';
 
@@ -12,17 +13,20 @@
 // import() works from this CommonJS route.
 let access = null;
 let price = null;
+let games = null;
 let modsPromise = null;
 
 function ensureMods() {
-  if (access && price) return Promise.resolve();
+  if (access && price && games) return Promise.resolve();
   if (!modsPromise) {
     modsPromise = Promise.all([
       import('../src/comboAccess.js'),
       import('../src/liveDeskPrice.js'),
-    ]).then(([accessMod, priceMod]) => {
+      import('../src/liveDeskGames.js'),
+    ]).then(([accessMod, priceMod, gamesMod]) => {
       access = accessMod;
       price = priceMod;
+      games = gamesMod;
     }).catch((err) => {
       modsPromise = null;
       throw err;
@@ -41,9 +45,12 @@ const defaults = {
 };
 
 let deps = { ...defaults };
+let nflGamesCache = { at: 0, games: null };
+const NFL_GAMES_TTL_MS = 60 * 1000;
 
 function resetDeps() {
   deps = { ...defaults };
+  nflGamesCache = { at: 0, games: null };
 }
 
 function setDeps(patch) {
@@ -164,8 +171,28 @@ function decoratePositions(rows, markets) {
   });
 }
 
+async function loadNflGames(client) {
+  const now = Date.now();
+  if (nflGamesCache.games && now - nflGamesCache.at < NFL_GAMES_TTL_MS) {
+    return { games: nflGamesCache.games, gamesError: '' };
+  }
+  try {
+    const text = await client.getNflLeagueEventsText();
+    const list = games.gamesFromLeagueEventsText(text, now);
+    const safe = Array.isArray(list) ? list : [];
+    nflGamesCache = { at: now, games: safe };
+    return { games: safe, gamesError: '' };
+  } catch (_) {
+    if (nflGamesCache.games) return { games: nflGamesCache.games, gamesError: '' };
+    return {
+      games: [],
+      gamesError: 'NFL slate did not load. Positions are still here; pick a game once the slate returns.',
+    };
+  }
+}
+
 async function snapshot(client, slug) {
-  const [positionsRaw, ordersRaw, activityRaw] = await Promise.all([
+  const [positionsRaw, ordersRaw, activityRaw, slate] = await Promise.all([
     allPositions(client),
     client.listOpenOrders(),
     client.listActivities({
@@ -173,6 +200,7 @@ async function snapshot(client, slug) {
       sortOrder: 'SORT_ORDER_DESCENDING',
       types: 'ACTIVITY_TYPE_TRADE',
     }),
+    loadNflGames(client),
   ]);
   const positions = price.mapPositions(positionsRaw);
   const slugs = positions.map((p) => p.slug);
@@ -194,13 +222,20 @@ async function snapshot(client, slug) {
     orders: price.mapOpenOrders(ordersRaw, markets),
     activity: price.mapActivities(activityRaw, markets),
     market: slug ? (markets[slug] || null) : null,
+    games: asList(slate && slate.games),
+    marketTypes: games.DESK_MARKET_TYPES,
+    gamesError: (slate && typeof slate.gamesError === 'string') ? slate.gamesError : '',
   };
 }
 
 async function placeOrder(client, body) {
   const slug = String(body.marketSlug || body.slug || '').trim();
   if (!price.isMarketSlug(slug)) return { ok: false, status: 400, error: 'Enter a Polymarket US market slug.' };
+  const early = games.placeScopeError(body, slug);
+  if (early) return { ok: false, status: 400, error: early };
   const raw = await client.getMarketBySlug(slug);
+  const typed = games.placeScopeError(body, slug, raw);
+  if (typed) return { ok: false, status: 400, error: typed };
   const market = price.readMarketSides(raw);
   if (!market.ok) return { ok: false, status: 400, error: market.error };
   if (!market.tradable) return { ok: false, status: 400, error: 'That market is not open on Polymarket US.' };

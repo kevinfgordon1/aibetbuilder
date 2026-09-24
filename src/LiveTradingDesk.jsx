@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder } from "./liveDeskPrice";
+import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 
 let supabaseClient = null;
 function supabase() {
@@ -80,6 +81,18 @@ const field = {
   fontWeight: 700,
 };
 
+const pick = {
+  width: "100%",
+  boxSizing: "border-box",
+  background: "#12141a",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 8,
+  color: "#e8eaed",
+  padding: "9px 10px",
+  fontSize: 13,
+  fontWeight: 600,
+};
+
 class DeskErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -133,6 +146,9 @@ function LiveTradingDeskView({ user }) {
   const [board, setBoard] = useState(null);
   const [slug, setSlug] = useState("");
   const [slugDraft, setSlugDraft] = useState("");
+  const [gameId, setGameId] = useState("");
+  const [marketType, setMarketType] = useState("moneyline");
+  const [scopeNote, setScopeNote] = useState("");
   const [outcome, setOutcome] = useState("long");
   const [action, setAction] = useState("sell");
   const [american, setAmerican] = useState("");
@@ -209,26 +225,96 @@ function LiveTradingDeskView({ user }) {
     return () => clearInterval(timer);
   }, [user]);
 
-  function selectPosition(row) {
-    setSlug(row.slug);
-    setSlugDraft(row.slug);
-    setOutcome(row.side === "short" ? "short" : "long");
-    setAction("sell");
+  function applyMoneyline(nextSlug, { outcomeSide } = {}) {
+    const classified = classifyDeskMarket(nextSlug);
+    if (!classified.ok) {
+      setScopeNote(classified.message || "Pick an NFL game moneyline.");
+      return;
+    }
+    setGameId(classified.gameId);
+    setMarketType("moneyline");
+    setScopeNote("");
     setNotice("");
-    load(row.slug, { silent: true });
+    setSlug(classified.slug);
+    setSlugDraft(classified.slug);
+    if (outcomeSide) setOutcome(outcomeSide === "short" ? "short" : "long");
+    setAction("sell");
+    load(classified.slug, { silent: true });
+  }
+
+  function selectPosition(row) {
+    const next = row && typeof row.slug === "string" ? row.slug : "";
+    const classified = classifyDeskMarket(next);
+    if (!classified.ok) {
+      setScopeNote(classified.message);
+      return;
+    }
+    applyMoneyline(classified.slug, { outcomeSide: row.side });
+  }
+
+  function selectGame(nextId) {
+    const id = String(nextId || "");
+    setGameId(id);
+    setMarketType("moneyline");
+    setScopeNote("");
+    setNotice("");
+    if (!id) {
+      setSlug("");
+      setSlugDraft("");
+      load("", { silent: true });
+      return;
+    }
+    const game = games.find((g) => g && g.id === id);
+    const fromGame = game && Array.isArray(game.markets)
+      ? game.markets.find((m) => m && m.id === "moneyline" && typeof m.slug === "string")
+      : null;
+    const next = (fromGame && fromGame.slug) || moneylineSlugForGame(id);
+    if (!next) {
+      setSlug("");
+      setSlugDraft("");
+      setScopeNote("That game has no Polymarket US moneyline on this slate.");
+      load("", { silent: true });
+      return;
+    }
+    setSlug(next);
+    setSlugDraft(next);
+    load(next, { silent: true });
+  }
+
+  function selectMarketType(nextType) {
+    const typeId = String(nextType || "");
+    setMarketType(typeId);
+    setNotice("");
+    if (typeId === "moneyline" && gameId) {
+      selectGame(gameId);
+      return;
+    }
+    setSlug("");
+    setSlugDraft("");
+    setScopeNote(typeId === "moneyline"
+      ? "Pick an NFL game first."
+      : "Only Moneyline can be rested on this desk right now.");
+    load("", { silent: true });
   }
 
   function loadDraft(e) {
     if (e) e.preventDefault();
     const next = slugDraft.trim();
-    setSlug(next);
-    setNotice("");
-    load(next);
+    const classified = classifyDeskMarket(next);
+    if (!classified.ok) {
+      setScopeNote(classified.message || "Enter an NFL full-game moneyline slug.");
+      return;
+    }
+    applyMoneyline(classified.slug);
   }
 
   async function submit(e) {
     e.preventDefault();
     if (!market || !quote || !quote.ok || busy) return;
+    if (marketType !== "moneyline" || market.slug !== moneylineSlugForGame(gameId)) {
+      setScopeNote("Pick the NFL game moneyline before resting.");
+      return;
+    }
     setBusy("place");
     setNotice("");
     setError("");
@@ -244,6 +330,7 @@ function LiveTradingDeskView({ user }) {
         body: JSON.stringify({
           op: "place",
           marketSlug: market.slug,
+          gameId,
           outcome,
           action,
           american,
@@ -311,19 +398,36 @@ function LiveTradingDeskView({ user }) {
   const positions = Array.isArray(board && board.positions) ? board.positions : [];
   const orders = Array.isArray(board && board.orders) ? board.orders : [];
   const activity = Array.isArray(board && board.activity) ? board.activity : [];
+  const games = Array.isArray(board && board.games)
+    ? board.games.filter((g) => g && typeof g === "object" && typeof g.id === "string")
+    : [];
+  const marketTypes = (() => {
+    const raw = board && board.marketTypes;
+    const list = Array.isArray(raw)
+      ? raw.filter((t) => t && typeof t.id === "string" && typeof t.label === "string")
+      : [];
+    return list.length ? list : DESK_MARKET_TYPES;
+  })();
+  const expectedSlug = gameId ? moneylineSlugForGame(gameId) : "";
+  const scoped = !!(market && expectedSlug && market.slug === expectedSlug && marketType === "moneyline");
+  const gamesBad = !!(board && board.games != null && !Array.isArray(board.games));
   const boardShapeError = board && (
-    !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity)
+    !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity) || gamesBad
   ) ? "The desk returned an unexpected board." : "";
   const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
-  const canSubmit = !!(market && market.tradable && quote && quote.ok && !busy);
+  const canSubmit = !!(scoped && market.tradable && quote && quote.ok && !busy);
+  const knownGame = games.some((g) => g.id === gameId);
+  const slateNote = board && typeof board.gamesError === "string" ? board.gamesError : "";
 
   return (
     <div>
       <style>{`
         .desk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .desk-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        .desk-picks { display: grid; grid-template-columns: 1.5fr 0.7fr; gap: 8px; margin-top: 12; }
         @media (max-width: 900px) {
           .desk-grid { grid-template-columns: 1fr; }
+          .desk-picks { grid-template-columns: 1fr; }
         }
       `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
@@ -350,7 +454,7 @@ function LiveTradingDeskView({ user }) {
       <div className="desk-grid">
         <section style={card}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Open positions</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Click a position to hedge it. Long/short follows marketSides, not outcomes[] order.</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Every Polymarket US position stays listed. Click an NFL moneyline to hedge that game. A spread, total, or other board will not load.</div>
           {loading && !board && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>Loading Polymarket US…</div>}
           {!loading && positions.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>No open Polymarket US positions.</div>}
           <div className="desk-list">
@@ -387,15 +491,52 @@ function LiveTradingDeskView({ user }) {
 
         <section style={card}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Rest a limit</div>
-          <form onSubmit={loadDraft} style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <input
-              aria-label="Market slug"
-              value={slugDraft}
-              onChange={(e) => setSlugDraft(e.target.value)}
-              placeholder="market slug"
-              style={{ ...field, fontSize: 13, fontWeight: 600, flex: 1 }}
-            />
-            <button type="submit" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#e5e7eb", borderRadius: 8, padding: "0 12px", fontWeight: 700, cursor: "pointer" }}>Load</button>
+          <div className="desk-picks">
+            <div>
+              <label style={label} htmlFor="desk-game">Game</label>
+              <select id="desk-game" aria-label="NFL game" value={gameId} onChange={(e) => selectGame(e.target.value)} style={pick}>
+                <option value="">— NFL game —</option>
+                {gameId && !knownGame && <option value={gameId}>{fallbackGameLabel(gameId)}</option>}
+                {games.map((g) => (
+                  <option key={g.id} value={g.id}>{plain(g.label, fallbackGameLabel(g.id))}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={label} htmlFor="desk-market">Market</label>
+              <select
+                id="desk-market"
+                aria-label="Market"
+                value={marketTypes.some((t) => t.id === marketType) ? marketType : "moneyline"}
+                disabled={!gameId || marketTypes.length < 2}
+                title="Moneyline only for now. Spreads and totals can be added on this same control."
+                onChange={(e) => selectMarketType(e.target.value)}
+                style={{ ...pick, opacity: (!gameId || marketTypes.length < 2) ? 0.7 : 1 }}
+              >
+                {marketTypes.map((t) => (
+                  <option key={t.id} value={t.id}>{plain(t.label, t.id)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {(scopeNote || slateNote) && (
+            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.35)", color: "#fcd34d", fontSize: 13 }}>
+              {deskErrorText(scopeNote || slateNote, "Pick an NFL game.")}
+            </div>
+          )}
+          <form onSubmit={loadDraft} style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <label style={label} htmlFor="desk-slug">Advanced slug</label>
+              <input
+                id="desk-slug"
+                aria-label="Market slug"
+                value={slugDraft}
+                onChange={(e) => setSlugDraft(e.target.value)}
+                placeholder="NFL moneyline slug"
+                style={{ ...field, fontSize: 13, fontWeight: 600 }}
+              />
+            </div>
+            <button type="submit" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", color: "#e5e7eb", borderRadius: 8, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>Load</button>
           </form>
           {market && (
             <div style={{ marginTop: 10, fontSize: 13, color: "#cbd5e1" }}>
@@ -441,7 +582,7 @@ function LiveTradingDeskView({ user }) {
             </div>
 
             <div style={{ marginTop: 14, padding: "12px 12px", borderRadius: 10, background: "#0a0b0f", border: "1px solid rgba(255,255,255,0.08)", minHeight: 64 }}>
-              {!market && <div style={{ color: "#9ca3af", fontSize: 13 }}>Pick a position or load a market slug.</div>}
+              {!market && <div style={{ color: "#9ca3af", fontSize: 13 }}>Pick an NFL game. The rest uses that game’s moneyline.</div>}
               {market && !String(american).trim() && (
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>Type American odds. The desk snaps to the Polymarket tick in your favor and shows that price before you rest it.</div>
               )}

@@ -118,6 +118,26 @@ function createPolymarketUsClient({
     return res.json;
   }
 
+  async function getNflLeagueEventsText() {
+    const path = '/v2/leagues/nfl/events?limit=80&active=true&closed=false';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const res = await fetchImpl(gateway + path, {
+        method: 'GET',
+        headers: { accept: 'application/json' },
+        signal: ctrl.signal,
+      });
+      const text = await res.text();
+      if (res.status < 200 || res.status >= 300) {
+        throw httpError('GET', path, res.status, parseBody(text), text);
+      }
+      return text;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function getMarketBySlug(slug) {
     const path = '/v1/market/slug/' + encodeURIComponent(slug);
     try {
@@ -140,6 +160,7 @@ function createPolymarketUsClient({
   return {
     request,
     getMarketBySlug,
+    getNflLeagueEventsText,
     listPositions: (query) => okJson('GET', '/v1/portfolio/positions', { query }),
     listActivities: (query) => okJson('GET', '/v1/portfolio/activities', { query }),
     listOpenOrders: (query) => okJson('GET', '/v1/orders/open', { query }),
