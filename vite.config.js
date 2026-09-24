@@ -11,8 +11,14 @@ function betstampLocalApi() {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url || ''
         const path = url.split('?')[0]
-        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream' && path !== '/api/underdog-predict' && path !== '/api/polymarket-stream' && path !== '/api/kalshi-stream') return next()
+        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream' && path !== '/api/underdog-predict' && path !== '/api/polymarket-stream' && path !== '/api/kalshi-stream' && path !== '/api/live-trading-desk') return next()
         try {
+          if (path === '/api/live-trading-desk' && req.method === 'POST') {
+            const chunks = []
+            for await (const chunk of req) chunks.push(chunk)
+            const raw = Buffer.concat(chunks).toString('utf8')
+            try { req.body = raw ? JSON.parse(raw) : {} } catch { req.body = {} }
+          }
           const handler = path === '/api/betstamp-stream'
             ? require('./api/betstamp-stream.js')
             : path === '/api/underdog-predict'
@@ -21,7 +27,9 @@ function betstampLocalApi() {
                 ? require('./api/polymarket-stream.js')
                 : path === '/api/kalshi-stream'
                   ? require('./api/kalshi-stream.js')
-                  : require('./api/betstamp-markets.js')
+                  : path === '/api/live-trading-desk'
+                    ? require('./api/live-trading-desk.js')
+                    : require('./api/betstamp-markets.js')
           if (typeof res.status !== 'function') {
             res.status = (code) => {
               res.statusCode = code

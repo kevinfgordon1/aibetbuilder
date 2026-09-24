@@ -6,7 +6,8 @@
 // so a missing env var cannot lock him out.
 //
 // This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
-// Do not use this list to expand Miss tape / Unhedged — those stay OWNER_EMAIL.
+// Do not use this list to expand Miss tape / Unhedged / Live Trading Desk —
+// those stay OWNER_EMAIL.
 // New Odds Board is owner plus NEW_ODDS_BOARD_SHARED_EMAILS (Kenneth).
 // Underdog Predict (196) uses VITE_UNDERDOG_PREDICT_ALLOWLIST; Kevin and Kenneth
 // are always on so a missing env var cannot lock them out.
@@ -82,7 +83,7 @@ export function profileShowsComboPnl(user, { isOwner = false } = {}, env) {
   return !!(isOwner && canSeeComboLocks(user, env));
 }
 
-/** Miss tape / Unhedged stay owner-only — do not expand Combo Locks via these. */
+/** Miss tape / Unhedged / Live Trading Desk stay owner-only — not Combo Locks, not Kenneth. */
 export function canSeeOwnerTools(user) {
   if (!user || !user.email) return false;
   return String(user.email).trim().toLowerCase() === OWNER_EMAIL.toLowerCase();
@@ -170,6 +171,9 @@ export const APP_HASH_TABS = Object.freeze({
   miss: "missTape",
   "miss-tape": "missTape",
   unhedged: "unhedged",
+  liveDesk: "liveDesk",
+  "live-trading-desk": "liveDesk",
+  desk: "liveDesk",
   profile: "profile",
 });
 
@@ -216,6 +220,7 @@ export function serializeAppHash({ tab = null, lockId = null, cardId = null } = 
     return "#" + resolved + "/" + encodeURIComponent(String(cardId));
   }
   if (resolved === "missTape") return "#missTape";
+  if (resolved === "liveDesk") return "#live-trading-desk";
   if (resolved === "oddsBetstamp") return "#new-odds-board";
   return "#" + resolved;
 }
@@ -241,7 +246,7 @@ export function clearComboHash(hash) {
 
 /**
  * Gate a parsed hash for the current user. Combo / owner tabs (Miss tape,
- * Unhedged) and New Odds Board never land unless the user is allowed.
+ * Unhedged, Live Trading Desk) and New Odds Board never land unless the user is allowed.
  * Denied links fall back to Promo with a soft sign-in / no-access notice.
  */
 export function resolveAppHash(parsed, user) {
@@ -274,7 +279,7 @@ export function resolveAppHash(parsed, user) {
       allowed: false,
     };
   }
-  if (tab === "missTape" || tab === "unhedged") {
+  if (tab === "missTape" || tab === "unhedged" || tab === "liveDesk") {
     if (canSeeOwnerTools(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }

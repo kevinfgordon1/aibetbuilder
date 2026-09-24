@@ -13,6 +13,9 @@ const TAB_LABEL = {
   miss: 'AI Bet Builder',
   'miss-tape': 'AI Bet Builder',
   unhedged: 'AI Bet Builder',
+  liveDesk: 'AI Bet Builder',
+  'live-trading-desk': 'AI Bet Builder',
+  desk: 'AI Bet Builder',
   profile: 'Profile',
 };
 
@@ -46,7 +49,7 @@ const BOOK_LABEL = {
   betopenly: 'BetOpenly',
 };
 
-const GATED = new Set(['combo', 'missTape', 'miss', 'miss-tape', 'unhedged', 'profile']);
+const GATED = new Set(['combo', 'missTape', 'miss', 'miss-tape', 'unhedged', 'liveDesk', 'live-trading-desk', 'desk', 'profile']);
 
 function esc(s) {
   return String(s == null ? '' : s)
