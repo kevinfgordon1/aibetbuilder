@@ -143,6 +143,9 @@ assert.deepEqual(parseAppHash("#odds-betstamp"), { tab: "oddsBetstamp", lockId: 
 assert.deepEqual(parseAppHash("#betstamp"), { tab: "oddsBetstamp", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#new-odds-board"), { tab: "oddsBetstamp", lockId: null, cardId: null });
 assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#new-odds-board");
+assert.deepEqual(parseAppHash("#live-trading-desk"), { tab: "liveDesk", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#desk"), { tab: "liveDesk", lockId: null, cardId: null });
+assert.equal(serializeAppHash({ tab: "liveDesk" }), "#live-trading-desk");
 assert.deepEqual(parseAppHash("#promo"), { tab: "promo", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#ev/abc"), { tab: "ev", lockId: null, cardId: "abc" });
 assert.equal(serializeAppHash({ tab: "odds" }), "#odds");
@@ -171,6 +174,20 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.equal(signedOutBoard.tab, "promo");
   assert.equal(signedOutBoard.notice, "signin");
 }
+{
+  const kevinDesk = resolveAppHash(parseAppHash("#live-trading-desk"), kevin);
+  assert.equal(kevinDesk.tab, "liveDesk");
+  assert.equal(kevinDesk.allowed, true);
+  const kennethDesk = resolveAppHash(parseAppHash("#desk"), kenneth);
+  assert.equal(kennethDesk.tab, "promo");
+  assert.equal(kennethDesk.notice, "noaccess");
+  assert.equal(kennethDesk.allowed, false);
+  const strangerDesk = resolveAppHash(parseAppHash("#live-trading-desk"), stranger);
+  assert.equal(strangerDesk.tab, "promo");
+  assert.equal(strangerDesk.notice, "noaccess");
+  const signedOutDesk = resolveAppHash(parseAppHash("#live-trading-desk"), null);
+  assert.equal(signedOutDesk.notice, "signin");
+}
 
 {
   const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -191,6 +208,9 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, /activeTab === "combo" && canSeeComboLocks\(user\) && <ComboLocks/);
   assert.match(app, /activeTab === "missTape" && canSeeOwnerTools\(user\) && <ComboTape/);
   assert.match(app, /activeTab === "unhedged" && canSeeOwnerTools\(user\) && <UnhedgedTape/);
+  assert.match(app, /activeTab === "liveDesk" && canSeeOwnerTools\(user\) && \([\s\S]*?<LiveTradingDesk/);
+  assert.match(app, /href=\{tabHash\("liveDesk"\)\}/);
+  assert.match(app, />Live Trading Desk<\/a>/);
   assert.match(app, /href=\{tabHash\("combo"\)\}/);
   assert.match(app, /tabStyle\("combo"\)/);
   assert.match(app, />Combo Locks<\/a>/);

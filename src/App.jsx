@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
+import LiveTradingDesk from "./LiveTradingDesk";
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
@@ -1648,7 +1649,7 @@ export default function App() {
       setFocusLockId(null);
     }
     if (activeTab === "profile" && !user) setActiveTab("promo");
-    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) {
+    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) {
       setActiveTab("promo");
     }
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) {
@@ -1660,7 +1661,7 @@ export default function App() {
     if (authLoading) return;
     if (activeTab === "combo" && !canSeeComboLocks(user)) return;
     if (activeTab === "profile" && !user) return;
-    if ((activeTab === "missTape" || activeTab === "unhedged") && !canSeeOwnerTools(user)) return;
+    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
     const desired = serializeAppHash({
       tab: activeTab || "promo",
@@ -2464,6 +2465,7 @@ export default function App() {
           <>
             <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
             <a href={tabHash("unhedged")} style={tabStyle("unhedged")} onClick={onNavTabClick("unhedged")}>Unhedged RFQs</a>
+            <a href={tabHash("liveDesk")} style={tabStyle("liveDesk")} onClick={onNavTabClick("liveDesk")}>Live Trading Desk</a>
           </>
         )}
         {user && (
@@ -2484,14 +2486,14 @@ export default function App() {
         <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
       )}
 
-      {showFullPageSpinner && (
+      {showFullPageSpinner && activeTab !== "liveDesk" && (
         <div style={{ padding: "60px 32px", textAlign: "center", color: "#4b5563" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⏳</div>
           <div style={{ fontSize: 14 }}>Loading live odds...</div>
         </div>
       )}
 
-      {showOddsLoadError && (
+      {showOddsLoadError && activeTab !== "liveDesk" && (
         <div data-guard-allow="true" style={{ padding: "60px 32px", textAlign: "center", color: "#9ca3af" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 15, color: "#e8eaed", fontWeight: 600, marginBottom: 8 }}>Couldn’t load live odds</div>
@@ -2510,7 +2512,13 @@ export default function App() {
         </div>
       )}
 
-      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && (
+      {activeTab === "liveDesk" && canSeeOwnerTools(user) && (
+        <div style={{ padding: "20px 32px" }}>
+          <LiveTradingDesk user={user} />
+        </div>
+      )}
+
+      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && activeTab !== "liveDesk" && (
         <div style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
