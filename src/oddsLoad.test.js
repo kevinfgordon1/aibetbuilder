@@ -332,9 +332,9 @@ function fullPlan() {
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
     "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
-    "underdog_predict",
   ]);
   assert.equal(TRUSTED_BOOK_KEYS.has("pinnacle"), true);
+  assert.equal(TRUSTED_BOOK_KEYS.has("underdog_predict"), false);
   assert.equal(TRUSTED_BOOK_KEYS.has("betus"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("bookmaker"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("betcris"), false);

@@ -86,12 +86,11 @@ function futureGame() {
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
     "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
     "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
-    "underdog_predict",
   ]);
   assert.equal(chips.find((b) => b.key === "pinnacle")?.label, "Pinnacle");
   assert.equal(chips.find((b) => b.key === "betus")?.label, "BetUS");
   assert.equal(chips.find((b) => b.key === "bookmaker")?.label, "Bookmaker");
-  for (const key of ["betanysports", "betopenly", "lowvig", "betcris"]) {
+  for (const key of ["betanysports", "betopenly", "lowvig", "betcris", "underdog_predict"]) {
     assert.equal(TRUSTED_BOOK_KEYS.has(key), false);
     assert.ok(!chips.some((b) => b.key === key));
   }
@@ -256,6 +255,7 @@ function futureGame() {
   assert.ok(!evTrusted[1].includes("betcris"));
   assert.ok(!evTrusted[1].includes("betanysports"));
   assert.ok(!evTrusted[1].includes("betopenly"));
+  assert.ok(!evTrusted[1].includes("underdog_predict"));
   assert.match(ev, /this EV-scanner copy always uses the full TRUSTED_BOOK_KEYS set/);
   assert.equal(TRUSTED_BOOK_KEYS.has("hardrockbet"), true);
   assert.equal(TRUSTED_BOOK_KEYS.has("espnbet"), true);
