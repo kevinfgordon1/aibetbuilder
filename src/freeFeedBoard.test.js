@@ -335,6 +335,7 @@ assert.match(board, /polymarketStreamUrl/);
 assert.match(board, /kalshiStreamUrl/);
 assert.match(board, /novigStreamUrl/);
 assert.match(board, /fourcastersStreamUrl/);
+assert.match(board, /novig_needs_credentials/);
 assert.match(board, /fourcasters_needs_credentials/);
 assert.match(board, /fetchUnderdogPhone/);
 assert.match(board, /data-free-feeds="polymarket,kalshi,novig,fourcasters,underdog"/);

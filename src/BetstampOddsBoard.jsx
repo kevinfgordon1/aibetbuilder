@@ -925,6 +925,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     return catalog;
   }, [user?.id, user?.email, venuesOn, novigOn, fourcastersOn]);
   const seeUnderdog = books.some((b) => b.key === "underdog_predict");
+  const bookKeysKey = books.map((b) => b.key).join(",");
+  const knownBookKeysRef = useRef(bookKeysKey);
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set(books.map((b) => b.key)));
@@ -967,8 +969,23 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   };
 
   useEffect(() => {
-    setSelectedBooks(new Set(books.map((b) => b.key)));
-  }, [books]);
+    setSelectedBooks(new Set(bookKeysKey ? bookKeysKey.split(",") : []));
+  }, [user?.id, user?.email]);
+
+  // Novig and 4Casters join after the stream reports credentials. Select the
+  // new column without turning back on a book the user already unchecked.
+  useEffect(() => {
+    const nextKeys = bookKeysKey ? bookKeysKey.split(",") : [];
+    const known = new Set((knownBookKeysRef.current || "").split(",").filter(Boolean));
+    setSelectedBooks((selected) => {
+      const next = new Set();
+      for (const key of nextKeys) {
+        if (!known.has(key) || selected.has(key)) next.add(key);
+      }
+      return next;
+    });
+    knownBookKeysRef.current = bookKeysKey;
+  }, [bookKeysKey]);
 
   useEffect(() => {
     setBoardOrder(loadOddsBoardOrder(user));
@@ -1626,7 +1643,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-            Polymarket, Kalshi, and Underdog Predict. No sportsbook columns.
+            Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters appear when the server has credentials. No sportsbook columns.
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1920,17 +1937,17 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       </div>
       )}
       <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
-        Polymarket, Kalshi, and Underdog Predict only. No DraftKings, FanDuel, or other sportsbook columns.
-        {" · "}Moneyline from all three. Underdog also has the main spread and total; Polymarket and Kalshi cells stay blank there.
+        Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
+        {" · "}Moneyline from Polymarket, Kalshi, and Underdog. Novig and 4Casters also show moneyline when configured. Underdog, Novig, and 4Casters show the main spread and total; Polymarket and Kalshi cells stay blank there.
         {" · "}A blank — means this feed has no quote for that side. It is not an error.
-        {" · "}Pregame polls Underdog and keeps the Polymarket and Kalshi streams open. LIVE uses the same feeds, including in-game Underdog.
+        {" · "}Pregame polls Underdog and keeps the Polymarket, Kalshi, Novig, and 4Casters streams open. LIVE uses the same feeds, including in-game Underdog.
         {" · "}Click a game to see the main lines already on the board. These feeds do not publish an alternate ladder.
         {" · "}Kalshi, Polymarket, and Underdog Predict show implied win probability
         {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
         {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
         {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
         {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board}
-        {" · "}LIVE keeps the Polymarket and Kalshi streams open and refreshes Underdog on the phone interval. A feed with no price stays blank
+        {" · "}LIVE keeps the Polymarket, Kalshi, Novig, and 4Casters streams open and refreshes Underdog on the phone interval. A feed with no price stays blank
         {" · "}Best names the winning book in full with its logo; +N if tied
         {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). Same-price ticks, age-only heartbeats, and the isolated 1s age clock do not flash or remount the grid. OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
@@ -1981,7 +1998,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                   {openGame.away} @ {openGame.home}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
-                  Main lines on this board. Polymarket and Kalshi are moneyline; Underdog may also show the main spread and total. No alternate ladder.
+                  Main lines on this board. Polymarket and Kalshi are moneyline. Underdog, and Novig or 4Casters when configured, may also show the main spread and total. No alternate ladder.
                 </div>
               </div>
             </div>
