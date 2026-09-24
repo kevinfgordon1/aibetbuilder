@@ -4,6 +4,8 @@ import {
   firstPartyPmLiveFromEnv,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  novigStreamUrl,
+  fourcastersStreamUrl,
   matchGameForQuote,
   venueQuotesToMarkets,
 } from "./venueLive.js";
@@ -12,24 +14,30 @@ import { applyStreamMarkets, gamesFromBetstampSnapshot } from "./betstampNormali
 const prevLive = process.env.VITE_FIRST_PARTY_PM_LIVE;
 try {
   delete process.env.VITE_FIRST_PARTY_PM_LIVE;
-  assert.equal(firstPartyPmLiveEnabled(), false, "unset stays off outside production builds");
+  assert.equal(firstPartyPmLiveEnabled(), true, "unset stays on; =0 is the kill switch");
   process.env.VITE_FIRST_PARTY_PM_LIVE = "1";
   assert.equal(firstPartyPmLiveEnabled(), true);
   process.env.VITE_FIRST_PARTY_PM_LIVE = "0";
   assert.equal(firstPartyPmLiveEnabled(), false, "0 opts out");
+  process.env.VITE_FIRST_PARTY_PM_LIVE = "false";
+  assert.equal(firstPartyPmLiveEnabled(), false);
 } finally {
   if (prevLive == null) delete process.env.VITE_FIRST_PARTY_PM_LIVE;
   else process.env.VITE_FIRST_PARTY_PM_LIVE = prevLive;
 }
 
-assert.equal(firstPartyPmLiveFromEnv(undefined, false), false);
-assert.equal(firstPartyPmLiveFromEnv(undefined, true), true, "unset defaults on for production builds");
-assert.equal(firstPartyPmLiveFromEnv("", true), true);
-assert.equal(firstPartyPmLiveFromEnv("0", true), false);
-assert.equal(firstPartyPmLiveFromEnv("1", false), true);
-assert.equal(firstPartyPmLiveFromEnv("true", false), true);
+assert.equal(firstPartyPmLiveFromEnv(undefined), true);
+assert.equal(firstPartyPmLiveFromEnv(""), true);
+assert.equal(firstPartyPmLiveFromEnv("0"), false);
+assert.equal(firstPartyPmLiveFromEnv("false"), false);
+assert.equal(firstPartyPmLiveFromEnv("off"), false);
+assert.equal(firstPartyPmLiveFromEnv("1"), true);
+assert.equal(firstPartyPmLiveFromEnv("true"), true);
 assert.equal(polymarketStreamUrl({ league: "NFL" }), "/api/polymarket-stream?league=NFL");
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "/api/kalshi-stream?league=MLB");
+assert.equal(novigStreamUrl({ league: "NCAAF" }), "/api/novig-stream?league=NCAAF");
+assert.equal(fourcastersStreamUrl({ league: "NFL" }), "/api/4casters-stream?league=NFL");
+assert.equal(fourcastersStreamUrl({ league: "MLB" }), "/api/4casters-stream?league=MLB");
 
 const games = gamesFromBetstampSnapshot({
   markets: [{
