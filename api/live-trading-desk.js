@@ -5,6 +5,7 @@
 // POST { op: "protect-sweep" }  adverse-only cancel + re-rest. Owner session OR
 //      header x-admin-secret = ADMIN_API_SECRET (same secret as the admin alert route).
 //      The shared secret cannot place or cancel. Safe to call every 1–2s.
+// Combo Locks polls POST /api/desk-protect-sweep (header X-Desk-Protect-Secret).
 // gameId, when sent, must be the NFL event whose moneyline slug is marketSlug.
 // Every non-sweep call checks the signed-in Supabase user is OWNER_EMAIL. UI hide is not the gate.
 'use strict';
