@@ -310,6 +310,79 @@ export function quoteRestingOrder(input) {
   return { ...snap, ...sized, ok: true };
 }
 
+/**
+ * Reject a ticket that is not the American price and dollar size asked for.
+ * Cost may sit below the typed dollars by less than one lot (floor). It may
+ * not sit more than a cent above them, and the limit may not be more than
+ * one tick worse than the typed American.
+ */
+export function guardDeskOrder({ american, dollars, tick, minQty, quote } = {}) {
+  if (!quote || quote.ok === false) {
+    return { ok: false, error: (quote && quote.error) || "Price is not tradable." };
+  }
+  const asked = parseAmerican(american);
+  const fair = asked == null ? null : impliedProbFromAmerican(asked);
+  const fairMicro = fair == null ? null : toMicro(fair);
+  if (fairMicro == null) return { ok: false, error: "Enter American odds like −150 or +130." };
+  const act = normalizeAction(quote.action);
+  const side = normalizeOutcome(quote.outcome);
+  if (!act || !side) return { ok: false, error: "Pick a side and buy or sell." };
+  const tickMicro = Math.round(normalizeTick(tick != null ? tick : quote.tick) * MICRO);
+  const outcomeMicro = Math.round(Number(quote.outcomeMicro));
+  const yesMicro = Math.round(Number(quote.yesMicro));
+  if (!(outcomeMicro > 0 && outcomeMicro < MICRO) || !(yesMicro > 0 && yesMicro < MICRO)) {
+    return { ok: false, error: "Price is not tradable." };
+  }
+  const worseMicro = act === "sell" ? fairMicro - outcomeMicro : outcomeMicro - fairMicro;
+  if (worseMicro > tickMicro) {
+    return { ok: false, error: "Limit is more than one tick worse than the American price entered." };
+  }
+  const expectYes = side === "short" ? MICRO - outcomeMicro : outcomeMicro;
+  if (yesMicro !== expectYes) {
+    return { ok: false, error: "YES price does not match that side." };
+  }
+  const requested = typeof dollars === "number" ? dollars : Number(String(dollars == null ? "" : dollars).trim());
+  if (!Number.isFinite(requested) || requested <= 0) return { ok: false, error: "Enter a dollar size." };
+  if (requested > MAX_SIZE_DOLLARS + 1e-9) {
+    return { ok: false, error: "Size cap is $" + MAX_SIZE_DOLLARS + " on this desk." };
+  }
+  const cost = Number(quote.riskDollars);
+  if (!Number.isFinite(cost) || cost <= 0) return { ok: false, error: "Order cost could not be checked." };
+  if (cost > MAX_SIZE_DOLLARS + 0.01) {
+    return { ok: false, error: "Order cost is above the $" + MAX_SIZE_DOLLARS + " cap." };
+  }
+  if (cost > requested + 0.01) {
+    return {
+      ok: false,
+      error: "Order cost " + (quote.riskLabel || ("$" + cost.toFixed(2))) + " is more than a cent above the $" + requested + " entered.",
+    };
+  }
+  const step = positiveQty(minQty);
+  const riskMicro = act === "sell" ? (MICRO - outcomeMicro) : outcomeMicro;
+  const stepCost = (step * riskMicro) / MICRO;
+  const shortfall = requested - cost;
+  if (shortfall > Math.max(0.01, stepCost) + 1e-6) {
+    return {
+      ok: false,
+      error: "Order cost " + (quote.riskLabel || ("$" + cost.toFixed(2))) + " does not match the $" + requested + " entered.",
+    };
+  }
+  return { ok: true };
+}
+
+/** Quote, guard, and the Polymarket US body. The only place-path builder. */
+export function restingLimitOrder({ slug, american, outcome, action, tick, dollars, minQty } = {}) {
+  const quote = quoteRestingOrder({ american, outcome, action, tick, dollars, minQty });
+  if (!quote.ok) return quote;
+  const guard = guardDeskOrder({ american, dollars, tick, minQty, quote });
+  if (!guard.ok) return { ok: false, error: guard.error, quote };
+  const order = buildLimitOrder({ slug, quote });
+  if (order.price.value !== quote.yesPriceValue || Number(order.quantity) !== Number(quote.contracts)) {
+    return { ok: false, error: "Order ticket does not match the price and size entered.", quote };
+  }
+  return { ok: true, quote, order };
+}
+
 export function buildLimitOrder({ slug, quote }) {
   return {
     marketSlug: String(slug || "").trim(),
