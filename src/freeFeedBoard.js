@@ -273,11 +273,62 @@ export function boardPollShouldApply(lastSseAt, nowMs, freshMs = SSE_BEATS_POLL_
   return Number(nowMs) - Number(lastSseAt) >= freshMs;
 }
 
+export function quoteUpdatedMs(quote) {
+  if (!quote || quote.updated_at == null || quote.updated_at === "") return 0;
+  const parsed = Date.parse(String(quote.updated_at));
+  if (Number.isFinite(parsed)) return parsed;
+  const n = Number(quote.updated_at);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+// Apply incoming quotes only when they are strictly newer than the print
+// already held for that contract. A reconnect snapshot or JSON poll with an
+// older clock must not rewind the board. Untimed complete snapshots still
+// replace, so a full book with no clocks can drop a contract that left.
+export function mergeMonotonicQuotes(prev, incoming, { complete = false } = {}) {
+  const prior = (prev || []).filter(Boolean);
+  const next = (incoming || []).filter(Boolean);
+  if (!next.length) return prior;
+  const priorByKey = new Map(prior.map((q) => [quoteMergeKey(q), q]));
+  const timed = prior.some((q) => quoteUpdatedMs(q) > 0) || next.some((q) => quoteUpdatedMs(q) > 0);
+  if (complete && !timed) return next.slice();
+  const out = [];
+  const seen = new Set();
+  for (const quote of next) {
+    const key = quoteMergeKey(quote);
+    seen.add(key);
+    const old = priorByKey.get(key);
+    if (!old) {
+      out.push(quote);
+      continue;
+    }
+    const tNew = quoteUpdatedMs(quote);
+    const tOld = quoteUpdatedMs(old);
+    if (tOld && (!tNew || tNew <= tOld)) {
+      out.push(old);
+      continue;
+    }
+    out.push(quote);
+  }
+  for (const quote of prior) {
+    const key = quoteMergeKey(quote);
+    if (seen.has(key)) continue;
+    if (!complete) {
+      out.push(quote);
+      continue;
+    }
+    const tOld = quoteUpdatedMs(quote);
+    const snapshotMax = next.reduce((max, q) => Math.max(max, quoteUpdatedMs(q)), 0);
+    if (tOld && snapshotMax && tOld > snapshotMax) out.push(quote);
+  }
+  return out;
+}
+
 export function quotesAfterVenueEvent(prev, payload) {
   const quotes = payload && Array.isArray(payload.quotes) ? payload.quotes.filter(Boolean) : [];
   if (!quotes.length) return prev || [];
-  if (payload.complete === true) return quotes;
-  return mergeVenueQuotes(prev, quotes);
+  return mergeMonotonicQuotes(prev, quotes, { complete: payload.complete === true });
 }
 
 const TICK_FIELDS = [

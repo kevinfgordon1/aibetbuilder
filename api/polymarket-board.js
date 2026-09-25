@@ -3,9 +3,9 @@
 // GET /api/polymarket-board?league=NFL|NCAAF|MLB
 // JSON snapshot of Polymarket game-moneyline best asks. No API key.
 //
-// Gamma outcomePrices are cached for minutes. This route reads CLOB
-// /prices (side=BUY, the best ask) so an in-game board is not stuck on
-// the pregame print when the SSE socket only replayed one token.
+// Gamma outcomePrices are cached for minutes. This route reads CLOB /books
+// and uses the minimum ask with size > 0. asks[0] is the worst level (0.99),
+// not the price to buy.
 
 const { parseLeague, loadPolymarketQuotes } = require('../lib/venue-live');
 

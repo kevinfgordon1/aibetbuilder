@@ -80,23 +80,29 @@ class FakeWS {
     assert.equal(sub.custom_feature_enabled, true);
     ws.emit('message', {
       data: JSON.stringify({
-        event_type: 'best_bid_ask',
+        event_type: 'book',
         asset_id: 'tok-away',
-        best_ask: '0.285',
         timestamp: '1790102024649',
+        bids: [{ price: '0.01', size: '100472' }, { price: '0.27', size: '10' }],
+        asks: [{ price: '0.99', size: '122237' }, { price: '0.285', size: '12' }],
       }),
     });
     assert.ok(res.chunks.some((c) => c.includes('"odds":0.285') && c.includes('"source":"polymarket"') && c.includes('"mode":"ws"')));
     const again = res.chunks.length;
     ws.emit('message', {
       data: JSON.stringify({
-        event_type: 'best_bid_ask',
-        asset_id: 'tok-away',
-        best_ask: '0.285',
+        event_type: 'price_change',
         timestamp: '1790102024700',
+        price_changes: [{
+          asset_id: 'tok-away',
+          price: '0.27',
+          size: '11',
+          side: 'BUY',
+          best_ask: '0.15',
+        }],
       }),
     });
-    assert.equal(res.chunks.length, again, 'unchanged ask is not a tick');
+    assert.equal(res.chunks.length, again, 'a bid change and a stale best_ask are not a new ask');
     req.emit('close');
     await pending;
     assert.equal(ws.closed, true);
@@ -271,17 +277,25 @@ class FakeWS {
       pollMs: 20,
       maxPolls: 2,
       WebSocket: FakeWS,
-      fetchFn: async (url) => {
-        if (String(url).includes('/prices')) {
+      fetchFn: async (url, init) => {
+        if (String(url).includes('/books')) {
           posts += 1;
+          const posted = JSON.parse(init.body);
+          assert.equal(posted[0].token_id, 'tok-away');
           const ask = posts === 1 ? '0.34' : '0.36';
+          const book = (assetId, askPx, bidPx) => ({
+            asset_id: assetId,
+            timestamp: String(1_790_298_104_000 + posts * 1000),
+            bids: [{ price: '0.01', size: '100472' }, { price: bidPx, size: '10' }],
+            asks: [{ price: '0.99', size: '122237' }, { price: askPx, size: '12' }],
+          });
           return {
             ok: true,
             status: 200,
-            text: async () => JSON.stringify({
-              'tok-away': { BUY: ask },
-              'tok-home': { BUY: '0.67' },
-            }),
+            text: async () => JSON.stringify([
+              book('tok-away', ask, '0.33'),
+              book('tok-home', '0.67', '0.32'),
+            ]),
           };
         }
         return {
