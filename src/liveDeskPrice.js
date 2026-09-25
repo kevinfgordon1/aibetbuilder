@@ -476,6 +476,22 @@ export function allowCrossRequested(value) {
   return value === true || value === 1 || value === "1" || value === "true";
 }
 
+/**
+ * After a successful rest, empty the ticket and return the toggle to Buy
+ * with Bet Protect off. Game and team stay on the board, so they are not
+ * in this object. A rejected submit returns null and the form keeps the
+ * typed odds, size, and side.
+ */
+export function restFormAfterPlace(accepted) {
+  if (accepted !== true) return null;
+  return {
+    action: "buy",
+    american: "",
+    dollars: "",
+    protect: false,
+  };
+}
+
 function sideLabel(side) {
   const team = (side && side.team) || {};
   return team.name || team.safeName || team.displayAbbreviation || side.description || (side.long ? "Yes" : "No");

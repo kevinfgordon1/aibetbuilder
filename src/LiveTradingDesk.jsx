@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket } from "./liveDeskPrice";
+import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents } from "./liveDeskProtect";
 
@@ -264,6 +264,15 @@ function LiveTradingDeskView({ user }) {
     setArmedKey("");
   }
 
+  function clearRestForm() {
+    const reset = restFormAfterPlace(true);
+    setAmerican(reset.american);
+    setDollars(reset.dollars);
+    setAction(reset.action);
+    setProtect(reset.protect);
+    setArmedKey("");
+  }
+
   function applyMoneyline(nextSlug, { outcomeSide } = {}) {
     const classified = classifyDeskMarket(nextSlug);
     if (!classified.ok) {
@@ -400,7 +409,7 @@ function LiveTradingDeskView({ user }) {
       }
       const snap = data.snap || {};
       const protectSnap = snap.protect;
-      preferBuy();
+      clearRestForm();
       const rested = snap.line
         ? ("Rested. " + snap.line)
         : ("Rested " + (snap.action || action) + " " + (snap.outcomeName || "")
@@ -639,6 +648,7 @@ function LiveTradingDeskView({ user }) {
               min="1"
               max={MAX_SIZE_DOLLARS}
               step="1"
+              placeholder={String(DEFAULT_SIZE_DOLLARS)}
               value={dollars}
               onChange={(e) => setDollars(e.target.value)}
               style={field}
