@@ -10,6 +10,7 @@ import {
 } from "./betstampBooks.js";
 import { americanToImpliedProb, impliedProbToAmerican } from "./blendAskLadder.js";
 import { BETSTAMP_RECONCILE_CLEAR_GRACE_MS } from "./betstampLive.js";
+import { feeInclusiveAmerican, takerFeeRate } from "./venueTakerFee.js";
 
 export { isPmWinProbBook };
 
@@ -30,6 +31,15 @@ export function toAmericanOdds(odds) {
   if (n <= -100 || n >= 100) return Math.round(n);
   if (n > 1) return decimalToAmerican(n);
   return null;
+}
+
+// Polymarket and Kalshi contract asks (0–1) paint the taker-fee price.
+// Decimal or American quotes, and every other book, stay as printed.
+function venueBoardPrice(bookKey, odds) {
+  const n = Number(odds);
+  const rate = takerFeeRate(bookKey);
+  if (rate != null && n > 0 && n < 1) return feeInclusiveAmerican(n, rate);
+  return { american: toAmericanOdds(odds), rawAmerican: null };
 }
 
 // Same American → implied win-prob as OddsBoard.jsx / +EV (`impliedProb`).
@@ -116,8 +126,16 @@ export function compactAgeTone(updatedAt, now = Date.now()) {
   return "#6b7280";
 }
 
-// Quiet soft books (no SSE) whose newest Betstamp print is ≥2m old.
-export function staleLiveBookLabels(games, books, nowMs, { staleMs = 120_000 } = {}) {
+// A venue with no print for 10s is stale. Betstamp pushed inside about a second.
+export const VENUE_STALE_MS = 10_000;
+
+export function lineIsStale(updatedAt, nowMs, staleMs = VENUE_STALE_MS) {
+  if (updatedAt == null || !Number.isFinite(updatedAt)) return false;
+  const now = nowMs != null && Number.isFinite(nowMs) ? nowMs : Date.now();
+  return now - updatedAt >= staleMs;
+}
+
+export function staleLiveBookLabels(games, books, nowMs, { staleMs = VENUE_STALE_MS } = {}) {
   const now = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
   const out = [];
   for (const book of books || []) {
@@ -405,12 +423,15 @@ function clearSideQuote(game, bookKey, betType, side) {
     if (side === "away") {
       odds.ml_away = null;
       odds.ml_away_size = null;
+      delete odds.ml_away_raw;
     } else if (side === "home") {
       odds.ml_home = null;
       odds.ml_home_size = null;
+      delete odds.ml_home_raw;
     } else if (side === "draw") {
       odds.ml_draw = null;
       odds.ml_draw_size = null;
+      delete odds.ml_draw_raw;
     }
   } else if (betType === "spread") {
     if (side === "away") {
@@ -432,6 +453,7 @@ function clearSideQuote(game, bookKey, betType, side) {
     }
     if (odds.tot_over == null && odds.tot_under == null) odds.tot_line = null;
   }
+  delete odds[`${field}_raw`];
   if (game.bookLineUpdatedAt?.[bookKey]) {
     delete game.bookLineUpdatedAt[bookKey][field];
   }
@@ -996,10 +1018,14 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   // Held live print wins unless Betstamp sends a strictly newer updated_at.
   if (hasQuote && incomingMarketTs == null) return false;
   if (hasQuote && existingTs != null && incomingMarketTs <= existingTs) return false;
-  const price = toAmericanOdds(market.odds);
+  const priced = venueBoardPrice(bookKey, market.odds);
+  const price = priced.american;
   if (price == null) return false;
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();
   applySideToOdds(game.bookOdds[bookKey], betType, side, price, marketSize(market), marketLine(market));
+  const rawKey = `${field}_raw`;
+  if (priced.rawAmerican == null) delete game.bookOdds[bookKey][rawKey];
+  else game.bookOdds[bookKey][rawKey] = priced.rawAmerican;
   if (market.is_live) game.is_live = true;
   // Stamp ages from Betstamp's updated_at only. Receive-time fallbacks were
   // blocking later live ticks whose market stamp is older than "now".

@@ -1,7 +1,7 @@
 // Adverse Protect for the Live Trading Desk.
 //
 // Armed rests are watched against the market mid (YES best bid/ask average).
-// If the resting outcome price is through that mid by at least X cents, it is
+// If the resting outcome price is more than X cents through that mid, it is
 // a stale gift — cancel it. Then re-rest better (buy lower / sell higher) at
 // the new outcome mid ± Y cents, snapped with the same tick-in-his-favor rule
 // as Desk V1. A move away from the rest (no longer through mid) is parked.

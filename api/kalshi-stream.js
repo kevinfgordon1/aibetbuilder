@@ -5,8 +5,10 @@
 //
 // The public REST market payload includes yes_ask_dollars (keyless). With
 // KALSHI_KEY_ID + Kalshi_combo_key (same names as the Railway combo-worker)
-// this route also holds the ticker WebSocket and relays each yes-ask into
-// the SSE book. A missing key does not 503 the board: REST still polls
+// this route also holds the orderbook WebSocket. A snapshot builds the book.
+// Deltas apply only when seq is contiguous; a gap asks for get_snapshot.
+// Ticker frames do not override a book that has been snapshotted. A missing
+// key does not 503 the board: REST still polls
 // about every 1s, which stays inside a 2s repaint. The SSE response itself
 // ends before Vercel's 300s maxDuration so the browser reconnects.
 
