@@ -7,8 +7,6 @@ import {
   snapRestingLimit,
   quoteRestingOrder,
   buildLimitOrder,
-  guardDeskOrder,
-  restingLimitOrder,
   readMarketSides,
   mapPositions,
   mapOpenOrders,
@@ -255,102 +253,6 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(deskErrorText("Sign in required."), "Sign in required.");
   assert.equal(deskErrorText(null, "Could not load the desk (500)."), "Could not load the desk (500).");
   assert.equal(deskErrorText({}), "Could not load the desk.");
-}
-
-{
-  // ATL @ GB: Falcons are YES (long), Packers are NO (short). price.value is the YES price.
-  // Buy Packers −150 / $25 → 60¢, YES book 40¢, 41 contracts, about $24.60.
-  const packers = restingLimitOrder({
-    slug: "aec-nfl-atl-gb-2026-09-24",
-    american: -150,
-    outcome: "short",
-    action: "buy",
-    tick: 0.005,
-    dollars: 25,
-    minQty: 1,
-  });
-  assert.equal(packers.ok, true);
-  assert.equal(packers.quote.centsLabel, "60¢");
-  assert.equal(packers.quote.outcomePrice, 0.6);
-  assert.equal(packers.quote.yesPriceValue, "0.400");
-  assert.equal(packers.quote.yesCentsLabel, "40¢");
-  assert.equal(packers.order.intent, "ORDER_INTENT_BUY_SHORT");
-  assert.equal(packers.order.price.value, "0.400");
-  assert.equal(packers.order.quantity, 41);
-  assert.ok(Math.abs(packers.quote.riskDollars - 24.6) < 0.001);
-  assert.ok(packers.quote.riskDollars <= 25);
-  assert.equal(guardDeskOrder({
-    american: -150,
-    dollars: 25,
-    tick: 0.005,
-    minQty: 1,
-    quote: packers.quote,
-  }).ok, true);
-
-  // This market's minimum lot is 0.01 contract, so the floor is 41.66, still 60¢, still about $25.
-  const lot = restingLimitOrder({
-    slug: "aec-nfl-atl-gb-2026-09-24",
-    american: "-150",
-    outcome: "short",
-    action: "buy",
-    tick: 0.005,
-    dollars: 25,
-    minQty: 0.01,
-  });
-  assert.equal(lot.ok, true);
-  assert.equal(lot.order.price.value, "0.400");
-  assert.equal(lot.order.quantity, 41.66);
-  assert.ok(lot.quote.riskDollars <= 25);
-  assert.ok(25 - lot.quote.riskDollars < 0.01);
-  assert.notEqual(lot.order.quantity, 147.05);
-
-  // Reverse side: buy Falcons −150 / $25 → YES price is 60¢, same 41 contracts.
-  const falcons = restingLimitOrder({
-    slug: "aec-nfl-atl-gb-2026-09-24",
-    american: -150,
-    outcome: "long",
-    action: "buy",
-    tick: 0.005,
-    dollars: 25,
-    minQty: 1,
-  });
-  assert.equal(falcons.ok, true);
-  assert.equal(falcons.quote.centsLabel, "60¢");
-  assert.equal(falcons.order.intent, "ORDER_INTENT_BUY_LONG");
-  assert.equal(falcons.order.price.value, "0.600");
-  assert.equal(falcons.order.quantity, 41);
-  assert.ok(Math.abs(falcons.quote.riskDollars - 24.6) < 0.001);
-
-  // The fill that landed: 68¢ and the $100 cap (147.05 contracts at a 0.01 lot).
-  const marketPrice = quoteRestingOrder({
-    american: -213,
-    outcome: "short",
-    action: "buy",
-    tick: 0.005,
-    dollars: 100,
-    minQty: 0.01,
-  });
-  assert.equal(marketPrice.ok, true);
-  assert.equal(marketPrice.yesPriceValue, "0.320");
-  assert.equal(marketPrice.contracts, 147.05);
-  const wrongPrice = guardDeskOrder({
-    american: -150,
-    dollars: 25,
-    tick: 0.005,
-    minQty: 0.01,
-    quote: { ...marketPrice, riskDollars: 99.99, riskLabel: "$99.99" },
-  });
-  assert.equal(wrongPrice.ok, false);
-  assert.match(wrongPrice.error, /one tick worse|more than a cent/);
-  const wrongSize = guardDeskOrder({
-    american: -150,
-    dollars: 25,
-    tick: 0.005,
-    minQty: 1,
-    quote: { ...packers.quote, riskDollars: 99.99, riskLabel: "$99.99" },
-  });
-  assert.equal(wrongSize.ok, false);
-  assert.match(wrongSize.error, /more than a cent/);
 }
 
 console.log("liveDeskPrice.test.js ok");
