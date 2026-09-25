@@ -47,12 +47,13 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.ok(rejectedAt > 0 && clearedAt > rejectedAt, "a rejected rest keeps the typed ticket");
   assert.equal((submitFn.slice(0, rejectedAt).match(/clearRestForm\(\)/g) || []).length, 0);
   assert.equal((submitFn.match(/clearRestForm\(\)/g) || []).length, 1);
-  assert.match(ui, /function clearRestForm\(\) \{[\s\S]*setAmerican\(reset\.american\)/);
-  assert.match(ui, /setDollars\(reset\.dollars\)/);
-  assert.match(ui, /setAction\(reset\.action\)/);
-  assert.doesNotMatch(submitFn, /setSlug\(""\)/);
-  assert.doesNotMatch(submitFn, /setGameId\(""\)/);
-  assert.doesNotMatch(submitFn, /setOutcome\(/);
+  assert.match(ui, /function clearRestForm\(\) \{[\s\S]*setAction\(reset\.action\)/);
+  assert.match(ui, /setGameId\(reset\.gameId\)/);
+  assert.match(ui, /setSlug\(reset\.slug\)/);
+  assert.match(ui, /setOutcome\(reset\.outcome\)/);
+  assert.equal(submitFn.includes("Rested."), false);
+  assert.doesNotMatch(ui, /setAmerican\(reset\.american\)/);
+  assert.doesNotMatch(ui, /setDollars\(reset\.dollars\)/);
   assert.match(ui, /Moneyline only for now/);
 }
 

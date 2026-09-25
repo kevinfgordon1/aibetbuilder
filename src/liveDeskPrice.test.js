@@ -381,13 +381,17 @@ for (const tick of [0.001, 0.005]) {
   const next = restFormAfterPlace(true);
   assert.deepEqual(next, {
     action: "buy",
-    american: "",
-    dollars: "",
     protect: false,
+    gameId: "",
+    slug: "",
+    slugDraft: "",
+    outcome: "long",
+    marketType: "moneyline",
+    notice: "",
   });
-  assert.equal(Object.hasOwn(next, "outcome"), false);
-  assert.equal(Object.hasOwn(next, "gameId"), false);
-  assert.equal(Object.hasOwn(next, "slug"), false);
+  assert.equal(Object.hasOwn(next, "american"), false);
+  assert.equal(Object.hasOwn(next, "dollars"), false);
+  assert.equal(Object.hasOwn(next, "allowCross"), false);
 }
 
 console.log("liveDeskPrice.test.js ok");
