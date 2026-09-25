@@ -309,17 +309,6 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
   if (!ticket.ok) return { ok: false, status: 400, error: ticket.error };
   const quote = ticket.quote;
   const orderBody = ticket.order;
-  const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
-  const stray = price.strayOrderFields(body, orderBody);
-  if (stray) return { ok: false, status: 400, error: stray };
-  const shown = price.matchDisplayedOrder({
-    confirm: body.confirm,
-    quote,
-    order: orderBody,
-    team: outcomeName,
-    yesTeam: market.longName,
-  });
-  if (!shown.ok) return { ok: false, status: 400, error: shown.error };
   const protectReq = protectMath.readProtectRequest(body);
   if (!protectReq.ok) return { ok: false, status: 400, error: protectReq.error };
   if (protectReq.on && (!store || !store.configured)) {
@@ -331,6 +320,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
   }
   const created = await client.createOrder(orderBody);
   const orderId = created && (created.id || (created.order && created.order.id));
+  const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
   let armed = null;
   if (protectReq.on) {
     if (!orderId) {

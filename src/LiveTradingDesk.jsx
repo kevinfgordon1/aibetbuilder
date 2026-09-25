@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, hedgeTarget, orderConfirm, quoteRestingOrder } from "./liveDeskPrice";
+import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents } from "./liveDeskProtect";
 
@@ -154,7 +154,6 @@ function LiveTradingDeskView({ user }) {
   const [action, setAction] = useState("buy");
   const [american, setAmerican] = useState("");
   const [dollars, setDollars] = useState(String(DEFAULT_SIZE_DOLLARS));
-  const [hedge, setHedge] = useState(false);
   const [protect, setProtect] = useState(false);
   const [protectX, setProtectX] = useState(String(DEFAULT_PROTECT_X_CENTS));
   const [protectY, setProtectY] = useState(String(DEFAULT_PROTECT_Y_CENTS));
@@ -194,13 +193,13 @@ function LiveTradingDeskView({ user }) {
     [protectY],
   );
   const ticketKey = quote && quote.ok && market
-    ? [market.slug, outcome, action, quote.yesPriceValue, quote.contracts, quote.riskLabel, hedge ? "hedge" : "flat", protect ? "on" : "off"].join("|")
+    ? [market.slug, outcome, action, quote.yesPriceValue, quote.contracts, quote.riskLabel, protect ? "on" : "off"].join("|")
     : "";
   const confirmed = !!(ticketKey && armedTicket === ticketKey);
 
   useEffect(() => {
     setArmedTicket("");
-  }, [american, dollars, outcome, action, slug, hedge, protect]);
+  }, [american, dollars, outcome, action, slug, protect]);
 
   async function load(nextSlug, { silent } = {}) {
     const id = ++seq.current;
@@ -248,7 +247,7 @@ function LiveTradingDeskView({ user }) {
     return () => clearInterval(timer);
   }, [user]);
 
-  function applyMoneyline(nextSlug, { outcomeSide, action: nextAction } = {}) {
+  function applyMoneyline(nextSlug, { outcomeSide, hedge } = {}) {
     const classified = classifyDeskMarket(nextSlug);
     if (!classified.ok) {
       setScopeNote(classified.message || "Pick an NFL game moneyline.");
@@ -261,7 +260,7 @@ function LiveTradingDeskView({ user }) {
     setSlug(classified.slug);
     setSlugDraft(classified.slug);
     if (outcomeSide) setOutcome(outcomeSide === "short" ? "short" : "long");
-    if (nextAction) setAction(nextAction === "sell" ? "sell" : "buy");
+    if (hedge) setAction("sell");
     load(classified.slug, { silent: true });
   }
 
@@ -272,18 +271,11 @@ function LiveTradingDeskView({ user }) {
       setScopeNote(classified.message);
       return;
     }
-    const hedgePick = hedgeTarget({ positionSide: row && row.side });
-    if (!hedgePick.ok) {
-      setScopeNote(hedgePick.error);
-      return;
-    }
-    setHedge(true);
-    applyMoneyline(classified.slug, { outcomeSide: hedgePick.outcome, action: hedgePick.action });
+    applyMoneyline(classified.slug, { outcomeSide: row.side, hedge: true });
   }
 
   function selectGame(nextId) {
     const id = String(nextId || "");
-    setHedge(false);
     setGameId(id);
     setMarketType("moneyline");
     setScopeNote("");
@@ -335,7 +327,6 @@ function LiveTradingDeskView({ user }) {
       setScopeNote(classified.message || "Enter an NFL full-game moneyline slug.");
       return;
     }
-    setHedge(false);
     applyMoneyline(classified.slug);
   }
 
@@ -372,15 +363,6 @@ function LiveTradingDeskView({ user }) {
           action,
           american,
           dollars: Number(dollars),
-          confirm: orderConfirm({
-            quote,
-            order: {
-              price: { value: quote.yesPriceValue },
-              quantity: quote.contracts,
-            },
-            team: outcomeName,
-            yesTeam: market.longName,
-          }),
           protect,
           protectXCents: protect ? protectXParsed.cents : undefined,
           protectYCents: protect ? protectYParsed.cents : undefined,
@@ -602,10 +584,10 @@ function LiveTradingDeskView({ user }) {
           <form onSubmit={submit} style={{ marginTop: 14 }}>
             <div style={label}>Side</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Chip on={outcome === "long"} disabled={!market} onClick={() => { setHedge(false); setOutcome("long"); }}>{market ? plain(market.longName, "Yes") : "Yes"}</Chip>
-              <Chip on={outcome === "short"} disabled={!market} onClick={() => { setHedge(false); setOutcome("short"); }}>{market ? plain(market.shortName, "No") : "No"}</Chip>
-              <Chip on={action === "buy"} disabled={!market} onClick={() => { setHedge(false); setAction("buy"); }}>Buy</Chip>
-              <Chip on={action === "sell"} disabled={!market} onClick={() => { setHedge(false); setAction("sell"); }}>Sell</Chip>
+              <Chip on={outcome === "long"} disabled={!market} onClick={() => setOutcome("long")}>{market ? plain(market.longName, "Yes") : "Yes"}</Chip>
+              <Chip on={outcome === "short"} disabled={!market} onClick={() => setOutcome("short")}>{market ? plain(market.shortName, "No") : "No"}</Chip>
+              <Chip on={action === "buy"} disabled={!market} onClick={() => setAction("buy")}>Buy</Chip>
+              <Chip on={action === "sell"} disabled={!market} onClick={() => setAction("sell")}>Sell</Chip>
             </div>
 
             <label style={{ ...label, marginTop: 14 }} htmlFor="desk-american">American odds</label>
@@ -634,7 +616,7 @@ function LiveTradingDeskView({ user }) {
               style={field}
             />
             <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 8, lineHeight: 1.45 }}>
-              Small size, trial only. Hard cap ${MAX_SIZE_DOLLARS}. Default ${DEFAULT_SIZE_DOLLARS}. Contracts are these dollars divided by the price, floored to the lot. An open position's contract count is not the order size.
+              Small size, trial only. Hard cap ${MAX_SIZE_DOLLARS} so a fat-finger cannot rest a large order. Default ${DEFAULT_SIZE_DOLLARS}. Dollars are the most you can lose if this fills and settles against you.
             </div>
 
             <label htmlFor="desk-protect" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, fontSize: 14, fontWeight: 800, color: "#f8fafc" }}>
@@ -702,13 +684,8 @@ function LiveTradingDeskView({ user }) {
                     {confirmed ? "Sending this order" : "Order that will be sent"}
                   </div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, marginTop: 8 }}>
-                    {hedge ? "Hedge · Buy" : (action === "buy" ? "Buy" : "Sell")} {outcomeName}
+                    {action === "buy" ? "Buy" : "Sell"} {outcomeName}
                   </div>
-                  {hedge && (
-                    <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 6, lineHeight: 1.45 }}>
-                      Hedge buys the other team. The American price below is {outcomeName}'s price. It is not the position you clicked, and it is not the live book.
-                    </div>
-                  )}
                   <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: "4px 10px", marginTop: 8, fontSize: 13, color: "#e5e7eb" }}>
                     <div style={{ color: "#9ca3af" }}>American</div>
                     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{plain(quote.snappedAmericanLabel, "")}</div>

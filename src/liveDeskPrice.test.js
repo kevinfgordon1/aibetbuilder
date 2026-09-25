@@ -9,10 +9,6 @@ import {
   buildLimitOrder,
   guardDeskOrder,
   restingLimitOrder,
-  hedgeTarget,
-  orderConfirm,
-  matchDisplayedOrder,
-  strayOrderFields,
   readMarketSides,
   mapPositions,
   mapOpenOrders,
@@ -325,64 +321,36 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(falcons.order.quantity, 41);
   assert.ok(Math.abs(falcons.quote.riskDollars - 24.6) < 0.001);
 
-  // What the form showed (Packers −150 $25) is not the ATL 32¢ / 147.05 order.
-  const shown = orderConfirm({
-    quote: lot.quote,
-    order: lot.order,
-    team: "Green Bay Packers",
-    yesTeam: "Atlanta Falcons",
-  });
-  assert.equal(shown.team, "Green Bay Packers");
-  assert.equal(shown.americanLabel, "-150");
-  assert.equal(shown.centsLabel, "60¢");
-  assert.equal(shown.contracts, 41.66);
-  assert.equal(shown.yesPrice, "0.400");
-  assert.equal(matchDisplayedOrder({
-    confirm: shown,
-    quote: lot.quote,
-    order: lot.order,
-    team: "Green Bay Packers",
-    yesTeam: "Atlanta Falcons",
-  }).ok, true);
-
-  const bookOrder = {
-    price: { value: "0.320" },
-    quantity: 147.05,
-  };
-  const lied = matchDisplayedOrder({
-    confirm: shown,
-    quote: lot.quote,
-    order: bookOrder,
-    team: "Green Bay Packers",
-    yesTeam: "Atlanta Falcons",
-  });
-  assert.equal(lied.ok, false);
-  assert.match(lied.error, /contracts|YES price/);
-  assert.equal(strayOrderFields({ price: { value: "0.320" }, contracts: 147.05 }, lot.order), "A different limit was attached to this order. It was not sent.");
-
-  // Hedge of a Packers position is Buy Falcons, still at the typed −150 / $25.
-  const hedge = hedgeTarget({ positionSide: "short" });
-  assert.equal(hedge.outcome, "long");
-  assert.equal(hedge.action, "buy");
-  const hedged = restingLimitOrder({
-    slug: "aec-nfl-atl-gb-2026-09-24",
-    american: -150,
-    outcome: hedge.outcome,
-    action: hedge.action,
+  // The fill that landed: 68¢ and the $100 cap (147.05 contracts at a 0.01 lot).
+  const marketPrice = quoteRestingOrder({
+    american: -213,
+    outcome: "short",
+    action: "buy",
     tick: 0.005,
-    dollars: 25,
-    minQty: 1,
+    dollars: 100,
+    minQty: 0.01,
   });
-  assert.equal(hedged.ok, true);
-  assert.equal(hedged.quote.centsLabel, "60¢");
-  assert.equal(hedged.order.intent, "ORDER_INTENT_BUY_LONG");
-  assert.equal(hedged.order.price.value, "0.600");
-  assert.equal(hedged.order.quantity, 41);
-  assert.notEqual(hedged.order.price.value, "0.320");
-  assert.notEqual(hedged.order.quantity, 147.05);
-  const other = hedgeTarget({ positionSide: "long" });
-  assert.equal(other.outcome, "short");
-  assert.equal(other.action, "buy");
+  assert.equal(marketPrice.ok, true);
+  assert.equal(marketPrice.yesPriceValue, "0.320");
+  assert.equal(marketPrice.contracts, 147.05);
+  const wrongPrice = guardDeskOrder({
+    american: -150,
+    dollars: 25,
+    tick: 0.005,
+    minQty: 0.01,
+    quote: { ...marketPrice, riskDollars: 99.99, riskLabel: "$99.99" },
+  });
+  assert.equal(wrongPrice.ok, false);
+  assert.match(wrongPrice.error, /one tick worse|more than a cent/);
+  const wrongSize = guardDeskOrder({
+    american: -150,
+    dollars: 25,
+    tick: 0.005,
+    minQty: 1,
+    quote: { ...packers.quote, riskDollars: 99.99, riskLabel: "$99.99" },
+  });
+  assert.equal(wrongSize.ok, false);
+  assert.match(wrongSize.error, /more than a cent/);
 }
 
 console.log("liveDeskPrice.test.js ok");
