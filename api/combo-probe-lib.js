@@ -182,7 +182,8 @@ function normalizeLegs(legs) {
     const key = `${ticker.toUpperCase()}:${side}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ ticker, side, event_ticker: eventTicker });
+    const label = leg.label != null ? String(leg.label).trim().slice(0, 80) : '';
+    out.push(label ? { ticker, side, event_ticker: eventTicker, label } : { ticker, side, event_ticker: eventTicker });
   }
   if (out.length < 2) return { ok: false, error: 'Need at least 2 mapped legs (ticker + side)' };
   if (out.length > 12) return { ok: false, error: 'Too many legs (max 12)' };
@@ -246,16 +247,59 @@ function parseBody(req) {
   }
 }
 
+// Kalshi errors look like { error: { code, message, details? } }. Show the real
+// upstream text: message plus details (and the code when it adds information),
+// not just the generic "invalid parameters".
 function kalshiErrorText(body, fallback) {
   if (body && typeof body === 'object') {
-    const msg = body.message
-      || (body.error && (body.error.message || body.error.code))
-      || body.code
-      || body.details;
-    if (msg) return String(msg);
+    const err = body.error && typeof body.error === 'object' ? body.error : null;
+    const message = (err && err.message) || body.message || (typeof body.error === 'string' ? body.error : '') || '';
+    const code = (err && err.code) || body.code || '';
+    const details = (err && err.details) || body.details || '';
+    const parts = [];
+    if (message) parts.push(String(message));
+    else if (code) parts.push(String(code));
+    if (details && String(details) !== String(message)) parts.push(String(details));
+    if (parts.length) {
+      let text = parts.join(': ');
+      const norm = (v) => String(v).toLowerCase().replace(/[\s_]+/g, ' ').trim();
+      if (code && message && norm(code) !== norm(message)) text += ` (${code})`;
+      return text.slice(0, 400);
+    }
   }
   if (typeof body === 'string' && body.trim()) return body.trim().slice(0, 400);
   return fallback || 'Kalshi request failed';
+}
+
+function kalshiErrorCode(body) {
+  if (!body || typeof body !== 'object') return '';
+  return String((body.error && typeof body.error === 'object' && body.error.code) || body.code || '');
+}
+
+/** Event tickers a multivariate collection accepts (GET /multivariate_event_collections/{t}). */
+function collectionEventTickers(data) {
+  const c = data && (data.multivariate_contract || data.collection || data);
+  if (!c || typeof c !== 'object') return null;
+  const set = new Set();
+  (Array.isArray(c.associated_event_tickers) ? c.associated_event_tickers : []).forEach((t) => t && set.add(String(t).toUpperCase()));
+  (Array.isArray(c.associated_events) ? c.associated_events : []).forEach((e) => {
+    const t = e && (e.ticker || e.event_ticker);
+    if (t) set.add(String(t).toUpperCase());
+  });
+  return set.size ? set : null;
+}
+
+/** Legs whose event is not part of the combo collection (Kalshi rejects those). */
+function legsOutsideCollection(legs, eventTickers) {
+  if (!eventTickers) return [];
+  return (legs || []).filter((l) => !eventTickers.has(String(l.event_ticker || '').toUpperCase()));
+}
+
+function outsideCollectionError(badLegs, collection, upstream) {
+  const names = badLegs.map((l) => (l.label ? `${l.label} (${l.ticker})` : l.ticker)).join(', ');
+  const one = badLegs.length === 1;
+  return `Kalshi rejected this combo${upstream ? ` — "${upstream}"` : ''}. ${names} ${one ? 'is' : 'are'} not in Kalshi's combo collection ${collection}, `
+    + `so Kalshi doesn't offer combos on ${one ? 'that game' : 'those games'} right now. Remove or swap ${one ? 'that leg' : 'those legs'} and Probe again.`;
 }
 
 function marketTickerFromCreate(data) {
@@ -320,6 +364,10 @@ module.exports = {
   readBearer,
   parseBody,
   kalshiErrorText,
+  kalshiErrorCode,
+  collectionEventTickers,
+  legsOutsideCollection,
+  outsideCollectionError,
   marketTickerFromCreate,
   quotesFromList,
   rfqIdFromCreate,

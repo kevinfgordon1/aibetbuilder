@@ -137,3 +137,12 @@ assert.equal(h.isUpcomingGame('26SEP091545STLSF', Date.parse('2026-09-09T19:44:0
 assert.equal(h.isUpcomingGame('26SEP091545STLSF', Date.parse('2026-09-09T19:46:00Z')), false);
 
 console.log('kalshi-games tests passed');
+
+// combo eligibility flag (Kalshi rejects combos on events outside the collection)
+{
+  const marked = h.markComboEligible([{ key: '26SEP251905BALNYY' }, { key: '26SEP251940COLCWS' }], 'KXMLBGAME', new Set(['KXMLBGAME-26SEP251940COLCWS']));
+  assert.equal(marked[0].comboEligible, false);
+  assert.equal(marked[1].comboEligible, true);
+  assert.equal(h.markComboEligible([{ key: 'X' }], 'KXMLBGAME', null)[0].comboEligible, null);
+  console.log('kalshi-games combo eligibility tests passed');
+}

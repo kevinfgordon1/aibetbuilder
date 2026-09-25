@@ -86,6 +86,19 @@ async function kalshi(method, path, { body, creds } = {}) {
   return { status: res.status, ok: res.ok, ...parsed };
 }
 
+// Public (unsigned) collection read, used only to explain a rejected combo.
+async function fetchCollectionEvents(collection) {
+  try {
+    const url = `${apiBase()}/multivariate_event_collections/${encodeURIComponent(collection)}`;
+    const res = await deps.fetchImpl(url, { method: 'GET', headers: { accept: 'application/json' } });
+    if (!res || !res.ok) return null;
+    const parsed = await readJsonRes(res);
+    return lib.collectionEventTickers(parsed.data);
+  } catch (_) {
+    return null;
+  }
+}
+
 async function ensureComboMarket(legs, collection, creds) {
   const selected_markets = lib.selectedMarkets(legs);
   const path = `/multivariate_event_collections/${encodeURIComponent(collection)}`;
@@ -94,10 +107,28 @@ async function ensureComboMarket(legs, collection, creds) {
     body: { selected_markets },
   });
   if (!res.ok) {
+    const body = res.data || res.text;
+    const upstream = lib.kalshiErrorText(body, 'Could not create the combo market on Kalshi');
+    let error = upstream;
+    let outsideCollection;
+    // Kalshi answers a leg whose game is not in the combo collection with a bare
+    // 400 invalid_parameters. Name the offending leg(s) instead.
+    if (res.status === 400 || /invalid_parameters/i.test(lib.kalshiErrorCode(body))) {
+      const events = await fetchCollectionEvents(collection);
+      const bad = lib.legsOutsideCollection(legs, events);
+      if (bad.length) {
+        error = lib.outsideCollectionError(bad, collection, upstream);
+        outsideCollection = bad.map((l) => l.ticker);
+      } else if (!/kalshi/i.test(upstream)) {
+        error = `Kalshi rejected the combo market: ${upstream}`;
+      }
+    }
     return {
       ok: false,
       status: res.status >= 400 && res.status < 600 ? res.status : 502,
-      error: lib.kalshiErrorText(res.data || res.text, 'Could not create the combo market on Kalshi'),
+      error,
+      upstreamError: upstream,
+      outsideCollection,
     };
   }
   const marketTicker = lib.marketTickerFromCreate(res.data);
@@ -254,7 +285,13 @@ async function handler(req, res) {
       creds,
     });
     if (!result.ok) {
-      json(res, result.status || 502, { ok: false, error: result.error, marketTicker: result.marketTicker || null });
+      json(res, result.status || 502, {
+        ok: false,
+        error: result.error,
+        upstreamError: result.upstreamError || null,
+        outsideCollection: result.outsideCollection || null,
+        marketTicker: result.marketTicker || null,
+      });
       return;
     }
     json(res, 200, result);

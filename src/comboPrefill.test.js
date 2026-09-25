@@ -476,6 +476,8 @@ assert.ok(flat.some((g) => g.sport === "ncaaf" && g.key === "26SEP03MASSRUTG"));
 assert.ok(flat.some((g) => g.sport === "mlb" && g.key === "26AUG071905PHIATL"));
 assert.equal(formatGameOption(flat.find((g) => g.key === "26SEP09NESEA")), "NFL · New England vs Seattle · NE vs SEA (Sep 9)");
 assert.equal(formatGameOption(flat.find((g) => g.key === "26SEP03MASSRUTG")), "NCAAF · UMass vs Rutgers · MASS vs RUTG (Sep 3)");
+assert.equal(formatGameOption({ sportLabel: "MLB", title: "Baltimore vs New York Y", date: "BAL vs NYY (Sep 25)", comboEligible: false }), "MLB · Baltimore vs New York Y · BAL vs NYY (Sep 25) · no Kalshi combos");
+assert.equal(formatGameOption({ sportLabel: "MLB", title: "A vs B", comboEligible: null }), "MLB · A vs B");
 assert.equal(comboGameId(flat.find((g) => g.key === "26SEP09NESEA")), "nfl:26SEP09NESEA");
 
 // Kalshi NCAAF/NFL strike grids skip sportsbook mains. Snap SPR/TOT to a real
