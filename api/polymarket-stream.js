@@ -7,8 +7,8 @@
 // moneyline book. Odds are the minimum ask with size, maintained locally:
 // the book snapshot replaces the ladder (index 0 is the worst level) and
 // price_change deltas update one level, deleting it when size is 0. The SSE
-// response ends before Vercel's 300s cap
-// and the browser reconnects onto a fresh snapshot.
+// response ends before Vercel's 300s cap and the browser reconnects onto a
+// fresh snapshot.
 //
 // Quote odds are the best ask as a 0–1 probability (the board converts
 // that to American). Spreads and totals exist on Gamma but are alt ladders;
