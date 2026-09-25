@@ -301,6 +301,25 @@ async function post(headers, body) {
   assert.ok(qty * px <= 100 + 1e-6, 're-rest risk ' + (qty * px));
   assert.ok(qty < 500);
 
+  handler._setDeps({
+    runSweep: async () => {
+      throw new Error('relation "public.desk_protect_rests" does not exist');
+    },
+  });
+  const origError = console.error;
+  console.error = () => {};
+  const thrown = await post(
+    { 'X-Desk-Protect-Secret': SECRET },
+    { op: 'sweep', mode: 'adverse-only' },
+  );
+  console.error = origError;
+  assert.equal(thrown.statusCode, 502);
+  assert.equal(thrown.body.ok, false);
+  assert.equal(thrown.body.error, 'Sweep failed');
+  assert.match(thrown.body.detail, /desk_protect_rests" does not exist/, '502 carries the underlying message');
+  assert.equal(handler._sweepErrorDetail(null), 'unknown error');
+  assert.equal(handler._sweepErrorDetail(new Error('x'.repeat(500))).length, 300);
+
   if (prevAdmin == null) delete process.env.ADMIN_API_SECRET;
   else process.env.ADMIN_API_SECRET = prevAdmin;
   if (prevDedicated == null) delete process.env.DESK_PROTECT_SWEEP_SECRET;
