@@ -309,7 +309,7 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
   const ui = fs.readFileSync(path.join(here, "LiveTradingDesk.jsx"), "utf8");
   assert.match(ui, /Bet Protect <span[^>]*>\(adverse pickoff\)<\/span>/);
   assert.match(ui, /Bet Protect armed/);
-  assert.match(ui, /Bet Protect on/);
+  assert.doesNotMatch(ui, /Bet Protect on/);
   assert.match(ui, / · Bet Protect/);
   assert.match(ui, /Cancel if mid blows through your rest, then re-rest better\. Does not chase if the market runs away\./);
   assert.match(ui, /useState\(false\)/);

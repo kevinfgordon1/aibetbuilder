@@ -266,11 +266,17 @@ function LiveTradingDeskView({ user }) {
 
   function clearRestForm() {
     const reset = restFormAfterPlace(true);
-    setAmerican(reset.american);
-    setDollars(reset.dollars);
     setAction(reset.action);
     setProtect(reset.protect);
+    setGameId(reset.gameId);
+    setSlug(reset.slug);
+    setSlugDraft(reset.slugDraft);
+    setOutcome(reset.outcome);
+    setMarketType(reset.marketType);
+    setNotice(reset.notice);
+    setScopeNote("");
     setArmedKey("");
+    load("", { silent: true });
   }
 
   function applyMoneyline(nextSlug, { outcomeSide } = {}) {
@@ -407,21 +413,7 @@ function LiveTradingDeskView({ user }) {
         setError(deskErrorText(data && data.error, "Order was not accepted (" + res.status + ")."));
         return;
       }
-      const snap = data.snap || {};
-      const protectSnap = snap.protect;
       clearRestForm();
-      const rested = snap.line
-        ? ("Rested. " + snap.line)
-        : ("Rested " + (snap.action || action) + " " + (snap.outcomeName || "")
-          + " at " + (snap.americanLabel || "")
-          + (snap.contracts != null ? " · " + snap.contracts + " contracts" : "")
-          + (snap.riskLabel ? " · " + snap.riskLabel + " at risk" : ""));
-      setNotice(
-        rested + (protectSnap && protectSnap.on
-          ? ". Bet Protect on (more than " + protectSnap.xCents + "¢ through, re-rest " + protectSnap.yCents + "¢ better)"
-          : ".")
-      );
-      await load(market.slug, { silent: true });
     } catch (err) {
       setError(String(err && err.message || err));
     } finally {

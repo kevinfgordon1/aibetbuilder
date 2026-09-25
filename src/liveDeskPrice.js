@@ -477,18 +477,25 @@ export function allowCrossRequested(value) {
 }
 
 /**
- * After a successful rest, empty the ticket and return the toggle to Buy
- * with Bet Protect off. Game and team stay on the board, so they are not
- * in this object. A rejected submit returns null and the form keeps the
- * typed odds, size, and side.
+ * What a successful Live Trading Desk rest clears. Mirrors Combo Locks
+ * addParlay: the leg (game + market) selection is emptied, stake and odds
+ * stay, and there is no success toast. A rejected submit returns null so
+ * the typed ticket stays on screen with the error.
+ * Overrides, always: the Buy/Sell toggle returns to Buy, and Bet Protect
+ * turns off. American odds, dollar size, and Allow cross are omitted
+ * because Combo Locks keeps those inputs.
  */
 export function restFormAfterPlace(accepted) {
   if (accepted !== true) return null;
   return {
     action: "buy",
-    american: "",
-    dollars: "",
     protect: false,
+    gameId: "",
+    slug: "",
+    slugDraft: "",
+    outcome: "long",
+    marketType: "moneyline",
+    notice: "",
   };
 }
 
