@@ -911,7 +911,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer " + token },
         body: JSON.stringify({
-          legs: legs.map((l) => ({ ticker: l.ticker, side: l.side })),
+          legs: legs.map((l) => ({ ticker: l.ticker, side: l.side, label: l.label })),
           contracts,
           waitMs: 8000,
           collection: games.comboCollection,

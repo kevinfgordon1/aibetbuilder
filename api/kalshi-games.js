@@ -225,6 +225,25 @@ async function fetchSportGames(seriesByType) {
   return groupSportGames(eventsByType);
 }
 
+// Combo eligibility: Kalshi only builds combos from events listed in the combo
+// collection. A game whose moneyline event is missing there gets a 400
+// invalid_parameters on Probe / RFQ, so flag it (null = unknown, fail open).
+async function fetchCollectionEventSet(collection) {
+  const data = await fetchJson(`${KALSHI_BASE}/multivariate_event_collections/${encodeURIComponent(collection)}`);
+  const c = data && data.multivariate_contract;
+  if (!c) return null;
+  const set = new Set();
+  (c.associated_event_tickers || []).forEach((t) => t && set.add(String(t).toUpperCase()));
+  (c.associated_events || []).forEach((e) => e && e.ticker && set.add(String(e.ticker).toUpperCase()));
+  return set.size ? set : null;
+}
+function markComboEligible(games, sideSeries, eventSet) {
+  return (games || []).map((g) => ({
+    ...g,
+    comboEligible: eventSet ? eventSet.has(`${sideSeries}-${g.key}`.toUpperCase()) : null,
+  }));
+}
+
 async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
@@ -237,9 +256,10 @@ async function handler(req, res) {
       return;
     }
     const sports = {};
+    const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
       const games = await fetchSportGames(seriesByType);
-      sports[sport] = games.map((g) => ({ ...g, sport }));
+      sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports });
   } catch (e) {
@@ -251,5 +271,5 @@ module.exports = handler;
 module.exports.MARKET_SERIES = MARKET_SERIES;
 module.exports._helpers = {
   parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf, tickersFromReq, slimMarket,
-  groupSportGames, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
+  groupSportGames, markComboEligible, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };

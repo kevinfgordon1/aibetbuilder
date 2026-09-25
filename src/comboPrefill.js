@@ -287,7 +287,8 @@ export function flattenComboGames(sportsOrList) {
 export function formatGameOption(g) {
   const title = g.title || g.key || "Game";
   const date = g.date ? ` · ${g.date}` : "";
-  return `${g.sportLabel || "MLB"} · ${title}${date}`;
+  const noCombo = g.comboEligible === false ? " · no Kalshi combos" : "";
+  return `${g.sportLabel || "MLB"} · ${title}${date}${noCombo}`;
 }
 
 export function indexComboGames(sportsOrList) {

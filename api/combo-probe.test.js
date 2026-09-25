@@ -105,6 +105,37 @@ assert.equal(lib.eventTickerFromMarket('KXMLBTOTAL-26AUG071905PHIATL-9'), 'KXMLB
   assert.equal(ok.legs[0].event_ticker, 'KXNFLGAME-26SEP09NESEA');
   assert.equal(ok.legs[1].side, 'yes');
 }
+
+// ── upstream error text: show Kalshi message + details, not just the code ──
+assert.equal(lib.kalshiErrorText({ error: { code: 'invalid_parameters', message: 'invalid parameters' } }), 'invalid parameters');
+assert.equal(
+  lib.kalshiErrorText({ error: { code: 'invalid_parameters', message: 'invalid parameters', details: 'market not in collection' } }),
+  'invalid parameters: market not in collection',
+);
+assert.equal(lib.kalshiErrorText({ error: { code: 'rfq_too_big', message: 'contracts exceed max' } }), 'contracts exceed max (rfq_too_big)');
+assert.equal(lib.kalshiErrorText({ error: { code: 'bad_thing' } }), 'bad_thing');
+assert.equal(lib.kalshiErrorCode({ error: { code: 'invalid_parameters' } }), 'invalid_parameters');
+
+// ── legs outside the combo collection (Kalshi 400 invalid_parameters) ──
+{
+  const events = lib.collectionEventTickers({ multivariate_contract: {
+    associated_event_tickers: ['KXMLBGAME-26SEP251940COLCWS', 'KXMLBGAME-26SEP252140AZSD'],
+    associated_events: [{ ticker: 'KXMLBGAME-26SEP271520BALNYY' }],
+  } });
+  assert.ok(events.has('KXMLBGAME-26SEP271520BALNYY'));
+  const legs = lib.normalizeLegs([
+    { ticker: 'KXMLBGAME-26SEP251940COLCWS-COL', side: 'yes', label: 'Colorado' },
+    { ticker: 'KXMLBGAME-26SEP251905BALNYY-NYY', side: 'yes', label: 'New York Y' },
+    { ticker: 'KXMLBGAME-26SEP252140AZSD-AZ', side: 'yes' },
+  ]).legs;
+  const bad = lib.legsOutsideCollection(legs, events);
+  assert.deepEqual(bad.map((l) => l.ticker), ['KXMLBGAME-26SEP251905BALNYY-NYY']);
+  assert.deepEqual(lib.legsOutsideCollection(legs, null), []);
+  const msg = lib.outsideCollectionError(bad, 'KXMVESPORTSMULTIGAMEEXTENDED-R', 'invalid parameters');
+  assert.match(msg, /New York Y \(KXMLBGAME-26SEP251905BALNYY-NYY\)/);
+  assert.match(msg, /invalid parameters/);
+  assert.match(msg, /not in Kalshi's combo collection/);
+}
 assert.equal(lib.parseContracts(750), 750);
 assert.equal(lib.parseContracts(0), null);
 assert.equal(lib.parseContracts(-3), null);
@@ -400,6 +431,74 @@ function src() {
     }, res);
     assert.ok(calls2.some((c) => c.method === 'DELETE'));
     assert.equal(res.out.statusCode, 502);
+  }
+
+  // Leg not in the combo collection: Kalshi 400 invalid_parameters → name the leg, no RFQ.
+  const callsBad = [];
+  handler._setDeps({
+    requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+    kalshiCreds: probeCreds,
+    fetchImpl: async (url, opts) => {
+      const method = (opts && opts.method) || 'GET';
+      const path = new URL(url).pathname;
+      callsBad.push({ method, path });
+      const json = (status, body) => ({
+        status,
+        ok: status >= 200 && status < 300,
+        text: async () => JSON.stringify(body),
+        clone() { return this; },
+      });
+      if (method === 'POST' && path.includes('/multivariate_event_collections/')) {
+        return json(400, { error: { code: 'invalid_parameters', message: 'invalid parameters' } });
+      }
+      if (method === 'GET' && path.includes('/multivariate_event_collections/')) {
+        return json(200, { multivariate_contract: {
+          associated_event_tickers: ['KXMLBGAME-26SEP251940COLCWS', 'KXMLBGAME-26SEP252140AZSD'],
+        } });
+      }
+      throw new Error(`unexpected ${method} ${path}`);
+    },
+  });
+  {
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        legs: [
+          { ticker: 'KXMLBGAME-26SEP251940COLCWS-COL', side: 'yes', label: 'Colorado' },
+          { ticker: 'KXMLBGAME-26SEP251905BALNYY-NYY', side: 'yes', label: 'New York Y' },
+          { ticker: 'KXMLBGAME-26SEP252140AZSD-AZ', side: 'yes', label: 'Arizona' },
+        ],
+        contracts: 9835,
+      },
+    }, res);
+    assert.equal(res.out.statusCode, 400);
+    assert.equal(res.out.body.ok, false);
+    assert.match(res.out.body.error, /New York Y \(KXMLBGAME-26SEP251905BALNYY-NYY\)/);
+    assert.equal(res.out.body.upstreamError, 'invalid parameters');
+    assert.deepEqual(res.out.body.outsideCollection, ['KXMLBGAME-26SEP251905BALNYY-NYY']);
+    assert.ok(callsBad.every((c) => !c.path.endsWith('/communications/rfqs')), 'no RFQ on a rejected combo');
+  }
+
+  // Collection lookup fails → still surface the real upstream message.
+  handler._setDeps({
+    fetchImpl: async (url, opts) => {
+      const method = (opts && opts.method) || 'GET';
+      const json = (status, body) => ({ status, ok: false, text: async () => JSON.stringify(body), clone() { return this; } });
+      if (method === 'POST') return json(400, { error: { code: 'invalid_parameters', message: 'invalid parameters', details: 'bad leg' } });
+      throw new Error('collection down');
+    },
+  });
+  {
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { legs: [{ ticker: 'A-1', side: 'yes' }, { ticker: 'B-1', side: 'yes' }], contracts: 10 },
+    }, res);
+    assert.equal(res.out.statusCode, 400);
+    assert.match(res.out.body.error, /Kalshi rejected the combo market: invalid parameters: bad leg/);
   }
 
   handler._resetDeps();
