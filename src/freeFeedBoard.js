@@ -10,13 +10,18 @@
 
 import { canonicalTeamName, identifyTeam } from "./comboPrefill.js";
 import { FOURCASTERS_BOARD_BOOK, NOVIG_BOARD_BOOK, sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
-import { applyStreamMarkets, emptyBookOddsForBooks } from "./betstampNormalize.js";
+import { applyStreamMarkets, emptyBookOddsForBooks, lineUpdatedAt } from "./betstampNormalize.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 30_000;
+// JSON snapshot backstop. The SSE socket is the 1–2s path. Apply a poll
+// only when that book has been quiet, so a slower REST body cannot paint
+// over a ticker that just arrived.
+export const FREE_FEED_LIVE_BOARD_POLL_MS = 2_000;
+export const SSE_BEATS_POLL_MS = 2_000;
 // Open quote after kickoff, before we treat the game as finished.
 const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
 
@@ -240,6 +245,70 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
     });
   }
   return markets;
+}
+
+// JSON body from GET /api/kalshi-board. Null means "keep whatever the stream
+// already merged" — an empty or failed body must not wipe a book we have.
+function quotesFromBoardBody(body, book, bookId) {
+  const quotes = body && Array.isArray(body.quotes) ? body.quotes : null;
+  if (!quotes || !quotes.length) return null;
+  const kept = quotes.filter((q) => (
+    q && q.odds != null && (q.book === book || Number(q.book_id) === bookId)
+  ));
+  return kept.length ? kept : null;
+}
+
+export function kalshiQuotesFromBoardBody(body) {
+  return quotesFromBoardBody(body, "kalshi", 194);
+}
+
+export function polymarketQuotesFromBoardBody(body) {
+  return quotesFromBoardBody(body, "polymarket", 193);
+}
+
+// A complete SSE payload is the whole book. Merging a one-contract tick
+// into an older book is what left Atlanta stuck at the pregame price.
+export function boardPollShouldApply(lastSseAt, nowMs, freshMs = SSE_BEATS_POLL_MS) {
+  if (lastSseAt == null || !Number.isFinite(Number(lastSseAt)) || Number(lastSseAt) <= 0) return true;
+  return Number(nowMs) - Number(lastSseAt) >= freshMs;
+}
+
+export function quotesAfterVenueEvent(prev, payload) {
+  const quotes = payload && Array.isArray(payload.quotes) ? payload.quotes.filter(Boolean) : [];
+  if (!quotes.length) return prev || [];
+  if (payload.complete === true) return quotes;
+  return mergeVenueQuotes(prev, quotes);
+}
+
+const TICK_FIELDS = [
+  ["ml_away", "away"],
+  ["ml_home", "home"],
+];
+
+export function boardPriceTicks(prevGames, nextGames) {
+  const prevById = new Map((prevGames || []).map((game) => [String(game && game.id), game]));
+  const out = [];
+  for (const game of nextGames || []) {
+    if (!game) continue;
+    const prev = prevById.get(String(game.id));
+    for (const [bookKey, odds] of Object.entries(game.bookOdds || {})) {
+      if (!odds) continue;
+      for (const [field, side] of TICK_FIELDS) {
+        if (odds[field] == null) continue;
+        const before = prev && prev.bookOdds && prev.bookOdds[bookKey];
+        if (before && before[field] === odds[field]) continue;
+        const who = side === "away" ? (game.awayAbbr || game.away) : (game.homeAbbr || game.home);
+        out.push({
+          bookKey,
+          fixtureId: game.id,
+          label: `${who} ML`,
+          price: odds[field],
+          eventTime: lineUpdatedAt(game, bookKey, field),
+        });
+      }
+    }
+  }
+  return out;
 }
 
 export function quoteMergeKey(quote) {
