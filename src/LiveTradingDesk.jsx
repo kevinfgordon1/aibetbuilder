@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder } from "./liveDeskPrice";
+import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 
 let supabaseClient = null;
@@ -150,7 +150,9 @@ function LiveTradingDeskView({ user }) {
   const [marketType, setMarketType] = useState("moneyline");
   const [scopeNote, setScopeNote] = useState("");
   const [outcome, setOutcome] = useState("long");
-  const [action, setAction] = useState("sell");
+  const [action, setAction] = useState("buy");
+  const [allowCross, setAllowCross] = useState(false);
+  const [armedKey, setArmedKey] = useState("");
   const [american, setAmerican] = useState("");
   const [dollars, setDollars] = useState(String(DEFAULT_SIZE_DOLLARS));
   const [loading, setLoading] = useState(true);
@@ -178,6 +180,26 @@ function LiveTradingDeskView({ user }) {
       return { ok: false, error: deskErrorText(err, "Could not price that order.") };
     }
   }, [market, american, outcome, action, dollars]);
+
+  const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
+  const ticket = useMemo(() => {
+    if (!quote || !quote.ok || !outcomeName) return null;
+    return orderTicket(quote, outcomeName);
+  }, [quote, outcomeName]);
+  const cross = useMemo(() => {
+    if (!quote || !quote.ok) return null;
+    return crossBlock({
+      bookSide: quote.bookSide,
+      yesMicro: quote.yesMicro,
+      bestBid: market ? market.bestBid : null,
+      bestAsk: market ? market.bestAsk : null,
+    });
+  }, [quote, market]);
+  const wouldCross = !!(cross && !cross.ok);
+  const crossBlocked = wouldCross && !allowCross;
+  const ticketKey = ticket
+    ? [slug, ticket.outcome, ticket.action, ticket.yesPrice, String(ticket.contracts), ticket.cost, allowCross ? "1" : "0"].join("|")
+    : "";
 
   async function load(nextSlug, { silent } = {}) {
     const id = ++seq.current;
@@ -238,7 +260,6 @@ function LiveTradingDeskView({ user }) {
     setSlug(classified.slug);
     setSlugDraft(classified.slug);
     if (outcomeSide) setOutcome(outcomeSide === "short" ? "short" : "long");
-    setAction("sell");
     load(classified.slug, { silent: true });
   }
 
@@ -310,9 +331,19 @@ function LiveTradingDeskView({ user }) {
 
   async function submit(e) {
     e.preventDefault();
-    if (!market || !quote || !quote.ok || busy) return;
+    if (!market || !quote || !quote.ok || !ticket || busy) return;
     if (marketType !== "moneyline" || market.slug !== moneylineSlugForGame(gameId)) {
       setScopeNote("Pick the NFL game moneyline before resting.");
+      return;
+    }
+    if (crossBlocked) {
+      setError(deskErrorText(cross && cross.error, "That limit would cross the book."));
+      return;
+    }
+    if (armedKey !== ticketKey) {
+      setArmedKey(ticketKey);
+      setError("");
+      setNotice("Read the order, then press Send.");
       return;
     }
     setBusy("place");
@@ -335,6 +366,8 @@ function LiveTradingDeskView({ user }) {
           action,
           american,
           dollars: Number(dollars),
+          allowCross: allowCross === true,
+          confirm: ticket,
         }),
       });
       let data = null;
@@ -344,13 +377,14 @@ function LiveTradingDeskView({ user }) {
         return;
       }
       const snap = data.snap || {};
-      setNotice(
+      setArmedKey("");
+      setNotice(snap.line ? ("Rested. " + snap.line + ".") : (
         "Rested " + (snap.action || action) + " " + (snap.outcomeName || "")
         + " at " + (snap.americanLabel || "") + " (" + (snap.centsLabel || "") + ")"
         + (snap.contracts != null ? " · " + snap.contracts + " contracts" : "")
         + (snap.riskLabel ? " · " + snap.riskLabel + " at risk" : "")
         + "."
-      );
+      ));
       await load(market.slug, { silent: true });
     } catch (err) {
       setError(String(err && err.message || err));
@@ -414,8 +448,7 @@ function LiveTradingDeskView({ user }) {
   const boardShapeError = board && (
     !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity) || gamesBad
   ) ? "The desk returned an unexpected board." : "";
-  const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
-  const canSubmit = !!(scoped && market.tradable && quote && quote.ok && !busy);
+  const canSubmit = !!(scoped && market.tradable && quote && quote.ok && ticket && !crossBlocked && !busy);
   const knownGame = games.some((g) => g.id === gameId);
   const slateNote = board && typeof board.gamesError === "string" ? board.gamesError : "";
 
@@ -589,22 +622,33 @@ function LiveTradingDeskView({ user }) {
               {market && String(american).trim() && quote && !quote.ok && (
                 <div style={{ color: "#fecaca", fontSize: 13 }}>{deskErrorText(quote.error, "That price cannot be rested.")}</div>
               )}
-              {market && quote && quote.ok && (
+              {market && quote && quote.ok && ticket && (
                 <div>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 20, fontWeight: 800 }}>
-                    {action === "buy" ? "Buy" : "Sell"} {outcomeName} {plain(quote.snappedAmericanLabel, "")}
-                  </div>
-                  <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 6 }}>
-                    {plain(quote.centsLabel, "")} on {outcomeName}
-                    {outcome === "short" ? " · YES book " + plain(quote.yesCentsLabel, "") : ""}
-                    {" · "}{plain(quote.contracts, "—")} contracts · {plain(quote.riskLabel, "")} at risk
+                  <div id="desk-order-line" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 800, lineHeight: 1.45 }}>
+                    {ticket.line}
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-                    Buys floor the tick (you pay less). Sells ceil the tick (you receive more). Never a worse American than you typed. Good-till-cancel limit — a price through the market can fill now; the rest stays until you cancel.
+                    Buys floor the tick (you pay less). Sells ceil the tick (you receive more). A rest does not take liquidity unless Allow cross is checked.
                   </div>
+                  {crossBlocked && (
+                    <div style={{ color: "#fecaca", fontSize: 13, marginTop: 8 }}>{deskErrorText(cross && cross.error, "That limit would cross the book.")}</div>
+                  )}
+                  {allowCross && wouldCross && (
+                    <div style={{ color: "#fcd34d", fontSize: 13, marginTop: 8 }}>Allow cross is on. This limit can fill immediately.</div>
+                  )}
                 </div>
               )}
             </div>
+
+            <label htmlFor="desk-allow-cross" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, fontSize: 13, color: "#e5e7eb", cursor: "pointer" }}>
+              <input
+                id="desk-allow-cross"
+                type="checkbox"
+                checked={allowCross}
+                onChange={(e) => setAllowCross(e.target.checked)}
+              />
+              Allow cross
+            </label>
 
             <button
               type="submit"
@@ -621,7 +665,7 @@ function LiveTradingDeskView({ user }) {
                 fontWeight: 800,
                 cursor: canSubmit ? "pointer" : "not-allowed",
               }}
-            >{busy === "place" ? "Resting…" : (quote && quote.ok ? "Rest limit at " + quote.snappedAmericanLabel : "Rest limit")}</button>
+            >{busy === "place" ? "Resting…" : (armedKey === ticketKey && ticket ? "Send this order" : (ticket ? "Confirm this rest" : "Rest limit"))}</button>
           </form>
         </section>
 
