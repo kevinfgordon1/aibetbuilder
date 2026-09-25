@@ -14,6 +14,7 @@ import {
   restFormAfterPlace,
   readMarketSides,
   mapPositions,
+  positionView,
   mapOpenOrders,
   mapActivities,
   deskErrorText,
@@ -208,6 +209,189 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(rows[0].side, "long");
   assert.equal(rows[0].net, 12);
   assert.equal(rows[0].title, "Los Angeles vs. Tennessee");
+}
+
+const GB_SLUG = "aec-nfl-atl-gb-2026-09-24";
+// Live market: title/outcome say Packers, settlement long is Falcons (long: true, pays 1).
+const GB_MARKET = {
+  question: "Atlanta Falcons vs. Green Bay Packers",
+  title: "Packers",
+  slug: GB_SLUG,
+  outcomes: "[\"Packers\",\"Falcons\"]",
+  orderPriceMinTickSize: 0.001,
+  active: true,
+  closed: false,
+  marketSides: [
+    { long: true, description: "Falcons", price: "1", team: { name: "Atlanta Falcons", displayAbbreviation: "ATL" } },
+    { long: false, description: "Packers", price: "0", team: { name: "Green Bay Packers", displayAbbreviation: "GB" } },
+  ],
+};
+
+{
+  // Negative instrument qty is a Packers hold, not a Falcons hold and not a short of the title.
+  const sides = readMarketSides(GB_MARKET);
+  assert.equal(sides.longName, "Atlanta Falcons");
+  assert.equal(sides.shortName, "Green Bay Packers");
+  assert.notEqual(sides.longName, "Packers");
+  const row = mapPositions({
+    positions: {
+      [GB_SLUG]: {
+        netPositionDecimal: "-1081",
+        cost: { value: "432.40", currency: "USD" },
+        marketMetadata: { slug: GB_SLUG, title: "Packers", outcome: "Packers" },
+      },
+    },
+  })[0];
+  const view = positionView(row, sides);
+  assert.equal(view.team, "Green Bay Packers");
+  assert.notEqual(view.team, "Atlanta Falcons");
+  assert.notEqual(view.team, "Packers");
+  assert.equal(view.net, 1081);
+  assert.equal(view.side, "short");
+  assert.equal(view.instrumentNet, -1081);
+  assert.equal(view.avgAmerican, "+150");
+  assert.equal(view.cost, 432.4);
+  assert.equal(view.title, "Atlanta Falcons vs. Green Bay Packers");
+  assert.doesNotMatch(view.avgAmerican, /¢/);
+}
+
+{
+  // Normal case: positive qty is the long team even when the position title names the other team.
+  const sides = readMarketSides({
+    question: "Los Angeles vs. Tennessee",
+    title: "Titans",
+    slug: "aec-nfl-lac-ten-2025-11-02",
+    outcomes: "[\"Titans\",\"Chargers\"]",
+    marketSides: [
+      { long: false, description: "Titans", team: { name: "Tennessee Titans" } },
+      { long: true, description: "Chargers", team: { name: "Los Angeles Chargers" } },
+    ],
+  });
+  const row = mapPositions({
+    positions: {
+      "aec-nfl-lac-ten-2025-11-02": {
+        netPositionDecimal: "12",
+        qtyBoughtDecimal: "12",
+        qtySoldDecimal: "0",
+        cost: { value: "7.20", currency: "USD" },
+        marketMetadata: { slug: "aec-nfl-lac-ten-2025-11-02", title: "Titans", outcome: "Titans" },
+      },
+    },
+  })[0];
+  const view = positionView(row, sides);
+  assert.equal(view.team, "Los Angeles Chargers");
+  assert.notEqual(view.team, "Titans");
+  assert.notEqual(view.team, "Tennessee Titans");
+  assert.equal(view.net, 12);
+  assert.equal(view.side, "long");
+  assert.equal(view.avgAmerican, "-150");
+  assert.equal(view.title, "Los Angeles vs. Tennessee");
+}
+
+{
+  // Stale netPosition of the first fills, later legs on the same slug. Net them.
+  const sides = readMarketSides(GB_MARKET);
+  const rows = mapPositions({
+    positions: [
+      {
+        netPositionDecimal: "-197",
+        cost: { value: "80.00", currency: "USD" },
+        marketMetadata: { slug: GB_SLUG, title: "Packers", outcome: "Packers" },
+      },
+      {
+        netPositionDecimal: "-884",
+        cost: { value: "352.40", currency: "USD" },
+        marketMetadata: { slug: GB_SLUG, title: "Packers", outcome: "Packers" },
+      },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  const view = positionView(rows[0], sides);
+  assert.equal(view.team, "Green Bay Packers");
+  assert.equal(view.net, 1081);
+  assert.equal(view.avgAmerican, "+150");
+}
+
+{
+  // Position snapshot stuck after the first four GB buys (~197). qtySold and
+  // the later BUY_SHORT fills are the rest of the 1,081.
+  const sides = readMarketSides(GB_MARKET);
+  const fromFlow = positionView(mapPositions({
+    positions: {
+      [GB_SLUG]: {
+        netPositionDecimal: "-197",
+        qtyBoughtDecimal: "0",
+        qtySoldDecimal: "1081",
+        cost: { value: "432.40", currency: "USD" },
+        marketMetadata: { slug: GB_SLUG, title: "Packers", outcome: "Packers" },
+      },
+    },
+  })[0], sides);
+  assert.equal(fromFlow.team, "Green Bay Packers");
+  assert.equal(fromFlow.net, 1081);
+  assert.notEqual(fromFlow.net, 197);
+
+  const fills = [
+    { id: "f1", marketSlug: GB_SLUG, intent: "ORDER_INTENT_BUY_SHORT", qtyDecimal: "197", price: { value: "0.600", currency: "USD" }, createTime: "2026-09-24T18:00:00Z" },
+    { id: "f2", marketSlug: GB_SLUG, intent: "ORDER_INTENT_BUY_SHORT", qtyDecimal: "210.5", price: { value: "0.677", currency: "USD" }, createTime: "2026-09-24T18:10:00Z" },
+    { id: "f3", marketSlug: GB_SLUG, intent: "ORDER_INTENT_BUY_SHORT", qtyDecimal: "327.9", price: { value: "0.766", currency: "USD" }, createTime: "2026-09-24T18:20:00Z" },
+    { id: "f4", marketSlug: GB_SLUG, intent: "ORDER_INTENT_BUY_SHORT", qtyDecimal: "344.8", price: { value: "0.710", currency: "USD" }, createTime: "2026-09-24T18:30:00Z" },
+  ];
+  const rows = mapPositions({
+    positions: {
+      [GB_SLUG]: {
+        netPositionDecimal: "-197",
+        cost: { value: "50.00", currency: "USD" },
+        marketMetadata: { slug: GB_SLUG, title: "Packers", outcome: "Packers" },
+      },
+    },
+  }, { fills });
+  assert.equal(rows.length, 1);
+  const view = positionView(rows[0], sides);
+  const expected = 197 + 210.5 + 327.9 + 344.8;
+  assert.equal(view.team, "Green Bay Packers");
+  assert.ok(Math.abs(view.net - expected) < 0.02, "net " + view.net + " vs " + expected);
+  assert.ok(view.net > 1000);
+  assert.notEqual(view.net, 197);
+  assert.match(view.avgAmerican, /^\+\d+$/);
+  assert.doesNotMatch(view.avgAmerican, /¢/);
+  assert.ok(view.cost > 50, "fill cost replaces the stale $50 snapshot");
+}
+
+{
+  // A flat snapshot stays flat. An opposite-side lifetime total does not flip a real long.
+  const flat = mapPositions({
+    positions: {
+      [GB_SLUG]: {
+        netPositionDecimal: "0",
+        qtyBoughtDecimal: "0",
+        qtySoldDecimal: "1081",
+        marketMetadata: { slug: GB_SLUG, title: "Packers" },
+      },
+    },
+  });
+  assert.equal(flat.length, 0);
+  const held = mapPositions({
+    positions: {
+      "aec-nfl-lac-ten-2025-11-02": {
+        netPositionDecimal: "12",
+        qtyBoughtDecimal: "12",
+        qtySoldDecimal: "500",
+        marketMetadata: { slug: "aec-nfl-lac-ten-2025-11-02", title: "Chargers" },
+      },
+    },
+  }, {
+    fills: [{
+      id: "opp",
+      marketSlug: "aec-nfl-lac-ten-2025-11-02",
+      intent: "ORDER_INTENT_BUY_SHORT",
+      qtyDecimal: "400",
+      price: { value: "0.40", currency: "USD" },
+    }],
+  });
+  assert.equal(held.length, 1);
+  assert.equal(held[0].instrumentNet, 12);
+  assert.equal(held[0].side, "long");
 }
 
 {

@@ -165,24 +165,68 @@ function upstreamMessage(err, fallback) {
   return auth.redactText(msg || fallback || 'Polymarket US request failed');
 }
 
+const PAGE_CAP = 40;
+
+function nextCursor(page, cursor) {
+  if (!page || page.eof) return '';
+  const next = page.nextCursor || page.next_cursor || '';
+  if (!next || next === cursor) return '';
+  return String(next);
+}
+
+// Keep every leg. A later page can repeat a map key with a fresher snapshot
+// (last write wins for that key). Distinct keys that share a market slug are
+// separate legs and are summed later. Arrays are fill-sized legs, not a map.
 async function allPositions(client) {
-  const merged = {};
+  const byKey = new Map();
   let cursor = '';
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < PAGE_CAP; i++) {
     const page = await client.listPositions({ limit: 100, cursor: cursor || undefined });
-    const positions = (page && page.positions) || {};
-    if (positions && typeof positions === 'object' && !Array.isArray(positions)) {
-      Object.assign(merged, positions);
+    const positions = page && page.positions;
+    if (Array.isArray(positions)) {
+      positions.forEach((pos, idx) => {
+        const slug = pos && pos.marketMetadata && pos.marketMetadata.slug;
+        byKey.set('leg:' + i + ':' + idx + ':' + String(slug || ''), pos);
+      });
+    } else if (positions && typeof positions === 'object') {
+      for (const [key, pos] of Object.entries(positions)) byKey.set(key, pos);
     }
-    if (!page || page.eof || !page.nextCursor || page.nextCursor === cursor) break;
-    cursor = page.nextCursor;
+    const next = nextCursor(page, cursor);
+    if (!next) break;
+    cursor = next;
   }
-  return { positions: merged };
+  return { positions: [...byKey.values()] };
+}
+
+async function allTrades(client) {
+  const activities = [];
+  const seen = new Set();
+  let cursor = '';
+  for (let i = 0; i < PAGE_CAP; i++) {
+    const page = await client.listActivities({
+      limit: 100,
+      cursor: cursor || undefined,
+      sortOrder: 'SORT_ORDER_DESCENDING',
+      types: 'ACTIVITY_TYPE_TRADE',
+    });
+    const list = Array.isArray(page && page.activities) ? page.activities : [];
+    for (const item of list) {
+      const trade = item && item.trade;
+      const id = trade && trade.id ? String(trade.id) : '';
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      activities.push(item);
+    }
+    const next = nextCursor(page, cursor);
+    if (!next) break;
+    cursor = next;
+  }
+  return activities;
 }
 
 async function loadMarkets(client, slugs) {
   const out = {};
-  const unique = [...new Set((slugs || []).map((s) => String(s || '').trim()).filter(price.isMarketSlug))].slice(0, 24);
+  const unique = [...new Set((slugs || []).map((s) => String(s || '').trim()).filter(price.isMarketSlug))].slice(0, 80);
   await Promise.all(unique.map(async (slug) => {
     try {
       const raw = await client.getMarketBySlug(slug);
@@ -198,20 +242,7 @@ function asList(value) {
 }
 
 function decoratePositions(rows, markets) {
-  return rows.map((row) => {
-    const m = markets[row.slug];
-    if (!m) return row;
-    return {
-      ...row,
-      title: row.title || m.title,
-      longName: m.longName,
-      shortName: m.shortName,
-      team: row.side === 'short' ? m.shortName : m.longName,
-      tick: m.tick,
-      minQty: m.minQty,
-      tradable: m.tradable,
-    };
-  });
+  return rows.map((row) => price.positionView(row, markets[row.slug]));
 }
 
 async function loadNflGames(client) {
@@ -263,23 +294,19 @@ function withFillNotes(positions, rows) {
 }
 
 async function snapshot(client, slug, store) {
-  const [positionsRaw, ordersRaw, activityRaw, slate] = await Promise.all([
+  const [positionsRaw, ordersRaw, activities, slate] = await Promise.all([
     allPositions(client),
     client.listOpenOrders(),
-    client.listActivities({
-      limit: 20,
-      sortOrder: 'SORT_ORDER_DESCENDING',
-      types: 'ACTIVITY_TYPE_TRADE',
-    }),
+    allTrades(client),
     loadNflGames(client),
   ]);
-  const positions = price.mapPositions(positionsRaw);
+  const positions = price.mapPositions(positionsRaw, { fills: activities });
   const slugs = positions.map((p) => p.slug);
   const orderList = asList(ordersRaw && ordersRaw.orders);
   for (const order of orderList) {
     if (order && order.marketSlug) slugs.push(order.marketSlug);
   }
-  for (const item of asList(activityRaw && activityRaw.activities)) {
+  for (const item of activities) {
     if (item && item.trade && item.trade.marketSlug) slugs.push(item.trade.marketSlug);
   }
   if (slug) slugs.push(slug);
@@ -293,7 +320,7 @@ async function snapshot(client, slug, store) {
     defaultDollars: price.DEFAULT_SIZE_DOLLARS,
     positions: withFillNotes(decoratePositions(positions, markets), await improvedRows(store, slugs)),
     orders: withProtect(price.mapOpenOrders(ordersRaw, markets), await armedRows(store)),
-    activity: price.mapActivities(activityRaw, markets),
+    activity: price.mapActivities({ activities: activities.slice(0, 20) }, markets),
     market,
     games: asList(slate && slate.games),
     marketTypes: games.DESK_MARKET_TYPES,
