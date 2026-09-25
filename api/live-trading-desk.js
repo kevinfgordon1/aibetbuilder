@@ -1,6 +1,6 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
 // GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, NFL slate
-// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, protect?, protectXCents?, protectYCents? }
+// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, confirm, allowCross?, protect?, protectXCents?, protectYCents? }
 // POST { op: "cancel", orderId, marketSlug }
 // POST { op: "protect-sweep" }  adverse-only cancel + re-rest. Owner session OR
 //      header x-admin-secret = ADMIN_API_SECRET (same secret as the admin alert route).
@@ -283,6 +283,8 @@ async function snapshot(client, slug, store) {
   }
   if (slug) slugs.push(slug);
   const markets = await loadMarkets(client, slugs);
+  let market = slug ? (markets[slug] || null) : null;
+  if (market && slug) market = await withBook(client, slug, market);
   return {
     ok: true,
     venue: 'polymarket-us',
@@ -291,11 +293,26 @@ async function snapshot(client, slug, store) {
     positions: withFillNotes(decoratePositions(positions, markets), await improvedRows(store, slugs)),
     orders: withProtect(price.mapOpenOrders(ordersRaw, markets), await armedRows(store)),
     activity: price.mapActivities(activityRaw, markets),
-    market: slug ? (markets[slug] || null) : null,
+    market,
     games: asList(slate && slate.games),
     marketTypes: games.DESK_MARKET_TYPES,
     gamesError: (slate && typeof slate.gamesError === 'string') ? slate.gamesError : '',
   };
+}
+
+async function withBook(client, slug, market) {
+  try {
+    const raw = await client.getMarketBbo(slug);
+    const book = price.readYesBbo(raw);
+    return {
+      ...market,
+      bestBid: book.bestBid,
+      bestAsk: book.bestAsk,
+      bookOk: !!book.ok,
+    };
+  } catch (_) {
+    return { ...market, bestBid: null, bestAsk: null, bookOk: false };
+  }
 }
 
 async function placeOrder(client, body, { store, ownerEmail } = {}) {
@@ -318,6 +335,27 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
     minQty: market.minQty,
   });
   if (!quote.ok) return { ok: false, status: 400, error: quote.error };
+  const team = quote.outcome === 'short' ? market.shortName : market.longName;
+  const shown = price.matchDisplayedOrder(quote, team, body.confirm);
+  if (!shown.ok) return { ok: false, status: 400, error: shown.error };
+  const stray = price.strayOrderMismatch(body, quote);
+  if (stray) return { ok: false, status: 400, error: stray };
+  const allowCross = price.allowCrossRequested(body.allowCross);
+  if (!allowCross) {
+    let book;
+    try {
+      book = price.readYesBbo(await client.getMarketBbo(slug));
+    } catch (_) {
+      book = { ok: false, error: 'The book is missing or crossed. A rest will not be sent.' };
+    }
+    const cross = price.crossBlock({
+      bookSide: quote.bookSide,
+      yesMicro: quote.yesMicro,
+      bestBid: book.bestBid,
+      bestAsk: book.bestAsk,
+    });
+    if (!cross.ok) return { ok: false, status: 400, error: cross.error || book.error };
+  }
   const protectReq = protectMath.readProtectRequest(body);
   if (!protectReq.ok) return { ok: false, status: 400, error: protectReq.error };
   if (protectReq.on && (!store || !store.configured)) {
@@ -327,10 +365,9 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
       error: 'Bet Protect registry is not configured. Apply sql/desk_protect_rests.sql and set SUPABASE_SERVICE_KEY.',
     };
   }
-  const orderBody = price.buildLimitOrder({ slug, quote });
+  const orderBody = price.buildLimitOrder({ slug, quote, allowCross });
   const created = await client.createOrder(orderBody);
   const orderId = created && (created.id || (created.order && created.order.id));
-  const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
   let armed = null;
   if (protectReq.on) {
     if (!orderId) {
@@ -353,7 +390,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
         protect_count: 0,
         status: 'armed',
         title: market.title || slug,
-        outcome_name: outcomeName,
+        outcome_name: team,
         tick: quote.tick,
         min_qty: market.minQty,
       });
@@ -368,7 +405,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
     snap: {
       outcome: quote.outcome,
       action: quote.action,
-      outcomeName,
+      outcomeName: team,
       americanLabel: quote.snappedAmericanLabel,
       centsLabel: quote.centsLabel,
       yesCentsLabel: quote.yesCentsLabel,
@@ -376,6 +413,8 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
       contracts: quote.contracts,
       riskLabel: quote.riskLabel,
       intent: quote.intent,
+      bookSide: quote.bookSide,
+      line: shown.expected.line,
       tick: quote.tick,
       protect: armed ? { on: true, xCents: protectReq.xCents, yCents: protectReq.yCents } : { on: false },
     },
