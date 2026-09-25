@@ -354,6 +354,85 @@ export function restingLimitOrder({ slug, american, outcome, action, tick, dolla
   return { ok: true, quote, order };
 }
 
+/**
+ * Hedging a position buys the other team. A Packers (short) position becomes
+ * Buy the long team. The typed American and dollars stay on that new side.
+ * The position's contract count is not the order size.
+ */
+export function hedgeTarget({ positionSide } = {}) {
+  const side = normalizeOutcome(positionSide);
+  if (side !== "long" && side !== "short") {
+    return { ok: false, error: "That position has no side to hedge." };
+  }
+  return { ok: true, outcome: side === "short" ? "long" : "short", action: "buy", held: side };
+}
+
+function normLabel(value) {
+  return String(value == null ? "" : value).replace(/[\u2212\u2013\u2014]/g, "-").trim();
+}
+
+/** The read-back the form shows. The place route rejects an order that differs. */
+export function orderConfirm({ quote, order, team, yesTeam } = {}) {
+  return {
+    team: String(team || ""),
+    action: quote && quote.action,
+    americanLabel: quote && quote.snappedAmericanLabel,
+    centsLabel: quote && quote.centsLabel,
+    contracts: quote && quote.contracts,
+    cost: quote && quote.riskLabel,
+    yesTeam: String(yesTeam || ""),
+    yesPrice: order && order.price && order.price.value,
+  };
+}
+
+export function matchDisplayedOrder({ confirm, quote, order, team, yesTeam } = {}) {
+  if (!confirm || typeof confirm !== "object") {
+    return { ok: false, error: "Confirm the order on the desk before sending." };
+  }
+  const wantTeam = String(team || "").trim();
+  if (!wantTeam || String(confirm.team || "").trim() !== wantTeam) {
+    return { ok: false, error: "Confirmed side does not match the order." };
+  }
+  if (normalizeAction(confirm.action) !== (quote && quote.action)) {
+    return { ok: false, error: "Confirmed buy/sell does not match the order." };
+  }
+  if (normLabel(confirm.americanLabel) !== normLabel(quote && quote.snappedAmericanLabel)) {
+    return { ok: false, error: "Confirmed American price does not match the order." };
+  }
+  if (String(confirm.centsLabel || "") !== String((quote && quote.centsLabel) || "")) {
+    return { ok: false, error: "Confirmed cents do not match the order." };
+  }
+  if (Number(confirm.contracts) !== Number(order && order.quantity)) {
+    return { ok: false, error: "Confirmed contracts do not match the dollars entered." };
+  }
+  if (String(confirm.cost || "") !== String((quote && quote.riskLabel) || "")) {
+    return { ok: false, error: "Confirmed cost does not match the order." };
+  }
+  if (String(confirm.yesPrice || "") !== String(order && order.price && order.price.value)) {
+    return { ok: false, error: "Confirmed YES price does not match the order." };
+  }
+  if (confirm.yesTeam && String(confirm.yesTeam).trim() !== String(yesTeam || "").trim()) {
+    return { ok: false, error: "Confirmed YES team does not match this market." };
+  }
+  return { ok: true };
+}
+
+/** A raw price or contract count on the request must be the ticket, or the order is refused. */
+export function strayOrderFields(body, order) {
+  if (!body || !order) return "";
+  if (body.price != null) {
+    const raw = body.price && typeof body.price === "object" ? body.price.value : body.price;
+    if (String(raw) !== String(order.price.value) && Number(raw) !== Number(order.price.value)) {
+      return "A different limit was attached to this order. It was not sent.";
+    }
+  }
+  const qty = body.contracts != null ? body.contracts : body.quantity;
+  if (qty != null && Number(qty) !== Number(order.quantity)) {
+    return "A different contract count was attached to this order. It was not sent.";
+  }
+  return "";
+}
+
 export function buildLimitOrder({ slug, quote }) {
   return {
     marketSlug: String(slug || "").trim(),

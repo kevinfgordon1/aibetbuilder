@@ -251,9 +251,19 @@ async function placeOrder(client, body) {
   if (!ticket.ok) return { ok: false, status: 400, error: ticket.error };
   const quote = ticket.quote;
   const orderBody = ticket.order;
+  const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
+  const stray = price.strayOrderFields(body, orderBody);
+  if (stray) return { ok: false, status: 400, error: stray };
+  const shown = price.matchDisplayedOrder({
+    confirm: body.confirm,
+    quote,
+    order: orderBody,
+    team: outcomeName,
+    yesTeam: market.longName,
+  });
+  if (!shown.ok) return { ok: false, status: 400, error: shown.error };
   const created = await client.createOrder(orderBody);
   const orderId = created && (created.id || (created.order && created.order.id));
-  const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
   return {
     ok: true,
     orderId: orderId ? String(orderId) : null,

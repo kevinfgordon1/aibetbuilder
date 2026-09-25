@@ -38,7 +38,12 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /id="desk-order-readback"/);
   assert.match(ui, /id="desk-confirm"/);
   assert.match(ui, /useState\("buy"\)/);
+  assert.match(ui, /hedgeTarget/);
+  assert.match(ui, /Hedge · Buy/);
+  assert.match(ui, /orderConfirm/);
+  assert.doesNotMatch(ui, /setDollars\([^)]*net/);
   assert.match(text, /restingLimitOrder/);
+  assert.match(text, /matchDisplayedOrder/);
 }
 
 {
@@ -243,6 +248,7 @@ const goodCreds = () => ({
   }
 
   {
+    const before = calls.length;
     const res = mockRes();
     await handler({
       method: 'POST',
@@ -255,23 +261,23 @@ const goodCreds = () => ({
         american: '−150',
         dollars: 25,
         price: { value: '0.990' },
+        contracts: 147.05,
+        confirm: {
+          team: 'Tennessee Titans',
+          action: 'buy',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 41,
+          cost: '$24.60',
+          yesTeam: 'Los Angeles Chargers',
+          yesPrice: '0.400',
+        },
       },
     }, res);
-    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
-    assert.equal(res.out.body.orderId, 'ord-rest-1');
-    assert.equal(res.out.body.snap.intent, 'ORDER_INTENT_BUY_SHORT');
-    assert.equal(res.out.body.snap.yesPriceValue, '0.400');
-    assert.equal(res.out.body.snap.americanLabel, '-150');
-    assert.equal(res.out.body.snap.outcomeName, 'Tennessee Titans');
-    assert.equal(res.out.body.snap.contracts, 41);
-    const posted = calls.filter((c) => c.path === '/v1/orders' && c.method === 'POST').pop();
-    const sent = JSON.parse(posted.body);
-    assert.equal(sent.price.value, '0.400');
-    assert.equal(sent.intent, 'ORDER_INTENT_BUY_SHORT');
-    assert.equal(sent.type, 'ORDER_TYPE_LIMIT');
-    assert.equal(sent.quantity, 41);
-    assert.notEqual(sent.price.value, '0.990');
-    assert.equal(posted.host, 'api.polymarket.us');
+    assert.equal(res.out.statusCode, 400, JSON.stringify(res.out.body));
+    assert.match(res.out.body.error, /different limit|different contract/);
+    assert.equal(calls.filter((c) => c.path === '/v1/orders' && c.method === 'POST').length, 0);
+    assert.ok(calls.length > before);
   }
 
   {
@@ -406,10 +412,22 @@ const goodCreds = () => ({
         action: 'buy',
         american: '−150',
         dollars: 25,
+        confirm: {
+          team: 'Tennessee Titans',
+          action: 'buy',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 41,
+          cost: '$24.60',
+          yesTeam: 'Los Angeles Chargers',
+          yesPrice: '0.400',
+        },
       },
     }, res);
     assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
     assert.equal(res.out.body.snap.outcomeName, 'Tennessee Titans');
+    assert.equal(res.out.body.snap.contracts, 41);
+    assert.equal(res.out.body.snap.centsLabel, '60¢');
   }
 
   handler._setDeps({
@@ -562,18 +580,57 @@ const goodCreds = () => ({
         american: -150,
         dollars: 25,
         price: { value: '0.320' },
+        contracts: 147.05,
+        confirm: {
+          team: 'Green Bay Packers',
+          action: 'buy',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 41.66,
+          cost: '$25.00',
+          yesTeam: 'Atlanta Falcons',
+          yesPrice: '0.400',
+        },
       },
     }, packers);
-    assert.equal(packers.out.statusCode, 200, JSON.stringify(packers.out.body));
+    assert.equal(packers.out.statusCode, 400, JSON.stringify(packers.out.body));
+    assert.match(packers.out.body.error, /different limit|different contract/);
+    assert.equal(posted.length, 0);
+
+    const packersOk = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-atl-gb-2026-09-24',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'short',
+        action: 'buy',
+        american: -150,
+        dollars: 25,
+        confirm: {
+          team: 'Green Bay Packers',
+          action: 'buy',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 41.66,
+          cost: '$25.00',
+          yesTeam: 'Atlanta Falcons',
+          yesPrice: '0.400',
+        },
+      },
+    }, packersOk);
+    assert.equal(packersOk.out.statusCode, 200, JSON.stringify(packersOk.out.body));
     assert.equal(posted.length, 1);
     assert.equal(posted[0].intent, 'ORDER_INTENT_BUY_SHORT');
     assert.equal(posted[0].price.value, '0.400');
     assert.equal(posted[0].quantity, 41.66);
     assert.notEqual(posted[0].price.value, '0.320');
     assert.ok(posted[0].quantity < 50);
-    assert.equal(packers.out.body.snap.outcomeName, 'Green Bay Packers');
-    assert.equal(packers.out.body.snap.centsLabel, '60¢');
-    assert.equal(packers.out.body.snap.yesCentsLabel, '40¢');
+    assert.equal(packersOk.out.body.snap.outcomeName, 'Green Bay Packers');
+    assert.equal(packersOk.out.body.snap.centsLabel, '60¢');
+    assert.equal(packersOk.out.body.snap.yesCentsLabel, '40¢');
 
     const falcons = mockRes();
     await handler({
@@ -587,6 +644,16 @@ const goodCreds = () => ({
         action: 'buy',
         american: -150,
         dollars: 25,
+        confirm: {
+          team: 'Atlanta Falcons',
+          action: 'buy',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 41.66,
+          cost: '$25.00',
+          yesTeam: 'Atlanta Falcons',
+          yesPrice: '0.600',
+        },
       },
     }, falcons);
     assert.equal(falcons.out.statusCode, 200, JSON.stringify(falcons.out.body));
