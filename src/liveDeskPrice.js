@@ -231,15 +231,8 @@ export function snapRestingLimit({ american, outcome, action, tick } = {}) {
   const asked = parseAmerican(american);
   const side = normalizeOutcome(outcome);
   const act = normalizeAction(action);
-  if (!side || !act) {
-    return { ok: false, error: "Pick a side and buy or sell." };
-  }
-  if (asked == null) {
-    const raw = String(american == null ? "" : american).trim();
-    if (!raw) {
-      return { ok: false, error: "Enter American odds. An empty box is not the market and not a placeholder." };
-    }
-    return { ok: false, error: "Enter American odds like −150 or +130." };
+  if (asked == null || !side || !act) {
+    return { ok: false, error: "Enter American odds like −150 or +130, plus buy/sell and Yes/No." };
   }
   const fair = impliedProbFromAmerican(asked);
   if (fair == null) {
@@ -461,25 +454,6 @@ export function matchDisplayedOrder({ confirm, quote, order, team, yesTeam } = {
     return { ok: false, error: "Confirmed YES team does not match this market." };
   }
   return { ok: true };
-}
-
-/** The sentence on the form. The place route sends this ticket and no other. */
-export function formatDeskOrderLine({ action, team, americanLabel, centsLabel, contracts, riskLabel, hedge } = {}) {
-  const act = normalizeAction(action);
-  if (act !== "buy" && act !== "sell") return "";
-  const verb = act === "sell" ? "SELL" : "BUY";
-  const prefix = hedge ? "Hedge. " : "";
-  return prefix + "You will " + verb + " " + String(team || "")
-    + " at " + String(americanLabel || "")
-    + " (" + String(centsLabel || "") + "), "
-    + String(contracts) + " contracts, max cost " + String(riskLabel || "");
-}
-
-/** Polymarket US prints price.value under the YES team. Say that so it cannot be read as the other bet. */
-export function polyDisplayNote({ action, team, yesTeam, yesCentsLabel } = {}) {
-  const act = normalizeAction(action) === "sell" ? "SELL" : "BUY";
-  return "Polymarket US shows this as " + String(yesTeam || "Yes") + " at " + String(yesCentsLabel || "")
-    + ". It is still a " + act + " of " + String(team || "") + ".";
 }
 
 /** A raw price or contract count on the request must be the ticket, or the order is refused. */

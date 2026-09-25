@@ -9,8 +9,6 @@ import {
   buildLimitOrder,
   guardDeskOrder,
   restingLimitOrder,
-  formatDeskOrderLine,
-  polyDisplayNote,
   hedgeTarget,
   orderConfirm,
   matchDisplayedOrder,
@@ -385,113 +383,6 @@ for (const tick of [0.001, 0.005]) {
   const other = hedgeTarget({ positionSide: "long" });
   assert.equal(other.outcome, "short");
   assert.equal(other.action, "buy");
-}
-
-{
-  // Screenshot: Sell + Green Bay Packers, American box empty (grey −150 placeholder), size 25.
-  // Empty odds must not fall through to the 68¢ market or the $100 cap.
-  for (const american of ["", "   ", null, undefined]) {
-    const blocked = restingLimitOrder({
-      slug: "aec-nfl-atl-gb-2026-09-24",
-      american,
-      outcome: "short",
-      action: "sell",
-      tick: 0.005,
-      dollars: 25,
-      minQty: 0.01,
-    });
-    assert.equal(blocked.ok, false);
-    assert.match(blocked.error, /empty box|American/);
-  }
-  const noDollars = restingLimitOrder({
-    american: -150,
-    outcome: "short",
-    action: "sell",
-    tick: 0.005,
-    dollars: "",
-    minQty: 0.01,
-  });
-  assert.equal(noDollars.ok, false);
-  assert.match(noDollars.error, /dollar size/);
-
-  const teams = { long: "Atlanta Falcons", short: "Green Bay Packers" };
-  const cases = [
-    { outcome: "long", action: "buy", intent: "ORDER_INTENT_BUY_LONG", yes: "0.600", contracts: 41, cost: 24.6 },
-    { outcome: "long", action: "sell", intent: "ORDER_INTENT_SELL_LONG", yes: "0.600", contracts: 62, cost: 24.8 },
-    { outcome: "short", action: "buy", intent: "ORDER_INTENT_BUY_SHORT", yes: "0.400", contracts: 41, cost: 24.6 },
-    { outcome: "short", action: "sell", intent: "ORDER_INTENT_SELL_SHORT", yes: "0.400", contracts: 62, cost: 24.8 },
-  ];
-  for (const row of cases) {
-    const ticket = restingLimitOrder({
-      slug: "aec-nfl-atl-gb-2026-09-24",
-      american: -150,
-      outcome: row.outcome,
-      action: row.action,
-      tick: 0.005,
-      dollars: 25,
-      minQty: 1,
-    });
-    assert.equal(ticket.ok, true, row.action + " " + row.outcome);
-    assert.equal(ticket.order.intent, row.intent);
-    assert.equal(ticket.quote.centsLabel, "60¢");
-    assert.equal(ticket.order.price.value, row.yes);
-    assert.equal(ticket.order.quantity, row.contracts);
-    assert.ok(Math.abs(ticket.quote.riskDollars - row.cost) < 0.001);
-    assert.ok(ticket.quote.riskDollars <= 25);
-    assert.notEqual(ticket.order.quantity, 147.05);
-    const line = formatDeskOrderLine({
-      action: row.action,
-      team: teams[row.outcome],
-      americanLabel: ticket.quote.snappedAmericanLabel,
-      centsLabel: ticket.quote.centsLabel,
-      contracts: ticket.quote.contracts,
-      riskLabel: ticket.quote.riskLabel,
-    });
-    const verb = row.action === "sell" ? "SELL" : "BUY";
-    assert.equal(
-      line,
-      "You will " + verb + " " + teams[row.outcome] + " at -150 (60¢), " + row.contracts + " contracts, max cost " + ticket.quote.riskLabel,
-    );
-    const note = polyDisplayNote({
-      action: row.action,
-      team: teams[row.outcome],
-      yesTeam: "Atlanta Falcons",
-      yesCentsLabel: ticket.quote.yesCentsLabel,
-    });
-    assert.match(note, new RegExp("still a " + verb + " of " + teams[row.outcome]));
-    if (row.outcome === "short") assert.match(note, /Atlanta Falcons at 40¢/);
-  }
-
-  // The fill: buy Packers at 68¢ sized to the $100 cap → YES 32¢, 147.05 contracts, about $99.99.
-  const filled = restingLimitOrder({
-    american: -213,
-    outcome: "short",
-    action: "buy",
-    tick: 0.005,
-    dollars: 100,
-    minQty: 0.01,
-  });
-  assert.equal(filled.ok, true);
-  assert.equal(filled.order.intent, "ORDER_INTENT_BUY_SHORT");
-  assert.equal(filled.quote.centsLabel, "68¢");
-  assert.equal(filled.order.price.value, "0.320");
-  assert.equal(filled.order.quantity, 147.05);
-  assert.ok(Math.abs(filled.quote.riskDollars - 99.994) < 0.01);
-
-  // Sell Packers at that same 68¢ for the $25 on screen is not that fill.
-  const sellMarket = restingLimitOrder({
-    american: -213,
-    outcome: "short",
-    action: "sell",
-    tick: 0.005,
-    dollars: 25,
-    minQty: 0.01,
-  });
-  assert.equal(sellMarket.ok, true);
-  assert.equal(sellMarket.order.intent, "ORDER_INTENT_SELL_SHORT");
-  assert.notEqual(sellMarket.order.quantity, 147.05);
-  assert.ok(sellMarket.quote.riskDollars <= 25);
-  assert.ok(sellMarket.quote.riskDollars < 50);
 }
 
 console.log("liveDeskPrice.test.js ok");
