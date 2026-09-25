@@ -291,6 +291,13 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
   if (!price.isMarketSlug(slug)) return { ok: false, status: 400, error: 'Enter a Polymarket US market slug.' };
   const early = games.placeScopeError(body, slug);
   if (early) return { ok: false, status: 400, error: early };
+  if (price.parseAmerican(body.american) == null) {
+    return { ok: false, status: 400, error: 'Enter American odds. An empty box is not the market and not a placeholder.' };
+  }
+  const dollars = typeof body.dollars === 'number' ? body.dollars : Number(String(body.dollars == null ? '' : body.dollars).trim());
+  if (!Number.isFinite(dollars) || dollars <= 0) {
+    return { ok: false, status: 400, error: 'Enter a dollar size. The desk will not substitute the $100 cap.' };
+  }
   const raw = await client.getMarketBySlug(slug);
   const typed = games.placeScopeError(body, slug, raw);
   if (typed) return { ok: false, status: 400, error: typed };
@@ -303,7 +310,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
     outcome: body.outcome,
     action: body.action,
     tick: market.tick,
-    dollars: body.dollars,
+    dollars,
     minQty: market.minQty,
   });
   if (!ticket.ok) return { ok: false, status: 400, error: ticket.error };
