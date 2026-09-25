@@ -3,16 +3,12 @@
 // GET /api/kalshi-stream?league=NFL|NCAAF|MLB
 // Same-origin SSE of Kalshi game-moneyline yes-asks.
 //
-// The public REST market payload includes yes_ask_dollars (keyless). This
-// spike polls that about every 3s and emits when the ask changes. One poll
-// loop per league is shared by every SSE client.
-//
-// Kalshi's WebSocket (ticker / orderbook_delta) is the true tick feed, but
-// the handshake requires the same RSA-PSS key as Combo Locks probe
-// (KALSHI_KEY_ID + Kalshi_combo_key). lib/venue-live.js builds those
-// headers and the subscribe frame. This route does not open that socket:
-// a missing key must not 503 the board, and we do not invent one. The
-// poll is the working keyless path. It is not tick-by-tick.
+// The public REST market payload includes yes_ask_dollars (keyless). With
+// KALSHI_KEY_ID + Kalshi_combo_key (same names as the Railway combo-worker)
+// this route also holds the ticker WebSocket and relays each yes-ask into
+// the SSE book. A missing key does not 503 the board: REST still polls
+// about every 1s, which stays inside a 2s repaint. The SSE response itself
+// ends before Vercel's 300s maxDuration so the browser reconnects.
 
 const { authHeaders } = require('./kalshi-sign');
 const {

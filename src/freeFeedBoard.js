@@ -10,13 +10,18 @@
 
 import { canonicalTeamName, identifyTeam } from "./comboPrefill.js";
 import { FOURCASTERS_BOARD_BOOK, NOVIG_BOARD_BOOK, sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
-import { applyStreamMarkets, emptyBookOddsForBooks } from "./betstampNormalize.js";
+import { applyStreamMarkets, emptyBookOddsForBooks, lineUpdatedAt } from "./betstampNormalize.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 30_000;
+// JSON snapshot backstop. The SSE socket is the 1–2s path. Apply a poll
+// only when that book has been quiet, so a slower REST body cannot paint
+// over a ticker that just arrived.
+export const FREE_FEED_LIVE_BOARD_POLL_MS = 2_000;
+export const SSE_BEATS_POLL_MS = 2_000;
 // Open quote after kickoff, before we treat the game as finished.
 const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
 
@@ -240,6 +245,121 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
     });
   }
   return markets;
+}
+
+// JSON body from GET /api/kalshi-board. Null means "keep whatever the stream
+// already merged" — an empty or failed body must not wipe a book we have.
+function quotesFromBoardBody(body, book, bookId) {
+  const quotes = body && Array.isArray(body.quotes) ? body.quotes : null;
+  if (!quotes || !quotes.length) return null;
+  const kept = quotes.filter((q) => (
+    q && q.odds != null && (q.book === book || Number(q.book_id) === bookId)
+  ));
+  return kept.length ? kept : null;
+}
+
+export function kalshiQuotesFromBoardBody(body) {
+  return quotesFromBoardBody(body, "kalshi", 194);
+}
+
+export function polymarketQuotesFromBoardBody(body) {
+  return quotesFromBoardBody(body, "polymarket", 193);
+}
+
+// A complete SSE payload is the whole book. Merging a one-contract tick
+// into an older book is what left Atlanta stuck at the pregame price.
+export function boardPollShouldApply(lastSseAt, nowMs, freshMs = SSE_BEATS_POLL_MS) {
+  if (lastSseAt == null || !Number.isFinite(Number(lastSseAt)) || Number(lastSseAt) <= 0) return true;
+  return Number(nowMs) - Number(lastSseAt) >= freshMs;
+}
+
+export function quoteUpdatedMs(quote) {
+  if (!quote || quote.updated_at == null || quote.updated_at === "") return 0;
+  const parsed = Date.parse(String(quote.updated_at));
+  if (Number.isFinite(parsed)) return parsed;
+  const n = Number(quote.updated_at);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+// Apply incoming quotes only when they are strictly newer than the print
+// already held for that contract. A reconnect snapshot or JSON poll with an
+// older clock must not rewind the board. Untimed complete snapshots still
+// replace, so a full book with no clocks can drop a contract that left.
+export function mergeMonotonicQuotes(prev, incoming, { complete = false } = {}) {
+  const prior = (prev || []).filter(Boolean);
+  const next = (incoming || []).filter(Boolean);
+  if (!next.length) return prior;
+  const priorByKey = new Map(prior.map((q) => [quoteMergeKey(q), q]));
+  const timed = prior.some((q) => quoteUpdatedMs(q) > 0) || next.some((q) => quoteUpdatedMs(q) > 0);
+  if (complete && !timed) return next.slice();
+  const out = [];
+  const seen = new Set();
+  for (const quote of next) {
+    const key = quoteMergeKey(quote);
+    seen.add(key);
+    const old = priorByKey.get(key);
+    if (!old) {
+      out.push(quote);
+      continue;
+    }
+    const tNew = quoteUpdatedMs(quote);
+    const tOld = quoteUpdatedMs(old);
+    if (tOld && (!tNew || tNew <= tOld)) {
+      out.push(old);
+      continue;
+    }
+    out.push(quote);
+  }
+  for (const quote of prior) {
+    const key = quoteMergeKey(quote);
+    if (seen.has(key)) continue;
+    if (!complete) {
+      out.push(quote);
+      continue;
+    }
+    const tOld = quoteUpdatedMs(quote);
+    const snapshotMax = next.reduce((max, q) => Math.max(max, quoteUpdatedMs(q)), 0);
+    if (tOld && snapshotMax && tOld > snapshotMax) out.push(quote);
+  }
+  return out;
+}
+
+export function quotesAfterVenueEvent(prev, payload) {
+  const quotes = payload && Array.isArray(payload.quotes) ? payload.quotes.filter(Boolean) : [];
+  if (!quotes.length) return prev || [];
+  return mergeMonotonicQuotes(prev, quotes, { complete: payload.complete === true });
+}
+
+const TICK_FIELDS = [
+  ["ml_away", "away"],
+  ["ml_home", "home"],
+];
+
+export function boardPriceTicks(prevGames, nextGames) {
+  const prevById = new Map((prevGames || []).map((game) => [String(game && game.id), game]));
+  const out = [];
+  for (const game of nextGames || []) {
+    if (!game) continue;
+    const prev = prevById.get(String(game.id));
+    for (const [bookKey, odds] of Object.entries(game.bookOdds || {})) {
+      if (!odds) continue;
+      for (const [field, side] of TICK_FIELDS) {
+        if (odds[field] == null) continue;
+        const before = prev && prev.bookOdds && prev.bookOdds[bookKey];
+        if (before && before[field] === odds[field]) continue;
+        const who = side === "away" ? (game.awayAbbr || game.away) : (game.homeAbbr || game.home);
+        out.push({
+          bookKey,
+          fixtureId: game.id,
+          label: `${who} ML`,
+          price: odds[field],
+          eventTime: lineUpdatedAt(game, bookKey, field),
+        });
+      }
+    }
+  }
+  return out;
 }
 
 export function quoteMergeKey(quote) {

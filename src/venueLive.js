@@ -49,6 +49,20 @@ export function kalshiStreamUrl({ league } = {}) {
   return q ? `/api/kalshi-stream?${q}` : "/api/kalshi-stream";
 }
 
+export function kalshiBoardUrl({ league } = {}) {
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `/api/kalshi-board?${q}` : "/api/kalshi-board";
+}
+
+export function polymarketBoardUrl({ league } = {}) {
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `/api/polymarket-board?${q}` : "/api/polymarket-board";
+}
+
 export function novigStreamUrl({ league } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);

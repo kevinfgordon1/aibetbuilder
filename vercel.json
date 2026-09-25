@@ -50,8 +50,14 @@
     "api/polymarket-stream.js": {
       "maxDuration": 300
     },
+    "api/polymarket-board.js": {
+      "maxDuration": 20
+    },
     "api/kalshi-stream.js": {
       "maxDuration": 300
+    },
+    "api/kalshi-board.js": {
+      "maxDuration": 20
     },
     "api/novig-stream.js": {
       "maxDuration": 300

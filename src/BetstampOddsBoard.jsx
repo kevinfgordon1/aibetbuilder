@@ -69,6 +69,8 @@ import {
   firstPartyPmLiveEnabled,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  kalshiBoardUrl,
+  polymarketBoardUrl,
   novigStreamUrl,
   fourcastersStreamUrl,
 } from "./venueLive.js";
@@ -76,10 +78,15 @@ import { consumeBetstampStream, nextBackoffMs } from "./betstampLive.js";
 import {
   FREE_FEED_POLL_MS,
   FREE_FEED_LIVE_POLL_MS,
+  FREE_FEED_LIVE_BOARD_POLL_MS,
   freeFeedBooks,
   gamesFromFreeFeeds,
+  kalshiQuotesFromBoardBody,
+  polymarketQuotesFromBoardBody,
+  boardPriceTicks,
+  mergeMonotonicQuotes,
+  quotesAfterVenueEvent,
   mainLaddersFromGame,
-  mergeVenueQuotes,
 } from "./freeFeedBoard.js";
 
 const BestBookName = memo(function BestBookName({ book, extra = 0, title, size = 13 }) {
@@ -1011,6 +1018,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setStreamStatus(liveOnly && venuesOn ? "connecting" : "idle");
 
     const quoteRef = { polymarket: [], kalshi: [], novig: [], fourcasters: [] };
+    const quotePrint = (list) => (list || []).map((q) => `${q.token_id || q.ticker || q.side}:${q.odds}`).join("|");
     let phone = null;
     let sawPhone = !seeUnderdog;
     let phoneFailed = false;
@@ -1027,8 +1035,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         underdog: seeUnderdog && sawPhone ? phone : null,
         nowMs: Date.now(),
       });
-      commitGames(next, { force: firstPaint });
+      const prev = gamesRef.current;
+      const painted = commitGames(next, { force: firstPaint });
       firstPaint = false;
+      if (painted && liveOnly) {
+        const applied = boardPriceTicks(prev, next);
+        if (applied.length) tickSinkRef.current?.(applied, Date.now());
+      }
       setSnapshotAt(Date.now());
       setLoading(false);
       setFeedNote(phoneFailed
@@ -1060,26 +1073,59 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       }
     };
 
-    let pollTimer;
-    let pollInFlight = false;
+    let phoneTimer;
+    let boardTimer;
+    let phoneInFlight = false;
+    let boardInFlight = false;
     const venueTimers = [];
 
-    // Pregame and LIVE both poll the phone. Do not wait on the first GET —
-    // a hung Underdog request must not freeze the other feeds.
-    loadPhone().then(() => { if (!cancelled) publish(); });
-    if (!liveOnly) {
-      pollTimer = setInterval(() => {
-        if (pollInFlight || cancelled) return;
-        pollInFlight = true;
-        loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { pollInFlight = false; });
-      }, FREE_FEED_POLL_MS);
-    } else {
-      pollTimer = setInterval(() => {
-        if (pollInFlight || cancelled) return;
-        pollInFlight = true;
-        loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { pollInFlight = false; });
-      }, FREE_FEED_LIVE_POLL_MS);
-    }
+    // Full book, not the last ticker the SSE hub replayed. LIVE polls every
+    // few seconds so an in-game price cannot sit on the pregame print.
+    const loadJsonBoard = async (url, read) => {
+      if (!venuesOn) return;
+      try {
+        const res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
+        if (cancelled || ctrl.signal.aborted || !res.ok) return;
+        const quotes = read(await res.json());
+        if (!quotes) return quotes;
+        return quotes;
+      } catch {
+        return null;
+      }
+    };
+
+    const kickPhone = () => {
+      if (phoneInFlight || cancelled) return;
+      phoneInFlight = true;
+      loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { phoneInFlight = false; });
+    };
+    const kickBoards = () => {
+      if (!venuesOn || boardInFlight || cancelled) return;
+      boardInFlight = true;
+      Promise.all([
+        loadJsonBoard(kalshiBoardUrl({ league }), kalshiQuotesFromBoardBody),
+        loadJsonBoard(polymarketBoardUrl({ league }), polymarketQuotesFromBoardBody),
+      ]).then(([kalshiQuotes, polyQuotes]) => {
+        if (cancelled) return;
+        let changed = false;
+        // A JSON poll is a snapshot. Apply each contract only when its
+        // exchange time is newer than the websocket print already held.
+        const applyBoard = (book, incoming) => {
+          if (!incoming) return;
+          const merged = mergeMonotonicQuotes(quoteRef[book], incoming, { complete: true });
+          if (quotePrint(quoteRef[book]) === quotePrint(merged)) return;
+          quoteRef[book] = merged;
+          changed = true;
+        };
+        applyBoard("kalshi", kalshiQuotes);
+        applyBoard("polymarket", polyQuotes);
+        if (changed) publish();
+      }).finally(() => { boardInFlight = false; });
+    };
+    kickPhone();
+    kickBoards();
+    phoneTimer = setInterval(kickPhone, liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS);
+    boardTimer = setInterval(kickBoards, liveOnly ? FREE_FEED_LIVE_BOARD_POLL_MS : FREE_FEED_POLL_MS);
 
     const runVenue = async (book, url) => {
       // VITE_FIRST_PARTY_PM_LIVE=0 turns this venue off. Unset stays on.
@@ -1115,7 +1161,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               }
               const quotes = payload && payload.quotes;
               if (!quotes || !quotes.length) return;
-              quoteRef[book] = mergeVenueQuotes(quoteRef[book], quotes);
+              const before = quotePrint(quoteRef[book]);
+              quoteRef[book] = quotesAfterVenueEvent(quoteRef[book], payload);
+              if (quotePrint(quoteRef[book]) === before) return;
               publish();
             },
           });
@@ -1150,7 +1198,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       cancelled = true;
       ctrl.abort();
       clearTimeout(loadGuard);
-      clearInterval(pollTimer);
+      clearInterval(phoneTimer);
+      clearInterval(boardTimer);
       venueTimers.forEach((t) => clearTimeout(t));
     };
   }, [boardSport, liveOnly, boardRefreshKey, seeUnderdog, venuesOn]);

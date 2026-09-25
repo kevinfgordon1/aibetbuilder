@@ -1119,8 +1119,10 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(envEx, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS=/);
   assert.doesNotMatch(envEx, /VITE_BETSTAMP_RECONCILE_CLEAR_GRACE_MS=\d/);
   assert.match(stamp, /setInterval\(\(\) => \{/);
-  assert.match(stamp, /if \(!liveOnly\) \{\s*pollTimer = setInterval/s);
-  assert.match(stamp, /clearInterval\(pollTimer\)/);
+  assert.match(stamp, /phoneTimer = setInterval\(kickPhone, liveOnly \? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS\)/);
+  assert.match(stamp, /boardTimer = setInterval\(kickBoards, liveOnly \? FREE_FEED_LIVE_BOARD_POLL_MS : FREE_FEED_POLL_MS\)/);
+  assert.match(stamp, /clearInterval\(phoneTimer\)/);
+  assert.match(stamp, /clearInterval\(boardTimer\)/);
   assert.match(stamp, /data-snapshot-age/);
   assert.match(stamp, /\[liveOnly, setLiveOnly\] = useState\(false\)/);
   assert.doesNotMatch(stamp, /setLiveOnly\(\s*true\s*\)/);
