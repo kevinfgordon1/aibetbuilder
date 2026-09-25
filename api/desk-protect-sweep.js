@@ -90,6 +90,14 @@ function setDeps(patch) {
   deps = { ...deps, ...patch };
 }
 
+// Underlying message for the 502 body and the Vercel log, so a missing table,
+// bad import, or Polymarket error is visible to the poller. Secrets and
+// credentials are not in these messages; clip length just in case.
+function sweepErrorDetail(err) {
+  const raw = err && (err.message || err.code) ? String(err.message || err.code) : String(err || 'unknown error');
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error';
+}
+
 function json(res, status, body) {
   res.status(status).json(body);
 }
@@ -140,7 +148,9 @@ async function handler(req, res) {
     json(res, 200, { ok: true, events });
   } catch (err) {
     const status = err && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 502;
-    json(res, status, { ok: false, error: 'Sweep failed' });
+    const detail = sweepErrorDetail(err);
+    console.error('[desk-protect-sweep] sweep failed:', detail);
+    json(res, status, { ok: false, error: 'Sweep failed', detail });
   }
 }
 
@@ -150,3 +160,4 @@ module.exports.config = { maxDuration: 15 };
 module.exports._setDeps = setDeps;
 module.exports._resetDeps = resetDeps;
 module.exports._sweepAuthorized = sweepAuthorized;
+module.exports._sweepErrorDetail = sweepErrorDetail;
