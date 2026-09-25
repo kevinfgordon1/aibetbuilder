@@ -186,6 +186,57 @@ function alignYesMicro(yesMicro, side, action, tickMicro) {
 }
 
 /**
+ * Snap a fair outcome probability (micro-dollars) onto the tick in the
+ * trader's favor. Buy floors (pays less). Sell ceils (receives more).
+ * Short orders complement onto the YES book and stay favorable.
+ */
+export function snapFavorableFromMicro({ fairMicro, outcome, action, tick } = {}) {
+  const side = normalizeOutcome(outcome);
+  const act = normalizeAction(action);
+  const fair = Math.round(Number(fairMicro));
+  if (!side || !act || !Number.isFinite(fair)) {
+    return { ok: false, error: "Price is not tradable." };
+  }
+  const tickNorm = normalizeTick(tick);
+  const tickMicro = Math.round(tickNorm * MICRO);
+  let outcomeMicro = act === "buy" ? floorToTick(fair, tickMicro) : ceilToTick(fair, tickMicro);
+  if (!(outcomeMicro > 0 && outcomeMicro < MICRO)) {
+    return { ok: false, error: "That price snaps off the board. Try a different American." };
+  }
+  let yesMicro = side === "long" ? outcomeMicro : (MICRO - outcomeMicro);
+  yesMicro = alignYesMicro(yesMicro, side, act, tickMicro);
+  outcomeMicro = side === "long" ? yesMicro : (MICRO - yesMicro);
+  const minMicro = toMicro(PRICE_MIN);
+  const maxMicro = toMicro(PRICE_MAX);
+  if (yesMicro < minMicro || yesMicro > maxMicro || !(outcomeMicro > 0 && outcomeMicro < MICRO)) {
+    return { ok: false, error: "Polymarket US only rests prices from 1¢ to 99¢." };
+  }
+  const favorable = act === "buy" ? outcomeMicro <= fair : outcomeMicro >= fair;
+  if (!favorable) {
+    return { ok: false, error: "Tick snap would be worse than the target price." };
+  }
+  const snappedAmerican = americanFromMicro(outcomeMicro);
+  return {
+    ok: true,
+    outcome: side,
+    action: act,
+    tick: tickNorm,
+    fairMicro: fair,
+    outcomeMicro,
+    yesMicro,
+    outcomePrice: fromMicro(outcomeMicro),
+    yesPrice: fromMicro(yesMicro),
+    yesPriceValue: formatYesPrice(yesMicro, tickMicro),
+    snappedAmerican,
+    snappedAmericanLabel: formatAmerican(snappedAmerican),
+    centsLabel: formatCentsFromMicro(outcomeMicro),
+    yesCentsLabel: formatCentsFromMicro(yesMicro),
+    intent: intentFor(side, act),
+    bookSide: yesBookSide(side, act),
+  };
+}
+
+/**
  * Snap a typed American onto the Polymarket US tick in the trader's favor.
  * Returns the YES book price that should be sent as price.value.
  */
@@ -200,44 +251,22 @@ export function snapRestingLimit({ american, outcome, action, tick } = {}) {
   if (fair == null) {
     return { ok: false, error: "Those American odds do not convert to a price." };
   }
-  const tickNorm = normalizeTick(tick);
-  const tickMicro = Math.round(tickNorm * MICRO);
-  const fairMicro = toMicro(fair);
-  let outcomeMicro = act === "buy" ? floorToTick(fairMicro, tickMicro) : ceilToTick(fairMicro, tickMicro);
-  if (!(outcomeMicro > 0 && outcomeMicro < MICRO)) {
-    return { ok: false, error: "That price snaps off the board. Try a different American." };
-  }
-  let yesMicro = side === "long" ? outcomeMicro : (MICRO - outcomeMicro);
-  yesMicro = alignYesMicro(yesMicro, side, act, tickMicro);
-  outcomeMicro = side === "long" ? yesMicro : (MICRO - yesMicro);
-  const minMicro = toMicro(PRICE_MIN);
-  const maxMicro = toMicro(PRICE_MAX);
-  if (yesMicro < minMicro || yesMicro > maxMicro || !(outcomeMicro > 0 && outcomeMicro < MICRO)) {
-    return { ok: false, error: "Polymarket US only rests prices from 1¢ to 99¢." };
-  }
-  const favorable = act === "buy" ? outcomeMicro <= fairMicro : outcomeMicro >= fairMicro;
-  if (!favorable) {
-    return { ok: false, error: "Tick snap would be worse than the American you typed." };
-  }
-  const snappedAmerican = americanFromMicro(outcomeMicro);
-  return {
-    ok: true,
+  const snapped = snapFavorableFromMicro({
+    fairMicro: toMicro(fair),
     outcome: side,
     action: act,
-    tick: tickNorm,
+    tick,
+  });
+  if (!snapped.ok) {
+    if (snapped.error === "Tick snap would be worse than the target price.") {
+      return { ok: false, error: "Tick snap would be worse than the American you typed." };
+    }
+    return snapped;
+  }
+  return {
+    ...snapped,
     askedAmerican: asked,
     fairProb: fair,
-    outcomeMicro,
-    yesMicro,
-    outcomePrice: fromMicro(outcomeMicro),
-    yesPrice: fromMicro(yesMicro),
-    yesPriceValue: formatYesPrice(yesMicro, tickMicro),
-    snappedAmerican,
-    snappedAmericanLabel: formatAmerican(snappedAmerican),
-    centsLabel: formatCentsFromMicro(outcomeMicro),
-    yesCentsLabel: formatCentsFromMicro(yesMicro),
-    intent: intentFor(side, act),
-    bookSide: yesBookSide(side, act),
   };
 }
 
@@ -589,6 +618,8 @@ export function mapOpenOrders(payload, marketsBySlug = {}) {
       outcomeName: name,
       americanLabel: outcomeMicro == null ? "" : formatAmerican(americanFromMicro(outcomeMicro)),
       centsLabel: outcomeMicro == null ? "" : formatCentsFromMicro(outcomeMicro),
+      outcomeMicro,
+      yesMicro,
       quantity: order.leavesQuantity != null ? order.leavesQuantity : order.quantity,
       state: order.state || "",
     };

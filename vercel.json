@@ -38,6 +38,9 @@
     "api/live-trading-desk.js": {
       "maxDuration": 15
     },
+    "api/desk-protect-sweep.js": {
+      "maxDuration": 15
+    },
     "api/soccer-pm-no.js": {
       "maxDuration": 20
     },
