@@ -577,11 +577,19 @@ function emptyCell(threeWay) {
     botNoBooks: [],
     topLine: null,
     botLine: null,
+    topRaw: null,
+    botRaw: null,
     topStacks: null,
     botStacks: null,
     pointStacks: null,
     threeWay,
   };
+}
+
+function loneRawAsk(game, books, field) {
+  if (!game || !books || books.length !== 1 || !field) return null;
+  const raw = game.bookOdds?.[books[0].key]?.[`${field}_raw`];
+  return raw == null ? null : raw;
 }
 
 export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allBooks, nowMs, maxBestAgeMs, hiddenKeys, stackedBest }) {
@@ -614,6 +622,8 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
         topBooks: top.books,
         midBooks: threeWay ? mid.books : [],
         botBooks: bot.books,
+        topRaw: loneRawAsk(game, top.books, "ml_away"),
+        botRaw: loneRawAsk(game, bot.books, "ml_home"),
         topNoBooks: threeWay ? topNo.books : [],
         midNoBooks: threeWay ? midNo.books : [],
         botNoBooks: threeWay ? botNo.books : [],
@@ -669,6 +679,8 @@ export function getOddsBoardCell({ game, bookKey, market, selectedBookKeys, allB
       top: b.ml_away,
       mid: threeWay ? b.ml_draw : null,
       bot: b.ml_home,
+      topRaw: b.ml_away_raw ?? null,
+      botRaw: b.ml_home_raw ?? null,
       topSize: b.ml_away_size ?? null,
       midSize: threeWay ? (b.ml_draw_size ?? null) : null,
       botSize: b.ml_home_size ?? null,

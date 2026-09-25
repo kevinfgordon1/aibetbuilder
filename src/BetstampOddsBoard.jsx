@@ -1,5 +1,6 @@
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
+import { TAKER_FEE_LEGEND } from "./venueTakerFee.js";
 import {
   fmtBoardSize,
   bestBooksTitle,
@@ -135,7 +136,7 @@ function BestNowProvider({ children }) {
   return <BestNowContext.Provider value={bestNowMs}>{children}</BestNowContext.Provider>;
 }
 
-const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey }) {
+const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey, title }) {
   const prevRef = useRef({ key: flashKey, price, suspended: !!suspended });
   const [flash, setFlash] = useState(null);
 
@@ -166,6 +167,7 @@ const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashK
     <span
       data-odds-flash={flash || "none"}
       className={flash ? `obb-flash obb-flash-${flash}` : undefined}
+      title={title || undefined}
       style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
     >
       {price == null ? "—" : formatAmericanOdds(price)}
@@ -174,6 +176,7 @@ const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashK
 }, (prev, next) => (
   prev.flashKey === next.flashKey
   && !!prev.suspended === !!next.suspended
+  && prev.title === next.title
   && sameAmericanPrice(prev.price, next.price)
 ));
 
@@ -234,11 +237,14 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
+const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
-  const winProb = showWinProb && price != null && !suspended ? formatWinProb(price) : null;
+  const feeTip = rawPrice != null
+    ? `Includes taker fee. Raw ask ${formatAmericanOdds(rawPrice)}${formatWinProb(rawPrice) ? ` (${formatWinProb(rawPrice)} contract)` : ""}`
+    : undefined;
+  const winProb = showWinProb && rawPrice == null && price != null && !suspended ? formatWinProb(price) : null;
   if (suspended) {
     return (
       <>
@@ -263,12 +269,22 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
     <>
       {line && <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
       <div className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "nowrap", lineHeight: 1.15, maxWidth: "100%" }}>
-        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
+        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} title={feeTip} />
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
         <LiquidityCue size={size} inline />
       </div>
+      {rawPrice != null && !suspended && (
+        <div
+          data-raw-ask={rawPrice}
+          title={feeTip}
+          className="obb-clip"
+          style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
+        >
+          ask {formatAmericanOdds(rawPrice)}
+        </div>
+      )}
       {winProb && (
         <div
           data-win-prob={winProb}
@@ -294,6 +310,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
   && prev.updatedAt === next.updatedAt
   && prev.ageTitle === next.ageTitle
   && sameAmericanPrice(prev.price, next.price)
+  && sameAmericanPrice(prev.rawPrice, next.rawPrice)
   && (prev.books?.[0]?.key || "") === (next.books?.[0]?.key || "")
   && (prev.books?.length || 0) === (next.books?.length || 0)
 ));
@@ -696,6 +713,7 @@ function renderBookColumn({
     : lineUpdatedAt(rowGame, b.key, fields.bot);
   const sideProps = (which) => ({
     price: which === "top" ? cell.top : cell.bot,
+    rawPrice: which === "top" ? cell.topRaw : cell.botRaw,
     size: which === "top" ? cell.topSize : cell.botSize,
     line: includeLine ? (which === "top" ? cell.topLine : cell.botLine) : null,
     books: which === "top" ? cell.topBooks : cell.botBooks,
@@ -1739,6 +1757,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
             Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters appear when the server has credentials. No sportsbook columns.
+          </div>
+          <div data-fee-legend="1" style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+            {TAKER_FEE_LEGEND}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
