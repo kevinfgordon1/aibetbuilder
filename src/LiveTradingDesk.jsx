@@ -497,6 +497,11 @@ function LiveTradingDeskView({ user }) {
                   }}
                 >
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(row.title, "Position")}</div>
+                  {typeof row.protectFill === "string" && row.protectFill ? (
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 800, marginTop: 6 }}>
+                      {plain(row.protectFill, "")}
+                    </div>
+                  ) : null}
                   <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 4 }}>
                     {(row.side === "short" ? "Short " : "Long ") + plain(row.team, row.side === "short" ? "No" : "Yes")}
                     {" · "}

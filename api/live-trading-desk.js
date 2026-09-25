@@ -249,6 +249,18 @@ async function armedRows(store) {
   try { return await store.listArmed(); } catch (_) { return []; }
 }
 
+async function improvedRows(store, slugs) {
+  if (!store || !store.configured || typeof store.listImproved !== 'function') return [];
+  try { return await store.listImproved(slugs); } catch (_) { return []; }
+}
+
+function withFillNotes(positions, rows) {
+  return positions.map((row) => {
+    const line = protectMath.protectFillForPosition(row, rows);
+    return line ? { ...row, protectFill: line } : row;
+  });
+}
+
 async function snapshot(client, slug, store) {
   const [positionsRaw, ordersRaw, activityRaw, slate] = await Promise.all([
     allPositions(client),
@@ -276,7 +288,7 @@ async function snapshot(client, slug, store) {
     venue: 'polymarket-us',
     capDollars: price.MAX_SIZE_DOLLARS,
     defaultDollars: price.DEFAULT_SIZE_DOLLARS,
-    positions: decoratePositions(positions, markets),
+    positions: withFillNotes(decoratePositions(positions, markets), await improvedRows(store, slugs)),
     orders: withProtect(price.mapOpenOrders(ordersRaw, markets), await armedRows(store)),
     activity: price.mapActivities(activityRaw, markets),
     market: slug ? (markets[slug] || null) : null,
@@ -333,6 +345,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
         action: quote.action,
         yes_price: quote.yesPriceValue,
         outcome_micro: quote.outcomeMicro,
+        submitted_outcome_micro: quote.outcomeMicro,
         contracts: quote.contracts,
         x_cents: protectReq.xCents,
         y_cents: protectReq.yCents,

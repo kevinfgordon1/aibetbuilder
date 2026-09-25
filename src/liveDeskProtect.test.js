@@ -15,6 +15,8 @@ import {
   formatProtectTelegram,
   readProtectRequest,
   parseProtectCents,
+  originalSubmittedMicro,
+  protectFillForPosition,
 } from "./liveDeskProtect.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -225,6 +227,83 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
 }
 
 {
+  const submitted = 434783;
+  assert.equal(originalSubmittedMicro({ protect_count: 0, outcome_micro: 600000 }), 600000);
+  assert.equal(originalSubmittedMicro({ protect_count: 2, outcome_micro: 400000, submitted_outcome_micro: submitted }), submitted);
+  assert.equal(originalSubmittedMicro({ protect_count: 2, outcome_micro: 400000 }), null);
+  const packers = protectFillForPosition({
+    slug: "aec-nfl-atl-gb-2026-09-24",
+    side: "short",
+    team: "Packers",
+    net: -10,
+    cost: 4,
+  }, [
+    {
+      market_slug: "aec-nfl-atl-gb-2026-09-24",
+      outcome: "short",
+      action: "buy",
+      protect_count: 1,
+      outcome_micro: 420000,
+      submitted_outcome_micro: 450000,
+      updated_at: "2026-09-24T00:00:00Z",
+    },
+    {
+      market_slug: "aec-nfl-atl-gb-2026-09-24",
+      outcome: "short",
+      action: "buy",
+      protect_count: 2,
+      outcome_micro: 400000,
+      submitted_outcome_micro: submitted,
+      updated_at: "2026-09-24T00:01:00Z",
+    },
+  ]);
+  assert.equal(packers, "Packers +150 (submitted +130 · improved by Protect)");
+  assert.doesNotMatch(packers, /¢/);
+  assert.equal(protectFillForPosition({
+    slug: "aec-nfl-atl-gb-2026-09-24",
+    side: "short",
+    team: "Packers",
+    net: -10,
+    cost: 4,
+  }, [{
+    market_slug: "aec-nfl-atl-gb-2026-09-24",
+    outcome: "short",
+    action: "buy",
+    protect_count: 0,
+    outcome_micro: submitted,
+    submitted_outcome_micro: submitted,
+  }]), null);
+  assert.equal(protectFillForPosition({
+    slug: "aec-nfl-atl-gb-2026-09-24",
+    side: "short",
+    team: "Packers",
+    net: -10,
+    cost: 4,
+  }, [{
+    market_slug: "aec-nfl-atl-gb-2026-09-24",
+    outcome: "short",
+    action: "sell",
+    protect_count: 1,
+    outcome_micro: 400000,
+    submitted_outcome_micro: submitted,
+  }]), null);
+  const fromLimit = protectFillForPosition({
+    slug: "m",
+    side: "long",
+    team: "Falcons",
+    net: 10,
+  }, [{
+    market_slug: "m",
+    outcome: "long",
+    action: "buy",
+    protect_count: 1,
+    outcome_micro: 400000,
+    submitted_outcome_micro: submitted,
+  }]);
+  assert.equal(fromLimit, "Falcons +150 (submitted +130 · improved by Protect)");
+}
+
+{
   const ui = fs.readFileSync(path.join(here, "LiveTradingDesk.jsx"), "utf8");
   assert.match(ui, /Protect <span[^>]*>\(adverse pickoff\)<\/span>/);
   assert.match(ui, /Cancel if mid blows through your rest, then re-rest better\. Does not chase if the market runs away\./);
@@ -232,6 +311,7 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_X_CENTS\)\)/);
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_Y_CENTS\)\)/);
   assert.match(ui, /protectXCents/);
+  assert.match(ui, /protectFill/);
   assert.doesNotMatch(ui, /canSeeComboLocks/);
   const desk = fs.readFileSync(path.join(here, "../api/live-trading-desk.js"), "utf8");
   assert.match(desk, /canSeeOwnerTools/);

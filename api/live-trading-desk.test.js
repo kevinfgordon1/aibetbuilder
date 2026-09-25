@@ -44,6 +44,7 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /id="desk-market"/);
   assert.match(ui, /Moneyline only for now/);
   assert.match(ui, /id="desk-protect"/);
+  assert.match(ui, /protectFill/);
   assert.match(ui, /useState\(false\)/);
   assert.doesNotMatch(ui, /quote\.centsLabel/);
   assert.doesNotMatch(ui, /order\.centsLabel/);
@@ -454,6 +455,80 @@ const goodCreds = () => ({
     assert.deepEqual(res.out.body.activity, []);
     assert.equal(Array.isArray(res.out.body.games), true);
     assert.deepEqual(res.out.body.marketTypes.map((t) => t.id), ['moneyline']);
+    assert.equal(res.out.body.positions[0].protectFill, undefined);
+  }
+
+  {
+    const { createMemoryProtectStore } = require('../lib/desk-protect-registry');
+    const store = createMemoryProtectStore([
+      {
+        order_id: 'filled-gb',
+        owner_email: 'kev120909@gmail.com',
+        market_slug: 'aec-nfl-lac-ten-2025-11-02',
+        outcome: 'short',
+        action: 'buy',
+        yes_price: '0.600',
+        outcome_micro: 400000,
+        submitted_outcome_micro: 434783,
+        contracts: 10,
+        x_cents: 3,
+        y_cents: 1,
+        lineage_id: 'first-gb',
+        protect_count: 2,
+        status: 'gone',
+        outcome_name: 'Tennessee Titans',
+      },
+      {
+        order_id: 'plain-lac',
+        owner_email: 'kev120909@gmail.com',
+        market_slug: 'aec-nfl-lac-ten-2025-11-02',
+        outcome: 'long',
+        action: 'buy',
+        yes_price: '0.600',
+        outcome_micro: 600000,
+        submitted_outcome_micro: 600000,
+        contracts: 12,
+        x_cents: 3,
+        y_cents: 1,
+        lineage_id: 'plain-lac',
+        protect_count: 0,
+        status: 'gone',
+      },
+    ]);
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      protectStore: () => store,
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const u = new URL(url);
+        if (u.host === 'gateway.polymarket.us') return jsonRes(200, MARKET);
+        if (method === 'GET' && u.pathname === '/v1/portfolio/positions') {
+          return jsonRes(200, {
+            positions: {
+              'aec-nfl-lac-ten-2025-11-02': {
+                netPositionDecimal: '-10',
+                cost: { value: '4.00', currency: 'USD' },
+                marketMetadata: { slug: 'aec-nfl-lac-ten-2025-11-02', title: 'Los Angeles vs. Tennessee' },
+              },
+            },
+            eof: true,
+          });
+        }
+        if (method === 'GET' && u.pathname === '/v1/orders/open') return jsonRes(200, { orders: [] });
+        if (method === 'GET' && u.pathname === '/v1/portfolio/activities') return jsonRes(200, { activities: [] });
+        return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
+      },
+    });
+    const noted = mockRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer tok' }, url: '/api/live-trading-desk' }, noted);
+    assert.equal(noted.out.statusCode, 200, JSON.stringify(noted.out.body));
+    assert.equal(noted.out.body.positions.length, 1);
+    assert.equal(
+      noted.out.body.positions[0].protectFill,
+      'Tennessee Titans +150 (submitted +130 · improved by Protect)',
+    );
+    assert.doesNotMatch(noted.out.body.positions[0].protectFill, /¢/);
   }
 
   handler._resetDeps();
@@ -590,6 +665,8 @@ const goodCreds = () => ({
     assert.equal(saved.owner_email, 'kev120909@gmail.com');
     assert.equal(saved.x_cents, 3);
     assert.equal(saved.y_cents, 1);
+    assert.equal(saved.submitted_outcome_micro, saved.outcome_micro);
+    assert.equal(saved.submitted_outcome_micro, 600000);
     assert.ok(saved.contracts <= 100 / 0.6 + 1e-6);
 
     const createsBeforeBlock = creates;

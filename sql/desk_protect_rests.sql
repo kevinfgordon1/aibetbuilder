@@ -10,6 +10,7 @@ create table if not exists public.desk_protect_rests (
   action text not null,
   yes_price text not null,
   outcome_micro bigint not null,
+  submitted_outcome_micro bigint,
   contracts numeric not null,
   x_cents numeric not null,
   y_cents numeric not null,
@@ -37,3 +38,7 @@ create index if not exists desk_protect_rests_status_idx
   on public.desk_protect_rests (status, updated_at);
 
 alter table public.desk_protect_rests enable row level security;
+
+-- Existing registries: keep the first submitted price across re-rests.
+alter table public.desk_protect_rests
+  add column if not exists submitted_outcome_micro bigint;

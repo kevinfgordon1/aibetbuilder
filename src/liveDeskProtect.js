@@ -13,6 +13,7 @@ import {
   sizeToContracts,
   formatAmerican,
   americanFromMicro,
+  americanFromProb,
   formatCentsFromMicro,
   normalizeAction,
   normalizeOutcome,
@@ -238,4 +239,55 @@ export function americanLabelFromMicro(micro) {
 export function centsLabelFromMicro(micro) {
   if (micro == null) return "";
   return formatCentsFromMicro(micro);
+}
+
+/** Price of the first rest in this lineage. Later re-rests must copy it, not the price they replace. */
+export function originalSubmittedMicro(row) {
+  if (!row) return null;
+  const stored = Number(row.submitted_outcome_micro);
+  if (stored > 0 && stored < MICRO) return Math.round(stored);
+  if ((Number(row.protect_count) || 0) === 0) {
+    const current = Number(row.outcome_micro);
+    if (current > 0 && current < MICRO) return Math.round(current);
+  }
+  return null;
+}
+
+function fillAmericanFromCost(position) {
+  const net = Math.abs(Number(position && position.net));
+  const cost = Number(position && position.cost);
+  if (!(net > 0) || !(cost > 0)) return "";
+  const prob = cost / net;
+  if (!(prob > 0 && prob < 1)) return "";
+  return formatAmerican(americanFromProb(prob)) || "";
+}
+
+/**
+ * Open position that came from a Protect re-rest.
+ * Main number is the fill (cost / contracts). The parenthetical is the first
+ * submitted American, never an intermediate re-rest. No note if Protect never moved it.
+ */
+export function protectFillForPosition(position, rows) {
+  if (!position || !position.slug) return null;
+  const side = position.side === "short" ? "short" : "long";
+  const matches = (rows || []).filter((row) => {
+    if (!row || String(row.market_slug || "") !== String(position.slug)) return false;
+    if (String(row.outcome || "") !== side) return false;
+    if (normalizeAction(row.action) !== "buy") return false;
+    return (Number(row.protect_count) || 0) > 0;
+  });
+  if (!matches.length) return null;
+  matches.sort((a, b) => {
+    const byCount = (Number(b.protect_count) || 0) - (Number(a.protect_count) || 0);
+    if (byCount) return byCount;
+    return (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0);
+  });
+  const row = matches[0];
+  const submittedMicro = originalSubmittedMicro(row);
+  const submittedAmerican = americanLabelFromMicro(submittedMicro);
+  if (!submittedAmerican) return null;
+  const fillAmerican = fillAmericanFromCost(position) || americanLabelFromMicro(row.outcome_micro);
+  if (!fillAmerican) return null;
+  const team = position.team || row.outcome_name || (side === "short" ? "No" : "Yes");
+  return team + " " + fillAmerican + " (submitted " + submittedAmerican + " · improved by Protect)";
 }
