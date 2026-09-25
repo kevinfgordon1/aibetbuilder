@@ -1,6 +1,6 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
 // GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, NFL slate
-// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId? }
+// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, confirm, allowCross? }
 // POST { op: "cancel", orderId, marketSlug }
 // gameId, when sent, must be the NFL event whose moneyline slug is marketSlug.
 // Every call checks the signed-in Supabase user is OWNER_EMAIL. UI hide is not the gate.
@@ -213,6 +213,8 @@ async function snapshot(client, slug) {
   }
   if (slug) slugs.push(slug);
   const markets = await loadMarkets(client, slugs);
+  let market = slug ? (markets[slug] || null) : null;
+  if (market && slug) market = await withBook(client, slug, market);
   return {
     ok: true,
     venue: 'polymarket-us',
@@ -221,11 +223,26 @@ async function snapshot(client, slug) {
     positions: decoratePositions(positions, markets),
     orders: price.mapOpenOrders(ordersRaw, markets),
     activity: price.mapActivities(activityRaw, markets),
-    market: slug ? (markets[slug] || null) : null,
+    market,
     games: asList(slate && slate.games),
     marketTypes: games.DESK_MARKET_TYPES,
     gamesError: (slate && typeof slate.gamesError === 'string') ? slate.gamesError : '',
   };
+}
+
+async function withBook(client, slug, market) {
+  try {
+    const raw = await client.getMarketBbo(slug);
+    const book = price.readYesBbo(raw);
+    return {
+      ...market,
+      bestBid: book.bestBid,
+      bestAsk: book.bestAsk,
+      bookOk: !!book.ok,
+    };
+  } catch (_) {
+    return { ...market, bestBid: null, bestAsk: null, bookOk: false };
+  }
 }
 
 async function placeOrder(client, body) {
@@ -248,17 +265,37 @@ async function placeOrder(client, body) {
     minQty: market.minQty,
   });
   if (!quote.ok) return { ok: false, status: 400, error: quote.error };
-  const orderBody = price.buildLimitOrder({ slug, quote });
+  const team = quote.outcome === 'short' ? market.shortName : market.longName;
+  const shown = price.matchDisplayedOrder(quote, team, body.confirm);
+  if (!shown.ok) return { ok: false, status: 400, error: shown.error };
+  const stray = price.strayOrderMismatch(body, quote);
+  if (stray) return { ok: false, status: 400, error: stray };
+  const allowCross = price.allowCrossRequested(body.allowCross);
+  if (!allowCross) {
+    let book;
+    try {
+      book = price.readYesBbo(await client.getMarketBbo(slug));
+    } catch (_) {
+      book = { ok: false, error: 'The book is missing or crossed. A rest will not be sent.' };
+    }
+    const cross = price.crossBlock({
+      bookSide: quote.bookSide,
+      yesMicro: quote.yesMicro,
+      bestBid: book.bestBid,
+      bestAsk: book.bestAsk,
+    });
+    if (!cross.ok) return { ok: false, status: 400, error: cross.error || book.error };
+  }
+  const orderBody = price.buildLimitOrder({ slug, quote, allowCross });
   const created = await client.createOrder(orderBody);
   const orderId = created && (created.id || (created.order && created.order.id));
-  const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
   return {
     ok: true,
     orderId: orderId ? String(orderId) : null,
     snap: {
       outcome: quote.outcome,
       action: quote.action,
-      outcomeName,
+      outcomeName: team,
       americanLabel: quote.snappedAmericanLabel,
       centsLabel: quote.centsLabel,
       yesCentsLabel: quote.yesCentsLabel,
@@ -266,6 +303,8 @@ async function placeOrder(client, body) {
       contracts: quote.contracts,
       riskLabel: quote.riskLabel,
       intent: quote.intent,
+      bookSide: quote.bookSide,
+      line: shown.expected.line,
       tick: quote.tick,
     },
   };

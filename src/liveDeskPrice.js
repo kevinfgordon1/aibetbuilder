@@ -146,6 +146,18 @@ export function intentFor(outcome, action) {
   return "";
 }
 
+// Polymarket US has no side field. The exchange derives ORDER_SIDE_SELL from
+// BUY_SHORT (buy the short team = sell YES) and ORDER_SIDE_BUY from
+// SELL_SHORT (sell the short team = buy YES). Keep the team on the intent so
+// an open buy of Green Bay is not labeled as a sell of Atlanta.
+export function yesBookSide(outcome, action) {
+  const side = normalizeOutcome(outcome);
+  const act = normalizeAction(action);
+  if (!side || !act) return "";
+  if (side === "short") return act === "buy" ? "sell" : "buy";
+  return act;
+}
+
 export function outcomeFromIntent(intent, outcomeSide, action) {
   const sideRaw = String(outcomeSide || "").toUpperCase();
   const actRaw = String(action || "").toUpperCase();
@@ -225,6 +237,7 @@ export function snapRestingLimit({ american, outcome, action, tick } = {}) {
     centsLabel: formatCentsFromMicro(outcomeMicro),
     yesCentsLabel: formatCentsFromMicro(yesMicro),
     intent: intentFor(side, act),
+    bookSide: yesBookSide(side, act),
   };
 }
 
@@ -281,7 +294,7 @@ export function quoteRestingOrder(input) {
   return { ...snap, ...sized, ok: true };
 }
 
-export function buildLimitOrder({ slug, quote }) {
+export function buildLimitOrder({ slug, quote, allowCross } = {}) {
   return {
     marketSlug: String(slug || "").trim(),
     type: "ORDER_TYPE_LIMIT",
@@ -290,7 +303,170 @@ export function buildLimitOrder({ slug, quote }) {
     tif: "TIME_IN_FORCE_GOOD_TILL_CANCEL",
     intent: quote.intent,
     manualOrderIndicator: "MANUAL_ORDER_INDICATOR_MANUAL",
-    participateDontInitiate: false,
+    participateDontInitiate: !allowCross,
+  };
+}
+
+export function compactCents(micro) {
+  const label = formatCentsFromMicro(micro);
+  if (!label) return "";
+  return label.replace(/¢$/, "c");
+}
+
+export function formatMaxCost(riskDollars) {
+  const n = Number(riskDollars);
+  if (!Number.isFinite(n)) return "";
+  const rounded = Math.round(n * 100) / 100;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-9) return "$" + Math.round(rounded);
+  return "$" + rounded.toFixed(2);
+}
+
+function formatContracts(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "";
+  if (Math.abs(v - Math.round(v)) < 1e-9) return String(Math.round(v));
+  const text = v.toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
+  return text;
+}
+
+export function formatDeskOrderLine({ action, team, americanLabel, cents, contracts, cost } = {}) {
+  const act = normalizeAction(action) === "sell" ? "SELL" : "BUY";
+  return "You will " + act + " " + String(team || "")
+    + " at " + String(americanLabel || "")
+    + " (" + String(cents || "") + ")"
+    + " · " + formatContracts(contracts) + " contracts"
+    + " · max cost " + String(cost || "");
+}
+
+export function orderTicket(quote, team) {
+  const cents = compactCents(quote.outcomeMicro);
+  const cost = formatMaxCost(quote.riskDollars);
+  const line = formatDeskOrderLine({
+    action: quote.action,
+    team,
+    americanLabel: quote.snappedAmericanLabel,
+    cents,
+    contracts: quote.contracts,
+    cost,
+  });
+  return {
+    team: String(team || ""),
+    outcome: quote.outcome,
+    action: quote.action,
+    american: quote.snappedAmericanLabel,
+    cents,
+    contracts: quote.contracts,
+    cost,
+    yesPrice: quote.yesPriceValue,
+    intent: quote.intent,
+    bookSide: quote.bookSide,
+    line,
+  };
+}
+
+export function matchDisplayedOrder(quote, team, confirm) {
+  const expected = orderTicket(quote, team);
+  if (!confirm || typeof confirm !== "object") {
+    return { ok: false, error: "Confirm the order sentence before sending.", expected };
+  }
+  const keys = ["team", "outcome", "action", "american", "contracts", "cost", "yesPrice", "intent", "bookSide", "line"];
+  for (const key of keys) {
+    if (String(confirm[key]) !== String(expected[key])) {
+      return {
+        ok: false,
+        error: "That confirmation does not match this order. Read the sentence and send again.",
+        expected,
+      };
+    }
+  }
+  return { ok: true, expected };
+}
+
+export function strayOrderMismatch(body, quote) {
+  if (!body || typeof body !== "object" || !quote) return "";
+  if (body.price != null) {
+    const raw = typeof body.price === "object" ? body.price.value : body.price;
+    if (raw != null && String(raw) !== "" && String(raw) !== String(quote.yesPriceValue)) {
+      return "Request price does not match the team and American on this order.";
+    }
+  }
+  if (body.quantity != null && String(body.quantity) !== "" && String(body.quantity) !== String(quote.contracts)) {
+    return "Request quantity does not match the dollar size on this order.";
+  }
+  if (body.intent != null && String(body.intent) !== "" && String(body.intent) !== String(quote.intent)) {
+    return "Request intent does not match the team and side on this order.";
+  }
+  return "";
+}
+
+export function readYesBbo(payload) {
+  const data = payload && (payload.marketData || payload.market_data || payload);
+  if (!data || typeof data !== "object") {
+    return { ok: false, bestBid: null, bestAsk: null, error: "The book is missing or crossed. A rest will not be sent." };
+  }
+  const bid = amountValue(data.bestBid != null ? data.bestBid : data.best_bid);
+  const ask = amountValue(data.bestAsk != null ? data.bestAsk : data.best_ask);
+  const bidOk = bid > 0 && bid < 1;
+  const askOk = ask > 0 && ask < 1;
+  if (!bidOk || !askOk || ask + 1e-9 < bid) {
+    return {
+      ok: false,
+      bestBid: bidOk ? bid : null,
+      bestAsk: askOk ? ask : null,
+      error: "The book is missing or crossed. A rest will not be sent.",
+    };
+  }
+  return { ok: true, bestBid: bid, bestAsk: ask };
+}
+
+export function crossBlock({ bookSide, yesMicro, bestBid, bestAsk } = {}) {
+  const side = bookSide === "buy" || bookSide === "sell" ? bookSide : "";
+  const yes = Math.round(Number(yesMicro));
+  if (!side || !(yes > 0 && yes < MICRO)) {
+    return { ok: false, crosses: true, error: "That limit has no book side." };
+  }
+  const bid = Number(bestBid);
+  const ask = Number(bestAsk);
+  const bidOk = bid > 0 && bid < 1;
+  const askOk = ask > 0 && ask < 1;
+  if (!bidOk || !askOk || ask + 1e-9 < bid) {
+    return { ok: false, crosses: true, error: "The book is missing or crossed. A rest will not be sent." };
+  }
+  const bidMicro = Math.round(bid * MICRO);
+  const askMicro = Math.round(ask * MICRO);
+  const crosses = side === "buy" ? yes >= askMicro : yes <= bidMicro;
+  if (!crosses) return { ok: true, crosses: false };
+  return {
+    ok: false,
+    crosses: true,
+    error: "That limit would cross the book and take liquidity. Tick Allow cross to send it, or rest inside the spread.",
+  };
+}
+
+export function allowCrossRequested(value) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+/**
+ * What a successful Live Trading Desk rest clears. Mirrors Combo Locks
+ * addParlay: the leg (game + market) selection is emptied, stake and odds
+ * stay, and there is no success toast. A rejected submit returns null so
+ * the typed ticket stays on screen with the error.
+ * Overrides, always: the Buy/Sell toggle returns to Buy, and Bet Protect
+ * turns off. American odds, dollar size, and Allow cross are omitted
+ * because Combo Locks keeps those inputs.
+ */
+export function restFormAfterPlace(accepted) {
+  if (accepted !== true) return null;
+  return {
+    action: "buy",
+    protect: false,
+    gameId: "",
+    slug: "",
+    slugDraft: "",
+    outcome: "long",
+    marketType: "moneyline",
+    notice: "",
   };
 }
 
@@ -368,13 +544,33 @@ export function mapPositions(payload) {
   return rows;
 }
 
+function exchangeBookSide(side) {
+  const s = String(side || "").toUpperCase();
+  if (s.includes("SELL")) return "sell";
+  if (s.includes("BUY")) return "buy";
+  return "";
+}
+
+// SELL_SHORT is a buy of YES. Label that open order as the long team, not
+// as a sell of the short team. BUY_SHORT is a sell of YES and stays a buy
+// of the short team.
+export function openOrderDisplay(order) {
+  const intent = String((order && order.intent) || "").toUpperCase();
+  const book = exchangeBookSide(order && order.side);
+  if (book === "buy" && intent.includes("SELL_SHORT")) return { outcome: "long", action: "buy" };
+  if (book === "sell" && intent.includes("BUY_SHORT")) return { outcome: "short", action: "buy" };
+  if (book === "sell" && intent.includes("SELL_LONG")) return { outcome: "long", action: "sell" };
+  if (book === "buy" && intent.includes("BUY_LONG")) return { outcome: "long", action: "buy" };
+  return outcomeFromIntent(order && order.intent, order && order.outcomeSide, order && order.action);
+}
+
 export function mapOpenOrders(payload, marketsBySlug = {}) {
   const raw = payload && (payload.orders || payload);
   const list = Array.isArray(raw) ? raw : [];
   return list.map((order) => {
     if (!order || typeof order !== "object") return null;
     const slug = String(order.marketSlug || (order.marketMetadata && order.marketMetadata.slug) || "").trim();
-    const parsed = outcomeFromIntent(order.intent, order.outcomeSide, order.action);
+    const parsed = openOrderDisplay(order);
     const yes = amountValue(order.price);
     const yesMicro = yes == null ? null : toMicro(yes);
     const outcomeMicro = yesMicro == null

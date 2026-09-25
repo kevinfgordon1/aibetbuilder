@@ -7,6 +7,11 @@ import {
   snapRestingLimit,
   quoteRestingOrder,
   buildLimitOrder,
+  orderTicket,
+  matchDisplayedOrder,
+  crossBlock,
+  yesBookSide,
+  restFormAfterPlace,
   readMarketSides,
   mapPositions,
   mapOpenOrders,
@@ -134,7 +139,10 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(body.tif, "TIME_IN_FORCE_GOOD_TILL_CANCEL");
   assert.equal(body.intent, "ORDER_INTENT_BUY_LONG");
   assert.equal(body.manualOrderIndicator, "MANUAL_ORDER_INDICATOR_MANUAL");
-  assert.equal(body.participateDontInitiate, false);
+  assert.equal(body.participateDontInitiate, true);
+  assert.equal(body.side, undefined);
+  const crossing = buildLimitOrder({ slug: "aec-nfl-lac-ten-2025-11-02", quote, allowCross: true });
+  assert.equal(crossing.participateDontInitiate, false);
 }
 
 {
@@ -253,6 +261,137 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(deskErrorText("Sign in required."), "Sign in required.");
   assert.equal(deskErrorText(null, "Could not load the desk (500)."), "Could not load the desk (500).");
   assert.equal(deskErrorText({}), "Could not load the desk.");
+}
+
+{
+  // Green Bay is the short team. Buy GB at −150 / $100 rests a YES sell
+  // at 40¢ for floor($100 / 0.60) = 166.66, not a YES buy of 250.
+  const tick = 0.001;
+  const minQty = 0.01;
+  const dollars = 100;
+  const cases = [
+    ["long", "buy", "ORDER_INTENT_BUY_LONG", "buy", "0.600", 166.66],
+    ["long", "sell", "ORDER_INTENT_SELL_LONG", "sell", "0.600", 250],
+    ["short", "buy", "ORDER_INTENT_BUY_SHORT", "sell", "0.400", 166.66],
+    ["short", "sell", "ORDER_INTENT_SELL_SHORT", "buy", "0.400", 250],
+  ];
+  for (const [outcome, action, intent, bookSide, yesPrice, contracts] of cases) {
+    const quote = quoteRestingOrder({ american: -150, outcome, action, tick, dollars, minQty });
+    assert.equal(quote.ok, true, outcome + " " + action + " " + (quote.error || ""));
+    assert.equal(quote.intent, intent, outcome + " " + action);
+    assert.equal(quote.bookSide, bookSide, outcome + " " + action);
+    assert.equal(yesBookSide(outcome, action), bookSide);
+    assert.equal(quote.yesPriceValue, yesPrice, outcome + " " + action);
+    assert.equal(quote.contracts, contracts, outcome + " " + action);
+    const body = buildLimitOrder({ slug: "aec-nfl-atl-gb-2026-09-24", quote });
+    assert.equal(body.intent, intent);
+    assert.equal(body.price.value, yesPrice);
+    assert.equal(body.quantity, contracts);
+    assert.equal(body.participateDontInitiate, true);
+    assert.equal(body.side, undefined);
+  }
+  const buyGb = quoteRestingOrder({
+    american: -150,
+    outcome: "short",
+    action: "buy",
+    tick,
+    dollars,
+    minQty,
+  });
+  assert.notEqual(buyGb.contracts, 250);
+  assert.notEqual(buyGb.intent, "ORDER_INTENT_SELL_SHORT");
+  assert.equal(buyGb.bookSide, "sell");
+  const ticket = orderTicket(buyGb, "GB Packers");
+  assert.equal(
+    ticket.line,
+    "You will BUY GB Packers at -150 (60c) · 166.66 contracts · max cost $100",
+  );
+  assert.equal(matchDisplayedOrder(buyGb, "GB Packers", ticket).ok, true);
+  assert.equal(matchDisplayedOrder(buyGb, "GB Packers", null).ok, false);
+  assert.equal(matchDisplayedOrder(buyGb, "GB Packers", { ...ticket, contracts: 250 }).ok, false);
+  assert.equal(matchDisplayedOrder(buyGb, "GB Packers", { ...ticket, intent: "ORDER_INTENT_SELL_SHORT" }).ok, false);
+  assert.equal(matchDisplayedOrder(buyGb, "Atlanta Falcons", ticket).ok, false);
+  const sellGb = quoteRestingOrder({
+    american: -150,
+    outcome: "short",
+    action: "sell",
+    tick,
+    dollars,
+    minQty,
+  });
+  assert.equal(orderTicket(sellGb, "GB Packers").line,
+    "You will SELL GB Packers at -150 (60c) · 250 contracts · max cost $100");
+}
+
+{
+  // Sell YES at 40¢ does not cross a 35.5¢ bid. Buy YES at 40¢ does cross a 35.5¢ ask.
+  assert.equal(crossBlock({ bookSide: "sell", yesMicro: 400000, bestBid: 0.355, bestAsk: 0.40 }).ok, true);
+  const take = crossBlock({ bookSide: "buy", yesMicro: 400000, bestBid: 0.32, bestAsk: 0.355 });
+  assert.equal(take.ok, false);
+  assert.equal(take.crosses, true);
+  assert.equal(crossBlock({ bookSide: "buy", yesMicro: 400000, bestBid: 0.30, bestAsk: 0.40 }).crosses, true);
+  assert.equal(crossBlock({ bookSide: "sell", yesMicro: 400000, bestBid: 0.40, bestAsk: 0.50 }).crosses, true);
+  assert.equal(crossBlock({ bookSide: "buy", yesMicro: 300000, bestBid: 0.30, bestAsk: 0.40 }).ok, true);
+  assert.equal(crossBlock({ bookSide: "sell", yesMicro: 400000, bestBid: 0.30, bestAsk: 0.40 }).ok, true);
+  assert.equal(crossBlock({ bookSide: "sell", yesMicro: 400000, bestBid: null, bestAsk: 0.50 }).ok, false);
+  assert.equal(crossBlock({ bookSide: "sell", yesMicro: 400000, bestBid: 0.50, bestAsk: 0.40 }).ok, false);
+}
+
+{
+  const orders = mapOpenOrders({
+    orders: [{
+      id: "ord-cross",
+      marketSlug: "aec-nfl-atl-gb-2026-09-24",
+      intent: "ORDER_INTENT_SELL_SHORT",
+      side: "ORDER_SIDE_BUY",
+      outcomeSide: "OUTCOME_SIDE_NO",
+      price: { value: "0.400", currency: "USD" },
+      quantity: 250,
+      leavesQuantity: 250,
+      state: "ORDER_STATE_NEW",
+    }, {
+      id: "ord-gb",
+      marketSlug: "aec-nfl-atl-gb-2026-09-24",
+      intent: "ORDER_INTENT_BUY_SHORT",
+      side: "ORDER_SIDE_SELL",
+      price: { value: "0.400", currency: "USD" },
+      quantity: 166.66,
+      leavesQuantity: 166.66,
+      state: "ORDER_STATE_NEW",
+    }],
+  }, {
+    "aec-nfl-atl-gb-2026-09-24": {
+      longName: "Atlanta Falcons",
+      shortName: "Green Bay Packers",
+      title: "Falcons vs Packers",
+    },
+  });
+  assert.equal(orders[0].outcomeName, "Atlanta Falcons");
+  assert.equal(orders[0].action, "buy");
+  assert.equal(orders[0].americanLabel, "+150");
+  assert.notEqual(orders[0].outcomeName, "Green Bay Packers");
+  assert.equal(orders[1].outcomeName, "Green Bay Packers");
+  assert.equal(orders[1].action, "buy");
+  assert.equal(orders[1].americanLabel, "-150");
+}
+
+{
+  assert.equal(restFormAfterPlace(false), null);
+  assert.equal(restFormAfterPlace(undefined), null);
+  const next = restFormAfterPlace(true);
+  assert.deepEqual(next, {
+    action: "buy",
+    protect: false,
+    gameId: "",
+    slug: "",
+    slugDraft: "",
+    outcome: "long",
+    marketType: "moneyline",
+    notice: "",
+  });
+  assert.equal(Object.hasOwn(next, "american"), false);
+  assert.equal(Object.hasOwn(next, "dollars"), false);
+  assert.equal(Object.hasOwn(next, "allowCross"), false);
 }
 
 console.log("liveDeskPrice.test.js ok");
