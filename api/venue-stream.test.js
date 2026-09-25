@@ -319,6 +319,69 @@ class FakeWS {
   }
 
   {
+    const req = new EventEmitter();
+    req.method = 'GET';
+    req.url = '/api/kalshi-stream?league=NFL';
+    const res = sseRes();
+    let ws = null;
+    const pending = kalshiHandler(req, res, {
+      hubs: new Map(),
+      pollMs: 5000,
+      maxPolls: 1,
+      kalshiCreds: { ok: true, keyId: 'key-1', pem: 'unused' },
+      wsHeaders: { 'KALSHI-ACCESS-KEY': 'key-1' },
+      WebSocket: FakeWS,
+      onSocket(socket) { ws = socket; },
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          events: [{
+            title: 'Atlanta vs Green Bay',
+            markets: [
+              { ticker: 'KXNFLGAME-26SEP24ATLGB-ATL', yes_sub_title: 'Atlanta', yes_ask_dollars: '0.3400' },
+              { ticker: 'KXNFLGAME-26SEP24ATLGB-GB', yes_sub_title: 'Green Bay', yes_ask_dollars: '0.6700' },
+            ],
+          }],
+        }),
+      }),
+    });
+    for (let i = 0; i < 40 && !ws; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    assert.ok(ws, 'kalshi hub opens the ticker socket when the key is present');
+    assert.match(ws.url, /external-api-ws\.kalshi\.com\/trade-api\/ws\/v2/);
+    ws.emit('open', {});
+    assert.ok(ws.sent.length >= 1);
+    const sub = JSON.parse(ws.sent[0]);
+    assert.deepEqual(sub.params.channels, ['ticker']);
+    assert.ok(sub.params.market_tickers.includes('KXNFLGAME-26SEP24ATLGB-ATL'));
+    ws.emit('message', {
+      data: JSON.stringify({
+        type: 'ticker',
+        msg: { market_ticker: 'KXNFLGAME-26SEP24ATLGB-ATL', yes_ask: 36, ts: Date.now() },
+      }),
+    });
+    const tick = JSON.parse(res.chunks[res.chunks.length - 1].split('data: ')[1]);
+    assert.equal(tick.payload.mode, 'ws');
+    assert.equal(tick.payload.complete, true);
+    assert.equal(tick.payload.quotes.length, 2, 'a ticker updates the book instead of replacing it');
+    assert.equal(tick.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.36);
+    assert.equal(tick.payload.quotes.find((q) => q.side === 'Green Bay').odds, 0.67);
+    const same = res.chunks.length;
+    ws.emit('message', {
+      data: JSON.stringify({
+        type: 'ticker',
+        msg: { market_ticker: 'KXNFLGAME-26SEP24ATLGB-ATL', yes_ask: 36, ts: Date.now() },
+      }),
+    });
+    assert.equal(res.chunks.length, same, 'unchanged ticker ask is not a second paint');
+    req.emit('close');
+    await pending;
+    assert.equal(ws.closed, true);
+  }
+
+  {
     const res = sseRes();
     await polyHandler({ method: 'POST', url: '/api/polymarket-stream' }, res, { hubs: new Map() });
     assert.equal(res.statusCode, 405);

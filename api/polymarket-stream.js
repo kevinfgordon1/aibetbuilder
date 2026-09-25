@@ -2,10 +2,12 @@
 
 // GET /api/polymarket-stream?league=NFL|NCAAF|MLB
 // Same-origin SSE of Polymarket CLOB best asks for game moneylines.
-// Public, keyless. One upstream poll + WebSocket per league is fanned out
-// to every connected board. Each event is the whole moneyline book.
-// Gamma's cached outcomePrices are not the live price; CLOB /prices is.
-// Betstamp is not modified.
+// Public, keyless. One CLOB snapshot plus the market-channel WebSocket per
+// league is fanned out to every connected board. Each event is the whole
+// moneyline book. The socket is the fast path (a venue change is relayed
+// on the next frame). CLOB /prices refreshes the book about every 2s so a
+// missed frame cannot sit. The SSE response ends before Vercel's 300s cap
+// and the browser reconnects onto a fresh snapshot.
 //
 // Quote odds are the best ask as a 0–1 probability (the board converts
 // that to American). Spreads and totals exist on Gamma but are alt ladders;

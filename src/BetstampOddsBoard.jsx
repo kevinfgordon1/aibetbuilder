@@ -84,6 +84,7 @@ import {
   kalshiQuotesFromBoardBody,
   polymarketQuotesFromBoardBody,
   boardPriceTicks,
+  boardPollShouldApply,
   quotesAfterVenueEvent,
   mainLaddersFromGame,
 } from "./freeFeedBoard.js";
@@ -1017,6 +1018,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setStreamStatus(liveOnly && venuesOn ? "connecting" : "idle");
 
     const quoteRef = { polymarket: [], kalshi: [], novig: [], fourcasters: [] };
+    const sseAt = { polymarket: 0, kalshi: 0, novig: 0, fourcasters: 0 };
     let phone = null;
     let sawPhone = !seeUnderdog;
     let phoneFailed = false;
@@ -1105,9 +1107,17 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         loadJsonBoard(polymarketBoardUrl({ league }), polymarketQuotesFromBoardBody),
       ]).then(([kalshiQuotes, polyQuotes]) => {
         if (cancelled) return;
-        if (kalshiQuotes) quoteRef.kalshi = kalshiQuotes;
-        if (polyQuotes) quoteRef.polymarket = polyQuotes;
-        if (kalshiQuotes || polyQuotes) publish();
+        const now = Date.now();
+        let changed = false;
+        if (kalshiQuotes && boardPollShouldApply(sseAt.kalshi, now)) {
+          quoteRef.kalshi = kalshiQuotes;
+          changed = true;
+        }
+        if (polyQuotes && boardPollShouldApply(sseAt.polymarket, now)) {
+          quoteRef.polymarket = polyQuotes;
+          changed = true;
+        }
+        if (changed) publish();
       }).finally(() => { boardInFlight = false; });
     };
     kickPhone();
@@ -1149,6 +1159,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               }
               const quotes = payload && payload.quotes;
               if (!quotes || !quotes.length) return;
+              sseAt[book] = Date.now();
               quoteRef[book] = quotesAfterVenueEvent(quoteRef[book], payload);
               publish();
             },

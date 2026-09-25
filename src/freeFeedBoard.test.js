@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { toAmericanOdds, gameVisibleOnBoard } from "./betstampNormalize.js";
 import {
   freeFeedBooks,
+  boardPollShouldApply,
   boardPriceTicks,
   gamesFromFreeFeeds,
   kalshiQuotesFromBoardBody,
@@ -265,6 +266,9 @@ const replaced = quotesAfterVenueEvent(
 assert.equal(replaced.length, 2);
 assert.equal(replaced.some((q) => String(q.ticker).includes("LARPHI")), false);
 assert.equal(quotesAfterVenueEvent(replaced, { quotes: [] }), replaced);
+assert.equal(boardPollShouldApply(0, 5_000), true, 'no socket yet, the JSON poll may paint');
+assert.equal(boardPollShouldApply(4_000, 5_000), false, 'a fresh SSE tick wins over an in-flight poll');
+assert.equal(boardPollShouldApply(1_000, 5_000), true, 'a quiet socket falls back to the poll');
 assert.equal(games[0].bookOdds.underdog_predict.ml_away, 245);
 assert.equal(games[0].bookOdds.underdog_predict.ml_home, -280);
 assert.equal(games[0].bookOdds.underdog_predict.spr_away, -110);
@@ -515,6 +519,7 @@ assert.match(board, /kalshiQuotesFromBoardBody/);
 assert.match(board, /polymarketQuotesFromBoardBody/);
 assert.match(board, /quotesAfterVenueEvent/);
 assert.match(board, /boardPriceTicks/);
+assert.match(board, /boardPollShouldApply/);
 assert.match(board, /tickSinkRef\.current\?/);
 assert.match(board, /FREE_FEED_LIVE_BOARD_POLL_MS/);
 const venueLive = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "venueLive.js"), "utf8");

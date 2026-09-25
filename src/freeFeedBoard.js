@@ -17,9 +17,11 @@ import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 30_000;
-// Live Polymarket / Kalshi JSON snapshots. SSE should be faster; this is the
-// backstop when a stream replays one ticker or a chunk sits in a proxy buffer.
-export const FREE_FEED_LIVE_BOARD_POLL_MS = 3_000;
+// JSON snapshot backstop. The SSE socket is the 1–2s path. Apply a poll
+// only when that book has been quiet, so a slower REST body cannot paint
+// over a ticker that just arrived.
+export const FREE_FEED_LIVE_BOARD_POLL_MS = 2_000;
+export const SSE_BEATS_POLL_MS = 2_000;
 // Open quote after kickoff, before we treat the game as finished.
 const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
 
@@ -266,6 +268,11 @@ export function polymarketQuotesFromBoardBody(body) {
 
 // A complete SSE payload is the whole book. Merging a one-contract tick
 // into an older book is what left Atlanta stuck at the pregame price.
+export function boardPollShouldApply(lastSseAt, nowMs, freshMs = SSE_BEATS_POLL_MS) {
+  if (lastSseAt == null || !Number.isFinite(Number(lastSseAt)) || Number(lastSseAt) <= 0) return true;
+  return Number(nowMs) - Number(lastSseAt) >= freshMs;
+}
+
 export function quotesAfterVenueEvent(prev, payload) {
   const quotes = payload && Array.isArray(payload.quotes) ? payload.quotes.filter(Boolean) : [];
   if (!quotes.length) return prev || [];
