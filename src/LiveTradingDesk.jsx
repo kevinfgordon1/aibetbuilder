@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
+import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents } from "./liveDeskProtect";
 
 let supabaseClient = null;
 function supabase() {
@@ -153,6 +154,9 @@ function LiveTradingDeskView({ user }) {
   const [action, setAction] = useState("sell");
   const [american, setAmerican] = useState("");
   const [dollars, setDollars] = useState(String(DEFAULT_SIZE_DOLLARS));
+  const [protect, setProtect] = useState(false);
+  const [protectX, setProtectX] = useState(String(DEFAULT_PROTECT_X_CENTS));
+  const [protectY, setProtectY] = useState(String(DEFAULT_PROTECT_Y_CENTS));
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -178,6 +182,15 @@ function LiveTradingDeskView({ user }) {
       return { ok: false, error: deskErrorText(err, "Could not price that order.") };
     }
   }, [market, american, outcome, action, dollars]);
+
+  const protectXParsed = useMemo(
+    () => parseProtectCents(protectX, DEFAULT_PROTECT_X_CENTS, { min: 0.1 }),
+    [protectX],
+  );
+  const protectYParsed = useMemo(
+    () => parseProtectCents(protectY, DEFAULT_PROTECT_Y_CENTS, { min: 0 }),
+    [protectY],
+  );
 
   async function load(nextSlug, { silent } = {}) {
     const id = ++seq.current;
@@ -335,6 +348,9 @@ function LiveTradingDeskView({ user }) {
           action,
           american,
           dollars: Number(dollars),
+          protect,
+          protectXCents: protect ? protectXParsed.cents : undefined,
+          protectYCents: protect ? protectYParsed.cents : undefined,
         }),
       });
       let data = null;
@@ -344,12 +360,15 @@ function LiveTradingDeskView({ user }) {
         return;
       }
       const snap = data.snap || {};
+      const protectSnap = snap.protect;
       setNotice(
         "Rested " + (snap.action || action) + " " + (snap.outcomeName || "")
-        + " at " + (snap.americanLabel || "") + " (" + (snap.centsLabel || "") + ")"
+        + " at " + (snap.americanLabel || "")
         + (snap.contracts != null ? " · " + snap.contracts + " contracts" : "")
         + (snap.riskLabel ? " · " + snap.riskLabel + " at risk" : "")
-        + "."
+        + (protectSnap && protectSnap.on
+          ? ". Protect on (more than " + protectSnap.xCents + "¢ through, re-rest " + protectSnap.yCents + "¢ better)"
+          : ".")
       );
       await load(market.slug, { silent: true });
     } catch (err) {
@@ -410,12 +429,13 @@ function LiveTradingDeskView({ user }) {
   })();
   const expectedSlug = gameId ? moneylineSlugForGame(gameId) : "";
   const scoped = !!(market && expectedSlug && market.slug === expectedSlug && marketType === "moneyline");
+  const protectReady = !protect || (protectXParsed.ok && protectYParsed.ok);
   const gamesBad = !!(board && board.games != null && !Array.isArray(board.games));
   const boardShapeError = board && (
     !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity) || gamesBad
   ) ? "The desk returned an unexpected board." : "";
   const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
-  const canSubmit = !!(scoped && market.tradable && quote && quote.ok && !busy);
+  const canSubmit = !!(scoped && market.tradable && quote && quote.ok && protectReady && !busy);
   const knownGame = games.some((g) => g.id === gameId);
   const slateNote = board && typeof board.gamesError === "string" ? board.gamesError : "";
 
@@ -581,6 +601,54 @@ function LiveTradingDeskView({ user }) {
               Small size, trial only. Hard cap ${MAX_SIZE_DOLLARS} so a fat-finger cannot rest a large order. Default ${DEFAULT_SIZE_DOLLARS}. Dollars are the most you can lose if this fills and settles against you.
             </div>
 
+            <label htmlFor="desk-protect" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, fontSize: 14, fontWeight: 800, color: "#f8fafc" }}>
+              <input
+                id="desk-protect"
+                type="checkbox"
+                checked={protect}
+                onChange={(e) => setProtect(e.target.checked)}
+              />
+              Protect <span style={{ fontWeight: 600, color: "#9ca3af" }}>(adverse pickoff)</span>
+            </label>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 1.45 }}>
+              Off unless you arm this rest. Cancel if mid blows through your rest, then re-rest better. Does not chase if the market runs away.
+            </div>
+            {protect && (
+              <details open style={{ marginTop: 10 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
+                  {(protectXParsed.ok ? protectXParsed.cents : protectX) + "¢ through mid · re-rest " + (protectYParsed.ok ? protectYParsed.cents : protectY) + "¢ better"}
+                </summary>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                  <div>
+                    <label style={label} htmlFor="desk-protect-x">Through mid (¢)</label>
+                    <input
+                      id="desk-protect-x"
+                      type="number"
+                      min="0.1"
+                      max="25"
+                      step="0.1"
+                      value={protectX}
+                      onChange={(e) => setProtectX(e.target.value)}
+                      style={{ ...field, fontSize: 16 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={label} htmlFor="desk-protect-y">Re-rest better (¢)</label>
+                    <input
+                      id="desk-protect-y"
+                      type="number"
+                      min="0"
+                      max="25"
+                      step="0.1"
+                      value={protectY}
+                      onChange={(e) => setProtectY(e.target.value)}
+                      style={{ ...field, fontSize: 16 }}
+                    />
+                  </div>
+                </div>
+              </details>
+            )}
+
             <div style={{ marginTop: 14, padding: "12px 12px", borderRadius: 10, background: "#0a0b0f", border: "1px solid rgba(255,255,255,0.08)", minHeight: 64 }}>
               {!market && <div style={{ color: "#9ca3af", fontSize: 13 }}>Pick an NFL game. The rest uses that game’s moneyline.</div>}
               {market && !String(american).trim() && (
@@ -589,19 +657,25 @@ function LiveTradingDeskView({ user }) {
               {market && String(american).trim() && quote && !quote.ok && (
                 <div style={{ color: "#fecaca", fontSize: 13 }}>{deskErrorText(quote.error, "That price cannot be rested.")}</div>
               )}
+              {market && protect && (!protectXParsed.ok || !protectYParsed.ok) && (
+                <div style={{ color: "#fecaca", fontSize: 13, marginBottom: 8 }}>{deskErrorText((protectXParsed.ok ? protectYParsed : protectXParsed).error, "Check the Protect cushion.")}</div>
+              )}
               {market && quote && quote.ok && (
                 <div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 20, fontWeight: 800 }}>
                     {action === "buy" ? "Buy" : "Sell"} {outcomeName} {plain(quote.snappedAmericanLabel, "")}
                   </div>
                   <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 6 }}>
-                    {plain(quote.centsLabel, "")} on {outcomeName}
-                    {outcome === "short" ? " · YES book " + plain(quote.yesCentsLabel, "") : ""}
-                    {" · "}{plain(quote.contracts, "—")} contracts · {plain(quote.riskLabel, "")} at risk
+                    {plain(quote.contracts, "—")} contracts · {plain(quote.riskLabel, "")} at risk
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
                     Buys floor the tick (you pay less). Sells ceil the tick (you receive more). Never a worse American than you typed. Good-till-cancel limit — a price through the market can fill now; the rest stays until you cancel.
                   </div>
+                  {protect && protectReady && (
+                    <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 6 }}>
+                      Protect armed. Cancel if this rest is more than {protectXParsed.cents}¢ through the new mid, then re-rest {protectYParsed.cents}¢ better (buy lower / sell higher) and snap the tick in your favor. Shown as American odds.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -621,7 +695,7 @@ function LiveTradingDeskView({ user }) {
                 fontWeight: 800,
                 cursor: canSubmit ? "pointer" : "not-allowed",
               }}
-            >{busy === "place" ? "Resting…" : (quote && quote.ok ? "Rest limit at " + quote.snappedAmericanLabel : "Rest limit")}</button>
+            >{busy === "place" ? "Resting…" : (quote && quote.ok ? "Rest limit at " + quote.snappedAmericanLabel + (protect ? " · Protect" : "") : "Rest limit")}</button>
           </form>
         </section>
 
@@ -635,9 +709,15 @@ function LiveTradingDeskView({ user }) {
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(order.title, "Order")}</div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>
                     {order.action === "sell" ? "Sell" : "Buy"} {plain(order.outcomeName, "")} {plain(order.americanLabel, "")}
-                    <span style={{ color: "#9ca3af" }}> · {plain(order.centsLabel, "")}</span>
                     {typeof order.quantity === "number" || typeof order.quantity === "string" ? " · " + order.quantity : ""}
                   </div>
+                  {order.protect && order.protect.on && (
+                    <div style={{ fontSize: 11, color: "#93c5fd", marginTop: 4 }}>
+                      Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
+                      {order.protect.count > 0 ? " · improved " + order.protect.count + "×" : ""}
+                      {order.protect.status === "pending_rereset" ? " · re-rest retrying" : ""}
+                    </div>
+                  )}
                   {stateLabel(order.state) && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{stateLabel(order.state)}</div>}
                 </div>
                 <button
@@ -663,7 +743,7 @@ function LiveTradingDeskView({ user }) {
 
         <section style={card}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Recent fills</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>American is the YES (long) price. No fill alerts on this desk.</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Prices are American odds. No fill alerts on this desk.</div>
           {activity.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>No recent trades.</div>}
           <div className="desk-list">
             {activity.filter((row) => row && typeof row === "object").map((row, index) => (
@@ -671,7 +751,6 @@ function LiveTradingDeskView({ user }) {
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(row.title, "Trade")}</div>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>
                   {plain(row.longName, "Yes")} {plain(row.americanLabel, "")}
-                  <span style={{ color: "#9ca3af" }}> · {plain(row.centsLabel, "")}</span>
                   {typeof row.qty === "number" || typeof row.qty === "string" ? " · " + row.qty : ""}
                 </div>
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{whenLabel(row.time)}{stateLabel(row.state) ? " · " + stateLabel(row.state) : ""}</div>

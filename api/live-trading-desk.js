@@ -1,10 +1,15 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
 // GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, NFL slate
-// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId? }
+// POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, protect?, protectXCents?, protectYCents? }
 // POST { op: "cancel", orderId, marketSlug }
+// POST { op: "protect-sweep" }  adverse-only cancel + re-rest. Owner session OR
+//      header x-admin-secret = ADMIN_API_SECRET (same secret as the admin alert route).
+//      The shared secret cannot place or cancel. Safe to call every 1–2s.
 // gameId, when sent, must be the NFL event whose moneyline slug is marketSlug.
-// Every call checks the signed-in Supabase user is OWNER_EMAIL. UI hide is not the gate.
+// Every non-sweep call checks the signed-in Supabase user is OWNER_EMAIL. UI hide is not the gate.
 'use strict';
+
+const crypto = require('crypto');
 
 // src/comboAccess.js and src/liveDeskPrice.js are ESM. Static require()
 // throws ERR_REQUIRE_ESM on the Vercel Node runtime, the function dies
@@ -14,19 +19,22 @@
 let access = null;
 let price = null;
 let games = null;
+let protectMath = null;
 let modsPromise = null;
 
 function ensureMods() {
-  if (access && price && games) return Promise.resolve();
+  if (access && price && games && protectMath) return Promise.resolve();
   if (!modsPromise) {
     modsPromise = Promise.all([
       import('../src/comboAccess.js'),
       import('../src/liveDeskPrice.js'),
       import('../src/liveDeskGames.js'),
-    ]).then(([accessMod, priceMod, gamesMod]) => {
+      import('../src/liveDeskProtect.js'),
+    ]).then(([accessMod, priceMod, gamesMod, protectMod]) => {
       access = accessMod;
       price = priceMod;
       games = gamesMod;
+      protectMath = protectMod;
     }).catch((err) => {
       modsPromise = null;
       throw err;
@@ -37,11 +45,43 @@ function ensureMods() {
 
 const auth = require('./polymarket-us-auth');
 const { createPolymarketUsClient } = require('./polymarket-us-client');
+const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
+const { runProtectSweep } = require('../lib/desk-protect-sweep');
+const { sendProtectPing } = require('../lib/desk-protect-notify');
+
+let sharedStore = null;
+function defaultProtectStore() {
+  if (!sharedStore) sharedStore = createSupabaseProtectStore();
+  return sharedStore;
+}
+
+function headerValue(headers, name) {
+  if (!headers) return '';
+  const direct = headers[name] || headers[name.toLowerCase()];
+  if (direct) return Array.isArray(direct) ? String(direct[0]) : String(direct);
+  const found = Object.keys(headers).find((k) => k.toLowerCase() === name.toLowerCase());
+  return found ? String(headers[found]) : '';
+}
+
+function serviceSweepAuthorized(req) {
+  const secret = String(process.env.ADMIN_API_SECRET || '');
+  if (!secret) return false;
+  const provided = headerValue(req && req.headers, 'x-admin-secret').trim();
+  if (!provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
 
 const defaults = {
   fetchImpl: (...args) => fetch(...args),
   requireOwner: requireDeskOwner,
   creds: () => auth.readPolymarketCreds(process.env),
+  protectStore: defaultProtectStore,
+  notify: (text) => sendProtectPing(text),
+  now: () => Date.now(),
+  serviceAuthorized: serviceSweepAuthorized,
 };
 
 let deps = { ...defaults };
@@ -49,6 +89,7 @@ let nflGamesCache = { at: 0, games: null };
 const NFL_GAMES_TTL_MS = 60 * 1000;
 
 function resetDeps() {
+  sharedStore = null;
   deps = { ...defaults };
   nflGamesCache = { at: 0, games: null };
 }
@@ -64,7 +105,7 @@ function json(res, status, body) {
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-admin-secret');
   res.setHeader('Cache-Control', 'no-store');
 }
 
@@ -191,7 +232,23 @@ async function loadNflGames(client) {
   }
 }
 
-async function snapshot(client, slug) {
+function withProtect(orders, rows) {
+  const byId = new Map();
+  for (const row of rows || []) {
+    if (row && row.order_id) byId.set(row.order_id, row);
+  }
+  return orders.map((order) => {
+    const badge = protectMath.protectBadge(byId.get(order.id));
+    return badge ? { ...order, protect: badge } : order;
+  });
+}
+
+async function armedRows(store) {
+  if (!store || !store.configured) return [];
+  try { return await store.listArmed(); } catch (_) { return []; }
+}
+
+async function snapshot(client, slug, store) {
   const [positionsRaw, ordersRaw, activityRaw, slate] = await Promise.all([
     allPositions(client),
     client.listOpenOrders(),
@@ -219,7 +276,7 @@ async function snapshot(client, slug) {
     capDollars: price.MAX_SIZE_DOLLARS,
     defaultDollars: price.DEFAULT_SIZE_DOLLARS,
     positions: decoratePositions(positions, markets),
-    orders: price.mapOpenOrders(ordersRaw, markets),
+    orders: withProtect(price.mapOpenOrders(ordersRaw, markets), await armedRows(store)),
     activity: price.mapActivities(activityRaw, markets),
     market: slug ? (markets[slug] || null) : null,
     games: asList(slate && slate.games),
@@ -228,7 +285,7 @@ async function snapshot(client, slug) {
   };
 }
 
-async function placeOrder(client, body) {
+async function placeOrder(client, body, { store, ownerEmail } = {}) {
   const slug = String(body.marketSlug || body.slug || '').trim();
   if (!price.isMarketSlug(slug)) return { ok: false, status: 400, error: 'Enter a Polymarket US market slug.' };
   const early = games.placeScopeError(body, slug);
@@ -248,10 +305,49 @@ async function placeOrder(client, body) {
     minQty: market.minQty,
   });
   if (!quote.ok) return { ok: false, status: 400, error: quote.error };
+  const protectReq = protectMath.readProtectRequest(body);
+  if (!protectReq.ok) return { ok: false, status: 400, error: protectReq.error };
+  if (protectReq.on && (!store || !store.configured)) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'Protect registry is not configured. Apply sql/desk_protect_rests.sql and set SUPABASE_SERVICE_KEY.',
+    };
+  }
   const orderBody = price.buildLimitOrder({ slug, quote });
   const created = await client.createOrder(orderBody);
   const orderId = created && (created.id || (created.order && created.order.id));
   const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;
+  let armed = null;
+  if (protectReq.on) {
+    if (!orderId) {
+      return { ok: false, status: 502, error: 'Order id missing, so Protect was not armed. Cancel it on Polymarket US.' };
+    }
+    try {
+      armed = await store.insert({
+        order_id: String(orderId),
+        owner_email: String(ownerEmail || '').trim().toLowerCase(),
+        market_slug: slug,
+        outcome: quote.outcome,
+        action: quote.action,
+        yes_price: quote.yesPriceValue,
+        outcome_micro: quote.outcomeMicro,
+        contracts: quote.contracts,
+        x_cents: protectReq.xCents,
+        y_cents: protectReq.yCents,
+        lineage_id: String(orderId),
+        protect_count: 0,
+        status: 'armed',
+        title: market.title || slug,
+        outcome_name: outcomeName,
+        tick: quote.tick,
+        min_qty: market.minQty,
+      });
+    } catch (_) {
+      try { await client.cancelOrder(String(orderId), slug); } catch (__) { /* best effort */ }
+      return { ok: false, status: 503, error: 'Protect could not be armed. That order was cancelled.' };
+    }
+  }
   return {
     ok: true,
     orderId: orderId ? String(orderId) : null,
@@ -267,16 +363,20 @@ async function placeOrder(client, body) {
       riskLabel: quote.riskLabel,
       intent: quote.intent,
       tick: quote.tick,
+      protect: armed ? { on: true, xCents: protectReq.xCents, yCents: protectReq.yCents } : { on: false },
     },
   };
 }
 
-async function cancelOrder(client, body) {
+async function cancelOrder(client, body, store) {
   const slug = String(body.marketSlug || body.slug || '').trim();
   const orderId = String(body.orderId || '').trim();
   if (!price.isMarketSlug(slug)) return { ok: false, status: 400, error: 'Missing market slug.' };
   if (!/^[A-Za-z0-9_.:-]{1,120}$/.test(orderId)) return { ok: false, status: 400, error: 'Missing order id.' };
   await client.cancelOrder(orderId, slug);
+  if (store && store.configured) {
+    try { await store.disarm(orderId); } catch (_) { /* book cancel already landed */ }
+  }
   return { ok: true, orderId };
 }
 
@@ -292,10 +392,16 @@ async function handler(req, res) {
   }
   try {
     await ensureMods();
-    const owner = await deps.requireOwner(req);
-    if (!owner.ok) {
-      json(res, owner.status || 401, { ok: false, error: owner.error || 'Unauthorized' });
-      return;
+    const body = req.method === 'POST' ? parseBody(req) : {};
+    const op = String(body.op || '').trim().toLowerCase();
+    const sweepBySecret = op === 'protect-sweep' && deps.serviceAuthorized(req);
+    let owner = { ok: true, user: null };
+    if (!sweepBySecret) {
+      owner = await deps.requireOwner(req);
+      if (!owner.ok) {
+        json(res, owner.status || 401, { ok: false, error: owner.error || 'Unauthorized' });
+        return;
+      }
     }
     const creds = deps.creds();
     if (!creds.ok) {
@@ -304,6 +410,7 @@ async function handler(req, res) {
       return;
     }
     const client = clientFromCreds(creds);
+    const store = deps.protectStore();
     if (req.method === 'GET') {
       const q = (req.query) || {};
       let slug = q.slug || '';
@@ -315,18 +422,27 @@ async function handler(req, res) {
         json(res, 400, { ok: false, error: 'Bad market slug.' });
         return;
       }
-      json(res, 200, await snapshot(client, slug));
+      json(res, 200, await snapshot(client, slug, store));
       return;
     }
-    const body = parseBody(req);
-    const op = String(body.op || '').trim().toLowerCase();
+    if (op === 'protect-sweep') {
+      const swept = await runProtectSweep({
+        client,
+        store,
+        notify: deps.notify,
+        now: deps.now,
+      });
+      json(res, swept.ok ? 200 : (swept.status || 503), swept);
+      return;
+    }
     if (op === 'place') {
-      const placed = await placeOrder(client, body);
+      const email = owner.user && (owner.user.email || owner.user.user_email);
+      const placed = await placeOrder(client, body, { store, ownerEmail: email });
       json(res, placed.ok ? 200 : (placed.status || 400), placed);
       return;
     }
     if (op === 'cancel') {
-      const canceled = await cancelOrder(client, body);
+      const canceled = await cancelOrder(client, body, store);
       json(res, canceled.ok ? 200 : (canceled.status || 400), canceled);
       return;
     }
