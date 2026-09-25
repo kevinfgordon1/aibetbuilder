@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
-import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents } from "./liveDeskProtect";
+import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
 
 let supabaseClient = null;
 function supabase() {
@@ -156,7 +156,7 @@ function LiveTradingDeskView({ user }) {
   const [armedKey, setArmedKey] = useState("");
   const [american, setAmerican] = useState("");
   const [dollars, setDollars] = useState(String(DEFAULT_SIZE_DOLLARS));
-  const [protect, setProtect] = useState(false);
+  const [protect, setProtect] = useState(true);
   const [protectX, setProtectX] = useState(String(DEFAULT_PROTECT_X_CENTS));
   const [protectY, setProtectY] = useState(String(DEFAULT_PROTECT_Y_CENTS));
   const [loading, setLoading] = useState(true);
@@ -414,6 +414,8 @@ function LiveTradingDeskView({ user }) {
         return;
       }
       clearRestForm();
+      const protectNote = data.snap && data.snap.protect && data.snap.protect.note ? data.snap.protect.note : "";
+      if (typeof protectNote === "string" && protectNote) setNotice(protectNote);
     } catch (err) {
       setError(String(err && err.message || err));
     } finally {
@@ -473,6 +475,7 @@ function LiveTradingDeskView({ user }) {
   const expectedSlug = gameId ? moneylineSlugForGame(gameId) : "";
   const scoped = !!(market && expectedSlug && market.slug === expectedSlug && marketType === "moneyline");
   const protectReady = !protect || (protectXParsed.ok && protectYParsed.ok);
+  const protectOverCap = !!(quote && quote.ok && Number(quote.riskDollars) > MAX_SIZE_DOLLARS + 1e-6);
   const gamesBad = !!(board && board.games != null && !Array.isArray(board.games));
   const boardShapeError = board && (
     !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity) || gamesBad
@@ -659,7 +662,7 @@ function LiveTradingDeskView({ user }) {
               Bet Protect <span style={{ fontWeight: 600, color: "#9ca3af" }}>(adverse pickoff)</span>
             </label>
             <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 1.45 }}>
-              Off unless you arm this rest. Cancel if mid blows through your rest, then re-rest better. Does not chase if the market runs away.
+              On by default for every rest (uncheck to send this one unprotected). Cancel if mid blows through your rest, then re-rest better. Does not chase if the market runs away. Orders over the ${MAX_SIZE_DOLLARS} Bet Protect cap rest unprotected.
             </div>
             {protect && (
               <details open style={{ marginTop: 10 }}>
@@ -716,7 +719,10 @@ function LiveTradingDeskView({ user }) {
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
                     Buys floor the tick (you pay less). Sells ceil the tick (you receive more). A rest does not take liquidity unless Allow cross is checked.
                   </div>
-                  {protect && protectReady && (
+                  {protect && protectOverCap && (
+                    <div style={{ fontSize: 12, color: "#fcd34d", marginTop: 6 }}>{protectOverCapNote(MAX_SIZE_DOLLARS)}</div>
+                  )}
+                  {protect && protectReady && !protectOverCap && (
                     <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 6 }}>
                       Bet Protect armed. Cancel if this rest is more than {protectXParsed.cents}¢ through the new mid, then re-rest {protectYParsed.cents}¢ better (buy lower / sell higher) and snap the tick in your favor. Shown as American odds.
                     </div>
@@ -756,7 +762,7 @@ function LiveTradingDeskView({ user }) {
                 fontWeight: 800,
                 cursor: canSubmit ? "pointer" : "not-allowed",
               }}
-            >{busy === "place" ? "Resting…" : (armedKey === ticketKey && ticket ? ("Send this order" + (protect ? " · Bet Protect" : "")) : (ticket ? ("Confirm this rest" + (protect ? " · Bet Protect" : "")) : "Rest limit"))}</button>
+            >{busy === "place" ? "Resting…" : (armedKey === ticketKey && ticket ? ("Send this order" + (protect && !protectOverCap ? " · Bet Protect" : "")) : (ticket ? ("Confirm this rest" + (protect && !protectOverCap ? " · Bet Protect" : "")) : "Rest limit"))}</button>
           </form>
         </section>
 

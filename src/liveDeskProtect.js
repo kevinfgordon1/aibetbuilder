@@ -49,16 +49,42 @@ export function parseProtectCents(raw, fallback, { min = 0, max = 25 } = {}) {
   return { ok: true, cents };
 }
 
-export function readProtectRequest(body) {
+function protectFlagOff(flag) {
+  if (flag === false || flag === 0) return true;
+  if (typeof flag === "string") {
+    const s = flag.trim().toLowerCase();
+    return s === "0" || s === "false" || s === "off" || s === "no";
+  }
+  return false;
+}
+
+export function protectOverCapNote(cap = MAX_SIZE_DOLLARS) {
+  return "Over the $" + cap + " Bet Protect cap, so this order rests unprotected.";
+}
+
+/**
+ * Bet Protect is ON by default for desk rests. A request that omits the flag
+ * (or sends true) is armed; only an explicit off (false / 0 / "false" / "off")
+ * rests unprotected. When the order risk is over the $MAX_SIZE_DOLLARS Protect
+ * cap, the order still rests but unprotected, with overCap + note set so the
+ * desk can say so. defaulted marks an arm that came from the default rather
+ * than an explicit protect:true. The desk size cap is also $MAX_SIZE_DOLLARS today, so that
+ * branch is a guard rather than a normal path.
+ */
+export function readProtectRequest(body, { riskDollars } = {}) {
   const raw = body || {};
   const flag = raw.protect;
-  const on = flag === true || flag === 1 || flag === "1" || flag === "true";
-  if (!on) return { ok: true, on: false };
+  if (protectFlagOff(flag)) return { ok: true, on: false };
+  const risk = Number(riskDollars);
+  if (Number.isFinite(risk) && risk > MAX_SIZE_DOLLARS + 1e-6) {
+    return { ok: true, on: false, overCap: true, note: protectOverCapNote() };
+  }
   const x = parseProtectCents(raw.protectXCents != null ? raw.protectXCents : raw.xCents, DEFAULT_PROTECT_X_CENTS, { min: 0.1 });
   if (!x.ok) return { ok: false, on: true, error: "Through-mid (X): " + x.error };
   const y = parseProtectCents(raw.protectYCents != null ? raw.protectYCents : raw.yCents, DEFAULT_PROTECT_Y_CENTS, { min: 0 });
   if (!y.ok) return { ok: false, on: true, error: "Re-rest (Y): " + y.error };
-  return { ok: true, on: true, xCents: x.cents, yCents: y.cents };
+  const defaulted = flag == null || flag === "";
+  return { ok: true, on: true, defaulted, xCents: x.cents, yCents: y.cents };
 }
 
 function amountValue(v) {

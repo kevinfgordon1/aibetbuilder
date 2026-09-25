@@ -65,6 +65,8 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(ui, /setDollars\(reset\.dollars\)/);
   assert.match(ui, /Moneyline only for now/);
   assert.match(ui, /id="desk-protect"/);
+  assert.match(ui, /const \[protect, setProtect\] = useState\(true\)/, 'Bet Protect starts on');
+  assert.doesNotMatch(ui, /Off unless you arm/);
   assert.match(ui, /protectFill/);
   assert.match(ui, /useState\(false\)/);
   assert.doesNotMatch(ui, /quote\.centsLabel/);
@@ -846,7 +848,7 @@ const goodCreds = () => ({
         return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
       },
     });
-    const plainBody = {
+    const defaultBody = {
       op: 'place',
       marketSlug: 'aec-nfl-lac-ten-2025-11-02',
       outcome: 'long',
@@ -854,6 +856,19 @@ const goodCreds = () => ({
       american: -150,
       dollars: 25,
     };
+    const byDefault = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { ...defaultBody, confirm: confirmFor(defaultBody) },
+    }, byDefault);
+    assert.equal(byDefault.out.statusCode, 200, JSON.stringify(byDefault.out.body));
+    assert.equal(byDefault.out.body.snap.protect.on, true, 'omitted flag arms Bet Protect by default');
+    assert.equal(byDefault.out.body.snap.protect.xCents, 3);
+    assert.equal(byDefault.out.body.snap.protect.yCents, 1);
+    assert.equal((await store.get(byDefault.out.body.orderId)).status, 'armed');
+
+    const plainBody = { ...defaultBody, protect: false };
     const plain = mockRes();
     await handler({
       method: 'POST',
@@ -896,6 +911,16 @@ const goodCreds = () => ({
     assert.equal(blocked.out.statusCode, 503);
     assert.match(blocked.out.body.error, /desk_protect_rests/);
     assert.equal(creates, createsBeforeBlock, 'unconfigured protect does not rest');
+
+    const fallback = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { ...defaultBody, confirm: confirmFor(defaultBody) },
+    }, fallback);
+    assert.equal(fallback.out.statusCode, 200, JSON.stringify(fallback.out.body));
+    assert.equal(fallback.out.body.snap.protect.on, false);
+    assert.match(fallback.out.body.snap.protect.note, /rests unprotected/);
   }
 
   {

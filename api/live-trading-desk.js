@@ -1,6 +1,7 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
 // GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, NFL slate
 // POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, confirm, allowCross?, protect?, protectXCents?, protectYCents? }
+//   protect defaults ON when omitted; send protect:false to rest unprotected.
 // POST { op: "cancel", orderId, marketSlug }
 // POST { op: "protect-sweep" }  adverse-only cancel + re-rest. Owner session OR
 //      header x-admin-secret = ADMIN_API_SECRET (same secret as the admin alert route).
@@ -356,8 +357,17 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
     });
     if (!cross.ok) return { ok: false, status: 400, error: cross.error || book.error };
   }
-  const protectReq = protectMath.readProtectRequest(body);
+  // Bet Protect defaults ON when the request omits the flag; over the $100
+  // Protect cap it rests unprotected with a note instead of blocking.
+  const protectReq = protectMath.readProtectRequest(body, { riskDollars: quote.riskDollars });
   if (!protectReq.ok) return { ok: false, status: 400, error: protectReq.error };
+  let protectNote = protectReq.overCap ? protectReq.note : '';
+  if (protectReq.on && protectReq.defaulted && (!store || !store.configured)) {
+    // Implicit default only: rest unprotected and say so. An explicit
+    // protect:true still refuses to rest without the registry (below).
+    protectReq.on = false;
+    protectNote = 'Bet Protect registry is not configured, so this order rests unprotected.';
+  }
   if (protectReq.on && (!store || !store.configured)) {
     return {
       ok: false,
@@ -416,7 +426,9 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
       bookSide: quote.bookSide,
       line: shown.expected.line,
       tick: quote.tick,
-      protect: armed ? { on: true, xCents: protectReq.xCents, yCents: protectReq.yCents } : { on: false },
+      protect: armed
+        ? { on: true, xCents: protectReq.xCents, yCents: protectReq.yCents }
+        : (protectNote ? { on: false, overCap: !!protectReq.overCap, note: protectNote } : { on: false }),
     },
   };
 }
