@@ -39,6 +39,8 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /useState\("buy"\)/);
   assert.doesNotMatch(ui, /useState\("sell"\)/);
   assert.doesNotMatch(ui, /setAction\("sell"\);/);
+  assert.match(ui, /function preferBuy\(\) \{\s*setAction\("buy"\);/);
+  assert.equal((ui.match(/preferBuy\(\)/g) || []).length, 4);
   assert.match(ui, /Moneyline only for now/);
 }
 

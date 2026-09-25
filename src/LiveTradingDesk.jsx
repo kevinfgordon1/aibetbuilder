@@ -150,7 +150,7 @@ function LiveTradingDeskView({ user }) {
   const [marketType, setMarketType] = useState("moneyline");
   const [scopeNote, setScopeNote] = useState("");
   const [outcome, setOutcome] = useState("long");
-  const [action, setAction] = useState("buy");
+  const [action, setAction] = useState("buy"); // Buy is the default. Sell is opt-in.
   const [allowCross, setAllowCross] = useState(false);
   const [armedKey, setArmedKey] = useState("");
   const [american, setAmerican] = useState("");
@@ -247,6 +247,11 @@ function LiveTradingDeskView({ user }) {
     return () => clearInterval(timer);
   }, [user]);
 
+  function preferBuy() {
+    setAction("buy");
+    setArmedKey("");
+  }
+
   function applyMoneyline(nextSlug, { outcomeSide } = {}) {
     const classified = classifyDeskMarket(nextSlug);
     if (!classified.ok) {
@@ -260,6 +265,7 @@ function LiveTradingDeskView({ user }) {
     setSlug(classified.slug);
     setSlugDraft(classified.slug);
     if (outcomeSide) setOutcome(outcomeSide === "short" ? "short" : "long");
+    preferBuy();
     load(classified.slug, { silent: true });
   }
 
@@ -279,6 +285,7 @@ function LiveTradingDeskView({ user }) {
     setMarketType("moneyline");
     setScopeNote("");
     setNotice("");
+    preferBuy();
     if (!id) {
       setSlug("");
       setSlugDraft("");
@@ -377,7 +384,7 @@ function LiveTradingDeskView({ user }) {
         return;
       }
       const snap = data.snap || {};
-      setArmedKey("");
+      preferBuy();
       setNotice(snap.line ? ("Rested. " + snap.line + ".") : (
         "Rested " + (snap.action || action) + " " + (snap.outcomeName || "")
         + " at " + (snap.americanLabel || "") + " (" + (snap.centsLabel || "") + ")"
