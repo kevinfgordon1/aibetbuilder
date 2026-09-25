@@ -68,6 +68,9 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /const \[protect, setProtect\] = useState\(true\)/, 'Bet Protect starts on');
   assert.doesNotMatch(ui, /Off unless you arm/);
   assert.match(ui, /protectFill/);
+  assert.match(ui, /row\.avgAmerican/);
+  assert.doesNotMatch(ui, /"Short "/);
+  assert.doesNotMatch(ui, /"Long "/);
   assert.match(ui, /useState\(false\)/);
   assert.doesNotMatch(ui, /quote\.centsLabel/);
   assert.doesNotMatch(ui, /order\.centsLabel/);
@@ -967,6 +970,111 @@ const goodCreds = () => ({
     assert.equal(ownerHits, 2, 'shared secret skips the owner session only for the sweep');
     if (prev == null) delete process.env.ADMIN_API_SECRET;
     else process.env.ADMIN_API_SECRET = prev;
+    handler._resetDeps();
+  }
+
+  handler._resetDeps();
+  {
+    // ATL @ GB: position pages are legs, the title says Packers, the long
+    // instrument is Falcons. Later fill pages must be requested too.
+    const gbSlug = 'aec-nfl-atl-gb-2026-09-24';
+    let positionPages = 0;
+    let activityPages = 0;
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      fetchImpl: async (url) => {
+        const u = new URL(url);
+        const cursor = u.searchParams.get('cursor') || '';
+        if (u.pathname.startsWith('/v2/leagues')) return jsonRes(200, { events: [] });
+        if (u.host === 'gateway.polymarket.us') return jsonRes(200, GB);
+        if (u.pathname === '/v1/portfolio/positions') {
+          positionPages += 1;
+          if (!cursor) {
+            return jsonRes(200, {
+              positions: {
+                [gbSlug]: {
+                  netPositionDecimal: '-197',
+                  cost: { value: '80.00', currency: 'USD' },
+                  marketMetadata: { slug: gbSlug, title: 'Packers', outcome: 'Packers' },
+                },
+              },
+              eof: false,
+              nextCursor: 'pos-2',
+            });
+          }
+          assert.equal(cursor, 'pos-2');
+          return jsonRes(200, {
+            positions: {
+              [gbSlug + ':leg2']: {
+                netPositionDecimal: '-884',
+                cost: { value: '352.40', currency: 'USD' },
+                marketMetadata: { slug: gbSlug, title: 'Packers', outcome: 'Packers' },
+              },
+            },
+            eof: true,
+          });
+        }
+        if (u.pathname === '/v1/orders/open') return jsonRes(200, { orders: [] });
+        if (u.pathname === '/v1/portfolio/activities') {
+          activityPages += 1;
+          if (!cursor) {
+            return jsonRes(200, {
+              activities: [{
+                type: 'ACTIVITY_TYPE_TRADE',
+                trade: {
+                  id: 'early',
+                  marketSlug: gbSlug,
+                  intent: 'ORDER_INTENT_BUY_SHORT',
+                  qtyDecimal: '10',
+                  price: { value: '0.600', currency: 'USD' },
+                  createTime: '2026-09-24T17:00:00Z',
+                },
+              }],
+              eof: false,
+              nextCursor: 'act-2',
+            });
+          }
+          assert.equal(cursor, 'act-2');
+          return jsonRes(200, {
+            activities: [{
+              type: 'ACTIVITY_TYPE_TRADE',
+              trade: {
+                id: 'later',
+                marketSlug: gbSlug,
+                intent: 'ORDER_INTENT_BUY_SHORT',
+                qtyDecimal: '10',
+                price: { value: '0.600', currency: 'USD' },
+                createTime: '2026-09-24T19:00:00Z',
+              },
+            }],
+            eof: true,
+          });
+        }
+        return jsonRes(500, { message: 'unexpected ' + u.pathname });
+      },
+    });
+    const res = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk',
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(positionPages, 2, 'positions are paginated');
+    assert.equal(activityPages, 2, 'fills are paginated');
+    assert.equal(res.out.body.positions.length, 1);
+    const row = res.out.body.positions[0];
+    assert.equal(row.team, 'Green Bay Packers');
+    assert.notEqual(row.team, 'Atlanta Falcons');
+    assert.equal(row.net, 1081);
+    assert.notEqual(row.net, 197);
+    assert.equal(row.side, 'short');
+    assert.equal(row.avgAmerican, '+150');
+    assert.equal(row.cost, 432.4);
+    assert.equal(row.title, 'Atlanta Falcons vs. Green Bay Packers');
+    assert.notEqual(row.title, 'Packers');
+    assert.doesNotMatch(String(row.avgAmerican), /¢/);
     handler._resetDeps();
   }
 

@@ -12,7 +12,10 @@
 //   Short orders then complement onto the YES price, moving only in the
 //   direction that keeps the outcome price favorable, and still on the tick.
 //
-// Team identity comes from marketSides[].long. outcomes[] order is ignored.
+// Team identity comes from marketSides[].long — the instrument that settles at
+// $1 — not from outcomes[] order and not from a position's market title.
+// netPosition is that instrument: positive holds the long team, negative holds
+// the other team. A market titled "Packers" can still be long Falcons.
 //
 // Dollar size is max loss if the order fills and settles against him:
 //   buy  → contracts × outcome price
@@ -543,34 +546,334 @@ function amountValue(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export function mapPositions(payload) {
-  const raw = payload && (payload.positions || payload);
+function numOrNull(v) {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function roundQty(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function roundCents(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function firstNumber(pos, keys) {
+  for (const key of keys) {
+    if (pos && pos[key] != null && pos[key] !== "") return numOrNull(pos[key]);
+  }
+  return null;
+}
+
+// Signed contracts of the long instrument. A stale netPosition can lag
+// qtyBought/qtySold. Prefer the flow only when it is the same direction and
+// larger — an opposite lifetime total must not flip the team.
+function signedInstrumentNet(pos) {
+  const net = firstNumber(pos, ["netPositionDecimal", "netPosition"]);
+  const bought = firstNumber(pos, ["qtyBoughtDecimal", "qtyBought"]);
+  const sold = firstNumber(pos, ["qtySoldDecimal", "qtySold"]);
+  const bod = firstNumber(pos, ["bodPositionDecimal", "bodPosition"]) || 0;
+  const fromFlow = (bought != null || sold != null) ? bod + (bought || 0) - (sold || 0) : null;
+  if (net == null) return fromFlow;
+  if (fromFlow == null || net === 0 || fromFlow === 0) return net;
+  // Same direction only. A larger opposite flow is a lifetime total, not a
+  // fresher net, and must not flip the team.
+  if (Math.sign(fromFlow) === Math.sign(net) && Math.abs(fromFlow) > Math.abs(net) + 1e-6) return fromFlow;
+  return net;
+}
+
+function positionEntries(raw) {
   const entries = [];
   if (Array.isArray(raw)) {
-    raw.forEach((pos) => entries.push([(pos && pos.marketMetadata && pos.marketMetadata.slug) || "", pos]));
+    raw.forEach((pos, i) => {
+      const slug = pos && pos.marketMetadata && pos.marketMetadata.slug;
+      entries.push([String(slug || ""), pos, "leg:" + i]);
+    });
   } else if (raw && typeof raw === "object") {
-    for (const [slug, pos] of Object.entries(raw)) entries.push([slug, pos]);
+    for (const [key, pos] of Object.entries(raw)) entries.push([key, pos, key]);
   }
-  const rows = [];
-  for (const [slug, pos] of entries) {
+  return entries;
+}
+
+// BUY_LONG / SELL_SHORT add long-instrument contracts. BUY_SHORT / SELL_LONG
+// subtract them (that is a long position in the other team). Price on the
+// trade is always the long instrument. Unknown side is ignored — never guessed
+// from the market title.
+function instrumentDeltaFromTrade(trade) {
+  if (!trade || typeof trade !== "object") return null;
+  const state = String(trade.state || "");
+  if (/BUSTED|REJECTED/i.test(state)) return null;
+  const qty = firstNumber(trade, ["qtyDecimal", "qty"]);
+  if (qty == null || qty === 0) return null;
+  const mag = Math.abs(qty);
+  const intent = String(trade.intent || trade.orderIntent || trade.order_intent || "").toUpperCase();
+  if (intent.includes("BUY_LONG") || intent.includes("SELL_SHORT")) return mag;
+  if (intent.includes("BUY_SHORT") || intent.includes("SELL_LONG")) return -mag;
+  const outcome = String(trade.outcomeSide || trade.outcome_side || "").toUpperCase();
+  const action = String(trade.action || "").toUpperCase();
+  if (outcome || action) {
+    const isNo = outcome.includes("NO") || outcome.includes("SHORT");
+    const isYes = !isNo && (outcome.includes("YES") || outcome.includes("LONG"));
+    const isBuy = action.includes("BUY");
+    const isSell = action.includes("SELL");
+    if (isYes && isBuy) return mag;
+    if (isYes && isSell) return -mag;
+    if (isNo && isBuy) return -mag;
+    if (isNo && isSell) return mag;
+  }
+  const side = String(trade.side || "").toUpperCase();
+  if ((side.includes("BUY") || side === "B") && !side.includes("SHORT") && !side.includes("LONG")) return mag;
+  if ((side.includes("SELL") || side === "S") && !side.includes("SHORT") && !side.includes("LONG")) return -mag;
+  return null;
+}
+
+function yesPriceOfTrade(trade) {
+  const p = amountValue(trade && trade.price);
+  if (p == null || !(p > 0 && p < 1)) return null;
+  return p;
+}
+
+function emptyBook() {
+  return { longQty: 0, longCost: 0, shortQty: 0, shortCost: 0 };
+}
+
+function applyInstrumentFill(book, delta, yesPrice) {
+  const qty = Math.abs(delta);
+  const yes = yesPrice != null && yesPrice > 0 && yesPrice < 1 ? yesPrice : null;
+  if (delta > 0) {
+    const cover = Math.min(book.shortQty, qty);
+    if (cover > 0 && book.shortQty > 0) {
+      book.shortCost -= book.shortCost * (cover / book.shortQty);
+      book.shortQty -= cover;
+    }
+    const open = qty - cover;
+    if (open > 0) {
+      book.longQty += open;
+      if (yes != null) book.longCost += open * yes;
+    }
+  } else if (delta < 0) {
+    const cover = Math.min(book.longQty, qty);
+    if (cover > 0 && book.longQty > 0) {
+      book.longCost -= book.longCost * (cover / book.longQty);
+      book.longQty -= cover;
+    }
+    const open = qty - cover;
+    if (open > 0) {
+      book.shortQty += open;
+      if (yes != null) book.shortCost += open * (1 - yes);
+    }
+  }
+}
+
+function tradesFromFills(fills) {
+  const list = Array.isArray(fills) ? fills : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    if (item.type && item.type !== "ACTIVITY_TYPE_TRADE") continue;
+    const trade = item.trade && typeof item.trade === "object" ? item.trade : item;
+    const id = String(trade.id || "");
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(trade);
+  }
+  out.sort((a, b) => (Date.parse(a.createTime || a.updateTime || 0) || 0) - (Date.parse(b.createTime || b.updateTime || 0) || 0));
+  return out;
+}
+
+function fillBooksBySlug(fills) {
+  const books = new Map();
+  for (const trade of tradesFromFills(fills)) {
+    const delta = instrumentDeltaFromTrade(trade);
+    if (delta == null) continue;
+    const slug = String(trade.marketSlug || trade.slug || (trade.marketMetadata && trade.marketMetadata.slug) || "").trim();
+    if (!slug) continue;
+    let book = books.get(slug);
+    if (!book) {
+      book = emptyBook();
+      books.set(slug, book);
+    }
+    applyInstrumentFill(book, delta, yesPriceOfTrade(trade));
+  }
+  return books;
+}
+
+function fillNet(book) {
+  if (!book) return 0;
+  return roundQty(book.longQty - book.shortQty);
+}
+
+function applyFillBooks(rows, books) {
+  for (const [slug, book] of books) {
+    const signed = fillNet(book);
+    if (!signed) continue;
+    const fillCost = signed < 0 ? book.shortCost : book.longCost;
+    const row = rows.find((r) => r.slug === slug);
+    if (!row) {
+      rows.push({
+        slug,
+        title: slug,
+        outcomeLabel: "",
+        net: signed,
+        instrumentNet: signed,
+        side: signed > 0 ? "long" : "short",
+        cost: fillCost > 0 ? roundCents(fillCost) : null,
+        cashValue: null,
+        realized: null,
+      });
+      continue;
+    }
+    const have = Number(row.instrumentNet);
+    if (Math.sign(signed) === Math.sign(have) && Math.abs(signed) > Math.abs(have) + 1e-6) {
+      row.instrumentNet = signed;
+      row.net = signed;
+      row.side = signed > 0 ? "long" : "short";
+      if (fillCost > 0) row.cost = roundCents(fillCost);
+    }
+  }
+}
+
+/**
+ * Dollars paid for the team actually held, and that price as American odds.
+ * A positive cost is the premium of the held team. A negative cost on a short
+ * instrument is the credit from selling the long side; the other team's cost
+ * is contracts minus that credit.
+ */
+function priceHeldTeam(contracts, cost, shortInstr) {
+  const c = Number(cost);
+  if (!(contracts > 0) || !Number.isFinite(c)) return { totalCost: null, american: "" };
+  let total;
+  if (c < 0 && shortInstr) total = contracts + c;
+  else total = Math.abs(c);
+  const prob = total / contracts;
+  const american = (prob > 0 && prob < 1) ? (formatAmerican(americanFromProb(prob)) || "") : "";
+  return { totalCost: roundCents(total), american };
+}
+
+export function heldTeamExposure({ instrumentNet, cost, longName, shortName } = {}) {
+  const signed = Number(instrumentNet);
+  if (!Number.isFinite(signed) || signed === 0) return null;
+  const contracts = Math.abs(roundQty(signed));
+  if (!(contracts > 0)) return null;
+  const shortInstr = signed < 0;
+  const team = shortInstr ? String(shortName || "") : String(longName || "");
+  const priced = priceHeldTeam(contracts, cost, shortInstr);
+  return {
+    team,
+    contracts,
+    side: shortInstr ? "short" : "long",
+    cost: priced.totalCost,
+    avgAmerican: priced.american,
+  };
+}
+
+/**
+ * One row per market. Legs that share a slug are netted (long minus short on
+ * the long instrument). Fills replace that net when they show more contracts
+ * than the position snapshot, so a later page of fills is not dropped.
+ * `net` here is still the signed instrument quantity. positionView turns it
+ * into contracts on the team that quantity actually holds.
+ */
+export function mapPositions(payload, { fills } = {}) {
+  const raw = payload && (payload.positions || payload);
+  const groups = new Map();
+  for (const [key, pos] of positionEntries(raw)) {
     if (!pos || typeof pos !== "object") continue;
     if (pos.expired) continue;
-    const net = Number(pos.netPositionDecimal != null ? pos.netPositionDecimal : pos.netPosition);
-    if (!Number.isFinite(net) || net === 0) continue;
+    const signed = signedInstrumentNet(pos);
+    if (signed == null || !Number.isFinite(signed) || signed === 0) continue;
     const meta = pos.marketMetadata || {};
+    const slug = String(meta.slug || key || "").trim();
+    if (!slug) continue;
+    let g = groups.get(slug);
+    if (!g) {
+      g = {
+        slug,
+        title: meta.title || meta.outcome || slug || "Position",
+        outcomeLabel: meta.outcome || "",
+        instrumentNet: 0,
+        cost: 0,
+        costSeen: false,
+        cashValue: null,
+        realized: null,
+      };
+      groups.set(slug, g);
+    }
+    g.instrumentNet += signed;
+    const cost = amountValue(pos.cost);
+    if (cost != null) {
+      g.cost += cost;
+      g.costSeen = true;
+    }
+    const cash = amountValue(pos.cashValue);
+    if (cash != null) g.cashValue = (g.cashValue || 0) + cash;
+    const realized = amountValue(pos.realized);
+    if (realized != null) g.realized = (g.realized || 0) + realized;
+    if (!g.outcomeLabel && meta.outcome) g.outcomeLabel = meta.outcome;
+  }
+  const rows = [];
+  for (const g of groups.values()) {
+    const signed = roundQty(g.instrumentNet);
+    if (!signed) continue;
     rows.push({
-      slug: String(meta.slug || slug || "").trim(),
-      title: meta.title || meta.outcome || slug || "Position",
-      outcomeLabel: meta.outcome || "",
-      net,
-      side: net > 0 ? "long" : "short",
-      cost: amountValue(pos.cost),
-      cashValue: amountValue(pos.cashValue),
-      realized: amountValue(pos.realized),
+      slug: g.slug,
+      title: g.title,
+      outcomeLabel: g.outcomeLabel,
+      net: signed,
+      instrumentNet: signed,
+      side: signed > 0 ? "long" : "short",
+      cost: g.costSeen ? roundCents(g.cost) : null,
+      cashValue: g.cashValue,
+      realized: g.realized,
     });
   }
-  rows.sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+  applyFillBooks(rows, fillBooksBySlug(fills));
+  rows.sort((a, b) => Math.abs(b.instrumentNet) - Math.abs(a.instrumentNet));
   return rows;
+}
+
+/**
+ * Display row: the team the signed instrument quantity holds, positive
+ * contracts, average cost in American odds, and total cost. The long team is
+ * marketSides long (settlement long), never the position title.
+ * `side` stays the instrument side so a Packers hold still pre-selects short
+ * and Bet Protect still matches that outcome.
+ */
+export function positionView(row, market) {
+  if (!row || typeof row !== "object") return row;
+  const signed = Number(row.instrumentNet != null ? row.instrumentNet : row.net);
+  const base = {
+    ...row,
+    instrumentNet: Number.isFinite(signed) ? signed : row.instrumentNet,
+  };
+  if (market && typeof market === "object") {
+    if (market.title) base.title = market.title;
+    if (market.longName) base.longName = market.longName;
+    if (market.shortName) base.shortName = market.shortName;
+    if (market.tick != null) base.tick = market.tick;
+    if (market.minQty != null) base.minQty = market.minQty;
+    if (market.tradable != null) base.tradable = market.tradable;
+  }
+  const held = heldTeamExposure({
+    instrumentNet: signed,
+    cost: row.cost,
+    longName: market && market.longName,
+    shortName: market && market.shortName,
+  });
+  if (!held || !held.team) return base;
+  return {
+    ...base,
+    team: held.team,
+    net: held.contracts,
+    side: held.side,
+    cost: held.cost != null ? held.cost : row.cost,
+    avgAmerican: held.avgAmerican,
+  };
 }
 
 function exchangeBookSide(side) {

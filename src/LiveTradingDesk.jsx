@@ -548,9 +548,12 @@ function LiveTradingDeskView({ user }) {
                     </div>
                   ) : null}
                   <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 4 }}>
-                    {(row.side === "short" ? "Short " : "Long ") + plain(row.team, row.side === "short" ? "No" : "Yes")}
+                    {plain(row.team, row.side === "short" ? "No" : "Yes")}
                     {" · "}
                     <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{plain(row.net, "—")}</span>
+                    {row.avgAmerican ? (
+                      <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{" · "}{plain(row.avgAmerican, "")}</span>
+                    ) : null}
                     {row.cost != null ? " · cost " + money(row.cost) : ""}
                   </div>
                 </button>
