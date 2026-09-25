@@ -271,16 +271,18 @@ class FakeWS {
       pollMs: 20,
       maxPolls: 2,
       WebSocket: FakeWS,
-      fetchFn: async (url) => {
+      fetchFn: async (url, init) => {
         if (String(url).includes('/prices')) {
           posts += 1;
+          const posted = JSON.parse(init.body);
+          assert.equal(posted[0].side, 'SELL');
           const ask = posts === 1 ? '0.34' : '0.36';
           return {
             ok: true,
             status: 200,
             text: async () => JSON.stringify({
-              'tok-away': { BUY: ask },
-              'tok-home': { BUY: '0.67' },
+              'tok-away': { SELL: ask, BUY: '0.15' },
+              'tok-home': { SELL: '0.67', BUY: '0.66' },
             }),
           };
         }

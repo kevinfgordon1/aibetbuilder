@@ -84,7 +84,7 @@ import {
   kalshiQuotesFromBoardBody,
   polymarketQuotesFromBoardBody,
   boardPriceTicks,
-  boardPollShouldApply,
+  mergeMonotonicQuotes,
   quotesAfterVenueEvent,
   mainLaddersFromGame,
 } from "./freeFeedBoard.js";
@@ -1018,7 +1018,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setStreamStatus(liveOnly && venuesOn ? "connecting" : "idle");
 
     const quoteRef = { polymarket: [], kalshi: [], novig: [], fourcasters: [] };
-    const sseAt = { polymarket: 0, kalshi: 0, novig: 0, fourcasters: 0 };
+    const quotePrint = (list) => (list || []).map((q) => `${q.token_id || q.ticker || q.side}:${q.odds}`).join("|");
     let phone = null;
     let sawPhone = !seeUnderdog;
     let phoneFailed = false;
@@ -1107,16 +1107,18 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         loadJsonBoard(polymarketBoardUrl({ league }), polymarketQuotesFromBoardBody),
       ]).then(([kalshiQuotes, polyQuotes]) => {
         if (cancelled) return;
-        const now = Date.now();
         let changed = false;
-        if (kalshiQuotes && boardPollShouldApply(sseAt.kalshi, now)) {
-          quoteRef.kalshi = kalshiQuotes;
+        // A JSON poll is a snapshot. Apply each contract only when its
+        // exchange time is newer than the websocket print already held.
+        const applyBoard = (book, incoming) => {
+          if (!incoming) return;
+          const merged = mergeMonotonicQuotes(quoteRef[book], incoming, { complete: true });
+          if (quotePrint(quoteRef[book]) === quotePrint(merged)) return;
+          quoteRef[book] = merged;
           changed = true;
-        }
-        if (polyQuotes && boardPollShouldApply(sseAt.polymarket, now)) {
-          quoteRef.polymarket = polyQuotes;
-          changed = true;
-        }
+        };
+        applyBoard("kalshi", kalshiQuotes);
+        applyBoard("polymarket", polyQuotes);
         if (changed) publish();
       }).finally(() => { boardInFlight = false; });
     };
@@ -1159,8 +1161,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               }
               const quotes = payload && payload.quotes;
               if (!quotes || !quotes.length) return;
-              sseAt[book] = Date.now();
+              const before = quotePrint(quoteRef[book]);
               quoteRef[book] = quotesAfterVenueEvent(quoteRef[book], payload);
+              if (quotePrint(quoteRef[book]) === before) return;
               publish();
             },
           });

@@ -22,12 +22,14 @@ function jsonRes() {
     fetchFn: async (url, init) => {
       if (String(url).includes('/prices')) {
         assert.equal(init && init.method, 'POST');
+        const posted = JSON.parse(init.body);
+        assert.equal(posted[0].side, 'SELL', 'the buy price is the ask, which CLOB names SELL');
         return {
           ok: true,
           status: 200,
           text: async () => JSON.stringify({
-            'tok-away': { BUY: '0.34' },
-            'tok-home': { BUY: '0.67' },
+            'tok-away': { BUY: '0.15', SELL: '0.34' },
+            'tok-home': { BUY: '0.66', SELL: '0.67' },
           }),
         };
       }

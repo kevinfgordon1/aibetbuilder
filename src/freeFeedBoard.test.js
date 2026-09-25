@@ -11,6 +11,7 @@ import {
   kalshiQuotesFromBoardBody,
   polymarketQuotesFromBoardBody,
   quotesAfterVenueEvent,
+  mergeMonotonicQuotes,
   mainLaddersFromGame,
   mergeVenueQuotes,
   quoteMergeKey,
@@ -266,6 +267,35 @@ const replaced = quotesAfterVenueEvent(
 assert.equal(replaced.length, 2);
 assert.equal(replaced.some((q) => String(q.ticker).includes("LARPHI")), false);
 assert.equal(quotesAfterVenueEvent(replaced, { quotes: [] }), replaced);
+const falcons = (odds, iso) => ({
+  book: "polymarket",
+  book_id: 193,
+  token_id: "tok-away",
+  side: "Falcons",
+  away: "Falcons",
+  home: "Packers",
+  bet_type: "moneyline",
+  odds,
+  updated_at: iso,
+});
+let held = [];
+const painted = [];
+const interleaved = [
+  { complete: true, quotes: [falcons(0.16, "2026-09-25T00:48:00.200Z")] },
+  { complete: true, quotes: [falcons(0.15, "2026-09-25T00:48:00.100Z")] },
+  { complete: true, quotes: [falcons(0.16, "2026-09-25T00:48:00.200Z")] },
+  { complete: true, quotes: [falcons(0.15, "2026-09-25T00:48:00.150Z")] },
+  { complete: true, quotes: [falcons(0.17, "2026-09-25T00:48:00.300Z")] },
+];
+for (const frame of interleaved) {
+  held = quotesAfterVenueEvent(held, frame);
+  painted.push(held[0].odds);
+}
+assert.deepEqual(painted, [0.16, 0.16, 0.16, 0.16, 0.17], "older frames do not oscillate the ask");
+const polledBack = mergeMonotonicQuotes(held, [falcons(0.2, "2026-09-25T00:48:00.250Z")], { complete: true });
+assert.equal(polledBack[0].odds, 0.17, "a reconcile poll older than the tick does not rewind");
+const polledForward = mergeMonotonicQuotes(held, [falcons(0.19, "2026-09-25T00:48:00.400Z")], { complete: true });
+assert.equal(polledForward[0].odds, 0.19, "a newer poll still applies");
 assert.equal(boardPollShouldApply(0, 5_000), true, 'no socket yet, the JSON poll may paint');
 assert.equal(boardPollShouldApply(4_000, 5_000), false, 'a fresh SSE tick wins over an in-flight poll');
 assert.equal(boardPollShouldApply(1_000, 5_000), true, 'a quiet socket falls back to the poll');
@@ -519,7 +549,7 @@ assert.match(board, /kalshiQuotesFromBoardBody/);
 assert.match(board, /polymarketQuotesFromBoardBody/);
 assert.match(board, /quotesAfterVenueEvent/);
 assert.match(board, /boardPriceTicks/);
-assert.match(board, /boardPollShouldApply/);
+assert.match(board, /mergeMonotonicQuotes/);
 assert.match(board, /tickSinkRef\.current\?/);
 assert.match(board, /FREE_FEED_LIVE_BOARD_POLL_MS/);
 const venueLive = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "venueLive.js"), "utf8");

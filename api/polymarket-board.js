@@ -4,8 +4,8 @@
 // JSON snapshot of Polymarket game-moneyline best asks. No API key.
 //
 // Gamma outcomePrices are cached for minutes. This route reads CLOB
-// /prices (side=BUY, the best ask) so an in-game board is not stuck on
-// the pregame print when the SSE socket only replayed one token.
+// /prices side=SELL, which is the best ask (the price to buy that side),
+// the same number the websocket best_ask field carries.
 
 const { parseLeague, loadPolymarketQuotes } = require('../lib/venue-live');
 
