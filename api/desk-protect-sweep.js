@@ -3,7 +3,8 @@
 // Header X-Desk-Protect-Secret = DESK_PROTECT_SWEEP_SECRET, or ADMIN_API_SECRET
 // when the dedicated name is unset. Body { op: "sweep", mode: "adverse-only" }.
 // Same cancel / re-rest as the desk. The secret cannot place or cancel.
-// Armed rests only. Off orders are not in the registry, so they are never touched.
+// Armed rests only (desk rests are armed by default; an order switched off is
+// not in the registry, so it is never touched).
 'use strict';
 
 const crypto = require('crypto');

@@ -28,7 +28,29 @@ assert.equal(centsToMicro(3), 30_000);
 assert.equal(centsToMicro(1), 10_000);
 assert.equal(centsToMicro(0.5), 5_000);
 
-assert.equal(readProtectRequest({}).on, false);
+assert.equal(readProtectRequest({}).on, true, "Bet Protect is on when the flag is omitted");
+assert.equal(readProtectRequest({}).xCents, 3);
+assert.equal(readProtectRequest({}).yCents, 1);
+assert.equal(readProtectRequest({}).defaulted, true);
+assert.equal(readProtectRequest({ protect: true }).defaulted, false);
+assert.equal(readProtectRequest({ protect: null }).on, true);
+assert.equal(readProtectRequest({ protect: false }).on, false);
+assert.equal(readProtectRequest({ protect: 0 }).on, false);
+assert.equal(readProtectRequest({ protect: "false" }).on, false);
+assert.equal(readProtectRequest({ protect: "off" }).on, false);
+assert.equal(readProtectRequest({}, { riskDollars: 100 }).on, true, "exactly at the cap is protected");
+{
+  const over = readProtectRequest({}, { riskDollars: 100.5 });
+  assert.equal(over.ok, true);
+  assert.equal(over.on, false);
+  assert.equal(over.overCap, true);
+  assert.match(over.note, /\$100 Bet Protect cap/);
+  const overExplicit = readProtectRequest({ protect: true }, { riskDollars: 150 });
+  assert.equal(overExplicit.ok, true, "over the cap is sent unprotected, not blocked");
+  assert.equal(overExplicit.on, false);
+  assert.equal(overExplicit.overCap, true);
+  assert.equal(readProtectRequest({ protect: false }, { riskDollars: 150 }).overCap, undefined);
+}
 assert.equal(readProtectRequest({ protect: true }).xCents, 3);
 assert.equal(readProtectRequest({ protect: true }).yCents, 1);
 assert.equal(readProtectRequest({ protect: true, protectXCents: 0 }).ok, false);

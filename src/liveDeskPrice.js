@@ -482,14 +482,14 @@ export function allowCrossRequested(value) {
  * stay, and there is no success toast. A rejected submit returns null so
  * the typed ticket stays on screen with the error.
  * Overrides, always: the Buy/Sell toggle returns to Buy, and Bet Protect
- * turns off. American odds, dollar size, and Allow cross are omitted
+ * goes back ON (the desk default). American odds, dollar size, and Allow cross are omitted
  * because Combo Locks keeps those inputs.
  */
 export function restFormAfterPlace(accepted) {
   if (accepted !== true) return null;
   return {
     action: "buy",
-    protect: false,
+    protect: true,
     gameId: "",
     slug: "",
     slugDraft: "",

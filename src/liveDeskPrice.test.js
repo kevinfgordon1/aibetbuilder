@@ -381,7 +381,7 @@ for (const tick of [0.001, 0.005]) {
   const next = restFormAfterPlace(true);
   assert.deepEqual(next, {
     action: "buy",
-    protect: false,
+    protect: true,
     gameId: "",
     slug: "",
     slugDraft: "",
