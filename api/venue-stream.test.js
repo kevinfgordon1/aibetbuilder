@@ -398,6 +398,43 @@ class FakeWS {
       }),
     });
     assert.equal(res.chunks.length, same, 'unchanged ticker ask is not a second paint');
+    ws.emit('message', {
+      data: JSON.stringify({
+        type: 'orderbook_snapshot',
+        sid: 4,
+        seq: 20,
+        msg: {
+          market_ticker: 'KXNFLGAME-26SEP24ATLGB-ATL',
+          no_dollars_fp: [['0.6400', '100.00']],
+        },
+      }),
+    });
+    const afterBook = res.chunks.length;
+    ws.emit('message', {
+      data: JSON.stringify({
+        type: 'ticker',
+        msg: { market_ticker: 'KXNFLGAME-26SEP24ATLGB-ATL', yes_ask: 17, ts: Date.now() },
+      }),
+    });
+    assert.equal(res.chunks.length, afterBook, 'ticker does not override a built book');
+    ws.emit('message', {
+      data: JSON.stringify({
+        type: 'orderbook_delta',
+        sid: 4,
+        seq: 22,
+        msg: {
+          market_ticker: 'KXNFLGAME-26SEP24ATLGB-ATL',
+          side: 'no',
+          price_dollars: '0.6400',
+          delta_fp: '-100.00',
+        },
+      }),
+    });
+    assert.equal(res.chunks.length, afterBook, 'a seq gap does not emit');
+    const snap = ws.sent.map((s) => JSON.parse(s)).find((m) => m.cmd === 'update_subscription');
+    assert.equal(snap.params.action, 'get_snapshot');
+    assert.deepEqual(snap.params.sids, [4]);
+    assert.deepEqual(snap.params.market_tickers, ['KXNFLGAME-26SEP24ATLGB-ATL']);
     req.emit('close');
     await pending;
     assert.equal(ws.closed, true);
