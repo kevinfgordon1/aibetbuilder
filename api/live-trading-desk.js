@@ -239,7 +239,8 @@ async function placeOrder(client, body) {
   const market = price.readMarketSides(raw);
   if (!market.ok) return { ok: false, status: 400, error: market.error };
   if (!market.tradable) return { ok: false, status: 400, error: 'That market is not open on Polymarket US.' };
-  const quote = price.quoteRestingOrder({
+  const ticket = price.restingLimitOrder({
+    slug,
     american: body.american,
     outcome: body.outcome,
     action: body.action,
@@ -247,8 +248,9 @@ async function placeOrder(client, body) {
     dollars: body.dollars,
     minQty: market.minQty,
   });
-  if (!quote.ok) return { ok: false, status: 400, error: quote.error };
-  const orderBody = price.buildLimitOrder({ slug, quote });
+  if (!ticket.ok) return { ok: false, status: 400, error: ticket.error };
+  const quote = ticket.quote;
+  const orderBody = ticket.order;
   const created = await client.createOrder(orderBody);
   const orderId = created && (created.id || (created.order && created.order.id));
   const outcomeName = quote.outcome === 'short' ? market.shortName : market.longName;

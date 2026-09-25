@@ -35,6 +35,10 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /id="desk-game"/);
   assert.match(ui, /id="desk-market"/);
   assert.match(ui, /Moneyline only for now/);
+  assert.match(ui, /id="desk-order-readback"/);
+  assert.match(ui, /id="desk-confirm"/);
+  assert.match(ui, /useState\("buy"\)/);
+  assert.match(text, /restingLimitOrder/);
 }
 
 {
@@ -512,6 +516,85 @@ const goodCreds = () => ({
     assert.match(res.out.body.games[0].label, /NFL · ATL Falcons @ GB Packers/);
     assert.ok(seen.some((p) => p.startsWith('/v2/leagues/nfl/events')));
     assert.equal(res.out.body.market, null);
+  }
+
+  {
+    const ATL = {
+      slug: 'aec-nfl-atl-gb-2026-09-24',
+      question: 'Atlanta Falcons vs. Green Bay Packers',
+      active: true,
+      closed: false,
+      sportsMarketType: 'football_team_full_game_winner',
+      marketType: 'moneyline',
+      orderPriceMinTickSize: 0.005,
+      minimumTradeQty: 0.01,
+      outcomes: '["Falcons","Packers"]',
+      marketSides: [
+        { long: true, description: 'Falcons', team: { name: 'Atlanta Falcons', ordering: 'away' } },
+        { long: false, description: 'Packers', team: { name: 'Green Bay Packers', ordering: 'home' } },
+      ],
+    };
+    const posted = [];
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const u = new URL(url);
+        if (u.host === 'gateway.polymarket.us') return jsonRes(200, ATL);
+        if (method === 'POST' && u.pathname === '/v1/orders') {
+          posted.push(JSON.parse(opts.body));
+          return jsonRes(200, { id: 'ord-atl-1' });
+        }
+        return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
+      },
+    });
+    const packers = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-atl-gb-2026-09-24',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'short',
+        action: 'buy',
+        american: -150,
+        dollars: 25,
+        price: { value: '0.320' },
+      },
+    }, packers);
+    assert.equal(packers.out.statusCode, 200, JSON.stringify(packers.out.body));
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].intent, 'ORDER_INTENT_BUY_SHORT');
+    assert.equal(posted[0].price.value, '0.400');
+    assert.equal(posted[0].quantity, 41.66);
+    assert.notEqual(posted[0].price.value, '0.320');
+    assert.ok(posted[0].quantity < 50);
+    assert.equal(packers.out.body.snap.outcomeName, 'Green Bay Packers');
+    assert.equal(packers.out.body.snap.centsLabel, '60¢');
+    assert.equal(packers.out.body.snap.yesCentsLabel, '40¢');
+
+    const falcons = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-atl-gb-2026-09-24',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'long',
+        action: 'buy',
+        american: -150,
+        dollars: 25,
+      },
+    }, falcons);
+    assert.equal(falcons.out.statusCode, 200, JSON.stringify(falcons.out.body));
+    assert.equal(posted[1].intent, 'ORDER_INTENT_BUY_LONG');
+    assert.equal(posted[1].price.value, '0.600');
+    assert.equal(posted[1].quantity, 41.66);
+    assert.equal(falcons.out.body.snap.outcomeName, 'Atlanta Falcons');
+    assert.equal(falcons.out.body.snap.centsLabel, '60¢');
   }
 
   console.log('live-trading-desk.test.js ok');

@@ -150,9 +150,10 @@ function LiveTradingDeskView({ user }) {
   const [marketType, setMarketType] = useState("moneyline");
   const [scopeNote, setScopeNote] = useState("");
   const [outcome, setOutcome] = useState("long");
-  const [action, setAction] = useState("sell");
+  const [action, setAction] = useState("buy");
   const [american, setAmerican] = useState("");
   const [dollars, setDollars] = useState(String(DEFAULT_SIZE_DOLLARS));
+  const [armedTicket, setArmedTicket] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -178,6 +179,15 @@ function LiveTradingDeskView({ user }) {
       return { ok: false, error: deskErrorText(err, "Could not price that order.") };
     }
   }, [market, american, outcome, action, dollars]);
+
+  const ticketKey = quote && quote.ok && market
+    ? [market.slug, outcome, action, quote.yesPriceValue, quote.contracts, quote.riskLabel].join("|")
+    : "";
+  const confirmed = !!(ticketKey && armedTicket === ticketKey);
+
+  useEffect(() => {
+    setArmedTicket("");
+  }, [american, dollars, outcome, action, slug]);
 
   async function load(nextSlug, { silent } = {}) {
     const id = ++seq.current;
@@ -225,7 +235,7 @@ function LiveTradingDeskView({ user }) {
     return () => clearInterval(timer);
   }, [user]);
 
-  function applyMoneyline(nextSlug, { outcomeSide } = {}) {
+  function applyMoneyline(nextSlug, { outcomeSide, hedge } = {}) {
     const classified = classifyDeskMarket(nextSlug);
     if (!classified.ok) {
       setScopeNote(classified.message || "Pick an NFL game moneyline.");
@@ -238,7 +248,7 @@ function LiveTradingDeskView({ user }) {
     setSlug(classified.slug);
     setSlugDraft(classified.slug);
     if (outcomeSide) setOutcome(outcomeSide === "short" ? "short" : "long");
-    setAction("sell");
+    if (hedge) setAction("sell");
     load(classified.slug, { silent: true });
   }
 
@@ -249,7 +259,7 @@ function LiveTradingDeskView({ user }) {
       setScopeNote(classified.message);
       return;
     }
-    applyMoneyline(classified.slug, { outcomeSide: row.side });
+    applyMoneyline(classified.slug, { outcomeSide: row.side, hedge: true });
   }
 
   function selectGame(nextId) {
@@ -311,6 +321,12 @@ function LiveTradingDeskView({ user }) {
   async function submit(e) {
     e.preventDefault();
     if (!market || !quote || !quote.ok || busy) return;
+    if (armedTicket !== ticketKey) {
+      setArmedTicket(ticketKey);
+      setNotice("");
+      setError("");
+      return;
+    }
     if (marketType !== "moneyline" || market.slug !== moneylineSlugForGame(gameId)) {
       setScopeNote("Pick the NFL game moneyline before resting.");
       return;
@@ -560,6 +576,7 @@ function LiveTradingDeskView({ user }) {
               id="desk-american"
               inputMode="text"
               autoComplete="off"
+              name="desk-american"
               placeholder="−150"
               value={american}
               onChange={(e) => setAmerican(e.target.value)}
@@ -573,6 +590,8 @@ function LiveTradingDeskView({ user }) {
               min="1"
               max={MAX_SIZE_DOLLARS}
               step="1"
+              autoComplete="off"
+              name="desk-dollars"
               value={dollars}
               onChange={(e) => setDollars(e.target.value)}
               style={field}
@@ -590,29 +609,41 @@ function LiveTradingDeskView({ user }) {
                 <div style={{ color: "#fecaca", fontSize: 13 }}>{deskErrorText(quote.error, "That price cannot be rested.")}</div>
               )}
               {market && quote && quote.ok && (
-                <div>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 20, fontWeight: 800 }}>
-                    {action === "buy" ? "Buy" : "Sell"} {outcomeName} {plain(quote.snappedAmericanLabel, "")}
+                <div id="desk-order-readback">
+                  <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: confirmed ? "#93c5fd" : "#9ca3af" }}>
+                    {confirmed ? "Sending this order" : "Order that will be sent"}
                   </div>
-                  <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 6 }}>
-                    {plain(quote.centsLabel, "")} on {outcomeName}
-                    {outcome === "short" ? " · YES book " + plain(quote.yesCentsLabel, "") : ""}
-                    {" · "}{plain(quote.contracts, "—")} contracts · {plain(quote.riskLabel, "")} at risk
+                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, marginTop: 8 }}>
+                    {action === "buy" ? "Buy" : "Sell"} {outcomeName}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: "4px 10px", marginTop: 8, fontSize: 13, color: "#e5e7eb" }}>
+                    <div style={{ color: "#9ca3af" }}>American</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{plain(quote.snappedAmericanLabel, "")}</div>
+                    <div style={{ color: "#9ca3af" }}>Cents</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{plain(quote.centsLabel, "")}</div>
+                    <div style={{ color: "#9ca3af" }}>Contracts</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{plain(quote.contracts, "—")}</div>
+                    <div style={{ color: "#9ca3af" }}>Total cost</div>
+                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{plain(quote.riskLabel, "")}</div>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 8, lineHeight: 1.45 }}>
+                    Polymarket US shows this as {plain(market.longName, "Yes")} at {plain(quote.yesCentsLabel, "")} (YES {plain(quote.yesPriceValue, "")}).
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
-                    Buys floor the tick (you pay less). Sells ceil the tick (you receive more). Never a worse American than you typed. Good-till-cancel limit — a price through the market can fill now; the rest stays until you cancel.
+                    Buys floor the tick (you pay less). Sells ceil the tick (you receive more). Cost is contracts times that price, floored so it stays at or under the dollars typed, and never over ${MAX_SIZE_DOLLARS}.
                   </div>
                 </div>
               )}
             </div>
 
             <button
+              id="desk-confirm"
               type="submit"
               disabled={!canSubmit}
               style={{
                 marginTop: 14,
                 width: "100%",
-                background: canSubmit ? "#2563eb" : "rgba(255,255,255,0.06)",
+                background: canSubmit ? (confirmed ? "#15803d" : "#2563eb") : "rgba(255,255,255,0.06)",
                 color: canSubmit ? "#fff" : "#6b7280",
                 border: "none",
                 borderRadius: 10,
@@ -621,7 +652,11 @@ function LiveTradingDeskView({ user }) {
                 fontWeight: 800,
                 cursor: canSubmit ? "pointer" : "not-allowed",
               }}
-            >{busy === "place" ? "Resting…" : (quote && quote.ok ? "Rest limit at " + quote.snappedAmericanLabel : "Rest limit")}</button>
+            >{busy === "place"
+              ? "Sending…"
+              : (quote && quote.ok
+                ? (confirmed ? "Send this order" : "Confirm order")
+                : "Rest limit")}</button>
           </form>
         </section>
 
