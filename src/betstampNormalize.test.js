@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { feeInclusiveAmerican, VENUE_TAKER_FEE_RATE } from "./venueTakerFee.js";
 import {
   decimalToAmerican,
   toAmericanOdds,
@@ -462,10 +463,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
     teams: [],
   });
   const g = games[0];
-  assert.equal(g.bookOdds.kalshi.ml_away, 150);
-  assert.equal(g.bookOdds.polymarket.ml_home, -200);
+  assert.equal(g.bookOdds.kalshi.ml_away, feeInclusiveAmerican(0.4, VENUE_TAKER_FEE_RATE.kalshi).american);
+  assert.equal(g.bookOdds.kalshi.ml_away_raw, 150);
+  assert.equal(g.bookOdds.polymarket.ml_home, -200, "a decimal quote is not a contract ask");
+  assert.equal(g.bookOdds.polymarket.ml_home_raw, undefined);
   assert.equal(g.bookOdds.prophetx.ml_away, 110);
-  assert.equal(formatWinProb(g.bookOdds.kalshi.ml_away), "40.0%");
+  assert.equal(formatWinProb(g.bookOdds.kalshi.ml_away_raw), "40.0%");
   assert.equal(formatWinProb(g.bookOdds.polymarket.ml_home), "66.7%");
   assert.equal(formatWinProb(g.bookOdds.prophetx.ml_away), "47.6%");
 }

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { toAmericanOdds, gameVisibleOnBoard } from "./betstampNormalize.js";
+import { feeInclusiveAmerican, VENUE_TAKER_FEE_RATE } from "./venueTakerFee.js";
 import {
   freeFeedBooks,
   boardPollShouldApply,
@@ -16,6 +17,10 @@ import {
   mergeVenueQuotes,
   quoteMergeKey,
 } from "./freeFeedBoard.js";
+
+function feeAsk(p) {
+  return feeInclusiveAmerican(p, VENUE_TAKER_FEE_RATE.polymarket).american;
+}
 
 const now = Date.parse("2026-09-22T18:00:00Z");
 
@@ -91,10 +96,77 @@ assert.equal(games[0].id, "ff:NFL:ATL:GB");
 assert.equal(games[0].away, "Atlanta Falcons");
 assert.equal(games[0].home, "Green Bay Packers");
 assert.equal(games[0].is_live, false);
-assert.equal(games[0].bookOdds.polymarket.ml_away, toAmericanOdds(0.285));
-assert.equal(games[0].bookOdds.polymarket.ml_home, toAmericanOdds(0.72));
-assert.equal(games[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.72));
+assert.equal(games[0].bookOdds.polymarket.ml_away, feeAsk(0.285));
+assert.equal(games[0].bookOdds.polymarket.ml_home, feeAsk(0.72));
+assert.equal(games[0].bookOdds.kalshi.ml_home, feeAsk(0.72));
 assert.equal(games[0].bookOdds.kalshi.ml_away, null);
+
+const liveNow = Date.parse("2026-09-25T01:00:00Z");
+const liveRow = gamesFromFreeFeeds({
+  league: "NFL",
+  polymarket: [
+    { ...poly, is_live: true, start: "2026-09-25T00:15:00Z", odds: 0.4 },
+    { ...polyHome, is_live: true, start: "2026-09-25T00:15:00Z", odds: 0.61 },
+  ],
+  kalshi: [{
+    ...kalshi,
+    away: "Atlanta",
+    home: "Green Bay",
+    side: "Atlanta",
+    odds: 0.4,
+    is_live: false,
+    start: "2026-09-25T03:15:00Z",
+    ticker: "KXNFLGAME-26SEP24ATLGB-ATL",
+  }],
+  nowMs: liveNow,
+});
+assert.equal(liveRow.length, 1, "Atlanta and Falcons share the live row");
+assert.equal(liveRow[0].away, "Atlanta Falcons");
+assert.equal(liveRow[0].home, "Green Bay Packers");
+assert.equal(liveRow[0].commence_time, "2026-09-25T00:15:00Z", "the later Kalshi occurrence does not move kickoff");
+assert.equal(liveRow[0].is_live, true);
+assert.equal(liveRow[0].bookOdds.kalshi.ml_away, feeAsk(0.4));
+assert.equal(liveRow[0].bookOdds.polymarket.ml_away, feeAsk(0.4));
+
+const mlbRow = gamesFromFreeFeeds({
+  league: "MLB",
+  polymarket: [{
+    book: "polymarket",
+    book_id: 193,
+    league: "MLB",
+    away: "Rays",
+    home: "Yankees",
+    side: "Rays",
+    bet_type: "moneyline",
+    odds: 0.39,
+    is_live: true,
+    start: "2026-09-24T23:05:00Z",
+    updated_at: "2026-09-25T01:00:00.000Z",
+    token_id: "rays",
+  }],
+  kalshi: [{
+    book: "kalshi",
+    book_id: 194,
+    league: "MLB",
+    away: "Tampa Bay",
+    home: "New York Y",
+    side: "Tampa Bay",
+    bet_type: "moneyline",
+    odds: 0.39,
+    is_live: false,
+    start: "2026-09-25T02:05:00Z",
+    updated_at: "2026-09-25T01:00:00.000Z",
+    ticker: "KXMLBGAME-26SEP241905TBNYY-TB",
+  }],
+  nowMs: liveNow,
+});
+assert.equal(mlbRow.length, 1, "Rays and Tampa Bay / New York Y share one row");
+assert.equal(mlbRow[0].away, "Tampa Bay Rays");
+assert.equal(mlbRow[0].home, "New York Yankees");
+assert.equal(mlbRow[0].is_live, true);
+assert.equal(mlbRow[0].commence_time, "2026-09-24T23:05:00Z");
+assert.equal(mlbRow[0].bookOdds.kalshi.ml_away, feeAsk(0.39));
+assert.equal(mlbRow[0].bookOdds.polymarket.ml_away, feeAsk(0.39));
 
 // Live Kalshi titles are city or truncated city ("Los Angeles C", "New York G"),
 // while Underdog uses the full club name. Both sides of an NFL moneyline join.
@@ -178,12 +250,12 @@ assert.equal(abbreviated.length, 3);
 const chargers = abbreviated.find((g) => g.awayAbbr === "LAC");
 const seahawks = abbreviated.find((g) => g.awayAbbr === "SEA");
 const titans = abbreviated.find((g) => g.awayAbbr === "TEN");
-assert.equal(chargers.bookOdds.kalshi.ml_away, toAmericanOdds(0.25));
-assert.equal(chargers.bookOdds.kalshi.ml_home, toAmericanOdds(0.76));
+assert.equal(chargers.bookOdds.kalshi.ml_away, feeAsk(0.25));
+assert.equal(chargers.bookOdds.kalshi.ml_home, feeAsk(0.76));
 assert.equal(chargers.bookOdds.underdog_predict.ml_away, 300);
-assert.equal(seahawks.bookOdds.kalshi.ml_away, toAmericanOdds(0.76));
+assert.equal(seahawks.bookOdds.kalshi.ml_away, feeAsk(0.76));
 assert.equal(titans.home, "New York Giants");
-assert.equal(titans.bookOdds.kalshi.ml_home, toAmericanOdds(0.57));
+assert.equal(titans.bookOdds.kalshi.ml_home, feeAsk(0.57));
 
 // Production SSE shape: book 194, city names, 0–1 yes-ask. Snapshot JSON
 // must paint American odds on the Underdog Falcons @ Packers row.
@@ -230,8 +302,8 @@ const fromPayload = gamesFromFreeFeeds({
 });
 assert.equal(fromPayload.length, 1);
 assert.equal(fromPayload[0].id, "ff:NFL:ATL:GB");
-assert.equal(fromPayload[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.69));
-assert.equal(fromPayload[0].bookOdds.kalshi.ml_away, toAmericanOdds(0.32));
+assert.equal(fromPayload[0].bookOdds.kalshi.ml_home, feeAsk(0.69));
+assert.equal(fromPayload[0].bookOdds.kalshi.ml_away, feeAsk(0.32));
 assert.equal(fromPayload[0].bookOdds.underdog_predict.ml_away, 245);
 
 const movedBoard = {
@@ -249,7 +321,7 @@ const movedGames = gamesFromFreeFeeds({
 const ticks = boardPriceTicks(fromPayload, movedGames);
 const atlTick = ticks.find((row) => row.bookKey === "kalshi" && row.label === "ATL ML");
 assert.ok(atlTick, "an in-game Kalshi move is a tick");
-assert.equal(atlTick.price, toAmericanOdds(0.34));
+assert.equal(atlTick.price, feeAsk(0.34));
 assert.equal(boardPriceTicks(movedGames, movedGames).length, 0, "the same print is not another tick");
 const polyBody = {
   ok: true,
@@ -469,7 +541,7 @@ const live = gamesFromFreeFeeds({
 });
 assert.equal(live.length, 1);
 assert.equal(live[0].is_live, true);
-assert.equal(live[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.72), "Kalshi still paints after kickoff");
+assert.equal(live[0].bookOdds.kalshi.ml_home, feeAsk(0.72), "Kalshi still paints after kickoff");
 assert.equal(gameVisibleOnBoard(live[0], { liveOnly: true, now }), true);
 assert.equal(gameVisibleOnBoard(live[0], { liveOnly: false, now }), false);
 
@@ -526,7 +598,7 @@ const ncaaf = gamesFromFreeFeeds({
 });
 assert.equal(ncaaf.length, 1);
 assert.equal(ncaaf[0].bookOdds.underdog_predict.ml_away, 127);
-assert.equal(ncaaf[0].bookOdds.polymarket.ml_away, toAmericanOdds(0.44));
+assert.equal(ncaaf[0].bookOdds.polymarket.ml_away, feeAsk(0.44));
 assert.match(ncaaf[0].away, /Ole Miss/);
 
 const merged = mergeVenueQuotes(

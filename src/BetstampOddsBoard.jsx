@@ -1,5 +1,6 @@
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
+import { TAKER_FEE_LEGEND } from "./venueTakerFee.js";
 import {
   fmtBoardSize,
   bestBooksTitle,
@@ -56,6 +57,7 @@ import {
   summarizeTickStats,
   formatCompactAge,
   compactAgeTone,
+  lineIsStale,
   staleLiveBookLabels,
   formatWinProb,
   cellShowsWinProb,
@@ -134,7 +136,7 @@ function BestNowProvider({ children }) {
   return <BestNowContext.Provider value={bestNowMs}>{children}</BestNowContext.Provider>;
 }
 
-const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey }) {
+const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey, title }) {
   const prevRef = useRef({ key: flashKey, price, suspended: !!suspended });
   const [flash, setFlash] = useState(null);
 
@@ -165,6 +167,7 @@ const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashK
     <span
       data-odds-flash={flash || "none"}
       className={flash ? `obb-flash obb-flash-${flash}` : undefined}
+      title={title || undefined}
       style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
     >
       {price == null ? "—" : formatAmericanOdds(price)}
@@ -173,6 +176,7 @@ const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashK
 }, (prev, next) => (
   prev.flashKey === next.flashKey
   && !!prev.suspended === !!next.suspended
+  && prev.title === next.title
   && sameAmericanPrice(prev.price, next.price)
 ));
 
@@ -180,16 +184,46 @@ function LineAge({ updatedAt, ageTitle }) {
   const nowMs = useContext(AgeNowContext);
   const age = formatCompactAge(updatedAt, nowMs);
   if (!age) return null;
+  const stale = lineIsStale(updatedAt, nowMs);
   const clock = updatedAt ? fmtClock(updatedAt) : "";
   return (
     <div
       data-line-age={age}
+      data-stale={stale ? "1" : "0"}
       title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
       className="obb-clip"
-      style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
+      style={{ fontSize: 9, color: stale ? "#f59e0b" : compactAgeTone(updatedAt, nowMs), fontWeight: stale ? 700 : 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
     >
-      {age}
+      {stale ? `stale ${age}` : `${age} ago`}
     </div>
+  );
+}
+
+function newestLineStamp(game) {
+  let newest = null;
+  for (const stamps of Object.values((game && game.bookLineUpdatedAt) || {})) {
+    for (const t of Object.values(stamps || {})) {
+      if (typeof t === "number" && Number.isFinite(t) && (newest == null || t > newest)) newest = t;
+    }
+  }
+  return newest;
+}
+
+function RowAge({ game }) {
+  const nowMs = useContext(AgeNowContext);
+  const updatedAt = newestLineStamp(game);
+  const age = formatCompactAge(updatedAt, nowMs);
+  if (!age) return null;
+  const stale = lineIsStale(updatedAt, nowMs);
+  return (
+    <span
+      data-row-age={age}
+      data-stale={stale ? "1" : "0"}
+      title="Newest price on this row"
+      style={{ color: stale ? "#f59e0b" : "#6b7280", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}
+    >
+      {stale ? `stale ${age}` : `updated ${age} ago`}
+    </span>
   );
 }
 
@@ -203,11 +237,14 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
+const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
-  const winProb = showWinProb && price != null && !suspended ? formatWinProb(price) : null;
+  const feeTip = rawPrice != null
+    ? `Includes taker fee. Raw ask ${formatAmericanOdds(rawPrice)}${formatWinProb(rawPrice) ? ` (${formatWinProb(rawPrice)} contract)` : ""}`
+    : undefined;
+  const winProb = showWinProb && rawPrice == null && price != null && !suspended ? formatWinProb(price) : null;
   if (suspended) {
     return (
       <>
@@ -232,12 +269,22 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
     <>
       {line && <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
       <div className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "nowrap", lineHeight: 1.15, maxWidth: "100%" }}>
-        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
+        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} title={feeTip} />
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
         <LiquidityCue size={size} inline />
       </div>
+      {rawPrice != null && !suspended && (
+        <div
+          data-raw-ask={rawPrice}
+          title={feeTip}
+          className="obb-clip"
+          style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
+        >
+          ask {formatAmericanOdds(rawPrice)}
+        </div>
+      )}
       {winProb && (
         <div
           data-win-prob={winProb}
@@ -263,6 +310,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
   && prev.updatedAt === next.updatedAt
   && prev.ageTitle === next.ageTitle
   && sameAmericanPrice(prev.price, next.price)
+  && sameAmericanPrice(prev.rawPrice, next.rawPrice)
   && (prev.books?.[0]?.key || "") === (next.books?.[0]?.key || "")
   && (prev.books?.length || 0) === (next.books?.length || 0)
 ));
@@ -543,8 +591,8 @@ const LiveTickStrip = memo(function LiveTickStrip({
             lineHeight: 1.4,
           }}
         >
-          {staleSoft.map((b) => `${b.label} ${b.age}`).join(" · ")}
-          {" — last Betstamp print, not a frozen Refresh. Last-tick in the header is SSE (Pinnacle / PMs). Soft books often do not tick live."}
+          {staleSoft.map((b) => `${b.label} silent ${b.age}`).join(" · ")}
+          {" — no price for 10s or more. The cell says stale until that book ticks again."}
         </div>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
@@ -665,6 +713,7 @@ function renderBookColumn({
     : lineUpdatedAt(rowGame, b.key, fields.bot);
   const sideProps = (which) => ({
     price: which === "top" ? cell.top : cell.bot,
+    rawPrice: which === "top" ? cell.topRaw : cell.botRaw,
     size: which === "top" ? cell.topSize : cell.botSize,
     line: includeLine ? (which === "top" ? cell.topLine : cell.botLine) : null,
     books: which === "top" ? cell.topBooks : cell.botBooks,
@@ -873,6 +922,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
             ) : (
               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
             )}
+            <RowAge game={game} />
           </div>
           <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
@@ -1132,12 +1182,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       if (!venuesOn || cancelled) return;
       let venueAttempt = 0;
       while (!cancelled && !ctrl.signal.aborted) {
+        let connected = false;
         try {
           await consumeBetstampStream({
             url,
             signal: ctrl.signal,
             onStatus: (s) => {
+              if (s === "live") connected = true;
               if (cancelled || gen !== fetchGen.current || !liveOnly) return;
+              if (s === "disconnected" && connected) setStreamStatus("reconnect");
               if (s === "live" || s === "connecting" || s === "reconnect") setStreamStatus(s);
             },
             onEvent: (ev) => {
@@ -1170,8 +1223,19 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         } catch {
           if (cancelled || ctrl.signal.aborted) return;
           if (liveOnly) setStreamStatus("reconnect");
+          connected = false;
         }
         if (cancelled || ctrl.signal.aborted) return;
+        // A clean end is the 240s function recycle. Rejoin at once so the
+        // next snapshot is not stuck behind error backoff.
+        if (connected) {
+          venueAttempt = 0;
+          await new Promise((resolve) => {
+            const t = setTimeout(resolve, 100);
+            venueTimers.push(t);
+          });
+          continue;
+        }
         const wait = nextBackoffMs(venueAttempt);
         venueAttempt += 1;
         await new Promise((resolve) => {
@@ -1693,6 +1757,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
             Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters appear when the server has credentials. No sportsbook columns.
+          </div>
+          <div data-fee-legend="1" style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+            {TAKER_FEE_LEGEND}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

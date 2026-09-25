@@ -4,12 +4,15 @@ import {
   firstPartyPmLiveFromEnv,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  polymarketBoardUrl,
+  kalshiBoardUrl,
   novigStreamUrl,
   fourcastersStreamUrl,
   matchGameForQuote,
   venueQuotesToMarkets,
 } from "./venueLive.js";
-import { applyStreamMarkets, gamesFromBetstampSnapshot } from "./betstampNormalize.js";
+import { applyStreamMarkets, gamesFromBetstampSnapshot, toAmericanOdds } from "./betstampNormalize.js";
+import { feeInclusiveAmerican, VENUE_TAKER_FEE_RATE } from "./venueTakerFee.js";
 
 const prevLive = process.env.VITE_FIRST_PARTY_PM_LIVE;
 try {
@@ -33,8 +36,20 @@ assert.equal(firstPartyPmLiveFromEnv("false"), false);
 assert.equal(firstPartyPmLiveFromEnv("off"), false);
 assert.equal(firstPartyPmLiveFromEnv("1"), true);
 assert.equal(firstPartyPmLiveFromEnv("true"), true);
+const prevRelay = process.env.VITE_ODDS_RELAY_URL;
+delete process.env.VITE_ODDS_RELAY_URL;
 assert.equal(polymarketStreamUrl({ league: "NFL" }), "/api/polymarket-stream?league=NFL");
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "/api/kalshi-stream?league=MLB");
+assert.equal(polymarketBoardUrl({ league: "NFL" }), "/api/polymarket-board?league=NFL");
+assert.equal(kalshiBoardUrl({ league: "NFL" }), "/api/kalshi-board?league=NFL");
+process.env.VITE_ODDS_RELAY_URL = "https://odds.example/";
+assert.equal(polymarketStreamUrl({ league: "NFL" }), "https://odds.example/stream?league=NFL&venue=polymarket");
+assert.equal(kalshiStreamUrl({ league: "MLB" }), "https://odds.example/stream?league=MLB&venue=kalshi");
+assert.equal(polymarketBoardUrl({ league: "NFL" }), "https://odds.example/board?league=NFL&venue=polymarket");
+assert.equal(kalshiBoardUrl({ league: "NCAAF" }), "https://odds.example/board?league=NCAAF&venue=kalshi");
+assert.equal(novigStreamUrl({ league: "NFL" }), "/api/novig-stream?league=NFL");
+if (prevRelay == null) delete process.env.VITE_ODDS_RELAY_URL;
+else process.env.VITE_ODDS_RELAY_URL = prevRelay;
 assert.equal(novigStreamUrl({ league: "NCAAF" }), "/api/novig-stream?league=NCAAF");
 assert.equal(fourcastersStreamUrl({ league: "NFL" }), "/api/4casters-stream?league=NFL");
 assert.equal(fourcastersStreamUrl({ league: "MLB" }), "/api/4casters-stream?league=MLB");
@@ -90,7 +105,8 @@ assert.equal(markets[0].is_live, true);
 const painted = applyStreamMarkets(games, markets, {
   receivedAt: Date.parse("2026-09-22T18:00:01.000Z"),
 }).games;
-assert.equal(painted[0].bookOdds.polymarket.ml_away, 251);
+assert.equal(painted[0].bookOdds.polymarket.ml_away, feeInclusiveAmerican(0.285, VENUE_TAKER_FEE_RATE.polymarket).american);
+assert.equal(painted[0].bookOdds.polymarket.ml_away_raw, toAmericanOdds(0.285));
 assert.equal(painted[0].bookOdds.draftkings.ml_away, -110);
 
 const kalshiQuote = {
@@ -109,6 +125,7 @@ const kalshiMarkets = venueQuotesToMarkets(games, [kalshiQuote], { liveBoard: tr
 const withKalshi = applyStreamMarkets(painted, kalshiMarkets, {
   receivedAt: Date.parse("2026-09-22T18:00:02.000Z"),
 }).games;
-assert.equal(withKalshi[0].bookOdds.kalshi.ml_home, -257);
+assert.equal(withKalshi[0].bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.72, VENUE_TAKER_FEE_RATE.kalshi).american);
+assert.equal(withKalshi[0].bookOdds.kalshi.ml_home_raw, toAmericanOdds(0.72));
 
 console.log("venueLive.test.js ok");
