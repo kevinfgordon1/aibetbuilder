@@ -87,7 +87,7 @@ class FakeWS {
         asks: [{ price: '0.99', size: '122237' }, { price: '0.285', size: '12' }],
       }),
     });
-    assert.ok(res.chunks.some((c) => c.includes('"odds":0.285') && c.includes('"source":"polymarket"') && c.includes('"mode":"ws"')));
+    assert.ok(res.chunks.some((c) => c.includes('"odds":0.285') && c.includes('"source":"polymarket"') && c.includes('"complete":false')), 'a websocket book is a delta, not a full snapshot');
     const again = res.chunks.length;
     ws.emit('message', {
       data: JSON.stringify({
@@ -118,7 +118,11 @@ class FakeWS {
       hubs: new Map(),
       pollMs: 30,
       maxPolls: 2,
-      fetchFn: async () => {
+      fetchFn: async (url) => {
+        const u = String(url);
+        if (u.includes('espn.com') || u.includes('/orderbook')) {
+          return { ok: true, status: 200, text: async () => '{}' };
+        }
         calls += 1;
         const ask = calls === 1 ? '0.4400' : '0.4600';
         return {
@@ -143,7 +147,7 @@ class FakeWS {
     }
     assert.ok(res.chunks.length >= 2, 'kalshi poll emits the ask and the change');
     assert.match(res.chunks[0], /"source":"kalshi"/);
-    assert.match(res.chunks[0], /"mode":"rest-poll"/);
+    assert.match(res.chunks[0], /"mode":"snapshot"/);
     assert.match(res.chunks[0], /"odds":0\.44/);
     assert.match(res.chunks[1], /"odds":0\.46/);
     assert.match(res.chunks[0], /ingest_ts/);
@@ -157,7 +161,11 @@ class FakeWS {
     // (PIT @ CLE) and the NFL moneyline column stayed "—" for every other game.
     const hubs = new Map();
     let calls = 0;
-    const fetchFn = async () => {
+    const fetchFn = async (url) => {
+      const u = String(url);
+      if (u.includes('espn.com') || u.includes('/orderbook')) {
+        return { ok: true, status: 200, text: async () => '{}' };
+      }
       calls += 1;
       const atl = calls === 1 ? '0.2900' : '0.3100';
       return {
@@ -195,12 +203,11 @@ class FakeWS {
     for (let i = 0; i < 50 && res1.chunks.length < 2; i += 1) {
       await new Promise((r) => setTimeout(r, 20));
     }
-    assert.equal(res1.chunks.length >= 2, true, 'two polls produce two Kalshi events');
+    assert.equal(res1.chunks.length >= 2, true, 'a later poll emits the ask that moved');
     const moved = JSON.parse(res1.chunks[1].split('data: ')[1]);
-    assert.equal(moved.payload.quotes.length, 2, 'a price change still ships both sides');
-    assert.equal(moved.payload.quotes.find((q) => q.side === 'Green Bay').odds, 0.72);
+    assert.equal(moved.payload.quotes.length, 1, 'a price change ships only that contract');
     assert.equal(moved.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.31);
-    assert.equal(moved.payload.complete, true, 'the board replaces with the full book');
+    assert.equal(moved.payload.complete, false, 'after the snapshot, frames are deltas');
 
     const req2 = new EventEmitter();
     req2.method = 'GET';
@@ -253,14 +260,15 @@ class FakeWS {
         }),
       }),
     });
-    for (let i = 0; i < 40 && res.chunks.length < 2; i += 1) {
+    for (let i = 0; i < 40 && res.chunks.length < 1; i += 1) {
       await new Promise((r) => setTimeout(r, 20));
     }
-    assert.ok(res.chunks.length >= 2, 'unchanged Kalshi book is still pushed');
-    const second = JSON.parse(res.chunks[1].split('data: ')[1]);
-    assert.equal(second.payload.complete, true);
-    assert.equal(second.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.34);
-    assert.equal(second.payload.quotes.length, 2);
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(res.chunks.length, 1, 'an unchanged ask is not pushed again');
+    const only = JSON.parse(res.chunks[0].split('data: ')[1]);
+    assert.equal(only.payload.complete, true);
+    assert.equal(only.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.34);
+    assert.equal(only.payload.quotes.length, 2);
     req.emit('close');
     await pending;
   }
@@ -326,8 +334,9 @@ class FakeWS {
     assert.equal(first.payload.quotes.length, 2, 'snapshot is both sides, not the gamma cache');
     assert.equal(first.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.34);
     assert.notEqual(first.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.26);
+    assert.equal(next.payload.complete, false, 'the refresh that moved one ask is a delta');
     assert.equal(next.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.36);
-    assert.equal(next.payload.quotes.find((q) => q.side === 'Packers').odds, 0.67);
+    assert.equal(next.payload.quotes.length, 1, 'the unchanged Packers ask is not re-sent');
     req.emit('close');
     await pending;
   }
@@ -368,7 +377,7 @@ class FakeWS {
     ws.emit('open', {});
     assert.ok(ws.sent.length >= 1);
     const sub = JSON.parse(ws.sent[0]);
-    assert.deepEqual(sub.params.channels, ['ticker']);
+    assert.deepEqual(sub.params.channels, ['ticker', 'orderbook_delta']);
     assert.ok(sub.params.market_tickers.includes('KXNFLGAME-26SEP24ATLGB-ATL'));
     ws.emit('message', {
       data: JSON.stringify({
@@ -378,10 +387,9 @@ class FakeWS {
     });
     const tick = JSON.parse(res.chunks[res.chunks.length - 1].split('data: ')[1]);
     assert.equal(tick.payload.mode, 'ws');
-    assert.equal(tick.payload.complete, true);
-    assert.equal(tick.payload.quotes.length, 2, 'a ticker updates the book instead of replacing it');
+    assert.equal(tick.payload.complete, false, 'a ticker is a delta, not another full book');
+    assert.equal(tick.payload.quotes.length, 1);
     assert.equal(tick.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.36);
-    assert.equal(tick.payload.quotes.find((q) => q.side === 'Green Bay').odds, 0.67);
     const same = res.chunks.length;
     ws.emit('message', {
       data: JSON.stringify({

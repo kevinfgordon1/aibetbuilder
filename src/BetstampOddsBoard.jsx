@@ -56,6 +56,7 @@ import {
   summarizeTickStats,
   formatCompactAge,
   compactAgeTone,
+  lineIsStale,
   staleLiveBookLabels,
   formatWinProb,
   cellShowsWinProb,
@@ -180,16 +181,46 @@ function LineAge({ updatedAt, ageTitle }) {
   const nowMs = useContext(AgeNowContext);
   const age = formatCompactAge(updatedAt, nowMs);
   if (!age) return null;
+  const stale = lineIsStale(updatedAt, nowMs);
   const clock = updatedAt ? fmtClock(updatedAt) : "";
   return (
     <div
       data-line-age={age}
+      data-stale={stale ? "1" : "0"}
       title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
       className="obb-clip"
-      style={{ fontSize: 9, color: compactAgeTone(updatedAt, nowMs), fontWeight: 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
+      style={{ fontSize: 9, color: stale ? "#f59e0b" : compactAgeTone(updatedAt, nowMs), fontWeight: stale ? 700 : 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
     >
-      {age}
+      {stale ? `stale ${age}` : `${age} ago`}
     </div>
+  );
+}
+
+function newestLineStamp(game) {
+  let newest = null;
+  for (const stamps of Object.values((game && game.bookLineUpdatedAt) || {})) {
+    for (const t of Object.values(stamps || {})) {
+      if (typeof t === "number" && Number.isFinite(t) && (newest == null || t > newest)) newest = t;
+    }
+  }
+  return newest;
+}
+
+function RowAge({ game }) {
+  const nowMs = useContext(AgeNowContext);
+  const updatedAt = newestLineStamp(game);
+  const age = formatCompactAge(updatedAt, nowMs);
+  if (!age) return null;
+  const stale = lineIsStale(updatedAt, nowMs);
+  return (
+    <span
+      data-row-age={age}
+      data-stale={stale ? "1" : "0"}
+      title="Newest price on this row"
+      style={{ color: stale ? "#f59e0b" : "#6b7280", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}
+    >
+      {stale ? `stale ${age}` : `updated ${age} ago`}
+    </span>
   );
 }
 
@@ -543,8 +574,8 @@ const LiveTickStrip = memo(function LiveTickStrip({
             lineHeight: 1.4,
           }}
         >
-          {staleSoft.map((b) => `${b.label} ${b.age}`).join(" · ")}
-          {" — last Betstamp print, not a frozen Refresh. Last-tick in the header is SSE (Pinnacle / PMs). Soft books often do not tick live."}
+          {staleSoft.map((b) => `${b.label} silent ${b.age}`).join(" · ")}
+          {" — no price for 10s or more. The cell says stale until that book ticks again."}
         </div>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
@@ -873,6 +904,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
             ) : (
               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
             )}
+            <RowAge game={game} />
           </div>
           <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
@@ -1132,12 +1164,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       if (!venuesOn || cancelled) return;
       let venueAttempt = 0;
       while (!cancelled && !ctrl.signal.aborted) {
+        let connected = false;
         try {
           await consumeBetstampStream({
             url,
             signal: ctrl.signal,
             onStatus: (s) => {
+              if (s === "live") connected = true;
               if (cancelled || gen !== fetchGen.current || !liveOnly) return;
+              if (s === "disconnected" && connected) setStreamStatus("reconnect");
               if (s === "live" || s === "connecting" || s === "reconnect") setStreamStatus(s);
             },
             onEvent: (ev) => {
@@ -1170,8 +1205,19 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         } catch {
           if (cancelled || ctrl.signal.aborted) return;
           if (liveOnly) setStreamStatus("reconnect");
+          connected = false;
         }
         if (cancelled || ctrl.signal.aborted) return;
+        // A clean end is the 240s function recycle. Rejoin at once so the
+        // next snapshot is not stuck behind error backoff.
+        if (connected) {
+          venueAttempt = 0;
+          await new Promise((resolve) => {
+            const t = setTimeout(resolve, 100);
+            venueTimers.push(t);
+          });
+          continue;
+        }
         const wait = nextBackoffMs(venueAttempt);
         venueAttempt += 1;
         await new Promise((resolve) => {

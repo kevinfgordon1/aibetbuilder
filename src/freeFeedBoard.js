@@ -17,10 +17,9 @@ import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 30_000;
-// JSON snapshot backstop. The SSE socket is the 1–2s path. Apply a poll
-// only when that book has been quiet, so a slower REST body cannot paint
-// over a ticker that just arrived.
-export const FREE_FEED_LIVE_BOARD_POLL_MS = 2_000;
+// JSON snapshot backstop. The SSE socket pushes ask changes. A poll this
+// slow cannot be the thing the board is waiting on.
+export const FREE_FEED_LIVE_BOARD_POLL_MS = 15_000;
 export const SSE_BEATS_POLL_MS = 2_000;
 // Open quote after kickoff, before we treat the game as finished.
 const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
@@ -138,7 +137,7 @@ function findGame(games, league, away, home) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-function enrich(game, away, home, commence, isLive) {
+function enrich(game, away, home, commence, isLive, nowMs) {
   const league = game.league;
   let srcAway = away;
   let srcHome = home;
@@ -158,11 +157,23 @@ function enrich(game, away, home, commence, isLive) {
   const homeAbbr = teamCode(game.home, league);
   if (awayAbbr) game.awayAbbr = awayAbbr;
   if (homeAbbr) game.homeAbbr = homeAbbr;
-  if (!game.commence_time && commence) game.commence_time = commence;
-  if (isLive) {
+  // Kalshi occurrence_datetime runs hours after the real kickoff. An earlier
+  // start from Polymarket or the schedule, within the same slate, wins.
+  const nextStart = preferKickoff(game.commence_time, commence);
+  if (nextStart) game.commence_time = nextStart;
+  if (isLive || inferLive(game.commence_time, nowMs)) {
     game.is_live = true;
     game.status = "live";
   }
+}
+
+function preferKickoff(current, incoming) {
+  const next = Date.parse(incoming || "");
+  if (!Number.isFinite(next)) return current || null;
+  const prev = Date.parse(current || "");
+  if (!Number.isFinite(prev)) return incoming;
+  if (next < prev && prev - next <= 8 * 3600 * 1000) return incoming;
+  return current;
 }
 
 function inferLive(commence, nowMs) {
@@ -191,7 +202,7 @@ function ensureGame(games, { league, away, home, commence, isLive, nowMs }) {
     games.push(game);
     return game;
   }
-  enrich(game, away, home, commence, live);
+  enrich(game, away, home, commence, live, nowMs);
   return game;
 }
 

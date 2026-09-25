@@ -116,8 +116,16 @@ export function compactAgeTone(updatedAt, now = Date.now()) {
   return "#6b7280";
 }
 
-// Quiet soft books (no SSE) whose newest Betstamp print is ≥2m old.
-export function staleLiveBookLabels(games, books, nowMs, { staleMs = 120_000 } = {}) {
+// A venue with no print for 10s is stale. Betstamp pushed inside about a second.
+export const VENUE_STALE_MS = 10_000;
+
+export function lineIsStale(updatedAt, nowMs, staleMs = VENUE_STALE_MS) {
+  if (updatedAt == null || !Number.isFinite(updatedAt)) return false;
+  const now = nowMs != null && Number.isFinite(nowMs) ? nowMs : Date.now();
+  return now - updatedAt >= staleMs;
+}
+
+export function staleLiveBookLabels(games, books, nowMs, { staleMs = VENUE_STALE_MS } = {}) {
   const now = nowMs != null && isFinite(nowMs) ? nowMs : Date.now();
   const out = [];
   for (const book of books || []) {

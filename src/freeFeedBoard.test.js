@@ -96,6 +96,73 @@ assert.equal(games[0].bookOdds.polymarket.ml_home, toAmericanOdds(0.72));
 assert.equal(games[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.72));
 assert.equal(games[0].bookOdds.kalshi.ml_away, null);
 
+const liveNow = Date.parse("2026-09-25T01:00:00Z");
+const liveRow = gamesFromFreeFeeds({
+  league: "NFL",
+  polymarket: [
+    { ...poly, is_live: true, start: "2026-09-25T00:15:00Z", odds: 0.4 },
+    { ...polyHome, is_live: true, start: "2026-09-25T00:15:00Z", odds: 0.61 },
+  ],
+  kalshi: [{
+    ...kalshi,
+    away: "Atlanta",
+    home: "Green Bay",
+    side: "Atlanta",
+    odds: 0.4,
+    is_live: false,
+    start: "2026-09-25T03:15:00Z",
+    ticker: "KXNFLGAME-26SEP24ATLGB-ATL",
+  }],
+  nowMs: liveNow,
+});
+assert.equal(liveRow.length, 1, "Atlanta and Falcons share the live row");
+assert.equal(liveRow[0].away, "Atlanta Falcons");
+assert.equal(liveRow[0].home, "Green Bay Packers");
+assert.equal(liveRow[0].commence_time, "2026-09-25T00:15:00Z", "the later Kalshi occurrence does not move kickoff");
+assert.equal(liveRow[0].is_live, true);
+assert.equal(liveRow[0].bookOdds.kalshi.ml_away, toAmericanOdds(0.4));
+assert.equal(liveRow[0].bookOdds.polymarket.ml_away, toAmericanOdds(0.4));
+
+const mlbRow = gamesFromFreeFeeds({
+  league: "MLB",
+  polymarket: [{
+    book: "polymarket",
+    book_id: 193,
+    league: "MLB",
+    away: "Rays",
+    home: "Yankees",
+    side: "Rays",
+    bet_type: "moneyline",
+    odds: 0.39,
+    is_live: true,
+    start: "2026-09-24T23:05:00Z",
+    updated_at: "2026-09-25T01:00:00.000Z",
+    token_id: "rays",
+  }],
+  kalshi: [{
+    book: "kalshi",
+    book_id: 194,
+    league: "MLB",
+    away: "Tampa Bay",
+    home: "New York Y",
+    side: "Tampa Bay",
+    bet_type: "moneyline",
+    odds: 0.39,
+    is_live: false,
+    start: "2026-09-25T02:05:00Z",
+    updated_at: "2026-09-25T01:00:00.000Z",
+    ticker: "KXMLBGAME-26SEP241905TBNYY-TB",
+  }],
+  nowMs: liveNow,
+});
+assert.equal(mlbRow.length, 1, "Rays and Tampa Bay / New York Y share one row");
+assert.equal(mlbRow[0].away, "Tampa Bay Rays");
+assert.equal(mlbRow[0].home, "New York Yankees");
+assert.equal(mlbRow[0].is_live, true);
+assert.equal(mlbRow[0].commence_time, "2026-09-24T23:05:00Z");
+assert.equal(mlbRow[0].bookOdds.kalshi.ml_away, toAmericanOdds(0.39));
+assert.equal(mlbRow[0].bookOdds.polymarket.ml_away, toAmericanOdds(0.39));
+
 // Live Kalshi titles are city or truncated city ("Los Angeles C", "New York G"),
 // while Underdog uses the full club name. Both sides of an NFL moneyline join.
 const abbreviated = gamesFromFreeFeeds({
