@@ -35,32 +35,55 @@ export function firstPartyPmLiveEnabled() {
   return firstPartyPmLiveFromEnv(raw, prod);
 }
 
-export function polymarketStreamUrl({ league } = {}) {
+// Browser talks to the Railway odds relay directly when this is set.
+// Unset keeps the Vercel SSE routes. Never send Novig, 4Casters, or Underdog there.
+function oddsRelayBase() {
+  let raw = "";
+  try {
+    const env = import.meta && import.meta.env;
+    if (env && env.VITE_ODDS_RELAY_URL) raw = env.VITE_ODDS_RELAY_URL;
+  } catch {
+    /* node tests have no Vite env */
+  }
+  if (!raw) {
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.VITE_ODDS_RELAY_URL) {
+        raw = process.env.VITE_ODDS_RELAY_URL;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return String(raw || "").trim().replace(/\/+$/, "");
+}
+
+function venuePath(fallback, relayPath, { league, venue } = {}) {
+  const base = oddsRelayBase();
   const p = new URLSearchParams();
   if (league) p.set("league", league);
+  if (base) {
+    if (venue) p.set("venue", venue);
+    const q = p.toString();
+    return q ? `${base}${relayPath}?${q}` : `${base}${relayPath}`;
+  }
   const q = p.toString();
-  return q ? `/api/polymarket-stream?${q}` : "/api/polymarket-stream";
+  return q ? `${fallback}?${q}` : fallback;
+}
+
+export function polymarketStreamUrl({ league } = {}) {
+  return venuePath("/api/polymarket-stream", "/stream", { league, venue: "polymarket" });
 }
 
 export function kalshiStreamUrl({ league } = {}) {
-  const p = new URLSearchParams();
-  if (league) p.set("league", league);
-  const q = p.toString();
-  return q ? `/api/kalshi-stream?${q}` : "/api/kalshi-stream";
+  return venuePath("/api/kalshi-stream", "/stream", { league, venue: "kalshi" });
 }
 
 export function kalshiBoardUrl({ league } = {}) {
-  const p = new URLSearchParams();
-  if (league) p.set("league", league);
-  const q = p.toString();
-  return q ? `/api/kalshi-board?${q}` : "/api/kalshi-board";
+  return venuePath("/api/kalshi-board", "/board", { league, venue: "kalshi" });
 }
 
 export function polymarketBoardUrl({ league } = {}) {
-  const p = new URLSearchParams();
-  if (league) p.set("league", league);
-  const q = p.toString();
-  return q ? `/api/polymarket-board?${q}` : "/api/polymarket-board";
+  return venuePath("/api/polymarket-board", "/board", { league, venue: "polymarket" });
 }
 
 export function novigStreamUrl({ league } = {}) {

@@ -4,6 +4,8 @@ import {
   firstPartyPmLiveFromEnv,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  polymarketBoardUrl,
+  kalshiBoardUrl,
   novigStreamUrl,
   fourcastersStreamUrl,
   matchGameForQuote,
@@ -33,8 +35,20 @@ assert.equal(firstPartyPmLiveFromEnv("false"), false);
 assert.equal(firstPartyPmLiveFromEnv("off"), false);
 assert.equal(firstPartyPmLiveFromEnv("1"), true);
 assert.equal(firstPartyPmLiveFromEnv("true"), true);
+const prevRelay = process.env.VITE_ODDS_RELAY_URL;
+delete process.env.VITE_ODDS_RELAY_URL;
 assert.equal(polymarketStreamUrl({ league: "NFL" }), "/api/polymarket-stream?league=NFL");
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "/api/kalshi-stream?league=MLB");
+assert.equal(polymarketBoardUrl({ league: "NFL" }), "/api/polymarket-board?league=NFL");
+assert.equal(kalshiBoardUrl({ league: "NFL" }), "/api/kalshi-board?league=NFL");
+process.env.VITE_ODDS_RELAY_URL = "https://odds.example/";
+assert.equal(polymarketStreamUrl({ league: "NFL" }), "https://odds.example/stream?league=NFL&venue=polymarket");
+assert.equal(kalshiStreamUrl({ league: "MLB" }), "https://odds.example/stream?league=MLB&venue=kalshi");
+assert.equal(polymarketBoardUrl({ league: "NFL" }), "https://odds.example/board?league=NFL&venue=polymarket");
+assert.equal(kalshiBoardUrl({ league: "NCAAF" }), "https://odds.example/board?league=NCAAF&venue=kalshi");
+assert.equal(novigStreamUrl({ league: "NFL" }), "/api/novig-stream?league=NFL");
+if (prevRelay == null) delete process.env.VITE_ODDS_RELAY_URL;
+else process.env.VITE_ODDS_RELAY_URL = prevRelay;
 assert.equal(novigStreamUrl({ league: "NCAAF" }), "/api/novig-stream?league=NCAAF");
 assert.equal(fourcastersStreamUrl({ league: "NFL" }), "/api/4casters-stream?league=NFL");
 assert.equal(fourcastersStreamUrl({ league: "MLB" }), "/api/4casters-stream?league=MLB");
