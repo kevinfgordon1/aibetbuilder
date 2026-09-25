@@ -147,6 +147,80 @@ class FakeWS {
   }
 
   {
+    // Production bug: a warm /api/kalshi-stream replayed one changed ticker
+    // (PIT @ CLE) and the NFL moneyline column stayed "—" for every other game.
+    const hubs = new Map();
+    let calls = 0;
+    const fetchFn = async () => {
+      calls += 1;
+      const atl = calls === 1 ? '0.2900' : '0.3100';
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          events: [{
+            title: 'Atlanta vs Green Bay',
+            markets: [
+              {
+                ticker: 'KXNFLGAME-26SEP24ATLGB-GB',
+                yes_sub_title: 'Green Bay',
+                yes_ask_dollars: '0.7200',
+              },
+              {
+                ticker: 'KXNFLGAME-26SEP24ATLGB-ATL',
+                yes_sub_title: 'Atlanta',
+                yes_ask_dollars: atl,
+              },
+            ],
+          }],
+        }),
+      };
+    };
+    const req1 = new EventEmitter();
+    req1.method = 'GET';
+    req1.url = '/api/kalshi-stream?league=NFL';
+    const res1 = sseRes();
+    const pending1 = kalshiHandler(req1, res1, {
+      hubs,
+      pollMs: 20,
+      maxPolls: 2,
+      fetchFn,
+    });
+    for (let i = 0; i < 50 && res1.chunks.length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.equal(res1.chunks.length >= 2, true, 'two polls produce two Kalshi events');
+    const moved = JSON.parse(res1.chunks[1].split('data: ')[1]);
+    assert.equal(moved.payload.quotes.length, 2, 'a price change still ships both sides');
+    assert.equal(moved.payload.quotes.find((q) => q.side === 'Green Bay').odds, 0.72);
+    assert.equal(moved.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.31);
+
+    const req2 = new EventEmitter();
+    req2.method = 'GET';
+    req2.url = '/api/kalshi-stream?league=NFL';
+    const res2 = sseRes();
+    const pending2 = kalshiHandler(req2, res2, {
+      hubs,
+      pollMs: 1000,
+      maxPolls: 1,
+      fetchFn,
+    });
+    for (let i = 0; i < 40 && res2.chunks.length < 1; i += 1) {
+      await new Promise((r) => setTimeout(r, 15));
+    }
+    assert.ok(res2.chunks.length >= 1, 'late subscriber is replayed a snapshot');
+    const replay = JSON.parse(res2.chunks[0].split('data: ')[1]);
+    assert.equal(replay.payload.source, 'kalshi');
+    assert.equal(replay.payload.quotes.length, 2, 'replay is the full book, not the last changed ticker');
+    assert.equal(replay.payload.quotes.find((q) => q.ticker.endsWith('-GB')).odds, 0.72);
+    assert.equal(replay.payload.quotes.find((q) => q.ticker.endsWith('-ATL')).odds, 0.31);
+    req1.emit('close');
+    req2.emit('close');
+    await pending1;
+    await pending2;
+  }
+
+  {
     const res = sseRes();
     await polyHandler({ method: 'POST', url: '/api/polymarket-stream' }, res, { hubs: new Map() });
     assert.equal(res.statusCode, 405);

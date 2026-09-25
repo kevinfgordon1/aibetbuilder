@@ -89,6 +89,95 @@ assert.equal(games[0].bookOdds.polymarket.ml_away, toAmericanOdds(0.285));
 assert.equal(games[0].bookOdds.polymarket.ml_home, toAmericanOdds(0.72));
 assert.equal(games[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.72));
 assert.equal(games[0].bookOdds.kalshi.ml_away, null);
+
+// Live Kalshi titles are city or truncated city ("Los Angeles C", "New York G"),
+// while Underdog uses the full club name. Both sides of an NFL moneyline join.
+const abbreviated = gamesFromFreeFeeds({
+  league: "NFL",
+  kalshi: [
+    {
+      book: "kalshi",
+      book_id: 194,
+      league: "NFL",
+      away: "Los Angeles C",
+      home: "Buffalo",
+      side: "Los Angeles C",
+      bet_type: "moneyline",
+      odds: 0.25,
+      ticker: "KXNFLGAME-26SEP27LACBUF-LAC",
+    },
+    {
+      book: "kalshi",
+      book_id: 194,
+      league: "NFL",
+      away: "Los Angeles C",
+      home: "Buffalo",
+      side: "Buffalo",
+      bet_type: "moneyline",
+      odds: 0.76,
+      ticker: "KXNFLGAME-26SEP27LACBUF-BUF",
+    },
+    {
+      book: "kalshi",
+      book_id: 194,
+      league: "NFL",
+      away: "Seattle",
+      home: "Washington",
+      side: "Seattle",
+      bet_type: "moneyline",
+      odds: 0.76,
+      ticker: "KXNFLGAME-26SEP27SEAWAS-SEA",
+    },
+    {
+      book: "kalshi",
+      book_id: 194,
+      league: "NFL",
+      away: "Tennessee",
+      home: "New York G",
+      side: "New York G",
+      bet_type: "moneyline",
+      odds: 0.57,
+      ticker: "KXNFLGAME-26SEP27TENNYG-NYG",
+    },
+  ],
+  underdog: {
+    ok: true,
+    games: [
+      {
+        sport: "NFL",
+        away: "Los Angeles Chargers",
+        home: "Buffalo Bills",
+        scheduledAt: "2026-09-27T17:00:00Z",
+        lines: [{ name: "Los Angeles Chargers", american: 300, market: "h2h" }],
+      },
+      {
+        sport: "NFL",
+        away: "Seattle Seahawks",
+        home: "Washington Commanders",
+        scheduledAt: "2026-09-27T17:00:00Z",
+        lines: [{ name: "Seattle Seahawks", american: -300, market: "h2h" }],
+      },
+      {
+        sport: "NFL",
+        away: "Tennessee Titans",
+        home: "New York Giants",
+        scheduledAt: "2026-09-27T17:00:00Z",
+        lines: [{ name: "New York Giants", american: -130, market: "h2h" }],
+      },
+    ],
+  },
+  nowMs: now,
+});
+assert.equal(abbreviated.length, 3);
+const chargers = abbreviated.find((g) => g.awayAbbr === "LAC");
+const seahawks = abbreviated.find((g) => g.awayAbbr === "SEA");
+const titans = abbreviated.find((g) => g.awayAbbr === "TEN");
+assert.equal(chargers.bookOdds.kalshi.ml_away, toAmericanOdds(0.25));
+assert.equal(chargers.bookOdds.kalshi.ml_home, toAmericanOdds(0.76));
+assert.equal(chargers.bookOdds.underdog_predict.ml_away, 300);
+assert.equal(seahawks.bookOdds.kalshi.ml_away, toAmericanOdds(0.76));
+assert.equal(titans.home, "New York Giants");
+assert.equal(titans.bookOdds.kalshi.ml_home, toAmericanOdds(0.57));
 assert.equal(games[0].bookOdds.underdog_predict.ml_away, 245);
 assert.equal(games[0].bookOdds.underdog_predict.ml_home, -280);
 assert.equal(games[0].bookOdds.underdog_predict.spr_away, -110);
