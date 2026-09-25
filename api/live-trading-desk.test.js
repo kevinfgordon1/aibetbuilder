@@ -40,7 +40,19 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(ui, /useState\("sell"\)/);
   assert.doesNotMatch(ui, /setAction\("sell"\);/);
   assert.match(ui, /function preferBuy\(\) \{\s*setAction\("buy"\);/);
-  assert.equal((ui.match(/preferBuy\(\)/g) || []).length, 4);
+  assert.equal((ui.match(/preferBuy\(\)/g) || []).length, 3);
+  const submitFn = ui.slice(ui.indexOf("async function submit"), ui.indexOf("async function cancel"));
+  const rejectedAt = submitFn.indexOf("Order was not accepted");
+  const clearedAt = submitFn.indexOf("clearRestForm()");
+  assert.ok(rejectedAt > 0 && clearedAt > rejectedAt, "a rejected rest keeps the typed ticket");
+  assert.equal((submitFn.slice(0, rejectedAt).match(/clearRestForm\(\)/g) || []).length, 0);
+  assert.equal((submitFn.match(/clearRestForm\(\)/g) || []).length, 1);
+  assert.match(ui, /function clearRestForm\(\) \{[\s\S]*setAmerican\(reset\.american\)/);
+  assert.match(ui, /setDollars\(reset\.dollars\)/);
+  assert.match(ui, /setAction\(reset\.action\)/);
+  assert.doesNotMatch(submitFn, /setSlug\(""\)/);
+  assert.doesNotMatch(submitFn, /setGameId\(""\)/);
+  assert.doesNotMatch(submitFn, /setOutcome\(/);
   assert.match(ui, /Moneyline only for now/);
 }
 

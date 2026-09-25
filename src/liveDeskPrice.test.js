@@ -11,6 +11,7 @@ import {
   matchDisplayedOrder,
   crossBlock,
   yesBookSide,
+  restFormAfterPlace,
   readMarketSides,
   mapPositions,
   mapOpenOrders,
@@ -372,6 +373,21 @@ for (const tick of [0.001, 0.005]) {
   assert.equal(orders[1].outcomeName, "Green Bay Packers");
   assert.equal(orders[1].action, "buy");
   assert.equal(orders[1].americanLabel, "-150");
+}
+
+{
+  assert.equal(restFormAfterPlace(false), null);
+  assert.equal(restFormAfterPlace(undefined), null);
+  const next = restFormAfterPlace(true);
+  assert.deepEqual(next, {
+    action: "buy",
+    american: "",
+    dollars: "",
+    protect: false,
+  });
+  assert.equal(Object.hasOwn(next, "outcome"), false);
+  assert.equal(Object.hasOwn(next, "gameId"), false);
+  assert.equal(Object.hasOwn(next, "slug"), false);
 }
 
 console.log("liveDeskPrice.test.js ok");
