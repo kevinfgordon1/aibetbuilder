@@ -376,21 +376,11 @@ export function restingLimitOrder({ slug, american, outcome, action, tick, dolla
   if (!quote.ok) return quote;
   const guard = guardDeskOrder({ american, dollars, tick, minQty, quote });
   if (!guard.ok) return { ok: false, error: guard.error, quote };
-  const wired = wireDeskOrder({ slug, quote });
-  if (!wired.ok) return { ok: false, error: wired.error, quote };
-  return { ok: true, quote, order: wired.order };
-}
-
-/** Polymarket US body for a ticket that is already snapped and sized. */
-export function wireDeskOrder({ slug, quote } = {}) {
-  if (!quote || !quote.yesPriceValue || !quote.intent || !(Number(quote.contracts) > 0)) {
-    return { ok: false, error: "Order ticket is incomplete." };
-  }
   const order = buildLimitOrder({ slug, quote });
   if (order.price.value !== quote.yesPriceValue || Number(order.quantity) !== Number(quote.contracts)) {
-    return { ok: false, error: "Order ticket does not match the price and size entered." };
+    return { ok: false, error: "Order ticket does not match the price and size entered.", quote };
   }
-  return { ok: true, order };
+  return { ok: true, quote, order };
 }
 
 export function buildLimitOrder({ slug, quote }) {
