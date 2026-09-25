@@ -11,7 +11,7 @@ function betstampLocalApi() {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url || ''
         const path = url.split('?')[0]
-        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream' && path !== '/api/underdog-predict' && path !== '/api/polymarket-stream' && path !== '/api/kalshi-stream' && path !== '/api/kalshi-board' && path !== '/api/novig-stream' && path !== '/api/4casters-stream' && path !== '/api/live-trading-desk') return next()
+        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream' && path !== '/api/underdog-predict' && path !== '/api/polymarket-stream' && path !== '/api/polymarket-board' && path !== '/api/kalshi-stream' && path !== '/api/kalshi-board' && path !== '/api/novig-stream' && path !== '/api/4casters-stream' && path !== '/api/live-trading-desk') return next()
         try {
           if (path === '/api/live-trading-desk' && req.method === 'POST') {
             const chunks = []
@@ -23,9 +23,11 @@ function betstampLocalApi() {
             ? require('./api/betstamp-stream.js')
             : path === '/api/underdog-predict'
               ? require('./api/underdog-predict.js')
-              : path === '/api/polymarket-stream'
+                : path === '/api/polymarket-stream'
                 ? require('./api/polymarket-stream.js')
-                : path === '/api/kalshi-stream'
+                : path === '/api/polymarket-board'
+                  ? require('./api/polymarket-board.js')
+                  : path === '/api/kalshi-stream'
                   ? require('./api/kalshi-stream.js')
                   : path === '/api/kalshi-board'
                     ? require('./api/kalshi-board.js')

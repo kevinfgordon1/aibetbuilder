@@ -4,10 +4,10 @@
 // Same-origin SSE of Kalshi game-moneyline yes-asks.
 //
 // The public REST market payload includes yes_ask_dollars (keyless). This
-// spike polls that about every 3s. When any ask changes, the event carries
-// the whole moneyline book for the league — not just the ticker that moved.
-// One poll loop per league is shared by every SSE client, and a client that
-// connects later is replayed that full book.
+// route polls that about every 2s and every event is the whole moneyline
+// book, including polls where no ask moved. One loop per league is shared,
+// and a client that connects later is replayed that full book — not the
+// last ticker that traded.
 //
 // Kalshi's WebSocket (ticker / orderbook_delta) is the true tick feed, but
 // the handshake requires the same RSA-PSS key as Combo Locks probe

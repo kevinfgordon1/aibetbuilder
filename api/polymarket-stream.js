@@ -1,9 +1,11 @@
 'use strict';
 
 // GET /api/polymarket-stream?league=NFL|NCAAF|MLB
-// Same-origin SSE of Polymarket CLOB best-ask ticks for game moneylines.
-// Public, keyless. One upstream WebSocket per league is fanned out to
-// every connected board. Betstamp is not modified.
+// Same-origin SSE of Polymarket CLOB best asks for game moneylines.
+// Public, keyless. One upstream poll + WebSocket per league is fanned out
+// to every connected board. Each event is the whole moneyline book.
+// Gamma's cached outcomePrices are not the live price; CLOB /prices is.
+// Betstamp is not modified.
 //
 // Quote odds are the best ask as a 0–1 probability (the board converts
 // that to American). Spreads and totals exist on Gamma but are alt ladders;

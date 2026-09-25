@@ -5,8 +5,11 @@ import { fileURLToPath } from "node:url";
 import { toAmericanOdds, gameVisibleOnBoard } from "./betstampNormalize.js";
 import {
   freeFeedBooks,
+  boardPriceTicks,
   gamesFromFreeFeeds,
   kalshiQuotesFromBoardBody,
+  polymarketQuotesFromBoardBody,
+  quotesAfterVenueEvent,
   mainLaddersFromGame,
   mergeVenueQuotes,
   quoteMergeKey,
@@ -228,6 +231,40 @@ assert.equal(fromPayload[0].id, "ff:NFL:ATL:GB");
 assert.equal(fromPayload[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.69));
 assert.equal(fromPayload[0].bookOdds.kalshi.ml_away, toAmericanOdds(0.32));
 assert.equal(fromPayload[0].bookOdds.underdog_predict.ml_away, 245);
+
+const movedBoard = {
+  ...boardBody,
+  quotes: boardBody.quotes.map((q) => (
+    q.side === "Atlanta" ? { ...q, odds: 0.34, updated_at: "2026-09-25T00:24:00.000Z" } : q
+  )),
+};
+const movedGames = gamesFromFreeFeeds({
+  league: "NFL",
+  kalshi: kalshiQuotesFromBoardBody(movedBoard),
+  underdog,
+  nowMs: Date.parse("2026-09-25T00:24:00Z"),
+});
+const ticks = boardPriceTicks(fromPayload, movedGames);
+const atlTick = ticks.find((row) => row.bookKey === "kalshi" && row.label === "ATL ML");
+assert.ok(atlTick, "an in-game Kalshi move is a tick");
+assert.equal(atlTick.price, toAmericanOdds(0.34));
+assert.equal(boardPriceTicks(movedGames, movedGames).length, 0, "the same print is not another tick");
+const polyBody = {
+  ok: true,
+  quotes: [
+    { book: "polymarket", book_id: 193, league: "NFL", away: "Falcons", home: "Packers", side: "Falcons", bet_type: "moneyline", odds: 0.34 },
+    { book: "other", book_id: 1, odds: 0.5 },
+  ],
+};
+assert.equal(polymarketQuotesFromBoardBody(polyBody).length, 1);
+assert.equal(polymarketQuotesFromBoardBody(polyBody)[0].odds, 0.34);
+const replaced = quotesAfterVenueEvent(
+  [{ book: "kalshi", ticker: "KXNFLGAME-26OCT04LARPHI-LAR", side: "Los Angeles R", odds: 0.58 }],
+  { complete: true, quotes: kalshiQuotesFromBoardBody(boardBody) },
+);
+assert.equal(replaced.length, 2);
+assert.equal(replaced.some((q) => String(q.ticker).includes("LARPHI")), false);
+assert.equal(quotesAfterVenueEvent(replaced, { quotes: [] }), replaced);
 assert.equal(games[0].bookOdds.underdog_predict.ml_away, 245);
 assert.equal(games[0].bookOdds.underdog_predict.ml_home, -280);
 assert.equal(games[0].bookOdds.underdog_predict.spr_away, -110);
@@ -473,9 +510,16 @@ assert.match(board, /gamesFromFreeFeeds/);
 assert.match(board, /polymarketStreamUrl/);
 assert.match(board, /kalshiStreamUrl/);
 assert.match(board, /kalshiBoardUrl/);
+assert.match(board, /polymarketBoardUrl/);
 assert.match(board, /kalshiQuotesFromBoardBody/);
+assert.match(board, /polymarketQuotesFromBoardBody/);
+assert.match(board, /quotesAfterVenueEvent/);
+assert.match(board, /boardPriceTicks/);
+assert.match(board, /tickSinkRef\.current\?/);
+assert.match(board, /FREE_FEED_LIVE_BOARD_POLL_MS/);
 const venueLive = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "venueLive.js"), "utf8");
 assert.match(venueLive, /\/api\/kalshi-board/);
+assert.match(venueLive, /\/api\/polymarket-board/);
 assert.match(board, /novigStreamUrl/);
 assert.match(board, /fourcastersStreamUrl/);
 assert.match(board, /novig_needs_credentials/);

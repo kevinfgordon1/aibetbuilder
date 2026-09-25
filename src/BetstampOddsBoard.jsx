@@ -70,6 +70,7 @@ import {
   polymarketStreamUrl,
   kalshiStreamUrl,
   kalshiBoardUrl,
+  polymarketBoardUrl,
   novigStreamUrl,
   fourcastersStreamUrl,
 } from "./venueLive.js";
@@ -77,11 +78,14 @@ import { consumeBetstampStream, nextBackoffMs } from "./betstampLive.js";
 import {
   FREE_FEED_POLL_MS,
   FREE_FEED_LIVE_POLL_MS,
+  FREE_FEED_LIVE_BOARD_POLL_MS,
   freeFeedBooks,
   gamesFromFreeFeeds,
   kalshiQuotesFromBoardBody,
+  polymarketQuotesFromBoardBody,
+  boardPriceTicks,
+  quotesAfterVenueEvent,
   mainLaddersFromGame,
-  mergeVenueQuotes,
 } from "./freeFeedBoard.js";
 
 const BestBookName = memo(function BestBookName({ book, extra = 0, title, size = 13 }) {
@@ -1029,8 +1033,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         underdog: seeUnderdog && sawPhone ? phone : null,
         nowMs: Date.now(),
       });
-      commitGames(next, { force: firstPaint });
+      const prev = gamesRef.current;
+      const painted = commitGames(next, { force: firstPaint });
       firstPaint = false;
+      if (painted && liveOnly) {
+        const applied = boardPriceTicks(prev, next);
+        if (applied.length) tickSinkRef.current?.(applied, Date.now());
+      }
       setSnapshotAt(Date.now());
       setLoading(false);
       setFeedNote(phoneFailed
@@ -1062,48 +1071,49 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       }
     };
 
-    let pollTimer;
+    let phoneTimer;
+    let boardTimer;
     let phoneInFlight = false;
-    let kalshiInFlight = false;
+    let boardInFlight = false;
     const venueTimers = [];
 
-    // Full Kalshi book. SSE can replay only the last ticker that moved, and
-    // snapshot mode does not wait on that socket — a one-contract tick left
-    // every other Kalshi moneyline as "—".
-    const loadKalshiBoard = async () => {
+    // Full book, not the last ticker the SSE hub replayed. LIVE polls every
+    // few seconds so an in-game price cannot sit on the pregame print.
+    const loadJsonBoard = async (url, read) => {
       if (!venuesOn) return;
       try {
-        const res = await fetch(kalshiBoardUrl({ league }), {
-          signal: ctrl.signal,
-          cache: "no-store",
-        });
+        const res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
         if (cancelled || ctrl.signal.aborted || !res.ok) return;
-        const quotes = kalshiQuotesFromBoardBody(await res.json());
-        if (!quotes) return;
-        quoteRef.kalshi = quotes;
+        const quotes = read(await res.json());
+        if (!quotes) return quotes;
+        return quotes;
       } catch {
-        if (cancelled || ctrl.signal.aborted) return;
+        return null;
       }
     };
 
-    // Pregame and LIVE both poll the phone and the Kalshi book. Do not wait
-    // on either GET — a hung request must not freeze the other feed.
     const kickPhone = () => {
       if (phoneInFlight || cancelled) return;
       phoneInFlight = true;
       loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { phoneInFlight = false; });
     };
-    const kickKalshi = () => {
-      if (!venuesOn || kalshiInFlight || cancelled) return;
-      kalshiInFlight = true;
-      loadKalshiBoard().then(() => { if (!cancelled) publish(); }).finally(() => { kalshiInFlight = false; });
+    const kickBoards = () => {
+      if (!venuesOn || boardInFlight || cancelled) return;
+      boardInFlight = true;
+      Promise.all([
+        loadJsonBoard(kalshiBoardUrl({ league }), kalshiQuotesFromBoardBody),
+        loadJsonBoard(polymarketBoardUrl({ league }), polymarketQuotesFromBoardBody),
+      ]).then(([kalshiQuotes, polyQuotes]) => {
+        if (cancelled) return;
+        if (kalshiQuotes) quoteRef.kalshi = kalshiQuotes;
+        if (polyQuotes) quoteRef.polymarket = polyQuotes;
+        if (kalshiQuotes || polyQuotes) publish();
+      }).finally(() => { boardInFlight = false; });
     };
     kickPhone();
-    kickKalshi();
-    pollTimer = setInterval(() => {
-      kickPhone();
-      kickKalshi();
-    }, liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS);
+    kickBoards();
+    phoneTimer = setInterval(kickPhone, liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS);
+    boardTimer = setInterval(kickBoards, liveOnly ? FREE_FEED_LIVE_BOARD_POLL_MS : FREE_FEED_POLL_MS);
 
     const runVenue = async (book, url) => {
       // VITE_FIRST_PARTY_PM_LIVE=0 turns this venue off. Unset stays on.
@@ -1139,7 +1149,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               }
               const quotes = payload && payload.quotes;
               if (!quotes || !quotes.length) return;
-              quoteRef[book] = mergeVenueQuotes(quoteRef[book], quotes);
+              quoteRef[book] = quotesAfterVenueEvent(quoteRef[book], payload);
               publish();
             },
           });
@@ -1174,7 +1184,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       cancelled = true;
       ctrl.abort();
       clearTimeout(loadGuard);
-      clearInterval(pollTimer);
+      clearInterval(phoneTimer);
+      clearInterval(boardTimer);
       venueTimers.forEach((t) => clearTimeout(t));
     };
   }, [boardSport, liveOnly, boardRefreshKey, seeUnderdog, venuesOn]);

@@ -194,6 +194,7 @@ class FakeWS {
     assert.equal(moved.payload.quotes.length, 2, 'a price change still ships both sides');
     assert.equal(moved.payload.quotes.find((q) => q.side === 'Green Bay').odds, 0.72);
     assert.equal(moved.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.31);
+    assert.equal(moved.payload.complete, true, 'the board replaces with the full book');
 
     const req2 = new EventEmitter();
     req2.method = 'GET';
@@ -214,10 +215,107 @@ class FakeWS {
     assert.equal(replay.payload.quotes.length, 2, 'replay is the full book, not the last changed ticker');
     assert.equal(replay.payload.quotes.find((q) => q.ticker.endsWith('-GB')).odds, 0.72);
     assert.equal(replay.payload.quotes.find((q) => q.ticker.endsWith('-ATL')).odds, 0.31);
+    assert.equal(replay.payload.complete, true);
     req1.emit('close');
     req2.emit('close');
     await pending1;
     await pending2;
+  }
+
+  {
+    // A quiet in-game book still has to reach a connected client. Skipping
+    // the emit when the ask did not move left the board on the pregame print.
+    const req = new EventEmitter();
+    req.method = 'GET';
+    req.url = '/api/kalshi-stream?league=NFL';
+    const res = sseRes();
+    const pending = kalshiHandler(req, res, {
+      hubs: new Map(),
+      pollMs: 20,
+      maxPolls: 2,
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          events: [{
+            title: 'Atlanta vs Green Bay',
+            markets: [
+              { ticker: 'KXNFLGAME-26SEP24ATLGB-ATL', yes_sub_title: 'Atlanta', yes_ask_dollars: '0.3400' },
+              { ticker: 'KXNFLGAME-26SEP24ATLGB-GB', yes_sub_title: 'Green Bay', yes_ask_dollars: '0.6700' },
+            ],
+          }],
+        }),
+      }),
+    });
+    for (let i = 0; i < 40 && res.chunks.length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(res.chunks.length >= 2, 'unchanged Kalshi book is still pushed');
+    const second = JSON.parse(res.chunks[1].split('data: ')[1]);
+    assert.equal(second.payload.complete, true);
+    assert.equal(second.payload.quotes.find((q) => q.side === 'Atlanta').odds, 0.34);
+    assert.equal(second.payload.quotes.length, 2);
+    req.emit('close');
+    await pending;
+  }
+
+  {
+    const req = new EventEmitter();
+    req.method = 'GET';
+    req.url = '/api/polymarket-stream?league=NFL';
+    const res = sseRes();
+    let posts = 0;
+    const pending = polyHandler(req, res, {
+      hubs: new Map(),
+      now: Date.parse('2026-09-25T00:30:00Z'),
+      pollMs: 20,
+      maxPolls: 2,
+      WebSocket: FakeWS,
+      fetchFn: async (url) => {
+        if (String(url).includes('/prices')) {
+          posts += 1;
+          const ask = posts === 1 ? '0.34' : '0.36';
+          return {
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({
+              'tok-away': { BUY: ask },
+              'tok-home': { BUY: '0.67' },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify([{
+            title: 'Falcons vs. Packers',
+            ordering: 'away',
+            live: true,
+            startTime: '2026-09-25T00:15:00Z',
+            markets: [{
+              sportsMarketType: 'moneyline',
+              outcomes: '["Falcons","Packers"]',
+              clobTokenIds: '["tok-away","tok-home"]',
+              outcomePrices: '["0.26","0.74"]',
+            }],
+          }]),
+        };
+      },
+    });
+    for (let i = 0; i < 50 && res.chunks.length < 2; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(res.chunks.length >= 2, 'CLOB refresh pushes a new in-game ask');
+    const first = JSON.parse(res.chunks[0].split('data: ')[1]);
+    const next = JSON.parse(res.chunks[1].split('data: ')[1]);
+    assert.equal(first.payload.complete, true);
+    assert.equal(first.payload.quotes.length, 2, 'snapshot is both sides, not the gamma cache');
+    assert.equal(first.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.34);
+    assert.notEqual(first.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.26);
+    assert.equal(next.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.36);
+    assert.equal(next.payload.quotes.find((q) => q.side === 'Packers').odds, 0.67);
+    req.emit('close');
+    await pending;
   }
 
   {
