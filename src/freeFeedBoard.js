@@ -242,6 +242,17 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
   return markets;
 }
 
+// JSON body from GET /api/kalshi-board. Null means "keep whatever the stream
+// already merged" — an empty or failed body must not wipe a book we have.
+export function kalshiQuotesFromBoardBody(body) {
+  const quotes = body && Array.isArray(body.quotes) ? body.quotes : null;
+  if (!quotes || !quotes.length) return null;
+  const kalshi = quotes.filter((q) => (
+    q && q.odds != null && (q.book === "kalshi" || Number(q.book_id) === 194)
+  ));
+  return kalshi.length ? kalshi : null;
+}
+
 export function quoteMergeKey(quote) {
   if (!quote) return "";
   return quote.token_id || quote.ticker || `${quote.book}|${quote.league}|${quote.away}|${quote.home}|${quote.side}|${quote.bet_type || "moneyline"}`;

@@ -69,6 +69,7 @@ import {
   firstPartyPmLiveEnabled,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  kalshiBoardUrl,
   novigStreamUrl,
   fourcastersStreamUrl,
 } from "./venueLive.js";
@@ -78,6 +79,7 @@ import {
   FREE_FEED_LIVE_POLL_MS,
   freeFeedBooks,
   gamesFromFreeFeeds,
+  kalshiQuotesFromBoardBody,
   mainLaddersFromGame,
   mergeVenueQuotes,
 } from "./freeFeedBoard.js";
@@ -1061,25 +1063,47 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     };
 
     let pollTimer;
-    let pollInFlight = false;
+    let phoneInFlight = false;
+    let kalshiInFlight = false;
     const venueTimers = [];
 
-    // Pregame and LIVE both poll the phone. Do not wait on the first GET —
-    // a hung Underdog request must not freeze the other feeds.
-    loadPhone().then(() => { if (!cancelled) publish(); });
-    if (!liveOnly) {
-      pollTimer = setInterval(() => {
-        if (pollInFlight || cancelled) return;
-        pollInFlight = true;
-        loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { pollInFlight = false; });
-      }, FREE_FEED_POLL_MS);
-    } else {
-      pollTimer = setInterval(() => {
-        if (pollInFlight || cancelled) return;
-        pollInFlight = true;
-        loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { pollInFlight = false; });
-      }, FREE_FEED_LIVE_POLL_MS);
-    }
+    // Full Kalshi book. SSE can replay only the last ticker that moved, and
+    // snapshot mode does not wait on that socket — a one-contract tick left
+    // every other Kalshi moneyline as "—".
+    const loadKalshiBoard = async () => {
+      if (!venuesOn) return;
+      try {
+        const res = await fetch(kalshiBoardUrl({ league }), {
+          signal: ctrl.signal,
+          cache: "no-store",
+        });
+        if (cancelled || ctrl.signal.aborted || !res.ok) return;
+        const quotes = kalshiQuotesFromBoardBody(await res.json());
+        if (!quotes) return;
+        quoteRef.kalshi = quotes;
+      } catch {
+        if (cancelled || ctrl.signal.aborted) return;
+      }
+    };
+
+    // Pregame and LIVE both poll the phone and the Kalshi book. Do not wait
+    // on either GET — a hung request must not freeze the other feed.
+    const kickPhone = () => {
+      if (phoneInFlight || cancelled) return;
+      phoneInFlight = true;
+      loadPhone().then(() => { if (!cancelled) publish(); }).finally(() => { phoneInFlight = false; });
+    };
+    const kickKalshi = () => {
+      if (!venuesOn || kalshiInFlight || cancelled) return;
+      kalshiInFlight = true;
+      loadKalshiBoard().then(() => { if (!cancelled) publish(); }).finally(() => { kalshiInFlight = false; });
+    };
+    kickPhone();
+    kickKalshi();
+    pollTimer = setInterval(() => {
+      kickPhone();
+      kickKalshi();
+    }, liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS);
 
     const runVenue = async (book, url) => {
       // VITE_FIRST_PARTY_PM_LIVE=0 turns this venue off. Unset stays on.

@@ -6,6 +6,7 @@ import { toAmericanOdds, gameVisibleOnBoard } from "./betstampNormalize.js";
 import {
   freeFeedBooks,
   gamesFromFreeFeeds,
+  kalshiQuotesFromBoardBody,
   mainLaddersFromGame,
   mergeVenueQuotes,
   quoteMergeKey,
@@ -178,6 +179,55 @@ assert.equal(chargers.bookOdds.underdog_predict.ml_away, 300);
 assert.equal(seahawks.bookOdds.kalshi.ml_away, toAmericanOdds(0.76));
 assert.equal(titans.home, "New York Giants");
 assert.equal(titans.bookOdds.kalshi.ml_home, toAmericanOdds(0.57));
+
+// Production SSE shape: book 194, city names, 0–1 yes-ask. Snapshot JSON
+// must paint American odds on the Underdog Falcons @ Packers row.
+const boardBody = {
+  ok: true,
+  league: "NFL",
+  quotes: [
+    {
+      book: "kalshi",
+      book_id: 194,
+      league: "NFL",
+      away: "Atlanta",
+      home: "Green Bay",
+      side: "Green Bay",
+      bet_type: "moneyline",
+      is_live: false,
+      odds: 0.69,
+      ticker: "KXNFLGAME-26SEP24ATLGB-GB",
+      start: "2026-09-25T03:15:00Z",
+    },
+    {
+      book: "kalshi",
+      book_id: 194,
+      league: "NFL",
+      away: "Atlanta",
+      home: "Green Bay",
+      side: "Atlanta",
+      bet_type: "moneyline",
+      is_live: false,
+      odds: 0.32,
+      ticker: "KXNFLGAME-26SEP24ATLGB-ATL",
+      start: "2026-09-25T03:15:00Z",
+    },
+  ],
+};
+assert.equal(kalshiQuotesFromBoardBody(null), null);
+assert.equal(kalshiQuotesFromBoardBody({ quotes: [] }), null);
+const fromBoard = kalshiQuotesFromBoardBody(boardBody);
+const fromPayload = gamesFromFreeFeeds({
+  league: "NFL",
+  kalshi: fromBoard,
+  underdog,
+  nowMs: now,
+});
+assert.equal(fromPayload.length, 1);
+assert.equal(fromPayload[0].id, "ff:NFL:ATL:GB");
+assert.equal(fromPayload[0].bookOdds.kalshi.ml_home, toAmericanOdds(0.69));
+assert.equal(fromPayload[0].bookOdds.kalshi.ml_away, toAmericanOdds(0.32));
+assert.equal(fromPayload[0].bookOdds.underdog_predict.ml_away, 245);
 assert.equal(games[0].bookOdds.underdog_predict.ml_away, 245);
 assert.equal(games[0].bookOdds.underdog_predict.ml_home, -280);
 assert.equal(games[0].bookOdds.underdog_predict.spr_away, -110);
@@ -422,6 +472,10 @@ const board = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.u
 assert.match(board, /gamesFromFreeFeeds/);
 assert.match(board, /polymarketStreamUrl/);
 assert.match(board, /kalshiStreamUrl/);
+assert.match(board, /kalshiBoardUrl/);
+assert.match(board, /kalshiQuotesFromBoardBody/);
+const venueLive = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "venueLive.js"), "utf8");
+assert.match(venueLive, /\/api\/kalshi-board/);
 assert.match(board, /novigStreamUrl/);
 assert.match(board, /fourcastersStreamUrl/);
 assert.match(board, /novig_needs_credentials/);
