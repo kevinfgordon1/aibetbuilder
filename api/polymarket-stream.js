@@ -2,11 +2,12 @@
 
 // GET /api/polymarket-stream?league=NFL|NCAAF|MLB
 // Same-origin SSE of Polymarket CLOB best asks for game moneylines.
-// Public, keyless. One CLOB snapshot plus the market-channel WebSocket per
-// league is fanned out to every connected board. Each event is the whole
-// moneyline book. The socket is the fast path (a venue change is relayed
-// on the next frame). CLOB /prices refreshes the book about every 2s so a
-// missed frame cannot sit. The SSE response ends before Vercel's 300s cap
+// Public, keyless. One CLOB /books snapshot plus the market-channel WebSocket
+// per league is fanned out to every connected board. Each event is the whole
+// moneyline book. Odds are the minimum ask with size, maintained locally:
+// the book snapshot replaces the ladder (index 0 is the worst level) and
+// price_change deltas update one level, deleting it when size is 0. The SSE
+// response ends before Vercel's 300s cap
 // and the browser reconnects onto a fresh snapshot.
 //
 // Quote odds are the best ask as a 0–1 probability (the board converts
