@@ -526,7 +526,7 @@ const goodCreds = () => ({
     assert.equal(noted.out.body.positions.length, 1);
     assert.equal(
       noted.out.body.positions[0].protectFill,
-      'Tennessee Titans +150 (submitted +130 · improved by Protect)',
+      'Tennessee Titans +150 (submitted +130 · improved by Bet Protect)',
     );
     assert.doesNotMatch(noted.out.body.positions[0].protectFill, /¢/);
   }

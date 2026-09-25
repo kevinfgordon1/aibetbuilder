@@ -367,7 +367,7 @@ function LiveTradingDeskView({ user }) {
         + (snap.contracts != null ? " · " + snap.contracts + " contracts" : "")
         + (snap.riskLabel ? " · " + snap.riskLabel + " at risk" : "")
         + (protectSnap && protectSnap.on
-          ? ". Protect on (more than " + protectSnap.xCents + "¢ through, re-rest " + protectSnap.yCents + "¢ better)"
+          ? ". Bet Protect on (more than " + protectSnap.xCents + "¢ through, re-rest " + protectSnap.yCents + "¢ better)"
           : ".")
       );
       await load(market.slug, { silent: true });
@@ -613,7 +613,7 @@ function LiveTradingDeskView({ user }) {
                 checked={protect}
                 onChange={(e) => setProtect(e.target.checked)}
               />
-              Protect <span style={{ fontWeight: 600, color: "#9ca3af" }}>(adverse pickoff)</span>
+              Bet Protect <span style={{ fontWeight: 600, color: "#9ca3af" }}>(adverse pickoff)</span>
             </label>
             <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 1.45 }}>
               Off unless you arm this rest. Cancel if mid blows through your rest, then re-rest better. Does not chase if the market runs away.
@@ -663,7 +663,7 @@ function LiveTradingDeskView({ user }) {
                 <div style={{ color: "#fecaca", fontSize: 13 }}>{deskErrorText(quote.error, "That price cannot be rested.")}</div>
               )}
               {market && protect && (!protectXParsed.ok || !protectYParsed.ok) && (
-                <div style={{ color: "#fecaca", fontSize: 13, marginBottom: 8 }}>{deskErrorText((protectXParsed.ok ? protectYParsed : protectXParsed).error, "Check the Protect cushion.")}</div>
+                <div style={{ color: "#fecaca", fontSize: 13, marginBottom: 8 }}>{deskErrorText((protectXParsed.ok ? protectYParsed : protectXParsed).error, "Check the Bet Protect cushion.")}</div>
               )}
               {market && quote && quote.ok && (
                 <div>
@@ -678,7 +678,7 @@ function LiveTradingDeskView({ user }) {
                   </div>
                   {protect && protectReady && (
                     <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 6 }}>
-                      Protect armed. Cancel if this rest is more than {protectXParsed.cents}¢ through the new mid, then re-rest {protectYParsed.cents}¢ better (buy lower / sell higher) and snap the tick in your favor. Shown as American odds.
+                      Bet Protect armed. Cancel if this rest is more than {protectXParsed.cents}¢ through the new mid, then re-rest {protectYParsed.cents}¢ better (buy lower / sell higher) and snap the tick in your favor. Shown as American odds.
                     </div>
                   )}
                 </div>
@@ -700,7 +700,7 @@ function LiveTradingDeskView({ user }) {
                 fontWeight: 800,
                 cursor: canSubmit ? "pointer" : "not-allowed",
               }}
-            >{busy === "place" ? "Resting…" : (quote && quote.ok ? "Rest limit at " + quote.snappedAmericanLabel + (protect ? " · Protect" : "") : "Rest limit")}</button>
+            >{busy === "place" ? "Resting…" : (quote && quote.ok ? "Rest limit at " + quote.snappedAmericanLabel + (protect ? " · Bet Protect" : "") : "Rest limit")}</button>
           </form>
         </section>
 
@@ -718,7 +718,7 @@ function LiveTradingDeskView({ user }) {
                   </div>
                   {order.protect && order.protect.on && (
                     <div style={{ fontSize: 11, color: "#93c5fd", marginTop: 4 }}>
-                      Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
+                      Bet Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
                       {order.protect.count > 0 ? " · improved " + order.protect.count + "×" : ""}
                       {order.protect.status === "pending_rereset" ? " · re-rest retrying" : ""}
                     </div>

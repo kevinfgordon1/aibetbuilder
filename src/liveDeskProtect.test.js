@@ -222,7 +222,9 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
     cancelledOnly: true,
     reason: "capped",
   });
-  assert.match(capped, /Cancelled · protect cap/);
+  assert.match(text, /^Bet Protect · /);
+  assert.match(capped, /Cancelled · Bet Protect cap/);
+  assert.match(capped, /^Bet Protect · /);
   assert.doesNotMatch(capped, /→/);
 }
 
@@ -257,7 +259,7 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
       updated_at: "2026-09-24T00:01:00Z",
     },
   ]);
-  assert.equal(packers, "Packers +150 (submitted +130 · improved by Protect)");
+  assert.equal(packers, "Packers +150 (submitted +130 · improved by Bet Protect)");
   assert.doesNotMatch(packers, /¢/);
   assert.equal(protectFillForPosition({
     slug: "aec-nfl-atl-gb-2026-09-24",
@@ -300,12 +302,15 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
     outcome_micro: 400000,
     submitted_outcome_micro: submitted,
   }]);
-  assert.equal(fromLimit, "Falcons +150 (submitted +130 · improved by Protect)");
+  assert.equal(fromLimit, "Falcons +150 (submitted +130 · improved by Bet Protect)");
 }
 
 {
   const ui = fs.readFileSync(path.join(here, "LiveTradingDesk.jsx"), "utf8");
-  assert.match(ui, /Protect <span[^>]*>\(adverse pickoff\)<\/span>/);
+  assert.match(ui, /Bet Protect <span[^>]*>\(adverse pickoff\)<\/span>/);
+  assert.match(ui, /Bet Protect armed/);
+  assert.match(ui, /Bet Protect on/);
+  assert.match(ui, / · Bet Protect/);
   assert.match(ui, /Cancel if mid blows through your rest, then re-rest better\. Does not chase if the market runs away\./);
   assert.match(ui, /useState\(false\)/);
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_X_CENTS\)\)/);

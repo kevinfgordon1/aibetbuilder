@@ -324,7 +324,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
     return {
       ok: false,
       status: 503,
-      error: 'Protect registry is not configured. Apply sql/desk_protect_rests.sql and set SUPABASE_SERVICE_KEY.',
+      error: 'Bet Protect registry is not configured. Apply sql/desk_protect_rests.sql and set SUPABASE_SERVICE_KEY.',
     };
   }
   const orderBody = price.buildLimitOrder({ slug, quote });
@@ -334,7 +334,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
   let armed = null;
   if (protectReq.on) {
     if (!orderId) {
-      return { ok: false, status: 502, error: 'Order id missing, so Protect was not armed. Cancel it on Polymarket US.' };
+      return { ok: false, status: 502, error: 'Order id missing, so Bet Protect was not armed. Cancel it on Polymarket US.' };
     }
     try {
       armed = await store.insert({
@@ -359,7 +359,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
       });
     } catch (_) {
       try { await client.cancelOrder(String(orderId), slug); } catch (__) { /* best effort */ }
-      return { ok: false, status: 503, error: 'Protect could not be armed. That order was cancelled.' };
+      return { ok: false, status: 503, error: 'Bet Protect could not be armed. That order was cancelled.' };
     }
   }
   return {

@@ -36,15 +36,15 @@ export function centsToMicro(cents) {
 export function parseProtectCents(raw, fallback, { min = 0, max = 25 } = {}) {
   if (raw == null || raw === "") {
     if (fallback == null || !Number.isFinite(Number(fallback))) {
-      return { ok: false, error: "Enter protect cents." };
+      return { ok: false, error: "Enter Bet Protect cents." };
     }
     return { ok: true, cents: Number(fallback) };
   }
   const n = Number(String(raw).trim());
-  if (!Number.isFinite(n)) return { ok: false, error: "Protect cents must be a number." };
+  if (!Number.isFinite(n)) return { ok: false, error: "Bet Protect cents must be a number." };
   const cents = Math.round(n * 10) / 10;
   if (cents < min || cents > max) {
-    return { ok: false, error: "Protect cents must be between " + min + " and " + max + "." };
+    return { ok: false, error: "Bet Protect cents must be between " + min + " and " + max + "." };
   }
   return { ok: true, cents };
 }
@@ -200,12 +200,12 @@ export function formatProtectTelegram({
 } = {}) {
   const side = normalizeAction(action) === "sell" ? "Sell" : "Buy";
   const who = outcomeName ? side + " " + outcomeName : side;
-  const head = "Protect · " + (title || "Polymarket US");
+  const head = "Bet Protect · " + (title || "Polymarket US");
   const size = contracts != null && contracts !== "" ? String(contracts) + " contracts" : "";
   const oldPx = [oldAmerican, oldCents ? "(" + oldCents + ")" : ""].filter(Boolean).join(" ");
   if (cancelledOnly) {
     const why = reason === "capped"
-      ? "protect cap"
+      ? "Bet Protect cap"
       : (reason === "retry" ? "re-rest will retry" : (reason === "no-improve" ? "could not re-rest better" : "no re-rest"));
     return [head, (who + " " + oldPx).trim(), "Cancelled · " + why, size].filter(Boolean).join("\n");
   }
@@ -289,5 +289,5 @@ export function protectFillForPosition(position, rows) {
   const fillAmerican = fillAmericanFromCost(position) || americanLabelFromMicro(row.outcome_micro);
   if (!fillAmerican) return null;
   const team = position.team || row.outcome_name || (side === "short" ? "No" : "Yes");
-  return team + " " + fillAmerican + " (submitted " + submittedAmerican + " · improved by Protect)";
+  return team + " " + fillAmerican + " (submitted " + submittedAmerican + " · improved by Bet Protect)";
 }
