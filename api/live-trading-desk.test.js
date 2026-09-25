@@ -39,8 +39,17 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /id="desk-confirm"/);
   assert.match(ui, /useState\("buy"\)/);
   assert.match(ui, /hedgeTarget/);
-  assert.match(ui, /Hedge · Buy/);
+  assert.match(ui, /formatDeskOrderLine\(\{/);
+  const priceSrc = fs.readFileSync(path.join(__dirname, '../src/liveDeskPrice.js'), 'utf8');
+  assert.match(priceSrc, /"Hedge\. "/);
+  assert.match(priceSrc, /"You will "/);
   assert.match(ui, /orderConfirm/);
+  assert.match(ui, /formatDeskOrderLine/);
+  assert.match(ui, /parseAmerican\(american\)/);
+  assert.match(ui, /placeholder="Type odds"/);
+  assert.doesNotMatch(ui, /placeholder="−150"/);
+  assert.match(text, /empty box is not the market/);
+  assert.doesNotMatch(text, /getMarketBbo|bestAsk|bestBid/);
   assert.doesNotMatch(ui, /setDollars\([^)]*net/);
   assert.match(text, /restingLimitOrder/);
   assert.match(text, /matchDisplayedOrder/);
@@ -567,6 +576,24 @@ const goodCreds = () => ({
         return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
       },
     });
+    const emptyOdds = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-atl-gb-2026-09-24',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'short',
+        action: 'sell',
+        american: '',
+        dollars: 25,
+      },
+    }, emptyOdds);
+    assert.equal(emptyOdds.out.statusCode, 400, JSON.stringify(emptyOdds.out.body));
+    assert.match(emptyOdds.out.body.error, /empty box is not the market/);
+    assert.equal(posted.length, 0);
+
     const packers = mockRes();
     await handler({
       method: 'POST',
@@ -662,6 +689,65 @@ const goodCreds = () => ({
     assert.equal(posted[1].quantity, 41.66);
     assert.equal(falcons.out.body.snap.outcomeName, 'Atlanta Falcons');
     assert.equal(falcons.out.body.snap.centsLabel, '60¢');
+
+    const sellPackers = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-atl-gb-2026-09-24',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'short',
+        action: 'sell',
+        american: -150,
+        dollars: 25,
+        confirm: {
+          team: 'Green Bay Packers',
+          action: 'sell',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 62.5,
+          cost: '$25.00',
+          yesTeam: 'Atlanta Falcons',
+          yesPrice: '0.400',
+        },
+      },
+    }, sellPackers);
+    assert.equal(sellPackers.out.statusCode, 200, JSON.stringify(sellPackers.out.body));
+    assert.equal(posted[2].intent, 'ORDER_INTENT_SELL_SHORT');
+    assert.equal(posted[2].price.value, '0.400');
+    assert.equal(posted[2].quantity, 62.5);
+    assert.notEqual(posted[2].quantity, 147.05);
+
+    const sellFalcons = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        op: 'place',
+        marketSlug: 'aec-nfl-atl-gb-2026-09-24',
+        gameId: 'nfl-atl-gb-2026-09-24',
+        outcome: 'long',
+        action: 'sell',
+        american: -150,
+        dollars: 25,
+        confirm: {
+          team: 'Atlanta Falcons',
+          action: 'sell',
+          americanLabel: '-150',
+          centsLabel: '60¢',
+          contracts: 62.5,
+          cost: '$25.00',
+          yesTeam: 'Atlanta Falcons',
+          yesPrice: '0.600',
+        },
+      },
+    }, sellFalcons);
+    assert.equal(sellFalcons.out.statusCode, 200, JSON.stringify(sellFalcons.out.body));
+    assert.equal(posted[3].intent, 'ORDER_INTENT_SELL_LONG');
+    assert.equal(posted[3].price.value, '0.600');
+    assert.equal(posted[3].quantity, 62.5);
   }
 
   console.log('live-trading-desk.test.js ok');

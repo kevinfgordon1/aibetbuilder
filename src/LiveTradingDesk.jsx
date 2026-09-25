@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, hedgeTarget, orderConfirm, quoteRestingOrder } from "./liveDeskPrice";
+import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, formatDeskOrderLine, hedgeTarget, orderConfirm, parseAmerican, polyDisplayNote, quoteRestingOrder } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 
 let supabaseClient = null;
@@ -329,6 +329,10 @@ function LiveTradingDeskView({ user }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (parseAmerican(american) == null) {
+      setError("Enter American odds. An empty box is not the market and not a placeholder.");
+      return;
+    }
     if (!market || !quote || !quote.ok || busy) return;
     if (armedTicket !== ticketKey) {
       setArmedTicket(ticketKey);
@@ -449,7 +453,7 @@ function LiveTradingDeskView({ user }) {
     !Array.isArray(board.positions) || !Array.isArray(board.orders) || !Array.isArray(board.activity) || gamesBad
   ) ? "The desk returned an unexpected board." : "";
   const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
-  const canSubmit = !!(scoped && market.tradable && quote && quote.ok && !busy);
+  const canSubmit = !!(scoped && market.tradable && parseAmerican(american) != null && quote && quote.ok && !busy);
   const knownGame = games.some((g) => g.id === gameId);
   const slateNote = board && typeof board.gamesError === "string" ? board.gamesError : "";
 
@@ -595,7 +599,7 @@ function LiveTradingDeskView({ user }) {
               inputMode="text"
               autoComplete="off"
               name="desk-american"
-              placeholder="−150"
+              placeholder="Type odds"
               value={american}
               onChange={(e) => setAmerican(e.target.value)}
               style={field}
@@ -620,8 +624,8 @@ function LiveTradingDeskView({ user }) {
 
             <div style={{ marginTop: 14, padding: "12px 12px", borderRadius: 10, background: "#0a0b0f", border: "1px solid rgba(255,255,255,0.08)", minHeight: 64 }}>
               {!market && <div style={{ color: "#9ca3af", fontSize: 13 }}>Pick an NFL game. The rest uses that game’s moneyline.</div>}
-              {market && !String(american).trim() && (
-                <div style={{ color: "#9ca3af", fontSize: 13 }}>Type American odds. The desk snaps to the Polymarket tick in your favor and shows that price before you rest it.</div>
+              {market && parseAmerican(american) == null && (
+                <div style={{ color: "#fbbf24", fontSize: 13 }}>Type American odds to send an order. An empty box is not a price and not the market. The desk will not guess.</div>
               )}
               {market && String(american).trim() && quote && !quote.ok && (
                 <div style={{ color: "#fecaca", fontSize: 13 }}>{deskErrorText(quote.error, "That price cannot be rested.")}</div>
@@ -631,8 +635,16 @@ function LiveTradingDeskView({ user }) {
                   <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: confirmed ? "#93c5fd" : "#9ca3af" }}>
                     {confirmed ? "Sending this order" : "Order that will be sent"}
                   </div>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, fontWeight: 800, marginTop: 8 }}>
-                    {hedge ? "Hedge · Buy" : (action === "buy" ? "Buy" : "Sell")} {outcomeName}
+                  <div id="desk-order-line" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 800, marginTop: 8, lineHeight: 1.45 }}>
+                    {formatDeskOrderLine({
+                      action,
+                      team: outcomeName,
+                      americanLabel: quote.snappedAmericanLabel,
+                      centsLabel: quote.centsLabel,
+                      contracts: quote.contracts,
+                      riskLabel: quote.riskLabel,
+                      hedge,
+                    })}
                   </div>
                   {hedge && (
                     <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 6, lineHeight: 1.45 }}>
@@ -650,7 +662,12 @@ function LiveTradingDeskView({ user }) {
                     <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700 }}>{plain(quote.riskLabel, "")}</div>
                   </div>
                   <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 8, lineHeight: 1.45 }}>
-                    Polymarket US shows this as {plain(market.longName, "Yes")} at {plain(quote.yesCentsLabel, "")} (YES {plain(quote.yesPriceValue, "")}).
+                    {polyDisplayNote({
+                      action,
+                      team: outcomeName,
+                      yesTeam: market.longName,
+                      yesCentsLabel: quote.yesCentsLabel,
+                    })} YES {plain(quote.yesPriceValue, "")}.
                   </div>
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
                     Buys floor the tick (you pay less). Sells ceil the tick (you receive more). Cost is contracts times that price, floored so it stays at or under the dollars typed, and never over ${MAX_SIZE_DOLLARS}.
