@@ -10,6 +10,9 @@ const board = fs.readFileSync(new URL("./BetstampOddsBoard.jsx", import.meta.url
 const panel = fs.readFileSync(new URL("./PlayerTdBoard.jsx", import.meta.url), "utf8");
 assert.match(board, /data-board-market="td"/);
 assert.match(board, /Player TDs/);
+assert.match(panel, /Anytime touchdown/);
+assert.match(panel, /id: "anytime"/);
+assert.doesNotMatch(panel, /id: "two"|id: "first"/);
 assert.match(panel, /formatAmericanOdds/);
 assert.match(panel, /PLAYER_TD_POLL_MS = 45_000/);
 assert.doesNotMatch(panel, /DraftKings|FanDuel|cents/);

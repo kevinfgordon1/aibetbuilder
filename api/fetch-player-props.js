@@ -1,6 +1,6 @@
 'use strict';
 
-// Vercel cron. NFL player props only — anytime TD, first TD, and 2+ TD.
+// Vercel cron. NFL anytime touchdown (1+) only, games kicking off within 72 hours.
 // Kept off /api/fetch-odds so the featured moneyline job stays inside its budget.
 
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');

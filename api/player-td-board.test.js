@@ -28,8 +28,21 @@ function jsonRes() {
           markets: [{
             ticker: 'KXNFLTD-26SEP27KCMIA-KCTKELCE87-1',
             title: 'Travis Kelce: 1+ touchdowns',
+            occurrence_datetime: '2026-09-27T17:00:00Z',
             yes_ask_dollars: '0.6400',
             yes_bid_dollars: '0.6200',
+          }, {
+            ticker: 'KXNFLTD-26SEP27KCMIA-KCTKELCE87-2',
+            title: 'Travis Kelce: 2+ touchdowns',
+            occurrence_datetime: '2026-09-27T17:00:00Z',
+            yes_ask_dollars: '0.2600',
+            yes_bid_dollars: '0.2500',
+          }, {
+            ticker: 'KXNFLTD-26OCT05NYGPHI-PHISBARKLEY26-1',
+            title: 'Saquon Barkley: 1+ touchdowns',
+            occurrence_datetime: '2026-10-05T17:00:00Z',
+            yes_ask_dollars: '0.5500',
+            yes_bid_dollars: '0.5300',
           }],
         }),
       };
@@ -71,6 +84,7 @@ function jsonRes() {
     fetchFn,
     cache: { at: 0, body: null },
     cacheMs: 0,
+    now: Date.parse('2026-09-26T12:00:00Z'),
     sleepFn: async () => {},
   });
   assert.equal(res.statusCode, 200);
@@ -82,7 +96,11 @@ function jsonRes() {
   assert.equal(typeof kelce.anytime.polymarket, 'number');
   assert.ok(kelce.anytime.best != null);
   assert.equal(String(kelce.anytime.kalshi).includes('.'), false);
+  assert.equal(kelce.two.kalshi, null);
+  assert.equal(kelce.first.kalshi, null);
   assert.ok(calls.some((url) => String(url).includes('nfl-kc-mia-2026-09-27')));
+  assert.equal(calls.some((url) => String(url).includes('KXNFLFIRSTTD')), false);
+  assert.equal(calls.some((url) => String(url).includes('2026-10-05')), false);
   console.log('player-td-board.test.js ok');
 })().catch((err) => {
   console.error(err);

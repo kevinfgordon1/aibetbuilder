@@ -26,15 +26,7 @@
     },
     {
       "path": "/api/fetch-player-props",
-      "schedule": "2-57/5 11-23 * * *"
-    },
-    {
-      "path": "/api/fetch-player-props",
-      "schedule": "2-57/5 0-6 * * *"
-    },
-    {
-      "path": "/api/fetch-player-props",
-      "schedule": "2 7-10 * * *"
+      "schedule": "2-57/5 * * * *"
     }
   ],
   "functions": {

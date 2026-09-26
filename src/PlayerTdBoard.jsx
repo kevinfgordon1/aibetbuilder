@@ -3,10 +3,9 @@ import { formatAmericanOdds } from "./trueOddsLine.js";
 
 export const PLAYER_TD_POLL_MS = 45_000;
 
+// v1 is anytime only. Add ids from lib/player-td.js ENABLED_TD_MARKETS to show more.
 const THRESHOLDS = [
-  { id: "anytime", label: "1+ TD" },
-  { id: "two", label: "2+ TD" },
-  { id: "first", label: "First TD" },
+  { id: "anytime", label: "Anytime TD" },
 ];
 
 const BOOKS = [
@@ -83,7 +82,7 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
   return (
     <div data-player-td-board="1" data-td-poll-ms={PLAYER_TD_POLL_MS}>
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-        {THRESHOLDS.map((item) => (
+        {THRESHOLDS.length > 1 && THRESHOLDS.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -103,8 +102,8 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
             {item.label}
           </button>
         ))}
-        <span style={{ fontSize: 12, color: "#6b7280" }}>
-          Yes prices in American odds. Kalshi and Polymarket include the taker fee.
+        <span style={{ fontSize: 12, color: "#6b7280" }} data-td-threshold="anytime">
+          Anytime touchdown (1+). Yes prices in American odds for games kicking off within 72 hours. Kalshi and Polymarket include the taker fee.
         </span>
       </div>
       {loading && (
