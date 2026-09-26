@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { feeInclusiveAmerican } from "./venueTakerFee.js";
 
 const require = createRequire(import.meta.url);
-const { boardYesAmerican, fairYesAmericanFromNo, noAskAmericanFromYesBid } = require("../lib/player-td.js");
+const { boardYesAmerican, fairYesAmericanFromNo, noAskAmericanFromYesBid } = require("../lib/player-td.cjs");
 
 const board = fs.readFileSync(new URL("./BetstampOddsBoard.jsx", import.meta.url), "utf8");
 const panel = fs.readFileSync(new URL("./PlayerTdBoard.jsx", import.meta.url), "utf8");

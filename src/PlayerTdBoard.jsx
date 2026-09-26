@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
-import * as playerTdLib from "../lib/player-td.js";
+import * as playerTdLib from "../lib/player-td.mjs";
 
 const { formatKickoffEt } = playerTdLib;
 
