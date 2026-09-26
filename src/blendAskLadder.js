@@ -269,6 +269,9 @@ export function resolvePmBookLevels(leg, levels) {
   if (!isPmBlendVenue(leg && leg.bestOppBook)) return [];
   const ladder = normalizeLevels(levels);
   if (ladder.length) return ladder;
+  // Cached No ladder carried on the leg (player TD legs from the props cron).
+  const stored = normalizeLevels(leg.bestOppLevels);
+  if (stored.length) return stored;
   const quoted = leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp;
   const size = typeof leg.bestOppSize === "number" ? leg.bestOppSize : parseFloat(leg.bestOppSize);
   if (!isFinite(quoted) || quoted === 0 || !isFinite(size) || size <= 0) return [];

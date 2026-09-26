@@ -462,7 +462,7 @@ function namesOf(parlays) {
   assert.match(app, /const \[maxLegOdds, setMaxLegOdds\] = useState\(""\)/);
   assert.match(app, /parsedMaxFinal/);
   assert.match(app, /parsedMaxLeg/);
-  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, \{ underdogCash: true \}\)/);
+  assert.match(app, /buildAllLegsForBook\(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, \{\s*underdogCash: true,\s*matchingBooks: promoMatchingPartial \? scanMatchingBookKeys : null,\s*\}\)/);
   assert.doesNotMatch(app, /underdogCash: promoType !== "freebet"/);
   assert.match(app, /maxFinalOdds: parsedMaxFinal/);
   assert.match(app, /parts\.push\(`max \$\{maxFinalOdds\}`\)/);
