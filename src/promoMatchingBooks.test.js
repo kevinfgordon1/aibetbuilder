@@ -263,4 +263,94 @@ function futureGame() {
   assert.equal(TRUSTED_BOOK_KEYS.has("betus"), true);
 }
 
+
+// Player TDs survive a partial Matching books selection, and the fair price
+// is re-picked among selected venues only (never Fliff / Courtside).
+{
+  const td = await import("../lib/player-td.mjs");
+  const now = Date.parse("2026-09-26T04:00:00Z");
+  const game = {
+    sport: "americanfootball_nfl",
+    away: "Los Angeles Chargers",
+    home: "Buffalo Bills",
+    commence_time: "2026-09-27T17:00:00Z",
+    gameKey: "LAC|BUF|2026-09-27",
+    players: [
+      {
+        name: "Dalton Kincaid",
+        markets: {
+          anytime: {
+            offers: [{ book: "draftkings", price: 170 }, { book: "fliff", price: 400 }],
+            opp: { price: -150, book: "polymarket", count: 2, source: "exchange", size: 900, levels: [{ american: -150, size: 900 }] },
+            opps: [
+              { price: -150, book: "polymarket", source: "exchange", size: 900, levels: [{ american: -150, size: 900 }] },
+              { price: -165, book: "kalshi", source: "exchange", size: 120, levels: [{ american: -165, size: 120 }, { american: -180, size: 400 }] },
+              { price: -120, book: "fliff", source: "exchange", size: 5000 },
+              { price: -175, book: "pinnacle", source: "devig", count: 1 },
+            ],
+          },
+        },
+      },
+      {
+        // Row cached before per-venue storage: only opp.
+        name: "Josh Allen",
+        markets: { anytime: { offers: [{ book: "draftkings", price: 120 }], opp: { price: -140, book: "kalshi", count: 1, source: "exchange" } } },
+      },
+    ],
+  };
+  const base = { now, sportFilter: ["americanfootball_nfl"] };
+  const full = td.playerTdLegsForBook([game], "draftkings", base);
+  assert.equal(full.length, 2);
+  const kincaid = full.find((l) => l.name.startsWith("Dalton"));
+  assert.equal(kincaid.bestOpp, -150);
+  assert.equal(kincaid.bestOppBook, "polymarket");
+  assert.equal(kincaid.bestOppSize, 900, "stored No size reaches the leg as bestOppSize");
+  // Combined Kalshi + Polymarket No book, best first, for the $500 blend.
+  assert.deepEqual(kincaid.bestOppLevels, [
+    { american: -150, size: 900, book: "polymarket" },
+    { american: -165, size: 120, book: "kalshi" },
+    { american: -180, size: 400, book: "kalshi" },
+  ]);
+
+  // Polymarket unchecked: Kalshi prices Kincaid; Allen (kalshi) stays.
+  const noPm = new Set([...TRUSTED_BOOK_KEYS].filter((k) => k !== "polymarket"));
+  const partial = td.playerTdLegsForBook([game], "draftkings", { ...base, matchingBooks: noPm });
+  const k2 = partial.find((l) => l.name.startsWith("Dalton"));
+  assert.equal(k2.bestOpp, -165);
+  assert.equal(k2.bestOppBook, "kalshi");
+  assert.equal(k2.bestOppSize, 120);
+  assert.deepEqual(k2.bestOppLevels.map((l) => l.book), ["kalshi", "kalshi"], "an unchecked venue's ladder is not merged");
+  assert.ok(partial.some((l) => l.name.startsWith("Josh")));
+
+  // Only a de-vig book selected: the de-vig prices it. Fliff never does.
+  const devigOnly = td.playerTdLegsForBook([game], "draftkings", { ...base, matchingBooks: ["pinnacle", "fliff"] });
+  assert.equal(devigOnly.length, 1);
+  assert.equal(devigOnly[0].bestOpp, -175);
+  assert.equal(devigOnly[0].bestOppBook, "pinnacle");
+  assert.equal(devigOnly[0].bestOppLevels, undefined, "a de-vig price has no ladder");
+  assert.equal(td.playerTdLegsForBook([game], "draftkings", { ...base, matchingBooks: ["fliff"] }).length, 0);
+  assert.equal(td.playerTdLegsForBook([game], "fliff", base).length, 0);
+
+  // Allen's only venue (kalshi) unchecked → dropped; Kincaid re-priced.
+  const noKalshiNoPm = new Set([...TRUSTED_BOOK_KEYS].filter((k) => k !== "kalshi" && k !== "polymarket"));
+  const p3 = td.playerTdLegsForBook([game], "draftkings", { ...base, matchingBooks: noKalshiNoPm });
+  assert.deepEqual(p3.map((l) => l.name), ["Dalton Kincaid 1+ TD"]);
+  assert.equal(p3[0].bestOppBook, "pinnacle");
+
+  // The .cjs copy used by API routes behaves the same.
+  const tdCjs = require("../lib/player-td.cjs");
+  assert.deepEqual(
+    tdCjs.playerTdLegsForBook([game], "draftkings", { ...base, matchingBooks: noPm }),
+    partial,
+  );
+
+  // App wiring: rebuilt (partial) board keeps playerTds and the leg builder
+  // gets the selection only when it is partial.
+  const app = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "App.jsx"), "utf8");
+  assert.match(app, /return withPlayerTds\(mergeOddsData\(\[/);
+  assert.match(app, /function withPlayerTds\(board, source\)/);
+  assert.match(app, /matchingBooks: promoMatchingPartial \? scanMatchingBookKeys : null/);
+  assert.match(app, /matchingBooks: opts && opts\.matchingBooks \? opts\.matchingBooks : null/);
+}
+
 console.log("promoMatchingBooks.test.js: ok");

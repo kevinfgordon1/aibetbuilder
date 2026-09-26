@@ -105,6 +105,7 @@ import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
+import { playerPropEmptyDetail, playerPropHiddenCounts } from "./promoPlayerPropHint.js";
 import {
   PROMO_SPORT_RELOAD_DEBOUNCE_MS,
   PROMO_CARD_LAYER_STYLE,
@@ -113,6 +114,7 @@ import {
 } from "./promoUiPerf.js";
 import {
   applyPmBlendToLeg,
+  preBlendStoredLadderLegs,
   pickHasLowLiquidity,
   trueOppAmerican,
   LOW_LIQUIDITY_LABEL,
@@ -448,6 +450,13 @@ function mergeOddsData(allData) {
   };
 }
 
+// Carry player_prop_cache TDs from the full Promo board onto a rebuilt board.
+function withPlayerTds(board, source) {
+  const tds = source && source.playerTds;
+  if (!board || !Array.isArray(tds) || !tds.length) return board;
+  return { ...board, playerTds: tds };
+}
+
 function formatET(commence_time) {
   if (!commence_time) return "";
   return new Date(commence_time).toLocaleString('en-US', {
@@ -725,6 +734,8 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
       isWithinDateRange,
       passesOddsBounds,
       resolveOpp,
+      // Partial Matching books: price each player from a selected venue only.
+      matchingBooks: opts && opts.matchingBooks ? opts.matchingBooks : null,
     })) legs.push(leg);
   }
 
@@ -1967,11 +1978,15 @@ export default function App() {
   const promoOddsData = useMemo(() => {
     if (matchingSetIsFull(scanMatchingBookKeys, trustedVisible)) return promoBoardData;
     const { featured, events } = oddsSource;
-    return mergeOddsData([
+    // Game lines are re-transformed for the selection. Player TDs come from
+    // player_prop_cache (not odds_cache), so carry them over; the leg builder
+    // re-picks each fair price among the selected Matching books.
+    return withPlayerTds(mergeOddsData([
       ...featured.map(row => transformOddsData(row.data, row.sport, scanMatchingBookKeys)),
       ...events.map(row => transformEventOddsData(row.data, row.sport, scanMatchingBookKeys)),
-    ]);
+    ]), promoBoardData);
   }, [promoBoardData, oddsSource, scanMatchingBookKeys, trustedVisible]);
+  const promoMatchingPartial = !matchingSetIsFull(scanMatchingBookKeys, trustedVisible);
 
   const soccerOnBoard = useMemo(
     () => (promoOddsData.moneylines || []).some((g) => isSoccerSport(g.sport)),
@@ -2097,18 +2112,44 @@ export default function App() {
   const dropThinPoolLegs = scanHideLowLiquidity;
   const promoLegs = useMemo(() => {
     if (waitForSoccerPm) return [];
-    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true });
+    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, {
+      underdogCash: true,
+      matchingBooks: promoMatchingPartial ? scanMatchingBookKeys : null,
+    });
     const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
-    const promoLegsLiquid = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
+    const promoLegsLiquid = preBlendStoredLadderLegs(
+      filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs }),
+      { promoType, numLegs: scanNumLegs },
+    );
     // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
     // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
     if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
       return filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens);
     }
     return promoLegsLiquid;
-  }, [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, scanMarketScope, excludedPromoLegs, dropThinPoolLegs, promoType, scanNumLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens]);
+  }, [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, scanMarketScope, excludedPromoLegs, dropThinPoolLegs, promoType, scanNumLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys]);
+
+  // Player Props empty-state counts: legs removed by a partial Matching
+  // books selection, and by Hide low liquidity. Only built on Player Props.
+  const playerPropHidden = useMemo(() => {
+    if (scanMarketScope !== "props" || waitForSoccerPm) return null;
+    const tds = promoOddsForPromo && promoOddsForPromo.playerTds;
+    if (!tds || !tds.length) return null;
+    const onlyTds = { playerTds: tds };
+    const build = (matchingBooks) => filterLegsByTeamExclude(
+      filterExcludedLegs(
+        scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), "props"),
+        excludedPromoLegs,
+      ),
+      excludeTeamTokens,
+    );
+    const matched = build(promoMatchingPartial ? scanMatchingBookKeys : null);
+    const unfiltered = promoMatchingPartial ? build(null) : matched;
+    const liquid = filterLowLiquidityLegs(matched, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
+    return playerPropHiddenCounts({ unfiltered, matched, liquid });
+  }, [scanMarketScope, waitForSoccerPm, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, excludedPromoLegs, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, dropThinPoolLegs, promoType, scanNumLegs]);
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -2297,6 +2338,10 @@ export default function App() {
   const soccerEmptyDetail = soccerPromoEmptyDetail({
     soccerSelected: soccerKeysSelected(promoSports),
     soccerMlLegCount: promoLegs.filter((l) => isSoccerSport(l.sport) && l.market === "ML").length,
+  }) || playerPropEmptyDetail({
+    marketScope: scanMarketScope,
+    resultCount: promoRankedCount,
+    hidden: playerPropHidden,
   });
 
   useEffect(() => {
