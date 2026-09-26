@@ -136,6 +136,54 @@ assert.equal(h.firstPitchUtcMs('26SEP091545STLSF'), Date.parse('2026-09-09T19:45
 assert.equal(h.isUpcomingGame('26SEP091545STLSF', Date.parse('2026-09-09T19:44:00Z')), true);
 assert.equal(h.isUpcomingGame('26SEP091545STLSF', Date.parse('2026-09-09T19:46:00Z')), false);
 
+// Spread ticker suffixes: team code + strike digits. Moneyline suffix is the code.
+assert.equal(h.teamCodeOf('SF9'), 'SF');
+assert.equal(h.teamCodeOf('ARI10'), 'ARI');
+assert.equal(h.teamCodeOf('RUTG36'), 'RUTG');
+assert.equal(h.teamCodeOf('SF'), 'SF');
+assert.equal(h.teamCodeOf(h.tickerTail('KXNFLSPREAD-26SEP27ARISF-SF9')), 'SF');
+
+// Live ARI@SF shape: moneyline cities, abbreviated spread titles, SF listed first.
+// Arizona +8.5 is NO on "SF 49ers wins by over 8.5", not a missing market.
+const ariSfSide = ev('KXNFLGAME-26SEP27ARISF', 'Arizona vs San Francisco', 'ARI vs SF (Sep 27)', [
+  { ticker: 'KXNFLGAME-26SEP27ARISF-SF', label: 'San Francisco' },
+  { ticker: 'KXNFLGAME-26SEP27ARISF-ARI', label: 'Arizona' },
+], '2026-09-27T20:05:00Z');
+const ariSfSpread = ev('KXNFLSPREAD-26SEP27ARISF', 'ARI Cardinals vs SF 49ers: Spread', 'ARI vs SF (Sep 27)', [
+  { ticker: 'KXNFLSPREAD-26SEP27ARISF-SF9', label: 'SF 49ers wins by over 8.5 points' },
+  { ticker: 'KXNFLSPREAD-26SEP27ARISF-SF8', label: 'SF 49ers wins by over 7.5 points' },
+  { ticker: 'KXNFLSPREAD-26SEP27ARISF-SF10', label: 'SF 49ers wins by over 9.5 points' },
+  { ticker: 'KXNFLSPREAD-26SEP27ARISF-ARI8', label: 'ARI Cardinals wins by over 7.5 points' },
+], '2026-09-27T20:05:00Z');
+const ariSfGames = h.groupSportGames({ side: [ariSfSide], spread: [ariSfSpread], total: [] }, NOW);
+assert.equal(ariSfGames.length, 1);
+const ariSfSpreads = ariSfGames[0].markets.spread;
+const leg = (ticker, side) => ariSfSpreads.find((m) => m.ticker === ticker && m.side === side);
+assert.equal(leg('KXNFLSPREAD-26SEP27ARISF-SF9', 'yes').label, 'San Francisco \u22128.5');
+assert.equal(leg('KXNFLSPREAD-26SEP27ARISF-SF9', 'no').label, 'Arizona +8.5');
+assert.equal(leg('KXNFLSPREAD-26SEP27ARISF-SF8', 'no').label, 'Arizona +7.5');
+assert.equal(leg('KXNFLSPREAD-26SEP27ARISF-SF10', 'no').label, 'Arizona +9.5');
+assert.equal(leg('KXNFLSPREAD-26SEP27ARISF-ARI8', 'yes').label, 'Arizona \u22127.5');
+assert.equal(leg('KXNFLSPREAD-26SEP27ARISF-ARI8', 'no').label, 'San Francisco +7.5');
+assert.equal(ariSfSpreads.filter((m) => m.side === 'no' && m.ticker.endsWith('-SF9') && /San Francisco/.test(m.label)).length, 0);
+
+// Philadelphia listed first must still put Chicago on the NO of PHI −4.5.
+const phiChiSide = ev('KXNFLGAME-26SEP28PHICHI', 'Philadelphia vs Chicago', 'PHI vs CHI (Sep 28)', [
+  { ticker: 'KXNFLGAME-26SEP28PHICHI-PHI', label: 'Philadelphia' },
+  { ticker: 'KXNFLGAME-26SEP28PHICHI-CHI', label: 'Chicago' },
+], '2026-09-28T17:00:00Z');
+const phiChiSpread = ev('KXNFLSPREAD-26SEP28PHICHI', 'PHI Eagles vs CHI Bears: Spread', 'PHI vs CHI (Sep 28)', [
+  { ticker: 'KXNFLSPREAD-26SEP28PHICHI-PHI5', label: 'PHI Eagles wins by over 4.5 points' },
+  { ticker: 'KXNFLSPREAD-26SEP28PHICHI-CHI5', label: 'CHI Bears wins by over 4.5 points' },
+], '2026-09-28T17:00:00Z');
+const phiChiGames = h.groupSportGames({ side: [phiChiSide], spread: [phiChiSpread], total: [] }, NOW);
+const phiChiSpreads = phiChiGames[0].markets.spread;
+const chiLeg = (ticker, side) => phiChiSpreads.find((m) => m.ticker === ticker && m.side === side);
+assert.equal(chiLeg('KXNFLSPREAD-26SEP28PHICHI-PHI5', 'yes').label, 'Philadelphia \u22124.5');
+assert.equal(chiLeg('KXNFLSPREAD-26SEP28PHICHI-PHI5', 'no').label, 'Chicago +4.5');
+assert.equal(chiLeg('KXNFLSPREAD-26SEP28PHICHI-CHI5', 'yes').label, 'Chicago \u22124.5');
+assert.equal(chiLeg('KXNFLSPREAD-26SEP28PHICHI-CHI5', 'no').label, 'Philadelphia +4.5');
+
 console.log('kalshi-games tests passed');
 
 // combo eligibility flag (Kalshi rejects combos on events outside the collection)

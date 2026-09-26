@@ -16,7 +16,12 @@
 // that market's NO. We expand every market into BOTH selectable legs with clean
 // labels so a leg carries the exact (ticker, side) an RFQ will contain:
 //   total "Over 7.5 runs scored"          -> Over 7.5 (yes) / Under 7.5 (no)
-//   spread "Philadelphia wins by over 1.5" -> PHI -1.5 (yes) / <opp> +1.5 (no)
+//   spread "Philadelphia wins by over 1.5" -> Philadelphia −1.5 (yes) / opponent +1.5 (no)
+// NFL spread titles use abbreviated names ("SF 49ers wins by over 8.5 points")
+// while moneyline labels are cities ("San Francisco", "Arizona"). The opponent
+// is the other moneyline team by ticker code (SF9 → SF), not the first city
+// whose name isn't an exact string match — that mislabeled every NO as the
+// first side (San Francisco +8.5) and dropped Arizona +8.5.
 //
 // IDENTITY ONLY — no prices/odds. CJS (api/package.json commonjs).
 // Also proxies GET /markets/{ticker} when called as /api/kalshi-games?tickers=A,B
@@ -143,6 +148,43 @@ function parseSpread(label) {
   return m ? { team: m[1].trim(), line: m[2] } : null;
 }
 
+function normTeamLabel(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function tickerTail(ticker) {
+  const s = String(ticker || '');
+  const i = s.lastIndexOf('-');
+  return i === -1 ? s : s.slice(i + 1);
+}
+// Spread suffixes are <TEAM><strike> (SF9 = SF wins by over 8.5, ARI10, RUTG36).
+// Moneyline suffixes are the team code alone (SF, ARI, RUTG).
+function teamCodeOf(tail) {
+  const m = /^([A-Z]+)(\d*)$/.exec(String(tail || '').toUpperCase());
+  return m ? m[1] : '';
+}
+function sideRoster(teamNamesOrSides) {
+  const codeToName = {};
+  const names = [];
+  for (const s of teamNamesOrSides || []) {
+    const label = typeof s === 'string' ? s : (s && s.label) || '';
+    const ticker = typeof s === 'string' ? '' : (s && s.ticker) || '';
+    if (label) names.push(label);
+    const code = teamCodeOf(tickerTail(ticker));
+    if (code && label && !codeToName[code]) codeToName[code] = label;
+  }
+  return { codeToName, names };
+}
+function nameHit(favLabel, names) {
+  const favNorm = normTeamLabel(favLabel);
+  if (!favNorm) return null;
+  const exact = (names || []).find((n) => normTeamLabel(n) === favNorm);
+  if (exact) return exact;
+  return (names || []).find((n) => {
+    const nn = normTeamLabel(n);
+    return nn && (favNorm.includes(nn) || nn.includes(favNorm));
+  }) || null;
+}
+
 // ── expand raw markets into both-side legs ──
 function expandTotals(raw) {
   const legs = [];
@@ -154,14 +196,36 @@ function expandTotals(raw) {
   }
   return legs.sort((a, b) => (a.sort || 0) - (b.sort || 0));
 }
-function expandSpreads(raw, teamNames) {
-  const other = (name) => teamNames.find(t => t && t !== name) || 'Other';
+function expandSpreads(raw, teamNamesOrSides) {
+  const { codeToName, names } = sideRoster(teamNamesOrSides);
+  const codes = Object.keys(codeToName);
+  const favoriteName = (favLabel, favCode) => {
+    if (favCode && codeToName[favCode]) return codeToName[favCode];
+    return nameHit(favLabel, names) || favLabel;
+  };
+  // Opponent is the other moneyline team. Exact string inequality against the
+  // abbreviated spread title ("SF 49ers" !== "San Francisco") used to pick
+  // whichever city was listed first and stamp that name on every NO leg.
+  const opponentName = (favLabel, favCode) => {
+    if (favCode && codeToName[favCode] && codes.length >= 2) {
+      const otherCode = codes.find((c) => c !== favCode);
+      if (otherCode && codeToName[otherCode]) return codeToName[otherCode];
+    }
+    const fav = nameHit(favLabel, names);
+    if (fav) {
+      const other = names.find((n) => n !== fav);
+      if (other) return other;
+    }
+    return 'Other';
+  };
   const legs = [];
   for (const m of raw) {
     const p = parseSpread(m.label);
     if (!p) { legs.push({ ticker: m.ticker, side: 'yes', label: m.label }); continue; }
-    const fav = p.team, dog = other(fav);
-    legs.push({ ticker: m.ticker, side: 'yes', label: `${fav} −${p.line}`, sort: parseFloat(p.line) });
+    const favCode = teamCodeOf(tickerTail(m.ticker));
+    const fav = favoriteName(p.team, favCode);
+    const dog = opponentName(p.team, favCode);
+    legs.push({ ticker: m.ticker, side: 'yes', label: `${fav} \u2212${p.line}`, sort: parseFloat(p.line) });
     legs.push({ ticker: m.ticker, side: 'no',  label: `${dog} +${p.line}`, sort: parseFloat(p.line) + 0.001 });
   }
   return legs.sort((a, b) => (a.sort || 0) - (b.sort || 0));
@@ -204,12 +268,11 @@ function groupSportGames(eventsByType, nowMs = Date.now()) {
     const startMs = Number.isFinite(timed) ? timed
       : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
     if (!Number.isFinite(startMs)) continue;
-    const teamNames = g.raw.side.map(m => m.label);
     games.push({
       key: g.key, title: g.title, date: g.date, startTime: new Date(startMs).toISOString(),
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
-        spread: expandSpreads(g.raw.spread || [], teamNames),
+        spread: expandSpreads(g.raw.spread || [], g.raw.side),
         total: expandTotals(g.raw.total || []),
       },
     });
@@ -270,6 +333,7 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.MARKET_SERIES = MARKET_SERIES;
 module.exports._helpers = {
-  parseTotal, parseSpread, expandTotals, expandSpreads, gameKeyOf, tickersFromReq, slimMarket,
+  parseTotal, parseSpread, expandTotals, expandSpreads, teamCodeOf, tickerTail,
+  gameKeyOf, tickersFromReq, slimMarket,
   groupSportGames, markComboEligible, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };
