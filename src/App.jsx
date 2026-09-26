@@ -47,8 +47,13 @@ import {
 } from "./promoMatchingBooks.js";
 import {
   MARKET_SCOPES,
+  DEFAULT_MARKET_SCOPE,
   scopePromoLegs,
   marketScopeSummary,
+  normalizeMarketScope,
+  toggleMarketScope,
+  isMarketScopeSelected,
+  scopeHasExplicitProps,
 } from "./promoMarketScope.js";
 import {
   HIDE_LOW_LIQUIDITY_LABEL,
@@ -1527,7 +1532,10 @@ export default function App() {
   const [evDateRange, setEvDateRange] = useState(DEFAULT_EV_DATE_RANGE);
   const [promoBook, setPromoBook] = useState("draftkings");
   const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
-  const [marketScope, setMarketScope] = useState("all");
+  // Multi-select Markets chips (array). normalizeMarketScope also migrates an
+  // old single string value, so any stale "main" / "props" still works.
+  const [marketScopeRaw, setMarketScope] = useState(() => [...DEFAULT_MARKET_SCOPE]);
+  const marketScope = useMemo(() => normalizeMarketScope(marketScopeRaw), [marketScopeRaw]);
   const [hideLowLiquidity, setHideLowLiquidity] = useState(true);
   const [promoTeamInclude, setPromoTeamInclude] = useState("");
   const [promoTeamExclude, setPromoTeamExclude] = useState("");
@@ -2134,13 +2142,13 @@ export default function App() {
   // Player Props empty-state counts: legs removed by a partial Matching
   // books selection, and by Hide low liquidity. Only built on Player Props.
   const playerPropHidden = useMemo(() => {
-    if (scanMarketScope !== "props" || waitForSoccerPm) return null;
+    if (!scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) return null;
     const tds = promoOddsForPromo && promoOddsForPromo.playerTds;
     if (!tds || !tds.length) return null;
     const onlyTds = { playerTds: tds };
     const build = (matchingBooks) => filterLegsByTeamExclude(
       filterExcludedLegs(
-        scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), "props"),
+        scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), ["props"]),
         excludedPromoLegs,
       ),
       excludeTeamTokens,
@@ -2921,7 +2929,7 @@ export default function App() {
                       {controlBox(<>
                         <label style={labelStyle}>Markets</label>
                         {MARKET_SCOPES.map(opt => (
-                          <button key={opt.val} onClick={() => setMarketScope(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: marketScope === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: marketScope === opt.val ? "#3b82f6" : "#6b7280" }}>
+                          <button key={opt.val} type="button" aria-pressed={isMarketScopeSelected(marketScope, opt.val)} onClick={() => setMarketScope(prev => toggleMarketScope(prev, opt.val))} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: isMarketScopeSelected(marketScope, opt.val) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: isMarketScopeSelected(marketScope, opt.val) ? "#3b82f6" : "#6b7280" }}>
                             {opt.label}
                           </button>
                         ))}
