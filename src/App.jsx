@@ -90,6 +90,7 @@ import {
   underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
+import * as playerTd from "../lib/player-td.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
@@ -114,6 +115,8 @@ import {
   trueOppAmerican,
   LOW_LIQUIDITY_LABEL,
 } from "./blendAskLadder.js";
+
+const { conflictsWithAny, playerTdLegsForBook, playerTdsFromCacheRows, promoLegsCorrelate } = playerTd;
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -707,6 +710,19 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
+  if (data.playerTds && data.playerTds.length) {
+    for (const leg of playerTdLegsForBook(data.playerTds, book, {
+      sportFilter,
+      minLegOdds,
+      maxLegOdds,
+      dateRange,
+      now: quoteNow,
+      isWithinDateRange,
+      passesOddsBounds,
+      resolveOpp,
+    })) legs.push(leg);
+  }
+
   const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
   return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow));
 }
@@ -811,6 +827,7 @@ function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFina
       let best = null;
       for (const cand of legs) {
         if (usedGames.has(cand.game)) continue;
+        if (conflictsWithAny(cand, current.legs)) continue;
         // Concat the original candidate — do not slim it (commence_time must survive).
         const nextLegs = current.legs.concat(cand);
         const r = calc(nextLegs);
@@ -839,7 +856,6 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   }
 
   const results = [];
-  const getGame = (leg) => leg.game;
 
   if (numLegs === 1) {
     legs.forEach(l => {
@@ -850,7 +866,7 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   } else if (numLegs === 2) {
     for (let i = 0; i < legs.length; i++) {
       for (let j = i + 1; j < legs.length; j++) {
-        if (getGame(legs[i]) === getGame(legs[j])) continue;
+        if (promoLegsCorrelate(legs[i], legs[j])) continue;
         const r = calc([legs[i], legs[j]]);
         if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
         results.push({ legs: [legs[i], legs[j]], ...r });
@@ -859,9 +875,9 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   } else if (numLegs === 3) {
     for (let i = 0; i < legs.length; i++) {
       for (let j = i + 1; j < legs.length; j++) {
-        if (getGame(legs[i]) === getGame(legs[j])) continue;
+        if (promoLegsCorrelate(legs[i], legs[j])) continue;
         for (let k = j + 1; k < legs.length; k++) {
-          if (getGame(legs[k]) === getGame(legs[i]) || getGame(legs[k]) === getGame(legs[j])) continue;
+          if (promoLegsCorrelate(legs[k], legs[i]) || promoLegsCorrelate(legs[k], legs[j])) continue;
           const r = calc([legs[i], legs[j], legs[k]]);
           if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
           results.push({ legs: [legs[i], legs[j], legs[k]], ...r });
@@ -1726,7 +1742,7 @@ export default function App() {
         forceRefresh: forceBookmaker,
         includeUnderdog: false,
       });
-      const { featured, events } = await queryOddsCaches(supabase, plan);
+      const { featured, events, playerProps } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
       // Apply before the odds-usable check so a 401 still drops the ref when
       // the Odds API cache errors. Otherwise the next chip load TTL-hits it.
@@ -1764,6 +1780,9 @@ export default function App() {
       );
       underdogOverlayAppliedRef.current = includeUnderdog;
       const nextBoard = applyTransformed(featuredRows, eventRows);
+      if (playerProps && !playerProps.error) {
+        nextBoard.playerTds = playerTdsFromCacheRows(playerProps.data || []);
+      }
       setOddsSource((prev) => (
         boardHasPromoGames(nextBoard) || !prev.featured.length
           ? { featured: featuredRows, events: eventRows }

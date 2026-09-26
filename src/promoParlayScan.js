@@ -4,6 +4,10 @@
 // materializing all C(n,3) objects (~1.3M at PARLAY_LEG_CAP=200). The shown
 // top-k set matches full sort (same EV ranking, no sampling).
 
+import * as playerTd from "../lib/player-td.js";
+
+const { conflictsWithAny, promoLegsCorrelate } = playerTd;
+
 export const SCAN_YIELD_MS = 8;
 export const SCAN_MAX_PROMO_LEGS = 8;
 export const SCAN_GROW_FROM_3_SEEDS = 50;
@@ -223,10 +227,9 @@ function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds, max
     let current = seed;
     let failed = false;
     for (let n = current.legs.length; n < numLegs; n++) {
-      const usedGames = new Set(current.legs.map((l) => l.game));
       let best = null;
       for (const cand of legs) {
-        if (usedGames.has(cand.game)) continue;
+        if (conflictsWithAny(cand, current.legs)) continue;
         const nextLegs = current.legs.concat(cand);
         const r = calc(nextLegs);
         if (!best || r.ev > best.ev) best = { legs: nextLegs, ...r };
@@ -293,7 +296,6 @@ export async function findTopParlaysChunked(
   }
 
   const top = [];
-  const getGame = (leg) => leg.game;
   const takeIfTop = (r, comboLegs) => {
     if (typeof acceptCombo === "function" && !acceptCombo(comboLegs)) return;
     if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) return;
@@ -310,7 +312,7 @@ export async function findTopParlaysChunked(
   } else if (numLegs === 2) {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        if (getGame(list[i]) === getGame(list[j])) continue;
+        if (promoLegsCorrelate(list[i], list[j])) continue;
         takeIfTop(calc([list[i], list[j]]), [list[i], list[j]]);
         if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
       }
@@ -318,9 +320,9 @@ export async function findTopParlaysChunked(
   } else if (numLegs === 3) {
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        if (getGame(list[i]) === getGame(list[j])) continue;
+        if (promoLegsCorrelate(list[i], list[j])) continue;
         for (let k = j + 1; k < list.length; k++) {
-          if (getGame(list[k]) === getGame(list[i]) || getGame(list[k]) === getGame(list[j])) continue;
+          if (promoLegsCorrelate(list[k], list[i]) || promoLegsCorrelate(list[k], list[j])) continue;
           takeIfTop(calc([list[i], list[j], list[k]]), [list[i], list[j], list[k]]);
           if ((++combos & 255) === 0) await maybeYield(state, yieldMs, yieldFn, signal);
         }
