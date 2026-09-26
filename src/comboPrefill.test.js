@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const kalshiGames = require("../api/kalshi-games.js");
 import {
   identifyTeam,
   parsePromoTotal,
@@ -618,7 +621,7 @@ const farSpread = mapPromoLegsToKalshi([{
 assert.equal(farSpread.unmatched.length, 1);
 assert.equal(farSpread.rows[0].gameKey, "26SEP03ARPBMIZZ");
 assert.equal(farSpread.rows[0].marketVal, "", "do not invent a −20.5 market");
-assert.match(farSpread.unmatched[0].reason, /no Kalshi SPR within 3 pts of -20\.5 on Arkansas-Pine Bluff vs Missouri/);
+assert.match(farSpread.unmatched[0].reason, /Kalshi has no 20\.5 line for ARPB vs MIZZ; nearest: 41\.5 \/ 45\.5/);
 
 const noSpreadMarkets = mapPromoLegsToKalshi([{
   name: "Delaware Blue Hens -31.5", market: "SPR",
@@ -688,6 +691,140 @@ for (const emptyFair of [undefined, null, "", NaN, Infinity, -Infinity]) {
   assert.equal(fb.boost, 1200);
   assert.equal(fb.fill, fb.fair);
   assert.equal(fb.label, "Phillies ML + Mets ML");
+}
+
+// Underdog +X is NO on the favorite's "wins by over X" contract. A mislabeled
+// NO (first moneyline city stamped on every dog leg) must still resolve.
+const ariSfMislabeled = {
+  key: "26SEP27ARISF",
+  sport: "nfl",
+  title: "Arizona vs San Francisco",
+  date: "ARI vs SF (Sep 27)",
+  startTime: "2026-09-27T20:05:00Z",
+  markets: {
+    side: [
+      { ticker: "KXNFLGAME-26SEP27ARISF-SF", side: "yes", label: "San Francisco" },
+      { ticker: "KXNFLGAME-26SEP27ARISF-ARI", side: "yes", label: "Arizona" },
+    ],
+    spread: [
+      { ticker: "KXNFLSPREAD-26SEP27ARISF-SF9", side: "yes", label: "SF 49ers \u22128.5" },
+      { ticker: "KXNFLSPREAD-26SEP27ARISF-SF9", side: "no", label: "San Francisco +8.5" },
+      { ticker: "KXNFLSPREAD-26SEP27ARISF-SF8", side: "yes", label: "SF 49ers \u22127.5" },
+      { ticker: "KXNFLSPREAD-26SEP27ARISF-SF8", side: "no", label: "San Francisco +7.5" },
+      { ticker: "KXNFLSPREAD-26SEP27ARISF-SF10", side: "yes", label: "SF 49ers \u22129.5" },
+      { ticker: "KXNFLSPREAD-26SEP27ARISF-SF10", side: "no", label: "San Francisco +9.5" },
+    ],
+    total: [],
+  },
+};
+const ariPlus = mapPromoLegsToKalshi([{
+  name: "Arizona Cardinals +8.5", market: "SPR",
+  game: "Arizona Cardinals @ San Francisco 49ers", sport: "americanfootball_nfl",
+}], { mlb: [], nfl: [ariSfMislabeled], ncaaf: [] });
+assert.equal(ariPlus.unmatched.length, 0, JSON.stringify(ariPlus.unmatched));
+assert.equal(ariPlus.rows[0].gameKey, "26SEP27ARISF");
+assert.equal(ariPlus.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP27ARISF-SF9", "no"),
+  "Arizona +8.5 is NO on SF wins by over 8.5");
+
+const sfMinus = mapPromoLegsToKalshi([{
+  name: "San Francisco 49ers -8.5", market: "SPR",
+  game: "Arizona Cardinals @ San Francisco 49ers", sport: "americanfootball_nfl",
+}], { mlb: [], nfl: [ariSfMislabeled], ncaaf: [] });
+assert.equal(sfMinus.unmatched.length, 0, JSON.stringify(sfMinus.unmatched));
+assert.equal(sfMinus.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP27ARISF-SF9", "yes"));
+
+const ariFar = mapPromoLegsToKalshi([{
+  name: "Arizona Cardinals +20.5", market: "SPR",
+  game: "Arizona Cardinals @ San Francisco 49ers", sport: "americanfootball_nfl",
+}], { mlb: [], nfl: [{
+  ...ariSfMislabeled,
+  markets: {
+    ...ariSfMislabeled.markets,
+    spread: ariSfMislabeled.markets.spread.filter((m) => !m.ticker.endsWith("-SF9")),
+  },
+}], ncaaf: [] });
+assert.equal(ariFar.rows[0].marketVal, "");
+assert.equal(ariFar.unmatched[0].reason, "Kalshi has no 20.5 line for ARI vs SF; nearest: 7.5 / 9.5");
+
+// Neighbors inside the 3-pt window still snap (Kalshi grids skip some mains).
+const ariSnap = mapPromoLegsToKalshi([{
+  name: "Arizona Cardinals +8.5", market: "SPR",
+  game: "Arizona Cardinals @ San Francisco 49ers", sport: "americanfootball_nfl",
+}], { mlb: [], nfl: [{
+  ...ariSfMislabeled,
+  markets: {
+    ...ariSfMislabeled.markets,
+    spread: ariSfMislabeled.markets.spread.filter((m) => !m.ticker.endsWith("-SF9")),
+  },
+}], ncaaf: [] });
+assert.equal(ariSnap.unmatched.length, 0, JSON.stringify(ariSnap.unmatched));
+assert.equal(ariSnap.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP27ARISF-SF8", "no"),
+  "+8.5 snaps to Arizona +7.5 when Kalshi has no 8.5");
+
+// Full feed shape: abbreviated spread titles expanded to both cities, then mapped.
+{
+  const gh = kalshiGames._helpers;
+  const ev = (ticker, title, sub, markets) => ({
+    event_ticker: ticker,
+    title,
+    sub_title: sub,
+    markets: markets.map((m) => ({ ticker: m.ticker, yes_sub_title: m.label })),
+  });
+  const NOW = Date.parse("2026-09-26T18:00:00Z");
+  const grouped = gh.groupSportGames({
+    side: [
+      ev("KXNFLGAME-26SEP28PHICHI", "Philadelphia vs Chicago", "PHI vs CHI (Sep 28)", [
+        { ticker: "KXNFLGAME-26SEP28PHICHI-PHI", label: "Philadelphia" },
+        { ticker: "KXNFLGAME-26SEP28PHICHI-CHI", label: "Chicago" },
+      ]),
+      ev("KXNFLGAME-26SEP27CINPIT", "Cincinnati vs Pittsburgh", "CIN vs PIT (Sep 27)", [
+        { ticker: "KXNFLGAME-26SEP27CINPIT-PIT", label: "Pittsburgh" },
+        { ticker: "KXNFLGAME-26SEP27CINPIT-CIN", label: "Cincinnati" },
+      ]),
+      ev("KXNFLGAME-26SEP27ARISF", "Arizona vs San Francisco", "ARI vs SF (Sep 27)", [
+        { ticker: "KXNFLGAME-26SEP27ARISF-SF", label: "San Francisco" },
+        { ticker: "KXNFLGAME-26SEP27ARISF-ARI", label: "Arizona" },
+      ]),
+      ev("KXNFLGAME-26SEP27BALDAL", "Baltimore vs Dallas", "BAL vs DAL (Sep 27)", [
+        { ticker: "KXNFLGAME-26SEP27BALDAL-DAL", label: "Dallas" },
+        { ticker: "KXNFLGAME-26SEP27BALDAL-BAL", label: "Baltimore" },
+      ]),
+    ],
+    spread: [
+      ev("KXNFLSPREAD-26SEP28PHICHI", "PHI Eagles vs CHI Bears: Spread", "PHI vs CHI (Sep 28)", [
+        { ticker: "KXNFLSPREAD-26SEP28PHICHI-PHI5", label: "PHI Eagles wins by over 4.5 points" },
+      ]),
+      ev("KXNFLSPREAD-26SEP27ARISF", "ARI Cardinals vs SF 49ers: Spread", "ARI vs SF (Sep 27)", [
+        { ticker: "KXNFLSPREAD-26SEP27ARISF-SF9", label: "SF 49ers wins by over 8.5 points" },
+        { ticker: "KXNFLSPREAD-26SEP27ARISF-ARI8", label: "ARI Cardinals wins by over 7.5 points" },
+      ]),
+    ],
+    total: [
+      ev("KXNFLTOTAL-26SEP27BALDAL", "BAL Ravens vs DAL Cowboys: Total Points", "BAL vs DAL (Sep 27)", [
+        { ticker: "KXNFLTOTAL-26SEP27BALDAL-54", label: "Over 53.5 points scored" },
+      ]),
+    ],
+  }, NOW).map((g) => ({ ...g, sport: "nfl" }));
+
+  const ariBoard = grouped.find((g) => g.key === "26SEP27ARISF");
+  assert.ok(ariBoard.markets.spread.some((m) => m.side === "yes" && m.label === "San Francisco \u22128.5"));
+  assert.ok(ariBoard.markets.spread.some((m) => m.side === "no" && m.label === "Arizona +8.5"));
+  assert.ok(ariBoard.markets.spread.some((m) => m.side === "yes" && m.label === "Arizona \u22127.5"));
+  assert.ok(ariBoard.markets.spread.some((m) => m.side === "no" && m.label === "San Francisco +7.5"));
+
+  const four = mapPromoLegsToKalshi([
+    { name: "Chicago Bears +4.5", market: "SPR", game: "Philadelphia Eagles @ Chicago Bears", sport: "americanfootball_nfl" },
+    { name: "Pittsburgh Steelers ML", market: "ML", game: "Cincinnati Bengals @ Pittsburgh Steelers", sport: "americanfootball_nfl" },
+    { name: "Arizona Cardinals +8.5", market: "SPR", game: "Arizona Cardinals @ San Francisco 49ers", sport: "americanfootball_nfl" },
+    { name: "Baltimore Ravens/Dallas Cowboys u53.5", market: "TOT", game: "Baltimore Ravens @ Dallas Cowboys", sport: "americanfootball_nfl" },
+  ], { mlb: [], nfl: grouped, ncaaf: [] });
+  assert.equal(four.unmatched.length, 0, JSON.stringify(four.unmatched));
+  assert.deepEqual(four.rows.map((r) => r.marketVal), [
+    encVal("KXNFLSPREAD-26SEP28PHICHI-PHI5", "no"),
+    encVal("KXNFLGAME-26SEP27CINPIT-PIT", "yes"),
+    encVal("KXNFLSPREAD-26SEP27ARISF-SF9", "no"),
+    encVal("KXNFLTOTAL-26SEP27BALDAL-54", "no"),
+  ]);
 }
 
 console.log("comboPrefill tests passed");

@@ -366,12 +366,93 @@ function pickNearestStrike(pool, wantLine) {
   return exact || best || null;
 }
 
-function formatWantSpread(parsed) {
-  return `${parsed.sign}${parsed.line}`;
-}
-
 function formatWantTotal(parsed) {
   return `${parsed.ou === "under" ? "u" : "o"}${parsed.line}`;
+}
+
+function matchupLabel(game) {
+  const date = String(game?.date || "").trim();
+  const paren = /^(.*?)\s+\([^)]*\)\s*$/.exec(date);
+  const head = (paren ? paren[1] : date).trim();
+  if (/\bvs\b/i.test(head)) return head;
+  return game?.title || game?.key || "this game";
+}
+
+function nearestStrikeTexts(pool, wantLine, limit = 2) {
+  const want = Number(wantLine);
+  const byNum = new Map();
+  for (const c of pool || []) {
+    const num = Number(c.line);
+    if (!Number.isFinite(num)) continue;
+    if (!byNum.has(num)) byNum.set(num, String(c.line));
+  }
+  const ranked = [...byNum.entries()].map(([num, text]) => ({
+    num,
+    text,
+    dist: Number.isFinite(want) ? Math.abs(num - want) : Infinity,
+  }));
+  ranked.sort((a, b) => a.dist - b.dist || a.num - b.num);
+  return ranked.slice(0, limit).sort((a, b) => a.num - b.num).map((x) => x.text);
+}
+
+// Exact strike missing and nothing close enough to snap. Name the board's
+// neighbors ("Kalshi has no 8.5 line for ARI vs SF; nearest: 7.5 / 9.5").
+function missingKalshiLineReason(wantLine, game, pool) {
+  const nearest = nearestStrikeTexts(pool, wantLine, 2);
+  if (!nearest.length) return null;
+  return `Kalshi has no ${wantLine} line for ${matchupLabel(game)}; nearest: ${nearest.join(" / ")}`;
+}
+
+// YES on "opponent wins by over X" is opponent −X. NO on that same contract
+// is this team's +X — even when the NO label was built from the wrong city.
+function opponentMinusCovers(parsed, yesSpread, sport) {
+  if (!yesSpread || yesSpread.sign !== "-") return false;
+  if (sport === "ncaaf") return !nameMatchesLabel(parsed.team, yesSpread.team);
+  const promoId = identifyTeam(parsed.team, sport);
+  const yesId = identifyTeam(yesSpread.team, sport);
+  if (promoId && yesId) return promoId !== yesId;
+  return !nameMatchesLabel(parsed.team, yesSpread.team);
+}
+
+function allParsedSpreadLines(game) {
+  const pool = [];
+  for (const m of game.markets?.spread || []) {
+    const sm = parseMarketLine(m.label);
+    if (sm) pool.push({ market: m, line: sm.line });
+  }
+  return pool;
+}
+
+function spreadCandidates(parsed, game, sport) {
+  const spreads = game.markets?.spread || [];
+  const yesByTicker = new Map();
+  for (const m of spreads) {
+    if (m && m.side === "yes") yesByTicker.set(m.ticker, m);
+  }
+  const pool = [];
+  const seen = new Set();
+  const add = (market, line) => {
+    if (!market || line == null || line === "") return;
+    const key = `${market.ticker}|${market.side}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    pool.push({ market, line: String(line) });
+  };
+  for (const m of spreads) {
+    const sm = parseMarketLine(m.label);
+    if (!spreadSideMatches(parsed, sm, sport)) continue;
+    add(m, sm.line);
+  }
+  if (parsed.sign === "+") {
+    for (const m of spreads) {
+      if (!m || m.side !== "no") continue;
+      const yes = yesByTicker.get(m.ticker);
+      const ys = yes && parseMarketLine(yes.label);
+      if (!opponentMinusCovers(parsed, ys, sport)) continue;
+      add(m, ys.line);
+    }
+  }
+  return pool;
 }
 
 function noStrikeInRangeReason(kind, want, title) {
@@ -413,17 +494,12 @@ function matchMarket(promoLeg, game, sport = "mlb") {
   if (market === "SPR") {
     const parsed = parsePromoSpread(promoLeg.name);
     if (!parsed) return { market: null };
-    const pool = [];
-    for (const m of game.markets?.spread || []) {
-      const sm = parseMarketLine(m.label);
-      if (!spreadSideMatches(parsed, sm, sport)) continue;
-      pool.push({ market: m, line: sm.line });
-    }
+    const pool = spreadCandidates(parsed, game, sport);
     const picked = pickNearestStrike(pool, parsed.line);
     if (picked) return { market: picked.market };
-    if (pool.length) {
-      return { market: null, reason: noStrikeInRangeReason("SPR", formatWantSpread(parsed), title) };
-    }
+    const hint = pool.length ? pool : allParsedSpreadLines(game);
+    const reason = missingKalshiLineReason(parsed.line, game, hint);
+    if (reason) return { market: null, reason };
     return { market: null };
   }
   return { market: null };

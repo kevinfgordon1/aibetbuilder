@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange, SCAN_MAX_PROMO_LEGS, SCAN_GROW_FROM_3_SEEDS } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -284,6 +284,25 @@ function namesOf(parlays) {
   const sync4 = findTopParlays(legs, 4, 30, 100, 5);
   const async4 = await findTopParlaysChunked(legs, 4, calc, { maxResults: 5, yieldMs: 0 });
   assert.deepEqual(namesOf(async4), namesOf(sync4));
+}
+
+// ── Chunked 9–10 leg grow matches sync; 11 is rejected; beam stays 50
+{
+  assert.equal(SCAN_MAX_PROMO_LEGS, 10);
+  assert.equal(SCAN_GROW_FROM_3_SEEDS, 50);
+  assert.match(scanSrc, /export const SCAN_MAX_PROMO_LEGS = 10;/);
+  assert.match(scanSrc, /export const SCAN_GROW_FROM_3_SEEDS = 50;/);
+  assert.match(app, /const MAX_PROMO_LEGS = 10;/);
+  assert.match(app, /const GROW_FROM_3_SEEDS = 50;/);
+  const legs = Array.from({ length: 12 }, (_, i) => mkLeg(`T${i} ML`, `T${i} @ U${i}`, 120 + i, 100));
+  const calc = (ls) => calcParlayEV(ls, 30, 100);
+  for (const n of [9, 10]) {
+    const sync = findTopParlays(legs, n, 30, 100, 5);
+    const asyncN = await findTopParlaysChunked(legs, n, calc, { maxResults: 5, yieldMs: 0 });
+    assert.equal(sync[0].legs.length, n);
+    assert.deepEqual(namesOf(asyncN), namesOf(sync));
+  }
+  assert.deepEqual(await findTopParlaysChunked(legs, 11, calc, { maxResults: 5, yieldMs: 0 }), []);
 }
 
 // ── Yields during a 3-leg scan; abort stops work

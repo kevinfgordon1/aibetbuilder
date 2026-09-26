@@ -241,8 +241,9 @@ const PROMO_TYPES = [
 ];
 
 // Profit-boost picker cap. 4+ legs grow greedily from top 3-leg parlays
-// (no C(n,k) explosion). 8 covers typical boost promos without a new toolbar.
-const MAX_PROMO_LEGS = 8;
+// (no C(n,k) explosion). The stepper stops at 10; seed count stays
+// GROW_FROM_3_SEEDS so 9–10 legs add a couple of greedy passes, not a new search.
+const MAX_PROMO_LEGS = 10;
 // How many top 3-leg seeds to grow from. Extra work is ~seeds × leftover
 // candidates per added leg — similar budget to today's 3-leg scan.
 const GROW_FROM_3_SEEDS = 50;
