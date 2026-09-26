@@ -53,6 +53,7 @@ export function buildOddsQueryPlan({
     futures: isFull,
     futuresKeys: isFull ? [...(futuresKeys || [])] : [],
     computeEv: isFull,
+    includePlayerProps: !isFull && sports.includes("americanfootball_nfl"),
   };
 }
 
@@ -214,11 +215,19 @@ export async function queryOddsCaches(client, plan, { timeoutMs = ODDS_QUERY_TIM
       { timeoutMs, label: "odds_cache futures" },
     ));
   }
+  const playerPropsIndex = plan.includePlayerProps ? jobs.length : -1;
+  if (plan.includePlayerProps) {
+    jobs.push(runCacheQuery(
+      () => client.from("player_prop_cache").select("*").eq("sport", "americanfootball_nfl"),
+      { timeoutMs, label: "player_prop_cache" },
+    ));
+  }
   const results = await Promise.all(jobs);
   return {
     featured: results[0],
     events: skipEvents ? emptyCacheResult() : results[1],
     futures: plan.futures ? results[skipEvents ? 1 : 2] : emptyCacheResult(),
+    playerProps: playerPropsIndex >= 0 ? results[playerPropsIndex] : emptyCacheResult(),
   };
 }
 

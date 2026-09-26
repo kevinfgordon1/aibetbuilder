@@ -6,10 +6,17 @@ export const MARKET_SCOPES = [
   { val: "main", label: "Main" },
   { val: "ml", label: "Moneylines" },
   { val: "alt", label: "Alt" },
+  { val: "props", label: "Player Props" },
 ];
 
 export function isMoneylineLeg(leg) {
   return !!(leg && leg.market === "ML");
+}
+
+// Sportsbook anytime TD legs from playerTdLegsForBook. Add other prop
+// markets here when Promo grows past anytime touchdowns.
+export function isPlayerPropLeg(leg) {
+  return !!(leg && (leg.playerTd || leg.market === "TD"));
 }
 
 export function scopePromoLegs(legs, marketScope) {
@@ -17,6 +24,7 @@ export function scopePromoLegs(legs, marketScope) {
   if (marketScope === "main") return list.filter((l) => !l.isAlt);
   if (marketScope === "alt") return list.filter((l) => l.isAlt);
   if (marketScope === "ml") return list.filter(isMoneylineLeg);
+  if (marketScope === "props") return list.filter(isPlayerPropLeg);
   return list;
 }
 
@@ -24,5 +32,6 @@ export function marketScopeSummary(marketScope) {
   if (marketScope === "main") return "mains";
   if (marketScope === "alt") return "alts";
   if (marketScope === "ml") return "moneylines";
+  if (marketScope === "props") return "player props";
   return "all";
 }

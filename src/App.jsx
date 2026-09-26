@@ -90,6 +90,7 @@ import {
   underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
+import * as playerTd from "../lib/player-td.js";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
@@ -114,6 +115,8 @@ import {
   trueOppAmerican,
   LOW_LIQUIDITY_LABEL,
 } from "./blendAskLadder.js";
+
+const { conflictsWithAny, playerTdLegsForBook, playerTdsFromCacheRows, promoLegsCorrelate } = playerTd;
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -142,6 +145,8 @@ const ALL_BOOKS = [
   { key: "betrivers", label: "BetRivers", color: "#4a9eff", bg: "rgba(74,158,255,0.15)", logo: "https://www.betrivers.com/favicon.ico" },
   { key: "fanatics", label: "Fanatics", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: "https://sportsbook.fanatics.com/favicon.ico" },
   { key: "hardrockbet", label: "Hard Rock", color: "#d4af37", bg: "rgba(212,175,55,0.15)", logo: "https://app.hardrock.bet/favicon.ico" },
+  { key: "betparx", label: "betPARX", color: "#e11d48", bg: "rgba(225,29,72,0.15)", logo: null },
+  { key: "ballybet", label: "Bally Bet", color: "#dc2626", bg: "rgba(220,38,38,0.15)", logo: null },
   { key: "espnbet", label: "theScore Bet", color: "#ff6600", bg: "rgba(255,102,0,0.15)", logo: "https://sportsbook.thescore.bet/favicon.ico" },
   { key: "bovada", label: "Bovada", color: "#f97316", bg: "rgba(249,115,22,0.15)", logo: null },
   { key: "mybookieag", label: "MyBookie", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
@@ -161,7 +166,7 @@ const ALL_BOOKS = [
 
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
-  "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
+  "fanatics", "hardrockbet", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
   "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
   "underdog_predict",
 ]);
@@ -707,6 +712,19 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
+  if (data.playerTds && data.playerTds.length) {
+    for (const leg of playerTdLegsForBook(data.playerTds, book, {
+      sportFilter,
+      minLegOdds,
+      maxLegOdds,
+      dateRange,
+      now: quoteNow,
+      isWithinDateRange,
+      passesOddsBounds,
+      resolveOpp,
+    })) legs.push(leg);
+  }
+
   const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
   return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow));
 }
@@ -811,6 +829,7 @@ function growParlaysFromTop3(legs, numLegs, boostPct, stake, maxResults, minFina
       let best = null;
       for (const cand of legs) {
         if (usedGames.has(cand.game)) continue;
+        if (conflictsWithAny(cand, current.legs)) continue;
         // Concat the original candidate — do not slim it (commence_time must survive).
         const nextLegs = current.legs.concat(cand);
         const r = calc(nextLegs);
@@ -839,7 +858,6 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   }
 
   const results = [];
-  const getGame = (leg) => leg.game;
 
   if (numLegs === 1) {
     legs.forEach(l => {
@@ -850,7 +868,7 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   } else if (numLegs === 2) {
     for (let i = 0; i < legs.length; i++) {
       for (let j = i + 1; j < legs.length; j++) {
-        if (getGame(legs[i]) === getGame(legs[j])) continue;
+        if (promoLegsCorrelate(legs[i], legs[j])) continue;
         const r = calc([legs[i], legs[j]]);
         if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
         results.push({ legs: [legs[i], legs[j]], ...r });
@@ -859,9 +877,9 @@ function findTopParlays(legs, numLegs, boostPct, stake, maxResults = 10, minFina
   } else if (numLegs === 3) {
     for (let i = 0; i < legs.length; i++) {
       for (let j = i + 1; j < legs.length; j++) {
-        if (getGame(legs[i]) === getGame(legs[j])) continue;
+        if (promoLegsCorrelate(legs[i], legs[j])) continue;
         for (let k = j + 1; k < legs.length; k++) {
-          if (getGame(legs[k]) === getGame(legs[i]) || getGame(legs[k]) === getGame(legs[j])) continue;
+          if (promoLegsCorrelate(legs[k], legs[i]) || promoLegsCorrelate(legs[k], legs[j])) continue;
           const r = calc([legs[i], legs[j], legs[k]]);
           if (!passesOddsBounds(r.parlayOdds, minFinalOdds, maxFinalOdds)) continue;
           results.push({ legs: [legs[i], legs[j], legs[k]], ...r });
@@ -1726,7 +1744,7 @@ export default function App() {
         forceRefresh: forceBookmaker,
         includeUnderdog: false,
       });
-      const { featured, events } = await queryOddsCaches(supabase, plan);
+      const { featured, events, playerProps } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
       // Apply before the odds-usable check so a 401 still drops the ref when
       // the Odds API cache errors. Otherwise the next chip load TTL-hits it.
@@ -1764,6 +1782,9 @@ export default function App() {
       );
       underdogOverlayAppliedRef.current = includeUnderdog;
       const nextBoard = applyTransformed(featuredRows, eventRows);
+      if (playerProps && !playerProps.error) {
+        nextBoard.playerTds = playerTdsFromCacheRows(playerProps.data || []);
+      }
       setOddsSource((prev) => (
         boardHasPromoGames(nextBoard) || !prev.featured.length
           ? { featured: featuredRows, events: eventRows }

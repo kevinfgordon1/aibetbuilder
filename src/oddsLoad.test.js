@@ -43,11 +43,12 @@ function createMockClient() {
   return {
     calls,
     from(table) {
-      const state = { table, select: null, in: null, gte: null };
+      const state = { table, select: null, in: null, gte: null, eq: null };
       calls.push(state);
       const chain = {
         select(cols) { state.select = cols; return chain; },
         in(col, vals) { state.in = { col, vals: [...vals] }; return chain; },
+        eq(col, val) { state.eq = { col, val }; return chain; },
         gte(col, val) { state.gte = { col, val }; return chain; },
         abortSignal(signal) { state.signal = signal; return chain; },
         then(resolve, reject) {
@@ -181,6 +182,16 @@ function fullPlan() {
   await queryOddsCaches(client, promoPlan(new Set(sports)));
   assert.deepEqual(client.calls[0].in.vals, sports);
   assert.deepEqual(client.calls[1].in.vals, sports);
+}
+
+// ── Promo NFL also reads player_prop_cache; the full board does not
+{
+  const client = createMockClient();
+  await queryOddsCaches(client, promoPlan(new Set(["americanfootball_nfl"])));
+  assert.ok(client.calls.some((c) => c.table === "player_prop_cache" && c.eq && c.eq.val === "americanfootball_nfl"));
+  const full = createMockClient();
+  await queryOddsCaches(full, fullPlan());
+  assert.ok(!full.calls.some((c) => c.table === "player_prop_cache"));
 }
 
 // ── queryOddsCaches: full board skips event_odds_cache, still loads futures
@@ -330,7 +341,7 @@ function fullPlan() {
   const listed = [...evTrusted[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(listed, [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
-    "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
+    "fanatics", "hardrockbet", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
     "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
     "underdog_predict",
   ]);
