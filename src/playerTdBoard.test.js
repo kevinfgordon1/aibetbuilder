@@ -17,6 +17,8 @@ assert.match(panel, /Anytime touchdown/);
 assert.match(panel, /id: "anytime", label: "Anytime TD"/);
 assert.match(panel, /PLAYER_PROP_TYPES\[0\]\.id/);
 assert.match(panel, /data-prop-type=\{item\.id\}/);
+assert.match(panel, /data-td-kickoff="1"/);
+assert.match(panel, /formatKickoffEt/);
 assert.doesNotMatch(panel, /id: "two"|id: "first"/);
 assert.match(panel, /formatAmericanOdds/);
 assert.match(panel, /PLAYER_TD_POLL_MS = 45_000/);

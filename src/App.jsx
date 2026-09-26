@@ -86,6 +86,8 @@ import {
   assignBookUpdatedAt,
   describePromoUnderdogStaleWarning,
   describeUnderdogOfferStaleWarning,
+  UNDERDOG_BOARD_OMIT_MS,
+  UNDERDOG_STALE_MS,
   underdogOfferIsRankable,
   underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
@@ -726,7 +728,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
-  return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow));
+  return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow, l.playerTd ? UNDERDOG_BOARD_OMIT_MS : UNDERDOG_STALE_MS));
 }
 
 function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
