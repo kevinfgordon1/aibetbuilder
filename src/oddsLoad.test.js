@@ -341,7 +341,7 @@ function fullPlan() {
   const listed = [...evTrusted[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(listed, [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
-    "fanatics", "hardrockbet", "espnbet", "bovada", "mybookieag", "betonlineag",
+    "fanatics", "hardrockbet", "courtside", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
     "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
     "underdog_predict",
   ]);
