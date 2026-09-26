@@ -2077,17 +2077,17 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         {" · "}Pregame polls Underdog and keeps the Polymarket, Kalshi, Novig, and 4Casters streams open. LIVE uses the same feeds, including in-game Underdog.
         {" · "}Click a game to see the main lines already on the board. These feeds do not publish an alternate ladder.
         {" · "}Kalshi, Polymarket, and Underdog Predict show implied win probability
-        {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)}
-        {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single}
-        {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)}
-        {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board}
+        {" · "}Green = best available odds across selected books (LIVE: while the game is moving, a number older than 60s cannot win Best; at halftime / intermission the allowance is 4 minutes)
+        {" · "}Best view default is Single (today's juice compare). Top 2 lines groups the two most popular spread/total points (unique books quoting that |point| on either side) and pairs both sides for each point; moneyline stays single)
+        {" · "}× on a book square hides that game / market / side from Best (session only; Show to unhide)
+        {" · "}× on the Game column hides the whole matchup for this session (Show all / chip to restore). Cell hides stay. Does not affect Promo or the public Odds Board)
         {" · "}LIVE keeps the Polymarket, Kalshi, Novig, and 4Casters streams open and refreshes Underdog on the phone interval. A feed with no price stays blank
         {" · "}Best names the winning book in full with its logo; +N if tied
         {" · "}The odds number flashes green when that cell improves for the bettor and red when it gets worse (~0.9s). Same-price ticks, age-only heartbeats, and the isolated 1s age clock do not flash or remount the grid. OFF / empty cells do not flash
         {" · "}$ under a price is that book's size / limit when the feed sends it
-        {" · "}muted age under a price is that line's last update (Best = newest contributing book)}
-        {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default}
-        {" · "}Book / Best / Game cells stay a fixed size — live ticks, ages, logos, OFF THE BOARD, and Best names clip or ellipsis inside the box. Wide slates scroll sideways instead of stretching columns}
+        {" · "}muted age under a price is that line's last update (Best = newest contributing book)
+        {" · "}⋮⋮ on a game or book header drags that row/column (arrow keys on the handle also nudge). Best Odds stays pinned. Order is saved for this user and survives refresh / live ticks — Reset games / Reset books restores the default)
+        {" · "}Book / Best / Game cells stay a fixed size — live ticks, ages, logos, OFF THE BOARD, and Best names clip or ellipsis inside the box. Wide slates scroll sideways instead of stretching columns)
       </div>
 
       {openGame && (

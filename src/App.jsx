@@ -92,7 +92,7 @@ import {
   underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
-import * as playerTd from "../lib/player-td.cjs";
+import * as playerTd from "../lib/player-td.mjs";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";

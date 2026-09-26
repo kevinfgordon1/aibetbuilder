@@ -4,7 +4,7 @@
 // materializing all C(n,3) objects (~1.3M at PARLAY_LEG_CAP=200). The shown
 // top-k set matches full sort (same EV ranking, no sampling).
 
-import * as playerTd from "../lib/player-td.cjs";
+import * as playerTd from "../lib/player-td.mjs";
 
 const { conflictsWithAny, promoLegsCorrelate } = playerTd;
 
