@@ -84,7 +84,7 @@ function futureGame() {
   const chips = matchingBookList(ALL_BOOKS, TRUSTED_BOOK_KEYS);
   assert.deepEqual(chips.map((b) => b.key), [
     "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
-    "fanatics", "hardrockbet", "courtside", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
+    "fanatics", "hardrockbet", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
     "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
     "underdog_predict",
   ]);

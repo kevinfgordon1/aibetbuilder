@@ -145,7 +145,6 @@ const ALL_BOOKS = [
   { key: "betrivers", label: "BetRivers", color: "#4a9eff", bg: "rgba(74,158,255,0.15)", logo: "https://www.betrivers.com/favicon.ico" },
   { key: "fanatics", label: "Fanatics", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: "https://sportsbook.fanatics.com/favicon.ico" },
   { key: "hardrockbet", label: "Hard Rock", color: "#d4af37", bg: "rgba(212,175,55,0.15)", logo: "https://app.hardrock.bet/favicon.ico" },
-  { key: "courtside", label: "Courtside", color: "#22c55e", bg: "rgba(34,197,94,0.15)", logo: null },
   { key: "betparx", label: "betPARX", color: "#e11d48", bg: "rgba(225,29,72,0.15)", logo: null },
   { key: "ballybet", label: "Bally Bet", color: "#dc2626", bg: "rgba(220,38,38,0.15)", logo: null },
   { key: "espnbet", label: "theScore Bet", color: "#ff6600", bg: "rgba(255,102,0,0.15)", logo: "https://sportsbook.thescore.bet/favicon.ico" },
@@ -167,7 +166,7 @@ const ALL_BOOKS = [
 
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
-  "fanatics", "hardrockbet", "courtside", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
+  "fanatics", "hardrockbet", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
   "bookmaker", "pinnacle", "betus", "kalshi", "novig", "prophetx", "polymarket",
   "underdog_predict",
 ]);
