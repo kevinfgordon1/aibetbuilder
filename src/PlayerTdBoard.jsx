@@ -100,51 +100,51 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
               fontSize: 13,
               fontWeight: 700,
               cursor: "pointer",
-              background: threshold === item.id ? "#10b981" : "rgba(255,255,255,0.05)",
-              color: threshold === item.id ? "#fff" : "#9ca3af",
+              background: threshold === item.id ? "var(--nob-gold, #10b981)" : "var(--nob-chip, rgba(255,255,255,0.05))",
+              color: threshold === item.id ? "var(--nob-on-gold, #fff)" : "var(--nob-text-2, #9ca3af)",
             }}
           >
             {item.label}
           </button>
         ))}
-        <span style={{ fontSize: 12, color: "#6b7280" }} data-td-threshold="anytime">
+        <span style={{ fontSize: 12, color: "var(--nob-muted, #6b7280)" }} data-td-threshold="anytime">
           Anytime touchdown (1+). Yes prices in American odds for games kicking off within 72 hours. Kalshi and Polymarket include the taker fee.
         </span>
       </div>
       {loading && (
-        <div style={{ padding: "28px 12px", textAlign: "center", color: "#6b7280", fontSize: 14 }}>
+        <div style={{ padding: "28px 12px", textAlign: "center", color: "var(--nob-muted, #6b7280)", fontSize: 14 }}>
           Loading player touchdowns…
         </div>
       )}
       {!loading && error && (
-        <div style={{ padding: "14px 16px", borderRadius: 10, border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", fontSize: 13 }}>
+        <div style={{ padding: "14px 16px", borderRadius: 10, border: "1px solid rgba(var(--nob-bad-rgb, 239,68,68),0.3)", color: "var(--nob-bad, #fca5a5)", fontSize: 13 }}>
           {error}
         </div>
       )}
       {!loading && !error && visible.length === 0 && (
-        <div style={{ padding: "28px 12px", textAlign: "center", color: "#6b7280", fontSize: 14 }}>
+        <div style={{ padding: "28px 12px", textAlign: "center", color: "var(--nob-muted, #6b7280)", fontSize: 14 }}>
           No player touchdown prices{needle ? ` for "${search}"` : ""}.
         </div>
       )}
       {!loading && !error && visible.map((game) => (
         <div key={game.gameKey} data-td-game={game.gameKey} style={{ marginBottom: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--nob-gold, #e8eaed)", marginBottom: 8 }}>
             {game.away} @ {game.home}
             {game.commence ? (
-              <span data-td-kickoff="1" style={{ marginLeft: 8, color: "#9ca3af", fontWeight: 600 }}>
+              <span data-td-kickoff="1" style={{ marginLeft: 8, color: "var(--nob-muted, #9ca3af)", fontWeight: 600 }}>
                 {formatKickoffEt(game.commence)}
               </span>
             ) : null}
           </div>
-          <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid var(--nob-border, rgba(255,255,255,0.06))", background: "var(--nob-surface, transparent)" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
               <thead>
-                <tr style={{ background: "rgba(255,255,255,0.03)" }}>
-                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, color: "#6b7280", letterSpacing: 0.6 }}>Player</th>
+                <tr style={{ background: "var(--nob-head, rgba(255,255,255,0.03))" }}>
+                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 11, color: "var(--nob-muted, #6b7280)", letterSpacing: 0.6, textTransform: "uppercase" }}>Player</th>
                   {BOOKS.map((book) => (
-                    <th key={book.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, color: "#6b7280" }}>{book.label}</th>
+                    <th key={book.key} style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, color: "var(--nob-muted, #6b7280)", textTransform: "uppercase", letterSpacing: 0.5 }}>{book.label}</th>
                   ))}
-                  <th style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, color: "#10b981" }}>Best</th>
+                  <th style={{ padding: "10px 8px", textAlign: "center", fontSize: 11, color: "var(--nob-good, #10b981)", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</th>
                 </tr>
               </thead>
               <tbody>
@@ -152,10 +152,10 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
                   const bestBook = playerTdBestBook(player, threshold);
                   const best = cellPrice(player, threshold, "best") ?? (player[threshold] && player[threshold].best);
                   return (
-                    <tr key={`${game.gameKey}:${player.name}`} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-                      <td style={{ padding: "8px 14px", color: "#e8eaed", fontSize: 13, fontWeight: 650 }}>
+                    <tr key={`${game.gameKey}:${player.name}`} style={{ borderTop: "1px solid var(--nob-divider, rgba(255,255,255,0.04))" }}>
+                      <td style={{ padding: "8px 14px", color: "var(--nob-gold, #e8eaed)", fontSize: 13, fontWeight: 650 }}>
                         {player.name}
-                        {player.team ? <span style={{ marginLeft: 8, color: "#6b7280", fontWeight: 600 }}>{player.team}</span> : null}
+                        {player.team ? <span style={{ marginLeft: 8, color: "var(--nob-muted, #6b7280)", fontWeight: 600 }}>{player.team}</span> : null}
                       </td>
                       {BOOKS.map((book) => {
                         const price = cellPrice(player, threshold, book.key);
@@ -168,8 +168,8 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
                               style={{
                                 fontVariantNumeric: "tabular-nums",
                                 fontWeight: 700,
-                                color: highlighted ? "#34d399" : "#e8eaed",
-                                background: highlighted ? "rgba(16,185,129,0.16)" : "transparent",
+                                color: highlighted ? "var(--nob-good, #34d399)" : "var(--nob-text, #e8eaed)",
+                                background: highlighted ? "rgba(var(--nob-good-rgb, 16,185,129),0.16)" : "transparent",
                                 borderRadius: 6,
                                 padding: "3px 8px",
                               }}
@@ -179,7 +179,7 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
                           </td>
                         );
                       })}
-                      <td style={{ padding: "8px", textAlign: "center", color: "#34d399", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
+                      <td style={{ padding: "8px", textAlign: "center", color: "var(--nob-good, #34d399)", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
                         {formatAmericanOdds(best)}
                       </td>
                     </tr>
@@ -191,7 +191,7 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
         </div>
       ))}
       {fetchedAt && (
-        <div style={{ fontSize: 11, color: "#4b5563", marginTop: 4 }}>
+        <div style={{ fontSize: 11, color: "var(--nob-faint, #4b5563)", marginTop: 4 }}>
           Player TD snapshot {fetchedAt}
         </div>
       )}
