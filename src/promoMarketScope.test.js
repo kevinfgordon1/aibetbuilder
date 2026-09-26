@@ -4,7 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   MARKET_SCOPES,
+  DEFAULT_MARKET_SCOPE,
   isMoneylineLeg,
+  normalizeMarketScope,
+  toggleMarketScope,
+  isMarketScopeSelected,
+  isAllMarketScope,
+  scopeIncludesProps,
+  scopeHasExplicitProps,
   isPlayerPropLeg,
   scopePromoLegs,
   marketScopeSummary,
@@ -57,9 +64,10 @@ const legs = [
     "Yankees -1.5",
     "o8.5",
     "Yankees TT o4.5",
-    "Travis Kelce 1+ TD",
   ]);
   assert.ok(main.every((l) => !l.isAlt));
+  // Main no longer includes player TD legs.
+  assert.ok(!main.some(isPlayerPropLeg));
 
   const alt = scopePromoLegs(legs, "alt");
   assert.deepEqual(alt.map((l) => l.name), [
@@ -83,6 +91,80 @@ const legs = [
   assert.deepEqual(scopePromoLegs(null, "ml"), []);
   assert.deepEqual(scopePromoLegs(undefined, "main"), []);
   assert.equal(scopePromoLegs(legs, "unknown"), legs);
+  assert.equal(scopePromoLegs(legs, ["all"]), legs);
+  assert.equal(scopePromoLegs(legs, []), legs);
+}
+
+// ── Multi-select union
+{
+  const names = (scope) => scopePromoLegs(legs, scope).map((l) => l.name);
+  assert.deepEqual(names(["main", "props"]), [
+    "Yankees ML",
+    "Red Sox ML",
+    "Yankees -1.5",
+    "o8.5",
+    "Yankees TT o4.5",
+    "Travis Kelce 1+ TD",
+  ]);
+  const mainProps = scopePromoLegs(legs, ["main", "props"]);
+  assert.ok(mainProps.some(isPlayerPropLeg));
+  assert.ok(mainProps.some((l) => !isPlayerPropLeg(l)));
+  assert.ok(!mainProps.some((l) => l.isAlt));
+  assert.deepEqual(names(["ml", "props"]), ["Yankees ML", "Red Sox ML", "Travis Kelce 1+ TD"]);
+  assert.deepEqual(names(["alt", "props"]), ["Yankees -2.5", "o9.5", "Yankees TT o5.5", "Travis Kelce 1+ TD"]);
+  // Union, no duplicates: Main already contains the MLs.
+  assert.deepEqual(names(["main", "ml"]), names(["main"]));
+  assert.equal(scopePromoLegs(legs, ["main", "alt", "props"]).length, legs.length);
+  // Array form matches the legacy single-string form.
+  for (const v of ["main", "ml", "alt", "props"]) assert.deepEqual(names([v]), names(v));
+}
+
+// ── normalize / migrate old single string values
+{
+  assert.deepEqual([...DEFAULT_MARKET_SCOPE], ["all"]);
+  assert.deepEqual(normalizeMarketScope("all"), ["all"]);
+  assert.deepEqual(normalizeMarketScope("main"), ["main"]);
+  assert.deepEqual(normalizeMarketScope("props"), ["props"]);
+  assert.deepEqual(normalizeMarketScope(""), ["all"]);
+  assert.deepEqual(normalizeMarketScope(undefined), ["all"]);
+  assert.deepEqual(normalizeMarketScope(null), ["all"]);
+  assert.deepEqual(normalizeMarketScope("bogus"), ["all"]);
+  assert.deepEqual(normalizeMarketScope([]), ["all"]);
+  assert.deepEqual(normalizeMarketScope(["props", "main", "main", "bogus"]), ["main", "props"]);
+  assert.deepEqual(normalizeMarketScope(["all", "main"]), ["all"]);
+  assert.equal(isAllMarketScope("all"), true);
+  assert.equal(isAllMarketScope(["main"]), false);
+}
+
+// ── chip toggles
+{
+  let s = ["all"];
+  s = toggleMarketScope(s, "main");
+  assert.deepEqual(s, ["main"]); // specific pick turns All off
+  s = toggleMarketScope(s, "props");
+  assert.deepEqual(s, ["main", "props"]);
+  assert.equal(isMarketScopeSelected(s, "main"), true);
+  assert.equal(isMarketScopeSelected(s, "props"), true);
+  assert.equal(isMarketScopeSelected(s, "all"), false);
+  s = toggleMarketScope(s, "main");
+  assert.deepEqual(s, ["props"]);
+  s = toggleMarketScope(s, "props");
+  assert.deepEqual(s, ["all"]); // deselecting everything falls back to All
+  assert.deepEqual(toggleMarketScope(["main", "alt", "props"], "all"), ["all"]); // All clears the others
+  assert.deepEqual(toggleMarketScope(["all"], "all"), ["all"]);
+  assert.deepEqual(toggleMarketScope("main", "props"), ["main", "props"]); // legacy string input
+  assert.deepEqual(toggleMarketScope(["main"], "bogus"), ["main"]);
+}
+
+// ── props checks
+{
+  assert.equal(scopeHasExplicitProps(["main", "props"]), true);
+  assert.equal(scopeHasExplicitProps("props"), true);
+  assert.equal(scopeHasExplicitProps(["all"]), false);
+  assert.equal(scopeHasExplicitProps(["main"]), false);
+  assert.equal(scopeIncludesProps(["all"]), true);
+  assert.equal(scopeIncludesProps(["main", "props"]), true);
+  assert.equal(scopeIncludesProps(["main", "alt"]), false);
 }
 
 {
@@ -92,12 +174,21 @@ const legs = [
   assert.equal(marketScopeSummary("props"), "player props");
   assert.equal(marketScopeSummary("all"), "all");
   assert.equal(marketScopeSummary(""), "all");
+  assert.equal(marketScopeSummary(["all"]), "all");
+  assert.equal(marketScopeSummary(["main", "props"]), "mains + player props");
+  assert.equal(marketScopeSummary(["props", "main"]), "mains + player props");
+  assert.equal(marketScopeSummary(["ml", "alt"]), "moneylines + alts");
+  assert.equal(marketScopeSummary([]), "all");
 }
 
 // ── App.jsx Extra Filters: chip row + scan pool uses shared helper
 {
-  assert.match(app, /import \{\s*MARKET_SCOPES,\s*scopePromoLegs,\s*marketScopeSummary,\s*\} from "\.\/promoMarketScope\.js"/);
-  assert.match(app, /const \[marketScope, setMarketScope\] = useState\("all"\)/);
+  assert.match(app, /import \{\s*MARKET_SCOPES,[^}]*scopePromoLegs,[^}]*marketScopeSummary,[^}]*toggleMarketScope,[^}]*\} from "\.\/promoMarketScope\.js"/);
+  assert.match(app, /const \[marketScopeRaw, setMarketScope\] = useState\(\(\) => \[\.\.\.DEFAULT_MARKET_SCOPE\]\)/);
+  assert.match(app, /normalizeMarketScope\(marketScopeRaw\)/);
+  assert.match(app, /setMarketScope\(prev => toggleMarketScope\(prev, opt\.val\)\)/);
+  assert.match(app, /scopeHasExplicitProps\(scanMarketScope\)/);
+  assert.doesNotMatch(app, /scanMarketScope [!=]== "props"/);
   assert.match(app, /scopePromoLegs\(promoLegsAll, scanMarketScope\)/);
   assert.match(app, /marketScopeSummary\(marketScope\)/);
   assert.match(app, /MARKET_SCOPES\.map\(opt =>/);

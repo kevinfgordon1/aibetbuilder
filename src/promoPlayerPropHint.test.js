@@ -12,6 +12,14 @@ assert.equal(playerPropEmptyDetail({ marketScope: "props", resultCount: 3, hidde
 assert.equal(playerPropEmptyDetail({ marketScope: "props", resultCount: 0, hidden: { liquidity: 0, matching: 0 } }), null);
 assert.equal(playerPropEmptyDetail({ marketScope: "props", resultCount: 0, hidden: null }), null);
 
+// Multi-select scope: props included alongside Main still shows the hint;
+// array / legacy-string forms both work; All and Main-only stay silent.
+assert.equal(playerPropEmptyDetail({ marketScope: ["all"], resultCount: 0, hidden: { liquidity: 5 } }), null);
+assert.equal(playerPropEmptyDetail({ marketScope: ["main"], resultCount: 0, hidden: { liquidity: 5 } }), null);
+assert.match(playerPropEmptyDetail({ marketScope: ["main", "props"], resultCount: 0, hidden: { liquidity: 5 } }), /^5 player-prop legs are hidden/);
+assert.match(playerPropEmptyDetail({ marketScope: ["props"], resultCount: 0, hidden: { matching: 2 } }), /^2 player-prop legs are hidden because/);
+assert.equal(playerPropEmptyDetail({ marketScope: ["main", "props"], resultCount: 4, hidden: { liquidity: 5 } }), null);
+
 const liq = playerPropEmptyDetail({ marketScope: "props", resultCount: 0, hidden: { liquidity: 372, matching: 0 } });
 assert.match(liq, /^372 player-prop legs are hidden by Hide low liquidity/);
 assert.match(liq, /Set Liquidity to All/);

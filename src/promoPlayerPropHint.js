@@ -5,6 +5,8 @@
 // have too little depth for the $500-profit walk, so Hide low liquidity can
 // empty the list even though the legs exist.
 
+import { scopeHasExplicitProps } from "./promoMarketScope.js";
+
 function plural(n, one, many) {
   return n === 1 ? one : many;
 }
@@ -27,7 +29,9 @@ export function playerPropHiddenCounts({ unfiltered, matched, liquid } = {}) {
 }
 
 export function playerPropEmptyDetail({ marketScope, resultCount, hidden } = {}) {
-  if (marketScope !== "props") return null;
+  // Shown whenever Player Props is one of the Markets picks (alone or with
+  // Main / Moneylines / Alt), and the whole scan came back empty.
+  if (!scopeHasExplicitProps(marketScope)) return null;
   if ((resultCount || 0) > 0) return null;
   const liquidity = sizeOf(hidden && hidden.liquidity);
   const matching = sizeOf(hidden && hidden.matching);
