@@ -165,7 +165,9 @@ function fullPlan() {
 {
   const client = createMockClient();
   await queryOddsCaches(client, promoPlan(new Set(["baseball_mlb"])));
-  assert.equal(client.calls.length, 2);
+  // odds_cache + event_odds_cache + player_prop_cache (MLB 1+ HR props).
+  assert.equal(client.calls.length, 3);
+  assert.equal(client.calls[2].table, "player_prop_cache");
   assert.equal(client.calls[0].table, "odds_cache");
   assert.deepEqual(client.calls[0].in, { col: "sport", vals: ["baseball_mlb"] });
   assert.equal(client.calls[1].table, "event_odds_cache");
@@ -192,6 +194,24 @@ function fullPlan() {
   const full = createMockClient();
   await queryOddsCaches(full, fullPlan());
   assert.ok(!full.calls.some((c) => c.table === "player_prop_cache"));
+}
+
+// ── Promo MLB reads player_prop_cache for 1+ HR; NFL + MLB reads both sports
+{
+  const mlbOnly = createMockClient();
+  const mlbPlan = promoPlan(new Set(["baseball_mlb"]));
+  assert.equal(mlbPlan.includePlayerProps, true);
+  assert.deepEqual(mlbPlan.playerPropSports, ["baseball_mlb"]);
+  await queryOddsCaches(mlbOnly, mlbPlan);
+  assert.ok(mlbOnly.calls.some((c) => c.table === "player_prop_cache" && c.eq && c.eq.val === "baseball_mlb"));
+  const both = createMockClient();
+  await queryOddsCaches(both, promoPlan(new Set(["americanfootball_nfl", "baseball_mlb"])));
+  const props = both.calls.find((c) => c.table === "player_prop_cache");
+  assert.ok(props && props.in && props.in.col === "sport");
+  assert.deepEqual([...props.in.vals].sort(), ["americanfootball_nfl", "baseball_mlb"]);
+  const nba = promoPlan(new Set(["basketball_nba"]));
+  assert.equal(nba.includePlayerProps, false);
+  assert.deepEqual(nba.playerPropSports, []);
 }
 
 // ── queryOddsCaches: full board skips event_odds_cache, still loads futures
