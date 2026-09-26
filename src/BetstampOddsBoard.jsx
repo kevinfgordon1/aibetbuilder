@@ -532,7 +532,6 @@ const NOB_ROOT_STYLE = {
   color: "var(--nob-text)",
   border: "1px solid #1c1c1c",
   borderRadius: 14,
-  padding: "18px 18px 14px",
 };
 
 const BOARD_SIDE_STYLE = (isBestCol, isBestCell, empty) => ({
@@ -1645,6 +1644,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       style={NOB_ROOT_STYLE}
     >
       <style>{`
+        .nob-theme { padding: 18px 18px 14px; }
+        @media (max-width: 600px) {
+          .nob-theme { padding: 12px 10px 10px; border-radius: 10px !important; }
+        }
         .nob-theme .obb-scroll { background: var(--nob-surface); }
         .nob-theme input::placeholder { color: var(--nob-faint); }
         .nob-theme input:focus { border-color: rgba(var(--nob-gold-rgb),0.55) !important; }
