@@ -77,6 +77,15 @@ import {
   fourcastersStreamUrl,
 } from "./venueLive.js";
 import PlayerTdBoard from "./PlayerTdBoard.jsx";
+
+// Same control as Moneyline / Spread / Totals. Player Props is NFL-only
+// because v1 is anytime touchdowns. Add another id here for a later prop board.
+const BOARD_MARKETS = [
+  { id: "ml", label: "Moneyline" },
+  { id: "spr", label: "Spread" },
+  { id: "tot", label: "Totals" },
+  { id: "props", label: "Player Props", sport: "americanfootball_nfl" },
+];
 import { consumeBetstampStream, nextBackoffMs } from "./betstampLive.js";
 import {
   FREE_FEED_POLL_MS,
@@ -991,7 +1000,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const [boardSport, setBoardSport] = useState(BETSTAMP_DEFAULT_SPORT);
   const nflBoard = boardSport === "americanfootball_nfl";
   useEffect(() => {
-    if (!nflBoard && market === "td") setMarket("ml");
+    if (!nflBoard && market === "props") setMarket("ml");
   }, [nflBoard, market]);
   const [liveOnly, setLiveOnly] = useState(false); // Pregame default. Never auto-enable LIVE.
   const [games, setGames] = useState([]);
@@ -1825,16 +1834,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       </div>
       <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        {["ml", "spr", "tot"].map((m) => (
-          <button key={m} type="button" data-board-market={m} onClick={() => setMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
-            {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : "Totals"}
+        {BOARD_MARKETS.filter((m) => !m.sport || boardSport === m.sport).map((m) => (
+          <button key={m.id} type="button" data-board-market={m.id} onClick={() => setMarket(m.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m.id ? "#fff" : "#6b7280" }}>
+            {m.label}
           </button>
         ))}
-        {nflBoard && (
-          <button type="button" data-board-market="td" onClick={() => setMarket("td")} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === "td" ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === "td" ? "#fff" : "#6b7280" }}>
-            Player TDs
-          </button>
-        )}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
         <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</span>
         <div
@@ -1970,15 +1974,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         </div>
       )}
 
-      {market === "td" && nflBoard && (
+      {market === "props" && nflBoard && (
         <PlayerTdBoard search={search} active />
       )}
 
-      {market !== "td" && loading && (
+      {market !== "props" && loading && (
         <div style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>Loading Polymarket, Kalshi, and Underdog…</div>
       )}
 
-      {market !== "td" && !loading && (
+      {market !== "props" && !loading && (
       <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
           <colgroup>

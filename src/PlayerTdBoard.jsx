@@ -3,8 +3,9 @@ import { formatAmericanOdds } from "./trueOddsLine.js";
 
 export const PLAYER_TD_POLL_MS = 45_000;
 
-// v1 is anytime only. Add ids from lib/player-td.js ENABLED_TD_MARKETS to show more.
-const THRESHOLDS = [
+// Player Props sub-selector. The first entry is the default. Add another
+// { id, label } here when a new prop type ships; the table already keys off id.
+export const PLAYER_PROP_TYPES = [
   { id: "anytime", label: "Anytime TD" },
 ];
 
@@ -28,7 +29,7 @@ export function playerTdBestBook(row, threshold) {
 }
 
 export default function PlayerTdBoard({ search = "", active = true } = {}) {
-  const [threshold, setThreshold] = useState("anytime");
+  const [threshold, setThreshold] = useState(PLAYER_PROP_TYPES[0].id);
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -81,12 +82,13 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
 
   return (
     <div data-player-td-board="1" data-td-poll-ms={PLAYER_TD_POLL_MS}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-        {THRESHOLDS.length > 1 && THRESHOLDS.map((item) => (
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Prop type" data-prop-type-selector="1">
+        {PLAYER_PROP_TYPES.map((item) => (
           <button
             key={item.id}
             type="button"
-            data-td-threshold={item.id}
+            data-prop-type={item.id}
+            aria-pressed={threshold === item.id}
             onClick={() => setThreshold(item.id)}
             style={{
               padding: "6px 14px",

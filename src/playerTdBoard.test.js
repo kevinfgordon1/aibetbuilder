@@ -8,10 +8,15 @@ const { boardYesAmerican, fairYesAmericanFromNo, noAskAmericanFromYesBid } = req
 
 const board = fs.readFileSync(new URL("./BetstampOddsBoard.jsx", import.meta.url), "utf8");
 const panel = fs.readFileSync(new URL("./PlayerTdBoard.jsx", import.meta.url), "utf8");
-assert.match(board, /data-board-market="td"/);
-assert.match(board, /Player TDs/);
+assert.match(board, /data-board-market=\{m\.id\}/);
+assert.match(board, /id: "props", label: "Player Props"/);
+assert.doesNotMatch(board, /Player TDs/);
+assert.doesNotMatch(board, /data-board-market="td"/);
+assert.match(board, /market === "props"/);
 assert.match(panel, /Anytime touchdown/);
-assert.match(panel, /id: "anytime"/);
+assert.match(panel, /id: "anytime", label: "Anytime TD"/);
+assert.match(panel, /PLAYER_PROP_TYPES\[0\]\.id/);
+assert.match(panel, /data-prop-type=\{item\.id\}/);
 assert.doesNotMatch(panel, /id: "two"|id: "first"/);
 assert.match(panel, /formatAmericanOdds/);
 assert.match(panel, /PLAYER_TD_POLL_MS = 45_000/);

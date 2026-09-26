@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   MARKET_SCOPES,
   isMoneylineLeg,
+  isPlayerPropLeg,
   scopePromoLegs,
   marketScopeSummary,
 } from "./promoMarketScope.js";
@@ -21,12 +22,14 @@ const legs = [
   { name: "o9.5", market: "TOT", isAlt: true },
   { name: "Yankees TT o4.5", market: "TT", isAlt: false },
   { name: "Yankees TT o5.5", market: "TT", isAlt: true },
+  { name: "Travis Kelce 1+ TD", market: "TD", playerTd: true, isAlt: false },
 ];
 
 {
-  assert.deepEqual(MARKET_SCOPES.map((o) => o.val), ["all", "main", "ml", "alt"]);
+  assert.deepEqual(MARKET_SCOPES.map((o) => o.val), ["all", "main", "ml", "alt", "props"]);
   assert.equal(MARKET_SCOPES.find((o) => o.val === "ml").label, "Moneylines");
   assert.equal(MARKET_SCOPES.find((o) => o.val === "main").label, "Main");
+  assert.equal(MARKET_SCOPES.find((o) => o.val === "props").label, "Player Props");
 }
 
 {
@@ -36,6 +39,11 @@ const legs = [
   assert.equal(isMoneylineLeg({ market: "TT" }), false);
   assert.equal(isMoneylineLeg({ name: "Yankees ML", market: "SPR" }), false);
   assert.equal(isMoneylineLeg(null), false);
+  assert.equal(isPlayerPropLeg({ market: "TD", playerTd: true }), true);
+  assert.equal(isPlayerPropLeg({ market: "TD" }), true);
+  assert.equal(isPlayerPropLeg({ market: "ML" }), false);
+  assert.equal(isPlayerPropLeg({ market: "SPR" }), false);
+  assert.equal(isPlayerPropLeg(null), false);
 }
 
 {
@@ -49,6 +57,7 @@ const legs = [
     "Yankees -1.5",
     "o8.5",
     "Yankees TT o4.5",
+    "Travis Kelce 1+ TD",
   ]);
   assert.ok(main.every((l) => !l.isAlt));
 
@@ -64,6 +73,10 @@ const legs = [
   assert.deepEqual(ml.map((l) => l.name), ["Yankees ML", "Red Sox ML"]);
   assert.ok(ml.every((l) => l.market === "ML"));
   assert.ok(!ml.some((l) => l.market === "SPR" || l.market === "TOT" || l.market === "TT"));
+
+  const props = scopePromoLegs(legs, "props");
+  assert.deepEqual(props.map((l) => l.name), ["Travis Kelce 1+ TD"]);
+  assert.ok(props.every(isPlayerPropLeg));
 }
 
 {
@@ -76,6 +89,7 @@ const legs = [
   assert.equal(marketScopeSummary("main"), "mains");
   assert.equal(marketScopeSummary("alt"), "alts");
   assert.equal(marketScopeSummary("ml"), "moneylines");
+  assert.equal(marketScopeSummary("props"), "player props");
   assert.equal(marketScopeSummary("all"), "all");
   assert.equal(marketScopeSummary(""), "all");
 }
