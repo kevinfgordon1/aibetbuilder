@@ -114,6 +114,7 @@ import {
 } from "./promoUiPerf.js";
 import {
   applyPmBlendToLeg,
+  preBlendStoredLadderLegs,
   pickHasLowLiquidity,
   trueOppAmerican,
   LOW_LIQUIDITY_LABEL,
@@ -2118,7 +2119,10 @@ export default function App() {
     const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
-    const promoLegsLiquid = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
+    const promoLegsLiquid = preBlendStoredLadderLegs(
+      filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs }),
+      { promoType, numLegs: scanNumLegs },
+    );
     // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
     // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
     if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {

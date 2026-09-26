@@ -320,6 +320,17 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
   };
 }
 
+// Legs that carry their own No ladder (player TDs from the props cron) are
+// blended before the parlay scan, so the scan ranks on the same $500 fair
+// the card shows. Other legs keep top-of-book until the page depth fetch.
+export function preBlendStoredLadderLegs(legs, ctx = {}) {
+  return (legs || []).map((leg) => {
+    if (!leg || !Array.isArray(leg.bestOppLevels) || !leg.bestOppLevels.length) return leg;
+    const blended = applyPmBlendToLeg(leg, null, ctx);
+    return blended && blended.pmBlend ? blended : leg;
+  });
+}
+
 export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
   const blends = {};
   const displayLegs = (legs || []).map((leg) => {
