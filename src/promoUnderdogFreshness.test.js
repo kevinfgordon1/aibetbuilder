@@ -512,10 +512,10 @@ const kick = new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
   assert.match(app, /⚠ \{warn\.message\}/);
   assert.match(app, /assignBookUpdatedAt/);
   assert.match(app, /ml_away_updatedAt/);
-  assert.match(app, /underdogOfferIsRankable\(l, quoteNow\)/);
+  assert.match(app, /underdogOfferIsRankable\(l, quoteNow, l\.playerTd \? UNDERDOG_BOARD_OMIT_MS : UNDERDOG_STALE_MS\)/);
   assert.match(app, /underdogOfferIsRankable\(l\)/);
   const promoEv = fs.readFileSync(path.join(dir, "../lib/promo-ev.js"), "utf8");
-  assert.match(promoEv, /underdogOfferIsRankable\(l, quoteNow\)/);
+  assert.match(promoEv, /underdogOfferIsRankable\(l, quoteNow, l\.playerTd \? UNDERDOG_BOARD_OMIT_MS : UNDERDOG_STALE_MS\)/);
   // Banner stays. Ranking excludes the stale offer instead of hiding cards in JSX.
   assert.doesNotMatch(app, /isUnderdogOddsStale\([^)]+\)\s*\?\s*null/);
 }

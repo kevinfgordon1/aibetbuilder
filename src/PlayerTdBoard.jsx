@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
+import * as playerTdLib from "../lib/player-td.js";
+
+const { formatKickoffEt } = playerTdLib;
 
 export const PLAYER_TD_POLL_MS = 45_000;
 
@@ -127,6 +130,11 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
         <div key={game.gameKey} data-td-game={game.gameKey} style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed", marginBottom: 8 }}>
             {game.away} @ {game.home}
+            {game.commence ? (
+              <span data-td-kickoff="1" style={{ marginLeft: 8, color: "#9ca3af", fontWeight: 600 }}>
+                {formatKickoffEt(game.commence)}
+              </span>
+            ) : null}
           </div>
           <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
