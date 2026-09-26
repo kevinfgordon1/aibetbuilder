@@ -113,7 +113,7 @@ const BestBookName = memo(function BestBookName({ book, extra = 0, title, size =
     >
       <BookLabel book={book} size={size} />
       {extra > 0 && (
-        <span style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>+{extra}</span>
+        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--nob-muted)", fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>+{extra}</span>
       )}
     </span>
   );
@@ -202,7 +202,7 @@ function LineAge({ updatedAt, ageTitle }) {
       data-stale={stale ? "1" : "0"}
       title={ageTitle || (clock ? `Last update ${clock}` : "Last update")}
       className="obb-clip"
-      style={{ fontSize: 9, color: stale ? "#f59e0b" : compactAgeTone(updatedAt, nowMs), fontWeight: stale ? 700 : 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
+      style={{ fontSize: 9, color: stale ? "var(--nob-warn)" : compactAgeTone(updatedAt, nowMs), fontWeight: stale ? 700 : 500, marginTop: 0, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1 }}
     >
       {stale ? `stale ${age}` : `${age} ago`}
     </div>
@@ -230,7 +230,7 @@ function RowAge({ game }) {
       data-row-age={age}
       data-stale={stale ? "1" : "0"}
       title="Newest price on this row"
-      style={{ color: stale ? "#f59e0b" : "#6b7280", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}
+      style={{ color: stale ? "var(--nob-warn)" : "var(--nob-muted)", fontWeight: 600, fontFamily: "'JetBrains Mono', monospace" }}
     >
       {stale ? `stale ${age}` : `updated ${age} ago`}
     </span>
@@ -241,7 +241,7 @@ function LiquidityCue({ size, inline = false }) {
   const label = fmtBoardSize(size);
   if (!label) return null;
   return (
-    <span data-liq={label} style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, lineHeight: 1.15, display: inline ? "inline" : "block" }}>
+    <span data-liq={label} style={{ fontSize: 9, color: "var(--nob-muted)", fontWeight: 500, lineHeight: 1.15, display: inline ? "inline" : "block" }}>
       {label}
     </span>
   );
@@ -277,7 +277,7 @@ const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, al
   }
   return (
     <>
-      {line && <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "#6b7280", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
+      {line && <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "var(--nob-muted)", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
       <div className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "nowrap", lineHeight: 1.15, maxWidth: "100%" }}>
         <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} title={feeTip} />
         {showBestMark && price != null && book && (
@@ -290,7 +290,7 @@ const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, al
           data-raw-ask={rawPrice}
           title={feeTip}
           className="obb-clip"
-          style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
+          style={{ fontSize: 10, color: "var(--nob-muted)", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
         >
           ask {formatAmericanOdds(rawPrice)}
         </div>
@@ -300,7 +300,7 @@ const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, al
           data-win-prob={winProb}
           title="Implied win probability"
           className="obb-clip"
-          style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
+          style={{ fontSize: 10, color: "var(--nob-muted)", fontWeight: 600, marginTop: 1, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.15 }}
         >
           {winProb}
         </div>
@@ -375,12 +375,12 @@ function BookSideCell({
         ...(last ? { borderBottom: "none" } : {}),
         ...(off ? {
           color: "#a8a29e",
-          background: "rgba(68, 45, 12, 0.38)",
-          boxShadow: "inset 0 0 0 1px rgba(245,158,11,0.28)",
+          background: "rgba(64,42,18,0.38)",
+          boxShadow: "inset 0 0 0 1px rgba(var(--nob-warn-rgb),0.28)",
         } : {}),
         ...(hidden ? {
-          color: "#6b7280",
-          background: "rgba(255,255,255,0.03)",
+          color: "var(--nob-muted)",
+          background: "var(--nob-chip)",
         } : {}),
         position: "relative",
       }}
@@ -413,7 +413,7 @@ function BookSideCell({
         {children}
       </div>
       {hidden && (
-        <div data-odds-hidden-label="true" style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", marginTop: 1, letterSpacing: 0.3, textTransform: "uppercase", lineHeight: 1.1 }}>
+        <div data-odds-hidden-label="true" style={{ fontSize: 9, fontWeight: 700, color: "var(--nob-text-2)", marginTop: 1, letterSpacing: 0.3, textTransform: "uppercase", lineHeight: 1.1 }}>
           hidden
         </div>
       )}
@@ -488,21 +488,61 @@ function fmtSignedLine(line) {
 }
 
 function ageTone(ms) {
-  if (ms == null) return "#6b7280";
-  if (ms <= 500) return "#10b981";
+  if (ms == null) return "var(--nob-muted)";
+  if (ms <= 500) return "var(--nob-good)";
   if (ms <= 1200) return "#eab308";
   return "#f97316";
 }
 
+// Scoped "Masterclass" dark/gold palette for the New Odds Board only. Every
+// color in this tab reads from these CSS variables on the board root, so no
+// other tab changes. Sampled from Kevin's reference screenshots.
+const NOB_THEME_VARS = {
+  "--nob-bg": "#141414",
+  "--nob-surface": "#181818",
+  "--nob-head": "#1f1f1f",
+  "--nob-warm": "#221d1a",
+  "--nob-chip": "#1f1f1f",
+  "--nob-chip-hover": "#262626",
+  "--nob-border": "#2a2a2a",
+  "--nob-border-strong": "#333333",
+  "--nob-divider": "#222222",
+  "--nob-gold": "#bc9e66",
+  "--nob-gold-rgb": "188,158,102",
+  "--nob-on-gold": "#17140f",
+  "--nob-text": "#e4e0d8",
+  "--nob-text-2": "#a8a49c",
+  "--nob-muted": "#8a8a8a",
+  "--nob-faint": "#5e5e5e",
+  "--nob-empty": "#3a3a3a",
+  "--nob-good": "#7cc49a",
+  "--nob-good-rgb": "124,196,154",
+  "--nob-good-bright": "#a6dcbb",
+  "--nob-bad": "#d88c84",
+  "--nob-bad-rgb": "216,140,132",
+  "--nob-bad-bright": "#eab3ac",
+  "--nob-warn": "#e0a04a",
+  "--nob-warn-rgb": "224,160,74",
+  "--nob-warn-bright": "#edc07e",
+};
+
+const NOB_ROOT_STYLE = {
+  ...NOB_THEME_VARS,
+  background: "var(--nob-bg)",
+  color: "var(--nob-text)",
+  border: "1px solid #1c1c1c",
+  borderRadius: 14,
+};
+
 const BOARD_SIDE_STYLE = (isBestCol, isBestCell, empty) => ({
   padding: "3px 4px",
   lineHeight: 1.15,
-  borderBottom: "1px solid rgba(255,255,255,0.03)",
+  borderBottom: "1px solid var(--nob-divider)",
   fontFamily: "'JetBrains Mono', monospace",
   fontSize: 13,
   fontWeight: 700,
-  color: empty ? "#2d3748" : (isBestCol || isBestCell) ? "#10b981" : "#e8eaed",
-  background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent",
+  color: empty ? "var(--nob-empty)" : (isBestCol || isBestCell) ? "var(--nob-good)" : "var(--nob-text)",
+  background: isBestCell ? "rgba(var(--nob-good-rgb),0.08)" : isBestCol ? "rgba(var(--nob-good-rgb),0.04)" : "transparent",
 });
 
 const LiveTickStrip = memo(function LiveTickStrip({
@@ -544,46 +584,46 @@ const LiveTickStrip = memo(function LiveTickStrip({
         marginBottom: 16,
         padding: "12px 14px",
         borderRadius: 12,
-        border: "1px solid rgba(16,185,129,0.18)",
-        background: "rgba(16,185,129,0.05)",
+        border: "1px solid var(--nob-border)",
+        background: "var(--nob-surface)",
       }}
     >
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Stream</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: streamStatus === "live" ? "#34d399" : "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>Stream</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: streamStatus === "live" ? "var(--nob-good)" : "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>
             {liveOnly ? streamStatus : "snapshot"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>
             {liveOnly ? "Reconciled" : "Refreshed"}
           </div>
-          <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div data-snapshot-age style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>
             {snapshotAt ? `${formatCompactAge(snapshotAt, nowMs) || "0ms"} ago` : "—"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>Last tick age</div>
           <div data-last-tick-age style={{ fontSize: 20, fontWeight: 800, color: ageTone(metrics.lastTickAgeMs), fontFamily: "'JetBrains Mono', monospace" }}>
             {liveOnly ? fmtMs(metrics.lastTickAgeMs) : "—"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>p50 inter-arrival</div>
-          <div data-p50 style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p50InterArrivalMs)}</div>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>p50 inter-arrival</div>
+          <div data-p50 style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p50InterArrivalMs)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>p95 inter-arrival</div>
-          <div data-p95 style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p95InterArrivalMs)}</div>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>p95 inter-arrival</div>
+          <div data-p95 style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.p95InterArrivalMs)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Tick lag</div>
-          <div data-tick-lag style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.lastLagMs)}</div>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>Tick lag</div>
+          <div data-tick-lag style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>{fmtMs(metrics.lastLagMs)}</div>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.6 }}>Ticks</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed", fontFamily: "'JetBrains Mono', monospace" }}>{metrics.eventCount}</div>
+          <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>Ticks</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>{metrics.eventCount}</div>
         </div>
       </div>
       {staleSoft.length > 0 && (
@@ -593,9 +633,9 @@ const LiveTickStrip = memo(function LiveTickStrip({
             marginBottom: 10,
             padding: "8px 10px",
             borderRadius: 8,
-            border: "1px solid rgba(245,158,11,0.35)",
-            background: "rgba(120,53,15,0.35)",
-            color: "#fbbf24",
+            border: "1px solid rgba(var(--nob-warn-rgb),0.35)",
+            background: "rgba(64,42,18,0.35)",
+            color: "var(--nob-warn)",
             fontSize: 12,
             fontWeight: 600,
             lineHeight: 1.4,
@@ -609,14 +649,14 @@ const LiveTickStrip = memo(function LiveTickStrip({
         {books.map((b) => {
           const row = metrics.perBook[b.key];
           return (
-            <span key={b.key} data-book-age={b.key} style={{ fontSize: 10, color: "#9ca3af", fontFamily: "'JetBrains Mono', monospace" }}>
+            <span key={b.key} data-book-age={b.key} style={{ fontSize: 10, color: "var(--nob-text-2)", fontFamily: "'JetBrains Mono', monospace" }}>
               {b.label} {row ? fmtMs(nowMs - row.lastAt) : "—"}
             </span>
           );
         })}
       </div>
       {!!metrics.ticks.length && (
-        <div data-tick-log="true" style={{ marginTop: 10, maxHeight: 92, overflow: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#9ca3af" }}>
+        <div data-tick-log="true" style={{ marginTop: 10, maxHeight: 92, overflow: "auto", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "var(--nob-text-2)" }}>
           {metrics.ticks.slice(0, 12).map((t, i) => (
             <div key={`${t.t}-${i}`}>
               {fmtClock(t.t)}  {(bookByKey(t.bookKey)?.label || t.bookKey || "").padEnd(10)}  {t.label}  {formatAmericanOdds(t.price)}
@@ -667,7 +707,7 @@ function renderPairedPointBlocks(rowGame, blocks, fields, books) {
           data-best-point-count={block.count}
           data-best-stack-pad={block.padded ? "1" : "0"}
           style={i > 0 ? {
-            borderTop: "1px solid rgba(16,185,129,0.28)",
+            borderTop: "1px solid rgba(var(--nob-good-rgb),0.28)",
             width: "100%",
           } : { width: "100%" }}
         >
@@ -681,7 +721,7 @@ function renderPairedPointBlocks(rowGame, blocks, fields, books) {
             data-best-stack-side="bot"
             style={{
               width: "100%",
-              borderTop: "1px solid rgba(16,185,129,0.12)",
+              borderTop: "1px solid rgba(var(--nob-good-rgb),0.12)",
             }}
           >
             {renderStackedSide(rowGame, fields.bot, block.bot, books)}
@@ -741,7 +781,7 @@ function renderBookColumn({
   if (pairBlocks) {
     const emptyPairs = !cell.pointStacks.length || cell.pointStacks.every((block) => block.top?.price == null && block.bot?.price == null);
     return (
-      <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colW, maxWidth: colW, overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+      <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colW, maxWidth: colW, overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid var(--nob-border)" : "none" }}>
         <div
           className="obb-side obb-side-paired"
           data-odds-side="paired"
@@ -757,7 +797,7 @@ function renderBookColumn({
   }
 
   return (
-    <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colW, maxWidth: colW, overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+    <td key={b.key} data-obb-cell={b.key} style={{ padding: 0, textAlign: "center", verticalAlign: "middle", width: colW, maxWidth: colW, overflow: "hidden", borderLeft: b.key === "draftkings" ? "2px solid var(--nob-border)" : "none" }}>
       <div style={{ display: "flex", flexDirection: "column", width: "100%", overflow: "hidden" }}>
         <BookSideCell
           gameId={rowGame.id}
@@ -895,12 +935,12 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
       onDragOver={onBoardDragOver("game", game.id)}
       onDrop={onBoardDrop("game", game.id)}
       onDragLeave={() => onBoardDragLeave("game", game.id)}
-      style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", cursor: "pointer" }}
+      style={{ borderBottom: "1px solid var(--nob-divider)", cursor: "pointer" }}
     >
       <td
         className="obb-game"
         data-hide-game-cell="true"
-        style={{ padding: 0, width: OBB_TEAM_COL_WIDTH, maxWidth: OBB_TEAM_COL_WIDTH, overflow: "hidden", position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}
+        style={{ padding: 0, width: OBB_TEAM_COL_WIDTH, maxWidth: OBB_TEAM_COL_WIDTH, overflow: "hidden", position: "sticky", left: 0, background: "var(--nob-surface)", zIndex: 1, borderRight: "1px solid var(--nob-border)" }}
       >
         <button
           type="button"
@@ -918,7 +958,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
           ×
         </button>
         <div style={{ padding: "4px 10px 2px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#4b5563", marginBottom: 1, lineHeight: 1.15 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "var(--nob-faint)", marginBottom: 1, lineHeight: 1.15 }}>
             <BoardGrip
               kind="game"
               itemKey={String(game.id)}
@@ -928,19 +968,19 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
               onDragEnd={onDragEnd}
             />
             {game.is_live ? (
-              <span style={{ color: "#34d399", fontWeight: 700 }}>LIVE</span>
+              <span style={{ color: "var(--nob-good)", fontWeight: 700 }}>LIVE</span>
             ) : (
               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
             )}
             <RowAge game={game} />
           </div>
-          <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 2, lineHeight: 1.15 }}>
+          <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "var(--nob-gold)", textDecoration: "underline", textDecorationColor: "rgba(var(--nob-gold-rgb),0.35)", textUnderlineOffset: 2, marginBottom: 2, lineHeight: 1.15 }}>
             {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
           </div>
-          <div className="obb-game-name" title={game.home} style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.15 }}>
+          <div className="obb-game-name" title={game.home} style={{ fontSize: 13, fontWeight: 600, color: "var(--nob-gold)", textDecoration: "underline", textDecorationColor: "rgba(var(--nob-gold-rgb),0.35)", textUnderlineOffset: 2, lineHeight: 1.15 }}>
             {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
           </div>
-          <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
+          <div style={{ fontSize: 10, color: "var(--nob-gold)", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
         </div>
       </td>
       <OddsBoardBookCells
@@ -1524,8 +1564,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     if (!rows.length) return null;
     return (
       <div data-alt-section={section} style={{ marginBottom: 22 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>{title}</div>
-        <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--nob-text-2)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 8 }}>{title}</div>
+        <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid var(--nob-border)" }}>
           <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
             <colgroup>
               <col data-obb-col="game" style={{ width: teamColWidth }} />
@@ -1534,10 +1574,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               ))}
             </colgroup>
             <thead>
-              <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-                <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 0, background: "#12131a", zIndex: 2 }}>Line</th>
+              <tr style={{ background: "var(--nob-head)", borderBottom: "1px solid var(--nob-border)" }}>
+                <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 0, background: "var(--nob-head)", zIndex: 2 }}>Line</th>
                 {visibleBooks.map((b) => (
-                  <th key={b.key} data-book-header={b.key} style={{ padding: "10px 6px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                  <th key={b.key} data-book-header={b.key} style={{ padding: "10px 6px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "var(--nob-good)" : "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.5, width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid var(--nob-border)" : "none" }}>
                     {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
                   </th>
                 ))}
@@ -1545,24 +1585,24 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={`${section}-${row.line ?? "ml"}`} data-alt-line={row.line ?? "ml"} data-alt-main={row.isMain ? "1" : "0"} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: row.isMain ? "rgba(59,130,246,0.04)" : "transparent" }}>
-                  <td style={{ padding: "6px 12px", width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", position: "sticky", left: 0, background: row.isMain ? "#101624" : "#0f1016", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#e8eaed", lineHeight: 1.2 }}>
+                <tr key={`${section}-${row.line ?? "ml"}`} data-alt-line={row.line ?? "ml"} data-alt-main={row.isMain ? "1" : "0"} style={{ borderBottom: "1px solid var(--nob-divider)", background: row.isMain ? "rgba(var(--nob-gold-rgb),0.05)" : "transparent" }}>
+                  <td style={{ padding: "6px 12px", width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", position: "sticky", left: 0, background: row.isMain ? "var(--nob-warm)" : "var(--nob-surface)", zIndex: 1, borderRight: "1px solid var(--nob-border)", fontSize: 13, fontWeight: 600, color: "var(--nob-text)", lineHeight: 1.2 }}>
                     <div>{labelFor(row)}</div>
-                    {row.isMain && <div style={{ fontSize: 10, color: "#60a5fa", fontWeight: 700, marginTop: 2 }}>MAIN</div>}
+                    {row.isMain && <div style={{ fontSize: 10, color: "var(--nob-gold)", fontWeight: 700, marginTop: 2 }}>MAIN</div>}
                     {marketKey === "ml" && (
-                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "var(--nob-muted)", marginTop: 4, fontWeight: 500 }}>
                         <div>{openGame?.away}</div>
                         <div style={{ marginTop: 3 }}>{openGame?.home}</div>
                       </div>
                     )}
                     {marketKey === "spr" && (
-                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "var(--nob-muted)", marginTop: 4, fontWeight: 500 }}>
                         <div>{openGame?.awayAbbr || openGame?.away} {fmtSignedLine(row.line)}</div>
                         <div style={{ marginTop: 3 }}>{openGame?.homeAbbr || openGame?.home} {fmtSignedLine(row.line == null ? null : -row.line)}</div>
                       </div>
                     )}
                     {marketKey === "tot" && (
-                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 500 }}>
+                      <div style={{ fontSize: 11, color: "var(--nob-muted)", marginTop: 4, fontWeight: 500 }}>
                         <div>Over {row.line}</div>
                         <div style={{ marginTop: 3 }}>Under {row.line}</div>
                       </div>
@@ -1599,8 +1639,20 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       data-live-reconcile-ms={liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS}
       data-live-paint-key={liveBoardPaintKey(games) ? "1" : "0"}
       data-live-clock="isolated"
+      data-nob-theme="masterclass"
+      className="nob-theme"
+      style={NOB_ROOT_STYLE}
     >
       <style>{`
+        .nob-theme { padding: 18px 18px 14px; }
+        @media (max-width: 600px) {
+          .nob-theme { padding: 12px 10px 10px; border-radius: 10px !important; }
+        }
+        .nob-theme .obb-scroll { background: var(--nob-surface); }
+        .nob-theme input::placeholder { color: var(--nob-faint); }
+        .nob-theme input:focus { border-color: rgba(var(--nob-gold-rgb),0.55) !important; }
+        .nob-theme button:focus-visible { outline: 1px solid rgba(var(--nob-gold-rgb),0.7); outline-offset: 1px; }
+        .nob-theme [data-book-logo] { filter: brightness(0.9) saturate(0.9); }
         .obb-side, .obb-game { position: relative; }
         .obb-grid {
           table-layout: fixed;
@@ -1650,7 +1702,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           border-radius: 3px;
           border: 1px solid transparent;
           background: transparent;
-          color: #4b5563;
+          color: var(--nob-faint);
           font-size: 10px;
           font-weight: 600;
           line-height: 1;
@@ -1671,15 +1723,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         .obb-game:hover .obb-hide:hover,
         .obb-game:focus-within .obb-hide:focus {
           opacity: 0.85;
-          color: #9ca3af;
-          background: rgba(10,11,15,0.7);
+          color: var(--nob-text-2);
+          background: rgba(20,20,20,0.75);
         }
         .obb-side[data-hidden="1"] .obb-hide {
           opacity: 1;
           pointer-events: auto;
-          color: #d1d5db;
-          background: rgba(10,11,15,0.92);
-          border-color: rgba(255,255,255,0.14);
+          color: var(--nob-text);
+          background: rgba(20,20,20,0.94);
+          border-color: var(--nob-border-strong);
           font-size: 11px;
           font-weight: 700;
           min-width: 24px;
@@ -1700,7 +1752,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           border: none;
           border-radius: 3px;
           background: transparent;
-          color: #6b7280;
+          color: var(--nob-muted);
           font-size: 11px;
           line-height: 1;
           letter-spacing: -1px;
@@ -1709,13 +1761,13 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           font-family: 'DM Sans', sans-serif;
         }
         .obb-grip:hover, .obb-grip:focus {
-          color: #e8eaed;
-          background: rgba(255,255,255,0.08);
+          color: var(--nob-text);
+          background: var(--nob-chip-hover);
           outline: none;
         }
         .obb-grip:active { cursor: grabbing; }
         tr[data-drag-over="1"], th[data-drag-over="1"] {
-          box-shadow: inset 0 2px 0 #3b82f6;
+          box-shadow: inset 0 2px 0 var(--nob-gold);
         }
         tr[data-dragging="1"], th[data-dragging="1"] { opacity: 0.45; }
         .obb-flash {
@@ -1725,11 +1777,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           font-variant-numeric: tabular-nums;
         }
         @keyframes obb-flash-up {
-          0%, 20% { color: #86efac; background: rgba(16,185,129,0.38); text-shadow: 0 0 10px rgba(52,211,153,0.55); }
+          0%, 20% { color: var(--nob-good-bright); background: rgba(var(--nob-good-rgb),0.38); text-shadow: 0 0 10px rgba(var(--nob-good-rgb),0.55); }
           100% { color: inherit; background: transparent; text-shadow: none; }
         }
         @keyframes obb-flash-down {
-          0%, 20% { color: #fca5a5; background: rgba(239,68,68,0.38); text-shadow: 0 0 10px rgba(248,113,113,0.5); }
+          0%, 20% { color: var(--nob-bad-bright); background: rgba(var(--nob-bad-rgb),0.38); text-shadow: 0 0 10px rgba(var(--nob-bad-rgb),0.5); }
           100% { color: inherit; background: transparent; text-shadow: none; }
         }
         .obb-flash-up { animation: obb-flash-up 0.9s ease-out; }
@@ -1745,9 +1797,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           width: 100%;
           padding: 2px 4px;
           border-radius: 5px;
-          border: 1px dashed rgba(251,191,36,0.55);
-          background: rgba(120,53,15,0.55);
-          color: #fbbf24;
+          border: 1px dashed rgba(var(--nob-warn-rgb),0.55);
+          background: rgba(64,42,18,0.55);
+          color: var(--nob-warn);
           font-size: 12px;
           font-weight: 800;
           letter-spacing: 0.7px;
@@ -1762,17 +1814,17 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           font-size: 8px;
           font-weight: 700;
           letter-spacing: 0.4px;
-          color: #fcd34d;
+          color: var(--nob-warn-bright);
           opacity: 0.9;
         }
       `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 14, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>New Odds Board</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-gold)", letterSpacing: 0.2 }}>New Odds Board</div>
+          <div style={{ fontSize: 12, color: "var(--nob-muted)", marginTop: 4 }}>
             Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters appear when the server has credentials. No sportsbook columns.
           </div>
-          <div data-fee-legend="1" style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
+          <div data-fee-legend="1" style={{ fontSize: 12, color: "var(--nob-text-2)", marginTop: 2 }}>
             {TAKER_FEE_LEGEND}
           </div>
         </div>
@@ -1785,9 +1837,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             style={{
               padding: "6px 14px",
               borderRadius: 999,
-              border: "1px solid rgba(59,130,246,0.35)",
-              background: "rgba(59,130,246,0.12)",
-              color: "#93c5fd",
+              border: "1px solid rgba(var(--nob-gold-rgb),0.5)",
+              background: "rgba(var(--nob-gold-rgb),0.10)",
+              color: "var(--nob-gold)",
               fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
@@ -1802,9 +1854,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             style={{
               padding: "6px 14px",
               borderRadius: 999,
-              border: liveOnly ? "1px solid rgba(16,185,129,0.45)" : "1px solid rgba(255,255,255,0.1)",
-              background: liveOnly ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.04)",
-              color: liveOnly ? "#34d399" : "#9ca3af",
+              border: liveOnly ? "1px solid rgba(var(--nob-good-rgb),0.45)" : "1px solid var(--nob-border-strong)",
+              background: liveOnly ? "rgba(var(--nob-good-rgb),0.15)" : "var(--nob-chip)",
+              color: liveOnly ? "var(--nob-good)" : "var(--nob-text-2)",
               fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
@@ -1827,25 +1879,25 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {BETSTAMP_SPORTS.map((s) => (
-          <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.id ? "#fff" : "#6b7280" }}>
+          <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "var(--nob-gold)" : "var(--nob-chip)", color: boardSport === s.id ? "var(--nob-on-gold)" : "var(--nob-text-2)", boxShadow: boardSport === s.id ? "none" : "inset 0 0 0 1px var(--nob-border)" }}>
             {s.label}
           </button>
         ))}
       </div>
-      <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
+      <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "var(--nob-chip)", border: "1px solid var(--nob-border-strong)", borderRadius: 8, color: "var(--nob-text)", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         {BOARD_MARKETS.filter((m) => !m.sport || boardSport === m.sport).map((m) => (
-          <button key={m.id} type="button" data-board-market={m.id} onClick={() => setMarket(m.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m.id ? "#fff" : "#6b7280" }}>
+          <button key={m.id} type="button" data-board-market={m.id} onClick={() => setMarket(m.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m.id ? "var(--nob-gold)" : "var(--nob-chip)", color: market === m.id ? "var(--nob-on-gold)" : "var(--nob-text-2)", boxShadow: market === m.id ? "none" : "inset 0 0 0 1px var(--nob-border)" }}>
             {m.label}
           </button>
         ))}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</span>
+        <div style={{ width: 1, height: 24, background: "var(--nob-border-strong)", margin: "0 4px" }} />
+        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.5 }}>Best</span>
         <div
           data-best-view-toggle="true"
           role="group"
           aria-label="Best odds view"
-          style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}
+          style={{ display: "inline-flex", borderRadius: 6, overflow: "hidden", border: "1px solid var(--nob-border-strong)" }}
         >
           {[
             { id: "single", label: "Single" },
@@ -1863,15 +1915,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 fontSize: 12,
                 fontWeight: 700,
                 cursor: "pointer",
-                background: bestView === opt.id ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.03)",
-                color: bestView === opt.id ? "#34d399" : "#6b7280",
+                background: bestView === opt.id ? "rgba(var(--nob-gold-rgb),0.16)" : "var(--nob-chip)",
+                color: bestView === opt.id ? "var(--nob-gold)" : "var(--nob-muted)",
               }}
             >
               {opt.label}
             </button>
           ))}
         </div>
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 24, background: "var(--nob-border-strong)", margin: "0 4px" }} />
         {catalogBooks.map((b) => (
           <button
             key={b.key}
@@ -1887,9 +1939,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               fontSize: 12,
               fontWeight: 600,
               cursor: "pointer",
-              background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)",
-              color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563",
-              border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)",
+              background: selectedBooks.has(b.key) ? "rgba(var(--nob-gold-rgb),0.10)" : "var(--nob-chip)",
+              color: selectedBooks.has(b.key) ? "var(--nob-gold)" : "var(--nob-faint)",
+              border: selectedBooks.has(b.key) ? "1px solid rgba(var(--nob-gold-rgb),0.55)" : "1px solid var(--nob-border)",
             }}
           >
             <BookLabel book={b} size={14} />
@@ -1900,7 +1952,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             type="button"
             data-reset-book-order="true"
             onClick={resetBookOrder}
-            style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "#9ca3af", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+            style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--nob-border-strong)", background: "var(--nob-chip)", color: "var(--nob-text-2)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
           >
             Reset books
           </button>
@@ -1910,7 +1962,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             type="button"
             data-reset-game-order="true"
             onClick={resetGameOrder}
-            style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "#9ca3af", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+            style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--nob-border-strong)", background: "var(--nob-chip)", color: "var(--nob-text-2)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
           >
             Reset games
           </button>
@@ -1923,10 +1975,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           data-hidden-game-count={hiddenBoardGames.length}
           style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}
         >
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#9ca3af" }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--nob-text-2)" }}>
             {hiddenBoardGames.length} hidden
           </span>
-          <span style={{ color: "#4b5563" }}>·</span>
+          <span style={{ color: "var(--nob-faint)" }}>·</span>
           <button
             type="button"
             data-show-all-games="true"
@@ -1934,9 +1986,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             style={{
               padding: "4px 10px",
               borderRadius: 6,
-              border: "1px solid rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.04)",
-              color: "#d1d5db",
+              border: "1px solid var(--nob-border-strong)",
+              background: "var(--nob-chip)",
+              color: "var(--nob-text)",
               fontSize: 12,
               fontWeight: 700,
               cursor: "pointer",
@@ -1954,9 +2006,9 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               style={{
                 padding: "4px 10px",
                 borderRadius: 999,
-                border: "1px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.03)",
-                color: "#9ca3af",
+                border: "1px solid var(--nob-border)",
+                background: "var(--nob-chip)",
+                color: "var(--nob-text-2)",
                 fontSize: 11,
                 fontWeight: 600,
                 cursor: "pointer",
@@ -1969,7 +2021,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       )}
 
       {feedNote && (
-        <div data-feed-note="true" style={{ padding: "12px 16px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", color: "#9ca3af", marginBottom: 16, fontSize: 13 }}>
+        <div data-feed-note="true" style={{ padding: "12px 16px", borderRadius: 12, border: "1px solid var(--nob-border)", color: "var(--nob-text-2)", marginBottom: 16, fontSize: 13 }}>
           {feedNote}
         </div>
       )}
@@ -1979,11 +2031,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       )}
 
       {market !== "props" && loading && (
-        <div style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>Loading Polymarket, Kalshi, and Underdog…</div>
+        <div style={{ padding: "40px", textAlign: "center", color: "var(--nob-faint)", fontSize: 14 }}>Loading Polymarket, Kalshi, and Underdog…</div>
       )}
 
       {market !== "props" && !loading && (
-      <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="obb-scroll" style={{ overflowX: "auto", borderRadius: 12, border: "1px solid var(--nob-border)" }}>
         <table className="obb-grid" data-col-layout="fixed" style={{ borderCollapse: "collapse", tableLayout: "fixed", width: tableWidth, minWidth: tableWidth, maxWidth: tableWidth }}>
           <colgroup>
             <col data-obb-col="game" style={{ width: teamColWidth }} />
@@ -1992,8 +2044,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             ))}
           </colgroup>
           <thead>
-            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
+            <tr style={{ background: "var(--nob-head)", borderBottom: "1px solid var(--nob-border)" }}>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, maxWidth: teamColWidth, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: 0, background: "var(--nob-head)", zIndex: 2 }}>Game</th>
               {visibleBooks.map((b) => (
                 <th
                   key={b.key}
@@ -2006,7 +2058,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                   onDragLeave={() => {
                     if (dragOver?.kind === "book" && dragOver.key === b.key) setDragOver(null);
                   }}
-                  style={{ padding: "12px 6px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}
+                  style={{ padding: "12px 6px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "var(--nob-good)" : "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.5, width: colWidthFor(b.key), maxWidth: colWidthFor(b.key), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid var(--nob-border)" : "none" }}
                 >
                   <span className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, maxWidth: "100%" }}>
                     {b.key !== "best" && (
@@ -2028,7 +2080,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           <tbody>
             {grouped.length === 0 && (
               <tr>
-                <td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
+                <td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "var(--nob-faint)", fontSize: 14 }}>
                   {hiddenBoardGames.length
                     ? "Hidden matchups are listed above — Show all to restore"
                     : `No ${liveOnly ? "live" : "pregame"} games on Polymarket, Kalshi, or Underdog${search ? ` for "${search}"` : ""}`}
@@ -2037,8 +2089,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             )}
             {grouped.map((block) => (
               <Fragment key={block.dateKey}>
-                <tr style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{block.dateKey}</td>
+                <tr style={{ background: "var(--nob-warm)", borderBottom: "1px solid var(--nob-divider)" }}>
+                  <td colSpan={visibleBooks.length + 1} style={{ padding: "7px 16px", fontSize: 11, fontWeight: 700, color: "var(--nob-gold)", textTransform: "uppercase", letterSpacing: 0.8 }}>{block.dateKey}</td>
                 </tr>
                 {block.games.map((game) => (
                   <OddsBoardGameRow
@@ -2070,7 +2122,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         </table>
       </div>
       )}
-      <div style={{ fontSize: 11, color: "#4b5563", marginTop: 12 }}>
+      <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
         Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
         {" · "}Moneyline from Polymarket, Kalshi, and Underdog. Novig and 4Casters also show moneyline when configured. Underdog, Novig, and 4Casters show the main spread and total; Polymarket and Kalshi cells stay blank there.
         {" · "}A blank — means this feed has no quote for that side. It is not an error.
@@ -2111,8 +2163,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
               position: "relative",
               width: "min(1100px, 100%)",
               height: "100%",
-              background: "#0a0b0f",
-              borderLeft: "1px solid rgba(255,255,255,0.08)",
+              background: "var(--nob-surface)",
+              borderLeft: "1px solid var(--nob-border)",
               overflow: "auto",
               padding: "18px 18px 28px",
               boxSizing: "border-box",
@@ -2124,23 +2176,23 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                   type="button"
                   data-alt-close="true"
                   onClick={closeAlts}
-                  style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "#e8eaed", fontSize: 12, fontWeight: 700, cursor: "pointer", marginBottom: 10 }}
+                  style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--nob-border-strong)", background: "var(--nob-chip)", color: "var(--nob-text)", fontSize: 12, fontWeight: 700, cursor: "pointer", marginBottom: 10 }}
                 >
                   ← Board
                 </button>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#e8eaed" }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-text)" }}>
                   {openGame.away} @ {openGame.home}
                 </div>
-                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "var(--nob-muted)", marginTop: 4 }}>
                   Main lines on this board. Polymarket and Kalshi are moneyline. Underdog, and Novig or 4Casters when configured, may also show the main spread and total. No alternate ladder.
                 </div>
               </div>
             </div>
             {altLoading && !altLadders && (
-              <div style={{ padding: "36px 12px", textAlign: "center", color: "#6b7280", fontSize: 14 }}>Loading alt lines…</div>
+              <div style={{ padding: "36px 12px", textAlign: "center", color: "var(--nob-muted)", fontSize: 14 }}>Loading alt lines…</div>
             )}
             {altError && (
-              <div style={{ padding: "14px 16px", borderRadius: 10, border: "1px solid rgba(239,68,68,0.3)", color: "#fca5a5", marginBottom: 16, fontSize: 13 }}>
+              <div style={{ padding: "14px 16px", borderRadius: 10, border: "1px solid rgba(var(--nob-bad-rgb),0.3)", color: "var(--nob-bad)", marginBottom: 16, fontSize: 13 }}>
                 {altError}
               </div>
             )}
@@ -2150,7 +2202,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                 {renderAltSection("Spreads", "spr", altLadders.spreads, "spr", (row) => `Away ${fmtSignedLine(row.line)}`)}
                 {renderAltSection("Totals", "tot", altLadders.totals, "tot", (row) => `Total ${row.line}`)}
                 {!altLadders.moneyline && !altLadders.spreads.length && !altLadders.totals.length && (
-                  <div style={{ padding: "36px 12px", textAlign: "center", color: "#6b7280", fontSize: 14 }}>
+                  <div style={{ padding: "36px 12px", textAlign: "center", color: "var(--nob-muted)", fontSize: 14 }}>
                     No moneyline, spread, or total from these feeds for this game.
                   </div>
                 )}
