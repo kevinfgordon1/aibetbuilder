@@ -105,7 +105,7 @@ export default function LiveDeskFilledOrders({ fills, stale, failed, note, style
                         )}
                       </td>
                       <td style={{ ...td, whiteSpace: "nowrap", color: "#9ca3af" }}>{txt(row.venue, "Polymarket US")}{txt(row.role) ? <div style={{ fontSize: 10, color: "#6b7280" }}>{row.role}</div> : null}</td>
-                      <td style={{ ...td, fontFamily: mono, fontSize: 11, color: "#9ca3af", wordBreak: "break-all" }}>{txt(row.orderId, "—")}</td>
+                      <td style={{ ...td, fontFamily: mono, fontSize: 11, color: "#9ca3af", whiteSpace: "nowrap" }}>{txt(row.orderId, "—")}</td>
                     </tr>
                     {p && (
                       <tr>
