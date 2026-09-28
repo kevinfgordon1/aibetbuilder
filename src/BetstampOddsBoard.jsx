@@ -1019,9 +1019,10 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const venuesOn = firstPartyPmLiveEnabled();
-  // Novig and 4Casters stay off until their streams say the server has
+  // Novig joins once its stream (the odds relay, public v3 book, no key)
+  // sends a packet. 4Casters stays off until its stream says the server has
   // credentials. needs-credentials omits the column. A blank column means
-  // the credential is set and this slate has no price.
+  // the feed is up and this slate has no price.
   const [novigOn, setNovigOn] = useState(false);
   const [fourcastersOn, setFourcastersOn] = useState(false);
   const books = useMemo(() => {
@@ -1149,7 +1150,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       setSnapshotAt(Date.now());
       setLoading(false);
       setFeedNote(phoneFailed
-        ? "Underdog phone didn't respond. Polymarket and Kalshi still show when they have a game. Novig and 4Casters show when the server has credentials."
+        ? "Underdog phone didn't respond. Polymarket, Kalshi, and Novig still show when they have a game. 4Casters shows when the server has credentials."
         : null);
     };
 

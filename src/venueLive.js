@@ -86,11 +86,10 @@ export function polymarketBoardUrl({ league } = {}) {
   return venuePath("/api/polymarket-board", "/board", { league, venue: "polymarket" });
 }
 
+// Novig rides the odds relay like Polymarket and Kalshi (public v3 book,
+// optional signed websocket). /api/novig-stream is the no-relay fallback.
 export function novigStreamUrl({ league } = {}) {
-  const p = new URLSearchParams();
-  if (league) p.set("league", league);
-  const q = p.toString();
-  return q ? `/api/novig-stream?${q}` : "/api/novig-stream";
+  return venuePath("/api/novig-stream", "/stream", { league, venue: "novig" });
 }
 
 export function fourcastersStreamUrl({ league } = {}) {
