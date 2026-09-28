@@ -460,6 +460,15 @@ const GB_MARKET = {
   assert.equal(deskErrorText("Sign in required."), "Sign in required.");
   assert.equal(deskErrorText(null, "Could not load the desk (500)."), "Could not load the desk (500).");
   assert.equal(deskErrorText({}), "Could not load the desk.");
+  assert.equal(
+    deskErrorText('{"title":"Error 1015: You are being rate limited","status":429,"error_code":1015}'),
+    "Polymarket is rate-limiting us, retrying in 45s",
+  );
+  assert.equal(
+    deskErrorText({ title: "Error 1015: You are being rate limited", status: 429, error_code: 1015, retryAfter: 37 }),
+    "Polymarket is rate-limiting us, retrying in 37s",
+  );
+  assert.equal(deskErrorText("Polymarket is rate-limiting us, retrying in 42s"), "Polymarket is rate-limiting us, retrying in 42s");
 }
 
 {

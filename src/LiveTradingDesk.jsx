@@ -6,6 +6,7 @@ import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
+import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLimit, mergeDeskBoard } from "./liveDeskRefresh";
 
 let supabaseClient = null;
 function supabase() {
@@ -164,8 +165,17 @@ function LiveTradingDeskView({ user }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [cancelId, setCancelId] = useState("");
+  const [freshness, setFreshness] = useState({
+    positionsFailed: false,
+    ordersFailed: false,
+    positionsStale: false,
+    ordersStale: false,
+  });
   const slugRef = useRef("");
   const seq = useRef(0);
+  const boardRef = useRef(null);
+  const delayRef = useRef(DESK_REFRESH_MS);
+  const armRef = useRef(() => {});
 
   const market = board && board.market && board.market.slug === slug ? board.market : null;
 
@@ -230,13 +240,41 @@ function LiveTradingDeskView({ user }) {
       let data = null;
       try { data = await res.json(); } catch (_) { data = null; }
       if (id !== seq.current) return;
+      const limited = res.status === 429 || isDeskRateLimit(data) || isDeskRateLimit(data && data.error);
       if (!res.ok || !data || data.ok === false) {
-        setError(deskErrorText(data && data.error, "Could not load the desk (" + res.status + ")."));
+        const delay = deskRefreshDelayMs({ rateLimited: limited, retryAfter: data && data.retryAfter });
+        delayRef.current = delay;
+        setError(limited
+          ? deskRateLimitMessage(Math.round(delay / 1000))
+          : deskErrorText(data && data.error, "Could not load the desk (" + res.status + ")."));
+        if (limited) {
+          const prev = boardRef.current;
+          const hasPos = !!(prev && Array.isArray(prev.positions) && prev.positions.length);
+          const hasOrd = !!(prev && Array.isArray(prev.orders) && prev.orders.length);
+          setFreshness({
+            positionsFailed: true,
+            ordersFailed: true,
+            positionsStale: hasPos,
+            ordersStale: hasOrd,
+          });
+        }
         setLoading(false);
         return;
       }
-      setBoard(data);
-      setError("");
+      const merged = mergeDeskBoard(boardRef.current, data);
+      boardRef.current = merged.board;
+      setBoard(merged.board);
+      setFreshness(merged.freshness);
+      if (data.rateLimited || limited) {
+        const delay = deskRefreshDelayMs({ rateLimited: true, retryAfter: data.retryAfter });
+        delayRef.current = delay;
+        setError(deskRateLimitMessage(Math.round(delay / 1000)));
+      } else {
+        delayRef.current = DESK_REFRESH_MS;
+        const section = data.sectionErrors || {};
+        const msg = [section.positions, section.orders, section.activity].filter((part) => typeof part === "string" && part).join(" ");
+        setError(msg);
+      }
       setLoading(false);
     } catch (err) {
       if (id !== seq.current) return;
@@ -251,12 +289,33 @@ function LiveTradingDeskView({ user }) {
 
   useEffect(() => {
     if (!canSeeOwnerTools(user)) return undefined;
-    load(slugRef.current);
-    const timer = setInterval(() => {
-      if (document.visibilityState === "hidden") return;
-      load(slugRef.current, { silent: true });
-    }, 12000);
-    return () => clearInterval(timer);
+    let stopped = false;
+    let timer = 0;
+    let ticket = 0;
+    const arm = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { pump(true); }, delayRef.current);
+    };
+    armRef.current = arm;
+    const pump = (silent) => {
+      if (stopped) return;
+      // Do not hit Polymarket while the tab is hidden. The timer keeps
+      // running so a visible tab resumes on the current delay.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        arm();
+        return;
+      }
+      const mine = ++ticket;
+      load(slugRef.current, { silent }).finally(() => {
+        if (!stopped && mine === ticket) arm();
+      });
+    };
+    pump(false);
+    return () => {
+      stopped = true;
+      armRef.current = () => {};
+      window.clearTimeout(timer);
+    };
   }, [user]);
 
   function preferBuy() {
@@ -410,7 +469,15 @@ function LiveTradingDeskView({ user }) {
       let data = null;
       try { data = await res.json(); } catch (_) { data = null; }
       if (!res.ok || !data || data.ok === false) {
-        setError(deskErrorText(data && data.error, "Order was not accepted (" + res.status + ")."));
+        const limited = res.status === 429 || isDeskRateLimit(data) || isDeskRateLimit(data && data.error);
+        if (limited) {
+          delayRef.current = deskRefreshDelayMs({ rateLimited: true, retryAfter: data && data.retryAfter });
+          seq.current += 1;
+          armRef.current();
+        }
+        setError(limited
+          ? deskRateLimitMessage(Math.round(delayRef.current / 1000))
+          : deskErrorText(data && data.error, "Order was not accepted (" + res.status + ")."));
         return;
       }
       clearRestForm();
@@ -444,7 +511,15 @@ function LiveTradingDeskView({ user }) {
       let data = null;
       try { data = await res.json(); } catch (_) { data = null; }
       if (!res.ok || !data || data.ok === false) {
-        setError(deskErrorText(data && data.error, "Cancel failed (" + res.status + ")."));
+        const limited = res.status === 429 || isDeskRateLimit(data) || isDeskRateLimit(data && data.error);
+        if (limited) {
+          delayRef.current = deskRefreshDelayMs({ rateLimited: true, retryAfter: data && data.retryAfter });
+          seq.current += 1;
+          armRef.current();
+        }
+        setError(limited
+          ? deskRateLimitMessage(Math.round(delayRef.current / 1000))
+          : deskErrorText(data && data.error, "Cancel failed (" + res.status + ")."));
         return;
       }
       setCancelId("");
@@ -518,10 +593,16 @@ function LiveTradingDeskView({ user }) {
 
       <div className="desk-grid">
         <section style={card}>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Open positions</div>
+          <div style={{ fontSize: 13, fontWeight: 800 }}>Open positions{freshness.positionsStale ? " · stale" : ""}</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Every Polymarket US position stays listed. Click an NFL moneyline to hedge that game. A spread, total, or other board will not load.</div>
+          {freshness.positionsStale && (
+            <div style={{ color: "#fcd34d", fontSize: 12, marginTop: 8 }}>Last loaded positions, marked stale until Polymarket accepts a refresh.</div>
+          )}
           {loading && !board && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>Loading Polymarket US…</div>}
-          {!loading && positions.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>No open Polymarket US positions.</div>}
+          {!loading && positions.length === 0 && !freshness.positionsFailed && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>No open Polymarket US positions.</div>}
+          {!loading && positions.length === 0 && freshness.positionsFailed && (
+            <div style={{ color: "#fcd34d", fontSize: 13, marginTop: 14 }}>Positions did not load. This is not an empty book.</div>
+          )}
           <div className="desk-list">
             {positions.filter((row) => row && typeof row === "object").map((row, index) => {
               const on = row.slug === slug;
@@ -770,8 +851,14 @@ function LiveTradingDeskView({ user }) {
         </section>
 
         <section style={card}>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Open orders</div>
-          {orders.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>No resting orders.</div>}
+          <div style={{ fontSize: 13, fontWeight: 800 }}>Open orders{freshness.ordersStale ? " · stale" : ""}</div>
+          {freshness.ordersStale && (
+            <div style={{ color: "#fcd34d", fontSize: 12, marginTop: 8 }}>Last loaded orders, marked stale until Polymarket accepts a refresh.</div>
+          )}
+          {orders.length === 0 && !freshness.ordersFailed && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>No resting orders.</div>}
+          {orders.length === 0 && freshness.ordersFailed && (
+            <div style={{ color: "#fcd34d", fontSize: 13, marginTop: 12 }}>Open orders did not load.</div>
+          )}
           <div className="desk-list">
             {orders.filter((order) => order && typeof order === "object").map((order, index) => (
               <div key={typeof order.id === "string" && order.id ? order.id : "ord-" + index} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
