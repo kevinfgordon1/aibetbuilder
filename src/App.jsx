@@ -2400,12 +2400,16 @@ export default function App() {
     const american = kind === "freebet"
       ? p.parlayOdds
       : decimalToAmerican(1 + p.boostedProfit / stake);
+    const promoKind = kind === "freebet" ? "freebet" : promoType;
     setComboPrefill(buildPromoComboPrefill({
       stake,
       american,
       combinedProb: p.combinedProb,
       legs: p.legs,
       kind,
+      promoType: promoKind,
+      sportsbook: activePromoBookData?.label || "",
+      boostPct: promoKind === "boost" ? boostPct : "",
     }));
     setActiveTab("combo");
   };

@@ -602,14 +602,33 @@ export function recommendedFillFromProb(combinedProb) {
   return recommendedFillFromFair(fairAmericanFromProb(combinedProb));
 }
 
+// Promo Builder promo type → Combo Locks "Bet type" <select> value.
+// Combo Locks options are exactly: "cash" (Cash), "boost" (Profit boost),
+// "freebet" (Free bet). No Sweat has no option, so it stays Cash.
+// "boost" is label/metadata only — lockKind() treats it as cash, so hedge
+// contracts / profit match a manual Cash entry at the same boosted odds.
+export const PROMO_TYPE_TO_COMBO_KIND = { boost: "boost", freebet: "freebet", nosweat: "cash" };
+
+export function comboKindForPromo(promoType, kind) {
+  if (promoType && Object.prototype.hasOwnProperty.call(PROMO_TYPE_TO_COMBO_KIND, promoType)) {
+    return PROMO_TYPE_TO_COMBO_KIND[promoType];
+  }
+  if (kind === "freebet" || kind === "boost") return kind;
+  return "cash";
+}
+
 // Promo Builder → Combo Locks create-form payload. Identity only — never inserts.
 // kind "freebet" tags stake as free-bet face value and book American (not boosted).
+// sportsbook → free-text "Sportsbook — optional"; boostPct only for profit boosts.
 export function buildPromoComboPrefill({
   stake,
   american,
   combinedProb,
   legs,
   kind = "cash",
+  promoType,
+  sportsbook,
+  boostPct,
   nonce,
 } = {}) {
   const fair = fairAmericanFromProb(combinedProb);
@@ -617,6 +636,8 @@ export function buildPromoComboPrefill({
   const mapped = (legs || []).map((l) => ({
     name: l.name, market: l.market, game: l.game, commence_time: l.commence_time, sport: l.sport,
   }));
+  const comboKind = comboKindForPromo(promoType, kind);
+  const pct = Number(boostPct);
   return {
     nonce: nonce ?? Date.now(),
     stake,
@@ -624,7 +645,9 @@ export function buildPromoComboPrefill({
     fair,
     fill: recommendedFillFromFair(fair),
     mode: "1x",
-    kind: kind === "freebet" ? "freebet" : "cash",
+    kind: comboKind,
+    sportsbook: sportsbook ? String(sportsbook).trim() : "",
+    boostPct: comboKind === "boost" && boostPct !== "" && boostPct != null && Number.isFinite(pct) ? pct : "",
     starts: earliestCommence(mapped),
     label: mapped.map((l) => l.name).join(" + "),
     labelEdited: true,
