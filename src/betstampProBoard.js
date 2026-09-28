@@ -12,6 +12,13 @@
 import { betstampSnapshotUrl } from "./betstampLive.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import { betstampOddsBoardBooks, bookByKey, UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
+import {
+  isMainMarket,
+  lineFieldFor,
+  marketIsBetstampPolymarketOtB,
+  marketSide,
+  normalizeBetType,
+} from "./betstampNormalize.js";
 
 // LIVE: every 5s → 3 × 720 = 2,160 Betstamp GETs per visible hour.
 // Pregame: every 15s → 720 GETs per visible hour. Hidden tabs skip polls.
@@ -106,4 +113,80 @@ export function underdogSlateForLeague(slate, league) {
 export function withUnderdogPhone(games, slate, league) {
   if (!slate) return games || [];
   return applyUnderdogPhoneQuotes(games || [], underdogSlateForLeague(slate, league));
+}
+
+// ── Polymarket (193) OTB hold ──────────────────────────────────────────
+// Betstamp's 193 feed briefly swaps a cell's real row for an is_otb row from
+// another Polymarket contract; marketIsOffered drops those, which would blank
+// the cell for that poll. On the snapshot rebuild, keep the last good
+// (non-OTB) 193 price for that cell for up to POLYMARKET_OTB_HOLD_MS instead.
+// Only cells whose snapshot row is a 193 OTB row are held; a row that is
+// simply gone still blanks.
+export const POLYMARKET_OTB_HOLD_MS = 60_000;
+const PM_KEY = "polymarket";
+const PM_LINE_FIELD = { spr_away: "spr_away_line", spr_home: "spr_home_line", tot_over: "tot_line", tot_under: "tot_line" };
+const PM_OPPOSITE = { spr_away: "spr_home", spr_home: "spr_away" };
+
+/**
+ * Remember good Polymarket cells and fill 193-OTB gaps from that memory.
+ * `memory` is a Map owned by the caller (one per board session). Returns a
+ * new games array; games with no held cell keep their identity.
+ */
+export function holdPolymarketOtbCells(games, markets, memory, { nowMs = Date.now(), holdMs = POLYMARKET_OTB_HOLD_MS } = {}) {
+  const list = games || [];
+  if (!(memory instanceof Map)) return list;
+  // 1. Record every good (painted) Polymarket cell.
+  for (const g of list) {
+    const row = g?.bookOdds?.[PM_KEY];
+    if (!row) continue;
+    for (const field of PRICE_FIELDS) {
+      const price = row[field];
+      if (price == null || !Number.isFinite(Number(price))) continue;
+      const lineField = PM_LINE_FIELD[field];
+      memory.set(`${g.id}|${field}`, {
+        price,
+        size: row[`${field}_size`] ?? null,
+        line: lineField ? row[lineField] ?? null : null,
+        updatedAt: g.bookLineUpdatedAt?.[PM_KEY]?.[field] ?? null,
+        at: nowMs,
+      });
+    }
+  }
+  // 2. Drop expired memory.
+  for (const [k, v] of memory) if (!(nowMs - v.at <= holdMs)) memory.delete(k);
+  // 3. Fill cells whose snapshot row was a 193 OTB substitute.
+  const byId = new Map(list.map((g, i) => [String(g.id), i]));
+  let out = null;
+  for (const market of markets || []) {
+    if (!marketIsBetstampPolymarketOtB(market) || !isMainMarket(market)) continue;
+    const idx = byId.get(String(market.fixture_id));
+    if (idx == null) continue;
+    const game = (out || list)[idx];
+    const field = lineFieldFor(normalizeBetType(market.bet_type), marketSide(market, game));
+    if (!field) continue;
+    const row = game.bookOdds?.[PM_KEY] || {};
+    if (row[field] != null) continue;
+    const held = memory.get(`${game.id}|${field}`);
+    if (!held) continue;
+    const lineField = PM_LINE_FIELD[field];
+    if (field === "tot_over" || field === "tot_under") {
+      if (row.tot_line != null && held.line != null && Number(row.tot_line) !== Number(held.line)) continue;
+    } else if (PM_OPPOSITE[field]) {
+      const opp = PM_OPPOSITE[field];
+      const oppLine = row[`${opp}_line`];
+      if (row[opp] != null && oppLine != null && held.line != null && Number(oppLine) !== -Number(held.line)) continue;
+    }
+    if (!out) out = list.slice();
+    const nextRow = { ...row, [field]: held.price, [`${field}_size`]: held.size };
+    if (lineField && held.line != null) nextRow[lineField] = held.line;
+    const next = { ...game, bookOdds: { ...game.bookOdds, [PM_KEY]: nextRow } };
+    if (held.updatedAt != null) {
+      next.bookLineUpdatedAt = {
+        ...(game.bookLineUpdatedAt || {}),
+        [PM_KEY]: { ...(game.bookLineUpdatedAt?.[PM_KEY] || {}), [field]: held.updatedAt },
+      };
+    }
+    out[idx] = next;
+  }
+  return out || list;
 }

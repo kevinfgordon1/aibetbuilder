@@ -13,7 +13,10 @@ import {
   underdogSlateForLeague,
   BETSTAMP_BOARD_UNDERDOG_POLL_MS,
   BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS,
+  holdPolymarketOtbCells,
+  POLYMARKET_OTB_HOLD_MS,
 } from "./betstampProBoard.js";
+import { gamesFromBetstampSnapshot as pmHoldSnapshot } from "./betstampNormalize.js";
 import { gamesFromFreeFeeds, FREE_FEED_POLL_MS, FREE_FEED_LIVE_POLL_MS } from "./freeFeedBoard.js";
 import {
   betstampOddsBoardBooks,
@@ -171,3 +174,83 @@ assert.match(board, /withUnderdogPhone\(/);
 assert.match(board, /betstampOddsBoardColumns\(\)/);
 
 console.log("betstampProBoard tests passed");
+
+// Polymarket (193) OTB hold: the snapshot rebuild keeps the last good 193
+// price for up to 60s when the cell's row is a 193 OTB substitute.
+{
+  assert.equal(POLYMARKET_OTB_HOLD_MS, 60_000);
+  const fid = "019e2c24-13fb-76fb-9ad8-b88cb1074cb2";
+  const fixtures = [{
+    id: fid, league: "NFL", date: "2026-09-29T00:15:00Z", status: "created",
+    home_abbr: "CHI", away_abbr: "PHI", home_team: "Chicago Bears", away_team: "Philadelphia Eagles",
+  }];
+  const row = (bet_type, side_type, odds, extra = {}) => ({
+    odd_provider_id: 193, odds, number: 0, bet_type, side_type,
+    side: side_type === "Away" ? "PHI" : side_type === "Home" ? "CHI" : side_type,
+    period: "FT", is_alt: false, is_live: false, is_otb: false, fixture_id: fid,
+    updated_at: "2026-09-28T21:14:38Z", ...extra,
+  });
+  const goodMarkets = [
+    row("Moneyline", "Away", 1.5348723),
+    row("Moneyline", "Home", 2.62016743),
+    row("Spread", "Away", 2.03053931, { number: -3.5 }),
+    row("Spread", "Home", 1.84347089, { number: 3.5 }),
+    row("Total", "Over", 1.99, { number: 42.5 }),
+    row("Total", "Under", 1.878, { number: 42.5 }),
+  ];
+  const t0 = Date.parse("2026-09-28T21:15:00Z");
+  const memory = new Map();
+  const build = (markets, nowMs) => holdPolymarketOtbCells(
+    pmHoldSnapshot({ markets, fixtures, teams: [], nowMs }), markets, memory, { nowMs },
+  );
+  const g0 = build(goodMarkets, t0)[0];
+  assert.equal(g0.bookOdds.polymarket.ml_away, -187);
+
+  const otbMarkets = goodMarkets.map((m) => (
+    m.bet_type === "Moneyline" && m.side_type === "Away"
+      ? { ...m, odds: 1.11751, is_otb: true, provider_market_id: "4866730" }
+      : m.bet_type === "Spread" && m.side_type === "Home"
+        ? { ...m, odds: 1.5, is_otb: true }
+        : m
+  ));
+  const g1 = build(otbMarkets, t0 + 15_000)[0];
+  assert.equal(g1.bookOdds.polymarket.ml_away, -187, "OTB ML falls back to last good price, never -851");
+  assert.equal(g1.bookOdds.polymarket.ml_home, 162);
+  assert.equal(g1.bookOdds.polymarket.spr_home, decimalToAmericanLocal(1.84347089), "OTB spread held");
+  assert.equal(g1.bookOdds.polymarket.spr_home_line, 3.5);
+
+  const g2 = build(otbMarkets, t0 + 55_000)[0];
+  assert.equal(g2.bookOdds.polymarket.ml_away, -187, "still held inside 60s of the last good print");
+  const g3 = build(otbMarkets, t0 + 61_000)[0];
+  assert.equal(g3.bookOdds.polymarket.ml_away, null, "hold expires after 60s: blank, not -851");
+
+  // A row that is simply gone (not a 193 OTB row) is not held.
+  const mem2 = new Map();
+  const b2 = (markets, nowMs) => holdPolymarketOtbCells(
+    pmHoldSnapshot({ markets, fixtures, teams: [], nowMs }), markets, mem2, { nowMs },
+  );
+  b2(goodMarkets, t0);
+  const gone = b2(goodMarkets.filter((m) => !(m.bet_type === "Moneyline" && m.side_type === "Away")), t0 + 5_000)[0];
+  assert.equal(gone.bookOdds.polymarket.ml_away, null);
+
+  // Spread moved: the held line must agree with the live opposite side.
+  const mem3 = new Map();
+  const b3 = (markets, nowMs) => holdPolymarketOtbCells(
+    pmHoldSnapshot({ markets, fixtures, teams: [], nowMs }), markets, mem3, { nowMs },
+  );
+  b3(goodMarkets, t0);
+  const moved = goodMarkets.map((m) => (
+    m.bet_type === "Spread" && m.side_type === "Away" ? { ...m, number: -2.5, is_otb: true }
+      : m.bet_type === "Spread" && m.side_type === "Home" ? { ...m, number: 2.5, odds: 1.95 } : m
+  ));
+  const gm = b3(moved, t0 + 5_000)[0];
+  assert.equal(gm.bookOdds.polymarket.spr_away, null, "held -3.5 price is not paired with a +2.5 home line");
+
+  // No memory → no-op, same array.
+  const plain = pmHoldSnapshot({ markets: goodMarkets, fixtures, teams: [], nowMs: t0 });
+  assert.equal(holdPolymarketOtbCells(plain, goodMarkets, null), plain);
+}
+
+function decimalToAmericanLocal(d) {
+  return d >= 2 ? Math.round((d - 1) * 100) : Math.round(-100 / (d - 1));
+}

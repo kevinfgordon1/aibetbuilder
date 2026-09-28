@@ -578,6 +578,12 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(marketIsOffered({ odds: 6.5, otb: true }), true);
   assert.equal(marketIsOffered({ odds: 1.91, off_the_board: true }), true);
   assert.equal(marketIsOffered({ is_otb: true }), false, "OTB with no price is OFF");
+  // Betstamp Polymarket (193): any OTB row is a wrong-market substitute.
+  assert.equal(marketIsOffered({ odds: 1.11751, is_otb: true, odd_provider_id: 193 }), false, "193 priced OTB is not offered");
+  assert.equal(marketIsOffered({ odds: 1.84, is_otb: true, odd_provider_id: 193, bet_type: "Spread" }), false);
+  assert.equal(marketIsOffered({ odds: 1.5348723, is_otb: false, odd_provider_id: 193 }), true, "193 on-board row stays");
+  assert.equal(marketIsOffered({ odds: 1.91, is_otb: true, odd_provider_id: 194 }), true, "Kalshi priced OTB unchanged");
+  assert.equal(marketIsOffered({ odds: 1.91, is_otb: true, odd_provider_id: 614 }), true, "soft book priced OTB unchanged");
   assert.equal(marketIsOffered({ odds: null, is_otb: true }), false);
   assert.equal(marketIsOffered({ odds: 1, is_otb: true }), false, "decimal 1 is not offerable");
   assert.equal(marketIsOffered({ odds: 1.91, active: false }), false);
@@ -873,9 +879,11 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
     const g = games[0];
     const selected = new Set(BETSTAMP_TRIAL_BOOKS.map((b) => b.key));
     const liveOpts = { nowMs: now, maxBestAgeMs: LIVE_BEST_ODDS_MAX_AGE_MS };
+    // Polymarket (193) is excluded: Betstamp's 193 OTB rows are other
+    // contracts mislabelled as this market, so they never paint.
     const softKeys = [
       "fanduel", "draftkings", "williamhill_us", "pinnacle", "betonlineag",
-      "circa", "bet365", "prophetx", "polymarket",
+      "circa", "bet365", "prophetx",
     ];
     for (const key of softKeys) {
       assert.equal(g.bookOdds[key].spr_away, decimalToAmerican(1.09), `${key} away priced`);
@@ -889,6 +897,8 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
       assert.equal(cell.top, decimalToAmerican(1.09));
       assert.equal(cell.bot, decimalToAmerican(6.5));
     }
+    assert.equal(g.bookOdds.polymarket.spr_away, null, "193 priced is_otb is not offered");
+    assert.equal(g.bookOdds.polymarket.spr_home, null);
     assert.equal(g.bookOdds.kalshi.spr_away, decimalToAmerican(1.20));
     assert.equal(g.bookOdds.underdog_predict.spr_away, null, "book 196 spread is not a phone price");
     assert.equal(g.bookOdds.underdog_predict.spr_home, null);
@@ -1209,3 +1219,42 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
 }
 
 console.log("betstampNormalize.test.js ok");
+
+// Regression: PHI @ CHI Sep 28 2026. Betstamp 193 swapped the real ML row
+// (market 3695205, PHI 1.5348723 = -187) for an OTB row from another
+// Polymarket contract (PHI 1.11751 = -851). The cell must blank, not paint -851.
+{
+  const fixtureId = "019e2c24-13fb-76fb-9ad8-b88cb1074cb2";
+  const fix = {
+    id: fixtureId, league: "NFL", date: "2026-09-29T00:15:00Z", status: "created",
+    home_abbr: "CHI", away_abbr: "PHI", home_team: "Chicago Bears", away_team: "Philadelphia Eagles",
+    home_id: "chi", away_id: "phi",
+  };
+  const ml = (providerId, sideType, odds, extra = {}) => ({
+    odd_provider_id: providerId, odds, number: 0,
+    side: sideType === "Away" ? "PHI" : "CHI", side_type: sideType,
+    bet_type: "Moneyline", period: "FT", is_alt: false, is_live: false, is_otb: false,
+    prop_name: "", fixture_id: fixtureId, updated_at: "2026-09-28T20:31:47Z", ...extra,
+  });
+  const nowMs = Date.parse("2026-09-28T20:31:50Z");
+  const bad = gamesFromBetstampSnapshot({
+    fixtures: [fix],
+    teams: [],
+    nowMs,
+    markets: [
+      ml(193, "Away", 1.11751, { is_otb: true, limit: 1905.49, provider_market_id: "4866730" }),
+      ml(193, "Home", 2.62016743, { provider_market_id: "3695205" }),
+      ml(194, "Away", 1.5, { is_otb: true }),
+      ml(194, "Home", 2.66),
+    ],
+  });
+  assert.equal(bad.length, 1);
+  assert.equal(bad[0].bookOdds.polymarket.ml_away, null, "wrong-market 193 OTB row does not paint -851");
+  assert.equal(bad[0].bookOdds.polymarket.ml_home, decimalToAmerican(2.62016743));
+  assert.equal(bad[0].bookOdds.kalshi.ml_away, -200, "non-193 priced OTB still paints");
+  const good = gamesFromBetstampSnapshot({
+    fixtures: [fix], teams: [], nowMs,
+    markets: [ml(193, "Away", 1.5348723, { provider_market_id: "3695205" })],
+  });
+  assert.equal(good[0].bookOdds.polymarket.ml_away, -187);
+}
