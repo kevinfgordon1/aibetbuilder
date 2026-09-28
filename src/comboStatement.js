@@ -5,6 +5,7 @@
 // Profile statement filters/sort/CSV are client-side over loaded lines.
 
 import { lockProfile } from "./comboLockProfile.js";
+import { isAbsorbedParlay } from "./comboMerge.js";
 import { historyOutcome, settlementFromStored, settlementCopy } from "./comboSettlement.js";
 import { sportFromTicker, underlyingCopy } from "./comboLegResult.js";
 
@@ -468,7 +469,7 @@ export function buildComboStatement({
   submissions = [],
   liveSettlement = {},
 } = {}) {
-  const lines = (parlays || []).map((parlay) => lockStatementLine({
+  const lines = (parlays || []).filter((parlay) => !isAbsorbedParlay(parlay)).map((parlay) => lockStatementLine({
     parlay,
     filled: filledContracts(parlay, fillsById),
     fills,

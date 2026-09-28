@@ -36,7 +36,9 @@ export function moneyAbs(v) {
 export function formatAmericanOdds(american) {
   const n = toNum(american);
   if (n == null || n === 0) return null;
-  return n > 0 ? "+" + n : "" + n;
+  const rounded = Math.round(n);
+  if (!rounded) return null;
+  return rounded > 0 ? "+" + rounded : "" + rounded;
 }
 
 export function lockKind(source) {
@@ -75,22 +77,62 @@ export function bookPnL({ stake, american, kind } = {}) {
   };
 }
 
+// Snap float dust (1300.0000001) onto the integer before floor/ceil.
+function nearInteger(n) {
+  const rounded = Math.round(n);
+  return Math.abs(n - rounded) < 1e-6 ? rounded : n;
+}
+
+// Kalshi combo contracts are whole numbers. Floor so a full fill cannot push the win below $0.
+export function floorContracts(n) {
+  if (!(n > 0) || !Number.isFinite(n)) return 0;
+  return Math.floor(nearInteger(n) + 1e-9);
+}
+
+function ceilContracts(n) {
+  if (!(n > 0) || !Number.isFinite(n)) return 0;
+  return Math.ceil(nearInteger(n) - 1e-9);
+}
+
 // Auto contracts cap for a hedge mode. Fill odds already include the maker fee.
-// Cash 1× = stake × decimal (equalize). Free bet 1× = (D−1)×FB (equalize; miss is already $0).
-export function hedgeCap({ stake, boostAmerican, fillAmerican, mode = "1x", kind } = {}) {
+// y = 1 / fill decimal = implied probability of the fill odds.
+// W = profit if the parlay wins. S = cash at risk (0 for a free bet).
+//   riskfree      : N = S / y, rounded up. Free bet (S = 0) stays 0 contracts.
+//   1x            : N = W + S.
+//   riskfree_open : N = W / (1 − y), rounded DOWN. Win side stays ≥ $0; miss pays.
+//   2x / 3x       : multiples of the 1× count. 3× is no longer in the form, but saved rows still size.
+// Pass profit / atRisk to use a merged order's total_profit_if_win and total_at_risk
+// instead of recomputing them from a single stake and American price.
+export function hedgeCap({
+  stake,
+  boostAmerican,
+  fillAmerican,
+  mode = "1x",
+  kind,
+  profit,
+  atRisk,
+} = {}) {
   if (!(stake > 0) || !boostAmerican || !fillAmerican) return 0;
   const book = bookPnL({ stake, american: boostAmerican, kind });
   if (!book) return 0;
-  const s = impliedProb(fillAmerican);
+  const y = impliedProb(fillAmerican);
+  if (!(y > 0 && y < 1)) return 0;
+  const W = profit != null && profit !== "" ? Number(profit) : book.bookHit;
+  const S = atRisk != null && atRisk !== "" ? Number(atRisk) : (book.kind === "freebet" ? 0 : book.stake);
+  if (!(W > 0) || !Number.isFinite(W) || !Number.isFinite(S) || S < 0) return 0;
+  const equalize = (profit != null && profit !== "") || (atRisk != null && atRisk !== "")
+    ? W + S
+    : book.equalizeN;
   switch (String(mode)) {
     case "riskfree":
-      // Cash: fewest contracts so miss ≥ $0. Free bet miss is already $0 — keep upside (0 contracts).
-      if (book.kind === "freebet") return 0;
-      return s > 0 ? Math.ceil(book.stake / s) : 0;
-    case "2x": return Math.round(2 * book.equalizeN);
-    case "3x": return Math.round(3 * book.equalizeN);
+      if (!(S > 0)) return 0;
+      return ceilContracts(S / y);
+    case "riskfree_open":
+      return floorContracts(W / (1 - y));
+    case "2x": return Math.round(2 * equalize);
+    case "3x": return Math.round(3 * equalize);
     case "1x":
-    default: return Math.round(book.equalizeN);
+    default: return Math.round(equalize);
   }
 }
 

@@ -123,6 +123,16 @@ const ariJax = {
   assert.equal(stmt.lines[0].id, "b");
 }
 
+{
+  const stmt = buildComboStatement({
+    parlays: [
+      { ...ariJax, id: "kept", kalshi_result: "no", archived_at: "2026-09-05T00:00:00Z" },
+      { ...ariJax, id: "absorbed", kalshi_result: "no", archived_at: "2026-09-05T00:00:00Z", merged_into_id: "kept" },
+    ],
+  });
+  assert.deepEqual(stmt.lines.map((line) => line.id), ["kept"]);
+}
+
 assert.equal(formatStatementPnl(5.63), "+$5.63");
 assert.equal(formatStatementPnl(-100), "-$100.00");
 assert.equal(formatStatementPnl(null), "—");

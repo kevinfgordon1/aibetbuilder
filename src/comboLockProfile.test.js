@@ -168,6 +168,14 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.match(locksSrc, /profile\.filled > 0 \? "Current \(standing\)" : "Current \(unhedged\)"/);
   assert.match(locksSrc, /\.cl \.pos\{color:#34d399\}\.cl \.neg\{color:#f87171\}\.cl \.muted\{color:#8a8f98\}/);
   assert.doesNotMatch(locksSrc, /className="v num">\{profile\.current\.text\}/);
+  assert.match(locksSrc, /Risk-free — floor \$0, keep upside/);
+  assert.match(locksSrc, /1× pure hedge — equal both sides \(default\)/);
+  assert.match(locksSrc, /Risk-free — floor \$0, open to larger orders \(new\)/);
+  assert.match(locksSrc, /2× — directional short \(can lose big\)/);
+  assert.doesNotMatch(locksSrc, /<option value="3x">/);
+  assert.match(locksSrc, /"3x": "3× \(directional\)"/);
+  assert.match(locksSrc, /if the parlay wins/);
+  assert.match(locksSrc, /if the parlay loses/);
 }
 
 {
@@ -278,6 +286,97 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.equal(book.bookMiss, 0);
   assert.ok(Math.abs(book.bookHit - ev.winProfit) < 0.51, `bookHit ${book.bookHit} vs winProfit ${ev.winProfit}`);
   assert.ok(Math.abs(ev.ev - ev.combinedProb * ev.winProfit) < 1e-9);
+}
+
+{
+  // Kevin's hedge-mode example: S=100, +2000, fill +1200.
+  // y = 1/13. Mode 1 = 1,300 (+$800 / $0). 1× = 2,100 (+$61.54 both).
+  // Open-to-larger exact N = 2,166.67 (+$66.67 if it loses, $0 if it wins),
+  // then floored to a whole contract so the win side stays ≥ $0.
+  const stake = 100;
+  const boost = 2000;
+  const fill = 1200;
+  const y = 100 / (fill + 100);
+  const W = stake * (boost / 100);
+  const exactOpen = W / (1 - y);
+  assert.ok(Math.abs(y - 1 / 13) < 1e-12);
+  assert.equal(W, 2000);
+  assert.ok(Math.abs(exactOpen - (2000 * 13) / 12) < 1e-9);
+  assert.equal(Number(exactOpen.toFixed(2)), 2166.67);
+  const exactMiss = exactOpen * y - stake;
+  const exactHit = W - exactOpen * (1 - y);
+  assert.equal(Number(exactMiss.toFixed(2)), 66.67);
+  assert.ok(Math.abs(exactHit) < 1e-9);
+
+  const modes = {
+    riskfree: hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: "riskfree" }),
+    "1x": hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: "1x" }),
+    riskfree_open: hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: "riskfree_open" }),
+    "2x": hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: "2x" }),
+    "3x": hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: "3x" }),
+  };
+  assert.equal(modes.riskfree, 1300);
+  assert.equal(modes["1x"], 2100);
+  assert.equal(modes.riskfree_open, 2166);
+  assert.equal(modes["2x"], 4200);
+  assert.equal(modes["3x"], 6300);
+
+  function filled(mode, contracts) {
+    return decideAtFill({
+      parlayStake: stake,
+      parlayAmerican: boost,
+      fillAmerican: fill,
+      rfqContracts: contracts,
+      hedgeMode: mode,
+    });
+  }
+  const riskfree = filled("riskfree", modes.riskfree);
+  assert.equal(riskfree.ok, true);
+  assert.equal(riskfree.cap, 1300);
+  assert.equal(riskfree.hit, 800);
+  assert.equal(riskfree.miss, 0);
+
+  const oneX = filled("1x", modes["1x"]);
+  assert.equal(oneX.cap, 2100);
+  assert.equal(oneX.hit, 61.54);
+  assert.equal(oneX.miss, 61.54);
+  assert.equal(oneX.locks, true);
+
+  const open = filled("riskfree_open", modes.riskfree_open);
+  assert.equal(open.cap, 2166);
+  assert.equal(open.contracts, 2166);
+  assert.ok(open.hit >= 0, `win side went negative: ${open.hit}`);
+  assert.equal(open.hit, 0.62);
+  assert.equal(open.miss, 66.62);
+  assert.equal(open.locks, true);
+
+  const twoX = filled("2x", modes["2x"]);
+  assert.equal(twoX.cap, 4200);
+  assert.ok(twoX.hit < 0, "2× is a directional short on a win");
+  assert.ok(twoX.miss > 0);
+
+  const threeX = filled("3x", modes["3x"]);
+  assert.equal(threeX.cap, 6300);
+  assert.ok(threeX.hit < twoX.hit);
+
+  // Free bet: risk-free (floor the loss) stays 0 contracts. The new mode still sizes off W.
+  assert.equal(hedgeCap({
+    stake, boostAmerican: boost, fillAmerican: fill, mode: "riskfree", kind: "freebet",
+  }), 0);
+  const freeOpen = hedgeCap({
+    stake, boostAmerican: boost, fillAmerican: fill, mode: "riskfree_open", kind: "freebet",
+  });
+  assert.equal(freeOpen, 2166);
+  const freeDecision = decideAtFill({
+    parlayStake: stake, parlayAmerican: boost, fillAmerican: fill,
+    rfqContracts: freeOpen, hedgeMode: "riskfree_open", kind: "freebet",
+  });
+  assert.equal(freeDecision.ok, true);
+  assert.ok(freeDecision.hit >= 0);
+  assert.ok(freeDecision.miss > 0);
+  assert.equal(hedgeCap({
+    stake, boostAmerican: boost, fillAmerican: fill, mode: "1x", kind: "freebet",
+  }), 2000);
 }
 
 console.log("comboLockProfile.test.js ok");

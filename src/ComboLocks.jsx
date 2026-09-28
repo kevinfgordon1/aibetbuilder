@@ -40,6 +40,16 @@ import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } fr
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
+import {
+  buildMergePlan,
+  findDuplicateGroups,
+  findMergeTarget,
+  formatAmerican,
+  formatDollars,
+  mergeEconomics,
+  sortOriginalBets,
+  undoStatus,
+} from "./comboMerge";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export { OWNER_EMAIL };
@@ -79,7 +89,13 @@ function decideAtFill(args) {
     quote: { yes_bid: "0.00", no_bid: v.noBid, rest_remainder: false },
   };
 }
-const MODE_LABEL = { riskfree: "Risk-free", "1x": "1× pure hedge", "2x": "2× (directional)", "3x": "3× (directional)" };
+const MODE_LABEL = {
+  riskfree: "Risk-free",
+  "1x": "1× pure hedge",
+  riskfree_open: "Risk-free (larger orders)",
+  "2x": "2× (directional)",
+  "3x": "3× (directional)",
+};
 const QUOTE_CHIP = {
   watching: { bg: "rgba(16,185,129,.15)", color: "#6ee7b7", mark: "● ", title: "The worker is watching the RFQ firehose for this combo." },
   paused: { bg: "rgba(245,158,11,.15)", color: "#fcd34d", mark: "⏸ ", title: "The worker paused this parlay. It is NOT watching for RFQs until you reactivate it." },
@@ -122,6 +138,73 @@ function StakeOddsChip({ parlay }) {
   const text = formatStakeOddsChip(parlay);
   if (!text) return null;
   return <span className="chip num" title="Original soft-book stake at the odds you put on — not the RFQ fill.">{text}</span>;
+}
+const BET_TYPE_LABEL = { cash: "cash", boost: "boost", free: "free" };
+function formBetType(form) {
+  if (lockKind(form) === "freebet") return "free";
+  if (form && form.kind === "boost") return "boost";
+  return "cash";
+}
+function betWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+}
+function MergeFigures({ plan }) {
+  if (!plan || !plan.ok) return null;
+  const econ = plan.economics;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div className="num">
+        Merged: at risk {formatDollars(econ.totalAtRisk)} · win {formatDollars(econ.totalProfit)} · true odds {formatAmerican(econ.trueAmericanExact)} · cap {plan.afterCap} contracts
+      </div>
+      <ul className="merged-list">
+        {econ.parts.map((part, i) => (
+          <li key={i} className="num">
+            {formatDollars(part.stake)} at {formatAmerican(part.american)} · {BET_TYPE_LABEL[part.type] || part.type}
+            {part.sportsbook ? ` · ${part.sportsbook}` : ""}
+            {part.boostPct > 0 ? ` · boost ${part.boostPct}%` : ""}
+            {part.createdAt ? ` · ${betWhen(part.createdAt)}` : ""}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+function MergedOrder({ parlay, bets, fills, onUndo, busy }) {
+  const rows = sortOriginalBets(bets);
+  if (!parlay || rows.length < 2) return null;
+  const econ = mergeEconomics(rows);
+  const status = undoStatus({
+    mergedAt: parlay.merged_at,
+    fillIdsAtMerge: parlay.merge_fill_ids,
+    fills: (fills || []).filter((row) => row.parlay_id === parlay.id),
+  });
+  return (
+    <div style={{ marginTop: 8 }}>
+      <span className="chip">Merged from {rows.length} bets</span>
+      {econ && (
+        <div className="num" style={{ fontSize: 13, marginTop: 6 }}>
+          at risk {formatDollars(econ.totalAtRisk)} · win {formatDollars(econ.totalProfit)} · true odds {formatAmerican(econ.trueAmericanExact)}
+        </div>
+      )}
+      <ul className="merged-list">
+        {rows.map((bet) => (
+          <li key={bet.id || `${bet.stake}-${bet.american}-${bet.created_at}`} className="num">
+            {formatDollars(bet.stake)} at {formatAmerican(bet.american)} · {BET_TYPE_LABEL[bet.bet_type] || bet.bet_type || "cash"}
+            {bet.sportsbook ? ` · ${bet.sportsbook}` : " · —"}
+            {bet.boost_pct > 0 ? ` · boost ${bet.boost_pct}%` : ""}
+            {bet.created_at ? ` · ${betWhen(bet.created_at)}` : ""}
+          </li>
+        ))}
+      </ul>
+      {status.ok ? (
+        <button type="button" className="btn mini" style={{ marginTop: 6 }} disabled={busy} onClick={() => onUndo(parlay)} title="Split this back into the original bets. A fill after the merge turns this off.">Undo merge</button>
+      ) : (
+        <div className="note warn">{status.reason}</div>
+      )}
+    </div>
+  );
 }
 function outcomeChipClass(chrome) {
   if (!chrome) return "settle-wait";
@@ -448,7 +531,7 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
 const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)" };
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
-const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", kind: "cash", starts: "", label: "", labelEdited: false };
+const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", kind: "cash", starts: "", label: "", labelEdited: false, sportsbook: "", boostPct: "" };
 const emptyLegRows = (n) => Array.from({ length: Math.max(2, n || 2) }, (_, i) => ({ id: i + 1, gameKey: "", marketVal: "" }));
 function formFromPrefill(prefill) {
   if (!prefill) return { ...DEFAULT_FORM };
@@ -458,7 +541,9 @@ function formFromPrefill(prefill) {
     fill: prefill.fill ?? "",
     fair: prefill.fair == null || prefill.fair === "" ? "" : prefill.fair,
     mode: prefill.mode || "1x",
-    kind: lockKind(prefill),
+    kind: prefill.kind === "boost" ? "boost" : lockKind(prefill),
+    sportsbook: prefill.sportsbook || "",
+    boostPct: prefill.boostPct ?? prefill.boost_pct ?? "",
     starts: toDatetimeLocalValue(prefill.starts),
     label: prefill.label || "",
     labelEdited: true,
@@ -495,6 +580,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
   const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
+  const [originalBets, setOriginalBets] = useState([]);
+  const [mergePrompt, setMergePrompt] = useState(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeError, setMergeError] = useState("");
+  const [dismissedDupes, setDismissedDupes] = useState({});
   const [matchesByParlay, setMatchesByParlay] = useState({}); // parlay_id -> [combo_matches rows]
   const [openParlays, setOpenParlays] = useState({});         // id / hist-<id> / arch-<id> -> expanded?
   const [legRows, setLegRows] = useState(() => emptyLegRows(prefill?.legs?.length));
@@ -692,6 +782,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (historyRows) setHistory(historyRows);
       const archivedRows = takeList(archivedRes);
       if (archivedRows) setArchived(archivedRows);
+      const betsRes = await supabase.from("combo_parlay_bets").select("*").eq("user_id", user.id);
+      if (!betsRes.error && Array.isArray(betsRes.data)) setOriginalBets(betsRes.data);
       const mcRows = takeList(mcRes);
       if (mcRows) {
         const mcMap = {};
@@ -931,7 +1023,90 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     }
   };
 
-  const addParlay = async () => {
+  const betsByParlay = useMemo(() => {
+    const m = {};
+    (originalBets || []).forEach((bet) => {
+      if (!bet || !bet.parlay_id) return;
+      (m[bet.parlay_id] = m[bet.parlay_id] || []).push(bet);
+    });
+    return m;
+  }, [originalBets]);
+  const dupGroups = useMemo(() => findDuplicateGroups(parlays, Date.now()), [parlays]);
+
+  const incomingBet = () => ({
+    stake: +form.stake,
+    american: +form.boost,
+    kind: form.kind,
+    bet_type: formBetType(form),
+    sportsbook: String(form.sportsbook || "").trim(),
+    boostPct: form.boostPct === "" ? null : +form.boostPct,
+    fill: +form.fill,
+    fair: form.fair === "" ? null : +form.fair,
+    mode: form.mode,
+    label: form.label.trim(),
+  });
+  const insertParlay = async (row) => {
+    let payload = { ...row };
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const { error } = await supabase.from("combo_parlays").insert(payload);
+      if (!error) return null;
+      const match = String(error.message || "").match(/Could not find the '([^']+)' column/i);
+      if (!match || !Object.prototype.hasOwnProperty.call(payload, match[1])) return error;
+      const next = { ...payload };
+      if (match[1] === "is_free_bet" && payload.is_free_bet && !/^free bet\b/i.test(next.label || "")) {
+        next.label = `Free bet · ${next.label || ""}`.trim();
+      }
+      delete next[match[1]];
+      payload = next;
+    }
+    return { message: "Save failed" };
+  };
+  const saveSeparateParlay = async (legs) => {
+    const kind = lockKind(form);
+    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: +form.fill, mode: form.mode, kind });
+    const row = {
+      user_id: user.id,
+      label: form.label.trim() || legs.map((l) => l.label).join(" + "),
+      legs,
+      mve_collection: games.comboCollection,
+      leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
+      parlay_stake: +form.stake,
+      parlay_american: +form.boost,
+      fill_american: +form.fill,
+      fair_american: form.fair === "" ? null : +form.fair,
+      hedge_mode: form.mode,
+      max_contracts: cap,
+      scale_factor: 1,
+      is_free_bet: kind === "freebet",
+      bet_type: formBetType(form),
+      sportsbook: String(form.sportsbook || "").trim() || null,
+      boost_pct: form.boostPct === "" ? null : +form.boostPct,
+      starts_at: form.starts ? new Date(form.starts).toISOString() : null,
+    };
+    const error = await insertParlay(row);
+    if (error) return alert("Save failed: " + error.message);
+    setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
+    setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "", sportsbook: "", boostPct: "" }));
+    setMergePrompt(null);
+    reload();
+  };
+  const postMerge = async (body) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session && session.access_token;
+    if (!token) throw new Error("Sign in required");
+    const r = await fetch("/api/combo-merge", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer " + token },
+      body: JSON.stringify(body),
+    });
+    let payload = null;
+    try { payload = await r.json(); } catch (_) { payload = null; }
+    if (!r.ok || !payload || payload.ok === false) {
+      throw new Error((payload && payload.error) || `Merge failed (${r.status})`);
+    }
+    return payload;
+  };
+  const addParlay = async ({ separate = false } = {}) => {
     const legs = readLegs();
     if (legs.length < 2) return alert("Pick at least 2 legs (game + market each).");
     if (!(+form.stake > 0) || !+form.boost || !+form.fill) {
@@ -939,29 +1114,98 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         ? "Enter free-bet amount, book parlay odds, and fill odds."
         : "Enter stake, boosted odds, and fill odds.");
     }
-    const kind = lockKind(form);
-    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: +form.fill, mode: form.mode, kind });
-    const row = { user_id: user.id, label: form.label.trim() || legs.map((l) => l.label).join(" + "),
-      legs, mve_collection: games.comboCollection, leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
-      parlay_stake: +form.stake, parlay_american: +form.boost, fill_american: +form.fill,
-      fair_american: form.fair === "" ? null : +form.fair, hedge_mode: form.mode, max_contracts: cap, scale_factor: 1,
-      is_free_bet: kind === "freebet",
-      starts_at: form.starts ? new Date(form.starts).toISOString() : null };
-    let { error } = await supabase.from("combo_parlays").insert(row);
-    if (error && /is_free_bet/i.test(error.message || "")) {
-      const { is_free_bet, ...rest } = row;
-      if (is_free_bet && !/^free bet\b/i.test(rest.label || "")) rest.label = `Free bet · ${rest.label}`;
-      ({ error } = await supabase.from("combo_parlays").insert(rest));
+    if (!separate) {
+      const target = findMergeTarget(parlays, { legs }, Date.now());
+      if (target) {
+        const plan = buildMergePlan({
+          survivor: target,
+          newBet: { ...incomingBet(), legs },
+          existingBets: originalBets,
+          fills: comboFills,
+          now: new Date(),
+        });
+        if (plan.ok) {
+          setMergeError("");
+          setMergePrompt({ kind: "new", target, plan });
+          return;
+        }
+      }
     }
-    if (error) return alert("Save failed: " + error.message);
-    setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
-    setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "" })); reload();
+    await saveSeparateParlay(legs);
+  };
+  const confirmMerge = async () => {
+    if (!mergePrompt || mergeBusy) return;
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      if (mergePrompt.kind === "group") {
+        await postMerge({ action: "merge", survivorId: mergePrompt.target.id, absorbIds: mergePrompt.absorbIds });
+      } else {
+        const legs = readLegs();
+        await postMerge({
+          action: "merge",
+          survivorId: mergePrompt.target.id,
+          newBet: { ...incomingBet(), legs },
+        });
+        setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
+        setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "", sportsbook: "", boostPct: "" }));
+      }
+      setMergePrompt(null);
+      reload();
+    } catch (err) {
+      setMergeError(String(err && err.message || err));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
+  const mergeExistingGroup = async (group) => {
+    if (mergeBusy) return;
+    const plan = buildMergePlan({
+      survivor: group.survivor,
+      absorb: group.others,
+      existingBets: originalBets,
+      fills: comboFills,
+      now: new Date(),
+    });
+    if (!plan.ok) {
+      setMergeError(plan.error || "Those parlays can't be merged.");
+      return;
+    }
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      await postMerge({ action: "merge", survivorId: group.survivor.id, absorbIds: group.others.map((row) => row.id) });
+      setMergePrompt(null);
+      reload();
+    } catch (err) {
+      setMergeError(String(err && err.message || err));
+    } finally {
+      setMergeBusy(false);
+    }
+  };
+  const undoMerge = async (parlay) => {
+    if (!parlay || mergeBusy) return;
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      await postMerge({ action: "undo", survivorId: parlay.id });
+      reload();
+    } catch (err) {
+      setMergeError(String(err && err.message || err));
+    } finally {
+      setMergeBusy(false);
+    }
   };
   const removeParlay = async (id) => { await supabase.from("combo_parlays").delete().eq("id", id); reload(); };
   // Move a parlay to History: deactivate it (worker stops watching) and stamp archived_at.
   const archiveParlay = async (id) => { await supabase.from("combo_parlays").update({ active: false, archived_at: new Date().toISOString() }).eq("id", id); reload(); };
   // Reactivate a parlay the worker paused (active=false) — it resumes watching for RFQs.
-  const reactivateParlay = async (id) => { await supabase.from("combo_parlays").update({ active: true }).eq("id", id); reload(); };
+  const reactivateParlay = async (id) => {
+    const row = [...parlays, ...archived].find((p) => p.id === id);
+    if (row && row.merged_into_id) return alert("That ticket was merged into another order. Undo the merge there instead of reactivating it.");
+    await supabase.from("combo_parlays").update({ active: true }).eq("id", id);
+    reload();
+  };
   const toggleKill = async () => {
     if (deskLoading || !deskReady) return;
     const next = !kill;
@@ -1045,6 +1289,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .parlay{border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px;margin-bottom:10px;background:rgba(255,255,255,0.02)}
         .cl .chip{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:#c3c6cc}.cl .chip.fill{background:rgba(59,130,246,.15);color:#93c5fd}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px;font-variant-numeric:tabular-nums}
+        .cl .merged-list{list-style:none;margin:6px 0 0;padding:0}
+        .cl .merged-list li{font-size:13px;color:#c3c6cc;padding:2px 0}
         .cl .leg .ty{font-size:10px;font-weight:700;text-transform:uppercase;color:#7ea2e0;margin-right:5px}
         .cl .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:10px 0}
         .cl .tile{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px}
@@ -1124,6 +1370,26 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
 
       <h3>Active — waiting to be filled</h3>
+      {dupGroups.filter((group) => !dismissedDupes[group.signature]).map((group) => {
+        const plan = buildMergePlan({
+          survivor: group.survivor,
+          absorb: group.others,
+          existingBets: originalBets,
+          fills: comboFills,
+          now: new Date(),
+        });
+        return (
+          <div className="note warn" key={group.signature} style={{ marginBottom: 10 }}>
+            <div>{group.warning}</div>
+            <MergeFigures plan={plan} />
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              <button type="button" className="btn mini primary" disabled={mergeBusy || !plan.ok} onClick={() => mergeExistingGroup(group)}>Merge</button>
+              <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => setDismissedDupes((prev) => ({ ...prev, [group.signature]: true }))}>Keep separate</button>
+            </div>
+          </div>
+        );
+      })}
+      {mergeError && <div className="note warn" style={{ marginBottom: 10 }}>{mergeError}</div>}
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {waitingKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : waitingKind === "empty" ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
           <div className="parlay" key={p.id} id={"lock-" + p.id}>
@@ -1144,6 +1410,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
             </div>
             <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
+            <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
             <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqMatchedCount(attemptsByParlay[p.id])); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : ""; })()}</div>
             <FillProgress desk={deskByParlay[p.id]} />
             <RiskProfile parlay={p} filled={realFills[p.id] || 0} />
@@ -1178,6 +1445,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history now">Move to history</button>
               </div>
               <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
+              <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
               <FillProgress desk={desk} thin />
               <RiskProfile parlay={p} filled={desk ? desk.fill.filled : (realFills[p.id] || 0)} />
               <DeskChips desk={desk} thin />
@@ -1220,14 +1488,16 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               </div>
             ))}
             <button className="btn mini" onClick={addLeg}>+ Add leg</button>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-              <input
-                type="checkbox"
-                checked={lockKind(form) === "freebet"}
-                onChange={(e) => setForm({ ...form, kind: e.target.checked ? "freebet" : "cash" })}
-              />
-              Free bet — hit pays profit only (stake not returned); miss costs $0
-            </label>
+            <div className="row c3" style={{ marginTop: 12 }}>
+              <div><label>Bet type</label>
+                <select value={form.kind === "freebet" ? "freebet" : (form.kind === "boost" ? "boost" : "cash")} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+                  <option value="cash">Cash</option>
+                  <option value="boost">Profit boost</option>
+                  <option value="freebet">Free bet</option>
+                </select></div>
+              <div><label>Sportsbook — optional</label><input value={form.sportsbook} onChange={(e) => setForm({ ...form, sportsbook: e.target.value })} placeholder="FanDuel, DraftKings…" /></div>
+              <div><label>Boost % — optional</label><input className="num" type="number" value={form.boostPct} onChange={(e) => setForm({ ...form, boostPct: e.target.value })} placeholder="25" /></div>
+            </div>
             <div className="row c3" style={{ marginTop: 14 }}>
               <div><label>{lockKind(form) === "freebet" ? "Free bet ($) — face value" : "Stake ($) — your bet"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
               <div><label>{lockKind(form) === "freebet" ? "Book parlay odds — you have" : "Boosted odds — you have"}</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
@@ -1241,8 +1511,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
                   <option value="riskfree">Risk-free — floor $0, keep upside</option>
                   <option value="1x">1× pure hedge — equal both sides (default)</option>
+                  <option value="riskfree_open">Risk-free — floor $0, open to larger orders (new)</option>
                   <option value="2x">2× — directional short (can lose big)</option>
-                  <option value="3x">3× — directional short (can lose big)</option>
                 </select></div>
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -1278,8 +1548,20 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             <label>Label — auto-filled from your legs, edit if you like</label>
             <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value, labelEdited: true })} placeholder="pick legs above…" />
+            {mergePrompt && mergePrompt.kind === "new" && (
+              <div className="note warn" style={{ marginTop: 12 }}>
+                <div>{mergePrompt.plan.warning}</div>
+                <MergeFigures plan={mergePrompt.plan} />
+                <div style={{ fontSize: 12, marginTop: 6 }}>The merged order keeps this lock's fill odds. Originals stay on the card for weekly P&L.</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <button type="button" className="btn mini primary" disabled={mergeBusy} onClick={confirmMerge}>Merge</button>
+                  <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => addParlay({ separate: true })}>Keep separate</button>
+                </div>
+                {mergeError && <div style={{ marginTop: 8 }}>{mergeError}</div>}
+              </div>
+            )}
             <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <button className="btn primary" onClick={addParlay}>Add to active parlays</button>
+              <button className="btn primary" onClick={() => addParlay()}>Add to active parlays</button>
               <button
                 type="button"
                 className="btn"
@@ -1372,6 +1654,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                   {(a.legs || []).length > 0 && (
                     <div style={{ marginBottom: 8 }}>{(a.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
                   )}
+                  <MergedOrder parlay={a} bets={betsByParlay[a.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
                   <RiskProfile parlay={a} filled={filledN} />
                   <AttemptHistory attempts={attemptsByParlay[a.id]} showSummary={false} />
                 </>
