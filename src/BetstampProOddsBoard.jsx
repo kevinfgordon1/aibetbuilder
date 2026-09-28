@@ -46,6 +46,7 @@ import {
   bookByKey,
   leagueForSport,
   betstampOddsBoardBooks,
+  betstampOddsBoardRequestIds,
 } from "./betstampBooks.js";
 import BookLabel from "./BookLabel.jsx";
 import {
@@ -954,10 +955,10 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
             )}
           </div>
           <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "var(--nob-gold)", textDecoration: "underline", textDecorationColor: "rgba(var(--nob-gold-rgb),0.35)", textUnderlineOffset: 2, marginBottom: 2, lineHeight: 1.15 }}>
-            {game.away}{game.away_score != null ? ` ${game.away_score}` : ""}
+            {game.away}{game.is_live && game.away_score != null ? ` ${game.away_score}` : ""}
           </div>
           <div className="obb-game-name" title={game.home} style={{ fontSize: 13, fontWeight: 600, color: "var(--nob-gold)", textDecoration: "underline", textDecorationColor: "rgba(var(--nob-gold-rgb),0.35)", textUnderlineOffset: 2, lineHeight: 1.15 }}>
-            {game.home}{game.home_score != null ? ` ${game.home_score}` : ""}
+            {game.home}{game.is_live && game.home_score != null ? ` ${game.home_score}` : ""}
           </div>
           <div style={{ fontSize: 10, color: "var(--nob-gold)", fontWeight: 700, margin: "2px 0 0", lineHeight: 1.15 }}>Alts →</div>
         </div>
@@ -998,7 +999,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 
 export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const allBooks = useMemo(() => betstampOddsBoardBooks(), []);
-  const bookIds = useMemo(() => allBooks.map((b) => b.id), [allBooks]);
+  const bookIds = useMemo(() => betstampOddsBoardRequestIds(), []);
   const bookIdsKey = bookIds.join(",");
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
@@ -2061,7 +2062,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       </div>
       )}
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
-        Betstamp books: DraftKings, FanDuel, Caesars, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Columns with no prices on this slate are hidden. No Underdog, Fliff, or Courtside
+        Betstamp books: DraftKings, FanDuel, Caesars, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Columns with no prices on this slate are hidden. Bet105 and Hard Rock are not on the current Betstamp key, so they are not requested yet. No Underdog, Fliff, or Courtside
         {" · "}Mains (moneyline / spread / total, period FT), American odds
         {" · "}Refresh: polls the Betstamp REST snapshot (refresh=1) every {Math.round(BETSTAMP_BOARD_PREGAME_POLL_MS / 1000)}s pregame and every {Math.round(BETSTAMP_BOARD_LIVE_POLL_MS / 1000)}s LIVE, paused while this browser tab is hidden. It does not open a Betstamp live stream (the trial key allows one connection)
         {" · "}LIVE: a book/side missing from several polls (or an explicit suspend / taken_down) shows OFF. A blank means never offered / no quote. Polymarket and Kalshi also tick from the first-party relays

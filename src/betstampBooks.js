@@ -112,6 +112,20 @@ export const BETSTAMP_ODDS_BOARD_BOOK_IDS = Object.freeze([
 ]);
 export const BETSTAMP_ODDS_BOARD_FORBIDDEN_BOOK_IDS = Object.freeze([UNDERDOG_PREDICT_BOOK_ID, 800]);
 
+// Kevin's list includes Bet105 (105) and Hard Rock (850), but the current
+// Betstamp trial key answers "You do not have access to this provider" for
+// both (checked Sep 28 2026). A bare 403 makes /api/betstamp-markets drop
+// EVERY opt-in book (Fanatics, Kambi, BetUS, theScore too), so do not send
+// them until the plan covers them. Remove an id here once it is entitled.
+export const BETSTAMP_ODDS_BOARD_UNENTITLED_BOOK_IDS = Object.freeze([105, 850]);
+
+/** book_ids this board sends to /api/betstamp-markets. */
+export function betstampOddsBoardRequestIds() {
+  return betstampOddsBoardBooks()
+    .map((b) => b.id)
+    .filter((id) => !BETSTAMP_ODDS_BOARD_UNENTITLED_BOOK_IDS.includes(id));
+}
+
 export function betstampOddsBoardBooks() {
   return BETSTAMP_ODDS_BOARD_BOOK_IDS
     .filter((id) => !BETSTAMP_ODDS_BOARD_FORBIDDEN_BOOK_IDS.includes(id))

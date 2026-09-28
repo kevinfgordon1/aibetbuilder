@@ -14,6 +14,7 @@ import {
   BETSTAMP_ODDS_BOARD_BOOK_IDS,
   BETSTAMP_TRIAL_BOOKS,
   bookById,
+  betstampOddsBoardRequestIds,
 } from "./betstampBooks.js";
 import {
   canSeeBetstampOddsBoard,
@@ -61,6 +62,10 @@ for (const id of BETSTAMP_ODDS_BOARD_BOOK_IDS) assert.ok(bookById(id), `bookById
 assert.ok(!BETSTAMP_TRIAL_BOOKS.some((b) => b.id === 722), "extras stay off the Promo / New Odds Board catalog");
 assert.equal(bookById(722).key, "fanatics");
 assert.equal(bookById(500).key, "betrivers");
+// Unentitled books would make the proxy drop every opt-in book on a bare 403.
+const reqIds = betstampOddsBoardRequestIds();
+assert.ok(!reqIds.includes(105) && !reqIds.includes(850));
+assert.ok([722, 500, 614, 700, 200, 191, 193, 194].every((id) => reqIds.includes(id)));
 
 // Polling URL always bypasses the 5-minute cache, never the SSE route.
 const u = betstampBoardSnapshotUrl({ league: "NFL", live: false, bookIds: [200, 722] });
