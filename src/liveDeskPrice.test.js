@@ -23,7 +23,7 @@ import {
 } from "./liveDeskPrice.js";
 
 assert.equal(DEFAULT_SIZE_DOLLARS, 25);
-assert.equal(MAX_SIZE_DOLLARS, 100);
+assert.equal(MAX_SIZE_DOLLARS, 1000);
 assert.equal(parseAmerican("−150"), -150);
 assert.equal(parseAmerican("+130"), 130);
 assert.equal(parseAmerican("130"), 130);
@@ -152,21 +152,36 @@ for (const tick of [0.001, 0.005]) {
     outcome: "long",
     action: "buy",
     tick: 0.001,
-    dollars: 250,
+    dollars: 1001,
     minQty: 1,
   });
   assert.equal(over.ok, false);
-  assert.match(over.error, /\$100/);
+  assert.match(over.error, /\$1000/);
   const exact = quoteRestingOrder({
     american: -150,
     outcome: "long",
     action: "buy",
     tick: 0.001,
-    dollars: 100,
+    dollars: 1000,
     minQty: 1,
   });
   assert.equal(exact.ok, true);
-  assert.ok(exact.riskDollars <= 100);
+  assert.ok(exact.riskDollars <= 1000);
+  assert.ok(exact.riskDollars > 100);
+  // $1000 at the 1¢ floor is 100,000 contracts. The contract ceiling must
+  // not reject a size the dollar cap allows.
+  const floor = quoteRestingOrder({
+    american: 9900,
+    outcome: "long",
+    action: "buy",
+    tick: 0.001,
+    dollars: 1000,
+    minQty: 1,
+  });
+  assert.equal(floor.ok, true, floor.error || "");
+  assert.equal(floor.outcomePrice, 0.01);
+  assert.equal(floor.contracts, 100000);
+  assert.ok(floor.riskDollars <= 1000);
 }
 
 {

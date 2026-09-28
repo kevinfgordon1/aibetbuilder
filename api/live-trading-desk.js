@@ -384,7 +384,7 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
     });
     if (!cross.ok) return { ok: false, status: 400, error: cross.error || book.error };
   }
-  // Bet Protect defaults ON when the request omits the flag; over the $100
+  // Bet Protect defaults ON when the request omits the flag; over the $1000
   // Protect cap it rests unprotected with a note instead of blocking.
   const protectReq = protectMath.readProtectRequest(body, { riskDollars: quote.riskDollars });
   if (!protectReq.ok) return { ok: false, status: 400, error: protectReq.error };

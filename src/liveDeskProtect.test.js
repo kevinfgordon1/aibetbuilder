@@ -38,18 +38,19 @@ assert.equal(readProtectRequest({ protect: false }).on, false);
 assert.equal(readProtectRequest({ protect: 0 }).on, false);
 assert.equal(readProtectRequest({ protect: "false" }).on, false);
 assert.equal(readProtectRequest({ protect: "off" }).on, false);
-assert.equal(readProtectRequest({}, { riskDollars: 100 }).on, true, "exactly at the cap is protected");
+assert.equal(readProtectRequest({}, { riskDollars: 1000 }).on, true, "exactly at the cap is protected");
+assert.equal(readProtectRequest({}, { riskDollars: 500 }).on, true, "a $500 order stays protected");
 {
-  const over = readProtectRequest({}, { riskDollars: 100.5 });
+  const over = readProtectRequest({}, { riskDollars: 1000.5 });
   assert.equal(over.ok, true);
   assert.equal(over.on, false);
   assert.equal(over.overCap, true);
-  assert.match(over.note, /\$100 Bet Protect cap/);
-  const overExplicit = readProtectRequest({ protect: true }, { riskDollars: 150 });
+  assert.match(over.note, /\$1000 Bet Protect cap/);
+  const overExplicit = readProtectRequest({ protect: true }, { riskDollars: 1500 });
   assert.equal(overExplicit.ok, true, "over the cap is sent unprotected, not blocked");
   assert.equal(overExplicit.on, false);
   assert.equal(overExplicit.overCap, true);
-  assert.equal(readProtectRequest({ protect: false }, { riskDollars: 150 }).overCap, undefined);
+  assert.equal(readProtectRequest({ protect: false }, { riskDollars: 1500 }).overCap, undefined);
 }
 assert.equal(readProtectRequest({ protect: true }).xCents, 3);
 assert.equal(readProtectRequest({ protect: true }).yCents, 1);
@@ -212,11 +213,17 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
   const keep = protectContracts({ leaves: 41, outcomeMicro: 600_000, action: "buy", minQty: 1 });
   assert.equal(keep.ok, true);
   assert.equal(keep.contracts, 41);
-  assert.ok(keep.riskDollars <= 100);
-  const capped = protectContracts({ leaves: 500, outcomeMicro: 600_000, action: "buy", minQty: 1 });
+  assert.ok(keep.riskDollars <= 1000);
+  // 833 contracts at 60¢ is $499.80. That used to be cut to the $100 cap.
+  const fiveHundred = protectContracts({ leaves: 833, outcomeMicro: 600_000, action: "buy", minQty: 1 });
+  assert.equal(fiveHundred.ok, true);
+  assert.equal(fiveHundred.contracts, 833);
+  assert.ok(fiveHundred.riskDollars > 100);
+  assert.ok(fiveHundred.riskDollars <= 1000);
+  const capped = protectContracts({ leaves: 5000, outcomeMicro: 600_000, action: "buy", minQty: 1 });
   assert.equal(capped.ok, true);
-  assert.equal(capped.contracts, 166);
-  assert.ok(capped.riskDollars <= 100);
+  assert.equal(capped.contracts, 1666);
+  assert.ok(capped.riskDollars <= 1000);
 }
 
 {

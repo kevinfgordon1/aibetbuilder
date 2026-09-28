@@ -68,8 +68,8 @@ export function protectOverCapNote(cap = MAX_SIZE_DOLLARS) {
  * rests unprotected. When the order risk is over the $MAX_SIZE_DOLLARS Protect
  * cap, the order still rests but unprotected, with overCap + note set so the
  * desk can say so. defaulted marks an arm that came from the default rather
- * than an explicit protect:true. The desk size cap is also $MAX_SIZE_DOLLARS today, so that
- * branch is a guard rather than a normal path.
+ * than an explicit protect:true. Protect uses the same $MAX_SIZE_DOLLARS desk
+ * cap, so that branch is a guard rather than a normal path.
  */
 export function readProtectRequest(body, { riskDollars } = {}) {
   const raw = body || {};
