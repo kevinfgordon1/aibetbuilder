@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { hedgeCap } from "./comboLockProfile.js";
 import {
   mergeEconomics,
   encodeMergedParlay,
@@ -230,6 +231,58 @@ function free100() {
   assert.equal(worker.effectiveCap, 2479);
   assert.ok(Math.abs(worker.bookHit - 2479) < 0.02);
   assert.ok(Math.abs(worker.bookMiss - (-150)) < 0.02);
+}
+
+// ── merged order uses total risk and total profit in every hedge mode ──
+{
+  const econ = mergeEconomics([
+    { stake: 40, american: 1500, bet_type: "cash" },
+    { stake: 60, american: 2500, bet_type: "cash" },
+  ]);
+  assert.equal(econ.totalAtRisk, 100);
+  assert.equal(econ.totalProfit, 2100);
+  const fill = 1200;
+  const y = 100 / (fill + 100);
+  const expected = {
+    riskfree: Math.ceil(econ.totalAtRisk / y),
+    "1x": Math.round(econ.totalProfit + econ.totalAtRisk),
+    riskfree_open: Math.floor(econ.totalProfit / (1 - y) + 1e-9),
+    "2x": Math.round(2 * (econ.totalProfit + econ.totalAtRisk)),
+    "3x": Math.round(3 * (econ.totalProfit + econ.totalAtRisk)),
+  };
+  assert.equal(expected.riskfree, 1300);
+  assert.equal(expected["1x"], 2200);
+  assert.equal(expected.riskfree_open, 2275);
+  for (const mode of Object.keys(expected)) {
+    const encoded = encodeMergedParlay(econ, { fillAmerican: fill, hedgeMode: mode });
+    assert.equal(encoded.max_contracts, expected[mode], mode);
+    assert.equal(encoded.hedge_mode, mode);
+    assert.equal(encoded.parlay_stake, 100);
+  }
+  // Same totals passed straight in, not recomputed from one leg's odds.
+  assert.equal(hedgeCap({
+    stake: 1,
+    boostAmerican: 100,
+    fillAmerican: fill,
+    mode: "riskfree_open",
+    profit: econ.totalProfit,
+    atRisk: econ.totalAtRisk,
+  }), expected.riskfree_open);
+
+  const open = encodeMergedParlay(econ, { fillAmerican: fill, hedgeMode: "riskfree_open" });
+  const worker = workerCashPosition({
+    stake: open.parlay_stake,
+    american: open.parlay_american,
+    fillAmerican: fill,
+    mode: open.hedge_mode,
+    maxContracts: open.max_contracts,
+  });
+  // Current worker does not know riskfree_open, so its per-fill cap stays 1× (2,200)
+  // even though max_contracts is the larger floored size (2,275).
+  assert.equal(worker.perFillCap, 2200);
+  assert.equal(worker.ceiling, 2275);
+  assert.equal(worker.effectiveCap, 2200);
+  assert.ok(worker.effectiveCap < open.max_contracts);
 }
 
 // ── duplicate detection ──

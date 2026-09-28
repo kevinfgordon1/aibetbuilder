@@ -115,7 +115,9 @@ export function mergeEconomics(bets) {
   };
 }
 
-// What combo-worker engine.js computes from the stored row (cash formula).
+// What combo-worker engine.js computes TODAY from the stored row (cash formula).
+// It reads hedge_mode and takes min(that per-fill cap, max_contracts).
+// riskfree_open is not in engine.js yet, so it falls through to the 1× cap.
 // 1× per-fill cap ignores the fill PRICE (it only requires a fill to be set).
 export function workerCashPosition({ stake, american, fillAmerican, mode = "1x", maxContracts = null } = {}) {
   const sStake = toNum(stake);
@@ -170,6 +172,8 @@ export function encodeMergedParlay(econ, { fillAmerican, hedgeMode = "1x" } = {}
       fillAmerican: fill,
       mode,
       kind: "freebet",
+      profit: econ.totalProfit,
+      atRisk: 0,
     });
     return {
       parlay_stake: stake,
@@ -188,6 +192,8 @@ export function encodeMergedParlay(econ, { fillAmerican, hedgeMode = "1x" } = {}
     fillAmerican: fill,
     mode,
     kind: "cash",
+    profit: econ.totalProfit,
+    atRisk: econ.totalAtRisk,
   });
   const types = new Set((econ.parts || []).map((p) => p.type));
   const betType = types.size > 1 ? "hybrid" : (types.values().next().value || "cash");

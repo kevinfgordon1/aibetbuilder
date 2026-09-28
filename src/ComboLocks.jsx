@@ -89,7 +89,13 @@ function decideAtFill(args) {
     quote: { yes_bid: "0.00", no_bid: v.noBid, rest_remainder: false },
   };
 }
-const MODE_LABEL = { riskfree: "Risk-free", "1x": "1× pure hedge", "2x": "2× (directional)", "3x": "3× (directional)" };
+const MODE_LABEL = {
+  riskfree: "Risk-free",
+  "1x": "1× pure hedge",
+  riskfree_open: "Risk-free (larger orders)",
+  "2x": "2× (directional)",
+  "3x": "3× (directional)",
+};
 const QUOTE_CHIP = {
   watching: { bg: "rgba(16,185,129,.15)", color: "#6ee7b7", mark: "● ", title: "The worker is watching the RFQ firehose for this combo." },
   paused: { bg: "rgba(245,158,11,.15)", color: "#fcd34d", mark: "⏸ ", title: "The worker paused this parlay. It is NOT watching for RFQs until you reactivate it." },
@@ -1505,8 +1511,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
                   <option value="riskfree">Risk-free — floor $0, keep upside</option>
                   <option value="1x">1× pure hedge — equal both sides (default)</option>
+                  <option value="riskfree_open">Risk-free — floor $0, open to larger orders (new)</option>
                   <option value="2x">2× — directional short (can lose big)</option>
-                  <option value="3x">3× — directional short (can lose big)</option>
                 </select></div>
             </div>
             <div style={{ marginBottom: 12 }}>
