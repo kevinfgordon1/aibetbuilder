@@ -1,5 +1,5 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
-// GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, NFL slate
+// GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, filled orders, NFL slate
 // POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, confirm, allowCross?, protect?, protectXCents?, protectYCents? }
 //   protect defaults ON when omitted; send protect:false to rest unprotected.
 // POST { op: "cancel", orderId, marketSlug }
@@ -22,17 +22,20 @@ let access = null;
 let price = null;
 let games = null;
 let protectMath = null;
+let fillsMod = null;
 let modsPromise = null;
 
 function ensureMods() {
-  if (access && price && games && protectMath) return Promise.resolve();
+  if (access && price && games && protectMath && fillsMod) return Promise.resolve();
   if (!modsPromise) {
     modsPromise = Promise.all([
       import('../src/comboAccess.js'),
       import('../src/liveDeskPrice.js'),
       import('../src/liveDeskGames.js'),
       import('../src/liveDeskProtect.js'),
-    ]).then(([accessMod, priceMod, gamesMod, protectMod]) => {
+      import('../src/liveDeskFills.js'),
+    ]).then(([accessMod, priceMod, gamesMod, protectMod, fillMod]) => {
+      fillsMod = fillMod;
       access = accessMod;
       price = priceMod;
       games = gamesMod;
@@ -93,6 +96,9 @@ const NFL_GAMES_TTL_MS = 60 * 1000;
 const MARKET_CACHE_TTL_MS = 10 * 60 * 1000;
 const MARKET_LOOKUP_CONCURRENCY = 4;
 const TRADE_HISTORY_LIMIT = 20;
+// One activities page feeds Recent fills (first 20), position cost (first 20)
+// and Filled orders (up to 50 individual fills). Still a single request.
+const FILLS_PAGE_LIMIT = 50;
 const DEFAULT_RETRY_AFTER_SEC = 45;
 
 function resetDeps() {
@@ -258,11 +264,11 @@ async function allPositions(client) {
   return { positions: [...byKey.values()] };
 }
 
-// The desk renders 20 fills. One page is enough; paging the whole account
+// The desk renders up to 50 individual fills (Filled orders). One page is enough; paging the whole account
 // (up to PAGE_CAP) was a large share of the Cloudflare 1015 burst.
 async function recentTrades(client) {
   const page = await client.listActivities({
-    limit: TRADE_HISTORY_LIMIT,
+    limit: FILLS_PAGE_LIMIT,
     sortOrder: 'SORT_ORDER_DESCENDING',
     types: 'ACTIVITY_TYPE_TRADE',
   });
@@ -366,6 +372,13 @@ async function improvedRows(store, slugs) {
   try { return await store.listImproved(slugs); } catch (_) { return []; }
 }
 
+async function protectRowsForFills(store, activities) {
+  if (!store || !store.configured || typeof store.listByOrderIds !== 'function') return [];
+  const ids = fillsMod.filledOrderIds(activities);
+  if (!ids.length) return [];
+  try { return await store.listByOrderIds(ids); } catch (_) { return []; }
+}
+
 function withFillNotes(positions, rows) {
   return positions.map((row) => {
     const line = protectMath.protectFillForPosition(row, rows);
@@ -405,7 +418,8 @@ async function snapshot(client, slug, store) {
   rate = absorbRate(rate, activityErr);
   if (slate.rateLimited) rate = absorbRate(rate, { rateLimited: true, retryAfter: slate.retryAfter });
 
-  const positions = positionsErr ? null : price.mapPositions(posRes.value, { fills: activities });
+  const recent = activities.slice(0, TRADE_HISTORY_LIMIT);
+  const positions = positionsErr ? null : price.mapPositions(posRes.value, { fills: recent });
   const ordersRaw = ordersErr ? null : ordRes.value;
   // Names for current positions, open orders, and the selected game only.
   // Trade-history slugs are not looked up.
@@ -435,7 +449,10 @@ async function snapshot(client, slug, store) {
   const orderRows = ordersRaw
     ? withProtect(price.mapOpenOrders(ordersRaw, markets), await armedRows(store))
     : null;
-  const activity = activityErr ? null : price.mapActivities({ activities: activities.slice(0, TRADE_HISTORY_LIMIT) }, markets);
+  const activity = activityErr ? null : price.mapActivities({ activities: recent }, markets);
+  const fills = activityErr
+    ? null
+    : fillsMod.mapFilledOrders(activities, { protectRows: await protectRowsForFills(store, activities) });
   const limited = !!rate.rateLimited;
   const retryAfter = limited ? normalizeRetryAfter(rate.retryAfter) : null;
   return {
@@ -446,6 +463,7 @@ async function snapshot(client, slug, store) {
     positions: positionRows,
     orders: orderRows,
     activity,
+    fills,
     market,
     games: asList(slate && slate.games),
     marketTypes: games.DESK_MARKET_TYPES,
@@ -454,6 +472,7 @@ async function snapshot(client, slug, store) {
       positions: sectionErrorText(positionsErr),
       orders: sectionErrorText(ordersErr),
       activity: sectionErrorText(activityErr),
+      fills: sectionErrorText(activityErr),
     },
     rateLimited: limited,
     retryAfter,

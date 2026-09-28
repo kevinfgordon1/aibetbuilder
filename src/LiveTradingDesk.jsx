@@ -6,6 +6,7 @@ import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
+import LiveDeskFilledOrders from "./LiveDeskFilledOrders";
 import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLimit, mergeDeskBoard } from "./liveDeskRefresh";
 
 let supabaseClient = null;
@@ -170,6 +171,7 @@ function LiveTradingDeskView({ user }) {
     ordersFailed: false,
     positionsStale: false,
     ordersStale: false,
+    fillsStale: false,
   });
   const slugRef = useRef("");
   const seq = useRef(0);
@@ -537,6 +539,7 @@ function LiveTradingDeskView({ user }) {
   const positions = Array.isArray(board && board.positions) ? board.positions : [];
   const orders = Array.isArray(board && board.orders) ? board.orders : [];
   const activity = Array.isArray(board && board.activity) ? board.activity : [];
+  const fills = Array.isArray(board && board.fills) ? board.fills : [];
   const games = Array.isArray(board && board.games)
     ? board.games.filter((g) => g && typeof g === "object" && typeof g.id === "string")
     : [];
@@ -850,7 +853,7 @@ function LiveTradingDeskView({ user }) {
           </form>
         </section>
 
-        <section style={card}>
+        <section style={{ ...card, gridColumn: "1 / -1" }}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Open orders{freshness.ordersStale ? " · stale" : ""}</div>
           {freshness.ordersStale && (
             <div style={{ color: "#fcd34d", fontSize: 12, marginTop: 8 }}>Last loaded orders, marked stale until Polymarket accepts a refresh.</div>
@@ -898,24 +901,14 @@ function LiveTradingDeskView({ user }) {
           </div>
         </section>
 
-        <section style={card}>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Recent fills</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Prices are American odds. No fill alerts on this desk.</div>
-          {activity.length === 0 && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>No recent trades.</div>}
-          <div className="desk-list">
-            {activity.filter((row) => row && typeof row === "object").map((row, index) => (
-              <div key={typeof row.id === "string" && row.id ? row.id : "fill-" + index} style={{ padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(row.title, "Trade")}</div>
-                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>
-                  {plain(row.longName, "Yes")} {plain(row.americanLabel, "")}
-                  {typeof row.qty === "number" || typeof row.qty === "string" ? " · " + row.qty : ""}
-                </div>
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{whenLabel(row.time)}{stateLabel(row.state) ? " · " + stateLabel(row.state) : ""}</div>
-              </div>
-            ))}
-          </div>
-        </section>
       </div>
+
+      <LiveDeskFilledOrders
+        fills={fills}
+        stale={!!freshness.fillsStale}
+        failed={!!(board && board.sectionErrors && board.sectionErrors.fills)}
+        style={{ ...card, marginTop: 16 }}
+      />
     </div>
   );
 }
