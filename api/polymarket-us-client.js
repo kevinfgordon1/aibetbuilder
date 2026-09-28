@@ -1,9 +1,118 @@
 // Signed Polymarket US Retail HTTP client (api.polymarket.us).
 // Public market metadata uses gateway.polymarket.us and is not signed.
 // No WebSocket, no CLOB. Callers inject fetchImpl in tests.
+//
+// When POLY_RELAY_URL and POLY_RELAY_SECRET are both set, api.polymarket.us
+// and gateway.polymarket.us requests go to that Railway origin with the same
+// method, body, and X-PM-* headers. Signing stays here (Ed25519 over
+// timestamp + METHOD + path). A relay 502/503/504, a relay-owned 401/403,
+// or a network failure retries that one request directly.
 'use strict';
 
 const { authHeaders, redactText } = require('./polymarket-us-auth');
+
+const RELAY_HOSTS = new Set(['api.polymarket.us', 'gateway.polymarket.us']);
+
+function readRelayConfig(env) {
+  const source = env || process.env;
+  let url = String(source.POLY_RELAY_URL || '').trim().replace(/\/+$/, '');
+  let secret = String(source.POLY_RELAY_SECRET || '').trim();
+  if ((secret.startsWith('"') && secret.endsWith('"')) || (secret.startsWith("'") && secret.endsWith("'"))) {
+    secret = secret.slice(1, -1).trim();
+  }
+  if ((url.startsWith('"') && url.endsWith('"')) || (url.startsWith("'") && url.endsWith("'"))) {
+    url = url.slice(1, -1).trim().replace(/\/+$/, '');
+  }
+  if (!url || !secret) return null;
+  return { origin: url, secret };
+}
+
+function headerMap(headers) {
+  const out = {};
+  if (!headers) return out;
+  if (typeof headers.forEach === 'function') {
+    headers.forEach((value, key) => { out[key] = value; });
+    return out;
+  }
+  return Object.assign(out, headers);
+}
+
+function relayOwnedReason(status, text) {
+  if (status !== 401 && status !== 403) return '';
+  let json = null;
+  try { json = JSON.parse(text); } catch (_) { return ''; }
+  if (!json || json.ok !== false || typeof json.error !== 'string') return '';
+  if (status === 401 && json.error === 'unauthorized') return '401 unauthorized';
+  if (status === 403 && json.error === 'upstream_not_allowed') return '403 upstream_not_allowed';
+  return '';
+}
+
+function replayResponse(status, text, headers) {
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers,
+    text: async () => text,
+  };
+}
+
+function warnFallback(method, host, path, reason) {
+  console.warn(
+    '[poly-relay] falling back to direct Polymarket after '
+    + reason + ' (' + method + ' ' + host + path + ')',
+  );
+}
+
+function createRelayFetch(directFetch, env) {
+  const call = typeof directFetch === 'function' ? directFetch : fetch;
+  return async function relayFetch(url, init) {
+    const cfg = readRelayConfig(env);
+    let parsed;
+    try { parsed = new URL(String(url)); } catch (_) { return call(url, init); }
+    if (!cfg || !RELAY_HOSTS.has(parsed.hostname)) return call(url, init);
+
+    const headers = headerMap(init && init.headers);
+    headers['X-Poly-Relay-Secret'] = cfg.secret;
+    headers['X-Poly-Relay-Host'] = parsed.hostname;
+    const method = (init && init.method) || 'GET';
+    const relayInit = {
+      method,
+      headers,
+      body: init && init.body,
+      signal: init && init.signal,
+    };
+    const relayUrl = cfg.origin + parsed.pathname + parsed.search;
+    let res;
+    try {
+      res = await call(relayUrl, relayInit);
+    } catch (_) {
+      warnFallback(method, parsed.hostname, parsed.pathname, 'network');
+      return call(url, init);
+    }
+
+    const status = Number(res && res.status);
+    if (status === 502 || status === 503 || status === 504) {
+      warnFallback(method, parsed.hostname, parsed.pathname, 'status ' + status);
+      return call(url, init);
+    }
+    if (status === 401 || status === 403) {
+      let text = '';
+      try {
+        text = typeof res.text === 'function' ? await res.text() : '';
+      } catch (_) {
+        warnFallback(method, parsed.hostname, parsed.pathname, 'unreadable ' + status);
+        return call(url, init);
+      }
+      const why = relayOwnedReason(status, text);
+      if (why) {
+        warnFallback(method, parsed.hostname, parsed.pathname, why);
+        return call(url, init);
+      }
+      return replayResponse(status, text, res.headers);
+    }
+    return res;
+  };
+}
 
 function queryString(query) {
   if (!query || typeof query !== 'object') return '';
@@ -48,8 +157,9 @@ function createPolymarketUsClient({
   secretKey,
   apiBase = 'https://api.polymarket.us',
   gatewayBase = 'https://gateway.polymarket.us',
-  fetchImpl = fetch,
+  fetchImpl: directFetch = fetch,
 } = {}) {
+  const fetchImpl = createRelayFetch(directFetch);
   const origin = String(apiBase || 'https://api.polymarket.us').replace(/\/$/, '');
   const gateway = String(gatewayBase || 'https://gateway.polymarket.us').replace(/\/$/, '');
   let signModeLatched = null;
@@ -193,5 +303,6 @@ function createPolymarketUsClient({
 
 module.exports = {
   queryString,
+  createRelayFetch,
   createPolymarketUsClient,
 };
