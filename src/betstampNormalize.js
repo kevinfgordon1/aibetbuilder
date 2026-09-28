@@ -245,10 +245,25 @@ export function marketIsExplicitlySuspended(market) {
 // Kevin can still bet (FanDuel/DK/Caesars etc.). Do not hide those. OTB
 // alone is only OFF when there is no offerable price *and* reconcile has
 // held that miss past the last-seen grace (SSE must not yank on the flap).
+// Betstamp's Polymarket feed (book 193) swaps in rows from *other* Polymarket
+// contracts, labelled as the fixture's FT moneyline / spread / total, and
+// flags them is_otb=true (PHI @ CHI Sep 28 2026: PHI 1.1175 = -851, both sides
+// -1210, from provider_market_id 4826188/4826189/4826190/4866730 instead of
+// the real ML market 3695205). The on-board 193 rows are always is_otb=false,
+// so any 193 OTB row is not offered, priced or not.
+export const BETSTAMP_POLYMARKET_BOOK_ID = 193;
+
+export function marketIsBetstampPolymarketOtB(market) {
+  if (!marketIsOtB(market)) return false;
+  const id = market.odd_provider_id ?? market.book_id ?? market.provider_id;
+  return Number(id) === BETSTAMP_POLYMARKET_BOOK_ID;
+}
+
 export function marketIsOffered(market) {
   if (!market || typeof market !== "object") return false;
   if (marketIsExplicitlySuspended(market)) return false;
   if (marketIsOtB(market) && !marketHasOfferableOdds(market)) return false;
+  if (marketIsBetstampPolymarketOtB(market)) return false;
   return true;
 }
 

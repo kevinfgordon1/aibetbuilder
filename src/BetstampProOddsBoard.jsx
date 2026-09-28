@@ -95,6 +95,7 @@ import {
   withUnderdogPhone,
   BETSTAMP_BOARD_UNDERDOG_POLL_MS,
   BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS,
+  holdPolymarketOtbCells,
 } from "./betstampProBoard.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 
@@ -1089,6 +1090,8 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
 
     const pollMs = liveOnly ? BETSTAMP_BOARD_LIVE_POLL_MS : BETSTAMP_BOARD_PREGAME_POLL_MS;
     const snapUrl = () => betstampBoardSnapshotUrl({ league, live: liveOnly, bookIds });
+    // Last good Polymarket (193) cells, per board session (sport / LIVE toggle).
+    const pmOtbHold = new Map();
 
     // First load and every poll: one REST snapshot through the shared proxy.
     // Pregame rebuilds the slate; LIVE reconciles into the painted rows so
@@ -1125,7 +1128,8 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
           nowMs: fetchedAt,
         };
         if (showLoading || !liveOnly || !gamesRef.current.length) {
-          commitGames(withUnderdogPhone(gamesFromBetstampSnapshot(payload), phoneRef.current, league), { force: true });
+          const rebuilt = holdPolymarketOtbCells(gamesFromBetstampSnapshot(payload), body.markets, pmOtbHold, { nowMs: fetchedAt });
+          commitGames(withUnderdogPhone(rebuilt, phoneRef.current, league), { force: true });
         } else {
           const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
           commitGames(withUnderdogPhone(reconcileLiveGames(withMeta, payload), phoneRef.current, league));
