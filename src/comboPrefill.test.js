@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { hedgeCap, decideAtFill, lockKind } from "./comboLockProfile.js";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const kalshiGames = require("../api/kalshi-games.js");
@@ -15,6 +16,7 @@ import {
   recommendedFillFromFair,
   recommendedFillFromProb,
   buildPromoComboPrefill,
+  comboKindForPromo,
   flattenComboGames,
   formatGameOption,
   comboGameId,
@@ -825,6 +827,69 @@ assert.equal(ariSnap.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP27ARISF-SF8", "
     encVal("KXNFLSPREAD-26SEP27ARISF-SF9", "no"),
     encVal("KXNFLTOTAL-26SEP27BALDAL-54", "no"),
   ]);
+}
+
+// Promo type → Combo Locks Bet type (options: cash / boost / freebet),
+// sportsbook + boost % prefill, and hedge math parity with manual entry.
+{
+  const legs = [
+    { name: "Phillies ML", market: "ML", game: "Mets @ Phillies", commence_time: "2026-08-07T23:05:00Z", sport: "baseball_mlb" },
+    { name: "Mets ML", market: "ML", game: "Mets @ Braves", commence_time: "2026-08-08T00:05:00Z", sport: "baseball_mlb" },
+  ];
+  assert.equal(comboKindForPromo("boost"), "boost");
+  assert.equal(comboKindForPromo("freebet"), "freebet");
+  assert.equal(comboKindForPromo("nosweat"), "cash");
+  assert.equal(comboKindForPromo(undefined, "freebet"), "freebet");
+  assert.equal(comboKindForPromo(undefined, undefined), "cash");
+
+  const boost = buildPromoComboPrefill({
+    stake: 100, american: 539, combinedProb: 1 / 5.4, legs, kind: "cash",
+    promoType: "boost", sportsbook: "BetMGM", boostPct: 33, nonce: 3,
+  });
+  assert.equal(boost.kind, "boost");
+  assert.equal(boost.sportsbook, "BetMGM");
+  assert.equal(boost.boostPct, 33);
+  assert.equal(boost.stake, 100);
+  assert.equal(boost.boost, 539);
+  assert.equal(boost.fair, 440);
+  assert.equal(boost.fill, 440);
+
+  const fb = buildPromoComboPrefill({
+    stake: 25, american: 1200, combinedProb: 0.08, legs, kind: "freebet",
+    promoType: "freebet", sportsbook: "FanDuel", boostPct: 33, nonce: 4,
+  });
+  assert.equal(fb.kind, "freebet");
+  assert.equal(fb.sportsbook, "FanDuel");
+  assert.equal(fb.boostPct, "", "boost % only for profit boosts");
+
+  const ns = buildPromoComboPrefill({
+    stake: 50, american: 600, combinedProb: 0.12, legs, promoType: "nosweat", sportsbook: "DraftKings", boostPct: 33, nonce: 5,
+  });
+  assert.equal(ns.kind, "cash");
+  assert.equal(ns.boostPct, "");
+  assert.equal(ns.sportsbook, "DraftKings");
+
+  // Legacy callers (no promoType / sportsbook) are unchanged.
+  const legacy = buildPromoComboPrefill({ stake: 100, american: 650, combinedProb: 0.08, legs, nonce: 6 });
+  assert.equal(legacy.kind, "cash");
+  assert.equal(legacy.sportsbook, "");
+  assert.equal(legacy.boostPct, "");
+
+  // Math parity: Combo Locks feeds lockKind(form) into hedgeCap / decideAtFill.
+  // Profit boost must price exactly like Cash at the same boosted odds.
+  assert.equal(lockKind({ kind: "boost" }), "cash");
+  for (const mode of ["1x", "2x", "riskfree", "riskfree_open"]) {
+    const kPre = lockKind({ kind: boost.kind, label: boost.label });
+    const kHand = lockKind({ kind: "cash" });
+    const capPre = hedgeCap({ stake: 100, boostAmerican: 539, fillAmerican: 440, mode, kind: kPre });
+    const capHand = hedgeCap({ stake: 100, boostAmerican: 539, fillAmerican: 440, mode, kind: kHand });
+    assert.equal(capPre, capHand, `cap parity ${mode}`);
+    if (capPre > 0) {
+      const a = decideAtFill({ parlayStake: 100, parlayAmerican: 539, fillAmerican: 440, fairAmerican: 440, rfqContracts: capPre, hedgeMode: mode, kind: kPre });
+      const b = decideAtFill({ parlayStake: 100, parlayAmerican: 539, fillAmerican: 440, fairAmerican: 440, rfqContracts: capHand, hedgeMode: mode, kind: kHand });
+      assert.deepEqual(a, b, `decide parity ${mode}`);
+    }
+  }
 }
 
 console.log("comboPrefill tests passed");
