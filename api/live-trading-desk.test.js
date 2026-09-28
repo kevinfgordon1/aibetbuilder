@@ -78,6 +78,8 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.match(ui, /deskRefreshDelayMs/);
   assert.match(ui, /mergeDeskBoard/);
   assert.match(ui, /No open Polymarket US positions/);
+  assert.match(ui, /LiveDeskFilledOrders/);
+  assert.match(text, /import\('\.\.\/src\/liveDeskFills\.js'\)/);
   assert.match(text, /Promise\.allSettled/);
   assert.match(text, /MARKET_LOOKUP_CONCURRENCY = 4/);
   assert.match(text, /TRADE_HISTORY_LIMIT = 20/);
@@ -774,6 +776,71 @@ const goodCreds = () => ({
       'Tennessee Titans +150 (submitted +130 · improved by Bet Protect)',
     );
     assert.doesNotMatch(noted.out.body.positions[0].protectFill, /¢/);
+  }
+
+  {
+    // Filled orders: one row per fill, Bet Protect re-rest shows submitted → filled.
+    const { createMemoryProtectStore } = require('../lib/desk-protect-registry');
+    const store = createMemoryProtectStore([
+      {
+        order_id: 'first-bp', market_slug: 'aec-nfl-lac-ten-2025-11-02', outcome: 'short', action: 'buy',
+        yes_price: '0.565', outcome_micro: 435000, submitted_outcome_micro: 435000, contracts: 10,
+        x_cents: 3, y_cents: 1, lineage_id: 'first-bp', protect_count: 0, status: 'replaced', replaced_by: 're-bp',
+      },
+      {
+        order_id: 're-bp', market_slug: 'aec-nfl-lac-ten-2025-11-02', outcome: 'short', action: 'buy',
+        yes_price: '0.580', outcome_micro: 420000, submitted_outcome_micro: 435000, contracts: 10,
+        x_cents: 3, y_cents: 1, lineage_id: 'first-bp', protect_count: 1, status: 'armed', replaces: 'first-bp',
+      },
+    ]);
+    const tradeOrder = {
+      id: 're-bp', marketSlug: 'aec-nfl-lac-ten-2025-11-02', intent: 'ORDER_INTENT_BUY_SHORT',
+      price: { value: '0.58' }, quantity: 10, cumQuantity: 4, state: 'ORDER_STATE_PARTIALLY_FILLED',
+      marketMetadata: { title: 'LA Chargers vs TEN Titans' },
+    };
+    let activityQuery = '';
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      protectStore: () => store,
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const u = new URL(url);
+        if (u.host === 'gateway.polymarket.us') return jsonRes(200, MARKET);
+        if (method === 'GET' && u.pathname === '/v1/portfolio/positions') return jsonRes(200, { positions: {}, eof: true });
+        if (method === 'GET' && u.pathname === '/v1/orders/open') return jsonRes(200, { orders: [] });
+        if (method === 'GET' && u.pathname === '/v1/portfolio/activities') {
+          activityQuery = u.search;
+          return jsonRes(200, {
+            activities: [{
+              type: 'ACTIVITY_TYPE_TRADE',
+              trade: {
+                id: 'tr-1', marketSlug: 'aec-nfl-lac-ten-2025-11-02', state: 'TRADE_STATE_NEW',
+                createTime: '2026-09-29T00:40:00Z', price: { value: '0.58' }, qtyDecimal: '4', cost: { value: '1.68' },
+                isAggressor: false,
+                passiveExecution: { order: tradeOrder, lastShares: '4', lastPx: { value: '0.58' } },
+                aggressorExecution: { order: { id: 'other' } },
+                market: MARKET,
+              },
+            }],
+          });
+        }
+        return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
+      },
+    });
+    const res = mockRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer tok' }, url: '/api/live-trading-desk' }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.match(activityQuery, /limit=50/);
+    assert.equal(res.out.body.fills.length, 1);
+    const fill = res.out.body.fills[0];
+    assert.equal(fill.orderId, 're-bp');
+    assert.equal(fill.venue, 'Polymarket US');
+    assert.equal(fill.partial, true);
+    assert.equal(fill.fillAmerican, '+138');
+    assert.equal(fill.protect.line, 'Submitted +130 → Filled +138 · Bet Protect');
+    assert.equal(res.out.body.sectionErrors.fills, '');
+    handler._resetDeps();
   }
 
   handler._resetDeps();

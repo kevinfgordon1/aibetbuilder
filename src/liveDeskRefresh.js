@@ -69,6 +69,8 @@ export function mergeDeskBoard(prev, data) {
   const positions = positionsFailed ? priorPositions : next.positions;
   const orders = ordersFailed ? priorOrders : next.orders;
   const activity = activityFailed ? priorActivity : next.activity;
+  const fillsFailed = !!section.fills || !Array.isArray(next.fills);
+  const fills = fillsFailed ? asRows(prior.fills) : next.fills;
   const incomingGames = Array.isArray(next.games) ? next.games : null;
   const priorGames = asRows(prior.games);
   const games = incomingGames && (incomingGames.length || !next.gamesError)
@@ -83,6 +85,7 @@ export function mergeDeskBoard(prev, data) {
       positions,
       orders,
       activity,
+      fills,
       games,
       market,
     },
@@ -91,6 +94,7 @@ export function mergeDeskBoard(prev, data) {
       ordersFailed,
       positionsStale: positionsFailed && positions.length > 0,
       ordersStale: ordersFailed && orders.length > 0,
+      fillsStale: fillsFailed && fills.length > 0,
     },
   };
 }
