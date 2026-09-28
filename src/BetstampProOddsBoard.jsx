@@ -45,7 +45,6 @@ import {
   BETSTAMP_DEFAULT_SPORT,
   bookByKey,
   leagueForSport,
-  betstampOddsBoardBooks,
   betstampOddsBoardRequestIds,
 } from "./betstampBooks.js";
 import BookLabel from "./BookLabel.jsx";
@@ -92,7 +91,12 @@ import {
   betstampBoardRequestsPerPoll,
   booksWithBoardData,
   wrapNamespacedStorage,
+  betstampOddsBoardColumns,
+  withUnderdogPhone,
+  BETSTAMP_BOARD_UNDERDOG_POLL_MS,
+  BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS,
 } from "./betstampProBoard.js";
+import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 
 // Betstamp Odds Board (Kevin only, #betstamp-odds-board).
 //
@@ -100,8 +104,11 @@ import {
 // cutover (#214, BetstampOddsBoard.jsx at 6ad2b04^) with the #233 black/gold
 // .nob-theme applied. Differences from that board:
 //   - Book columns are Kevin's core list (betstampOddsBoardBooks), plus
-//     ProphetX / Polymarket / Kalshi from Betstamp. No Underdog (196), Fliff,
-//     or Courtside. Columns with no prices in the snapshot are hidden.
+//     ProphetX / Polymarket / Kalshi from Betstamp, then Underdog Predict.
+//     Underdog comes from its phone feed (/api/underdog-predict), polled and
+//     matched exactly like the New Odds Board (applyUnderdogPhoneQuotes), so
+//     both boards show the same Underdog prices. Never Betstamp Underdog
+//     (196), Fliff, or Courtside. Columns with no prices are hidden.
 //   - Live updates poll /api/betstamp-markets?refresh=1 (5s LIVE, 15s pregame)
 //     instead of opening /api/betstamp-stream. The Betstamp trial key allows
 //     ONE upstream SSE connection, and /api/betstamp-stream opens a fresh
@@ -998,7 +1005,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 ));
 
 export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {}) {
-  const allBooks = useMemo(() => betstampOddsBoardBooks(), []);
+  const allBooks = useMemo(() => betstampOddsBoardColumns(), []);
   const bookIds = useMemo(() => betstampOddsBoardRequestIds(), []);
   const bookIdsKey = bookIds.join(",");
   const [market, setMarket] = useState("ml");
@@ -1015,6 +1022,8 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
   const [snapshotAt, setSnapshotAt] = useState(null);
   const [pollStats, setPollStats] = useState({ polls: 0, errors: 0, lastError: null });
   const gamesRef = useRef([]);
+  // Latest Underdog phone slate (null until the first poll returns).
+  const phoneRef = useRef(null);
   const tickSinkRef = useRef(null);
   const moveGameRef = useRef(null);
   const moveBookRef = useRef(null);
@@ -1116,10 +1125,10 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
           nowMs: fetchedAt,
         };
         if (showLoading || !liveOnly || !gamesRef.current.length) {
-          commitGames(gamesFromBetstampSnapshot(payload), { force: true });
+          commitGames(withUnderdogPhone(gamesFromBetstampSnapshot(payload), phoneRef.current, league), { force: true });
         } else {
           const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
-          commitGames(reconcileLiveGames(withMeta, payload));
+          commitGames(withUnderdogPhone(reconcileLiveGames(withMeta, payload), phoneRef.current, league));
         }
         setSnapshotAt(fetchedAt);
         setPollStats((p) => ({ ...p, polls: p.polls + 1, lastError: null }));
@@ -1214,6 +1223,44 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       venueTimers.forEach((t) => clearTimeout(t));
     };
   }, [boardSport, liveOnly, bookIdsKey, boardRefreshKey]);
+
+  // Underdog Predict: same /api/underdog-predict poll as the New Odds Board
+  // (20s pregame, 30s LIVE with ?live=1). Repaints only the Underdog cells.
+  useEffect(() => {
+    const league = leagueForSport(boardSport);
+    phoneRef.current = null;
+    const ctrl = new AbortController();
+    let cancelled = false;
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight || cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden" && phoneRef.current) return;
+      inFlight = true;
+      try {
+        const body = await fetchUnderdogPhone((url, init) => fetch(url, {
+          ...(init || {}),
+          signal: ctrl.signal,
+          cache: "no-store",
+        }), { live: liveOnly });
+        if (cancelled || ctrl.signal.aborted) return;
+        phoneRef.current = body && Array.isArray(body.games) ? body : { ok: false, games: [] };
+      } catch {
+        if (cancelled || ctrl.signal.aborted) return;
+        phoneRef.current = { ok: false, games: [] };
+      } finally {
+        inFlight = false;
+      }
+      if (cancelled || !gamesRef.current.length) return;
+      commitGames(withUnderdogPhone(gamesRef.current, phoneRef.current, league));
+    };
+    load();
+    const timer = setInterval(load, liveOnly ? BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS : BETSTAMP_BOARD_UNDERDOG_POLL_MS);
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      clearInterval(timer);
+    };
+  }, [boardSport, liveOnly, boardRefreshKey]);
 
   useEffect(() => {
     altFetchGen.current += 1;
@@ -2062,7 +2109,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       </div>
       )}
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
-        Betstamp books: DraftKings, FanDuel, Caesars, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Columns with no prices on this slate are hidden. Bet105 and Hard Rock are not on the current Betstamp key, so they are not requested yet. No Underdog, Fliff, or Courtside
+        Betstamp books: DraftKings, FanDuel, Caesars, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Underdog Predict comes from Underdog's own phone prices (same feed and game matching as the New Odds Board, polled every 20s pregame / 30s LIVE), not Betstamp. Columns with no prices on this slate are hidden. Bet105 and Hard Rock are not on the current Betstamp key, so they are not requested yet. No Fliff or Courtside
         {" · "}Mains (moneyline / spread / total, period FT), American odds
         {" · "}Refresh: polls the Betstamp REST snapshot (refresh=1) every {Math.round(BETSTAMP_BOARD_PREGAME_POLL_MS / 1000)}s pregame and every {Math.round(BETSTAMP_BOARD_LIVE_POLL_MS / 1000)}s LIVE, paused while this browser tab is hidden. It does not open a Betstamp live stream (the trial key allows one connection)
         {" · "}LIVE: a book/side missing from several polls (or an explicit suspend / taken_down) shows OFF. A blank means never offered / no quote. Polymarket and Kalshi also tick from the first-party relays

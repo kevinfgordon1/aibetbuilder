@@ -10,6 +10,8 @@
 // GETs per league (markets + fixtures + teams), far under 25 req/s.
 
 import { betstampSnapshotUrl } from "./betstampLive.js";
+import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
+import { betstampOddsBoardBooks, bookByKey, UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
 
 // LIVE: every 5s → 3 × 720 = 2,160 Betstamp GETs per visible hour.
 // Pregame: every 15s → 720 GETs per visible hour. Hidden tabs skip polls.
@@ -66,4 +68,42 @@ export function wrapNamespacedStorage(namespace, storage) {
       if (s) s.setItem(`${ns}:${key}`, value);
     },
   };
+}
+
+// ── Underdog Predict column ────────────────────────────────────────────
+// Same source, matching, and conversion as the New Odds Board: poll
+// /api/underdog-predict (Underdog phone odds.prediction, never Betstamp
+// book 196), join by teams + same-kickoff window (findUnderdogPhoneGame),
+// and paint through applyUnderdogPhoneQuotes. Same poll cadence as the New
+// Odds Board so both boards show identical Underdog prices.
+
+export const BETSTAMP_BOARD_UNDERDOG_POLL_MS = 20_000; // = FREE_FEED_POLL_MS
+export const BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS = 30_000; // = FREE_FEED_LIVE_POLL_MS
+
+/** Column catalog: Betstamp books, then Underdog Predict (phone feed). */
+export function betstampOddsBoardColumns() {
+  const ud = bookByKey(UNDERDOG_PREDICT_BOOK_KEY);
+  return ud ? [...betstampOddsBoardBooks(), ud] : betstampOddsBoardBooks();
+}
+
+/** Keep only this league's phone games (Underdog sport NFL / NCAAF / MLB). */
+export function underdogSlateForLeague(slate, league) {
+  if (!slate || !Array.isArray(slate.games)) return slate;
+  const lg = String(league || "NFL").toUpperCase();
+  return {
+    ...slate,
+    games: slate.games.filter((g) => {
+      const sport = String((g && (g.sport || g.league)) || "").toUpperCase();
+      return !sport || sport === lg;
+    }),
+  };
+}
+
+/**
+ * Paint Underdog Predict cells onto Betstamp board games. A null slate (phone
+ * not back yet) leaves games alone; a failed/empty slate clears the cells.
+ */
+export function withUnderdogPhone(games, slate, league) {
+  if (!slate) return games || [];
+  return applyUnderdogPhoneQuotes(games || [], underdogSlateForLeague(slate, league));
 }

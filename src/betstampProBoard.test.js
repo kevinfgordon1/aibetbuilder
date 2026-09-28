@@ -8,7 +8,13 @@ import {
   betstampBoardHourlyRequests,
   booksWithBoardData,
   wrapNamespacedStorage,
+  betstampOddsBoardColumns,
+  withUnderdogPhone,
+  underdogSlateForLeague,
+  BETSTAMP_BOARD_UNDERDOG_POLL_MS,
+  BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS,
 } from "./betstampProBoard.js";
+import { gamesFromFreeFeeds, FREE_FEED_POLL_MS, FREE_FEED_LIVE_POLL_MS } from "./freeFeedBoard.js";
 import {
   betstampOddsBoardBooks,
   BETSTAMP_ODDS_BOARD_BOOK_IDS,
@@ -105,5 +111,63 @@ const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
 assert.match(app, /canSeeBetstampOddsBoard\(user\) && \(\s*<a[^>]*betstampBoard/);
 assert.match(app, /activeTab === "betstampBoard" && canSeeBetstampOddsBoard\(user\)/);
 assert.match(app, /activeTab === "betstampBoard" && !canSeeBetstampOddsBoard\(user\)\) \{\s*setActiveTab\("promo"\)/);
+
+// Underdog Predict column: phone feed, same matching as the New Odds Board.
+const cols = betstampOddsBoardColumns();
+assert.equal(cols[cols.length - 1].key, "underdog_predict", "Underdog Predict is the last column");
+assert.deepEqual(cols.slice(0, -1).map((b) => b.id), ids, "Betstamp columns unchanged");
+assert.ok(!betstampOddsBoardRequestIds().includes(196), "never asks Betstamp for book 196");
+assert.equal(BETSTAMP_BOARD_UNDERDOG_POLL_MS, FREE_FEED_POLL_MS, "same pregame cadence as the New Odds Board");
+assert.equal(BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS, FREE_FEED_LIVE_POLL_MS, "same LIVE cadence as the New Odds Board");
+const t0 = Date.parse("2026-09-28T20:00:00Z");
+const phone = {
+  ok: true,
+  games: [
+    {
+      matchId: 179003, sport: "NFL", away: "Philadelphia Eagles", home: "Chicago Bears",
+      scheduledAt: "2026-09-29T00:15:00Z", status: "scheduled", live: false,
+      lines: [
+        { market: "h2h", name: "Philadelphia Eagles", choice: "away", american: -205, updatedAt: t0 },
+        { market: "h2h", name: "Chicago Bears", choice: "home", american: 163, updatedAt: t0 },
+        { market: "spreads", name: "Philadelphia Eagles", point: -3.5, choice: "away", american: -109, updatedAt: t0 },
+        { market: "spreads", name: "Chicago Bears", point: 3.5, choice: "home", american: -113, updatedAt: t0 },
+        { market: "totals", name: "PHI @ CHI", point: 41.5, choice: "higher", american: -118, updatedAt: t0 },
+        { market: "totals", name: "PHI @ CHI", point: 41.5, choice: "lower", american: -105, updatedAt: t0 },
+      ],
+    },
+    // Same team names in another league must not attach on the NFL board.
+    {
+      matchId: 1, sport: "NCAAF", away: "Philadelphia Eagles", home: "Chicago Bears",
+      scheduledAt: "2026-09-29T00:10:00Z", lines: [{ market: "h2h", name: "Philadelphia Eagles", american: 999 }],
+    },
+  ],
+};
+assert.equal(underdogSlateForLeague(phone, "NFL").games.length, 1);
+const bsGame = {
+  id: "bs-1", league: "NFL", away_team: "Philadelphia Eagles", home_team: "Chicago Bears",
+  commence_time: "2026-09-29T00:15:00Z",
+  bookOdds: { draftkings: { ml_away: -200, ml_home: 170 } },
+};
+const [painted] = withUnderdogPhone([bsGame], phone, "NFL");
+assert.equal(painted.bookOdds.draftkings.ml_away, -200, "Betstamp cells untouched");
+const ud = painted.bookOdds.underdog_predict;
+assert.deepEqual(
+  [ud.ml_away, ud.ml_home, ud.spr_away, ud.spr_away_line, ud.spr_home, ud.spr_home_line, ud.tot_line, ud.tot_over, ud.tot_under],
+  [-205, 163, -109, -3.5, -113, 3.5, 41.5, -118, -105],
+);
+// Identical Underdog cells to the New Odds Board for the same slate.
+const nob = gamesFromFreeFeeds({ league: "NFL", underdog: phone, nowMs: t0 })
+  .find((g) => /Eagles/.test(g.away_team || g.away));
+assert.deepEqual(ud, nob.bookOdds.underdog_predict, "same Underdog cells as the New Odds Board");
+assert.equal(withUnderdogPhone([bsGame], null, "NFL")[0], bsGame, "no slate yet: leave games alone");
+const cleared = withUnderdogPhone([painted], { ok: false, games: [] }, "NFL")[0].bookOdds.underdog_predict;
+assert.equal(cleared.ml_away, null, "failed phone poll clears Underdog cells");
+// A different night never attaches.
+const nextWeek = { ...bsGame, commence_time: "2026-10-06T00:15:00Z" };
+assert.equal(withUnderdogPhone([nextWeek], phone, "NFL")[0].bookOdds.underdog_predict.ml_away, null);
+assert.ok(booksWithBoardData([painted]).has("underdog_predict"), "Underdog column shows when priced");
+assert.match(board, /fetchUnderdogPhone/);
+assert.match(board, /withUnderdogPhone\(/);
+assert.match(board, /betstampOddsBoardColumns\(\)/);
 
 console.log("betstampProBoard tests passed");
