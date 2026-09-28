@@ -81,6 +81,58 @@ export const FOURCASTERS_BOARD_BOOK = Object.freeze({
 BOOKS_BY_ID.set(FOURCASTERS_BOARD_BOOK.id, FOURCASTERS_BOARD_BOOK);
 BOOKS_BY_KEY.set(FOURCASTERS_BOARD_BOOK.key, FOURCASTERS_BOARD_BOOK);
 
+// Betstamp Odds Board (Kevin only) extra books. These are Betstamp appendix
+// ids the proxy accepts only when a caller lists them in book_ids (#241).
+// Registered for bookById so a snapshot that carries them can paint, but kept
+// out of BETSTAMP_TRIAL_BOOKS so Promo and the New Odds Board are unchanged.
+// Never Fliff (800), never Courtside, never Betstamp Underdog (196).
+export const BETSTAMP_EXTRA_BOARD_BOOKS = Object.freeze([
+  { id: 722, key: "fanatics", label: "Fanatics", color: "#e11d48", bg: "rgba(225,29,72,0.15)", logo: null },
+  { id: 500, key: "betrivers", label: "BetRivers (Kambi)", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
+  { id: 105, key: "bet105", label: "Bet105", color: "#38bdf8", bg: "rgba(56,189,248,0.15)", logo: null },
+  { id: 614, key: "betus", label: "BetUS", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: null },
+  { id: 700, key: "thescore", label: "theScore Bet", color: "#60a5fa", bg: "rgba(96,165,250,0.15)", logo: null },
+  { id: 850, key: "hardrockbet", label: "Hard Rock", color: "#a78bfa", bg: "rgba(167,139,250,0.15)", logo: null },
+]);
+
+for (const b of BETSTAMP_EXTRA_BOARD_BOOKS) {
+  if (!BOOKS_BY_ID.has(b.id)) BOOKS_BY_ID.set(b.id, b);
+  if (!BOOKS_BY_KEY.has(b.key)) BOOKS_BY_KEY.set(b.key, b);
+}
+
+// Column order on the Betstamp Odds Board: Kevin's core books, then the
+// Betstamp exchanges. 196 / Fliff / Courtside are never on this list.
+export const BETSTAMP_ODDS_BOARD_BOOK_IDS = Object.freeze([
+  200, 100, 300, 722, 365,
+  642,
+  500,
+  250, 105, 613, 614, 150,
+  700, 850,
+  191, 193, 194,
+]);
+export const BETSTAMP_ODDS_BOARD_FORBIDDEN_BOOK_IDS = Object.freeze([UNDERDOG_PREDICT_BOOK_ID, 800]);
+
+// Kevin's list includes Bet105 (105) and Hard Rock (850), but the current
+// Betstamp trial key answers "You do not have access to this provider" for
+// both (checked Sep 28 2026). A bare 403 makes /api/betstamp-markets drop
+// EVERY opt-in book (Fanatics, Kambi, BetUS, theScore too), so do not send
+// them until the plan covers them. Remove an id here once it is entitled.
+export const BETSTAMP_ODDS_BOARD_UNENTITLED_BOOK_IDS = Object.freeze([105, 850]);
+
+/** book_ids this board sends to /api/betstamp-markets. */
+export function betstampOddsBoardRequestIds() {
+  return betstampOddsBoardBooks()
+    .map((b) => b.id)
+    .filter((id) => !BETSTAMP_ODDS_BOARD_UNENTITLED_BOOK_IDS.includes(id));
+}
+
+export function betstampOddsBoardBooks() {
+  return BETSTAMP_ODDS_BOARD_BOOK_IDS
+    .filter((id) => !BETSTAMP_ODDS_BOARD_FORBIDDEN_BOOK_IDS.includes(id))
+    .map((id) => BOOKS_BY_ID.get(id))
+    .filter(Boolean);
+}
+
 // Kalshi / Polymarket / Novig / 4Casters / ProphetX / Underdog Predict — exchanges the board shows as win probability.
 export const PM_WIN_PROB_BOOKS = Object.freeze(["kalshi", "polymarket", "novig", "fourcasters", "prophetx", "underdog_predict"]);
 
