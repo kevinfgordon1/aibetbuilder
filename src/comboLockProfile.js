@@ -36,7 +36,9 @@ export function moneyAbs(v) {
 export function formatAmericanOdds(american) {
   const n = toNum(american);
   if (n == null || n === 0) return null;
-  return n > 0 ? "+" + n : "" + n;
+  const rounded = Math.round(n);
+  if (!rounded) return null;
+  return rounded > 0 ? "+" + rounded : "" + rounded;
 }
 
 export function lockKind(source) {
