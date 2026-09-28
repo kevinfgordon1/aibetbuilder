@@ -652,7 +652,7 @@ function LiveTradingDeskView({ user }) {
               style={field}
             />
             <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 8, lineHeight: 1.45 }}>
-              Small size, trial only. Hard cap ${MAX_SIZE_DOLLARS} so a fat-finger cannot rest a large order. Default ${DEFAULT_SIZE_DOLLARS}. Dollars are the most you can lose if this fills and settles against you.
+              Hard cap ${MAX_SIZE_DOLLARS} so a fat-finger cannot rest a large order. Default ${DEFAULT_SIZE_DOLLARS}. Dollars are the most you can lose if this fills and settles against you.
             </div>
 
             <label htmlFor="desk-protect" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, fontSize: 14, fontWeight: 800, color: "#f8fafc" }}>

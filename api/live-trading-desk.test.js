@@ -64,6 +64,9 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(ui, /setAmerican\(reset\.american\)/);
   assert.doesNotMatch(ui, /setDollars\(reset\.dollars\)/);
   assert.match(ui, /Moneyline only for now/);
+  assert.match(ui, /fat-finger cannot rest a large order/);
+  assert.doesNotMatch(ui, /trial only/);
+  assert.doesNotMatch(ui, /Small size/);
   assert.match(ui, /id="desk-protect"/);
   assert.match(ui, /const \[protect, setProtect\] = useState\(true\)/, 'Bet Protect starts on');
   assert.doesNotMatch(ui, /Off unless you arm/);
@@ -309,7 +312,7 @@ const goodCreds = () => ({
     assert.equal(res.out.body.market.shortName, 'Tennessee Titans');
     assert.notEqual(res.out.body.market.longName, 'Titans');
     assert.equal(res.out.body.activity[0].americanLabel, '-150');
-    assert.equal(res.out.body.capDollars, 100);
+    assert.equal(res.out.body.capDollars, 1000);
     assert.equal(res.out.body.defaultDollars, 25);
   }
 
@@ -359,11 +362,11 @@ const goodCreds = () => ({
         outcome: 'long',
         action: 'buy',
         american: -150,
-        dollars: 250,
+        dollars: 1001,
       },
     }, res);
     assert.equal(res.out.statusCode, 400);
-    assert.match(res.out.body.error, /\$100/);
+    assert.match(res.out.body.error, /\$1000/);
     assert.equal(calls.length, before + 1, 'cap rejects before create');
     assert.equal(calls[calls.length - 1].host, 'gateway.polymarket.us');
   }
@@ -901,7 +904,22 @@ const goodCreds = () => ({
     assert.equal(saved.y_cents, 1);
     assert.equal(saved.submitted_outcome_micro, saved.outcome_micro);
     assert.equal(saved.submitted_outcome_micro, 600000);
-    assert.ok(saved.contracts <= 100 / 0.6 + 1e-6);
+    assert.ok(saved.contracts <= 1000 / 0.6 + 1e-6);
+
+    const fiveHundred = { ...defaultBody, dollars: 500 };
+    const covered = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { ...fiveHundred, confirm: confirmFor(fiveHundred) },
+    }, covered);
+    assert.equal(covered.out.statusCode, 200, JSON.stringify(covered.out.body));
+    assert.equal(covered.out.body.snap.protect.on, true, 'a $500 rest stays under Bet Protect');
+    assert.equal(covered.out.body.snap.protect.overCap, undefined);
+    const coveredRow = await store.get(covered.out.body.orderId);
+    assert.equal(coveredRow.status, 'armed');
+    assert.ok(coveredRow.contracts > 100 / 0.6, 'larger than the old $100 size');
+    assert.ok(coveredRow.contracts <= 1000 / 0.6 + 1e-6);
 
     const createsBeforeBlock = creates;
     handler._setDeps({ protectStore: () => ({ configured: false, async listArmed() { return []; } }) });

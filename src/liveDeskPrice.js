@@ -20,14 +20,15 @@
 // Dollar size is max loss if the order fills and settles against him:
 //   buy  → contracts × outcome price
 //   sell → contracts × (1 − outcome price)
-// Hard cap is MAX_SIZE_DOLLARS (V1 trial).
+// Hard cap is MAX_SIZE_DOLLARS. MAX_CONTRACTS is that cap at the 1¢ floor
+// ($1000 / $0.01) so a legal rest is not rejected for contract count.
 
 export const DEFAULT_TICK = 0.001;
 export const PRICE_MIN = 0.01;
 export const PRICE_MAX = 0.99;
 export const DEFAULT_SIZE_DOLLARS = 25;
-export const MAX_SIZE_DOLLARS = 100;
-export const MAX_CONTRACTS = 10000;
+export const MAX_SIZE_DOLLARS = 1000;
+export const MAX_CONTRACTS = 100000;
 
 const MICRO = 1_000_000;
 

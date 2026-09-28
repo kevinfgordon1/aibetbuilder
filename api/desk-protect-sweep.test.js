@@ -283,12 +283,27 @@ async function post(headers, body) {
   assert.equal(idle.body.events.length, 0);
   assert.equal(idleClient.calls.cancel.length, 0, 'Protect-off orders are not in the registry');
 
-  const capClient = fakeClient({
-    open: [resting('ord-1', 500, '0.600')],
+  const keepClient = fakeClient({
+    open: [resting('ord-1', 833, '0.600')],
     book: bbo(0.55, 0.57),
   });
   handler._setDeps({
-    protectStore: () => createMemoryProtectStore([armedRow({ contracts: 500 })]),
+    protectStore: () => createMemoryProtectStore([armedRow({ contracts: 833 })]),
+    clientFromCreds: () => keepClient,
+  });
+  const kept = await post(
+    { 'X-Desk-Protect-Secret': SECRET },
+    { op: 'sweep', mode: 'adverse-only' },
+  );
+  assert.equal(kept.body.events.length, 1);
+  assert.equal(keepClient.calls.create[0].quantity, 833, 'a ~$500 rest is re-rested in full');
+
+  const capClient = fakeClient({
+    open: [resting('ord-1', 5000, '0.600')],
+    book: bbo(0.55, 0.57),
+  });
+  handler._setDeps({
+    protectStore: () => createMemoryProtectStore([armedRow({ contracts: 5000 })]),
     clientFromCreds: () => capClient,
   });
   const capped = await post(
@@ -298,8 +313,8 @@ async function post(headers, body) {
   assert.equal(capped.body.events.length, 1);
   const qty = capClient.calls.create[0].quantity;
   const px = Number(capClient.calls.create[0].price.value);
-  assert.ok(qty * px <= 100 + 1e-6, 're-rest risk ' + (qty * px));
-  assert.ok(qty < 500);
+  assert.ok(qty * px <= 1000 + 1e-6, 're-rest risk ' + (qty * px));
+  assert.ok(qty < 5000);
 
   handler._setDeps({
     runSweep: async () => {
