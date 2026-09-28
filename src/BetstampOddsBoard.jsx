@@ -2124,7 +2124,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       </div>
       )}
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
-        Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
+        Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
         {" · "}Moneyline from Polymarket, Kalshi, and Underdog. Novig and 4Casters also show moneyline when configured. Underdog, Novig, and 4Casters show the main spread and total; Polymarket and Kalshi cells stay blank there.
         {" · "}A blank — means this feed has no quote for that side. It is not an error.
         {" · "}Pregame polls Underdog and keeps the Polymarket, Kalshi, Novig, and 4Casters streams open. LIVE uses the same feeds, including in-game Underdog.
