@@ -1823,7 +1823,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-gold)", letterSpacing: 0.2 }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "var(--nob-muted)", marginTop: 4 }}>
-            Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters appear when the server has credentials. No sportsbook columns.
+            Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters appears when the server has credentials. No sportsbook columns.
           </div>
           <div data-fee-legend="1" style={{ fontSize: 12, color: "var(--nob-text-2)", marginTop: 2 }}>
             {TAKER_FEE_LEGEND}
