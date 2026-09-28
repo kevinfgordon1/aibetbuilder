@@ -1019,9 +1019,10 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
 
 export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) {
   const venuesOn = firstPartyPmLiveEnabled();
-  // Novig and 4Casters stay off until their streams say the server has
+  // Novig joins once its stream (the odds relay, public v3 book, no key)
+  // sends a packet. 4Casters stays off until its stream says the server has
   // credentials. needs-credentials omits the column. A blank column means
-  // the credential is set and this slate has no price.
+  // the feed is up and this slate has no price.
   const [novigOn, setNovigOn] = useState(false);
   const [fourcastersOn, setFourcastersOn] = useState(false);
   const books = useMemo(() => {
@@ -1149,7 +1150,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       setSnapshotAt(Date.now());
       setLoading(false);
       setFeedNote(phoneFailed
-        ? "Underdog phone didn't respond. Polymarket and Kalshi still show when they have a game. Novig and 4Casters show when the server has credentials."
+        ? "Underdog phone didn't respond. Polymarket, Kalshi, and Novig still show when they have a game. 4Casters shows when the server has credentials."
         : null);
     };
 
@@ -1822,7 +1823,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-gold)", letterSpacing: 0.2 }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "var(--nob-muted)", marginTop: 4 }}>
-            Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters appear when the server has credentials. No sportsbook columns.
+            Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters appears when the server has credentials. No sportsbook columns.
           </div>
           <div data-fee-legend="1" style={{ fontSize: 12, color: "var(--nob-text-2)", marginTop: 2 }}>
             {TAKER_FEE_LEGEND}
@@ -2123,7 +2124,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       </div>
       )}
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
-        Polymarket, Kalshi, and Underdog Predict. Novig and 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
+        Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
         {" · "}Moneyline from Polymarket, Kalshi, and Underdog. Novig and 4Casters also show moneyline when configured. Underdog, Novig, and 4Casters show the main spread and total; Polymarket and Kalshi cells stay blank there.
         {" · "}A blank — means this feed has no quote for that side. It is not an error.
         {" · "}Pregame polls Underdog and keeps the Polymarket, Kalshi, Novig, and 4Casters streams open. LIVE uses the same feeds, including in-game Underdog.

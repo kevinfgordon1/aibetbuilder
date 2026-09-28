@@ -42,12 +42,13 @@ assert.equal(polymarketStreamUrl({ league: "NFL" }), "/api/polymarket-stream?lea
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "/api/kalshi-stream?league=MLB");
 assert.equal(polymarketBoardUrl({ league: "NFL" }), "/api/polymarket-board?league=NFL");
 assert.equal(kalshiBoardUrl({ league: "NFL" }), "/api/kalshi-board?league=NFL");
+assert.equal(novigStreamUrl({ league: "NFL" }), "/api/novig-stream?league=NFL");
 process.env.VITE_ODDS_RELAY_URL = "https://odds.example/";
 assert.equal(polymarketStreamUrl({ league: "NFL" }), "https://odds.example/stream?league=NFL&venue=polymarket");
 assert.equal(kalshiStreamUrl({ league: "MLB" }), "https://odds.example/stream?league=MLB&venue=kalshi");
 assert.equal(polymarketBoardUrl({ league: "NFL" }), "https://odds.example/board?league=NFL&venue=polymarket");
 assert.equal(kalshiBoardUrl({ league: "NCAAF" }), "https://odds.example/board?league=NCAAF&venue=kalshi");
-assert.equal(novigStreamUrl({ league: "NFL" }), "/api/novig-stream?league=NFL");
+assert.equal(novigStreamUrl({ league: "NFL" }), "https://odds.example/stream?league=NFL&venue=novig");
 if (prevRelay == null) delete process.env.VITE_ODDS_RELAY_URL;
 else process.env.VITE_ODDS_RELAY_URL = prevRelay;
 assert.equal(novigStreamUrl({ league: "NCAAF" }), "/api/novig-stream?league=NCAAF");

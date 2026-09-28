@@ -2,11 +2,11 @@
 
 // GET /api/novig-stream?league=NFL|NCAAF|MLB
 // Same-origin SSE of Novig best asks for game moneylines, plus the main
-// spread and total when the book has both sides and a clean line.
+// spread and total. Fallback for when VITE_ODDS_RELAY_URL is unset; the
+// board normally reads Novig from the odds relay.
 //
-// OAuth client credentials (NOVIG_CLIENT_ID / NOVIG_CLIENT_SECRET) stay on
-// the server. Unset credentials emit one needs-credentials note and do not
-// open the tape. A 401 does not throw — the column stays blank.
+// Novig public v3 REST needs no key. NOVIG_KEY_ID / NOVIG_PRIVATE_KEY (server
+// only) add the signed websocket.
 
 const {
   parseLeague,
@@ -53,7 +53,7 @@ async function handler(req, res, deps) {
       hubs,
       key: `novig:${league}`,
       source: 'novig',
-      mode: configured ? 'ws' : 'needs-credentials',
+      mode: configured ? 'rest' : 'needs-credentials',
       start(emit) {
         return startNovig(league, deps || {}, emit);
       },
