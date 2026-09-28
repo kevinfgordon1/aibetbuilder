@@ -450,4 +450,18 @@ function free100() {
   assert.match(locks, /confirmMerge/);
 }
 
+{
+  // Original riskfree on free bets (single or merged all-free) must save a positive
+  // cap: ceil(total free face / y). combo-worker treats max_contracts 0 as unlimited.
+  const econ = mergeEconomics([
+    { stake: 50, american: 650, bet_type: "free" },
+    { stake: 50, american: 650, bet_type: "free" },
+  ]);
+  assert.equal(econ.allFree, true);
+  const enc = encodeMergedParlay(econ, { fillAmerican: 610, hedgeMode: "riskfree" });
+  assert.equal(enc.is_free_bet, true);
+  assert.equal(enc.max_contracts, 710);
+  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "riskfree", kind: "freebet" }), 710);
+}
+
 console.log("comboMerge.test.js ok");

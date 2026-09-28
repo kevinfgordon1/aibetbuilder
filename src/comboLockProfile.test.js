@@ -205,7 +205,8 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "1x" }), 750);
   assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "1x", kind: "freebet" }), 650);
   assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "2x", kind: "freebet" }), 1300);
-  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "riskfree", kind: "freebet" }), 0);
+  // Free bet riskfree: N = ceil(face / y) = ceil(100 × 7.10) = 710 (never 0).
+  assert.equal(hedgeCap({ stake: 100, boostAmerican: 650, fillAmerican: 610, mode: "riskfree", kind: "freebet" }), 710);
 
   const unhedged = currentUnhedged(fb);
   assert.equal(unhedged.kind, "freebet");
@@ -251,12 +252,14 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
 
   const riskfree = decideAtFill({
     parlayStake: 100, parlayAmerican: 650, fillAmerican: 610,
-    rfqContracts: 0, hedgeMode: "riskfree", kind: "freebet",
+    rfqContracts: 710, hedgeMode: "riskfree", kind: "freebet",
   });
   assert.equal(riskfree.ok, true);
-  assert.equal(riskfree.contracts, 0);
-  assert.equal(riskfree.hit, 650);
-  assert.equal(riskfree.miss, 0);
+  assert.equal(riskfree.cap, 710);
+  assert.equal(riskfree.contracts, 710);
+  assert.equal(riskfree.miss, 100); // free-bet face back on a miss
+  assert.equal(riskfree.hit, 40); // 650 − 710 × (1 − y), still ≥ $0
+  assert.equal(riskfree.locks, true);
 
   const prof = lockProfile(fb, 0);
   assert.equal(prof.current.kind, "freebet");
@@ -359,10 +362,29 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.equal(threeX.cap, 6300);
   assert.ok(threeX.hit < twoX.hit);
 
-  // Free bet: risk-free (floor the loss) stays 0 contracts. The new mode still sizes off W.
-  assert.equal(hedgeCap({
+  // Free bet: risk-free sizes off the free-bet face (never 0): ceil(100 × 13) = 1,300.
+  // Miss = +$100, hit = +$800. The new mode still sizes off W.
+  const freeRf = hedgeCap({
     stake, boostAmerican: boost, fillAmerican: fill, mode: "riskfree", kind: "freebet",
-  }), 0);
+  });
+  assert.equal(freeRf, 1300);
+  const freeRfDecision = decideAtFill({
+    parlayStake: stake, parlayAmerican: boost, fillAmerican: fill,
+    rfqContracts: freeRf, hedgeMode: "riskfree", kind: "freebet",
+  });
+  assert.equal(freeRfDecision.miss, 100);
+  assert.equal(freeRfDecision.hit, 800);
+  // Boost worse than the fill: clamp so the win side never goes negative.
+  const clamp = hedgeCap({ stake: 100, boostAmerican: 400, fillAmerican: 600, mode: "riskfree", kind: "freebet" });
+  assert.equal(clamp, Math.floor(400 / (1 - 1 / 7) + 1e-9));
+  assert.ok(decideAtFill({
+    parlayStake: 100, parlayAmerican: 400, fillAmerican: 600,
+    rfqContracts: clamp, hedgeMode: "riskfree", kind: "freebet",
+  }).hit >= 0);
+  // Every saved mode gives a free bet a positive cap (combo-worker treats 0 as unlimited).
+  for (const m of ["1x", "2x", "3x", "riskfree", "riskfree_open"]) {
+    assert.ok(hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: m, kind: "freebet" }) > 0, m);
+  }
   const freeOpen = hedgeCap({
     stake, boostAmerican: boost, fillAmerican: fill, mode: "riskfree_open", kind: "freebet",
   });

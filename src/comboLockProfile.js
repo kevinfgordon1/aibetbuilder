@@ -97,7 +97,11 @@ function ceilContracts(n) {
 // Auto contracts cap for a hedge mode. Fill odds already include the maker fee.
 // y = 1 / fill decimal = implied probability of the fill odds.
 // W = profit if the parlay wins. S = cash at risk (0 for a free bet).
-//   riskfree      : N = S / y, rounded up. Free bet (S = 0) stays 0 contracts.
+//   riskfree      : N = S / y, rounded up. Free bet: S is the free-bet face value F
+//                   (what the ticket is worth if it misses), so N = F / y rounded up,
+//                   never past W / (1 − y) so the win side stays ≥ $0. Miss ≈ +F, hit
+//                   keeps the rest of the upside. (Saving 0 here made combo-worker fall
+//                   back to an unpersisted cap it could overfill.)
 //   1x            : N = W + S.
 //   riskfree_open : N = W / (1 − y), rounded DOWN. Win side stays ≥ $0; miss pays.
 //   2x / 3x       : multiples of the 1× count. 3× is no longer in the form, but saved rows still size.
@@ -124,9 +128,14 @@ export function hedgeCap({
     ? W + S
     : book.equalizeN;
   switch (String(mode)) {
-    case "riskfree":
+    case "riskfree": {
+      if (book.kind === "freebet" && !(S > 0)) {
+        const face = book.stake;
+        return Math.min(ceilContracts(face / y), floorContracts(W / (1 - y)));
+      }
       if (!(S > 0)) return 0;
       return ceilContracts(S / y);
+    }
     case "riskfree_open":
       return floorContracts(W / (1 - y));
     case "2x": return Math.round(2 * equalize);
