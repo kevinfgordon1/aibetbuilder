@@ -32,7 +32,28 @@ function parseBody(text) {
   try { return JSON.parse(text); } catch (_) { return null; }
 }
 
-function httpError(method, path, statusCode, json, text) {
+function isRateLimitPayload(statusCode, json, text) {
+  if (Number(statusCode) === 429) return true;
+  const code = json && (json.error_code != null ? json.error_code : json.errorCode);
+  if (Number(code) === 1015) return true;
+  const title = json && (json.title || json.message || '');
+  if (/error 1015|you are being rate limited/i.test(String(title))) return true;
+  return typeof text === 'string' && /error 1015|you are being rate limited|"error_code"\s*:\s*1015/i.test(text);
+}
+
+function readRetryAfter(res) {
+  const headers = res && res.headers;
+  if (!headers || typeof headers.get !== 'function') return null;
+  const raw = headers.get('retry-after');
+  if (raw == null || raw === '') return null;
+  const secs = Number(raw);
+  if (Number.isFinite(secs)) return secs;
+  const when = Date.parse(String(raw));
+  if (!Number.isFinite(when)) return null;
+  return (when - Date.now()) / 1000;
+}
+
+function httpError(method, path, statusCode, json, text, retryAfter) {
   const raw = json && typeof json === 'object'
     ? (json.message || json.error || json.reason || json.code || '')
     : '';
@@ -40,6 +61,8 @@ function httpError(method, path, statusCode, json, text) {
   const err = new Error('Polymarket ' + method + ' ' + path + ' ' + statusCode + (msg ? ' ' + msg : ''));
   err.statusCode = statusCode;
   err.publicMessage = msg;
+  err.rateLimited = isRateLimitPayload(statusCode, json, text);
+  err.retryAfter = err.rateLimited ? retryAfter : null;
   return err;
 }
 
@@ -83,6 +106,7 @@ function createPolymarketUsClient({
       json: parseBody(text),
       signMode,
       signedPath,
+      retryAfter: readRetryAfter(res),
     };
   }
 
@@ -113,7 +137,7 @@ function createPolymarketUsClient({
   async function okJson(method, path, opts) {
     const res = await request(method, path, opts);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw httpError(method, path, res.statusCode, res.json, res.text);
+      throw httpError(method, path, res.statusCode, res.json, res.text, res.retryAfter);
     }
     return res.json;
   }
@@ -130,7 +154,7 @@ function createPolymarketUsClient({
       });
       const text = await res.text();
       if (res.status < 200 || res.status >= 300) {
-        throw httpError('GET', path, res.status, parseBody(text), text);
+        throw httpError('GET', path, res.status, parseBody(text), text, readRetryAfter(res));
       }
       return text;
     } finally {
@@ -152,7 +176,7 @@ function createPolymarketUsClient({
     const res = await request('GET', path);
     if (res.statusCode === 404) return null;
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw httpError('GET', path, res.statusCode, res.json, res.text);
+      throw httpError('GET', path, res.statusCode, res.json, res.text, res.retryAfter);
     }
     return (res.json && res.json.market) || res.json;
   }
@@ -170,7 +194,7 @@ function createPolymarketUsClient({
     const res = await request('GET', path);
     if (res.statusCode === 404) return null;
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw httpError('GET', path, res.statusCode, res.json, res.text);
+      throw httpError('GET', path, res.statusCode, res.json, res.text, res.retryAfter);
     }
     return res.json;
   }

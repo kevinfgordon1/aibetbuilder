@@ -1,3 +1,7 @@
+import { deskRateLimitMessage, isDeskRateLimit } from "./liveDeskRefresh.js";
+
+export { deskRateLimitMessage, isDeskRateLimit };
+
 // Live Trading Desk price math for Polymarket US.
 //
 // Kevin types American odds. Polymarket US rests a YES (long) price in
@@ -931,6 +935,10 @@ export function mapOpenOrders(payload, marketsBySlug = {}) {
 }
 
 export function deskErrorText(value, fallback = "Could not load the desk.") {
+  if (isDeskRateLimit(value)) {
+    const retry = value && typeof value === "object" ? value.retryAfter : null;
+    return deskRateLimitMessage(retry);
+  }
   if (typeof value === "string" && value.trim()) return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (value && typeof value === "object") {

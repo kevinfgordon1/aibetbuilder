@@ -72,6 +72,17 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(ui, /Off unless you arm/);
   assert.match(ui, /protectFill/);
   assert.match(ui, /row\.avgAmerican/);
+  assert.match(ui, /document\.visibilityState === "hidden"/);
+  assert.match(ui, /positionsStale/);
+  assert.match(ui, /ordersStale/);
+  assert.match(ui, /deskRefreshDelayMs/);
+  assert.match(ui, /mergeDeskBoard/);
+  assert.match(ui, /No open Polymarket US positions/);
+  assert.match(text, /Promise\.allSettled/);
+  assert.match(text, /MARKET_LOOKUP_CONCURRENCY = 4/);
+  assert.match(text, /TRADE_HISTORY_LIMIT = 20/);
+  assert.match(text, /MARKET_CACHE_TTL_MS = 10 \* 60 \* 1000/);
+  assert.doesNotMatch(text, /allTrades/);
   assert.doesNotMatch(ui, /"Short "/);
   assert.doesNotMatch(ui, /"Long "/);
   assert.match(ui, /useState\(false\)/);
@@ -133,9 +144,23 @@ function mockRes() {
   };
 }
 
-function jsonRes(status, body) {
+function jsonRes(status, body, headers) {
   const text = body == null ? '' : JSON.stringify(body);
-  return { status, ok: status >= 200 && status < 300, text: async () => text };
+  const bag = new Map();
+  if (headers) {
+    for (const [k, v] of Object.entries(headers)) bag.set(String(k).toLowerCase(), String(v));
+  }
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    text: async () => text,
+    headers: {
+      get(name) {
+        const key = String(name || '').toLowerCase();
+        return bag.has(key) ? bag.get(key) : null;
+      },
+    },
+  };
 }
 
 const MARKET = {
@@ -994,7 +1019,7 @@ const goodCreds = () => ({
   handler._resetDeps();
   {
     // ATL @ GB: position pages are legs, the title says Packers, the long
-    // instrument is Falcons. Later fill pages must be requested too.
+    // instrument is Falcons. Trade history is one page (the desk shows 20).
     const gbSlug = 'aec-nfl-atl-gb-2026-09-24';
     let positionPages = 0;
     let activityPages = 0;
@@ -1036,37 +1061,22 @@ const goodCreds = () => ({
         if (u.pathname === '/v1/orders/open') return jsonRes(200, { orders: [] });
         if (u.pathname === '/v1/portfolio/activities') {
           activityPages += 1;
-          if (!cursor) {
-            return jsonRes(200, {
-              activities: [{
-                type: 'ACTIVITY_TYPE_TRADE',
-                trade: {
-                  id: 'early',
-                  marketSlug: gbSlug,
-                  intent: 'ORDER_INTENT_BUY_SHORT',
-                  qtyDecimal: '10',
-                  price: { value: '0.600', currency: 'USD' },
-                  createTime: '2026-09-24T17:00:00Z',
-                },
-              }],
-              eof: false,
-              nextCursor: 'act-2',
-            });
-          }
-          assert.equal(cursor, 'act-2');
+          assert.equal(cursor, '', 'trade history is a single page');
+          assert.equal(u.searchParams.get('limit'), '20');
           return jsonRes(200, {
             activities: [{
               type: 'ACTIVITY_TYPE_TRADE',
               trade: {
-                id: 'later',
+                id: 'early',
                 marketSlug: gbSlug,
                 intent: 'ORDER_INTENT_BUY_SHORT',
                 qtyDecimal: '10',
                 price: { value: '0.600', currency: 'USD' },
-                createTime: '2026-09-24T19:00:00Z',
+                createTime: '2026-09-24T17:00:00Z',
               },
             }],
-            eof: true,
+            eof: false,
+            nextCursor: 'act-2',
           });
         }
         return jsonRes(500, { message: 'unexpected ' + u.pathname });
@@ -1080,7 +1090,7 @@ const goodCreds = () => ({
     }, res);
     assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
     assert.equal(positionPages, 2, 'positions are paginated');
-    assert.equal(activityPages, 2, 'fills are paginated');
+    assert.equal(activityPages, 1, 'trade history is a single page');
     assert.equal(res.out.body.positions.length, 1);
     const row = res.out.body.positions[0];
     assert.equal(row.team, 'Green Bay Packers');
@@ -1093,6 +1103,312 @@ const goodCreds = () => ({
     assert.equal(row.title, 'Atlanta Falcons vs. Green Bay Packers');
     assert.notEqual(row.title, 'Packers');
     assert.doesNotMatch(String(row.avgAmerican), /¢/);
+    handler._resetDeps();
+  }
+
+  const CF_1015 = {
+    title: 'Error 1015: You are being rate limited',
+    status: 429,
+    detail: 'You are being rate limited',
+    error_code: 1015,
+  };
+
+  handler._resetDeps();
+  {
+    // Account calls 1015, but the public slate still fills the game dropdown.
+    // After the slate cache expires, a slate 429 is served from that cache.
+    const kick = new Date(Date.now() + 3 * 3600 * 1000).toISOString();
+    const league = {
+      events: [{
+        slug: 'nfl-lar-den-2026-09-27',
+        markets: [{
+          id: 'ml-lar-den',
+          slug: 'aec-nfl-lar-den-2026-09-27',
+          marketType: 'moneyline',
+          sportsMarketType: 'football_team_full_game_winner',
+          sportsMarketTypeV2: 'SPORTS_MARKET_TYPE_MONEYLINE',
+          gameStartTime: kick,
+          marketSides: [
+            { long: true, team: { safeName: 'LAR Rams', ordering: 'away' } },
+            { long: false, team: { safeName: 'DEN Broncos', ordering: 'home' } },
+          ],
+        }],
+      }],
+    };
+    let now = Date.now();
+    let slateStatus = 200;
+    let slateHits = 0;
+    let positionCalls = 0;
+    let orderCalls = 0;
+    let activityCalls = 0;
+    let marketCalls = 0;
+    handler._setDeps({
+      now: () => now,
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      fetchImpl: async (url) => {
+        const u = new URL(url);
+        if (u.pathname.startsWith('/v2/leagues/nfl/events')) {
+          slateHits += 1;
+          if (slateStatus !== 200) return jsonRes(slateStatus, CF_1015, { 'Retry-After': '37' });
+          return jsonRes(200, league);
+        }
+        if (u.pathname.startsWith('/v1/market/slug/')) {
+          marketCalls += 1;
+          return jsonRes(429, CF_1015, { 'Retry-After': '37' });
+        }
+        if (u.pathname === '/v1/portfolio/positions') {
+          positionCalls += 1;
+          return jsonRes(429, CF_1015, { 'Retry-After': '37' });
+        }
+        if (u.pathname === '/v1/orders/open') {
+          orderCalls += 1;
+          return jsonRes(429, CF_1015, { 'Retry-After': '37' });
+        }
+        if (u.pathname === '/v1/portfolio/activities') {
+          activityCalls += 1;
+          return jsonRes(429, CF_1015, { 'Retry-After': '37' });
+        }
+        return jsonRes(500, { message: 'unexpected ' + u.pathname });
+      },
+    });
+    const res = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk',
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.ok, true);
+    assert.equal(res.out.body.rateLimited, true);
+    assert.equal(res.out.body.retryAfter, 37);
+    assert.equal(res.out.body.error, 'Polymarket is rate-limiting us, retrying in 37s');
+    assert.equal(res.out.body.positions, null);
+    assert.equal(res.out.body.orders, null);
+    assert.equal(res.out.body.activity, null);
+    assert.match(res.out.body.sectionErrors.positions, /Polymarket is rate-limiting us, retrying in 37s/);
+    assert.match(res.out.body.sectionErrors.orders, /rate-limiting us/);
+    assert.match(res.out.body.sectionErrors.activity, /rate-limiting us/);
+    assert.equal(res.out.body.games.length, 1);
+    assert.equal(res.out.body.games[0].id, 'nfl-lar-den-2026-09-27');
+    assert.equal(res.out.body.games[0].markets[0].slug, 'aec-nfl-lar-den-2026-09-27');
+    assert.equal(JSON.stringify(res.out.body).includes('Error 1015'), false);
+    assert.equal(JSON.stringify(res.out.body).includes('error_code'), false);
+    assert.equal(positionCalls, 1);
+    assert.equal(orderCalls, 1);
+    assert.equal(activityCalls, 1);
+    assert.equal(marketCalls, 0, 'a 1015 skips uncached market lookups');
+    assert.equal(slateHits, 1);
+    assert.equal(res.out.body.capDollars, 1000);
+    assert.equal(res.out.body.defaultDollars, 25);
+
+    const again = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk',
+    }, again);
+    assert.equal(slateHits, 1, 'slate cache serves the dropdown inside the TTL');
+    assert.equal(again.out.body.games[0].id, 'nfl-lar-den-2026-09-27');
+
+    now += 61 * 1000;
+    slateStatus = 429;
+    const stale = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk',
+    }, stale);
+    assert.equal(stale.out.statusCode, 200, JSON.stringify(stale.out.body));
+    assert.equal(slateHits, 2);
+    assert.equal(stale.out.body.games.length, 1);
+    assert.equal(stale.out.body.games[0].id, 'nfl-lar-den-2026-09-27');
+    assert.equal(stale.out.body.gamesError, '');
+    assert.equal(stale.out.body.rateLimited, true);
+    assert.equal(JSON.stringify(stale.out.body).includes('Error 1015'), false);
+    handler._resetDeps();
+  }
+
+  handler._resetDeps();
+  {
+    // Market lookups cover positions, open orders, and the selected game.
+    // Trade-history slugs are not fetched. At most 4 lookups run at once,
+    // and a second poll inside 10 minutes uses the module cache.
+    const posSlugs = [1, 2, 3, 4, 5, 6].map((n) => 'aec-nfl-p' + n + '-aa-2026-09-27');
+    const orderSlug = 'aec-nfl-ord-one-2026-09-27';
+    const historySlug = 'aec-nfl-hist-ory-2026-09-27';
+    const selected = 'aec-nfl-sel-ect-2026-09-27';
+    const wanted = new Set([...posSlugs, orderSlug, selected]);
+    let now = Date.now();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let marketCalls = 0;
+    let activityCalls = 0;
+    const seen = new Set();
+    let releaseAll = () => {};
+    let opened = new Promise((resolve) => { releaseAll = resolve; });
+    let waiting = 0;
+    function marketBody(slug) {
+      return {
+        ...MARKET,
+        slug,
+        question: slug,
+      };
+    }
+    handler._setDeps({
+      now: () => now,
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      fetchImpl: async (url) => {
+        const u = new URL(url);
+        if (u.pathname.startsWith('/v2/leagues')) return jsonRes(200, { events: [] });
+        if (u.pathname.startsWith('/v1/market/slug/')) {
+          const slug = decodeURIComponent(u.pathname.slice('/v1/market/slug/'.length));
+          seen.add(slug);
+          marketCalls += 1;
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          waiting += 1;
+          if (waiting >= 4) releaseAll();
+          await opened;
+          inFlight -= 1;
+          return jsonRes(200, marketBody(slug));
+        }
+        if (u.pathname.endsWith('/bbo')) {
+          return jsonRes(200, {
+            marketData: {
+              bestBid: { value: '0.20', currency: 'USD' },
+              bestAsk: { value: '0.80', currency: 'USD' },
+            },
+          });
+        }
+        if (u.pathname === '/v1/portfolio/positions') {
+          const positions = {};
+          posSlugs.forEach((slug, i) => {
+            positions[slug] = {
+              netPositionDecimal: String(i + 1),
+              marketMetadata: { slug, title: slug },
+            };
+          });
+          return jsonRes(200, { positions, eof: true });
+        }
+        if (u.pathname === '/v1/orders/open') {
+          return jsonRes(200, {
+            orders: [{
+              id: 'ord-scope-1',
+              marketSlug: orderSlug,
+              side: 'ORDER_SIDE_BUY',
+              intent: 'ORDER_INTENT_BUY_LONG',
+              price: { value: '0.400', currency: 'USD' },
+              leavesQuantity: 10,
+              state: 'ORDER_STATE_PENDING_NEW',
+            }],
+          });
+        }
+        if (u.pathname === '/v1/portfolio/activities') {
+          activityCalls += 1;
+          assert.equal(u.searchParams.get('cursor') || '', '');
+          return jsonRes(200, {
+            activities: [{
+              type: 'ACTIVITY_TYPE_TRADE',
+              trade: {
+                id: 'hist-1',
+                marketSlug: historySlug,
+                price: { value: '0.500', currency: 'USD' },
+                qtyDecimal: '1',
+              },
+            }],
+            eof: false,
+            nextCursor: 'hist-2',
+          });
+        }
+        return jsonRes(500, { message: 'unexpected ' + u.pathname });
+      },
+    });
+    const res = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk?slug=' + selected,
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.positions.length, 6);
+    assert.equal(maxInFlight, 4, 'market lookups are capped at 4');
+    assert.equal(marketCalls, wanted.size);
+    assert.equal(activityCalls, 1);
+    for (const slug of wanted) assert.equal(seen.has(slug), true, slug);
+    assert.equal(seen.has(historySlug), false, 'trade history markets are not looked up');
+    assert.equal(res.out.body.market && res.out.body.market.slug, selected);
+
+    const cached = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk?slug=' + selected,
+    }, cached);
+    assert.equal(cached.out.statusCode, 200, JSON.stringify(cached.out.body));
+    assert.equal(marketCalls, wanted.size, 'market details stay cached for 10 minutes');
+    assert.equal(cached.out.body.market.slug, selected);
+
+    now += (10 * 60 * 1000) + 1;
+    waiting = 0;
+    opened = new Promise((resolve) => { releaseAll = resolve; });
+    const cold = mockRes();
+    await handler({
+      method: 'GET',
+      headers: { authorization: 'Bearer tok' },
+      url: '/api/live-trading-desk?slug=' + selected,
+    }, cold);
+    assert.equal(cold.out.statusCode, 200, JSON.stringify(cold.out.body));
+    assert.equal(marketCalls, wanted.size * 2, 'market cache expires after 10 minutes');
+    assert.equal(maxInFlight, 4);
+    handler._resetDeps();
+  }
+
+  handler._resetDeps();
+  {
+    const res = mockRes();
+    const body = {
+      op: 'place',
+      marketSlug: 'aec-nfl-lac-ten-2025-11-02',
+      outcome: 'short',
+      action: 'buy',
+      american: '−150',
+      dollars: 25,
+    };
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const u = new URL(url);
+        if (u.host === 'gateway.polymarket.us' && u.pathname.endsWith('/bbo')) {
+          return jsonRes(200, {
+            marketData: {
+              bestBid: { value: '0.20', currency: 'USD' },
+              bestAsk: { value: '0.80', currency: 'USD' },
+            },
+          });
+        }
+        if (u.host === 'gateway.polymarket.us') return jsonRes(200, MARKET);
+        if (method === 'POST' && u.pathname === '/v1/orders') {
+          return jsonRes(429, CF_1015, { 'Retry-After': '42' });
+        }
+        return jsonRes(500, { message: 'unexpected ' + method + ' ' + u.pathname });
+      },
+    });
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { ...body, confirm: confirmFor(body) },
+    }, res);
+    assert.equal(res.out.statusCode, 429, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.ok, false);
+    assert.equal(res.out.body.rateLimited, true);
+    assert.equal(res.out.body.retryAfter, 42);
+    assert.equal(res.out.body.error, 'Polymarket is rate-limiting us, retrying in 42s');
+    assert.equal(JSON.stringify(res.out.body).includes('Error 1015'), false);
+    assert.equal(JSON.stringify(res.out.body).includes('error_code'), false);
     handler._resetDeps();
   }
 
