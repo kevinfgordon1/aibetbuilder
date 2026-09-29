@@ -893,3 +893,47 @@ assert.equal(ariSnap.rows[0].marketVal, encVal("KXNFLSPREAD-26SEP27ARISF-SF8", "
 }
 
 console.log("comboPrefill tests passed");
+
+// ── 2026-09-29 PHI@ATL: Game 1 (2:00 PM ET, key 26SEP291400PHIATL) already
+// started and was dropped from /api/kalshi-games; only tomorrow's "Game 2"
+// (26SEP301400PHIATL) remained. The promo leg used to snap onto that different
+// game and then fail with a confusing "no matching TOT on Game 2".
+{
+  const g2 = sampleGame("26SEP301400PHIATL", "PHI", "ATL", "Philadelphia", "Atlanta");
+  g2.title = "Game 2: Philadelphia vs Atlanta";
+  g2.startTime = "2026-09-30T18:00:00.000Z";
+  const g1 = sampleGame("26SEP291400PHIATL", "PHI", "ATL", "Philadelphia", "Atlanta");
+  g1.title = "Game 1: Philadelphia vs Atlanta";
+  g1.startTime = "2026-09-29T18:00:00.000Z";
+  const leg = {
+    name: "Philadelphia Phillies/Atlanta Braves o6.5", market: "TOT",
+    game: "Philadelphia Phillies @ Atlanta Braves", sport: "baseball_mlb",
+    commence_time: "2026-09-29T18:15:00Z",
+  };
+  const now = Date.parse("2026-09-29T18:14:00Z");
+  // Game 1 gone from slate: never map onto tomorrow's game; say why.
+  const gone = mapPromoLegsToKalshi([leg], [g2], now);
+  assert.equal(gone.rows[0].gameKey, "", "must not map onto the next day's game");
+  assert.equal(gone.rows[0].marketVal, "");
+  assert.equal(gone.unmatched.length, 1);
+  assert.match(gone.unmatched[0].reason, /not on Combo Locks' pre-game slate/);
+  assert.match(gone.unmatched[0].reason, /Game 2: Philadelphia vs Atlanta on Sep 30/);
+  assert.match(gone.unmatched[0].reason, /different game/);
+  assert.doesNotMatch(gone.unmatched[0].reason, /no matching TOT/);
+  // Game 1 present (pre-game): maps to Game 1's exact o6.5 strike, not Game 2's.
+  const both = mapPromoLegsToKalshi([leg], [g2, g1], Date.parse("2026-09-29T17:00:00Z"));
+  assert.equal(both.unmatched.length, 0, JSON.stringify(both.unmatched));
+  assert.equal(both.rows[0].gameKey, "26SEP291400PHIATL");
+  assert.equal(both.rows[0].marketVal, encVal("KXMLBTOTAL-26SEP291400PHIATL-7", "yes"));
+  // Same-day doubleheader: pick the half nearest the promo's start.
+  const dhG2 = sampleGame("26SEP291900PHIATL", "PHI", "ATL", "Philadelphia", "Atlanta");
+  dhG2.startTime = "2026-09-29T23:00:00.000Z";
+  const dh = mapPromoLegsToKalshi([{ ...leg, commence_time: "2026-09-29T23:05:00Z" }], [g1, dhG2], Date.parse("2026-09-29T17:00:00Z"));
+  assert.equal(dh.rows[0].gameKey, "26SEP291900PHIATL");
+  // Date-only football keys are never time-gated.
+  const nflLeg = { name: "Kansas City Chiefs ML", market: "ML", game: "Kansas City Chiefs @ Buffalo Bills", sport: "americanfootball_nfl", commence_time: "2026-09-13T20:25:00Z" };
+  const nflGame = { key: "26SEP13KCBUF", sport: "nfl", title: "Kansas City vs Buffalo", date: "KC vs BUF", startTime: "2026-09-13T04:00:00.000Z",
+    markets: { side: [gSide("KXNFLGAME-26SEP13KCBUF-KC", "Kansas City"), gSide("KXNFLGAME-26SEP13KCBUF-BUF", "Buffalo")], spread: [], total: [] } };
+  assert.equal(mapPromoLegsToKalshi([nflLeg], [nflGame]).rows[0].gameKey, "26SEP13KCBUF");
+}
+console.log("comboPrefill PHI/ATL game-gap tests passed");

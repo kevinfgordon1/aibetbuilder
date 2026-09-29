@@ -234,20 +234,59 @@ function promoSportOf(leg) {
   return PROMO_TO_SPORT[leg.sport] || null;
 }
 
-function matchKalshiGame(promoLeg, games) {
+// Same two teams are often on the slate on consecutive days (series games) or
+// twice in one day (doubleheader). A promo leg's commence_time must sit near the
+// Kalshi game's start; a game more than SAME_GAME_MAX_GAP_MS away is a DIFFERENT
+// game (e.g. today's PHI@ATL leg must never map onto tomorrow's "Game 2").
+// Doubleheader halves are ~3-5h apart, so they still compete on nearest start.
+export const SAME_GAME_MAX_GAP_MS = 6 * 3600 * 1000;
+
+function sameTeamsCandidates(promoLeg, games) {
   const sport = promoSportOf(promoLeg);
-  if (!sport) return null;
+  if (!sport) return [];
   const pool = (games || []).filter((g) => (g.sport || "mlb") === sport);
-  const candidates = pool.filter((g) => teamsMatchGame(promoLeg.game, g, sport));
+  return pool.filter((g) => teamsMatchGame(promoLeg.game, g, sport));
+}
+
+// Only MLB-style keys carry a real first-pitch time (26SEP291400PHIATL). NFL /
+// NCAAF keys are date-only, so their startTime is midnight ET and says nothing
+// about kickoff — never gate those on the time gap.
+const TIMED_KEY = /^\d{2}[A-Z]{3}\d{2}\d{4}[A-Z]/;
+function startGapMs(g, t) {
+  if (!TIMED_KEY.test(g.key || "")) return NaN;
+  const gt = new Date(g.startTime).getTime();
+  return Number.isFinite(gt) && Number.isFinite(t) ? Math.abs(gt - t) : NaN;
+}
+
+function matchKalshiGame(promoLeg, games) {
+  const all = sameTeamsCandidates(promoLeg, games);
+  if (all.length === 0) return null;
+  const t = new Date(promoLeg.commence_time).getTime();
+  if (!Number.isFinite(t)) return all[0];
+  // Drop games whose start is known and far from the promo's commence time.
+  const candidates = all.filter((g) => {
+    const gap = startGapMs(g, t);
+    return !Number.isFinite(gap) || gap <= SAME_GAME_MAX_GAP_MS;
+  });
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
-  const t = new Date(promoLeg.commence_time).getTime();
-  if (!Number.isFinite(t)) return candidates[0];
   return candidates.slice().sort((a, b) => {
-    const da = Math.abs(new Date(a.startTime).getTime() - t);
-    const db = Math.abs(new Date(b.startTime).getTime() - t);
+    const da = startGapMs(a, t);
+    const db = startGapMs(b, t);
     return (Number.isFinite(da) ? da : Infinity) - (Number.isFinite(db) ? db : Infinity);
   })[0];
+}
+
+// Same teams are on the Kalshi slate, but only on another day/time (the leg's
+// own game is gone — typically already underway). Returns those games.
+function otherStartGames(promoLeg, games) {
+  const t = new Date(promoLeg.commence_time).getTime();
+  if (!Number.isFinite(t)) return [];
+  return sameTeamsCandidates(promoLeg, games).filter((g) => startGapMs(g, t) > SAME_GAME_MAX_GAP_MS); // NaN (date-only) never counts
+}
+
+function etDay(ms, opts = {}) {
+  return new Date(ms).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", ...opts });
 }
 
 export function comboGameId(game) {
@@ -519,7 +558,7 @@ function promoMatchupLabel(leg) {
 // promo leg can fail here even when Kalshi still lists the event as open.
 // Prefer "already started" when Odds API commence_time is in the past; never
 // invent a map onto a different game.
-export function noMatchingGameReason(leg, sport, nowMs = Date.now()) {
+export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames = []) {
   const label = COMBO_SPORT_LABEL[sport] || String(sport || "").toUpperCase();
   const matchup = promoMatchupLabel(leg);
   const startMs = Date.parse(leg?.commence_time);
@@ -528,6 +567,13 @@ export function noMatchingGameReason(leg, sport, nowMs = Date.now()) {
     return matchup
       ? `${matchup} already started — Combo Locks only quotes pre-game Kalshi ${label} markets`
       : `game already started — Combo Locks only quotes pre-game Kalshi ${label} markets`;
+  }
+  if (otherGames.length) {
+    const when = otherGames.map((g) => {
+      const ms = Date.parse(g.startTime);
+      return `${g.title || g.key} on ${Number.isFinite(ms) ? etDay(ms) : g.date || g.key}`;
+    }).join(" / ");
+    return `${matchup || "this game"} (${etDay(startMs, { hour: "numeric", minute: "2-digit" })} ET) is not on Combo Locks' pre-game slate (Kalshi may have taken it down at its own first pitch); the only ${label} game listed for these teams is ${when} — a different game, so not mapped`;
   }
   if (matchup) {
     return `no matching Kalshi ${label} game on the current pre-game slate (${matchup})`;
@@ -553,7 +599,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
     }
     const game = matchKalshiGame(leg, flat);
     if (!game) {
-      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs)));
+      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs, otherStartGames(leg, flat))));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
