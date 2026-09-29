@@ -56,6 +56,21 @@ export const ODDS_FRESHNESS = Object.freeze({
   // median 38s after Pinnacle / the exchanges on PHI @ CHI 2026-09-28
   // (p75 169s) while Betstamp delivered its prints ~0.1s after updated_at.
   LIVE_FROZEN_MIN_AGE_BY_BOOK_MS: Object.freeze({ betcris: 45_000 }),
+  // Game-state aware gates (src/nflGameState.js; ESPN scoreboard, PM US fallback).
+  // Clock stopped (halftime, quarter break, timeout, review, two-minute
+  // warning, injury): lines legitimately sit still, so the frozen gate and the
+  // absolute live cap loosen. Halftime runs ~13-15 min plus the 2H kickoff.
+  GAME_STATE_STOPPED_FROZEN_MIN_AGE_MS: 5 * 60_000,
+  GAME_STATE_STOPPED_MAX_AGE_MS: 20 * 60_000,
+  // Just after a score / turnover books pull: off-the-board or missing lines
+  // are normal for this long, and nothing is called frozen until the clock is
+  // seen moving again (capped at PULL_MAX so a stuck feed cannot mute it).
+  GAME_STATE_PULL_GRACE_MS: 75_000,
+  GAME_STATE_PULL_MAX_MS: 4 * 60_000,
+  GAME_STATE_POLL_MS: 5_000,
+  // Feed state older than this is ignored (normal live gates apply).
+  GAME_STATE_MAX_AGE_MS: 30_000,
+  GAME_STATE_FALLBACK_AFTER_FAILS: 2,
 });
 
 const FIELDS = [
@@ -186,7 +201,9 @@ function tapeAt(tape, key, t) {
 
 /**
  * Why this book's price should be hidden right now, or null.
- * ctx: { nowMs, live, tape, constants }
+ * ctx: { nowMs, live, tape, constants, gameMode }
+ * gameMode ({ mode: "running" | "stopped" | "pulled", reason }) comes from
+ * freshnessMode() in nflGameState.js; absent → "running" (the old rules).
  */
 export function staleOddsReason(game, book, spec, ctx) {
   const c = ctx.constants || ODDS_FRESHNESS;
@@ -196,6 +213,12 @@ export function staleOddsReason(game, book, spec, ctx) {
   const { nowMs, live } = ctx;
   const ts = stampOf(game, book, spec.field);
   const flag = flagOf(game, book, spec.field);
+  const mode = live ? ctx.gameMode?.mode || "running" : "running";
+  if (mode === "pulled" && flag) {
+    // Books pull after a score / turnover. Still not bettable, so hidden, but
+    // labelled as the expected pull rather than a suspension.
+    return `pulled ${ctx.gameMode.reason || ""}`.trim();
+  }
   if (flag === "off the board") {
     const after = live ? c.OTB_HIDE_LIVE_AFTER_MS : c.OTB_HIDE_PREGAME_AFTER_MS;
     if (ts == null || nowMs - ts >= after) return "suspended (off the board)";
@@ -207,12 +230,17 @@ export function staleOddsReason(game, book, spec, ctx) {
   const start = gameStartMs(game);
   // start <= nowMs: a future fixture a stray live tick flagged is not "after kickoff".
   if (live && start != null && start <= nowMs && ts < start) return "pregame line (not updated since kickoff)";
+  // Pulled window: do not call anything frozen until play resumes.
+  if (mode === "pulled") return null;
   const age = nowMs - ts;
-  const maxAge = live ? c.LIVE_MAX_AGE_MS : c.PREGAME_MAX_AGE_MS;
+  const stopped = mode === "stopped";
+  const maxAge = !live ? c.PREGAME_MAX_AGE_MS : stopped ? c.GAME_STATE_STOPPED_MAX_AGE_MS : c.LIVE_MAX_AGE_MS;
   if (maxAge != null && age >= maxAge) return `frozen ${formatFrozenAge(age)}`;
-  const frozenAge = live
-    ? (c.LIVE_FROZEN_MIN_AGE_BY_BOOK_MS?.[book] ?? c.LIVE_FROZEN_MIN_AGE_MS)
-    : c.PREGAME_FROZEN_MIN_AGE_MS;
+  const frozenAge = !live
+    ? c.PREGAME_FROZEN_MIN_AGE_MS
+    : stopped
+      ? c.GAME_STATE_STOPPED_FROZEN_MIN_AGE_MS
+      : (c.LIVE_FROZEN_MIN_AGE_BY_BOOK_MS?.[book] ?? c.LIVE_FROZEN_MIN_AGE_MS);
   if (age < frozenAge) return null;
   const line = lineOf(odds, spec);
   const refs = referenceProbs(game, spec, line, nowMs, live, c);
@@ -255,10 +283,10 @@ export function recordConsensus(game, { nowMs = Date.now(), tape = defaultTape, 
  * Game copy with frozen / suspended prices removed. Returns the same object
  * when nothing is hidden. bookLineMasked[book][field] carries the reason.
  */
-export function maskStaleOdds(game, { nowMs = Date.now(), tape = defaultTape, constants = ODDS_FRESHNESS, record = true } = {}) {
+export function maskStaleOdds(game, { nowMs = Date.now(), tape = defaultTape, constants = ODDS_FRESHNESS, record = true, gameMode = null } = {}) {
   if (!game || !game.bookOdds) return game;
   if (record && tape) recordConsensus(game, { nowMs, tape, constants });
-  const ctx = { nowMs, live: !!game.is_live, tape, constants };
+  const ctx = { nowMs, live: !!game.is_live, tape, constants, gameMode };
   let masked = null;
   for (const [book, odds] of Object.entries(game.bookOdds)) {
     if (!odds) continue;

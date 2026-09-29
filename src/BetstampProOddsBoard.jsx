@@ -99,6 +99,8 @@ import {
 } from "./betstampProBoard.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import { maskStaleOdds, maskedOddsReason } from "./oddsFreshness.js";
+import { nflGameModeFor } from "./nflGameState.js";
+import { GameStateLine, useNflGameStatePoll } from "./GameStateLine.jsx";
 
 // Newest committed slate (one board instance per tab). Read by row masking.
 const latestBoardGames = { current: [] };
@@ -895,8 +897,8 @@ const OddsBoardBookCells = memo(function OddsBoardBookCells({
   // The row only repaints on price / line / OFF changes; flags and same-price
   // restamps land in latestBoardGames first, so mask the newest copy.
   const rowGame = useMemo(() => {
-    const latest = latestBoardGames.current.find((g) => g && g.id === game.id);
-    return maskStaleOdds(latest || game, { nowMs: bestNowMs });
+    const latest = latestBoardGames.current.find((g) => g && g.id === game.id) || game;
+    return maskStaleOdds(latest, { nowMs: bestNowMs, gameMode: nflGameModeFor(latest, bestNowMs) });
   }, [game, bestNowMs]);
   return renderOddsColumns({
     rowGame,
@@ -983,6 +985,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
               new Date(game.commence_time || Date.now()).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true }) + " ET"
             )}
           </div>
+          <GameStateLine game={game} />
           <div className="obb-game-name" title={game.away} style={{ fontSize: 13, fontWeight: 600, color: "var(--nob-gold)", textDecoration: "underline", textDecorationColor: "rgba(var(--nob-gold-rgb),0.35)", textUnderlineOffset: 2, marginBottom: 2, lineHeight: 1.15 }}>
             {game.away}{game.is_live && game.away_score != null ? ` ${game.away_score}` : ""}
           </div>
@@ -1036,6 +1039,9 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
   const [boardSport, setBoardSport] = useState(BETSTAMP_DEFAULT_SPORT);
   const [liveOnly, setLiveOnly] = useState(false); // Pregame default. Never auto-enable LIVE.
   const [games, setGames] = useState([]);
+  const anyLiveGame = games.some((g) => g && g.is_live);
+  // Game state (ESPN; PM US fallback) for the LIVE row line and frozen gates.
+  useNflGameStatePoll(boardSport === "americanfootball_nfl" && (liveOnly || anyLiveGame));
   const [loadError, setLoadError] = useState(null);
   const [missingKey, setMissingKey] = useState(false);
   const [loading, setLoading] = useState(true);

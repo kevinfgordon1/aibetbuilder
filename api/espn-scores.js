@@ -8,6 +8,11 @@
 //   NCAAF  https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard
 //
 // GET /api/espn-scores?queries=mlb:20260903,nfl:20260913
+// GET /api/espn-scores?live=nfl  → today's NFL scoreboard, slimmed to the
+//   live game-state fields (status, clock, period, scores, situation) for the
+//   odds boards' game-state line and frozen gates (src/nflGameState.js).
+//   Server-side because ESPN's CDN 403s browser user agents from some
+//   networks; s-maxage 3 so every board viewer shares one upstream call.
 // Returns only games ESPN has scored. We do not invent scores or winners.
 // Combo Locks stamps risk won / risk lost / push from these + Kalshi legs.
 // ─────────────────────────────────────────────────────────────────────────
@@ -122,10 +127,52 @@ async function fetchScoreboard(sport, date) {
   return slimScoreboard(data, sport, date);
 }
 
+function liveParam(req) {
+  if (req && req.query && req.query.live) return String(req.query.live).toLowerCase();
+  try { return (new URL((req && req.url) || '', 'http://localhost').searchParams.get('live') || '').toLowerCase(); } catch (_) { return ''; }
+}
+
+// Keep only what src/nflGameState.js reads (stateFromEspnEvent).
+function slimLiveEvent(ev) {
+  const comp = ev && ev.competitions && ev.competitions[0];
+  if (!comp) return null;
+  const sit = comp.situation || null;
+  const lp = sit && sit.lastPlay;
+  return {
+    id: ev.id,
+    status: ev.status || comp.status || null,
+    competitions: [{
+      competitors: (comp.competitors || []).map((c) => ({
+        homeAway: c.homeAway,
+        score: c.score,
+        team: c.team ? { id: c.team.id, abbreviation: c.team.abbreviation, displayName: c.team.displayName } : null,
+      })),
+      situation: sit ? {
+        down: sit.down, distance: sit.distance, yardLine: sit.yardLine, isRedZone: sit.isRedZone,
+        possession: sit.possession, possessionText: sit.possessionText,
+        downDistanceText: sit.downDistanceText, shortDownDistanceText: sit.shortDownDistanceText,
+        homeTimeouts: sit.homeTimeouts, awayTimeouts: sit.awayTimeouts,
+        lastPlay: lp ? { type: lp.type ? { text: lp.type.text } : null, text: lp.text } : null,
+      } : null,
+    }],
+  };
+}
+
+async function liveHandler(res) {
+  res.setHeader('Cache-Control', 's-maxage=3, stale-while-revalidate=5');
+  const data = await fetchJson(ESPN.nfl);
+  const events = ((data && data.events) || []).map(slimLiveEvent).filter(Boolean);
+  res.status(200).json({ events, source: data ? 'espn' : null, updatedAt: new Date().toISOString() });
+}
+
 async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  if (liveParam(req) === 'nfl') {
+    try { await liveHandler(res); } catch (e) { res.status(200).json({ events: [], source: null, error: String(e && e.message || e) }); }
+    return;
+  }
   try {
     const queries = queriesFromReq(req);
     if (!queries.length) {
@@ -141,4 +188,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._helpers = { queriesFromReq, slimEvent, slimScoreboard, DATE_RE, ESPN, scoreboardUrl };
+module.exports._helpers = { queriesFromReq, slimEvent, slimScoreboard, DATE_RE, ESPN, scoreboardUrl, slimLiveEvent, liveParam };
