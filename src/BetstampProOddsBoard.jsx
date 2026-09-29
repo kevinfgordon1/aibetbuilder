@@ -75,10 +75,12 @@ import {
   firstPartyPmLiveEnabled,
   polymarketStreamUrl,
   kalshiStreamUrl,
+  novigStreamUrl,
   venueQuotesToMarkets,
 } from "./venueLive.js";
+import { quotesAfterVenueEvent } from "./freeFeedBoard.js";
 // consumeBetstampStream is only used for the first-party Polymarket / Kalshi
-// relays below. This board never opens /api/betstamp-stream (see header).
+// / Novig relays below. This board never opens /api/betstamp-stream (see header).
 import {
   betstampSnapshotUrl,
   consumeBetstampStream,
@@ -96,6 +98,8 @@ import {
   BETSTAMP_BOARD_UNDERDOG_POLL_MS,
   BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS,
   holdPolymarketOtbCells,
+  withNovigQuotes,
+  BETSTAMP_BOARD_PINNED_BOOK_KEYS,
 } from "./betstampProBoard.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 
@@ -104,8 +108,12 @@ import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 // Restored from the Betstamp-powered New Odds Board before the free-feed
 // cutover (#214, BetstampOddsBoard.jsx at 6ad2b04^) with the #233 black/gold
 // .nob-theme applied. Differences from that board:
-//   - Book columns are Kevin's core list (betstampOddsBoardBooks), plus
-//     ProphetX / Polymarket / Kalshi from Betstamp, then Underdog Predict.
+//   - Book columns are Kevin's core list (betstampOddsBoardBooks, BetMGM
+//     next to DraftKings / FanDuel / Caesars), plus ProphetX / Polymarket /
+//     Kalshi from Betstamp, then Novig, then Underdog Predict. Novig is not a
+//     Betstamp provider: it reads the same public Novig feed as the New Odds
+//     Board (odds relay /stream?venue=novig) and joins games the same way as
+//     the Underdog column (withNovigQuotes → findUnderdogPhoneGame).
 //     Underdog comes from its phone feed (/api/underdog-predict), polled and
 //     matched exactly like the New Odds Board (applyUnderdogPhoneQuotes), so
 //     both boards show the same Underdog prices. Never Betstamp Underdog
@@ -1025,6 +1033,8 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
   const gamesRef = useRef([]);
   // Latest Underdog phone slate (null until the first poll returns).
   const phoneRef = useRef(null);
+  // Latest Novig relay quotes (null until the stream sends its book).
+  const novigRef = useRef(null);
   const tickSinkRef = useRef(null);
   const moveGameRef = useRef(null);
   const moveBookRef = useRef(null);
@@ -1062,7 +1072,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
   const dataBookKeysKey = [...dataBookKeys].sort().join(",");
   const books = useMemo(() => {
     if (!games.length) return allBooks;
-    return allBooks.filter((b) => dataBookKeys.has(b.key));
+    return allBooks.filter((b) => dataBookKeys.has(b.key) || BETSTAMP_BOARD_PINNED_BOOK_KEYS.includes(b.key));
   }, [allBooks, dataBookKeysKey, games.length ? 1 : 0]);
 
   useEffect(() => {
@@ -1129,10 +1139,10 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
         };
         if (showLoading || !liveOnly || !gamesRef.current.length) {
           const rebuilt = holdPolymarketOtbCells(gamesFromBetstampSnapshot(payload), body.markets, pmOtbHold, { nowMs: fetchedAt });
-          commitGames(withUnderdogPhone(rebuilt, phoneRef.current, league), { force: true });
+          commitGames(withNovigQuotes(withUnderdogPhone(rebuilt, phoneRef.current, league), novigRef.current, league), { force: true });
         } else {
           const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
-          commitGames(withUnderdogPhone(reconcileLiveGames(withMeta, payload), phoneRef.current, league));
+          commitGames(withNovigQuotes(withUnderdogPhone(reconcileLiveGames(withMeta, payload), phoneRef.current, league), novigRef.current, league));
         }
         setSnapshotAt(fetchedAt);
         setPollStats((p) => ({ ...p, polls: p.polls + 1, lastError: null }));
@@ -1265,6 +1275,57 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       clearInterval(timer);
     };
   }, [boardSport, liveOnly, boardRefreshKey]);
+
+  // Novig: same public feed as the New Odds Board (odds relay, about 9s
+  // behind; /api/novig-stream without a relay). Pregame and LIVE share the
+  // stream. Repaints only the Novig cells; the Betstamp poll re-applies them.
+  useEffect(() => {
+    const league = leagueForSport(boardSport);
+    novigRef.current = null;
+    if (!firstPartyPmLiveEnabled()) return undefined;
+    const ctrl = new AbortController();
+    const timers = [];
+    let cancelled = false;
+    let quotes = [];
+    (async () => {
+      let attempt = 0;
+      while (!cancelled && !ctrl.signal.aborted) {
+        let connected = false;
+        try {
+          await consumeBetstampStream({
+            url: novigStreamUrl({ league }),
+            signal: ctrl.signal,
+            onStatus: (s) => { if (s === "live") connected = true; },
+            onEvent: (ev) => {
+              if (cancelled) return;
+              const payload = ev && ev.data && ev.data.payload;
+              if (!payload) return;
+              if (payload.mode === "needs-credentials" || payload.note === "novig_needs_credentials") return;
+              if (!Array.isArray(payload.quotes) || !payload.quotes.length) return;
+              quotes = quotesAfterVenueEvent(quotes, payload);
+              novigRef.current = quotes;
+              if (!gamesRef.current.length) return;
+              commitGames(withNovigQuotes(gamesRef.current, quotes, league));
+            },
+          });
+        } catch {
+          if (cancelled || ctrl.signal.aborted) return;
+        }
+        if (cancelled || ctrl.signal.aborted) return;
+        // A clean end is the relay / function recycle: rejoin at once.
+        const wait = connected ? 100 : nextBackoffMs(attempt);
+        attempt = connected ? 0 : attempt + 1;
+        await new Promise((resolve) => {
+          timers.push(setTimeout(resolve, wait));
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      timers.forEach((t) => clearTimeout(t));
+    };
+  }, [boardSport, boardRefreshKey]);
 
   useEffect(() => {
     altFetchGen.current += 1;
@@ -2113,12 +2174,12 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       </div>
       )}
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
-        Betstamp books: DraftKings, FanDuel, Caesars, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Underdog Predict comes from Underdog's own phone prices (same feed and game matching as the New Odds Board, polled every 20s pregame / 30s LIVE), not Betstamp. Columns with no prices on this slate are hidden. Bet105 and Hard Rock are not on the current Betstamp key, so they are not requested yet. No Fliff or Courtside
+        Betstamp books: DraftKings, FanDuel, Caesars, BetMGM, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Novig comes from Novig's free public prices (same feed as the New Odds Board, about 9s behind), not Betstamp, and joins games the same way as Underdog. Underdog Predict comes from Underdog's own phone prices (same feed and game matching as the New Odds Board, polled every 20s pregame / 30s LIVE), not Betstamp. Columns with no prices on this slate are hidden, except BetMGM, BetUS and Novig (Betstamp sends BetUS pregame only, no LIVE rows). BetMGM stays blank until the Betstamp key covers it (the server sends book 400 only with BETSTAMP_INCLUDE_BETMGM=1). Bet105 and Hard Rock are not on the current Betstamp key, so they are not requested yet. No Fliff or Courtside
         {" · "}Mains (moneyline / spread / total, period FT), American odds
         {" · "}Refresh: polls the Betstamp REST snapshot (refresh=1) every {Math.round(BETSTAMP_BOARD_PREGAME_POLL_MS / 1000)}s pregame and every {Math.round(BETSTAMP_BOARD_LIVE_POLL_MS / 1000)}s LIVE, paused while this browser tab is hidden. It does not open a Betstamp live stream (the trial key allows one connection)
         {" · "}LIVE: a book/side missing from several polls (or an explicit suspend / taken_down) shows OFF. A blank means never offered / no quote. Polymarket and Kalshi also tick from the first-party relays
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
-        {" · "}Kalshi / Polymarket / ProphetX also show implied win probability
+        {" · "}Kalshi / Polymarket / ProphetX / Novig also show implied win probability
         {" · "}Green = best price in the row across selected books (LIVE: a number older than 60s cannot win Best while the game is moving; 4 minutes at halftime)
         {" · "}Top 2 lines groups the two most popular spread/total points; moneyline stays single
         {" · "}× on a book square hides that cell from Best; × on the Game column hides the matchup (session only)
