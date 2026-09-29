@@ -67,6 +67,10 @@ import {
   bestLineUpdatedAt,
 } from "./betstampNormalize.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
+import { maskStaleOdds, maskedOddsReason } from "./oddsFreshness.js";
+
+// Newest committed slate (one board instance per tab). Read by row masking.
+const latestBoardGames = { current: [] };
 import {
   firstPartyPmLiveEnabled,
   polymarketStreamUrl,
@@ -247,7 +251,15 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, flashKey }) {
+const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, maskedReason, flashKey }) {
+  if (maskedReason) {
+    // Frozen / suspended price (oddsFreshness.js): muted dash, reason on hover.
+    return (
+      <span data-odds-masked={maskedReason} title={`Hidden: ${maskedReason}`} style={{ color: "var(--nob-faint)", opacity: 0.6, cursor: "help", fontVariantNumeric: "tabular-nums" }}>
+        —
+      </span>
+    );
+  }
   const primary = books?.[0];
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
@@ -312,6 +324,7 @@ const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, al
   );
 }, (prev, next) => (
   prev.flashKey === next.flashKey
+  && prev.maskedReason === next.maskedReason
   && !!prev.suspended === !!next.suspended
   && !!prev.showBestMark === !!next.showBestMark
   && !!prev.showWinProb === !!next.showWinProb
@@ -773,6 +786,7 @@ function renderBookColumn({
     updatedAt: which === "top" ? topUpdatedAt : botUpdatedAt,
     ageTitle: isBestCol ? "Newest update among books offering this best price" : undefined,
     suspended: !isBestCol && lineIsSuspended(rowGame, b.key, which === "top" ? fields.top : fields.bot),
+    maskedReason: isBestCol ? null : maskedOddsReason(rowGame, b.key, which === "top" ? fields.top : fields.bot),
     flashKey: `${rowGame.id}:${marketKey}:${b.key}:${which}`,
   });
   const topOff = sideProps("top").suspended;
@@ -888,8 +902,15 @@ const OddsBoardBookCells = memo(function OddsBoardBookCells({
   onToggleHide,
 }) {
   const bestNowMs = useContext(BestNowContext);
+  // Frozen / suspended prices drop out before Best is picked.
+  // The row only repaints on price / line / OFF changes; flags and same-price
+  // restamps land in latestBoardGames first, so mask the newest copy.
+  const rowGame = useMemo(() => {
+    const latest = latestBoardGames.current.find((g) => g && g.id === game.id);
+    return maskStaleOdds(latest || game, { nowMs: bestNowMs });
+  }, [game, bestNowMs]);
   return renderOddsColumns({
-    rowGame: game,
+    rowGame,
     marketKey: market,
     books,
     visibleBooks,
@@ -1075,6 +1096,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   const commitGames = (next, { force = false } = {}) => {
     const prev = gamesRef.current;
     gamesRef.current = next;
+    latestBoardGames.current = next || [];
     if (!force && liveBoardPaintKey(prev) === liveBoardPaintKey(next)) return false;
     setGames(next);
     return true;

@@ -385,6 +385,8 @@ function blankBoardUnderdogOdds() {
 
 function stampPhone(stamps, field, line) {
   if (line && line.updatedAt != null) stamps[field] = line.updatedAt;
+  // /api/underdog-predict passes status only when it is not "active".
+  if (line && line.status && stamps.flags) stamps.flags[field] = "suspended";
 }
 
 function fillBoardUnderdogOdds(odds, stamps, game, lines) {
@@ -452,7 +454,8 @@ export function applyUnderdogPhoneQuotes(games, slate) {
       game.commence_time || game.scheduledAt || game.scheduled_at || null,
     );
     const odds = blankBoardUnderdogOdds();
-    const stamps = {};
+    const flags = {};
+    const stamps = Object.defineProperty({}, "flags", { value: flags, enumerable: false });
     if (hit) fillBoardUnderdogOdds(odds, stamps, game, hit.lines);
     const bookLineSuspended = { ...(game.bookLineSuspended || {}) };
     if (bookLineSuspended.underdog_predict) bookLineSuspended.underdog_predict = {};
@@ -460,6 +463,7 @@ export function applyUnderdogPhoneQuotes(games, slate) {
     bookLineUpdatedAt.underdog_predict = stamps;
     return {
       ...game,
+      bookLineFlags: { ...(game.bookLineFlags || {}), underdog_predict: flags },
       bookOdds: { ...(game.bookOdds || {}), underdog_predict: odds },
       bookLineUpdatedAt,
       bookLineSuspended,

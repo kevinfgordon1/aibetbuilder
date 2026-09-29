@@ -1,6 +1,7 @@
 // Betstamp market snapshot → Odds Board row model.
 // Isolated from The Odds API transform so the existing board stays untouched.
 
+import { setLineFlag } from "./oddsFreshness.js";
 import {
   bookById,
   BETSTAMP_TRIAL_BOOKS,
@@ -209,6 +210,10 @@ const NOT_OFFERED_MARKET_STATUSES = new Set([
   "void",
   "hidden",
   "pulled",
+  "paused",
+  "settled",
+  "determined",
+  "finalized",
 ]);
 
 export function marketIsOtB(market) {
@@ -1006,6 +1011,13 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   if (!side) return false;
   const field = lineFieldFor(betType, side);
   if (!field) return false;
+  // Betstamp is_otb / i_hidden on a priced row = the book has this line
+  // pulled (price and updated_at freeze until it is re-offered). Flag it so
+  // maskStaleOdds hides it; the next on-board row clears the flag.
+  if (!marketIsBetstampPolymarketOtB(market)) {
+    const pulled = (marketIsOtB(market) || market.i_hidden === true) && marketHasOfferableOdds(market);
+    setLineFlag(game, bookKey, field, pulled ? "off the board" : null);
+  }
   const existingPrice = game.bookOdds?.[bookKey]?.[field];
   const existingTs = lineUpdatedAt(game, bookKey, field);
   const incomingLive = marketIsLiveQuote(market);
