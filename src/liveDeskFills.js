@@ -13,6 +13,7 @@
 // American odds only.
 import { americanFromMicro, formatAmerican, formatCentsFromMicro, readMarketSides, toMicro } from "./liveDeskPrice.js";
 import { originalSubmittedMicro } from "./liveDeskProtect.js";
+import { ourExecution, sideFromOrder } from "./liveDeskTradeSide.js";
 
 const MICRO = 1_000_000;
 export const FILLS_VENUE = "Polymarket US";
@@ -61,24 +62,6 @@ export function fillTimeEt(iso) {
   return text + " ET";
 }
 
-function sideFromOrder(order) {
-  const intent = str(order && (order.intent || order.orderIntent)).toUpperCase();
-  if (intent.includes("BUY_LONG")) return { action: "buy", outcome: "long" };
-  if (intent.includes("SELL_LONG")) return { action: "sell", outcome: "long" };
-  if (intent.includes("BUY_SHORT")) return { action: "buy", outcome: "short" };
-  if (intent.includes("SELL_SHORT")) return { action: "sell", outcome: "short" };
-  const side = str(order && order.outcomeSide).toUpperCase();
-  const act = str(order && order.action).toUpperCase();
-  const isNo = side.includes("NO");
-  const isYes = side.includes("YES");
-  const isBuy = act.includes("BUY");
-  const isSell = act.includes("SELL");
-  if ((isYes || isNo) && (isBuy || isSell)) {
-    return { action: isBuy ? "buy" : "sell", outcome: isNo ? "short" : "long" };
-  }
-  return null;
-}
-
 function outcomeMicroFromYes(yes, outcome) {
   if (yes == null || !(yes > 0 && yes < 1)) return null;
   const yesMicro = toMicro(yes);
@@ -117,13 +100,6 @@ function gameName(trade, order) {
   if (str(meta.title)) return str(meta.title);
   const market = trade.market || {};
   return str(market.title) || str(market.question) || str(trade.marketSlug) || "Trade";
-}
-
-function ourExecution(trade) {
-  const agg = trade.aggressorExecution;
-  const pas = trade.passiveExecution;
-  if (trade.isAggressor === true) return { exec: agg || null, order: (agg && agg.order) || trade.aggressor || null, role: "taker" };
-  return { exec: pas || null, order: (pas && pas.order) || trade.passive || null, role: "maker" };
 }
 
 function protectRowFor(orderId, byId) {

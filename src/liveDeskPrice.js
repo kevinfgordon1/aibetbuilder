@@ -1,4 +1,5 @@
 import { deskRateLimitMessage, isDeskRateLimit } from "./liveDeskRefresh.js";
+import { tradeOrderSide } from "./liveDeskTradeSide.js";
 
 export { deskRateLimitMessage, isDeskRateLimit };
 
@@ -604,7 +605,9 @@ function positionEntries(raw) {
 
 // BUY_LONG / SELL_SHORT add long-instrument contracts. BUY_SHORT / SELL_LONG
 // subtract them (that is a long position in the other team). Price on the
-// trade is always the long instrument. Unknown side is ignored — never guessed
+// trade is always the long instrument. The side comes from our order on the
+// trade (tradeOrderSide, shared with Filled orders), then from top-level trade
+// fields for older / flattened shapes. Unknown side is ignored — never guessed
 // from the market title.
 function instrumentDeltaFromTrade(trade) {
   if (!trade || typeof trade !== "object") return null;
@@ -613,6 +616,13 @@ function instrumentDeltaFromTrade(trade) {
   const qty = firstNumber(trade, ["qtyDecimal", "qty"]);
   if (qty == null || qty === 0) return null;
   const mag = Math.abs(qty);
+  // Real trades: the side is on our order inside the execution.
+  const fromOrder = tradeOrderSide(trade);
+  if (fromOrder) {
+    const adds = (fromOrder.action === "buy") === (fromOrder.outcome === "long");
+    return adds ? mag : -mag;
+  }
+  // Legacy / flattened shape: side fields on the trade itself.
   const intent = String(trade.intent || trade.orderIntent || trade.order_intent || "").toUpperCase();
   if (intent.includes("BUY_LONG") || intent.includes("SELL_SHORT")) return mag;
   if (intent.includes("BUY_SHORT") || intent.includes("SELL_LONG")) return -mag;
@@ -691,13 +701,30 @@ function tradesFromFills(fills) {
   return out;
 }
 
+// Markets settled inside the same activities page. Their trades must not
+// rebuild a position the exchange has already resolved (and dropped from the
+// positions snapshot); nothing can trade on a market after it resolves.
+function resolvedSlugs(fills) {
+  const out = new Set();
+  for (const item of Array.isArray(fills) ? fills : []) {
+    if (!item || item.type !== "ACTIVITY_TYPE_POSITION_RESOLUTION") continue;
+    const res = item.positionResolution || {};
+    const meta = (res.beforePosition && res.beforePosition.marketMetadata) || {};
+    const slug = String(res.marketSlug || meta.slug || "").trim();
+    if (slug) out.add(slug);
+  }
+  return out;
+}
+
 function fillBooksBySlug(fills) {
   const books = new Map();
+  const resolved = resolvedSlugs(fills);
   for (const trade of tradesFromFills(fills)) {
     const delta = instrumentDeltaFromTrade(trade);
     if (delta == null) continue;
     const slug = String(trade.marketSlug || trade.slug || (trade.marketMetadata && trade.marketMetadata.slug) || "").trim();
     if (!slug) continue;
+    if (resolved.has(slug)) continue;
     let book = books.get(slug);
     if (!book) {
       book = emptyBook();
