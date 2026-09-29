@@ -1230,6 +1230,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     kickPhone();
     kickBoards();
     phoneTimer = setInterval(kickPhone, liveOnly ? FREE_FEED_LIVE_POLL_MS : FREE_FEED_POLL_MS);
+    // Tab visible again: refresh Underdog now instead of on the next tick.
+    const onVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") kickPhone();
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
     boardTimer = setInterval(kickBoards, liveOnly ? FREE_FEED_LIVE_BOARD_POLL_MS : FREE_FEED_POLL_MS);
 
     const runVenue = async (book, url) => {
@@ -1319,6 +1324,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       clearTimeout(loadGuard);
       clearInterval(phoneTimer);
       clearInterval(boardTimer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
       venueTimers.forEach((t) => clearTimeout(t));
     };
   }, [boardSport, liveOnly, boardRefreshKey, seeUnderdog, venuesOn]);
