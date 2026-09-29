@@ -1479,6 +1479,50 @@ const goodCreds = () => ({
     handler._resetDeps();
   }
 
+  // Position drill-down: pages this market's trades (marketSlug filter) and stops once fills reach the open.
+  {
+    const slugX = 'aec-nfl-phi-chi-2026-09-28';
+    const mkTrade = (id, qty, px, minute) => ({
+      type: 'ACTIVITY_TYPE_TRADE',
+      trade: {
+        id, marketSlug: slugX, state: 'TRADE_STATE_CLEARED', isAggressor: true,
+        createTime: '2026-09-29T00:' + String(minute).padStart(2, '0') + ':00Z',
+        price: { value: String(px) }, qtyDecimal: qty, cost: { value: String(qty * px) },
+        aggressorExecution: { lastShares: qty, lastPx: { value: String(px) }, order: { id: 'O' + id, intent: 'ORDER_INTENT_BUY_LONG', price: { value: String(px) } } },
+      },
+    });
+    const pages = {
+      '': { activities: [mkTrade('T3', 10, 0.55, 3), mkTrade('T2', 10, 0.56, 2)], nextCursor: 'c1', eof: false },
+      c1: { activities: [mkTrade('T1', 5, 0.5, 1), { type: 'ACTIVITY_TYPE_TRADE', trade: { ...mkTrade('X', 99, 0.5, 0).trade, marketSlug: 'other-slug' } }], nextCursor: 'c2', eof: false },
+      c2: { activities: [mkTrade('T0', 7, 0.5, 0)], nextCursor: '', eof: true },
+    };
+    const seenQ = [];
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      creds: goodCreds,
+      protectStore: () => ({ configured: false }),
+      fetchImpl: async (url) => {
+        const u = new URL(url);
+        assert.equal(u.pathname, '/v1/portfolio/activities');
+        seenQ.push(u.searchParams);
+        assert.equal(u.searchParams.get('marketSlug'), slugX);
+        return jsonRes(200, pages[u.searchParams.get('cursor') || '']);
+      },
+    });
+    const res = mockRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer tok' }, url: '/api/live-trading-desk?positionFills=' + slugX + '&net=25', query: { positionFills: slugX, net: '25' } }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.ok, true);
+    assert.equal(res.out.body.pages, 2, 'stops after the page that reaches the open');
+    assert.equal(res.out.body.reachedOpen, true);
+    assert.deepEqual(res.out.body.fills.map((f) => f.tradeId), ['T3', 'T2', 'T1'], 'other slugs dropped');
+    assert.equal(seenQ.length, 2);
+    const bad = mockRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer tok' }, url: '/api/live-trading-desk?positionFills=..', query: { positionFills: '..' } }, bad);
+    assert.equal(bad.out.statusCode, 400);
+    handler._resetDeps();
+  }
+
   console.log('live-trading-desk.test.js ok');
 })().catch((err) => {
   console.error(err);

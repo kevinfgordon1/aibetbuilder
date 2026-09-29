@@ -7,6 +7,7 @@ import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrde
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
 import LiveDeskFilledOrders from "./LiveDeskFilledOrders";
+import LiveDeskPositionFills from "./LiveDeskPositionFills";
 import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLimit, mergeDeskBoard } from "./liveDeskRefresh";
 
 let supabaseClient = null;
@@ -224,6 +225,26 @@ function LiveTradingDeskView({ user }) {
   const ticketKey = ticket
     ? [slug, ticket.outcome, ticket.action, ticket.yesPrice, String(ticket.contracts), ticket.cost, allowCross ? "1" : "0", protect ? "p" : "0"].join("|")
     : "";
+
+  const [openFills, setOpenFills] = useState({});
+
+  // Drill-down for one position card. Only runs while that card is expanded.
+  async function loadPositionFills(row) {
+    const headers = await authHeaders();
+    if (!headers) throw new Error("Sign in required.");
+    const net = Number(row && row.instrumentNet);
+    const q = "?positionFills=" + encodeURIComponent(row.slug) + (Number.isFinite(net) ? "&net=" + encodeURIComponent(String(net)) : "");
+    const res = await fetch("/api/live-trading-desk" + q, { headers });
+    let data = null;
+    try { data = await res.json(); } catch (_) { data = null; }
+    if (!res.ok || !data || data.ok === false || !Array.isArray(data.fills)) {
+      const limited = res.status === 429 || isDeskRateLimit(data) || isDeskRateLimit(data && data.error);
+      throw new Error(limited
+        ? deskRateLimitMessage(Math.round(deskRefreshDelayMs({ rateLimited: true, retryAfter: data && data.retryAfter }) / 1000))
+        : deskErrorText(data && data.error, "Fills did not load (" + res.status + ")."));
+    }
+    return data;
+  }
 
   async function load(nextSlug, { silent } = {}) {
     const id = ++seq.current;
@@ -610,12 +631,14 @@ function LiveTradingDeskView({ user }) {
             {positions.filter((row) => row && typeof row === "object").map((row, index) => {
               const on = row.slug === slug;
               const rowKey = typeof row.slug === "string" && row.slug ? row.slug : "pos-" + index;
+              const expanded = !!openFills[rowKey];
+              const panelId = "desk-pos-fills-" + index;
               return (
+                <div key={rowKey}>
                 <button
-                  key={rowKey}
                   type="button"
                   onClick={() => selectPosition(row)}
-                  style={{
+                  style={{ display: "block", width: "100%",
                     textAlign: "left",
                     background: on ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.03)",
                     border: on ? "1px solid rgba(59,130,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
@@ -641,6 +664,17 @@ function LiveTradingDeskView({ user }) {
                     {row.cost != null ? " · cost " + money(row.cost) : ""}
                   </div>
                 </button>
+                {typeof row.slug === "string" && row.slug ? (
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={panelId}
+                    onClick={() => setOpenFills((m) => ({ ...m, [rowKey]: !m[rowKey] }))}
+                    style={{ marginTop: 4, background: "none", border: "none", color: "#93c5fd", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}
+                  >{expanded ? "▾ Hide fills" : "▸ Show fills"}</button>
+                ) : null}
+                {expanded ? <LiveDeskPositionFills row={row} panelId={panelId} loadFills={loadPositionFills} /> : null}
+                </div>
               );
             })}
           </div>
