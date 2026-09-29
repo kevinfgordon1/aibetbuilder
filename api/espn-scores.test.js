@@ -41,4 +41,39 @@ assert.equal(live.completed, false);
 
 assert.equal(h.slimEvent(null, 'mlb', '20260904'), null);
 
-console.log('espn-scores.test.js ok');
+// ?live=nfl: slim live game-state payload (PR #250 game-state line / frozen gates).
+assert.equal(h.liveParam({ query: { live: 'NFL' } }), 'nfl');
+assert.equal(h.liveParam({ url: '/api/espn-scores?live=nfl' }), 'nfl');
+assert.equal(h.liveParam({ url: '/api/espn-scores?queries=nfl:20260928' }), '');
+{
+  const ev = {
+    id: '401872963',
+    status: { displayClock: '8:30', period: 2, type: { name: 'STATUS_IN_PROGRESS', state: 'in' } },
+    competitions: [{
+      competitors: [
+        { homeAway: 'home', score: '10', team: { id: '3', abbreviation: 'CHI', displayName: 'Chicago Bears', logo: 'x' }, records: [1] },
+        { homeAway: 'away', score: '7', team: { id: '21', abbreviation: 'PHI', displayName: 'Philadelphia Eagles' } },
+      ],
+      situation: { down: 3, distance: 4, possession: '21', possessionText: 'CHI 35', shortDownDistanceText: '3rd & 4', isRedZone: false, lastPlay: { type: { id: '24', text: 'Pass Reception' }, text: 'pass', probability: {} } },
+      broadcasts: [1, 2],
+    }],
+  };
+  const slim = h.slimLiveEvent(ev);
+  assert.equal(slim.competitions[0].situation.possession, '21');
+  assert.equal(slim.competitions[0].situation.lastPlay.type.text, 'Pass Reception');
+  assert.equal(slim.competitions[0].competitors[0].team.logo, undefined);
+  assert.equal(slim.competitions[0].broadcasts, undefined);
+  assert.equal(h.slimLiveEvent({}), null);
+  const realFetch = global.fetch;
+  global.fetch = async (url) => ({ ok: true, json: async () => ({ events: [ev], url }) });
+  const headers = {};
+  let out = null;
+  const res = { setHeader: (k, v) => { headers[k] = v; }, status: () => ({ json: (b) => { out = b; }, end() {} }) };
+  handler({ method: 'GET', query: { live: 'nfl' } }, res).then(() => {
+    global.fetch = realFetch;
+    assert.equal(out.source, 'espn');
+    assert.equal(out.events.length, 1);
+    assert.equal(headers['Cache-Control'], 's-maxage=3, stale-while-revalidate=5');
+    console.log('espn-scores.test.js ok');
+  });
+}

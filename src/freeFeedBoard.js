@@ -220,6 +220,14 @@ function quoteSideType(game, quote) {
   return null;
 }
 
+function venueStateFields(quote) {
+  const out = {};
+  if (quote.status != null) out.status = quote.status;
+  if (quote.suspended === true || quote.paused === true) out.suspended = true;
+  if (quote.closed === true || quote.accepting_orders === false || quote.active === false) out.active = false;
+  return out;
+}
+
 function marketsFromQuotes(games, quotes, fallbackLeague) {
   const markets = [];
   for (const quote of quotes || []) {
@@ -253,6 +261,9 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
       number: line,
       is_live: quote.is_live === true || game.is_live === true,
       updated_at: quote.updated_at,
+      // Venue market state (Kalshi status, Polymarket closed / not accepting
+      // orders, Novig suspended). applyMarketToGame tombs a not-offered state.
+      ...venueStateFields(quote),
     });
   }
   return markets;
