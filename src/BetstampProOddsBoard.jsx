@@ -1269,10 +1269,16 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     };
     load();
     const timer = setInterval(load, liveOnly ? BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS : BETSTAMP_BOARD_UNDERDOG_POLL_MS);
+    // Tab visible again: refresh Underdog now instead of on the next tick.
+    const onVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") load();
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       ctrl.abort();
       clearInterval(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
     };
   }, [boardSport, liveOnly, boardRefreshKey]);
 
