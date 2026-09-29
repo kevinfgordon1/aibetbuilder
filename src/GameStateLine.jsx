@@ -19,7 +19,7 @@ export function GameStateLine({ game }) {
     <div
       data-game-state={m.mode}
       title={title}
-      style={{ fontSize: 10, color: m.mode === "running" ? "var(--nob-faint)" : "var(--nob-warn, #d9a441)", lineHeight: 1.15, margin: "0 0 1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+      style={{ fontSize: 10, color: m.mode === "running" ? "var(--nob-faint)" : "var(--nob-warn, #d9a441)", lineHeight: 1.2, margin: "0 0 2px", whiteSpace: "normal", overflowWrap: "anywhere" }}
     >
       {text}
     </div>
