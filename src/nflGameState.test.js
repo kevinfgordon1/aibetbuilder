@@ -49,6 +49,16 @@ const NOW = Date.parse("2026-09-29T01:45:00Z");
   assert.equal(statesFromEspnScoreboard({ events: [HALFTIME] }).length, 1);
 }
 
+// Status still HALFTIME but the 2H kickoff is the last play → live Q3 (ESPN lag seen tonight).
+{
+  const ko = structuredClone(HALFTIME);
+  ko.competitions[0].situation.lastPlay = { type: { text: "Kickoff" }, text: "C.Santos kicks 65 yards from CHI 35 to landing zone to end zone, Touchback." };
+  const st = stateFromEspnEvent(ko);
+  assert.equal(st.phase, "live");
+  assert.equal(st.period, 3);
+  assert.equal(gameStateLine(st).startsWith("Q3 15:00"), true);
+}
+
 // Live payload → "Q2 8:30 · PHI ball · 3rd & 4 at CHI 35".
 {
   const st = stateFromEspnEvent(live());

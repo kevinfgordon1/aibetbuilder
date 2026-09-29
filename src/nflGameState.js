@@ -78,7 +78,11 @@ export function stateFromEspnEvent(ev) {
   let phase = "live";
   if (type.state === "pre" || name === "STATUS_SCHEDULED") phase = "pre";
   else if (type.completed || type.state === "post") phase = "final";
-  else if (name === "STATUS_HALFTIME") phase = "halftime";
+  else if (name === "STATUS_HALFTIME") {
+    // ESPN's status sat on HALFTIME ~35s after the 2H kickoff tonight while
+    // lastPlay already showed the kick; trust the play.
+    phase = lp.text && !phaseFromPlay(lp.type?.text, lp.text) ? "live" : "halftime";
+  }
   else if (name === "STATUS_END_PERIOD") phase = "end_period";
   else if (/DELAY|SUSPEND|RAIN/.test(name)) phase = "delayed";
   else phase = phaseFromPlay(lp.type?.text, lp.text) || "live";
@@ -93,9 +97,9 @@ export function stateFromEspnEvent(ev) {
     awayAbbr: away.team.abbreviation || "",
     homeScore: num(home.score),
     awayScore: num(away.score),
-    period: num(st.period),
-    clock: st.displayClock || null,
-    clockSec: num(st.clock) ?? clockSeconds(st.displayClock),
+    period: name === "STATUS_HALFTIME" && phase === "live" ? 3 : num(st.period),
+    clock: name === "STATUS_HALFTIME" && phase === "live" ? "15:00" : st.displayClock || null,
+    clockSec: name === "STATUS_HALFTIME" && phase === "live" ? 900 : num(st.clock) ?? clockSeconds(st.displayClock),
     phase,
     possession,
     downDistance: phase === "live" || phase === "timeout" || phase === "review" || phase === "two_minute" || phase === "injury"
