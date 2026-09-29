@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { SEP24_ACTIVITIES } from "./liveDeskFillsSep24.fixture.js";
+import { tradeOrderSide } from "./liveDeskTradeSide.js";
 import {
   MAX_SIZE_DOLLARS,
   DEFAULT_SIZE_DOLLARS,
@@ -600,6 +602,131 @@ const GB_MARKET = {
   assert.equal(Object.hasOwn(next, "american"), false);
   assert.equal(Object.hasOwn(next, "dollars"), false);
   assert.equal(Object.hasOwn(next, "allowCross"), false);
+}
+
+{
+  // Real Polymarket US trades: no side on the trade, ours is on the order in
+  // our execution (passive here; the aggressor order is the counterparty's and
+  // may say ORDER_INTENT_UNDEFINED). The fill correction must read it.
+  const first = SEP24_ACTIVITIES[0].trade;
+  assert.equal(first.intent, undefined);
+  assert.equal(first.aggressorExecution.order.intent, "ORDER_INTENT_UNDEFINED");
+  assert.deepEqual(tradeOrderSide(first), { action: "buy", outcome: "short" });
+
+  const GB = "aec-nfl-atl-gb-2026-09-24";
+  const stale = {
+    positions: {
+      [GB]: {
+        netPositionDecimal: "-5",
+        cost: { value: "3.00", currency: "USD" },
+        marketMetadata: { slug: GB, title: "ATL Falcons vs GB Packers", outcome: "Packers" },
+      },
+    },
+  };
+  const rows = mapPositions(stale, { fills: SEP24_ACTIVITIES });
+  const gb = rows.find((r) => r.slug === GB);
+  // Oldest -> newest: SELL_LONG 147.05 @ .32, BUY_SHORT 150.37 @ .335,
+  // SELL_SHORT 250 @ .355 (covers), BUY_SHORT 150 @ .40.
+  assert.equal(gb.instrumentNet, -197.42);
+  assert.equal(gb.net, -197.42);
+  assert.equal(gb.side, "short");
+  assert.equal(gb.cost, 121.89);
+
+  // Other open markets in the page appear from their fills.
+  const spread = rows.find((r) => r.slug === "asc-nfl-atl-gb-2026-09-24-neg-6pt5");
+  assert.equal(spread.instrumentNet, -2000);
+  assert.equal(spread.cost, 1660);
+  // MIL-PHI resolved inside the same page: its BUY_LONG fill must not bring a
+  // settled market back as an open position.
+  assert.equal(rows.some((r) => r.slug === "aec-mlb-mil-phi-2026-09-22"), false);
+  const withoutResolution = mapPositions({ positions: {} }, {
+    fills: SEP24_ACTIVITIES.filter((a) => a.type === "ACTIVITY_TYPE_TRADE"),
+  });
+  const mil = withoutResolution.find((r) => r.slug === "aec-mlb-mil-phi-2026-09-22");
+  assert.equal(mil.instrumentNet, 218.75);
+  assert.equal(mil.side, "long");
+
+  // A snapshot that already shows at least as many contracts is left alone.
+  const fresh = mapPositions({
+    positions: {
+      [GB]: {
+        netPositionDecimal: "-197.42",
+        cost: { value: "121.00", currency: "USD" },
+        marketMetadata: { slug: GB, title: "ATL Falcons vs GB Packers", outcome: "Packers" },
+      },
+    },
+  }, { fills: SEP24_ACTIVITIES }).find((r) => r.slug === GB);
+  assert.equal(fresh.cost, 121);
+}
+
+{
+  // Order with ORDER_INTENT_UNDEFINED but outcomeSide / action set (seen on
+  // Polymarket US) and the trade's own intent also UNDEFINED.
+  const SLUG = "aec-nfl-lac-ten-2025-11-02";
+  const trade = (id, isAggressor, order, qty, price, t) => ({
+    type: "ACTIVITY_TYPE_TRADE",
+    trade: {
+      id,
+      marketSlug: SLUG,
+      intent: "ORDER_INTENT_UNDEFINED",
+      isAggressor,
+      qtyDecimal: qty,
+      price: { value: price, currency: "USD" },
+      createTime: t,
+      aggressorExecution: { order: isAggressor ? order : { intent: "ORDER_INTENT_UNDEFINED" } },
+      passiveExecution: { order: isAggressor ? { intent: "ORDER_INTENT_UNDEFINED" } : order },
+    },
+  });
+  const buyNo = { intent: "ORDER_INTENT_UNDEFINED", outcomeSide: "OUTCOME_SIDE_NO", action: "ORDER_ACTION_BUY" };
+  const sellNo = { intent: "ORDER_INTENT_UNDEFINED", outcomeSide: "OUTCOME_SIDE_NO", action: "ORDER_ACTION_SELL" };
+  const buyYes = { intent: "ORDER_INTENT_UNDEFINED", outcomeSide: "OUTCOME_SIDE_YES", action: "ORDER_ACTION_BUY" };
+  const fills = [
+    trade("t1", true, buyNo, "100", "0.40", "2026-09-24T18:00:00Z"),
+    trade("t2", false, buyNo, "50", "0.30", "2026-09-24T18:05:00Z"),
+    trade("t3", true, sellNo, "30", "0.35", "2026-09-24T18:10:00Z"),
+  ];
+  const rows = mapPositions({ positions: {} }, { fills });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].instrumentNet, -120);
+  assert.equal(rows[0].side, "short");
+  // 100 @ .60 + 50 @ .70 = 95; sell 30 of 150 removes 1/5 -> 76.
+  assert.equal(rows[0].cost, 76);
+
+  const long = mapPositions({ positions: {} }, {
+    fills: [trade("y1", true, buyYes, "10", "0.25", "2026-09-24T18:00:00Z")],
+  });
+  assert.equal(long[0].instrumentNet, 10);
+  assert.equal(long[0].cost, 2.5);
+
+  // The order wins over a conflicting top-level field; without an order side
+  // the trade is still ignored (never guessed).
+  const unknown = mapPositions({ positions: {} }, {
+    fills: [trade("u1", true, { intent: "ORDER_INTENT_UNDEFINED" }, "10", "0.25", "2026-09-24T18:00:00Z")],
+  });
+  assert.equal(unknown.length, 0);
+}
+
+{
+  // Legacy / flattened shape: side only on the trade (no executions).
+  const SLUG = "aec-nfl-lac-ten-2025-11-02";
+  const viaOutcome = mapPositions({ positions: {} }, {
+    fills: [
+      { id: "l1", marketSlug: SLUG, outcomeSide: "OUTCOME_SIDE_YES", action: "ORDER_ACTION_BUY", qtyDecimal: "20", price: { value: "0.50" }, createTime: "2026-09-24T18:00:00Z" },
+      { id: "l2", marketSlug: SLUG, outcomeSide: "OUTCOME_SIDE_YES", action: "ORDER_ACTION_SELL", qtyDecimal: "5", price: { value: "0.60" }, createTime: "2026-09-24T18:01:00Z" },
+    ],
+  });
+  assert.equal(viaOutcome[0].instrumentNet, 15);
+  assert.equal(viaOutcome[0].cost, 7.5);
+  const viaSide = mapPositions({ positions: {} }, {
+    fills: [{ id: "s1", marketSlug: SLUG, side: "SELL", qtyDecimal: "8", price: { value: "0.25" } }],
+  });
+  assert.equal(viaSide[0].instrumentNet, -8);
+  assert.equal(viaSide[0].cost, 6);
+  const viaIntent = mapPositions({ positions: {} }, {
+    fills: [{ type: "ACTIVITY_TYPE_TRADE", trade: { id: "i1", marketSlug: SLUG, intent: "ORDER_INTENT_BUY_SHORT", qtyDecimal: "4", price: { value: "0.75" } } }],
+  });
+  assert.equal(viaIntent[0].instrumentNet, -4);
+  assert.equal(viaIntent[0].cost, 1);
 }
 
 console.log("liveDeskPrice.test.js ok");
