@@ -139,6 +139,20 @@ function StakeOddsChip({ parlay }) {
   if (!text) return null;
   return <span className="chip num" title="Original soft-book stake at the odds you put on — not the RFQ fill.">{text}</span>;
 }
+// "taker gets" + "fair" header chips. Shared by the Active (0 fills) and Filled (≥1 fill) lock headers so
+// a partially-filled lock keeps them — both come from the saved lock (fill_american / fair_american).
+function TakerFairChips({ parlay }) {
+  const fill = Number(parlay.fill_american);
+  const eff = parlay.fill_american != null && parlay.fill_american !== "" && Number.isFinite(fill) && fill !== 0 ? fillView(fill) : null;
+  const fair = parlay.fair_american != null && parlay.fair_american !== "" && Number.isFinite(Number(parlay.fair_american)) ? Number(parlay.fair_american) : null;
+  const beatsFair = eff && eff.effTaker != null && fair != null && eff.effTaker >= fair;
+  return (
+    <>
+      {eff && eff.effTaker != null && <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>}
+      {fair != null && <span className="chip num">fair {fmtAm(fair)}</span>}
+    </>
+  );
+}
 const BET_TYPE_LABEL = { cash: "cash", boost: "boost", free: "free" };
 function formBetType(form) {
   if (lockKind(form) === "freebet") return "free";
@@ -1400,9 +1414,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <OutcomeChip out={lockOutcome(p, 0)} />
               <StakeOddsChip parlay={p} />
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
-              {(() => { const eff = fillView(p.fill_american); const beatsFair = p.fair_american != null && eff.effTaker >= p.fair_american;
-                return <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>; })()}
-              {p.fair_american != null && <span className="chip num">fair {fmtAm(p.fair_american)}</span>}
+              <TakerFairChips parlay={p} />
               <span style={{ flex: 1 }} />
               <CopyLockLink lockId={p.id} />
               {p.active === false && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
@@ -1439,6 +1451,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <QuoteChip quote={desk && desk.quote} />
                 <StakeOddsChip parlay={p} />
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
+                <TakerFairChips parlay={p} />
                 <span style={{ flex: 1 }} />
                 <CopyLockLink lockId={p.id} />
                 {p.active === false && desk && desk.fill.left > 0 && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}

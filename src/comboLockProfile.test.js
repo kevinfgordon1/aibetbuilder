@@ -401,4 +401,14 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   }), 2000);
 }
 
+// Partial-fill locks (Filled section) keep the "taker gets" + "fair" header chips, same as 0-fill locks.
+{
+  const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  assert.equal((locksSrc.match(/<TakerFairChips parlay=\{p\} \/>/g) || []).length, 2);
+  assert.match(locksSrc, /function TakerFairChips\(\{ parlay \}\)/);
+  assert.match(locksSrc, /parlay\.fair_american/);
+  const filledBlock = locksSrc.slice(locksSrc.indexOf("filledParlays.map((p) =>"), locksSrc.indexOf("<h3>", locksSrc.indexOf("filledParlays.map((p) =>")) > 0 ? locksSrc.indexOf("<DeskChips desk={desk} thin />") : undefined);
+  assert.match(filledBlock, /<TakerFairChips parlay=\{p\} \/>/);
+}
+
 console.log("comboLockProfile.test.js ok");
