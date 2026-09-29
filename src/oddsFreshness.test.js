@@ -52,7 +52,7 @@ assert.equal(consensusMoved(400, 300), true);
 {
   const g = game({
     odds: { circa: ml(150, -170), pinnacle: ml(120, -140) },
-    stamps: { circa: at(1_000), pinnacle: at(1_000) },
+    stamps: { circa: at(20_000), pinnacle: at(1_000) },
     flags: { circa: { ml_away: "off the board", ml_home: "off the board" } },
   });
   const m = maskStaleOdds(g, { nowMs: NOW, tape: new Map() });
@@ -62,6 +62,21 @@ assert.equal(consensusMoved(400, 300), true);
   const books = [{ key: "circa", label: "Circa" }, { key: "pinnacle", label: "Pinnacle" }];
   const best = getBestForGame(m, "ml", new Set(["circa", "pinnacle"]), books, { nowMs: NOW });
   assert.equal(best.bestAway, 120, "hidden Circa +150 is not Best");
+}
+
+// Off-the-board grace: a fresh OTB print stays (flaps); pregame OTB only hides once 30m old.
+{
+  const otb = (live, ageMs) => game({
+    live,
+    odds: { draftkings: ml(128, -150) },
+    stamps: { draftkings: at(ageMs) },
+    flags: { draftkings: { ml_away: "off the board", ml_home: "off the board" } },
+  });
+  const r = (g) => maskedOddsReason(maskStaleOdds(g, { nowMs: NOW, tape: new Map() }), "draftkings", "ml_away");
+  assert.equal(r(otb(true, 5_000)), null);
+  assert.equal(r(otb(true, 16_000)), "suspended (off the board)");
+  assert.equal(r(otb(false, 10 * 60_000)), null, "pregame OTB with a price is still bettable");
+  assert.equal(r(otb(false, 31 * 60_000)), "suspended (off the board)");
 }
 
 // Live hard cap: older than 5 minutes.
@@ -76,6 +91,12 @@ assert.equal(consensusMoved(400, 300), true);
   const g = game({ odds: { fanduel: ml(110, -130) }, stamps: { fanduel: { ml_away: Date.parse(KICK) - 60_000 } } });
   const m = maskStaleOdds(g, { nowMs: Date.parse(KICK) + 60_000, tape: new Map() });
   assert.match(maskedOddsReason(m, "fanduel", "ml_away"), /pregame line/);
+}
+
+// A future fixture wrongly flagged live does not trip the pregame-line rule.
+{
+  const g = { ...game({ odds: { kalshi: ml(110, -130) }, stamps: { kalshi: at(1_000) } }), commence_time: "2026-10-02T00:15:00Z" };
+  assert.equal(maskStaleOdds(g, { nowMs: NOW, tape: new Map() }), g);
 }
 
 // Frozen with consensus history: stamped 3m ago, consensus moved since.
@@ -134,7 +155,7 @@ assert.equal(consensusMoved(400, 300), true);
 {
   const g = game({
     odds: { circa: { spr_away: -110, spr_away_line: 2.5, spr_home: -110, spr_home_line: -2.5, tot_over: -105, tot_under: -115, tot_line: 38.5 } },
-    stamps: { circa: { spr_away: NOW - 1000, spr_home: NOW - 1000, tot_over: NOW - 1000, tot_under: NOW - 1000 } },
+    stamps: { circa: { spr_away: NOW - 20_000, spr_home: NOW - 20_000, tot_over: NOW - 20_000, tot_under: NOW - 20_000 } },
     flags: { circa: { tot_over: "off the board", tot_under: "off the board", spr_away: "off the board" } },
   });
   const m = maskStaleOdds(g, { nowMs: NOW, tape: new Map() });

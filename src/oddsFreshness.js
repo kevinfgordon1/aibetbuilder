@@ -8,7 +8,9 @@
 //  1. The source's own flag (game.bookLineFlags[book][field]):
 //     - Betstamp is_otb / i_hidden on a priced row ("off the board"). This is
 //       the flag Betstamp raises while a book has the line pulled mid-play,
-//       with the last price and updated_at frozen.
+//       with the last price and updated_at frozen. Hidden once the pulled row
+//       has gone OTB_HIDE_LIVE_AFTER_MS (pregame: OTB_HIDE_PREGAME_AFTER_MS)
+//       without a fresh print, because priced OTB rows can still be bettable.
 //     - Underdog option / line status other than "active".
 //     - Kalshi / Polymarket / Novig quotes that carry a closed / paused /
 //       inactive status (applyMarketToGame tombs explicit suspends already).
@@ -32,6 +34,12 @@ export const ODDS_FRESHNESS = Object.freeze({
   PREGAME_MAX_AGE_MS: null,
   // 15 American cents (−135 → −150, −105 → +110). Beyond ±200 cents inflate,
   // so there the move is measured as implied probability instead.
+  // Betstamp is_otb / i_hidden on a priced row. Pregame soft-book mains carry
+  // that flag on lines that are still bettable (NYJ @ CHI Oct 4: DK, Caesars,
+  // Circa ML all is_otb with prices), and live rows flap it for a print or
+  // two. Hide once the pulled row has had no fresh print for this long.
+  OTB_HIDE_LIVE_AFTER_MS: 15_000,
+  OTB_HIDE_PREGAME_AFTER_MS: 30 * 60_000,
   CONSENSUS_MOVE_CENTS: 15,
   CONSENSUS_MOVE_PROB: 0.03,
   CENTS_RANGE_MAX_ABS: 200,
@@ -185,14 +193,20 @@ export function staleOddsReason(game, book, spec, ctx) {
   const odds = game?.bookOdds?.[book];
   const price = num(odds?.[spec.field]);
   if (price == null) return null;
-  const flag = flagOf(game, book, spec.field);
-  if (flag) return flag === "off the board" ? "suspended (off the board)" : "suspended";
   const { nowMs, live } = ctx;
-  if (live && c.NON_LIVE_BOOKS.includes(book)) return "not offered live";
   const ts = stampOf(game, book, spec.field);
+  const flag = flagOf(game, book, spec.field);
+  if (flag === "off the board") {
+    const after = live ? c.OTB_HIDE_LIVE_AFTER_MS : c.OTB_HIDE_PREGAME_AFTER_MS;
+    if (ts == null || nowMs - ts >= after) return "suspended (off the board)";
+  } else if (flag) {
+    return "suspended";
+  }
+  if (live && c.NON_LIVE_BOOKS.includes(book)) return "not offered live";
   if (ts == null) return null;
   const start = gameStartMs(game);
-  if (live && start != null && ts < start) return "pregame line (not updated since kickoff)";
+  // start <= nowMs: a future fixture a stray live tick flagged is not "after kickoff".
+  if (live && start != null && start <= nowMs && ts < start) return "pregame line (not updated since kickoff)";
   const age = nowMs - ts;
   const maxAge = live ? c.LIVE_MAX_AGE_MS : c.PREGAME_MAX_AGE_MS;
   if (maxAge != null && age >= maxAge) return `frozen ${formatFrozenAge(age)}`;
