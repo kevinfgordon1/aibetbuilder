@@ -1,7 +1,12 @@
 // Filled orders list for the private Live Trading Desk. One row per fill,
 // newest first. Rows come from GET /api/live-trading-desk (board.fills),
 // which the desk already polls every 12s while the tab is visible.
-import React from "react";
+import React, { useState } from "react";
+import { filterFills, readFillsFilter, writeFillsFilter } from "./liveDeskPositionFills";
+
+function safeStorage() {
+  try { return typeof window !== "undefined" ? window.localStorage : null; } catch (_) { return null; }
+}
 
 const mono = "'JetBrains Mono', monospace";
 
@@ -44,7 +49,16 @@ function Badge({ children, tone }) {
 }
 
 export default function LiveDeskFilledOrders({ fills, stale, failed, note, style }) {
-  const rows = (Array.isArray(fills) ? fills : []).filter((row) => row && typeof row === "object");
+  const allRows = (Array.isArray(fills) ? fills : []).filter((row) => row && typeof row === "object");
+  // "Desk only" (default) keeps fills tagged Desk / Bet Protect; "All" adds
+  // Combo Locks hedge fills and anything else on the account. Persisted.
+  const [mode, setMode] = useState(() => readFillsFilter(safeStorage()));
+  const pickMode = (next) => {
+    setMode(next);
+    writeFillsFilter(safeStorage(), next);
+  };
+  const rows = filterFills(allRows, mode);
+  const deskCount = filterFills(allRows, "desk").length;
   const protectCount = rows.filter((row) => row.protect && typeof row.protect === "object").length;
   return (
     <section style={style}>
@@ -55,10 +69,25 @@ export default function LiveDeskFilledOrders({ fills, stale, failed, note, style
         </div>
         <div style={{ fontSize: 11, color: "#6b7280" }}>Every individual fill, newest first · American odds · times ET · updates every 12s while open</div>
       </div>
+      <div role="group" aria-label="Filter filled orders" style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        {[["desk", "Desk only", deskCount], ["all", "All", allRows.length]].map(([id, label, count]) => {
+          const on = mode === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => pickMode(id)}
+              title={id === "desk" ? "Fills tagged Desk (orders rested from this desk, incl. Bet Protect)" : "Every fill, incl. Combo Locks hedge fills tagged Combo"}
+              style={{ padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer", background: on ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.04)", border: "1px solid " + (on ? "rgba(59,130,246,0.5)" : "rgba(255,255,255,0.12)"), color: on ? "#bfdbfe" : "#9ca3af" }}
+            >{label} <span style={{ opacity: 0.7 }}>{count}</span></button>
+          );
+        })}
+      </div>
       {note && <div style={{ marginTop: 8, fontSize: 12, color: "#fcd34d" }}>{note}</div>}
       {stale && <div style={{ color: "#fcd34d", fontSize: 12, marginTop: 8 }}>Last loaded fills, marked stale until Polymarket accepts a refresh.</div>}
       {rows.length === 0 && (
-        <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>{failed ? "Fills did not load. Retrying on the next refresh." : "No fills yet."}</div>
+        <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 12 }}>{failed ? "Fills did not load. Retrying on the next refresh." : (mode === "desk" && allRows.length ? "No desk fills in the latest " + allRows.length + ". Tap All to see Combo and other fills." : "No fills yet.")}</div>
       )}
       {rows.length > 0 && (
         <div style={{ overflowX: "auto", marginTop: 10 }}>

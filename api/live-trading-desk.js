@@ -1,5 +1,8 @@
 // Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
 // GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, filled orders, NFL slate
+// GET  /api/live-trading-desk?positionFills=<slug>[&net=<signed instrument net>]
+//      every fill for one market (paged, marketSlug filter), for the Open positions drill-down.
+//      Only called when a position card is expanded; stops paging once the fills reach the open.
 // POST { op: "place", marketSlug, outcome, action, american, dollars, gameId?, confirm, allowCross?, protect?, protectXCents?, protectYCents? }
 //   protect defaults ON when omitted; send protect:false to rest unprotected.
 // POST { op: "cancel", orderId, marketSlug }
@@ -23,10 +26,11 @@ let price = null;
 let games = null;
 let protectMath = null;
 let fillsMod = null;
+let posFillsMod = null;
 let modsPromise = null;
 
 function ensureMods() {
-  if (access && price && games && protectMath && fillsMod) return Promise.resolve();
+  if (access && price && games && protectMath && fillsMod && posFillsMod) return Promise.resolve();
   if (!modsPromise) {
     modsPromise = Promise.all([
       import('../src/comboAccess.js'),
@@ -34,8 +38,10 @@ function ensureMods() {
       import('../src/liveDeskGames.js'),
       import('../src/liveDeskProtect.js'),
       import('../src/liveDeskFills.js'),
-    ]).then(([accessMod, priceMod, gamesMod, protectMod, fillMod]) => {
+      import('../src/liveDeskPositionFills.js'),
+    ]).then(([accessMod, priceMod, gamesMod, protectMod, fillMod, posFillMod]) => {
       fillsMod = fillMod;
+      posFillsMod = posFillMod;
       access = accessMod;
       price = priceMod;
       games = gamesMod;
@@ -283,6 +289,55 @@ async function recentTrades(client) {
     activities.push(item);
   }
   return activities;
+}
+
+// Drill-down for one position card. Pages this market's trades newest first
+// (marketSlug filter) until the fills reach the point the position opened,
+// the history ends, or POSITION_FILLS_MAX_PAGES. Client-side slug filter too,
+// in case the venue ignores marketSlug.
+async function positionFills(client, slug, net, store) {
+  const pageLimit = posFillsMod.POSITION_FILLS_PAGE_LIMIT;
+  const maxPages = posFillsMod.POSITION_FILLS_MAX_PAGES;
+  const seen = new Set();
+  const activities = [];
+  let cursor = '';
+  let pages = 0;
+  let eof = false;
+  let reached = false;
+  const position = Number.isFinite(net) && net !== 0 ? { slug, instrumentNet: net } : null;
+  while (pages < maxPages) {
+    const page = await client.listActivities({
+      limit: pageLimit,
+      sortOrder: 'SORT_ORDER_DESCENDING',
+      types: 'ACTIVITY_TYPE_TRADE',
+      marketSlug: slug,
+      ...(cursor ? { cursor } : {}),
+    });
+    pages += 1;
+    const list = Array.isArray(page && page.activities) ? page.activities : [];
+    for (const item of list) {
+      const trade = item && item.trade;
+      if (!trade) continue;
+      const tslug = String(trade.marketSlug || (trade.market && trade.market.slug) || '');
+      if (tslug && tslug !== slug) continue;
+      const id = trade.id ? String(trade.id) : '';
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      activities.push(item);
+    }
+    const next = nextCursor(page, cursor);
+    if (!next || !list.length) { eof = true; break; }
+    if (position && posFillsMod.reachesOpen(position, fillsMod.mapFilledOrders(activities, { limit: 100000 }))) {
+      reached = true;
+      break;
+    }
+    cursor = next;
+  }
+  const rows = fillsMod.mapFilledOrders(activities, {
+    protectRows: await protectRowsForFills(store, activities),
+    limit: 100000,
+  });
+  return { ok: true, slug, fills: rows, eof, reachedOpen: reached, pages, fetched: activities.length, maxPages };
 }
 
 async function loadMarkets(client, slugs, { allowFetch } = {}) {
@@ -660,6 +715,25 @@ async function handler(req, res) {
     const store = deps.protectStore();
     if (req.method === 'GET') {
       const q = (req.query) || {};
+      let drill = q.positionFills || '';
+      let netRaw = q.net;
+      if (!drill && req.url) {
+        try {
+          const sp = new URL(req.url, 'http://localhost').searchParams;
+          drill = sp.get('positionFills') || '';
+          if (netRaw == null) netRaw = sp.get('net');
+        } catch (_) { drill = ''; }
+      }
+      drill = String(Array.isArray(drill) ? drill[0] : drill).trim();
+      if (drill) {
+        if (!price.isMarketSlug(drill)) {
+          json(res, 400, { ok: false, error: 'Bad market slug.' });
+          return;
+        }
+        const net = Number(Array.isArray(netRaw) ? netRaw[0] : netRaw);
+        json(res, 200, await positionFills(client, drill, Number.isFinite(net) ? net : NaN, store));
+        return;
+      }
       let slug = q.slug || '';
       if (!slug && req.url) {
         try { slug = new URL(req.url, 'http://localhost').searchParams.get('slug') || ''; } catch (_) { slug = ''; }
