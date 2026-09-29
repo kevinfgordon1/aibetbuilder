@@ -10,6 +10,7 @@ import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardMod
 import ShareCardActions from "./ShareCardActions";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
+import { AppAlertsBanner, AppAlertsBell, AppAlertsBoundary, useAppAlerts } from "./AppAlerts";
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
 import { shouldShowKennethOddsBoardAlert, kennethOddsBoardAnnouncement, KENNETH_ODDS_BOARD_ALERT_ID } from "./targetedAlerts";
 import { buildPromoComboPrefill } from "./comboPrefill";
@@ -1564,6 +1565,8 @@ export default function App() {
   const [whatsNew, setWhatsNew] = useState(null);
   const [whatsNewReady, setWhatsNewReady] = useState(false);
   const [targetedAlertSessionDismissed, setTargetedAlertSessionDismissed] = useState(false);
+  const appAlerts = useAppAlerts(supabase, user);
+  const [appAlertsOpen, setAppAlertsOpen] = useState(false);
   const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
@@ -2526,6 +2529,9 @@ export default function App() {
           )}
           {user ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <AppAlertsBoundary>
+                <AppAlertsBell state={appAlerts} open={appAlertsOpen} onToggle={() => setAppAlertsOpen((v) => !v)} />
+              </AppAlertsBoundary>
               <button type="button" onClick={() => setActiveTab("profile")} title="Profile" style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                 <img src={user.user_metadata?.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)" }} />
               </button>
@@ -2536,6 +2542,10 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <AppAlertsBoundary>
+        <AppAlertsBanner state={appAlerts} open={appAlertsOpen} />
+      </AppAlertsBoundary>
 
       <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <a href={tabHash("promo")} style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
