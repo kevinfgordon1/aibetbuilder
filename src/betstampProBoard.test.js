@@ -15,6 +15,9 @@ import {
   BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS,
   holdPolymarketOtbCells,
   POLYMARKET_OTB_HOLD_MS,
+  withNovigQuotes,
+  novigSlateFromQuotes,
+  BETSTAMP_BOARD_PINNED_BOOK_KEYS,
 } from "./betstampProBoard.js";
 import { gamesFromBetstampSnapshot as pmHoldSnapshot } from "./betstampNormalize.js";
 import { gamesFromFreeFeeds, FREE_FEED_POLL_MS, FREE_FEED_LIVE_POLL_MS } from "./freeFeedBoard.js";
@@ -62,7 +65,8 @@ assert.equal(resolveAppHash(parseAppHash("#betstamp-odds-board"), null).notice, 
 // Books: Kevin's list, no Underdog / Fliff.
 const books = betstampOddsBoardBooks();
 const ids = books.map((b) => b.id);
-assert.deepEqual(ids, [200, 100, 300, 722, 365, 642, 500, 250, 105, 613, 614, 150, 700, 850, 191, 193, 194]);
+assert.deepEqual(ids, [200, 100, 300, 400, 722, 365, 642, 500, 250, 105, 613, 614, 150, 700, 850, 191, 193, 194]);
+assert.equal(bookById(400).key, "betmgm", "BetMGM next to DraftKings / FanDuel / Caesars");
 assert.ok(!ids.includes(196), "no Betstamp Underdog");
 assert.ok(!ids.includes(800), "no Fliff");
 assert.ok(!books.some((b) => /fliff|courtside|underdog/i.test(`${b.key} ${b.label}`)));
@@ -74,7 +78,7 @@ assert.equal(bookById(500).key, "betrivers");
 // Unentitled books would make the proxy drop every opt-in book on a bare 403.
 const reqIds = betstampOddsBoardRequestIds();
 assert.ok(!reqIds.includes(105) && !reqIds.includes(850));
-assert.ok([722, 500, 614, 700, 200, 191, 193, 194].every((id) => reqIds.includes(id)));
+assert.ok([722, 500, 614, 700, 200, 191, 193, 194, 400].every((id) => reqIds.includes(id)));
 
 // Polling URL always bypasses the 5-minute cache, never the SSE route.
 const u = betstampBoardSnapshotUrl({ league: "NFL", live: false, bookIds: [200, 722] });
@@ -118,7 +122,12 @@ assert.match(app, /activeTab === "betstampBoard" && !canSeeBetstampOddsBoard\(us
 // Underdog Predict column: phone feed, same matching as the New Odds Board.
 const cols = betstampOddsBoardColumns();
 assert.equal(cols[cols.length - 1].key, "underdog_predict", "Underdog Predict is the last column");
-assert.deepEqual(cols.slice(0, -1).map((b) => b.id), ids, "Betstamp columns unchanged");
+assert.equal(cols[cols.length - 2].key, "novig", "Novig sits between Kalshi and Underdog Predict");
+assert.equal(cols[cols.length - 3].key, "kalshi");
+assert.deepEqual(cols.slice(0, -2).map((b) => b.id), ids, "Betstamp columns unchanged");
+assert.ok(!betstampOddsBoardRequestIds().includes(195), "Novig is never requested from Betstamp");
+assert.ok(!cols.some((b) => /fliff|courtside/i.test(`${b.key} ${b.label}`)), "no Fliff / Courtside column");
+assert.deepEqual([...BETSTAMP_BOARD_PINNED_BOOK_KEYS].sort(), ["betmgm", "betus", "novig"]);
 assert.ok(!betstampOddsBoardRequestIds().includes(196), "never asks Betstamp for book 196");
 assert.equal(BETSTAMP_BOARD_UNDERDOG_POLL_MS, FREE_FEED_POLL_MS, "same pregame cadence as the New Odds Board");
 assert.equal(BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS, FREE_FEED_LIVE_POLL_MS, "same LIVE cadence as the New Odds Board");
@@ -172,6 +181,57 @@ assert.ok(booksWithBoardData([painted]).has("underdog_predict"), "Underdog colum
 assert.match(board, /fetchUnderdogPhone/);
 assert.match(board, /withUnderdogPhone\(/);
 assert.match(board, /betstampOddsBoardColumns\(\)/);
+
+// Novig column: relay quotes, matched like the Underdog column.
+{
+  const stamp = "2026-09-29T01:04:33.794Z";
+  const q = (extra) => ({
+    book: "novig", book_id: 195, league: "NFL", away: "Philadelphia Eagles", home: "Chicago Bears",
+    is_alt: false, is_live: true, start: "2026-09-29T00:15:00.000Z", updated_at: stamp, ...extra,
+  });
+  const quotes = [
+    q({ bet_type: "moneyline", side: "Chicago Bears", odds: 0.535, american: -115, size: 812.5 }),
+    q({ bet_type: "moneyline", side: "Philadelphia Eagles", odds: 0.5, american: -100, size: 40 }),
+    q({ bet_type: "spread", side: "Chicago Bears", line: 2.5, odds: 0.48, american: 108, market_id: "s1" }),
+    q({ bet_type: "spread", side: "Philadelphia Eagles", line: -2.5, odds: 0.53, american: -113, market_id: "s1" }),
+    // Lopsided alt spread: not the main.
+    q({ bet_type: "spread", side: "Chicago Bears", line: 10.5, odds: 0.9, american: -900, market_id: "s2" }),
+    q({ bet_type: "spread", side: "Philadelphia Eagles", line: -10.5, odds: 0.12, american: 733, market_id: "s2" }),
+    q({ bet_type: "total", side: "Over", side_type: "Over", line: 42.5, odds: 0.505, american: -102, market_id: "t1", updated_at: "2026-09-28T22:48:48.627Z" }),
+    q({ bet_type: "total", side: "Under", side_type: "Under", line: 42.5, odds: 0.5, american: -100, market_id: "t1", updated_at: "2026-09-28T22:48:48.627Z" }),
+    // Another league / next week's rematch never attach.
+    q({ league: "NCAAF", bet_type: "moneyline", side: "Chicago Bears", odds: 0.1, american: 900 }),
+    { ...q({ bet_type: "moneyline", side: "Chicago Bears", odds: 0.2, american: 400 }), start: "2026-10-06T00:15:00.000Z" },
+  ];
+  assert.equal(novigSlateFromQuotes(quotes, "NFL").games.length, 2);
+  const [ng] = withNovigQuotes([bsGame], quotes, "NFL");
+  const nv = ng.bookOdds.novig;
+  assert.deepEqual(
+    [nv.ml_away, nv.ml_home, nv.spr_away, nv.spr_away_line, nv.spr_home, nv.spr_home_line, nv.tot_line, nv.tot_over, nv.tot_under],
+    [-100, -115, -113, -2.5, 108, 2.5, 42.5, -102, -100],
+  );
+  assert.equal(nv.ml_home_size, 812.5, "Novig size rides along");
+  assert.equal(ng.bookOdds.draftkings.ml_away, -200, "Betstamp cells untouched");
+  assert.equal(ng.bookLineUpdatedAt.novig.ml_home, Date.parse(stamp), "age badge = Novig book change time");
+  assert.equal(ng.bookLineUpdatedAt.novig.tot_over, Date.parse("2026-09-28T22:48:48.627Z"));
+  assert.ok(booksWithBoardData([ng]).has("novig"));
+  // Underdog cells survive a Novig repaint and vice versa.
+  const both = withNovigQuotes(withUnderdogPhone([bsGame], phone, "NFL"), quotes, "NFL")[0];
+  assert.equal(both.bookOdds.underdog_predict.ml_away, -205);
+  assert.equal(withUnderdogPhone([both], phone, "NFL")[0].bookOdds.novig.ml_home, -115);
+  // No stream yet: leave games alone. Empty book: clear.
+  assert.equal(withNovigQuotes([bsGame], null, "NFL")[0], bsGame);
+  assert.equal(withNovigQuotes([ng], [], "NFL")[0].bookOdds.novig.ml_home, null);
+  // A different night never attaches (same kickoff window as Underdog).
+  const nextWeekOnly = quotes.filter((x) => x.start === "2026-10-06T00:15:00.000Z");
+  assert.equal(withNovigQuotes([bsGame], nextWeekOnly, "NFL")[0].bookOdds.novig.ml_home, null);
+  assert.equal(withNovigQuotes([nextWeek], quotes, "NFL")[0].bookOdds.novig.ml_home, 400);
+  // No `american` on the quote: derive from the 0–1 ask.
+  const [derived] = withNovigQuotes([bsGame], [q({ bet_type: "moneyline", side: "Chicago Bears", odds: 0.6 })], "NFL");
+  assert.equal(derived.bookOdds.novig.ml_home, -150);
+  assert.match(board, /novigStreamUrl\(/);
+  assert.match(board, /withNovigQuotes\(/);
+}
 
 console.log("betstampProBoard tests passed");
 

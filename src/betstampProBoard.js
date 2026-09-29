@@ -10,8 +10,15 @@
 // GETs per league (markets + fixtures + teams), far under 25 req/s.
 
 import { betstampSnapshotUrl } from "./betstampLive.js";
-import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
-import { betstampOddsBoardBooks, bookByKey, UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
+import { applyUnderdogPhoneQuotes, findUnderdogPhoneGame } from "./underdogPredictionQuote.js";
+import { teamsLikelySame } from "./promoBookmaker.js";
+import {
+  betstampOddsBoardBooks,
+  bookByKey,
+  NOVIG_BOARD_BOOK,
+  NOVIG_BOARD_BOOK_ID,
+  UNDERDOG_PREDICT_BOOK_KEY,
+} from "./betstampBooks.js";
 import {
   isMainMarket,
   lineFieldFor,
@@ -87,11 +94,21 @@ export function wrapNamespacedStorage(namespace, storage) {
 export const BETSTAMP_BOARD_UNDERDOG_POLL_MS = 20_000; // = FREE_FEED_POLL_MS
 export const BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS = 30_000; // = FREE_FEED_LIVE_POLL_MS
 
-/** Column catalog: Betstamp books, then Underdog Predict (phone feed). */
+/**
+ * Column catalog: Betstamp books (ending ProphetX / Polymarket / Kalshi), then
+ * Novig (its own public feed via the odds relay), then Underdog Predict
+ * (phone feed).
+ */
 export function betstampOddsBoardColumns() {
   const ud = bookByKey(UNDERDOG_PREDICT_BOOK_KEY);
-  return ud ? [...betstampOddsBoardBooks(), ud] : betstampOddsBoardBooks();
+  return [...betstampOddsBoardBooks(), NOVIG_BOARD_BOOK, ud].filter(Boolean);
 }
+
+// Listed (column + filter chip) even when the slate has no price for them,
+// so Kevin can see the book is wired. Other empty columns stay hidden.
+// BetUS (614): Betstamp REST returns NFL pregame rows for it but no is_live
+// rows (checked Sep 28 2026 during MNF), so it used to vanish on LIVE.
+export const BETSTAMP_BOARD_PINNED_BOOK_KEYS = Object.freeze(["betmgm", "betus", NOVIG_BOARD_BOOK.key]);
 
 /** Keep only this league's phone games (Underdog sport NFL / NCAAF / MLB). */
 export function underdogSlateForLeague(slate, league) {
@@ -189,4 +206,151 @@ export function holdPolymarketOtbCells(games, markets, memory, { nowMs = Date.no
     out[idx] = next;
   }
   return out || list;
+}
+
+// ── Novig column ───────────────────────────────────────────────────────
+// Same source as the New Odds Board (#240): Novig's free public v3 book
+// (about 9s behind) through the odds relay /stream?venue=novig, or
+// /api/novig-stream when VITE_ODDS_RELAY_URL is unset. Novig is not a
+// Betstamp provider. Games join exactly like the Underdog column: the Novig
+// quotes are grouped into one row per event and matched with
+// findUnderdogPhoneGame (teams + same-kickoff window, same New York date).
+// Cells show American odds; the age badge is the book's last change.
+
+export const NOVIG_BOARD_KEY = NOVIG_BOARD_BOOK.key;
+
+function novigNamesMatch(a, b) {
+  if (!a || !b) return false;
+  if (String(a).trim().toLowerCase() === String(b).trim().toLowerCase()) return true;
+  return teamsLikelySame(a, b);
+}
+
+function novigAmerican(q) {
+  const a = Number(q && q.american);
+  if (q && q.american != null && Number.isFinite(a) && a !== 0) return Math.round(a);
+  const p = Number(q && q.odds);
+  if (!(p > 0 && p < 1)) return null;
+  return p >= 0.5 ? -Math.round((100 * p) / (1 - p)) : Math.round((100 * (1 - p)) / p);
+}
+
+function novigStampMs(raw) {
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Date.parse(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Group Novig relay quotes into phone-slate shaped rows (one per event) so
+ * findUnderdogPhoneGame can match them the way the Underdog column does.
+ */
+export function novigSlateFromQuotes(quotes, league) {
+  const lg = String(league || "NFL").toUpperCase();
+  const byEvent = new Map();
+  for (const q of quotes || []) {
+    if (!q) continue;
+    if (q.book && q.book !== NOVIG_BOARD_KEY && Number(q.book_id) !== NOVIG_BOARD_BOOK_ID) continue;
+    if (String(q.league || lg).toUpperCase() !== lg) continue;
+    if (!q.away || !q.home || q.is_alt === true) continue;
+    const american = novigAmerican(q);
+    if (american == null) continue;
+    const key = `${q.away}|${q.home}|${q.start || ""}`;
+    let ev = byEvent.get(key);
+    if (!ev) {
+      ev = { sport: lg, away: q.away, home: q.home, scheduledAt: q.start || null, live: q.is_live === true, lines: [] };
+      byEvent.set(key, ev);
+    }
+    if (q.is_live === true) ev.live = true;
+    ev.lines.push({
+      betType: String(q.bet_type || "moneyline").toLowerCase(),
+      side: q.side,
+      line: q.line != null ? Number(q.line) : null,
+      american,
+      prob: Number(q.odds),
+      size: q.size != null && Number.isFinite(Number(q.size)) ? Number(q.size) : null,
+      marketId: q.market_id || `${q.bet_type}|${q.line ?? ""}`,
+      updatedAt: novigStampMs(q.updated_at),
+    });
+  }
+  return { ok: true, games: [...byEvent.values()] };
+}
+
+function blankNovigOdds() {
+  return {
+    ml_away: null, ml_home: null, ml_draw: null, ml_away_size: null, ml_home_size: null,
+    spr_away: null, spr_away_line: null, spr_away_size: null,
+    spr_home: null, spr_home_line: null, spr_home_size: null,
+    tot_line: null, tot_over: null, tot_over_size: null, tot_under: null, tot_under_size: null,
+  };
+}
+
+// Main spread / total: the two-sided market priced closest to a coin flip.
+function pickMainMarket(lines) {
+  const byMarket = new Map();
+  for (const l of lines) {
+    if (!byMarket.has(l.marketId)) byMarket.set(l.marketId, []);
+    byMarket.get(l.marketId).push(l);
+  }
+  let best = null;
+  let bestGap = Infinity;
+  for (const list of byMarket.values()) {
+    if (list.length < 2) continue;
+    const probs = list.map((l) => (Number.isFinite(l.prob) ? l.prob : 0.5));
+    const gap = Math.abs(probs[0] - probs[1]);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = list;
+    }
+  }
+  if (best) return best;
+  return byMarket.size ? [...byMarket.values()][0] : [];
+}
+
+function fillNovigOdds(odds, stamps, away, home, lines) {
+  const put = (field, l, lineField) => {
+    odds[field] = l.american;
+    odds[`${field}_size`] = l.size;
+    if (lineField) odds[lineField] = l.line;
+    if (l.updatedAt != null) stamps[field] = l.updatedAt;
+  };
+  for (const l of lines) {
+    if (l.betType !== "moneyline") continue;
+    if (novigNamesMatch(l.side, away)) put("ml_away", l);
+    else if (novigNamesMatch(l.side, home)) put("ml_home", l);
+  }
+  for (const l of pickMainMarket(lines.filter((x) => x.betType === "spread" && x.line != null))) {
+    if (novigNamesMatch(l.side, away)) put("spr_away", l, "spr_away_line");
+    else if (novigNamesMatch(l.side, home)) put("spr_home", l, "spr_home_line");
+  }
+  for (const l of pickMainMarket(lines.filter((x) => x.betType === "total" && x.line != null))) {
+    const side = String(l.side || "").toLowerCase();
+    if (side.startsWith("over")) put("tot_over", l, "tot_line");
+    else if (side.startsWith("under")) put("tot_under", l, "tot_line");
+  }
+  return odds;
+}
+
+/**
+ * Paint Novig cells onto Betstamp board games. null quotes (stream not back
+ * yet) leave games alone; an event with no Novig match clears its cells.
+ */
+export function withNovigQuotes(games, quotes, league) {
+  if (quotes == null) return games || [];
+  const slate = novigSlateFromQuotes(quotes, league);
+  return (games || []).map((game) => {
+    if (!game) return game;
+    const away = game.away || game.away_team;
+    const home = game.home || game.home_team;
+    const hit = slate.games.length
+      ? findUnderdogPhoneGame(slate, away, home, game.commence_time || game.scheduledAt || game.scheduled_at || null)
+      : null;
+    const odds = blankNovigOdds();
+    const stamps = {};
+    if (hit) fillNovigOdds(odds, stamps, away, home, hit.lines);
+    return {
+      ...game,
+      bookOdds: { ...(game.bookOdds || {}), [NOVIG_BOARD_KEY]: odds },
+      bookLineUpdatedAt: { ...(game.bookLineUpdatedAt || {}), [NOVIG_BOARD_KEY]: stamps },
+      bookLineSuspended: { ...(game.bookLineSuspended || {}), [NOVIG_BOARD_KEY]: {} },
+    };
+  });
 }

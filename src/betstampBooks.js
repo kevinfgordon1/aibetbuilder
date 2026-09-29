@@ -102,8 +102,11 @@ for (const b of BETSTAMP_EXTRA_BOARD_BOOKS) {
 
 // Column order on the Betstamp Odds Board: Kevin's core books, then the
 // Betstamp exchanges. 196 / Fliff / Courtside are never on this list.
+// BetMGM (400) sits with DraftKings / FanDuel / Caesars. The proxy only
+// forwards 400 when BETSTAMP_INCLUDE_BETMGM=1 (lib/betstamp.js), so until the
+// Betstamp plan covers BetMGM the column is listed but has no prices.
 export const BETSTAMP_ODDS_BOARD_BOOK_IDS = Object.freeze([
-  200, 100, 300, 722, 365,
+  200, 100, 300, 400, 722, 365,
   642,
   500,
   250, 105, 613, 614, 150,
