@@ -463,3 +463,26 @@ assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
 }
 
 console.log("comboLegResult.test.js ok");
+
+// NHL: Kalshi ticker/gameKey → sport, ESPN query, UTA/UTAH, and OT/shootout scoring.
+{
+  assert.equal(sportFromTicker("KXNHLGAME-26SEP30PITPHI-PIT"), "nhl");
+  assert.equal(sportFromTicker("", "nhl:26SEP30PITPHI"), "nhl");
+  assert.deepEqual(espnQueryForLeg({ ticker: "KXNHLTOTAL-26SEP30PITPHI-7", gameKey: "nhl:26SEP30PITPHI" }), { sport: "nhl", date: "20260930" });
+  const pitPhi = { sport: "nhl", date: "20260930", home: "Philadelphia Flyers", homeAbbr: "PHI", away: "Pittsburgh Penguins", awayAbbr: "PIT", homeScore: 4, awayScore: 3, completed: true };
+  const utaChi = { sport: "nhl", date: "20261001", home: "Utah Mammoth", homeAbbr: "UTAH", away: "Chicago Blackhawks", awayAbbr: "CHI", homeScore: 2, awayScore: 1, completed: true };
+  const total = (n, ou) => ({ ticker: "KXNHLTOTAL-26SEP30PITPHI-7", gameKey: "nhl:26SEP30PITPHI", side: ou === "over" ? "yes" : "no", type: "total", label: `${ou === "over" ? "Over" : "Under"} ${n}` });
+  // 4-3 (OT or not): 7 goals → Over 6.5 wins, Under 6.5 loses; ESPN's final score already includes OT/SO.
+  assert.equal(legFromEspnGame(total("6.5", "over"), pitPhi).status, "won");
+  assert.equal(legFromEspnGame(total("6.5", "under"), pitPhi).status, "lost");
+  const puck = (team, sign, side, ticker) => ({ ticker, gameKey: "nhl:26SEP30PITPHI", side, type: "spread", label: `${team} ${sign}1.5` });
+  // Pittsburgh lost by 1: +1.5 wins, Philadelphia −1.5 loses (Kalshi "wins by over 1.5").
+  assert.equal(legFromEspnGame(puck("Pittsburgh", "+", "no", "KXNHLSPREAD-26SEP30PITPHI-PHI2"), pitPhi).status, "won");
+  assert.equal(legFromEspnGame(puck("Philadelphia", "\u2212", "yes", "KXNHLSPREAD-26SEP30PITPHI-PHI2"), pitPhi).status, "lost");
+  // UTA (Kalshi) ↔ UTAH (ESPN) resolves the game and the side.
+  const utaLeg = { ticker: "KXNHLGAME-26OCT01CHIUTA-UTA", gameKey: "nhl:26OCT01CHIUTA", side: "yes", type: "side", label: "Utah" };
+  assert.equal(findEspnGame(utaLeg, [utaChi]), utaChi);
+  assert.equal(legFromEspnGame(utaLeg, utaChi).status, "won");
+  assert.equal(matchEspnSide("UTA", utaChi, "nhl"), "home");
+  console.log("comboLegResult NHL tests passed");
+}

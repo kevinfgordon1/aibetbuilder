@@ -529,6 +529,7 @@ const sampleGame = (key, ka, kb, A, B, series = { side: "KXMLBGAME", spread: "KX
 });
 const NFL_SERIES = { side: "KXNFLGAME", spread: "KXNFLSPREAD", total: "KXNFLTOTAL" };
 const NCAAF_SERIES = { side: "KXNCAAFGAME", spread: "KXNCAAFSPREAD", total: "KXNCAAFTOTAL" };
+const NHL_SERIES = { side: "KXNHLGAME", spread: "KXNHLSPREAD", total: "KXNHLTOTAL" };
 const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true, sports: {
   mlb: [
     sampleGame("26AUG071905PHIATL", "PHI", "ATL", "Philadelphia", "Atlanta"),
@@ -540,6 +541,9 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
   ],
   ncaaf: [
     sampleGame("26SEP03MASSRUTG", "MASS", "RUTG", "UMass", "Rutgers", NCAAF_SERIES, ["35.5"], ["49.5", "52.5"]),
+  ],
+  nhl: [
+    sampleGame("26OCT07PITPHI", "PHI", "PIT", "Philadelphia", "Pittsburgh", NHL_SERIES, ["1.5", "2.5"], ["5.5", "6.5", "7.5"]),
   ],
 } };
 const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)" };
@@ -907,8 +911,21 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const readLegs = useCallback(() => legRows.map((r) => {
     if (!r.gameKey || !r.marketVal) return null;
     const [tk, side] = decValFn(r.marketVal); const g = gameIdx[r.gameKey]; const m = g && findMarket(g, tk, side);
-    if (!m) return null; return { ticker: tk, side, label: m.label, type: m.type, game: g.title, gameKey: r.gameKey };
+    if (!m) return null;
+    // NHL keys are date-only (no HHMM), so the worker can't read puck drop from the ticker:
+    // stamp the exact start on the leg (started.js reads leg.starts_at) for the pre-game gate.
+    return { ticker: tk, side, label: m.label, type: m.type, game: g.title, gameKey: r.gameKey, ...(g.startExact && g.startTime ? { starts_at: g.startTime } : {}) };
   }).filter(Boolean), [legRows, gameIdx]);
+
+  // Game start autofill for NHL (exact puck drop from the feed): earliest leg start, only while the field is empty.
+  const startsTouched = useRef(false);
+  useEffect(() => {
+    if (startsTouched.current) return;
+    const ms = legRows.map((r) => { const g = r.gameKey && gameIdx[r.gameKey]; return g && g.startExact ? Date.parse(g.startTime) : NaN; }).filter(Number.isFinite);
+    if (!ms.length) return;
+    const v = toDatetimeLocalValue(new Date(Math.min(...ms)).toISOString());
+    setForm((f) => (f.starts ? f : { ...f, starts: v }));
+  }, [legRows, gameIdx]);
 
   // keep label synced from legs unless the user has edited it
   useEffect(() => { setForm((f) => (f.labelEdited ? f : { ...f, label: readLegs().map((l) => l.label).join(" + ") })); }, [legRows, readLegs]);
@@ -1479,7 +1496,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             {prefillWarning && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
-                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF main lines). Fill those rows by hand, then save — nothing has been inserted yet.
+                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF / NHL main lines). Fill those rows by hand, then save — nothing has been inserted yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
                 </ul>
@@ -1530,7 +1547,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             </div>
             <div style={{ marginBottom: 12 }}>
               <label>Game start — optional (auto-moves this parlay to history once the time passes)</label>
-              <input className="num" type="datetime-local" value={form.starts} onChange={(e) => setForm({ ...form, starts: e.target.value })} />
+              <input className="num" type="datetime-local" value={form.starts} onChange={(e) => { startsTouched.current = true; setForm({ ...form, starts: e.target.value }); }} />
             </div>
             {preview && (
               <div className="tiles" style={{ marginTop: 2 }}>
