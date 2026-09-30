@@ -363,4 +363,68 @@ const giantsOption = {
   assert.notEqual(board[0].bookOdds.underdog_predict.tot_over, -110);
 }
 
+{
+  // Audit 2026-09-30: MICH @ MINN total 43.5 printed Higher −113 / Lower −113.
+  // The parser dedupe key had no side, so the Under vanished from
+  // /api/underdog-predict and the Promo under leg never built.
+  const payload = {
+    over_under_lines: [{
+      stat_value: "43.5",
+      over_under: { title: "MICH @ MINN Total Points", category: "core", appearance_stat: { display_stat: "Total Points", stat: "points" } },
+      options: [
+        { choice: "higher", selection_header: "MICH @ MINN", choice_display: "Higher", odds: { prediction: { american: "-113", decimal: "1.89", probability: "51" } } },
+        { choice: "lower", selection_header: "MICH @ MINN", choice_display: "Lower", odds: { prediction: { american: "-113", decimal: "1.89", probability: "51" } } },
+      ],
+    }],
+  };
+  const quotes = predictionQuotesFromPayload(payload);
+  assert.deepEqual(quotes.map((q) => [q.choice, q.american, q.point]), [["higher", -113, 43.5], ["lower", -113, 43.5]]);
+  assert.deepEqual(cjsQuotes.predictionQuotesFromPayload(payload), quotes, "CJS parser keeps both equal-priced sides too");
+}
+
+{
+  // Audit 2026-09-30: Underdog and the Odds API spell these differently.
+  const phone = (away, home, lines) => ({ games: [{ away, home, scheduledAt: "2026-10-03T19:30:00Z", lines }] });
+  const cases = [
+    ["Louisville Cardinals", "NC State Wolfpack", "Louisville Cardinals", "North Carolina State Wolfpack"],
+    ["UL Monroe Warhawks", "South Alabama Jaguars", "Louisiana-Monroe Warhawks", "South Alabama Jaguars"],
+    ["McNeese State Cowboys", "LSU Tigers", "McNeese Cowboys", "LSU Tigers"],
+    ["Southern Mississippi Golden Eagles", "Troy Trojans", "Southern Miss Golden Eagles", "Troy Trojans"],
+  ];
+  for (const [oddsAway, oddsHome, udAway, udHome] of cases) {
+    const hit = findUnderdogPhoneGame(phone(udAway, udHome, [{ market: "h2h", name: udAway, american: 120 }]), oddsAway, oddsHome, "2026-10-03T19:30:00Z");
+    assert.ok(hit, `${oddsAway} @ ${oddsHome} matches Underdog ${udAway} @ ${udHome}`);
+  }
+  assert.equal(
+    findUnderdogPhoneGame(phone("Louisiana-Monroe Warhawks", "South Alabama Jaguars", []), "Louisiana Ragin' Cajuns", "South Alabama Jaguars", "2026-10-03T19:30:00Z"),
+    null,
+    "Louisiana (Lafayette) is not Louisiana-Monroe",
+  );
+  assert.equal(
+    findUnderdogPhoneGame(phone("Southern Miss Golden Eagles", "Troy Trojans", []), "Mississippi State Bulldogs", "Troy Trojans", "2026-10-03T19:30:00Z"),
+    null,
+  );
+}
+
+{
+  // Audit 2026-09-30: SJSU @ Hawaii is 04:00Z on Underdog (12:00 AM ET Oct 4)
+  // and 03:59Z on the Odds API (11:59 PM ET Oct 3). One minute of skew across
+  // New York midnight is the same game; a real next-date game still is not.
+  const lines = [{ market: "h2h", name: "Hawaii Rainbow Warriors", american: -110 }];
+  const slate = { games: [{ away: "San Jose State Spartans", home: "Hawaii Rainbow Warriors", scheduledAt: "2026-10-04T04:00:00Z", lines }] };
+  assert.ok(findUnderdogPhoneGame(slate, "San Jose State Spartans", "Hawaii Rainbow Warriors", "2026-10-04T03:59:00Z"), "1 minute across midnight ET attaches");
+  assert.equal(findUnderdogPhoneGame(slate, "San Jose State Spartans", "Hawaii Rainbow Warriors", "2026-10-04T02:30:00Z"), null, "90 minutes across midnight ET still does not");
+}
+
+{
+  // Suspended sides (status set by the parser) do not become Promo legs.
+  const game = { away_team: "Delaware State Hornets", home_team: "University at Albany Great Danes" };
+  const bm = predictionOnlyBookmakerFromQuotes(game, [
+    { market: "totals", name: "DSU @ ALBY", choice: "higher", point: 45.5, american: -10000, status: "suspended" },
+    { market: "totals", name: "DSU @ ALBY", choice: "lower", point: 45.5, american: -834 },
+  ]);
+  const totals = bm.markets.find((m) => m.key === "totals");
+  assert.deepEqual(totals.outcomes.map((o) => [o.name, o.price]), [["Under", -834]]);
+}
+
 console.log("underdogPredictionQuote.test.js ok");

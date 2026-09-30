@@ -41,7 +41,6 @@ import {
   UNDERDOG_PREDICT_BOOK_KEY,
 } from "./betstampBooks.js";
 import {
-  betstampOverlayConflictsWithEventBooks,
   joinOddsEventToBetstampFixture,
   marketHasBookId,
   oddsApiOutcomeName,
@@ -128,8 +127,37 @@ export function underdogMagnitudeConflictsWithEventBooks(event, bm) {
   return false;
 }
 
+// A sign flip against the sportsbook median is only a wrong-side quote when
+// the two prices are far apart in probability. Near a pick'em the median sits
+// on +100 and Underdog legitimately prints −105 (Bears +112 median vs Underdog
+// Bears −105 / Packers −127 on 2026-09-30, Kalshi +101 / −126): ~2pts of p,
+// the same market. The sign-only Bookmaker 642 guard dropped the whole
+// Underdog game there, so Promo lost its most valuable near-even legs.
+export const UNDERDOG_SIGN_FLIP_MIN_DEV = 0.10;
+
+export function underdogSignFlipConflictsWithEventBooks(event, bm) {
+  const h2h = (bm?.markets || []).find((m) => m && m.key === "h2h");
+  if (!h2h) return false;
+  const others = (event?.bookmakers || []).filter((b) => b && b.key !== UNDERDOG_PREDICT_BOOK_KEY);
+  if (!others.length) return false;
+  for (const outcome of h2h.outcomes || []) {
+    if (!outcome || outcome.price == null || !outcome.name) continue;
+    const consensus = [];
+    for (const book of others) {
+      const hit = h2hOutcomeOnBook(book, outcome.name);
+      if (hit && hit.price != null) consensus.push(hit.price);
+    }
+    if (consensus.length < 2) continue;
+    const med = medianAmerican(consensus);
+    if (med == null || !Number.isFinite(Number(outcome.price)) || Number(outcome.price) === 0) continue;
+    if (Math.sign(med) === Math.sign(Number(outcome.price))) continue;
+    if (quoteLooksAbsurdVsReference(med, outcome.price, UNDERDOG_SIGN_FLIP_MIN_DEV)) return true;
+  }
+  return false;
+}
+
 export function underdogPredictConflictsWithEventBooks(event, bm) {
-  if (betstampOverlayConflictsWithEventBooks(event, bm, UNDERDOG_PREDICT_BOOK_KEY)) return true;
+  if (underdogSignFlipConflictsWithEventBooks(event, bm)) return true;
   if (underdogTwoWayLooksIncoherent(bm)) return true;
   if (underdogMagnitudeConflictsWithEventBooks(event, bm)) return true;
   return false;

@@ -1167,4 +1167,34 @@ function underdogSnapshot({ fixtureId = "fix-den-kc", commence = future, extraFi
   assert.notEqual(total(tonight).dk, -110);
 }
 
+{
+  // Audit 2026-09-30: near a pick'em the sportsbook median is +112 and
+  // Underdog prints −105 (Kalshi +101 / −126 on the same game). That is ~2pts
+  // of p, not a wrong-side quote, but the sign-only guard dropped the game.
+  const book = (key, away, home) => ({ key, markets: [{ key: "h2h", outcomes: [{ name: "Chicago Bears", price: away }, { name: "Green Bay Packers", price: home }] }] });
+  const event = {
+    id: "odds-chi-gb",
+    sport_key: "americanfootball_nfl",
+    commence_time: future,
+    away_team: "Chicago Bears",
+    home_team: "Green Bay Packers",
+    bookmakers: [book("draftkings", 114, -135), book("fanduel", 118, -138), book("betmgm", 112, -136), book("kalshi", 101, -126)],
+  };
+  const phone = { games: [{ away: "Chicago Bears", home: "Green Bay Packers", scheduledAt: future, lines: [
+    { market: "h2h", name: "Chicago Bears", american: -105, choice: "away" },
+    { market: "h2h", name: "Green Bay Packers", american: -127, choice: "home" },
+  ] }] };
+  const overlaid = overlayUnderdogPredictOnGame(event, null, phone);
+  const ud = overlaid.bookmakers.find((b) => b.key === UNDERDOG_PREDICT_BOOK_KEY);
+  assert.ok(ud, "−105 / −127 against a +112 median stays");
+  assert.deepEqual(ud.markets.find((m) => m.key === "h2h").outcomes.map((o) => o.price), [-105, -127]);
+
+  // A real flip (Underdog favorite where books have the dog) is still dropped.
+  const flipped = { games: [{ away: "Chicago Bears", home: "Green Bay Packers", scheduledAt: future, lines: [
+    { market: "h2h", name: "Chicago Bears", american: -300, choice: "away" },
+    { market: "h2h", name: "Green Bay Packers", american: 240, choice: "home" },
+  ] }] };
+  assert.equal(overlayUnderdogPredictOnGame(event, null, flipped).bookmakers.some((b) => b.key === UNDERDOG_PREDICT_BOOK_KEY), false);
+}
+
 console.log("promoUnderdogPredict.test.js ok");
