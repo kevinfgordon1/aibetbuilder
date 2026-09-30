@@ -26,7 +26,7 @@
 // A prediction quote with no sticker still forms a Promo leg and a New
 // Odds Board cell at that phone American.
 
-import { teamsLikelySame } from "./promoBookmaker.js";
+import { foldTeamName, teamsLikelySame } from "./promoBookmaker.js";
 import { UNDERDOG_PREDICT_BOOK_KEY } from "./betstampBooks.js";
 
 const SIDE_CHOICES = new Set(["higher", "lower", "yes", "no", "over", "under"]);
@@ -209,7 +209,9 @@ export function predictionQuotesFromPayload(payload) {
         point,
         updatedAt: quote.updatedAt || null,
       };
-      const key = `${row.market}|${row.name}|${row.american}|${row.point ?? ""}`;
+      // choice keeps Over and Under apart: both sides of a total share the
+      // matchup name and often the same price (-113 / -113).
+      const key = `${row.market}|${row.name}|${row.choice ?? ""}|${row.american}|${row.point ?? ""}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(row);
@@ -218,10 +220,28 @@ export function predictionQuotesFromPayload(payload) {
   return out;
 }
 
+// Underdog and the Odds API spell a few colleges differently and
+// teamsLikelySame cannot bridge them (NC State / North Carolina State,
+// UL Monroe / Louisiana-Monroe, McNeese State / McNeese, Southern
+// Mississippi / Southern Miss). Checked live 2026-09-30: those four
+// NCAAF games had an Underdog price and no Promo leg. Keys are folded
+// names (lowercase, punctuation to spaces).
+const UNDERDOG_TEAM_ALIASES = new Map([
+  ["nc state wolfpack", "north carolina state wolfpack"],
+  ["ul monroe warhawks", "louisiana monroe warhawks"],
+  ["mcneese state cowboys", "mcneese cowboys"],
+  ["southern mississippi golden eagles", "southern miss golden eagles"],
+]);
+
+function aliasedTeamName(raw) {
+  const folded = foldTeamName(raw);
+  return UNDERDOG_TEAM_ALIASES.get(folded) || raw;
+}
+
 function namesMatch(a, b) {
   if (!a || !b) return false;
   if (String(a).trim().toLowerCase() === String(b).trim().toLowerCase()) return true;
-  return teamsLikelySame(a, b);
+  return teamsLikelySame(aliasedTeamName(a), aliasedTeamName(b));
 }
 
 function quoteMatchesOutcome(quote, outcome, marketKey, away, home) {
@@ -296,6 +316,9 @@ function isPhoneSlate(payload) {
 // game inside the window loses to the closer kickoff. No row in that
 // window means omit Underdog — do not reuse another night.
 export const UNDERDOG_PHONE_COMMENCE_WINDOW_MS = 4 * 60 * 60 * 1000;
+// Feed skew between Underdog scheduled_at and the Odds API commence_time
+// (observed 0-1 minute). Inside this gap the New York date is not compared.
+export const UNDERDOG_PHONE_SKEW_MS = 15 * 60 * 1000;
 
 const NY_CALENDAR_DATE = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/New_York",
@@ -348,9 +371,12 @@ export function findUnderdogPhoneGame(slate, away, home, commence) {
     for (const game of matches) {
       const ms = phoneGameKickoffMs(game);
       if (!Number.isFinite(ms)) continue;
-      if (!sameNewYorkCalendarDate(ms, eventMs)) continue;
       const delta = Math.abs(ms - eventMs);
       if (delta > UNDERDOG_PHONE_COMMENCE_WINDOW_MS) continue;
+      // A minute of feed skew across New York midnight is the same game
+      // (San Jose State @ Hawaii: Underdog 04:00Z = 12:00 AM ET, Odds API
+      // 03:59Z = 11:59 PM ET). Only a real gap may not cross the date.
+      if (delta > UNDERDOG_PHONE_SKEW_MS && !sameNewYorkCalendarDate(ms, eventMs)) continue;
       if (delta < bestDelta) {
         bestDelta = delta;
         best = game;
@@ -484,6 +510,9 @@ export function predictionOnlyBookmakerFromQuotes(game, payload) {
   const teamTotals = [];
   for (const quote of quotes) {
     if (!quote || quote.american == null || quote.market === "future") continue;
+    // Underdog pulled this side (status "suspended", e.g. DSU @ ALBY higher
+    // −10000). The board hides it; a Promo leg must not price off it either.
+    if (quote.status) continue;
     if (quote.market === "h2h" || quote.market == null) {
       if (quote.market == null && SIDE_CHOICES.has(String(quote.choice || "").toLowerCase())) continue;
       const name = canonicalTeam(quote.name, away, home);

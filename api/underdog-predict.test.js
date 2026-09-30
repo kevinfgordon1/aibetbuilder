@@ -300,7 +300,7 @@ function linesFor(sport) {
   }
 
   {
-    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB']);
+    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB', 'NHL']);
     assert.equal(SPORT_BY_UNDERDOG_ID.NFL, 'NFL');
     assert.equal(SPORT_BY_UNDERDOG_ID.CFB, 'NCAAF');
     assert.equal(SPORT_BY_UNDERDOG_ID.MLB, 'MLB');
@@ -1026,6 +1026,53 @@ function linesFor(sport) {
       ],
     }), 'NFL');
     assert.equal(scheduled[0].live, false);
+  }
+
+  {
+    // NHL (checked live 2026-09-30): the NHL scaffold has no per-pill lines
+    // sections, so the fallback pill ids carry moneyline, puck line, and
+    // Total Goals. Kalshi KXNHLGAME / KXNHLSPREAD / KXNHLTOTAL.
+    assert.equal(MONEYLINE_FILTER_IDS.NHL, 'b8e09d03-dac1-44e1-9830-98cdc85e0d93');
+    assert.equal(SPREAD_FILTER_IDS.NHL, '20aa9a25-f18b-45ee-ac34-369d6d672804');
+    assert.equal(TOTAL_FILTER_IDS.NHL, 'a4e2704d-0790-4aa9-aca4-c805102e9d34');
+    assert.equal(SPORT_BY_UNDERDOG_ID.NHL, 'NHL');
+    const nhlLines = contentBody({
+      id: 201142,
+      sportId: 'NHL',
+      title: 'Pittsburgh Penguins @ Philadelphia Flyers',
+      scheduledAt: '2026-09-30T23:30:00Z',
+      lines: [
+        line('PIT @ PHI Moneyline', 'moneyline', 'Moneyline', 'moneyline', null, [
+          opt('Pittsburgh Penguins', 'away', 'Penguins to win', '+122'),
+          opt('Philadelphia Flyers', 'home', 'Flyers to win', '-150'),
+        ]),
+        line('PIT @ PHI Spread', 'spread', 'Spread', 'spread', '-1.5', [
+          opt('Pittsburgh Penguins', 'away', 'PIT +1.5', '-213'),
+          opt('Philadelphia Flyers', 'home', 'PHI -1.5', '+170'),
+        ]),
+        line('PIT @ PHI Total Goals', 'points', 'Total Goals', 'over_under', '6.5', [
+          opt('PIT @ PHI', 'higher', 'Higher', '+108'),
+          opt('PIT @ PHI', 'lower', 'Lower', '-134'),
+        ]),
+      ],
+    });
+    const fetchFn = async (url) => {
+      if (String(url).includes('/lobbies/scaffolds/sports')) return jsonRes(200, { sections: [] });
+      if (String(url).includes('/lobbies/content/lines') && sportOf(url) === 'NHL') {
+        return jsonRes(200, nhlLines);
+      }
+      return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn });
+    const nhl = res.body.games.filter((g) => g.sport === 'NHL');
+    assert.equal(nhl.length, 1);
+    const lines = nhl[0].lines;
+    assert.equal(lines.find((l) => l.market === 'h2h' && l.name === 'Pittsburgh Penguins').american, 122);
+    assert.equal(lines.find((l) => l.market === 'spreads' && l.name === 'Philadelphia Flyers').point, -1.5);
+    assert.equal(lines.find((l) => l.market === 'spreads' && l.name === 'Pittsburgh Penguins').american, -213);
+    assert.equal(lines.find((l) => l.market === 'totals' && l.choice === 'higher').point, 6.5);
+    assert.equal(lines.find((l) => l.market === 'totals' && l.choice === 'lower').american, -134);
   }
 
   console.log('underdog-predict.test.js ok');
