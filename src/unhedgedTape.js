@@ -1056,7 +1056,7 @@ export function isTickerBlob(value) {
   if (!t) return false;
   if (TICKER_BLOB.test(t)) return true;
   if (!t.includes("-")) return false;
-  return /KXMLB|KXNFL|KXNCAAF|KXMVE|GAME|SPREAD|TOTAL/i.test(t) && !/\s/.test(t);
+  return /KXMLB|KXNFL|KXNCAAF|KXNHL|KXMVE|GAME|SPREAD|TOTAL/i.test(t) && !/\s/.test(t);
 }
 
 export function normalizeTeamCode(raw, league = "") {

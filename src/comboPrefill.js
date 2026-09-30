@@ -6,12 +6,13 @@
 
 export const encVal = (t, s) => `${t}|${s}`;
 
-export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf"];
-export const COMBO_SPORT_LABEL = { mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF" };
+export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl"];
+export const COMBO_SPORT_LABEL = { mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL" };
 const PROMO_TO_SPORT = {
   baseball_mlb: "mlb",
   americanfootball_nfl: "nfl",
   americanfootball_ncaaf: "ncaaf",
+  icehockey_nhl: "nhl",
 };
 
 const MINUS = /[+\-\u2212]/;
@@ -87,6 +88,44 @@ const NFL_TEAMS = [
   { id: "WAS", aliases: ["washington commanders", "washington", "commanders", "was", "wsh", "football team"] },
 ];
 
+// Canonical ids are the codes Kalshi bakes into KXNHL game keys (26SEP30PITPHI,
+// 26SEP30LACOL, 26OCT01FLASJ). Kalshi labels are city-only except the two New
+// York clubs ("New York I" / "New York R"); Odds API uses full names.
+const NHL_TEAMS = [
+  { id: "ANA", aliases: ["anaheim ducks", "anaheim", "ducks", "ana"] },
+  { id: "BOS", aliases: ["boston bruins", "boston", "bruins", "bos"] },
+  { id: "BUF", aliases: ["buffalo sabres", "buffalo", "sabres", "buf"] },
+  { id: "CGY", aliases: ["calgary flames", "calgary", "flames", "cgy", "cal"] },
+  { id: "CAR", aliases: ["carolina hurricanes", "carolina", "hurricanes", "canes", "car"] },
+  { id: "CHI", aliases: ["chicago blackhawks", "chicago", "blackhawks", "hawks", "chi"] },
+  { id: "COL", aliases: ["colorado avalanche", "colorado", "avalanche", "avs", "col"] },
+  { id: "CBJ", aliases: ["columbus blue jackets", "columbus", "blue jackets", "bluejackets", "jackets", "cbj"] },
+  { id: "DAL", aliases: ["dallas stars", "dallas", "stars", "dal"] },
+  { id: "DET", aliases: ["detroit red wings", "detroit", "red wings", "redwings", "det"] },
+  { id: "EDM", aliases: ["edmonton oilers", "edmonton", "oilers", "edm"] },
+  { id: "FLA", aliases: ["florida panthers", "florida", "panthers", "fla"] },
+  { id: "LA", aliases: ["los angeles kings", "la kings", "kings", "los angeles", "la", "lak"] },
+  { id: "MIN", aliases: ["minnesota wild", "minnesota", "wild", "min"] },
+  { id: "MTL", aliases: ["montreal canadiens", "montreal", "canadiens", "habs", "mtl", "mon"] },
+  { id: "NSH", aliases: ["nashville predators", "nashville", "predators", "preds", "nsh", "nas"] },
+  { id: "NJ", aliases: ["new jersey devils", "new jersey", "devils", "nj", "njd"] },
+  { id: "NYI", aliases: ["new york islanders", "ny islanders", "islanders", "isles", "nyi", "new york i"] },
+  { id: "NYR", aliases: ["new york rangers", "ny rangers", "rangers", "nyr", "new york r"] },
+  { id: "OTT", aliases: ["ottawa senators", "ottawa", "senators", "sens", "ott"] },
+  { id: "PHI", aliases: ["philadelphia flyers", "philadelphia", "flyers", "phi"] },
+  { id: "PIT", aliases: ["pittsburgh penguins", "pittsburgh", "penguins", "pens", "pit"] },
+  { id: "SJ", aliases: ["san jose sharks", "san jose", "sharks", "sj", "sjs"] },
+  { id: "SEA", aliases: ["seattle kraken", "seattle", "kraken", "sea"] },
+  { id: "STL", aliases: ["st louis blues", "saint louis blues", "st louis", "saint louis", "blues", "stl"] },
+  { id: "TB", aliases: ["tampa bay lightning", "tampa bay", "lightning", "bolts", "tb", "tbl", "tampa"] },
+  { id: "TOR", aliases: ["toronto maple leafs", "toronto", "maple leafs", "leafs", "tor"] },
+  { id: "UTA", aliases: ["utah mammoth", "utah hockey club", "utah", "mammoth", "uta", "utah hc"] },
+  { id: "VAN", aliases: ["vancouver canucks", "vancouver", "canucks", "van"] },
+  { id: "VGK", aliases: ["vegas golden knights", "vegas", "golden knights", "knights", "vgk", "veg", "las vegas golden knights"] },
+  { id: "WSH", aliases: ["washington capitals", "washington", "capitals", "caps", "wsh", "was"] },
+  { id: "WPG", aliases: ["winnipeg jets", "winnipeg", "jets", "wpg"] },
+];
+
 function buildSportIndex(teams, extraTwo = []) {
   const twoLetter = new Set(extraTwo);
   const codeToId = {};
@@ -107,10 +146,12 @@ function buildSportIndex(teams, extraTwo = []) {
 const SPORT_INDEX = {
   mlb: buildSportIndex(MLB_TEAMS, ["AZ", "KC", "SD", "SF", "TB"]),
   nfl: buildSportIndex(NFL_TEAMS, ["NE", "SF", "GB", "KC", "TB", "LV", "NO"]),
+  nhl: buildSportIndex(NHL_TEAMS, ["LA", "NJ", "SJ", "TB"]),
 };
 
 export function normalize(s) {
   return String(s || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Montréal → Montreal
     .toLowerCase()
     .replace(/[.\u2019']/g, "")
     .replace(/[^a-z0-9]+/g, " ")
@@ -123,7 +164,7 @@ export function normalize(s) {
 export function canonicalTeamName(raw, sport = "mlb") {
   const id = identifyTeam(raw, sport);
   if (!id) return null;
-  const teams = sport === "nfl" ? NFL_TEAMS : sport === "mlb" ? MLB_TEAMS : null;
+  const teams = sport === "nfl" ? NFL_TEAMS : sport === "mlb" ? MLB_TEAMS : sport === "nhl" ? NHL_TEAMS : null;
   const team = teams && teams.find((t) => t.id === id);
   const full = team && team.aliases && team.aliases[0];
   if (!full) return null;
@@ -250,10 +291,12 @@ function sameTeamsCandidates(promoLeg, games) {
 
 // Only MLB-style keys carry a real first-pitch time (26SEP291400PHIATL). NFL /
 // NCAAF keys are date-only, so their startTime is midnight ET and says nothing
-// about kickoff — never gate those on the time gap.
+// about kickoff — never gate those on the time gap. NHL keys are date-only too,
+// but /api/kalshi-games derives the exact puck drop from the markets'
+// occurrence time and flags it startExact, so NHL games are time-gated.
 const TIMED_KEY = /^\d{2}[A-Z]{3}\d{2}\d{4}[A-Z]/;
 function startGapMs(g, t) {
-  if (!TIMED_KEY.test(g.key || "")) return NaN;
+  if (!TIMED_KEY.test(g.key || "") && g.startExact !== true) return NaN;
   const gt = new Date(g.startTime).getTime();
   return Number.isFinite(gt) && Number.isFinite(t) ? Math.abs(gt - t) : NaN;
 }
@@ -368,6 +411,10 @@ function lineDistance(a, b) {
 // Kalshi football strike grids skip some sportsbook mains (e.g. −55.5 vs 54.5/57.5).
 // Snap SPR/TOT to a real Kalshi contract within this window; never invent a ticker.
 export const STRIKE_SNAP_MAX = 3;
+// Hockey lines are in whole goals on a complete 1.5–9.5 grid: o6.5 → o5.5 is a
+// different bet, not a "nearby strike". NHL maps the exact line or nothing.
+const STRIKE_SNAP_MAX_BY_SPORT = { nhl: 0 };
+const snapMaxFor = (sport) => (Object.prototype.hasOwnProperty.call(STRIKE_SNAP_MAX_BY_SPORT, sport) ? STRIKE_SNAP_MAX_BY_SPORT[sport] : STRIKE_SNAP_MAX);
 
 function parseMarketLine(label) {
   const m = new RegExp(`^(.*?)\\s*(${MINUS.source})\\s*([\\d.]+)\\s*$`).exec(String(label || "").trim());
@@ -386,7 +433,7 @@ function spreadSideMatches(parsed, sm, sport) {
 }
 
 // Pick an existing Kalshi strike: exact line wins, else nearest within STRIKE_SNAP_MAX.
-function pickNearestStrike(pool, wantLine) {
+function pickNearestStrike(pool, wantLine, maxSnap = STRIKE_SNAP_MAX) {
   let exact = null;
   let best = null;
   let bestDist = Infinity;
@@ -396,7 +443,7 @@ function pickNearestStrike(pool, wantLine) {
       break;
     }
     const d = lineDistance(c.line, wantLine);
-    if (d > STRIKE_SNAP_MAX) continue;
+    if (d > maxSnap) continue;
     if (!best || d < bestDist || (d === bestDist && Number(c.line) < Number(best.line))) {
       best = c;
       bestDist = d;
@@ -523,9 +570,13 @@ function matchMarket(promoLeg, game, sport = "mlb") {
       if (!tm || tm.ou !== parsed.ou) continue;
       pool.push({ market: m, line: tm.line });
     }
-    const picked = pickNearestStrike(pool, parsed.line);
+    const picked = pickNearestStrike(pool, parsed.line, snapMaxFor(sport));
     if (picked) return { market: picked.market };
     if (pool.length) {
+      if (snapMaxFor(sport) === 0) {
+        const r = missingKalshiLineReason(parsed.line, game, pool);
+        if (r) return { market: null, reason: r };
+      }
       return { market: null, reason: noStrikeInRangeReason("TOT", formatWantTotal(parsed), title) };
     }
     return { market: null };
@@ -534,7 +585,7 @@ function matchMarket(promoLeg, game, sport = "mlb") {
     const parsed = parsePromoSpread(promoLeg.name);
     if (!parsed) return { market: null };
     const pool = spreadCandidates(parsed, game, sport);
-    const picked = pickNearestStrike(pool, parsed.line);
+    const picked = pickNearestStrike(pool, parsed.line, snapMaxFor(sport));
     if (picked) return { market: picked.market };
     const hint = pool.length ? pool : allParsedSpreadLines(game);
     const reason = missingKalshiLineReason(parsed.line, game, hint);
@@ -588,7 +639,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
   for (const leg of promoLegs || []) {
     const sport = promoSportOf(leg);
     if (!sport) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, and NCAAF main lines"));
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }

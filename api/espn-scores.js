@@ -6,6 +6,7 @@
 //   MLB    https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard
 //   NFL    https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
 //   NCAAF  https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard
+//   NHL    https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard
 //
 // GET /api/espn-scores?queries=mlb:20260903,nfl:20260913
 // GET /api/espn-scores?live=nfl  → today's NFL scoreboard, slimmed to the
@@ -22,6 +23,7 @@ const ESPN = {
   mlb: 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard',
   nfl: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
   ncaaf: 'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard',
+  nhl: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard',
 };
 
 const DATE_RE = /^(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/;
@@ -51,7 +53,7 @@ function queriesFromReq(req) {
   const out = [];
   const seen = new Set();
   for (const part of String(raw).split(/[,\s]+/)) {
-    const m = /^(mlb|nfl|ncaaf):(\d{8})$/i.exec(part.trim());
+    const m = /^(mlb|nfl|ncaaf|nhl):(\d{8})$/i.exec(part.trim());
     if (!m || !DATE_RE.test(m[2])) continue;
     const sport = m[1].toLowerCase();
     const date = m[2];

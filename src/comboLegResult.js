@@ -12,6 +12,7 @@ const MONTHS = { JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06
 const ESPN_ABBR = {
   nfl: { JAC: "JAX", WSH: "WSH", WAS: "WSH", JACX: "JAX" },
   mlb: { CWS: "CHW", ATH: "ATH", AZ: "ARI", WSH: "WSH" },
+  nhl: { UTA: "UTAH" }, // Kalshi UTA, ESPN UTAH; LA/NJ/SJ/TB/VGK/WSH already agree
 };
 
 // Kalshi NCAAF ticker codes vs ESPN abbreviations (FCS + A&M, St. schools).
@@ -35,10 +36,12 @@ export function sportFromTicker(ticker, gameKey) {
   if (/KXMLB/i.test(t)) return "mlb";
   if (/KXNFL/i.test(t)) return "nfl";
   if (/KXNCAAF/i.test(t)) return "ncaaf";
+  if (/KXNHL/i.test(t)) return "nhl";
   const gk = String(gameKey || "");
   if (gk.startsWith("mlb:")) return "mlb";
   if (gk.startsWith("nfl:")) return "nfl";
   if (gk.startsWith("ncaaf:")) return "ncaaf";
+  if (gk.startsWith("nhl:")) return "nhl";
   return null;
 }
 

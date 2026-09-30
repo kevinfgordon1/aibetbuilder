@@ -20,6 +20,9 @@ import {
   flattenComboGames,
   formatGameOption,
   comboGameId,
+  canonicalTeamName,
+  COMBO_SPORT_ORDER,
+  STRIKE_SNAP_MAX,
 } from "./comboPrefill.js";
 
 const gSide = (tk, label) => ({ ticker: tk, side: "yes", label });
@@ -937,3 +940,110 @@ console.log("comboPrefill tests passed");
   assert.equal(mapPromoLegsToKalshi([nflLeg], [nflGame]).rows[0].gameKey, "26SEP13KCBUF");
 }
 console.log("comboPrefill PHI/ATL game-gap tests passed");
+
+// ── NHL: Kevin's 2026-09-30 DraftKings 50% boost parlay (PIT/PHI u6.5 + LA/COL o6.5 + NYI +1.5) ──
+{
+  const ev = (ticker, title, sub, markets, occ) => ({
+    event_ticker: ticker, title, sub_title: sub,
+    markets: markets.map(([t, label]) => ({ ticker: t, yes_sub_title: label, occurrence_datetime: occ })),
+  });
+  const totals = (g, occ, title, sub) => ev(`KXNHLTOTAL-${g}`, `${title}: Total Goals`, sub,
+    [[2, 1.5], [3, 2.5], [4, 3.5], [5, 4.5], [6, 5.5], [7, 6.5], [8, 7.5]].map(([n, l]) => [`KXNHLTOTAL-${g}-${n}`, `Over ${l} goals scored`]), occ);
+  const mk = (g, a, b, An, Bn, sub, occ, spreadRows) => ({
+    side: [ev(`KXNHLGAME-${g}`, `${An} vs ${Bn}`, sub, [[`KXNHLGAME-${g}-${b}`, Bn], [`KXNHLGAME-${g}-${a}`, An]], occ)],
+    spread: [ev(`KXNHLSPREAD-${g}`, `${An} vs ${Bn}: Spread`, sub, spreadRows.map(([s, t, l]) => [`KXNHLSPREAD-${g}-${s}`, `${t} wins by over ${l} goals`]), occ)],
+    total: [totals(g, occ, `${An} vs ${Bn}`, sub)],
+  });
+  const NOW = Date.parse("2026-09-30T17:00:00Z");
+  const OPTS = { occurrenceStartOffsetMs: kalshiGames.OCCURRENCE_START_OFFSET_MS.nhl };
+  const pitphi = mk("26SEP30PITPHI", "PIT", "PHI", "Pittsburgh", "Philadelphia", "PIT vs PHI (Sep 30)", "2026-10-01T02:30:00Z",
+    [["PHI3", "Philadelphia", "2.5"], ["PHI2", "Philadelphia", "1.5"], ["PIT2", "Pittsburgh", "1.5"], ["PIT3", "Pittsburgh", "2.5"]]);
+  const nyitor = mk("26SEP30NYITOR", "NYI", "TOR", "New York I", "Toronto", "NYI vs TOR (Sep 30)", "2026-10-01T02:30:00Z",
+    [["TOR3", "Toronto", "2.5"], ["TOR2", "Toronto", "1.5"], ["NYI2", "New York I", "1.5"], ["NYI3", "New York I", "2.5"]]);
+  const lacol = mk("26SEP30LACOL", "LA", "COL", "Los Angeles", "Colorado", "LA vs COL (Sep 30)", "2026-10-01T05:00:00Z",
+    [["COL3", "Colorado", "2.5"], ["COL2", "Colorado", "1.5"], ["LA2", "Los Angeles", "1.5"], ["LA3", "Los Angeles", "2.5"]]);
+  const games = [pitphi, nyitor, lacol].flatMap((e) => kalshiGames._helpers.groupSportGames(e, NOW, OPTS)).map((g) => ({ ...g, sport: "nhl" }));
+  assert.equal(games.length, 3);
+  const sports = { mlb: [], nfl: [], ncaaf: [], nhl: games };
+
+  const legs = [
+    { name: "Pittsburgh Penguins/Philadelphia Flyers u6.5", market: "TOT", game: "Pittsburgh Penguins @ Philadelphia Flyers", sport: "icehockey_nhl", commence_time: "2026-09-30T23:30:00Z" },
+    { name: "Los Angeles Kings/Colorado Avalanche o6.5", market: "TOT", game: "Los Angeles Kings @ Colorado Avalanche", sport: "icehockey_nhl", commence_time: "2026-10-01T02:00:00Z" },
+    { name: "New York Islanders +1.5", market: "SPR", game: "New York Islanders @ Toronto Maple Leafs", sport: "icehockey_nhl", commence_time: "2026-09-30T23:30:00Z" },
+  ];
+  const out = mapPromoLegsToKalshi(legs, sports, NOW);
+  assert.deepEqual(out.unmatched, [], JSON.stringify(out.unmatched));
+  assert.deepEqual(out.rows, [
+    { gameKey: "26SEP30PITPHI", marketVal: encVal("KXNHLTOTAL-26SEP30PITPHI-7", "no") }, // Under 6.5
+    { gameKey: "26SEP30LACOL", marketVal: encVal("KXNHLTOTAL-26SEP30LACOL-7", "yes") }, // Over 6.5
+    { gameKey: "26SEP30NYITOR", marketVal: encVal("KXNHLSPREAD-26SEP30NYITOR-TOR2", "no") }, // Islanders +1.5 = NO on "Toronto wins by over 1.5"
+  ]);
+  // Also with the flat list shape and via the Send-to-Combo-Locks prefill builder.
+  assert.deepEqual(mapPromoLegsToKalshi(legs, games, NOW).rows, out.rows);
+  const prefill = buildPromoComboPrefill({ stake: 100, american: 641, combinedProb: 0.167, legs, kind: "boost", promoType: "boost", sportsbook: "DraftKings", boostPct: 50 });
+  assert.equal(prefill.legs.length, 3);
+  assert.equal(prefill.legs[0].sport, "icehockey_nhl");
+  assert.equal(mapPromoLegsToKalshi(prefill.legs, sports, NOW).unmatched.length, 0);
+
+  // Team ids, incl. the Kalshi "New York I/R" labels and the Kings/LA and Utah aliases.
+  assert.equal(identifyTeam("New York Islanders", "nhl"), "NYI");
+  assert.equal(identifyTeam("New York I", "nhl"), "NYI");
+  assert.equal(identifyTeam("New York Rangers", "nhl"), "NYR");
+  assert.equal(identifyTeam("New York R", "nhl"), "NYR");
+  assert.equal(identifyTeam("Los Angeles Kings", "nhl"), "LA");
+  assert.equal(identifyTeam("Utah Mammoth", "nhl"), "UTA");
+  assert.equal(identifyTeam("Utah Hockey Club", "nhl"), "UTA");
+  assert.equal(identifyTeam("Vegas Golden Knights", "nhl"), "VGK");
+  assert.equal(identifyTeam("Montréal Canadiens", "nhl"), "MTL");
+  assert.equal(identifyTeam("St. Louis Blues", "nhl"), "STL");
+  assert.equal(identifyTeam("Tampa Bay Lightning", "nhl"), "TB");
+  assert.equal(identifyTeam("Washington Capitals", "nhl"), "WSH");
+  assert.equal(identifyTeam("Florida Panthers", "nhl"), "FLA");
+  assert.equal(identifyTeam("Carolina Hurricanes", "nhl"), "CAR");
+  assert.equal(identifyTeam("Panthers", "nhl"), "FLA"); // NHL Panthers are Florida, not Carolina
+  assert.equal(canonicalTeamName("NY Islanders", "nhl"), "New York Islanders");
+
+  // Moneyline + favorite puck line (−1.5) + O/U, each to the right contract/side.
+  const leg = (name, market, game) => ({ name, market, game, sport: "icehockey_nhl", commence_time: "2026-09-30T23:30:00Z" });
+  const one = (l) => mapPromoLegsToKalshi([l], sports, NOW);
+  assert.equal(one(leg("Philadelphia Flyers ML", "ML", "Pittsburgh Penguins @ Philadelphia Flyers")).rows[0].marketVal, encVal("KXNHLGAME-26SEP30PITPHI-PHI", "yes"));
+  assert.equal(one(leg("Toronto Maple Leafs ML", "ML", "New York Islanders @ Toronto Maple Leafs")).rows[0].marketVal, encVal("KXNHLGAME-26SEP30NYITOR-TOR", "yes"));
+  assert.equal(one(leg("Toronto Maple Leafs -1.5", "SPR", "New York Islanders @ Toronto Maple Leafs")).rows[0].marketVal, encVal("KXNHLSPREAD-26SEP30NYITOR-TOR2", "yes"));
+  assert.equal(one(leg("Philadelphia Flyers +2.5", "SPR", "Pittsburgh Penguins @ Philadelphia Flyers")).rows[0].marketVal, encVal("KXNHLSPREAD-26SEP30PITPHI-PIT3", "no"));
+  assert.equal(one(leg("Pittsburgh Penguins +1.5", "SPR", "Pittsburgh Penguins @ Philadelphia Flyers")).rows[0].marketVal, encVal("KXNHLSPREAD-26SEP30PITPHI-PHI2", "no"));
+  assert.equal(one(leg("Pittsburgh Penguins/Philadelphia Flyers o5.5", "TOT", "Pittsburgh Penguins @ Philadelphia Flyers")).rows[0].marketVal, encVal("KXNHLTOTAL-26SEP30PITPHI-6", "yes"));
+
+  // Hockey lines never snap: Kalshi has no 6.0/8.5 here, so o8.5 must NOT become o7.5.
+  const miss = one(leg("Pittsburgh Penguins/Philadelphia Flyers o8.5", "TOT", "Pittsburgh Penguins @ Philadelphia Flyers"));
+  assert.equal(miss.rows[0].marketVal, "");
+  assert.match(miss.unmatched[0].reason, /Kalshi has no 8\.5 line for PIT vs PHI; nearest: 6\.5 \/ 7\.5/);
+  const missSpr = one(leg("Pittsburgh Penguins +3.5", "SPR", "Pittsburgh Penguins @ Philadelphia Flyers"));
+  assert.equal(missSpr.rows[0].marketVal, "");
+
+  // Puck-drop gating (startExact): same teams on another night never map; started game explains itself.
+  const tomorrowLeg = { ...leg("Philadelphia Flyers ML", "ML", "Pittsburgh Penguins @ Philadelphia Flyers"), commence_time: "2026-10-05T23:30:00Z" };
+  const gone = mapPromoLegsToKalshi([tomorrowLeg], sports, NOW);
+  assert.equal(gone.rows[0].gameKey, "");
+  assert.match(gone.unmatched[0].reason, /not on Combo Locks' pre-game slate/);
+  assert.match(gone.unmatched[0].reason, /different game/);
+  const started = mapPromoLegsToKalshi([leg("Philadelphia Flyers ML", "ML", "Pittsburgh Penguins @ Philadelphia Flyers")], { nhl: [] }, Date.parse("2026-09-30T23:45:00Z"));
+  assert.match(started.unmatched[0].reason, /already started — Combo Locks only quotes pre-game Kalshi NHL markets/);
+
+  // Two meetings of the same teams in a week (Flyers–Penguins 9/30 and 10/3-ish): nearest puck drop wins.
+  const pitphi2 = kalshiGames._helpers.groupSportGames(mk("26OCT05PITPHI", "PIT", "PHI", "Pittsburgh", "Philadelphia", "PIT vs PHI (Oct 5)", "2026-10-06T02:30:00Z",
+    [["PHI2", "Philadelphia", "1.5"]]), NOW, OPTS).map((g) => ({ ...g, sport: "nhl" }));
+  const both = mapPromoLegsToKalshi([{ ...leg("Philadelphia Flyers ML", "ML", "Pittsburgh Penguins @ Philadelphia Flyers"), commence_time: "2026-10-05T23:30:00Z" }], { nhl: [...games, ...pitphi2] }, NOW);
+  assert.equal(both.rows[0].gameKey, "26OCT05PITPHI");
+
+  // Sport chip / dropdown plumbing.
+  assert.deepEqual(COMBO_SPORT_ORDER, ["mlb", "nfl", "ncaaf", "nhl"]);
+  const flat = flattenComboGames(sports);
+  assert.equal(flat.length, 3);
+  assert.ok(flat.every((g) => g.sportLabel === "NHL"));
+  assert.equal(formatGameOption(flat[0]), "NHL · Pittsburgh vs Philadelphia · PIT vs PHI (Sep 30)");
+  assert.deepEqual(flat.map((g) => g.key), ["26SEP30PITPHI", "26SEP30NYITOR", "26SEP30LACOL"]); // by puck drop
+
+  // Non-NHL sports are unchanged: MLB/NFL/NCAAF still snap within STRIKE_SNAP_MAX.
+  assert.equal(STRIKE_SNAP_MAX, 3);
+  console.log("comboPrefill NHL tests passed");
+}

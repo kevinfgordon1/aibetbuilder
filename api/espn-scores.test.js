@@ -77,3 +77,12 @@ assert.equal(h.liveParam({ url: '/api/espn-scores?queries=nfl:20260928' }), '');
     console.log('espn-scores.test.js ok');
   });
 }
+
+// NHL scoreboard (Combo Locks underlying results for KXNHL legs)
+assert.deepEqual(h.queriesFromReq({ query: { queries: 'nhl:20261007,NHL:20261008' } }), [
+  { sport: 'nhl', date: '20261007' },
+  { sport: 'nhl', date: '20261008' },
+]);
+assert.equal(h.ESPN.nhl, 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard');
+assert.equal(h.scoreboardUrl('nhl', '20261007'), h.ESPN.nhl + '?dates=20261007');
+console.log('espn-scores NHL tests passed');

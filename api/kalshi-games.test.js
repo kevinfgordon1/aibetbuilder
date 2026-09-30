@@ -194,3 +194,55 @@ console.log('kalshi-games tests passed');
   assert.equal(h.markComboEligible([{ key: 'X' }], 'KXMLBGAME', null)[0].comboEligible, null);
   console.log('kalshi-games combo eligibility tests passed');
 }
+
+// ── NHL (KXNHLGAME / KXNHLSPREAD / KXNHLTOTAL) — shapes captured from live Kalshi 2026-09-30 ──
+{
+  assert.deepEqual(handler.MARKET_SERIES.nhl, {
+    side: 'KXNHLGAME', spread: 'KXNHLSPREAD', total: 'KXNHLTOTAL',
+  });
+  assert.equal(handler.OCCURRENCE_START_OFFSET_MS.nhl, 3 * 3600 * 1000);
+  assert.equal(h.gameKeyOf('KXNHLGAME-26SEP30PITPHI'), '26SEP30PITPHI');
+  assert.ok(Number.isNaN(h.firstPitchUtcMs('26SEP30PITPHI')), 'NHL keys carry no HHMM');
+  assert.deepEqual(h.parseSpread('New York I wins by over 1.5 goals'), { team: 'New York I', line: '1.5' });
+  assert.deepEqual(h.parseTotal('Over 6.5 goals scored'), { line: '6.5' });
+
+  const nhlEv = (ticker, title, sub, markets, occurrence) => ev(ticker, title, sub, markets, occurrence);
+  const OCC_NYITOR = '2026-10-01T02:30:00Z'; // puck drop 23:30Z (7:30 PM ET) + 3h
+  const nyiSide = nhlEv('KXNHLGAME-26SEP30NYITOR', 'New York I vs Toronto', 'NYI vs TOR (Sep 30)', [
+    { ticker: 'KXNHLGAME-26SEP30NYITOR-TOR', label: 'Toronto' },
+    { ticker: 'KXNHLGAME-26SEP30NYITOR-NYI', label: 'New York I' },
+  ], OCC_NYITOR);
+  const nyiSpread = nhlEv('KXNHLSPREAD-26SEP30NYITOR', 'New York I vs Toronto: Spread', 'NYI vs TOR (Sep 30)', [
+    { ticker: 'KXNHLSPREAD-26SEP30NYITOR-TOR3', label: 'Toronto wins by over 2.5 goals' },
+    { ticker: 'KXNHLSPREAD-26SEP30NYITOR-TOR2', label: 'Toronto wins by over 1.5 goals' },
+    { ticker: 'KXNHLSPREAD-26SEP30NYITOR-NYI2', label: 'New York I wins by over 1.5 goals' },
+    { ticker: 'KXNHLSPREAD-26SEP30NYITOR-NYI3', label: 'New York I wins by over 2.5 goals' },
+  ], OCC_NYITOR);
+  const nyiTotal = nhlEv('KXNHLTOTAL-26SEP30NYITOR', 'New York I vs Toronto: Total Goals', 'NYI vs TOR (Sep 30)', [
+    { ticker: 'KXNHLTOTAL-26SEP30NYITOR-6', label: 'Over 5.5 goals scored' },
+    { ticker: 'KXNHLTOTAL-26SEP30NYITOR-7', label: 'Over 6.5 goals scored' },
+  ], OCC_NYITOR);
+  const by = { side: [nyiSide], spread: [nyiSpread], total: [nyiTotal] };
+  const OPTS = { occurrenceStartOffsetMs: handler.OCCURRENCE_START_OFFSET_MS.nhl };
+
+  // 2:00 PM ET on game day: listed, with the REAL puck drop (not midnight ET).
+  const pre = h.groupSportGames(by, Date.parse('2026-09-30T18:00:00Z'), OPTS);
+  assert.equal(pre.length, 1);
+  assert.equal(pre[0].startTime, '2026-09-30T23:30:00.000Z');
+  assert.equal(pre[0].startExact, true);
+  const sp = pre[0].markets.spread;
+  const lab = (t, s) => sp.find((m) => m.ticker === t && m.side === s).label;
+  assert.equal(lab('KXNHLSPREAD-26SEP30NYITOR-TOR2', 'yes'), 'Toronto \u22121.5');
+  assert.equal(lab('KXNHLSPREAD-26SEP30NYITOR-TOR2', 'no'), 'New York I +1.5'); // Islanders +1.5 puck line
+  assert.equal(lab('KXNHLSPREAD-26SEP30NYITOR-NYI2', 'yes'), 'New York I \u22121.5');
+  assert.equal(lab('KXNHLSPREAD-26SEP30NYITOR-NYI2', 'no'), 'Toronto +1.5');
+  assert.deepEqual(pre[0].markets.total.map((m) => m.label), ['Over 5.5', 'Under 5.5', 'Over 6.5', 'Under 6.5']);
+  assert.equal(pre[0].markets.total.find((m) => m.label === 'Under 6.5').side, 'no');
+
+  // Puck drop passed (7:31 PM ET): dropped, even though the ET calendar day isn't over.
+  assert.equal(h.groupSportGames(by, Date.parse('2026-09-30T23:31:00Z'), OPTS).length, 0);
+  // Without the NHL offset a date-only key would (wrongly) linger to midnight ET.
+  assert.equal(h.groupSportGames(by, Date.parse('2026-09-30T23:31:00Z')).length, 1);
+  // Day before: still listed.
+  assert.equal(h.groupSportGames(by, Date.parse('2026-09-29T12:00:00Z'), OPTS).length, 1);
+}

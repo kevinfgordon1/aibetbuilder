@@ -6,11 +6,16 @@
 //   MLB   side=KXMLBGAME    spread=KXMLBSPREAD   total=KXMLBTOTAL
 //   NFL   side=KXNFLGAME    spread=KXNFLSPREAD   total=KXNFLTOTAL
 //   NCAAF side=KXNCAAFGAME  spread=KXNCAAFSPREAD total=KXNCAAFTOTAL
+//   NHL   side=KXNHLGAME    spread=KXNHLSPREAD   total=KXNHLTOTAL
 // Series tickers were confirmed against the live Kalshi series catalog; if a
 // type 404s later, that ladder is simply empty (moneyline still ships).
 // All share the game key `<SERIES>-<DATE[TIME]><TEAMS>` (group on the part after
-// the series prefix). MLB keys include HHMM (e.g. 26AUG071840TORPHI); NFL/NCAAF
-// keys are date-only (e.g. 26SEP09NESEA, 26SEP03MASSRUTG).
+// the series prefix). MLB keys include HHMM (e.g. 26AUG071840TORPHI); NFL/NCAAF/NHL
+// keys are date-only (e.g. 26SEP09NESEA, 26SEP03MASSRUTG, 26SEP30PITPHI).
+// NHL spreads are the puck line ("Toronto wins by over 1.5 goals" -> Toronto -1.5 /
+// New York I +1.5; Kalshi lists 1.5 and 2.5) and totals run Over 1.5..9.5 goals.
+// Goals in overtime count; a shootout decides the game as ONE goal for the winner
+// (Kalshi HOCKEYTOTALS rules_secondary), so a shootout game never pushes a .5 line.
 //
 // Kalshi lists only ONE side of each spread/total as a market; the OTHER side is
 // that market's NO. We expand every market into BOTH selectable legs with clean
@@ -35,7 +40,13 @@ const MARKET_SERIES = {
   mlb: { side: 'KXMLBGAME', spread: 'KXMLBSPREAD', total: 'KXMLBTOTAL' },
   nfl: { side: 'KXNFLGAME', spread: 'KXNFLSPREAD', total: 'KXNFLTOTAL' },
   ncaaf: { side: 'KXNCAAFGAME', spread: 'KXNCAAFSPREAD', total: 'KXNCAAFTOTAL' },
+  nhl: { side: 'KXNHLGAME', spread: 'KXNHLSPREAD', total: 'KXNHLTOTAL' },
 };
+// NHL keys are date-only (26SEP30PITPHI) but every market's occurrence_datetime is
+// puck drop + 3h (checked against ESPN's scoreboard: 46 of 47 listed games), so the
+// real start is occurrence - 3h. Used for the pre-game cutoff so a 7:30 PM game
+// drops at puck drop instead of lingering until midnight ET.
+const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000 };
 
 async function fetchJson(url) {
   const ctrl = new AbortController();
@@ -243,7 +254,8 @@ async function fetchSeriesEvents(seriesTicker) {
   return events;
 }
 
-function groupSportGames(eventsByType, nowMs = Date.now()) {
+function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
+  const occOffset = Number(opts && opts.occurrenceStartOffsetMs) || 0;
   const byKey = new Map(); // key -> { key, title, date, occurrenceMs, raw:{side,spread,total} }
   for (const [type, events] of Object.entries(eventsByType || {})) {
     if (!events) continue;
@@ -262,14 +274,18 @@ function groupSportGames(eventsByType, nowMs = Date.now()) {
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
     // PRE-GAME: MLB (datetime key) drops once first pitch has passed. Football
-    // (date-only key) stays through the end of that ET calendar day.
-    if (!isUpcomingGame(g.key, nowMs)) continue;
+    // (date-only key) stays through the end of that ET calendar day. NHL (date-only
+    // key, but occurrence - 3h is the real puck drop) drops at puck drop.
+    const exactOcc = occOffset > 0 && Number.isFinite(g.occurrenceMs) && !Number.isFinite(firstPitchUtcMs(g.key));
+    if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) continue;
     const timed = firstPitchUtcMs(g.key);
     const startMs = Number.isFinite(timed) ? timed
-      : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
+      : exactOcc ? g.occurrenceMs - occOffset
+        : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
     if (!Number.isFinite(startMs)) continue;
     games.push({
       key: g.key, title: g.title, date: g.date, startTime: new Date(startMs).toISOString(),
+      ...(exactOcc ? { startExact: true } : {}),
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
         spread: expandSpreads(g.raw.spread || [], g.raw.side),
@@ -280,12 +296,12 @@ function groupSportGames(eventsByType, nowMs = Date.now()) {
   return games;
 }
 
-async function fetchSportGames(seriesByType) {
+async function fetchSportGames(seriesByType, opts) {
   const eventsByType = {};
   await Promise.all(Object.entries(seriesByType || {}).map(async ([type, series]) => {
     eventsByType[type] = await fetchSeriesEvents(series);
   }));
-  return groupSportGames(eventsByType);
+  return groupSportGames(eventsByType, Date.now(), opts);
 }
 
 // Combo eligibility: Kalshi only builds combos from events listed in the combo
@@ -321,7 +337,7 @@ async function handler(req, res) {
     const sports = {};
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
-      const games = await fetchSportGames(seriesByType);
+      const games = await fetchSportGames(seriesByType, { occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0 });
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports });
@@ -332,6 +348,7 @@ async function handler(req, res) {
 
 module.exports = handler;
 module.exports.MARKET_SERIES = MARKET_SERIES;
+module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports._helpers = {
   parseTotal, parseSpread, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
