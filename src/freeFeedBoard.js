@@ -5,12 +5,13 @@
 //
 // NFL and MLB sides join on the Combo Locks team index (city, nickname,
 // and code are the same team). NCAAF joins on the team-name matcher.
-// A game that has already started and still has a quote stays on LIVE
-// for a few hours — Kalshi does not flag in-game.
+// LIVE needs a source in-progress flag (Polymarket live, Novig OPEN_INGAME,
+// Underdog "scoring", Kalshi via the ESPN schedule) AND a passed kickoff.
+// A passed kickoff alone is not live, and a flag before kickoff is ignored.
 
 import { canonicalTeamName, identifyTeam } from "./comboPrefill.js";
 import { FOURCASTERS_BOARD_BOOK, NOVIG_BOARD_BOOK, sportByLeague, visibleBetstampBooks } from "./betstampBooks.js";
-import { applyStreamMarkets, emptyBookOddsForBooks, lineUpdatedAt } from "./betstampNormalize.js";
+import { applyStreamMarkets, emptyBookOddsForBooks, kickoffHasPassed, lineUpdatedAt } from "./betstampNormalize.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import { novigLiveFeeRate } from "./venueTakerFee.js";
@@ -22,8 +23,6 @@ export const FREE_FEED_LIVE_POLL_MS = 30_000;
 // slow cannot be the thing the board is waiting on.
 export const FREE_FEED_LIVE_BOARD_POLL_MS = 15_000;
 export const SSE_BEATS_POLL_MS = 2_000;
-// Open quote after kickoff, before we treat the game as finished.
-const LIVE_AFTER_START_MS = 6 * 3600 * 1000;
 
 function freeFeedCatalog(user, env) {
   const allowed = new Map(visibleBetstampBooks(user, env).map((b) => [b.key, b]));
@@ -162,7 +161,7 @@ function enrich(game, away, home, commence, isLive, nowMs) {
   // start from Polymarket or the schedule, within the same slate, wins.
   const nextStart = preferKickoff(game.commence_time, commence);
   if (nextStart) game.commence_time = nextStart;
-  if (isLive || inferLive(game.commence_time, nowMs)) {
+  if (isLive && kickoffHasPassed(game.commence_time, nowMs)) {
     game.is_live = true;
     game.status = "live";
   }
@@ -177,18 +176,11 @@ function preferKickoff(current, incoming) {
   return current;
 }
 
-function inferLive(commence, nowMs) {
-  const t = Date.parse(commence || "");
-  if (!Number.isFinite(t)) return false;
-  const age = nowMs - t;
-  return age >= 0 && age < LIVE_AFTER_START_MS;
-}
-
 function ensureGame(games, { league, away, home, commence, isLive, nowMs }) {
   const lg = String(league || "").toUpperCase();
   if (!lg || !away || !home) return null;
   let game = findGame(games, lg, away, home);
-  const live = !!isLive || inferLive(commence, nowMs);
+  const live = !!isLive && kickoffHasPassed(commence, nowMs);
   if (!game) {
     const id = pairId(lg, away, home) || `ff:${lg}:${slug(away)}:${slug(home)}`;
     if (games.some((g) => g.id === id)) return null;
@@ -203,7 +195,9 @@ function ensureGame(games, { league, away, home, commence, isLive, nowMs }) {
     games.push(game);
     return game;
   }
-  enrich(game, away, home, commence, live, nowMs);
+  // The flag is judged against the earliest kickoff known for the row (a
+  // later Kalshi occurrence time must not hide an in-progress game).
+  enrich(game, away, home, commence, !!isLive, nowMs);
   return game;
 }
 
@@ -443,12 +437,6 @@ export function gamesFromFreeFeeds({
       isLive: quote.is_live === true,
       nowMs: seenAt,
     });
-  }
-  for (const game of games) {
-    if (inferLive(game.commence_time, seenAt)) {
-      game.is_live = true;
-      game.status = "live";
-    }
   }
   const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || []), ...(novig || []), ...(fourcasters || [])].filter((q) => (
     q && String(q.league || lg).toUpperCase() === lg
