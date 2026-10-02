@@ -178,7 +178,7 @@ function BestNowProvider({ children }) {
   return <BestNowContext.Provider value={bestNowMs}>{children}</BestNowContext.Provider>;
 }
 
-const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey }) {
+const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashKey, title }) {
   const prevRef = useRef({ key: flashKey, price, suspended: !!suspended });
   const [flash, setFlash] = useState(null);
 
@@ -208,6 +208,7 @@ const OddsFlashNumber = memo(function OddsFlashNumber({ price, suspended, flashK
   return (
     <span
       data-odds-flash={flash || "none"}
+      title={title}
       className={flash ? `obb-flash obb-flash-${flash}` : undefined}
       style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}
     >
@@ -247,7 +248,7 @@ function LiquidityCue({ size, inline = false }) {
   );
 }
 
-const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, maskedReason, flashKey }) {
+const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, allBooks, showBestMark, updatedAt, ageTitle, showWinProb, suspended, maskedReason, flashKey }) {
   if (maskedReason) {
     // Frozen / suspended price (oddsFreshness.js): muted dash, reason on hover.
     return (
@@ -260,6 +261,8 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
   const book = primary ? bookByKey(primary.key) : null;
   const title = bestBooksTitle(books, (k) => bookByKey(k)?.label);
   const winProb = showWinProb && price != null && !suspended ? formatWinProb(price) : null;
+  // Fee-adjusted cells (Poly / Kalshi taker fee, Novig live fee): hover shows the raw ask.
+  const feeTip = rawPrice != null ? `After taker fee. Raw ask ${formatAmericanOdds(rawPrice)}` : undefined;
   if (suspended) {
     return (
       <>
@@ -284,7 +287,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
     <>
       {line && <div className="obb-clip" data-odds-line={line} style={{ fontSize: 10, color: "var(--nob-muted)", fontWeight: 500, marginBottom: 0, lineHeight: 1.15 }}>{line}</div>}
       <div className="obb-clip" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, flexWrap: "nowrap", lineHeight: 1.15, maxWidth: "100%" }}>
-        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} />
+        <OddsFlashNumber price={price} suspended={false} flashKey={flashKey} title={feeTip} />
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
@@ -316,6 +319,7 @@ const OddsSide = memo(function OddsSide({ price, size, line, books, allBooks, sh
   && prev.updatedAt === next.updatedAt
   && prev.ageTitle === next.ageTitle
   && sameAmericanPrice(prev.price, next.price)
+  && sameAmericanPrice(prev.rawPrice, next.rawPrice)
   && (prev.books?.[0]?.key || "") === (next.books?.[0]?.key || "")
   && (prev.books?.length || 0) === (next.books?.length || 0)
 ));
@@ -776,6 +780,7 @@ function renderBookColumn({
     : lineUpdatedAt(rowGame, b.key, fields.bot);
   const sideProps = (which) => ({
     price: which === "top" ? cell.top : cell.bot,
+    rawPrice: which === "top" ? cell.topRaw : cell.botRaw,
     size: which === "top" ? cell.topSize : cell.botSize,
     line: includeLine ? (which === "top" ? cell.topLine : cell.botLine) : null,
     books: which === "top" ? cell.topBooks : cell.botBooks,

@@ -36,9 +36,15 @@ export function toAmericanOdds(odds) {
 
 // Polymarket and Kalshi contract asks (0–1) paint the taker-fee price.
 // Decimal or American quotes, and every other book, stay as printed.
-function venueBoardPrice(bookKey, odds) {
+// Novig is charged only on live takes: marketsFromQuotes sets taker_fee_rate
+// (the market's own fee coefficient) on a quote Novig reports as in-game, and
+// leaves it off pregame, so pregame Novig stays raw.
+function venueBoardPrice(bookKey, odds, market) {
   const n = Number(odds);
-  const rate = takerFeeRate(bookKey);
+  const feeRate = Number(market && market.taker_fee_rate);
+  const rate = bookKey === "novig"
+    ? takerFeeRate(bookKey, { live: feeRate > 0, coefficient: feeRate })
+    : takerFeeRate(bookKey);
   if (rate != null && n > 0 && n < 1) return feeInclusiveAmerican(n, rate);
   return { american: toAmericanOdds(odds), rawAmerican: null };
 }
@@ -1045,7 +1051,7 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   // Held live print wins unless Betstamp sends a strictly newer updated_at.
   if (hasQuote && incomingMarketTs == null) return false;
   if (hasQuote && existingTs != null && incomingMarketTs <= existingTs) return false;
-  const priced = venueBoardPrice(bookKey, market.odds);
+  const priced = venueBoardPrice(bookKey, market.odds, market);
   const price = priced.american;
   if (price == null) return false;
   if (!game.bookOdds[bookKey]) game.bookOdds[bookKey] = emptyBookOdds();

@@ -42,6 +42,22 @@ function sseRes() {
     assert.ok(quotes.every((q) => q.book === 'novig' && q.book_id === 195 && q.bet_type === 'moneyline'));
   }
 
+  // Market fee.coefficient rides on the quote (pre-fee ask); is_live from the event.
+  {
+    const mk = (status, fee) => feed.buildCatalog('NFL', {
+      items: [{ eventId: 'e', description: 'Pittsburgh Steelers @ Cleveland Browns', league: 'NFL', status, startsTs: Date.now() - 600e3 }],
+    }, {
+      items: [{ marketId: 'm', eventId: 'e', marketType: 'MONEY', status: 'OPEN', strike: '0', fee, outcomes: [{ outcomeId: 'cle', name: 'CLE' }, { outcomeId: 'pit', name: 'PIT' }] }],
+    });
+    const book = feed.bookFromSnapshot({ seq: 1, orders: { cle: [{ orderId: '1', price: '0.705', qty: 100 }], pit: [{ orderId: '2', price: '0.705', qty: 100 }] } });
+    const live = mk('OPEN_INGAME', { coefficient: '0.03', makerCredit: '0.5', charged: 'WHEN_LIVE' });
+    const lq = feed.quotesForMarket(live.events.get('e'), live.groups.get('e|MONEY')[0], book, 'NFL');
+    assert.ok(lq.every((q) => q.is_live === true && q.fee_coefficient === 0.03 && q.odds === 0.295));
+    const none = mk('OPEN_INGAME', undefined);
+    const nq = feed.quotesForMarket(none.events.get('e'), none.groups.get('e|MONEY')[0], book, 'NFL');
+    assert.ok(nq.every((q) => q.fee_coefficient === undefined));
+  }
+
   // Handler streams whatever the feed publishes, as source novig.
   {
     const req = new EventEmitter();

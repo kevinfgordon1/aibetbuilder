@@ -13,6 +13,7 @@ import { FOURCASTERS_BOARD_BOOK, NOVIG_BOARD_BOOK, sportByLeague, visibleBetstam
 import { applyStreamMarkets, emptyBookOddsForBooks, lineUpdatedAt } from "./betstampNormalize.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
+import { novigLiveFeeRate } from "./venueTakerFee.js";
 
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
@@ -247,6 +248,9 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
     }
     if (!sideType) continue;
     const line = quote.line != null ? quote.line : quote.number;
+    // Novig live takes pay c·P·(1−P) on top of the ask. Only Novig's own
+    // in-game flag counts, not the board's game-level live guess.
+    const novigRate = quote.book === "novig" || Number(quote.book_id) === 195 ? novigLiveFeeRate(quote) : null;
     markets.push({
       fixture_id: game.id,
       odd_provider_id: quote.book_id,
@@ -260,6 +264,7 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
       line,
       number: line,
       is_live: quote.is_live === true || game.is_live === true,
+      ...(novigRate ? { taker_fee_rate: novigRate } : {}),
       updated_at: quote.updated_at,
       // Venue market state (Kalshi status, Polymarket closed / not accepting
       // orders, Novig suspended). applyMarketToGame tombs a not-offered state.

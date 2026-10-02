@@ -8,6 +8,8 @@ import { gamesFromFreeFeeds } from "./freeFeedBoard.js";
 import {
   TAKER_FEE_LEGEND,
   VENUE_TAKER_FEE_RATE,
+  novigLiveFeeRate,
+  novigQuotePrice,
   effectiveTakerPrice,
   feeInclusiveAmerican,
   orderTakerFeeDollars,
@@ -20,7 +22,11 @@ assert.equal(VENUE_TAKER_FEE_RATE.kalshi, 0.07);
 assert.equal(takerFeeRate("polymarket"), 0.07);
 assert.equal(takerFeeRate("kalshi"), 0.07);
 assert.equal(takerFeeRate("underdog_predict"), null);
+// Novig has no static venue rate: only a live take is charged (0.03 default).
 assert.equal(takerFeeRate("novig"), null);
+assert.equal(takerFeeRate("novig", { live: false }), null);
+assert.equal(takerFeeRate("novig", { live: true }), 0.03);
+assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
 
 {
   const p = 0.355;
@@ -158,7 +164,61 @@ assert.equal(takerFeeRate("novig"), null);
   assert.match(board, /TAKER_FEE_LEGEND/);
   assert.match(board, /data-raw-ask/);
   assert.match(board, /data-fee-legend/);
-  assert.equal(TAKER_FEE_LEGEND, "Poly/Kalshi prices include taker fee");
+  assert.equal(TAKER_FEE_LEGEND, "Poly/Kalshi prices include taker fee · Novig LIVE prices include live fee");
+}
+
+// Novig live taker fee (0.03 × P × (1−P), added on top of the ask).
+// Verified against the Novig slip: $100 at ask 0.295 shows Payout $331.96 and
+// Trading Fee $2.07; at 0.32 Payout $306.25; at 0.28 Payout $349.59.
+{
+  const live = (odds, extra = {}) => ({ book: "novig", league: "NFL", bet_type: "moneyline", is_live: true, odds, ...extra });
+  const a = novigQuotePrice(live(0.295));
+  assert.equal(a.rawAmerican, 239);
+  assert.equal(a.american, 232, "+239 ask is +232 all-in");
+  assert.ok(Math.abs(100 / a.effectivePrice - 331.96) < 0.01);
+  assert.ok(Math.abs((100 / a.effectivePrice) * takerFeePerContract(0.295, 0.03) - 2.07) < 0.005);
+  assert.ok(Math.abs(100 / novigQuotePrice(live(0.32)).effectivePrice - 306.25) < 0.01);
+  assert.ok(Math.abs(100 / novigQuotePrice(live(0.28)).effectivePrice - 349.59) < 0.01);
+  assert.equal(novigQuotePrice(live(0.32)).american, 206);
+  assert.equal(novigQuotePrice(live(0.28)).american, 250);
+  // Favorite side: ask 0.71 → −245 raw, a touch worse all-in.
+  assert.equal(novigQuotePrice(live(0.71)).rawAmerican, -245);
+  assert.equal(novigQuotePrice(live(0.71)).american, -252);
+  // Pregame and missing/false is_live stay raw, no raw tag.
+  const pre = novigQuotePrice(live(0.295, { is_live: false }));
+  assert.deepEqual([pre.american, pre.rawAmerican], [239, null]);
+  const unk = novigQuotePrice({ book: "novig", odds: 0.295 });
+  assert.deepEqual([unk.american, unk.rawAmerican], [239, null]);
+  assert.equal(novigLiveFeeRate(live(0.295, { is_live: "true" })), null, "only boolean true counts as live");
+  // Coefficient comes from the market: 0.06 NCAAF live lines, default per type.
+  assert.equal(novigLiveFeeRate(live(0.5, { fee_coefficient: 0.06 })), 0.06);
+  assert.equal(novigLiveFeeRate(live(0.5)), 0.03);
+  assert.equal(novigLiveFeeRate(live(0.5, { league: "NCAAF", bet_type: "spread" })), 0.06);
+  assert.equal(novigLiveFeeRate(live(0.5, { league: "NCAAF", bet_type: "moneyline" })), 0.03);
+  assert.equal(novigLiveFeeRate(live(0.5, { fee_coefficient: 0 })), null);
+  assert.equal(novigQuotePrice(live(0.5, { fee_coefficient: 0.06 })).american, -106);
+  assert.equal(novigQuotePrice(live(0.5)).american, -103);
+  // Derive from american when odds is missing.
+  assert.equal(novigQuotePrice({ book: "novig", is_live: true, american: 239 }).american, 232);
+  assert.equal(novigQuotePrice({ book: "novig" }).american, null);
+}
+
+{
+  // Live Novig through the Betstamp-normalized board path vs pregame.
+  const mk = (isLive) => gamesFromFreeFeeds({
+    league: "NFL",
+    novig: [{
+      book: "novig", book_id: 195, league: "NFL", away: "Pittsburgh Steelers", home: "Cleveland Browns",
+      side: "Cleveland Browns", bet_type: "moneyline", odds: 0.295, is_live: isLive,
+      start: "2026-10-02T00:15:00.000Z", token_id: "cle", updated_at: "2026-10-02T00:39:00.000Z",
+    }],
+    nowMs: Date.parse("2026-10-02T00:39:30.000Z"),
+  });
+  const live = mk(true)[0].bookOdds.novig;
+  assert.equal(live.ml_home, 232);
+  assert.equal(live.ml_home_raw, 239);
+  const pre = mk(false)[0].bookOdds.novig;
+  assert.equal(pre.ml_home_raw, undefined);
 }
 
 console.log("venueTakerFee.test.js ok");

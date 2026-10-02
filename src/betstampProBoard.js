@@ -12,6 +12,7 @@
 import { betstampSnapshotUrl } from "./betstampLive.js";
 import { applyUnderdogPhoneQuotes, findUnderdogPhoneGame } from "./underdogPredictionQuote.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
+import { novigQuotePrice } from "./venueTakerFee.js";
 import {
   betstampOddsBoardBooks,
   bookByKey,
@@ -225,12 +226,12 @@ function novigNamesMatch(a, b) {
   return teamsLikelySame(a, b);
 }
 
-function novigAmerican(q) {
-  const a = Number(q && q.american);
-  if (q && q.american != null && Number.isFinite(a) && a !== 0) return Math.round(a);
-  const p = Number(q && q.odds);
-  if (!(p > 0 && p < 1)) return null;
-  return p >= 0.5 ? -Math.round((100 * p) / (1 - p)) : Math.round((100 * (1 - p)) / p);
+// All-in price: a quote Novig reports as in-game is painted after the live
+// taker fee (c·P·(1−P) on top of the ask, c = the market's fee_coefficient,
+// default 0.03). Pregame quotes stay raw. raw keeps the displayed ask.
+function novigPrice(q) {
+  const priced = novigQuotePrice(q);
+  return priced.american == null ? null : priced;
 }
 
 function novigStampMs(raw) {
@@ -251,8 +252,9 @@ export function novigSlateFromQuotes(quotes, league) {
     if (q.book && q.book !== NOVIG_BOARD_KEY && Number(q.book_id) !== NOVIG_BOARD_BOOK_ID) continue;
     if (String(q.league || lg).toUpperCase() !== lg) continue;
     if (!q.away || !q.home || q.is_alt === true) continue;
-    const american = novigAmerican(q);
-    if (american == null) continue;
+    const priced = novigPrice(q);
+    if (priced == null) continue;
+    const american = priced.american;
     const key = `${q.away}|${q.home}|${q.start || ""}`;
     let ev = byEvent.get(key);
     if (!ev) {
@@ -265,6 +267,7 @@ export function novigSlateFromQuotes(quotes, league) {
       side: q.side,
       line: q.line != null ? Number(q.line) : null,
       american,
+      rawAmerican: priced.rawAmerican,
       prob: Number(q.odds),
       size: q.size != null && Number.isFinite(Number(q.size)) ? Number(q.size) : null,
       marketId: q.market_id || `${q.bet_type}|${q.line ?? ""}`,
@@ -308,6 +311,8 @@ function pickMainMarket(lines) {
 function fillNovigOdds(odds, stamps, away, home, lines) {
   const put = (field, l, lineField) => {
     odds[field] = l.american;
+    // Raw ask only when a live fee was added (tooltip: "after live fee").
+    if (l.rawAmerican != null) odds[`${field}_raw`] = l.rawAmerican;
     odds[`${field}_size`] = l.size;
     if (lineField) odds[lineField] = l.line;
     if (l.updatedAt != null) stamps[field] = l.updatedAt;
