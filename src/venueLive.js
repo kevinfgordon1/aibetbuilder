@@ -94,6 +94,36 @@ export function novigStreamUrl({ league } = {}) {
   return venuePath("/api/novig-stream", "/stream", { league, venue: "novig" });
 }
 
+// Pro board LIVE Betstamp feed from the relay (one shared poll, SSE out).
+// Null when no relay is configured or VITE_BETSTAMP_RELAY is 0 / false / off;
+// the board then keeps polling /api/betstamp-markets.
+export function betstampRelayStreamUrl({ league, bookIds } = {}) {
+  const base = oddsRelayBase();
+  if (!base) return null;
+  let raw;
+  try {
+    const env = import.meta && import.meta.env;
+    if (env && env.VITE_BETSTAMP_RELAY != null && env.VITE_BETSTAMP_RELAY !== "") raw = env.VITE_BETSTAMP_RELAY;
+  } catch {
+    /* node tests have no Vite env */
+  }
+  if (raw == null) {
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.VITE_BETSTAMP_RELAY != null) raw = process.env.VITE_BETSTAMP_RELAY;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!firstPartyPmLiveFromEnv(raw)) return null;
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  if (bookIds != null && bookIds !== "") {
+    p.set("book_ids", Array.isArray(bookIds) ? bookIds.join(",") : String(bookIds));
+  }
+  const q = p.toString();
+  return q ? `${base}/betstamp?${q}` : `${base}/betstamp`;
+}
+
 export function fourcastersStreamUrl({ league } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);

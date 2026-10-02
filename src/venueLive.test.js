@@ -7,6 +7,7 @@ import {
   polymarketBoardUrl,
   kalshiBoardUrl,
   novigStreamUrl,
+  betstampRelayStreamUrl,
   fourcastersStreamUrl,
   matchGameForQuote,
   venueQuotesToMarkets,
@@ -49,9 +50,20 @@ assert.equal(kalshiStreamUrl({ league: "MLB" }), "https://odds.example/stream?le
 assert.equal(polymarketBoardUrl({ league: "NFL" }), "https://odds.example/board?league=NFL&venue=polymarket");
 assert.equal(kalshiBoardUrl({ league: "NCAAF" }), "https://odds.example/board?league=NCAAF&venue=kalshi");
 assert.equal(novigStreamUrl({ league: "NFL" }), "https://odds.example/stream?league=NFL&venue=novig");
+assert.equal(
+  betstampRelayStreamUrl({ league: "NFL", bookIds: [100, 200, 191] }),
+  "https://odds.example/betstamp?league=NFL&book_ids=100%2C200%2C191",
+);
+assert.equal(betstampRelayStreamUrl({ league: "NCAAF" }), "https://odds.example/betstamp?league=NCAAF");
+const prevBsRelay = process.env.VITE_BETSTAMP_RELAY;
+process.env.VITE_BETSTAMP_RELAY = "0";
+assert.equal(betstampRelayStreamUrl({ league: "NFL" }), null, "VITE_BETSTAMP_RELAY=0 is the kill switch");
+if (prevBsRelay == null) delete process.env.VITE_BETSTAMP_RELAY;
+else process.env.VITE_BETSTAMP_RELAY = prevBsRelay;
 if (prevRelay == null) delete process.env.VITE_ODDS_RELAY_URL;
 else process.env.VITE_ODDS_RELAY_URL = prevRelay;
 assert.equal(novigStreamUrl({ league: "NCAAF" }), "/api/novig-stream?league=NCAAF");
+assert.equal(betstampRelayStreamUrl({ league: "NFL" }), null, "no relay configured: keep polling /api/betstamp-markets");
 assert.equal(fourcastersStreamUrl({ league: "NFL" }), "/api/4casters-stream?league=NFL");
 assert.equal(fourcastersStreamUrl({ league: "MLB" }), "/api/4casters-stream?league=MLB");
 

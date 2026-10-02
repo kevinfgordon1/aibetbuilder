@@ -77,7 +77,14 @@ import {
   kalshiStreamUrl,
   novigStreamUrl,
   venueQuotesToMarkets,
+  betstampRelayStreamUrl,
 } from "./venueLive.js";
+import {
+  RELAY_SILENT_MS,
+  RELAY_TICK_APPLY_MS,
+  relayFeedFresh,
+  createRelayBook,
+} from "./betstampRelayStream.js";
 import { quotesAfterVenueEvent } from "./freeFeedBoard.js";
 // consumeBetstampStream is only used for the first-party Polymarket / Kalshi
 // / Novig relays below. This board never opens /api/betstamp-stream (see header).
@@ -124,6 +131,12 @@ const latestBoardGames = { current: [] };
 //     matched exactly like the New Odds Board (applyUnderdogPhoneQuotes), so
 //     both boards show the same Underdog prices. Never Betstamp Underdog
 //     (196), Fliff, or Courtside. Columns with no prices are hidden.
+//   - LIVE reads one shared Betstamp poll from the Railway odds relay over SSE
+//     (GET <relay>/betstamp, about 2s; src/betstampRelayStream.js) when
+//     VITE_ODDS_RELAY_URL is set. The relay is the only caller that talks to
+//     Betstamp for live ticks, so browsers do not spend Betstamp requests.
+//     If the relay stream is down, refused, or silent for 10s the board falls
+//     back, with no action needed, to the REST poll below until it returns.
 //   - Live updates poll /api/betstamp-markets?refresh=1 (5s LIVE, 15s pregame)
 //     instead of opening /api/betstamp-stream. The Betstamp trial key allows
 //     ONE upstream SSE connection, and /api/betstamp-stream opens a fresh
@@ -595,8 +608,8 @@ const LiveTickStrip = memo(function LiveTickStrip({
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline" }}>
         <div>
           <div style={{ fontSize: 10, color: "var(--nob-muted)", textTransform: "uppercase", letterSpacing: 0.6 }}>Feed</div>
-          <div data-feed-mode={streamStatus} title="REST snapshot poll through /api/betstamp-markets. No Betstamp SSE connection (the trial key allows one)." style={{ fontSize: 14, fontWeight: 700, color: streamStatus === "polling" ? "var(--nob-good)" : "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>
-            {streamStatus === "polling" ? `poll ${Math.round(pollMs / 1000)}s` : streamStatus}
+          <div data-feed-mode={streamStatus} title={streamStatus === "relay" ? "Betstamp live feed from the odds relay (one shared Betstamp poll, pushed over SSE). Falls back to the REST poll through /api/betstamp-markets if the relay goes quiet for 10s." : "REST snapshot poll through /api/betstamp-markets. No Betstamp SSE connection (the trial key allows one)."} style={{ fontSize: 14, fontWeight: 700, color: streamStatus === "polling" || streamStatus === "relay" ? "var(--nob-good)" : "var(--nob-text)", fontFamily: "'JetBrains Mono', monospace" }}>
+            {streamStatus === "polling" ? `poll ${Math.round(pollMs / 1000)}s` : streamStatus === "relay" ? "relay ~2s" : streamStatus}
           </div>
         </div>
         <div>
@@ -1136,6 +1149,27 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     // Last good Polymarket (193) cells, per board session (sport / LIVE toggle).
     const pmOtbHold = new Map();
 
+    // Paint one Betstamp-shaped body ({ markets, fixtures, teams }). Shared by
+    // the REST poll and the relay stream so both land the same way.
+    const paintBody = (body, { showLoading }) => {
+      const fetchedAt = Date.now();
+      const payload = {
+        markets: body.markets,
+        fixtures: body.fixtures,
+        teams: body.teams,
+        nowMs: fetchedAt,
+      };
+      if (showLoading || !liveOnly || !gamesRef.current.length) {
+        const rebuilt = holdPolymarketOtbCells(gamesFromBetstampSnapshot(payload), body.markets, pmOtbHold, { nowMs: fetchedAt });
+        commitGames(withNovigQuotes(withUnderdogPhone(rebuilt, phoneRef.current, league), novigRef.current, league), { force: true });
+      } else {
+        const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
+        commitGames(withNovigQuotes(withUnderdogPhone(reconcileLiveGames(withMeta, payload), phoneRef.current, league), novigRef.current, league));
+      }
+      setSnapshotAt(fetchedAt);
+      setLoadError(null);
+    };
+
     // First load and every poll: one REST snapshot through the shared proxy.
     // Pregame rebuilds the slate; LIVE reconciles into the painted rows so
     // venue ticks and flash state survive.
@@ -1163,23 +1197,8 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
           }
           return false;
         }
-        const fetchedAt = Date.now();
-        const payload = {
-          markets: body.markets,
-          fixtures: body.fixtures,
-          teams: body.teams,
-          nowMs: fetchedAt,
-        };
-        if (showLoading || !liveOnly || !gamesRef.current.length) {
-          const rebuilt = holdPolymarketOtbCells(gamesFromBetstampSnapshot(payload), body.markets, pmOtbHold, { nowMs: fetchedAt });
-          commitGames(withNovigQuotes(withUnderdogPhone(rebuilt, phoneRef.current, league), novigRef.current, league), { force: true });
-        } else {
-          const withMeta = applyFixtureMeta(gamesRef.current, body.fixtures || []);
-          commitGames(withNovigQuotes(withUnderdogPhone(reconcileLiveGames(withMeta, payload), phoneRef.current, league), novigRef.current, league));
-        }
-        setSnapshotAt(fetchedAt);
+        paintBody(body, { showLoading });
         setPollStats((p) => ({ ...p, polls: p.polls + 1, lastError: null }));
-        setLoadError(null);
         if (showLoading) setLoading(false);
         return true;
       } catch (err) {
@@ -1200,17 +1219,43 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
 
     applySnapshot({ showLoading: true });
     setStreamStatus("polling");
+    // Relay stream (LIVE only). While it is fresh the REST poll stands down;
+    // the moment it is down or silent for RELAY_SILENT_MS the poll resumes.
+    const relayUrl = liveOnly ? betstampRelayStreamUrl({ league, bookIds }) : null;
+    let relayLastAt = 0;
+    let relayLastApplyAt = 0;
+    let relayDirty = false;
+    let relayBook = null;
+    let relayConn = null;
+    const relayFresh = () => !!relayUrl && relayFeedFresh(relayLastAt, Date.now(), RELAY_SILENT_MS);
+
+    const pollNow = () => {
+      if (pollInFlight || cancelled) return;
+      pollInFlight = true;
+      applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
+    };
     pollTimer = setInterval(() => {
       // Hidden tab: skip. Saves Betstamp budget; the next visible tick catches up.
       if (pollInFlight || cancelled || pageHidden()) return;
-      pollInFlight = true;
-      applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
+      if (relayFresh()) return;
+      pollNow();
     }, pollMs);
 
+    const paintRelay = () => {
+      if (!relayBook || cancelled || gen !== fetchGen.current) return;
+      relayLastApplyAt = Date.now();
+      relayDirty = false;
+      paintBody(relayBook.payload(), { showLoading: false });
+      setPollStats((p) => (p.lastError ? { ...p, lastError: null } : p));
+    };
+
     const onVisible = () => {
-      if (cancelled || pageHidden() || pollInFlight) return;
-      pollInFlight = true;
-      applySnapshot({ showLoading: false }).finally(() => { pollInFlight = false; });
+      if (cancelled || pageHidden()) return;
+      if (relayFresh()) {
+        if (relayDirty) paintRelay();
+        return;
+      }
+      pollNow();
     };
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
 
@@ -1262,9 +1307,83 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       runVenue(kalshiStreamUrl({ league }));
     }
 
+    // Betstamp via the relay. One connection per tab; reconnects with backoff.
+    const runRelay = async () => {
+      if (!relayUrl || cancelled) return;
+      let attempt = 0;
+      while (!cancelled && !ctrl.signal.aborted) {
+        const conn = new AbortController();
+        relayConn = conn;
+        const onParentAbort = () => conn.abort();
+        ctrl.signal.addEventListener("abort", onParentAbort, { once: true });
+        relayBook = createRelayBook();
+        const openedAt = Date.now();
+        let gotEvent = false;
+        let refused = false;
+        try {
+          await consumeBetstampStream({
+            url: relayUrl,
+            signal: conn.signal,
+            onEvent: (ev) => {
+              if (cancelled || gen !== fetchGen.current || !ev || ev.event !== "bs") return;
+              const out = relayBook.apply(ev.data);
+              if (out.kind === "gap") { conn.abort(); return; }
+              if (out.kind === "error") {
+                setPollStats((p) => ({ ...p, lastError: `relay: ${out.error}` }));
+                return;
+              }
+              if (out.kind === "ignore") return;
+              const wasFresh = relayFresh();
+              relayLastAt = Date.now();
+              gotEvent = true;
+              if (!wasFresh) setStreamStatus("relay");
+              if (pageHidden()) { relayDirty = true; return; }
+              if (out.kind === "tick" && relayLastAt - relayLastApplyAt < RELAY_TICK_APPLY_MS) return;
+              paintRelay();
+            },
+          });
+        } catch (err) {
+          if (cancelled || ctrl.signal.aborted) return;
+          // 400 / 503: the relay has no Betstamp feed for this board. Try again slowly.
+          refused = err && (err.status === 400 || err.status === 503);
+        } finally {
+          ctrl.signal.removeEventListener("abort", onParentAbort);
+          if (relayConn === conn) relayConn = null;
+        }
+        if (cancelled || ctrl.signal.aborted) return;
+        if (!relayFresh()) setStreamStatus("polling");
+        // A connection that lived a while and then dropped reconnects quickly.
+        // One that ends right after opening (relay restarting, proxy closing
+        // streams) backs off so a tab never hammers the relay.
+        const lived = Date.now() - openedAt >= 5_000;
+        if (lived) attempt = 0;
+        const wait = refused ? 30_000 : (lived ? 250 : nextBackoffMs(attempt, { max: 10_000 }));
+        if (!lived) attempt += 1;
+        await new Promise((resolve) => {
+          const t = setTimeout(resolve, wait);
+          venueTimers.push(t);
+        });
+      }
+    };
+    let relayWatch = null;
+    if (relayUrl) {
+      runRelay();
+      // A stream that stays open but says nothing is as bad as a closed one:
+      // poll right away and drop the connection so it reconnects.
+      relayWatch = setInterval(() => {
+        if (cancelled || !relayLastAt) return;
+        if (Date.now() - relayLastAt < RELAY_SILENT_MS) return;
+        relayLastAt = 0;
+        setStreamStatus("polling");
+        if (relayConn) relayConn.abort();
+        if (!pageHidden()) pollNow();
+      }, 2_000);
+    }
+
     return () => {
       cancelled = true;
       ctrl.abort();
+      if (relayWatch) clearInterval(relayWatch);
       clearInterval(pollTimer);
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
       venueTimers.forEach((t) => clearTimeout(t));
@@ -2215,7 +2334,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
         Betstamp books: DraftKings, FanDuel, Caesars, BetMGM, Fanatics, bet365, BookMaker/BetCris, BetRivers (Kambi), Pinnacle, Bet105, BetOnline, BetUS, Circa, theScore Bet, Hard Rock, then ProphetX / Polymarket / Kalshi. Novig comes from Novig's free public prices (same feed as the New Odds Board, about 9s behind), not Betstamp, and joins games the same way as Underdog. Underdog Predict comes from Underdog's own phone prices (same feed and game matching as the New Odds Board, polled every 20s pregame / 30s LIVE), not Betstamp. Columns with no prices on this slate are hidden, except BetMGM, BetUS and Novig (Betstamp sends BetUS pregame only, no LIVE rows). BetMGM stays blank until the Betstamp key covers it (the server sends book 400 only with BETSTAMP_INCLUDE_BETMGM=1). Bet105 and Hard Rock are not on the current Betstamp key, so they are not requested yet. No Fliff or Courtside
         {" · "}Mains (moneyline / spread / total, period FT), American odds
-        {" · "}Refresh: polls the Betstamp REST snapshot (refresh=1) every {Math.round(BETSTAMP_BOARD_PREGAME_POLL_MS / 1000)}s pregame and every {Math.round(BETSTAMP_BOARD_LIVE_POLL_MS / 1000)}s LIVE, paused while this browser tab is hidden. It does not open a Betstamp live stream (the trial key allows one connection)
+        {" · "}Refresh: polls the Betstamp REST snapshot (refresh=1) every {Math.round(BETSTAMP_BOARD_PREGAME_POLL_MS / 1000)}s pregame and every {Math.round(BETSTAMP_BOARD_LIVE_POLL_MS / 1000)}s LIVE, paused while this browser tab is hidden. LIVE normally reads the odds relay's shared Betstamp feed (about 2s) and uses this poll only if the relay is down or quiet for 10s. This browser never opens a Betstamp live stream (the trial key allows one connection)
         {" · "}LIVE: a book/side missing from several polls (or an explicit suspend / taken_down) shows OFF. A blank means never offered / no quote. Polymarket and Kalshi also tick from the first-party relays
         {" · "}Click a game for that fixture's full alt ladder (fetched only then)
         {" · "}Kalshi / Polymarket / ProphetX / Novig also show implied win probability
