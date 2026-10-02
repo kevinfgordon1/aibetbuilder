@@ -25,6 +25,8 @@ import {
   lineIsSuspended,
   lineConfirmedAt,
   gameVisibleOnBoard,
+  kickoffHasPassed,
+  liveFlagTrusted,
   gameIsFinished,
   fixtureCommence,
   fixtureIsClosed,
@@ -191,6 +193,23 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: past }, { liveOnly: false }), false);
   assert.equal(gameVisibleOnBoard({ is_live: false, commence_time: future }, { liveOnly: false }), true);
   assert.equal(gameVisibleOnBoard({ is_live: false, commence_time: past }, { liveOnly: false }), false);
+  // A live flag on a game that has not kicked off is an upcoming game.
+  assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: future }, { liveOnly: true }), false);
+  assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: future }, { liveOnly: false }), true);
+  assert.equal(kickoffHasPassed(future), false);
+  assert.equal(kickoffHasPassed(past), true);
+  assert.equal(liveFlagTrusted(true, future), false);
+  assert.equal(liveFlagTrusted(true, past), true);
+  assert.equal(liveFlagTrusted(false, past), false);
+  const snap = gamesFromBetstampSnapshot({
+    fixtures: [
+      { id: "up", league: "NFL", status: "inprogress", is_live: true, date: future, home_team: "Philadelphia Eagles", away_team: "Los Angeles Rams", home_abbr: "PHI", away_abbr: "LAR" },
+      { id: "on", league: "NFL", status: "inprogress", date: past, home_team: "Cleveland Browns", away_team: "Pittsburgh Steelers", home_abbr: "CLE", away_abbr: "PIT" },
+    ],
+    markets: [], teams: [],
+  });
+  assert.equal(snap.find((g) => g.id === "up").is_live, false, "Betstamp flag before kickoff is ignored");
+  assert.equal(snap.find((g) => g.id === "on").is_live, true);
 }
 
 {

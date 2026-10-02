@@ -205,19 +205,20 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
 
 {
   // Live Novig through the Betstamp-normalized board path vs pregame.
-  const mk = (isLive) => gamesFromFreeFeeds({
+  const mk = (isLive, nowMs = "2026-10-02T00:39:30.000Z") => gamesFromFreeFeeds({
     league: "NFL",
     novig: [{
       book: "novig", book_id: 195, league: "NFL", away: "Pittsburgh Steelers", home: "Cleveland Browns",
       side: "Cleveland Browns", bet_type: "moneyline", odds: 0.295, is_live: isLive,
       start: "2026-10-02T00:15:00.000Z", token_id: "cle", updated_at: "2026-10-02T00:39:00.000Z",
     }],
-    nowMs: Date.parse("2026-10-02T00:39:30.000Z"),
+    nowMs: Date.parse(nowMs),
   });
   const live = mk(true)[0].bookOdds.novig;
   assert.equal(live.ml_home, 232);
   assert.equal(live.ml_home_raw, 239);
-  const pre = mk(false)[0].bookOdds.novig;
+  // Pregame: before kickoff, even a stray live flag leaves the row upcoming.
+  const pre = mk(false, "2026-10-01T22:00:00.000Z")[0].bookOdds.novig;
   assert.equal(pre.ml_home_raw, undefined);
 }
 

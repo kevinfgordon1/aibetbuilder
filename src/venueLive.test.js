@@ -96,12 +96,23 @@ assert.equal(matchGameForQuote([
   { ...games[0], id: "other", away: "Atlanta Falcons", home: "Green Bay Packers", league: "NFL" },
 ], quote), null, "two fixtures with the same teams are not guessed");
 
-const markets = venueQuotesToMarkets(games, [quote], { liveBoard: true });
+const markets = venueQuotesToMarkets(games, [quote], { liveBoard: true, nowMs: Date.parse("2026-09-25T00:30:00Z") });
 assert.equal(markets.length, 1);
 assert.equal(markets[0].fixture_id, "atl-gb");
 assert.equal(markets[0].odd_provider_id, 193);
 assert.equal(markets[0].odds, 0.285);
 assert.equal(markets[0].is_live, true);
+
+// liveBoard no longer forces LIVE: a pregame quote stays pregame, and a live
+// flag before kickoff is dropped.
+{
+  const pre = venueQuotesToMarkets(games, [{ ...quote, is_live: false }], { liveBoard: true, nowMs: Date.parse("2026-09-25T00:30:00Z") });
+  assert.equal(pre[0].is_live, false, "liveBoard does not force is_live");
+  const early = venueQuotesToMarkets(games, [quote], { liveBoard: true, nowMs: Date.parse("2026-09-24T20:00:00Z") });
+  assert.equal(early[0].is_live, false, "live flag before kickoff is ignored");
+  const ok = venueQuotesToMarkets(games, [quote], { liveBoard: true, nowMs: Date.parse("2026-09-25T00:30:00Z") });
+  assert.equal(ok[0].is_live, true, "kickoff passed + in-progress flag");
+}
 
 const painted = applyStreamMarkets(games, markets, {
   receivedAt: Date.parse("2026-09-22T18:00:01.000Z"),

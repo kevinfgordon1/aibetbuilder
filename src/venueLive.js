@@ -1,3 +1,5 @@
+import { kickoffHasPassed } from "./betstampNormalize.js";
+
 // First-party Polymarket + Kalshi quotes for the New Odds Board.
 // Always on unless VITE_FIRST_PARTY_PM_LIVE is 0 / false / off.
 // That var is a kill switch only — the board does not wait for a prod build.
@@ -141,9 +143,11 @@ export function matchGameForQuote(games, quote) {
 }
 
 // Synthetic Betstamp markets so applyStreamMarkets can paint the cell.
-// liveBoard forces is_live: Kalshi has no in-game flag, and a pregame
-// stamp would be ignored once the fixture is already live.
-export function venueQuotesToMarkets(games, quotes, { liveBoard = false } = {}) {
+// liveBoard only stops a pregame stamp from being ignored once the fixture is
+// already live. It never makes a game live: the quote's own in-progress flag
+// and a passed kickoff are both required (applyMarketToGame checks kickoff).
+// Forcing is_live here put every upcoming game on the Live now group.
+export function venueQuotesToMarkets(games, quotes, { liveBoard = false, nowMs = Date.now() } = {}) {
   const markets = [];
   for (const quote of quotes || []) {
     if (!quote || quote.odds == null) continue;
@@ -159,7 +163,7 @@ export function venueQuotesToMarkets(games, quotes, { liveBoard = false } = {}) 
       side: quote.side,
       odds: quote.odds,
       size: quote.size,
-      is_live: liveBoard === true || quote.is_live === true,
+      is_live: quote.is_live === true && kickoffHasPassed(game.commence_time, nowMs),
       updated_at: quote.updated_at,
     });
   }

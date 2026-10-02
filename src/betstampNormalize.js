@@ -684,7 +684,7 @@ export function applyFixtureMeta(games, fixtures) {
     const fixture = byId.get(String(game.id));
     if (!fixture) return game;
     const meta = fixtureLiveMeta(fixture);
-    const isLive = fixtureIsLive(fixture) || !!game.is_live;
+    const isLive = liveFlagTrusted(fixtureIsLive(fixture) || !!game.is_live, game.commence_time || fixtureCommence(fixture));
     if (
       (game.status || null) === meta.status
       && (game.period || null) === meta.period
@@ -722,7 +722,23 @@ export function fixtureIsLive(fixture) {
   if (fixtureIsClosed(fixture)) return false;
   if (fixture.is_live === true) return true;
   const status = fixtureStatus(fixture);
-  return status === "live" || status === "in" || status === "in_play" || status === "inplay";
+  return status === "live" || status === "in" || status === "in_play" || status === "inplay"
+    || status === "inprogress" || status === "in_progress";
+}
+
+// A game can only be in progress once its kickoff has passed. Every "live"
+// flag (Betstamp is_live / status, Polymarket live, Kalshi, Novig, Underdog
+// "scoring") is ignored before kickoff, so a stray or forced flag cannot put
+// an upcoming game under LIVE NOW. Unknown kickoff: trust the source flag.
+export function kickoffHasPassed(commence, nowMs = Date.now()) {
+  const t = Date.parse(commence || "");
+  if (!Number.isFinite(t)) return true;
+  const now = nowMs != null && Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+  return t <= now;
+}
+
+export function liveFlagTrusted(flag, commence, nowMs = Date.now()) {
+  return flag === true && kickoffHasPassed(commence, nowMs);
 }
 
 function namesEqual(a, b) {
@@ -960,7 +976,7 @@ function newGameFromFixture(fixture, teamsById, nowMs) {
     homeId: sides.homeId,
     commence_time: commence,
     ...fixtureLiveMeta(fixture),
-    is_live: fixtureIsLive(fixture),
+    is_live: liveFlagTrusted(fixtureIsLive(fixture), commence, nowMs),
     home_score: fixture.home_score ?? fixture.homeScore ?? null,
     away_score: fixture.away_score ?? fixture.awayScore ?? null,
     bookOdds: emptyBookOddsForBooks(),
@@ -989,7 +1005,7 @@ function stubGameFromMarket(market, nowMs) {
     homeId: null,
     commence_time: fixtureCommence(market),
     ...fixtureLiveMeta(market),
-    is_live: fixtureIsLive(market),
+    is_live: liveFlagTrusted(fixtureIsLive(market), fixtureCommence(market), nowMs),
     home_score: null,
     away_score: null,
     bookOdds: emptyBookOddsForBooks(),
@@ -1047,6 +1063,7 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
       updatedAt: null,
     };
   }
+  if (game.is_live && !kickoffHasPassed(game.commence_time)) game.is_live = false;
   if (hasQuote && game.is_live && !incomingLive) return false;
   // Held live print wins unless Betstamp sends a strictly newer updated_at.
   if (hasQuote && incomingMarketTs == null) return false;
@@ -1059,7 +1076,7 @@ export function applyMarketToGame(game, market, { receivedAt, allowAlt } = {}) {
   const rawKey = `${field}_raw`;
   if (priced.rawAmerican == null) delete game.bookOdds[bookKey][rawKey];
   else game.bookOdds[bookKey][rawKey] = priced.rawAmerican;
-  if (market.is_live) game.is_live = true;
+  if (market.is_live && kickoffHasPassed(game.commence_time)) game.is_live = true;
   // Stamp ages from Betstamp's updated_at only. Receive-time fallbacks were
   // blocking later live ticks whose market stamp is older than "now".
   if (incomingMarketTs != null) {
@@ -1209,15 +1226,18 @@ export function reconcileLiveGames(games, {
 export function gameIsFinished(game, now = Date.now()) {
   if (!game) return true;
   if (fixtureIsClosed(game)) return true;
-  if (game.is_live) return false;
+  if (game.is_live && kickoffHasPassed(game.commence_time, now)) return false;
   const t = Date.parse(game.commence_time);
   return isFinite(t) && t <= now;
 }
 
 export function gameVisibleOnBoard(game, { liveOnly, now = Date.now() } = {}) {
   if (!game || gameIsFinished(game, now)) return false;
-  if (liveOnly) return !!game.is_live;
-  if (game.is_live) return false;
+  // LIVE needs both a source in-progress flag and a passed kickoff. A stale or
+  // forced flag on an upcoming game belongs on the pregame slate.
+  const live = !!game.is_live && kickoffHasPassed(game.commence_time, now);
+  if (liveOnly) return live;
+  if (live) return false;
   return true;
 }
 
