@@ -1317,6 +1317,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
         const onParentAbort = () => conn.abort();
         ctrl.signal.addEventListener("abort", onParentAbort, { once: true });
         relayBook = createRelayBook();
+        const openedAt = Date.now();
         let gotEvent = false;
         let refused = false;
         try {
@@ -1335,7 +1336,6 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
               const wasFresh = relayFresh();
               relayLastAt = Date.now();
               gotEvent = true;
-              attempt = 0;
               if (!wasFresh) setStreamStatus("relay");
               if (pageHidden()) { relayDirty = true; return; }
               if (out.kind === "tick" && relayLastAt - relayLastApplyAt < RELAY_TICK_APPLY_MS) return;
@@ -1352,8 +1352,13 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
         }
         if (cancelled || ctrl.signal.aborted) return;
         if (!relayFresh()) setStreamStatus("polling");
-        const wait = refused ? 30_000 : (gotEvent ? 250 : nextBackoffMs(attempt, { max: 10_000 }));
-        attempt += gotEvent ? 0 : 1;
+        // A connection that lived a while and then dropped reconnects quickly.
+        // One that ends right after opening (relay restarting, proxy closing
+        // streams) backs off so a tab never hammers the relay.
+        const lived = Date.now() - openedAt >= 5_000;
+        if (lived) attempt = 0;
+        const wait = refused ? 30_000 : (lived ? 250 : nextBackoffMs(attempt, { max: 10_000 }));
+        if (!lived) attempt += 1;
         await new Promise((resolve) => {
           const t = setTimeout(resolve, wait);
           venueTimers.push(t);
