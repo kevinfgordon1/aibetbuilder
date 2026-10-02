@@ -536,6 +536,7 @@ export function readMarketSides(market) {
     longName: sideLabel(longSide),
     shortName: sideLabel(shortSide),
     tick: normalizeTick(market.orderPriceMinTickSize),
+    feeCoefficient: readFeeCoefficient(market),
     minQty: positiveQty(market.minimumTradeQty),
     tradable: market.active !== false && !closed && !resolved,
     closed: closed || resolved,
@@ -888,6 +889,7 @@ export function positionView(row, market) {
     if (market.longName) base.longName = market.longName;
     if (market.shortName) base.shortName = market.shortName;
     if (market.tick != null) base.tick = market.tick;
+    if (market.feeCoefficient != null) base.feeCoefficient = market.feeCoefficient;
     if (market.minQty != null) base.minQty = market.minQty;
     if (market.tradable != null) base.tradable = market.tradable;
   }
@@ -951,6 +953,10 @@ export function mapOpenOrders(payload, marketsBySlug = {}) {
       outcome: parsed.outcome,
       action: parsed.action,
       outcomeName: name,
+      otherName: sides
+        ? (parsed.outcome === "short" ? sides.longName : sides.shortName)
+        : (parsed.outcome === "short" ? "Yes" : "No"),
+      feeCoefficient: sides && sides.feeCoefficient != null ? sides.feeCoefficient : null,
       americanLabel: outcomeMicro == null ? "" : formatAmerican(americanFromMicro(outcomeMicro)),
       centsLabel: outcomeMicro == null ? "" : formatCentsFromMicro(outcomeMicro),
       outcomeMicro,
@@ -959,6 +965,115 @@ export function mapOpenOrders(payload, marketsBySlug = {}) {
       state: order.state || "",
     };
   }).filter((row) => row && row.id);
+}
+
+// ---- What a taker gets when they hit a resting order -----------------------
+//
+// Polymarket US taker fee is Θ × C × p × (1−p), p = the taker's buy price,
+// Θ = the market's feeCoefficient (0.0695 today). The all-in price is
+// p + Θ·p·(1−p). Makers pay $0 (and earn a small rebate, Θ −0.0125·p(1−p)).
+//
+// Hitting a resting BUY of team X at P means the taker sells X, which is the
+// same as buying the other team at 1−P. Hitting a resting SELL of X at P means
+// the taker buys X at P. Fee per $100 stake is 100·Θ·(1−p): $100 of contracts
+// at price p holds 100/p contracts, each charged Θ·p·(1−p).
+
+export const POLY_TAKER_FEE_COEFFICIENT = 0.0695;
+export const POLY_MAKER_REBATE_COEFFICIENT = -0.0125;
+
+export function readFeeCoefficient(market) {
+  const raw = market && (market.feeCoefficient != null ? market.feeCoefficient : market.fee_coefficient);
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n < 1 ? n : null;
+}
+
+export function takerFeeCoefficient(value) {
+  const n = Number(value);
+  return value != null && value !== "" && Number.isFinite(n) && n > 0 && n < 1 ? n : POLY_TAKER_FEE_COEFFICIENT;
+}
+
+// takerPrice is the taker's buy price as a 0–1 probability.
+export function takerAllIn(takerPrice, coefficient) {
+  const p = Number(takerPrice);
+  if (!(p > 0 && p < 1)) return null;
+  const theta = takerFeeCoefficient(coefficient);
+  const feePerContract = theta * p * (1 - p);
+  const allIn = p + feePerContract;
+  if (!(allIn > 0 && allIn < 1)) return null;
+  const rawAmerican = americanFromProb(p);
+  const allInAmerican = americanFromProb(allIn);
+  if (rawAmerican == null || allInAmerican == null) return null;
+  return {
+    coefficient: theta,
+    takerPrice: p,
+    feePerContract,
+    allInPrice: allIn,
+    rawAmerican,
+    allInAmerican,
+    feePer100: 100 * theta * (1 - p),
+    makerRebatePerContract: -POLY_MAKER_REBATE_COEFFICIENT * p * (1 - p),
+  };
+}
+
+// outcomeMicro is the resting order's price on the outcome Kevin trades.
+export function takerGets({ outcomeMicro, action, ownName, otherName, coefficient } = {}) {
+  const micro = Math.round(Number(outcomeMicro));
+  if (!(micro > 0 && micro < MICRO)) return null;
+  const sell = normalizeAction(action) === "sell";
+  const takerMicro = sell ? micro : MICRO - micro;
+  const calc = takerAllIn(takerMicro / MICRO, coefficient);
+  if (!calc) return null;
+  const team = String(sell ? ownName : otherName || "").trim();
+  return { ...calc, team };
+}
+
+export function formatTakerGets(info, { suffix = "" } = {}) {
+  if (!info) return "";
+  return "Taker gets " + (info.team ? info.team + " " : "")
+    + formatAmerican(info.rawAmerican) + " raw · "
+    + formatAmerican(info.allInAmerican) + " all-in · fee $"
+    + info.feePer100.toFixed(2) + "/$100"
+    + (suffix ? " · " + suffix : "");
+}
+
+// Open order row: price and side come from the order itself.
+export function takerLineForOrder(order) {
+  if (!order || typeof order !== "object") return "";
+  const info = takerGets({
+    outcomeMicro: order.outcomeMicro,
+    action: order.action,
+    ownName: order.outcomeName,
+    otherName: order.otherName,
+    coefficient: order.feeCoefficient,
+  });
+  return formatTakerGets(info, { suffix: "you pay no fee" });
+}
+
+// Position row: there is no resting order, so show what a taker would get if
+// Kevin rested at his average price on the team he holds.
+export function takerLineForPosition(row) {
+  if (!row || typeof row !== "object" || !row.avgAmerican || !row.team) return "";
+  const prob = impliedProbFromAmerican(row.avgAmerican);
+  if (prob == null) return "";
+  const held = String(row.team);
+  const other = held === row.longName ? row.shortName : (held === row.shortName ? row.longName : "");
+  if (!other) return "";
+  const info = takerGets({
+    outcomeMicro: toMicro(prob),
+    action: "buy",
+    ownName: held,
+    otherName: other,
+    coefficient: row.feeCoefficient,
+  });
+  return formatTakerGets(info, { suffix: "at your avg" });
+}
+
+// Order form preview from the live quote.
+export function takerLineForQuote(quote, { ownName, otherName, coefficient } = {}) {
+  if (!quote || !quote.ok) return "";
+  const info = takerGets({ outcomeMicro: quote.outcomeMicro, action: quote.action, ownName, otherName, coefficient });
+  return formatTakerGets(info, { suffix: "you pay no fee" });
 }
 
 export function deskErrorText(value, fallback = "Could not load the desk.") {
