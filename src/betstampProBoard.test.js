@@ -1,3 +1,4 @@
+import { getOddsBoardCell } from "./oddsBoard.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
@@ -187,7 +188,7 @@ assert.match(board, /betstampOddsBoardColumns\(\)/);
   const stamp = "2026-09-29T01:04:33.794Z";
   const q = (extra) => ({
     book: "novig", book_id: 195, league: "NFL", away: "Philadelphia Eagles", home: "Chicago Bears",
-    is_alt: false, is_live: true, start: "2026-09-29T00:15:00.000Z", updated_at: stamp, ...extra,
+    is_alt: false, is_live: false, start: "2026-09-29T00:15:00.000Z", updated_at: stamp, ...extra,
   });
   const quotes = [
     q({ bet_type: "moneyline", side: "Chicago Bears", odds: 0.535, american: -115, size: 812.5 }),
@@ -226,6 +227,30 @@ assert.match(board, /betstampOddsBoardColumns\(\)/);
   const nextWeekOnly = quotes.filter((x) => x.start === "2026-10-06T00:15:00.000Z");
   assert.equal(withNovigQuotes([bsGame], nextWeekOnly, "NFL")[0].bookOdds.novig.ml_home, null);
   assert.equal(withNovigQuotes([nextWeek], quotes, "NFL")[0].bookOdds.novig.ml_home, 400);
+  // LIVE Novig quotes are painted after the live taker fee (0.03·P·(1−P) on
+  // top of the ask); the raw ask rides along for the hover. Pregame stays raw.
+  {
+    const lq = (extra) => q({ is_live: true, ...extra });
+    const [lv] = withNovigQuotes([bsGame], [
+      lq({ bet_type: "moneyline", side: "Chicago Bears", odds: 0.295, american: 239 }),
+      lq({ bet_type: "moneyline", side: "Philadelphia Eagles", odds: 0.71, american: -245, fee_coefficient: 0.03 }),
+    ], "NFL");
+    assert.equal(lv.bookOdds.novig.ml_home, 232);
+    assert.equal(lv.bookOdds.novig.ml_home_raw, 239);
+    assert.equal(lv.bookOdds.novig.ml_away, -252);
+    assert.equal(lv.bookOdds.novig.ml_away_raw, -245);
+    assert.equal(nv.ml_home_raw, undefined, "pregame Novig has no fee tag");
+    // The Best column ranks on the all-in Novig price.
+    assert.equal(lv.bookOdds.draftkings.ml_away, -200);
+    const best = (price) => getOddsBoardCell({
+      game: { ...lv, bookOdds: { draftkings: { ml_home: price }, novig: lv.bookOdds.novig } },
+      bookKey: "best", market: "ml", selectedBookKeys: new Set(["draftkings", "novig"]), allBooks: [{ key: "draftkings" }, { key: "novig" }],
+    });
+    assert.equal(best(235).bot, 235, "a +235 book beats Novig +232 all-in (+239 raw would have won)");
+    assert.equal(best(235).botBooks[0].key, "draftkings");
+    assert.equal(best(225).bot, 232);
+    assert.equal(best(225).botBooks[0].key, "novig");
+  }
   // No `american` on the quote: derive from the 0–1 ask.
   const [derived] = withNovigQuotes([bsGame], [q({ bet_type: "moneyline", side: "Chicago Bears", odds: 0.6 })], "NFL");
   assert.equal(derived.bookOdds.novig.ml_home, -150);
