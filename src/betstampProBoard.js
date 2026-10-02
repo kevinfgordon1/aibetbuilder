@@ -93,7 +93,7 @@ export function wrapNamespacedStorage(namespace, storage) {
 // Odds Board so both boards show identical Underdog prices.
 
 export const BETSTAMP_BOARD_UNDERDOG_POLL_MS = 20_000; // = FREE_FEED_POLL_MS
-export const BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS = 30_000; // = FREE_FEED_LIVE_POLL_MS
+export const BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS = 10_000; // = FREE_FEED_LIVE_POLL_MS
 
 /**
  * Column catalog: Betstamp books (ending ProphetX / Polymarket / Kalshi), then

@@ -18,7 +18,7 @@ import { novigLiveFeeRate } from "./venueTakerFee.js";
 
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
-export const FREE_FEED_LIVE_POLL_MS = 30_000;
+export const FREE_FEED_LIVE_POLL_MS = 10_000;
 // JSON snapshot backstop. The SSE socket pushes ask changes. A poll this
 // slow cannot be the thing the board is waiting on.
 export const FREE_FEED_LIVE_BOARD_POLL_MS = 15_000;
