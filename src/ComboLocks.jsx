@@ -26,7 +26,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, overFillText, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
@@ -34,7 +34,7 @@ import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAb
 import { buildComboStatement } from "./comboStatement";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, filledAttemptEvents, historyFillsEmptyText, historyFillsHeading, historyQuotesHeading, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqHeading, matchedRfqMatchedCount, matchedRfqWatcherParked, collapseAttempts, visibleAttempts } from "./comboLockHistory";
-import { deskFillCounts } from "./comboTape";
+import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
@@ -406,7 +406,7 @@ function FillProgress({ desk, thin }) {
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
         <span style={{ color: "#8a8f98", fontWeight: 600 }} title="Remaining ceiling accumulates across RFQs — the next quote can only take what's left.">{thin ? "Fill" : "Real fills (Kalshi account)"}</span>
         <span className="num" style={{ color: fill.filled > 0 ? "#34d399" : "#6b7280" }}>
-          {fill.filled} of {fill.ceiling} filled · {fill.left} left{quoted > fill.filled ? ` · ${quoted} quoted` : ""}
+          {fill.filled} of {fill.ceiling}{overFillText(fill)} filled · {fill.left} left{quoted > fill.filled ? ` · ${quoted} quoted` : ""}
         </span>
       </div>
       <div className={thin ? "bar thin" : "bar"}><div className="bar-fill" style={{ width: fill.pct + "%" }} /></div>
@@ -592,6 +592,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [history, setHistory] = useState([]);
   const [archived, setArchived] = useState([]);
   const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
+  const filledSubsRef = useRef([]); // last confirmed-fill submissions (kept if a poll's query fails)
   const [quoted, setQuoted] = useState({});       // parlay_id -> contracts the worker quoted (from combo_submissions)
   const [realUnattr, setRealUnattr] = useState(0);// real combo fills we couldn't tie to a specific parlay
   const [matchCounts, setMatchCounts] = useState({}); // parlay_id -> { n, locks_n, dollar_n, last_match }
@@ -763,7 +764,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
         supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
-        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live").or("status.eq.filled,is_live.eq.true"),
+        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live,order_id,venue,created_at").or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
         // How many RFQs matched each parlay (from the read-only watcher).
         supabase.from("combo_match_counts").select("*"),
         // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
@@ -811,17 +812,23 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       const ocRows = takeList(ocRes);
       if (ocRows) setOutcomes(ocRows);
       const fillRows = takeList(fillsRes);
-      if (fillRows) {
-        const summed = deskFillCounts(fillRows, []);
-        setComboFills(fillRows);
-        setRealFills(summed.byParlay);
-        setRealUnattr(summed.unattributed);
-      }
+      if (fillRows) setComboFills(fillRows);
       const bookedRows = takeList(bookedRes);
       if (bookedRows) {
         const q = {};
         bookedRows.forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
         setQuoted(q);
+        // Confirmed-fill submissions (status=filled) fill the one gap combo_fills can have: a stamped
+        // order_id whose combo_fills row is still unattributed. Unwindowed on purpose — the per-lock
+        // History window (newest 400 rows) must not change the fill count between polls.
+        filledSubsRef.current = bookedRows.filter(isConfirmedFillSubmission);
+      }
+      // ONE fills write per poll, from combo_fills (+ confirmed submissions). It used to be written
+      // twice (fills only, then fills + a windowed submission sample) so the bar flipped every poll.
+      if (fillRows) {
+        const summed = deskFillCounts(fillRows, filledSubsRef.current);
+        setRealFills(summed.byParlay);
+        setRealUnattr(summed.unattributed);
       }
       const matchRows = takeList(mrowsRes);
       const mbp = {};
@@ -849,11 +856,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (livingSubsOk) {
         const subRows = mergeSubmissionRows(livingSubRows);
         setSubmissions(subRows);
-        const deskFills = fillRows ? deskFillCounts(fillRows, subRows) : null;
-        if (deskFills) {
-          setRealFills(deskFills.byParlay);
-          setRealUnattr(deskFills.unattributed);
-        }
         refreshSettlements({
           living: livingRows,
           archived: archivedForSubs,
