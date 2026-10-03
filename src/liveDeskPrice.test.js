@@ -22,6 +22,13 @@ import {
   deskErrorText,
   formatAmerican,
   toMicro,
+  takerAllIn,
+  takerGets,
+  formatTakerGets,
+  readFeeCoefficient,
+  takerLineForOrder,
+  takerLineForPosition,
+  takerLineForQuote,
 } from "./liveDeskPrice.js";
 
 assert.equal(DEFAULT_SIZE_DOLLARS, 25);
@@ -727,6 +734,87 @@ const GB_MARKET = {
   });
   assert.equal(viaIntent[0].instrumentNet, -4);
   assert.equal(viaIntent[0].cost, 1);
+}
+
+{
+  // Taker gets: Kevin buys Browns 75.5¢ → taker buys Steelers 24.5¢.
+  const info = takerGets({ outcomeMicro: 755000, action: "buy", ownName: "Browns", otherName: "Steelers" });
+  assert.equal(info.team, "Steelers");
+  assert.equal(info.coefficient, 0.0695);
+  assert.ok(Math.abs(info.takerPrice - 0.245) < 1e-9);
+  assert.equal(info.rawAmerican, 308);
+  assert.equal(info.allInAmerican, 288);
+  assert.ok(Math.abs(info.allInPrice - (0.245 + 0.0695 * 0.245 * 0.755)) < 1e-12);
+  assert.equal(info.feePer100.toFixed(2), "5.25");
+  assert.ok(Math.abs(info.makerRebatePerContract - 0.0125 * 0.245 * 0.755) < 1e-12);
+  assert.equal(formatTakerGets(info), "Taker gets Steelers +308 raw · +288 all-in · fee $5.25/$100");
+
+  // Sell: taker buys the same team at the resting price. Favorite pays a lower fee.
+  const sell = takerGets({ outcomeMicro: 755000, action: "sell", ownName: "Browns", otherName: "Steelers" });
+  assert.equal(sell.team, "Browns");
+  assert.equal(sell.rawAmerican, -308);
+  assert.equal(sell.allInAmerican, -331);
+  assert.equal(sell.feePer100.toFixed(2), "1.70");
+
+  // Coefficient from the market wins; junk falls back to 0.0695.
+  assert.equal(takerGets({ outcomeMicro: 755000, action: "buy", coefficient: 0.03 }).coefficient, 0.03);
+  for (const bad of [null, undefined, "", 0, -1, NaN, "x", 1.5]) {
+    assert.equal(takerGets({ outcomeMicro: 755000, action: "buy", coefficient: bad }).coefficient, 0.0695);
+  }
+  assert.equal(readFeeCoefficient({ feeCoefficient: 0.0695 }), 0.0695);
+  assert.equal(readFeeCoefficient({ fee_coefficient: "0.05" }), 0.05);
+  assert.equal(readFeeCoefficient({}), null);
+  assert.equal(readFeeCoefficient({ feeCoefficient: 0 }), null);
+
+  // Even money: p = 50¢ → fee $3.475 per $100, all-in 0.5173..
+  const even = takerAllIn(0.5);
+  assert.equal(even.rawAmerican, -100);
+  assert.equal(even.allInAmerican, -107);
+  assert.equal(even.feePer100.toFixed(2), "3.48");
+
+  // Edges return null instead of NaN.
+  assert.equal(takerAllIn(0), null);
+  assert.equal(takerAllIn(1), null);
+  assert.equal(takerGets({ outcomeMicro: 0, action: "buy" }), null);
+  assert.equal(takerGets({ outcomeMicro: 1000000, action: "buy" }), null);
+  assert.equal(takerGets({ outcomeMicro: null, action: "buy" }), null);
+
+  // Form preview through the real quote path (-308 snaps to a tick in his favor).
+  const quote = quoteRestingOrder({ american: "-308", outcome: "long", action: "buy", tick: 0.001, dollars: 25, minQty: 1 });
+  const line = takerLineForQuote(quote, { ownName: "Browns", otherName: "Steelers", coefficient: 0.0695 });
+  assert.match(line, /^Taker gets Steelers \+30\d raw · \+28\d all-in · fee \$5\.2\d\/\$100 · you pay no fee$/);
+  assert.equal(takerLineForQuote({ ok: false }, {}), "");
+
+  // Short-outcome order: Kevin buys the short team at 40¢ → taker buys the long team at 60¢.
+  const shortQuote = quoteRestingOrder({ american: "+150", outcome: "short", action: "buy", tick: 0.001, dollars: 25, minQty: 1 });
+  const shortLine = takerLineForQuote(shortQuote, { ownName: "Steelers", otherName: "Browns" });
+  assert.match(shortLine, /^Taker gets Browns -150 raw · -16\d all-in/);
+
+  // Open order row.
+  const [row] = mapOpenOrders({ orders: [{
+    id: "o1", marketSlug: "aec-nfl-cle-pit-2026-10-04", intent: "ORDER_INTENT_BUY_LONG", side: "ORDER_SIDE_BUY",
+    price: { value: "0.755" }, quantity: "10", state: "ORDER_STATE_OPEN",
+  }] }, { "aec-nfl-cle-pit-2026-10-04": { longName: "Browns", shortName: "Steelers", title: "Browns vs Steelers", feeCoefficient: 0.0695 } });
+  assert.equal(row.otherName, "Steelers");
+  assert.equal(row.feeCoefficient, 0.0695);
+  assert.equal(takerLineForOrder(row), "Taker gets Steelers +308 raw · +288 all-in · fee $5.25/$100 · you pay no fee");
+  assert.equal(takerLineForOrder({}), "");
+  assert.equal(takerLineForOrder(null), "");
+
+  // Position row: avg price stands in for the resting price.
+  const pos = positionView(
+    { slug: "aec-nfl-cle-pit-2026-10-04", instrumentNet: 10, net: 10, cost: 7.55, side: "long" },
+    { longName: "Browns", shortName: "Steelers", title: "Browns vs Steelers", feeCoefficient: 0.0695 },
+  );
+  assert.equal(pos.feeCoefficient, 0.0695);
+  assert.match(takerLineForPosition(pos), /^Taker gets Steelers \+308 raw · \+288 all-in · fee \$5\.25\/\$100 · at your avg$/);
+  assert.equal(takerLineForPosition({ team: "Browns", avgAmerican: "-308" }), "");
+  assert.equal(takerLineForPosition({ team: "Browns", longName: "Browns", shortName: "Steelers" }), "");
+
+  // readMarketSides carries the coefficient (null when absent → UI falls back).
+  const sidesMarket = { slug: "x", marketSides: [{ long: true, description: "Browns" }, { long: false, description: "Steelers" }], feeCoefficient: 0.0695 };
+  assert.equal(readMarketSides(sidesMarket).feeCoefficient, 0.0695);
+  assert.equal(readMarketSides({ ...sidesMarket, feeCoefficient: undefined }).feeCoefficient, null);
 }
 
 console.log("liveDeskPrice.test.js ok");

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
+import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace, takerLineForOrder, takerLineForPosition, takerLineForQuote } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
 import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
 import LiveDeskFilledOrders from "./LiveDeskFilledOrders";
@@ -211,6 +211,11 @@ function LiveTradingDeskView({ user }) {
     if (!quote || !quote.ok || !outcomeName) return null;
     return orderTicket(quote, outcomeName);
   }, [quote, outcomeName]);
+  const otherName = market ? plain(outcome === "short" ? market.longName : market.shortName, "") : "";
+  const takerLine = useMemo(
+    () => (quote && quote.ok ? takerLineForQuote(quote, { ownName: outcomeName, otherName, coefficient: market && market.feeCoefficient }) : ""),
+    [quote, outcomeName, otherName, market],
+  );
   const cross = useMemo(() => {
     if (!quote || !quote.ok) return null;
     return crossBlock({
@@ -663,6 +668,9 @@ function LiveTradingDeskView({ user }) {
                     ) : null}
                     {row.cost != null ? " · cost " + money(row.cost) : ""}
                   </div>
+                  {takerLineForPosition(row) ? (
+                    <div className="desk-taker-line" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#93c5fd", marginTop: 4 }}>{takerLineForPosition(row)}</div>
+                  ) : null}
                 </button>
                 {typeof row.slug === "string" && row.slug ? (
                   <button
@@ -837,6 +845,9 @@ function LiveTradingDeskView({ user }) {
                   <div id="desk-order-line" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 16, fontWeight: 800, lineHeight: 1.45 }}>
                     {ticket.line}
                   </div>
+                  {takerLine && (
+                    <div id="desk-taker-line" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "#93c5fd", marginTop: 6 }}>{takerLine}</div>
+                  )}
                   <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>
                     Buys floor the tick (you pay less). Sells ceil the tick (you receive more). A rest does not take liquidity unless Allow cross is checked.
                   </div>
@@ -905,6 +916,9 @@ function LiveTradingDeskView({ user }) {
                     {order.action === "sell" ? "Sell" : "Buy"} {plain(order.outcomeName, "")} {plain(order.americanLabel, "")}
                     {typeof order.quantity === "number" || typeof order.quantity === "string" ? " · " + order.quantity : ""}
                   </div>
+                  {takerLineForOrder(order) ? (
+                    <div className="desk-taker-line" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#93c5fd", marginTop: 4 }}>{takerLineForOrder(order)}</div>
+                  ) : null}
                   {order.protect && order.protect.on && (
                     <div style={{ fontSize: 11, color: "#93c5fd", marginTop: 4 }}>
                       Bet Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
