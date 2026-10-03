@@ -21,6 +21,8 @@ import {
   comboSettingsQueryOk,
   applyComboDeskPoll,
   buildParlayDesk,
+  shouldShowDeskFailure,
+  COMBO_DESK_RETRY_MS,
 } from "./comboDesk.js";
 
 // ── over-fill label ──
@@ -376,6 +378,29 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   assert.doesNotMatch(page, /livingRows = p \|\| \[\]/);
   assert.match(page, /if \(deskLoading \|\| !deskReady\) return;/);
   assert.match(page, /kill: deskReady && !deskLoading \? kill : false/);
+}
+
+// Banner policy: warn only after consecutive failed polls once the desk has loaded; surface a
+// never-loaded desk right away; never warn on success.
+{
+  assert.equal(shouldShowDeskFailure({ failed: false, streak: 5, hadReady: true }), false);
+  assert.equal(shouldShowDeskFailure({ failed: true, streak: 1, hadReady: true }), false);
+  assert.equal(shouldShowDeskFailure({ failed: true, streak: 2, hadReady: true }), true);
+  assert.equal(shouldShowDeskFailure({ failed: true, streak: 1, hadReady: false }), true);
+  assert.ok(COMBO_DESK_RETRY_MS > 0 && COMBO_DESK_RETRY_MS < 3000);
+  const page = readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
+  // Regression: #262 left a reference to a `deskFills` local that no longer existed. It threw a
+  // ReferenceError on EVERY poll after the locks loaded, which the catch reported as
+  // "Couldn't refresh locks / kill-switch" (flashing on each 20s poll).
+  assert.doesNotMatch(page, /\bdeskFills\b/);
+  assert.match(page, /filledById: summed \? summed\.byParlay : \{\}/);
+  // Secondary reads sit in their own try/catch so they can't raise the locks / kill-switch banner.
+  assert.match(page, /secondary desk refresh failed/);
+  // One retry of the locks / kill-switch reads, consecutive-failure banner, single-flight reload.
+  assert.match(page, /COMBO_DESK_RETRY_MS/);
+  assert.match(page, /shouldShowDeskFailure/);
+  assert.match(page, /reloadInflightRef/);
+  assert.match(page, /reloadAgainRef/);
 }
 
 console.log("comboDesk.test.js ok");
