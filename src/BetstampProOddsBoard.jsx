@@ -114,6 +114,7 @@ import {
   holdPolymarketOtbCells,
   withNovigQuotes,
   BETSTAMP_BOARD_PINNED_BOOK_KEYS,
+  gameStripeMap,
 } from "./betstampProBoard.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import { maskStaleOdds, maskedOddsReason } from "./oddsFreshness.js";
@@ -519,6 +520,9 @@ function ageTone(ms) {
 const NOB_THEME_VARS = {
   "--nob-bg": "#141414",
   "--nob-surface": "#181818",
+  // Every other game block (both lines of the game, GAME + BEST + book cells)
+  // paints this slightly lighter shade so back-to-back games read as separate.
+  "--nob-surface-alt": "#202020",
   "--nob-head": "#1f1f1f",
   "--nob-warm": "#221d1a",
   "--nob-chip": "#1f1f1f",
@@ -956,6 +960,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
   hiddenKeys,
   stackedBest,
   open,
+  stripe,
   dragging,
   dragOver,
   onOpenAlts,
@@ -974,6 +979,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
       data-game-paint={liveGamePaintKey(game)}
       data-drop-game={game.id}
       data-open-alts={open ? "1" : "0"}
+      data-stripe={stripe ? "1" : "0"}
       data-drag-over={dragOver ? "1" : "0"}
       data-dragging={dragging ? "1" : "0"}
       onClick={() => onOpenAlts(game)}
@@ -985,7 +991,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
       <td
         className="obb-game"
         data-hide-game-cell="true"
-        style={{ padding: 0, width: OBB_TEAM_COL_WIDTH, maxWidth: OBB_TEAM_COL_WIDTH, overflow: "hidden", position: "sticky", left: 0, background: "var(--nob-surface)", zIndex: 1, borderRight: "1px solid var(--nob-border)" }}
+        style={{ padding: 0, width: OBB_TEAM_COL_WIDTH, maxWidth: OBB_TEAM_COL_WIDTH, overflow: "hidden", position: "sticky", left: 0, background: "var(--obb-row-bg, var(--nob-surface))", zIndex: 1, borderRight: "1px solid var(--nob-border)" }}
       >
         <button
           type="button"
@@ -1045,6 +1051,7 @@ const OddsBoardGameRow = memo(function OddsBoardGameRow({
   && prev.market === next.market
   && prev.stackedBest === next.stackedBest
   && prev.open === next.open
+  && prev.stripe === next.stripe
   && prev.dragging === next.dragging
   && prev.dragOver === next.dragOver
   && prev.books === next.books
@@ -1816,6 +1823,10 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     g.is_live ? "Live now" : formatDateGroup(g.commence_time || Date.now())
   )), [orderedGames]);
 
+  // Zebra index among VISIBLE games only (grouped is already filtered by hide /
+  // search / LIVE), so hiding a game re-alternates the rest. Date headers don't reset it.
+  const stripeByGameId = useMemo(() => gameStripeMap(grouped), [grouped]);
+
   const visibleBooks = useMemo(
     () => [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))],
     [catalogBooks, selectedBooks],
@@ -2050,6 +2061,11 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
           outline: none;
         }
         .obb-grip:active { cursor: grabbing; }
+        /* Alternate game blocks. The row paints the shade across every cell
+           (book cells are transparent, so best-price greens still tint over
+           it) and the sticky GAME cell reads the same var so it never looks
+           mismatched while scrolling horizontally. */
+        .obb-grid tr[data-stripe="1"] { --obb-row-bg: var(--nob-surface-alt); background: var(--nob-surface-alt); }
         tr[data-drag-over="1"], th[data-drag-over="1"] {
           box-shadow: inset 0 2px 0 var(--nob-gold);
         }
@@ -2394,6 +2410,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
                     hiddenKeys={hiddenKeys}
                     stackedBest={stackedBest}
                     open={openGame?.id === game.id}
+                    stripe={stripeByGameId.get(game.id) === true}
                     dragging={dragging?.kind === "game" && String(dragging.key) === String(game.id)}
                     dragOver={dragOver?.kind === "game" && String(dragOver.key) === String(game.id)}
                     onOpenAlts={openAltsStable}
