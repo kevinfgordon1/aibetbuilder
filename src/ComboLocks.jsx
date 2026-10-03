@@ -610,7 +610,7 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
     sampleGame("26OCT07PITPHI", "PHI", "PIT", "Philadelphia", "Pittsburgh", NHL_SERIES, ["1.5", "2.5"], ["5.5", "6.5", "7.5"]),
   ],
 } };
-const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)" };
+const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)", prop: "Player props (MLB 1+ HR / NFL anytime TD)" };
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
 const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", kind: "cash", starts: "", label: "", labelEdited: false, sportsbook: "", boostPct: "" };
@@ -973,7 +973,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     return () => window.clearTimeout(t);
   }, [focusLockId, parlays, archived]);
 
-  const findMarket = (g, ticker, side) => { for (const t of ["side", "spread", "total"]) { const m = (g.markets[t] || []).find((x) => x.ticker === ticker && x.side === side); if (m) return { ...m, type: t }; } return null; };
+  const findMarket = (g, ticker, side) => { for (const t of ["side", "spread", "total", "prop"]) { const m = (g.markets[t] || []).find((x) => x.ticker === ticker && x.side === side); if (m) return { ...m, type: t }; } return null; };
   const readLegs = useCallback(() => legRows.map((r) => {
     if (!r.gameKey || !r.marketVal) return null;
     const [tk, side] = decValFn(r.marketVal); const g = gameIdx[r.gameKey]; const m = g && findMarket(g, tk, side);
@@ -1376,7 +1376,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
   const marketGroups = (gameKey, selVal) => {
     const g = gameIdx[gameKey]; if (!g) return null;
-    return ["side", "spread", "total"].map((t) => (g.markets[t] || []).length ? (
+    return ["side", "spread", "total", "prop"].map((t) => (g.markets[t] || []).length ? (
       <optgroup key={t} label={TYPE_LABEL[t]}>
         {g.markets[t].map((m) => { const v = encVal(m.ticker, m.side); return <option key={v} value={v}>{m.label}</option>; })}
       </optgroup>) : null);
@@ -1595,7 +1595,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             {prefillWarning && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
-                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF / NHL main lines). Fill those rows by hand, then save — nothing has been inserted yet.
+                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF / NHL main lines, MLB 1+ HR and NFL anytime-TD props). Fill those rows by hand, then save — nothing has been inserted yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
                 </ul>
