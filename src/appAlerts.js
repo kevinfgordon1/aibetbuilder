@@ -29,7 +29,23 @@ export function normalizeAppAlert(raw) {
     body: String(raw.body || ""),
     createdAt: raw.created_at || raw.createdAt || null,
     readAt: raw.read_at || raw.readAt || null,
+    resolvedAt: raw.resolved_at || raw.resolvedAt || null,
   };
+}
+
+// Kinds that routinely heal themselves. Once the worker marks one resolved the
+// banner (and bell badge) stop showing it; it stays in the bell history list.
+// Repeat / unrecovered stalls use a different kind (poly_ws_stall_escalated),
+// which keeps its warning banner until the worker resolves it.
+export const SELF_HEALING_KINDS = new Set(["poly_ws_stall"]);
+
+export function isSelfHealedAlert(a) {
+  return !!(a && SELF_HEALING_KINDS.has(a.kind) && a.resolvedAt);
+}
+
+// Alerts that deserve the banner / badge (everything except healed ones).
+export function bannerAlerts(list) {
+  return (Array.isArray(list) ? list : []).filter((a) => !isSelfHealedAlert(a));
 }
 
 // Newest first; unread only; severity does not reorder (recency wins).
@@ -62,7 +78,7 @@ export async function fetchUnreadAppAlerts(supabase, user) {
   try {
     const { data, error } = await supabase
       .from(APP_ALERTS_TABLE)
-      .select("id,kind,severity,title,body,created_at,read_at")
+      .select("id,kind,severity,title,body,created_at,read_at,resolved_at")
       .is("read_at", null)
       .order("created_at", { ascending: false })
       .limit(APP_ALERTS_LIMIT);
