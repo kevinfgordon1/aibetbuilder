@@ -1047,3 +1047,90 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(STRIKE_SNAP_MAX, 3);
   console.log("comboPrefill NHL tests passed");
 }
+
+// ── Player props: MLB 1+ HR and NFL anytime TD (REAL captured Kalshi events) ──
+{
+  const { readFileSync } = await import("node:fs");
+  const fx = JSON.parse(readFileSync(new URL("./fixtures-combo-props.json", import.meta.url), "utf8"));
+  const side = (series, key, a, b, aName, bName) => ({
+    event_ticker: `${series}-${key}`, title: `${aName} vs ${bName}`, sub_title: key,
+    markets: [{ ticker: `${series}-${key}-${a}`, yes_sub_title: aName }, { ticker: `${series}-${key}-${b}`, yes_sub_title: bName }],
+  });
+  const PNOW = Date.parse("2026-10-03T14:50:00Z");
+  const mlbGames = kalshiGames._helpers.groupSportGames({
+    side: [
+      side("KXMLBGAME", "26OCT031600ATLLAD", "ATL", "LAD", "Atlanta", "Los Angeles D"),
+      side("KXMLBGAME", "26OCT031300CWSCLE", "CWS", "CLE", "Chicago WS", "Cleveland"),
+      side("KXMLBGAME", "26OCT042000ATLLAD", "ATL", "LAD", "Atlanta", "Los Angeles D"),
+    ],
+    prop: fx.hr,
+  }, PNOW, { propKind: "hr" }).map((g) => ({ ...g, sport: "mlb" }));
+  const nflGames = kalshiGames._helpers.groupSportGames({
+    side: [side("KXNFLGAME", "26OCT04NEBUF", "NE", "BUF", "New England", "Buffalo")],
+    prop: fx.td,
+  }, PNOW, { propKind: "td" }).map((g) => ({ ...g, sport: "nfl" }));
+  const psports = { mlb: mlbGames, nfl: nflGames };
+  const hr = (name, game, commence) => ({ name, market: "HR", game, commence_time: commence, sport: "baseball_mlb" });
+  const td = (name, game, commence) => ({ name, market: "TD", game, commence_time: commence, sport: "americanfootball_nfl" });
+  const ATL = "Atlanta Braves @ Los Angeles Dodgers";
+  const CWS = "Chicago White Sox @ Cleveland Guardians";
+
+  // Kevin's screenshot: both HR legs map to the exact Kalshi 1+ tickers.
+  const shot = mapPromoLegsToKalshi([
+    hr("Matt Olson 1+ HR", ATL, "2026-10-03T20:08:00Z"),
+    hr("Munetaka Murakami 1+ HR", CWS, "2026-10-03T17:10:00Z"),
+  ], psports, PNOW);
+  assert.deepEqual(shot.unmatched, []);
+  assert.deepEqual(shot.rows, [
+    { gameKey: "26OCT031600ATLLAD", marketVal: encVal("KXMLBHR-26OCT031600ATLLAD-ATLMOLSON28-1", "yes") },
+    { gameKey: "26OCT031300CWSCLE", marketVal: encVal("KXMLBHR-26OCT031300CWSCLE-CWSMMURAKAMI5-1", "yes") },
+  ]);
+
+  // NFL anytime TD maps; accents/punctuation fold, the Jr./III suffix does not.
+  const nflOk = mapPromoLegsToKalshi([td("Josh Allen 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], psports, PNOW);
+  assert.deepEqual(nflOk.unmatched, []);
+  assert.equal(nflOk.rows[0].marketVal, encVal("KXNFLTD-26OCT04NEBUF-BUFJALLEN17-1", "yes"));
+  const cook = mapPromoLegsToKalshi([td("James Cook III 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], psports, PNOW);
+  assert.equal(cook.rows[0].marketVal, encVal("KXNFLTD-26OCT04NEBUF-BUFJCOOK4-1", "yes"));
+  const cookNoSuffix = mapPromoLegsToKalshi([td("James Cook 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], psports, PNOW);
+  assert.equal(cookNoSuffix.rows[0].marketVal, "");
+  assert.match(cookNoSuffix.unmatched[0].reason, /no anytime TD market for James Cook/);
+  assert.match(cookNoSuffix.unmatched[0].reason, /James Cook III — not an exact full-name match/);
+
+  // Strict skips: nothing is guessed.
+  const bad = (leg) => { const r = mapPromoLegsToKalshi([leg], psports, PNOW); assert.equal(r.rows[0].marketVal, ""); assert.equal(r.unmatched.length, 1); return r.unmatched[0].reason; };
+  assert.match(bad(hr("Matt Olson 2+ HR", ATL, "2026-10-03T20:08:00Z")), /only the 1\+ HR rung/);
+  assert.match(bad(hr("Matt Olsen 1+ HR", ATL, "2026-10-03T20:08:00Z")), /no 1\+ HR market for Matt Olsen on (ATL vs LAD|Atlanta vs Los Angeles D)/);
+  assert.match(bad(hr("Austin Riley 1+ HR", CWS, "2026-10-03T17:10:00Z")), /no 1\+ HR market for Austin Riley/); // right name, wrong game
+  assert.match(bad(hr("Matt Olson 1+ HR", ATL, "2026-10-04T20:08:00Z")), /no 1\+ HR markets listed yet/); // Game 2 has no HR event yet
+  assert.match(bad({ ...hr("Matt Olson 1+ HR", ATL, ""), commence_time: undefined }), /date could not be verified/);
+  assert.match(bad({ ...hr("Josh Allen 1+ HR", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z"), sport: "americanfootball_nfl" }), /HR props map only on MLB/);
+  assert.match(bad(td("Josh Allen 1+ HR", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")), /not a "<Player> 1\+ TD" leg/);
+  assert.match(bad({ ...td("BUF Bills D/ST 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z") }), /no anytime TD market/); // D/ST never listed
+  assert.match(bad({ name: "Matt Olson First HR", market: "HR", game: ATL, commence_time: "2026-10-03T20:08:00Z", sport: "baseball_mlb" }), /not a "<Player> 1\+ HR" leg/);
+  // Same-day wrong ET date: a Game-1 leg dated the next ET day must not borrow today's HR market.
+  assert.match(bad(hr("Matt Olson 1+ HR", ATL, "2026-10-05T01:00:00Z")), /date could not be verified|no matching|listed yet/);
+  // Two same-name players in one game: ambiguous -> skip.
+  const dupGames = JSON.parse(JSON.stringify(psports));
+  const dupProps = dupGames.mlb.find((g) => g.key === "26OCT031600ATLLAD").markets.prop;
+  dupProps.push({ ...dupProps.find((p) => p.player === "Matt Olson"), ticker: "KXMLBHR-26OCT031600ATLLAD-LADMOLSON99-1" });
+  const dup = mapPromoLegsToKalshi([hr("Matt Olson 1+ HR", ATL, "2026-10-03T20:08:00Z")], dupGames, PNOW);
+  assert.equal(dup.rows[0].marketVal, "");
+  assert.match(dup.unmatched[0].reason, /2 Kalshi 1\+ HR markets match/);
+  // Props are optional on a game: an older games payload with no `prop` key just skips.
+  const old = JSON.parse(JSON.stringify(psports));
+  old.mlb.forEach((g) => { delete g.markets.prop; });
+  assert.match(mapPromoLegsToKalshi([hr("Matt Olson 1+ HR", ATL, "2026-10-03T20:08:00Z")], old, PNOW).unmatched[0].reason, /no 1\+ HR markets listed yet/);
+
+  // Mixed parlay: a main-line leg and a prop leg both map.
+  const mixed = mapPromoLegsToKalshi([
+    { name: "Atlanta Braves", market: "ML", game: ATL, commence_time: "2026-10-03T20:08:00Z", sport: "baseball_mlb" },
+    hr("Matt Olson 1+ HR", ATL, "2026-10-03T20:08:00Z"),
+  ], psports, PNOW);
+  assert.deepEqual(mixed.unmatched, []);
+  assert.equal(mixed.rows[0].marketVal, encVal("KXMLBGAME-26OCT031600ATLLAD-ATL", "yes"));
+
+  // Saved prop leg carries the exact label the combo-worker's Polymarket crosswalk verifies.
+  assert.equal(psports.mlb.find((g) => g.key === "26OCT031600ATLLAD").markets.prop.find((p) => p.player === "Matt Olson").label, "Matt Olson: 1+");
+  console.log("comboPrefill player-prop tests passed");
+}
