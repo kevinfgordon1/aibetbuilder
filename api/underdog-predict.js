@@ -33,6 +33,21 @@ function queryLive(req) {
   return raw === '1' || raw === 'true';
 }
 
+function queryParam(req, name) {
+  let raw = '';
+  if (req && req.query && req.query[name] != null) {
+    raw = Array.isArray(req.query[name]) ? req.query[name].join(',') : String(req.query[name]);
+  }
+  if (!raw && req && req.url) {
+    try { raw = new URL(req.url, 'http://localhost').searchParams.get(name) || ''; } catch (_) { raw = ''; }
+  }
+  return raw;
+}
+
+// ?fresh=1 (with live=1) is the odds relay's single shared poller: 1s edge
+// bust bucket and 1s memory cache instead of 5s / 5s. ?sport=NCAAF[,NFL]
+// polls just those leagues (4 Underdog requests per sport on the first poll,
+// 3 after, instead of 16 for all four sports).
 async function handler(req, res, deps) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -48,7 +63,11 @@ async function handler(req, res, deps) {
   }
   try {
     const live = deps && Object.prototype.hasOwnProperty.call(deps, 'live') ? !!deps.live : queryLive(req);
-    const result = await fetchUnderdogPhone({ ...(deps || {}), live });
+    const fresh = deps && Object.prototype.hasOwnProperty.call(deps, 'fresh')
+      ? !!deps.fresh
+      : ['1', 'true'].includes(queryParam(req, 'fresh'));
+    const sports = deps && deps.sports != null ? deps.sports : queryParam(req, 'sport');
+    const result = await fetchUnderdogPhone({ ...(deps || {}), live, fresh, sports });
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Underdog-Cache', result.cacheStatus || 'MISS');
     res.status(200).json({
