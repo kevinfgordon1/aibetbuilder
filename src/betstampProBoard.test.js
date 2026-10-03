@@ -116,6 +116,15 @@ const board = readFileSync(new URL("./BetstampProOddsBoard.jsx", import.meta.url
 assert.ok(!/betstampStreamUrl|\/api\/betstamp-stream/.test(board.replace(/\/\/.*$/gm, "")), "no Betstamp SSE in the board");
 assert.match(board, /className="nob-theme"/);
 
+// Zebra stripes: every other GAME block (both lines) paints --nob-surface-alt
+// across the whole row, and the sticky GAME cell reads the same row var.
+assert.match(board, /"--nob-surface-alt": "#[0-9a-f]{6}"/);
+assert.match(board, /stripeByGameId/);
+assert.match(board, /data-stripe=\{stripe \? "1" : "0"\}/);
+assert.match(board, /\.obb-grid tr\[data-stripe="1"\] \{ --obb-row-bg: var\(--nob-surface-alt\); background: var\(--nob-surface-alt\); \}/);
+assert.match(board, /left: 0, background: "var\(--obb-row-bg, var\(--nob-surface\)\)", zIndex: 1/);
+assert.match(board, /prev\.stripe === next\.stripe/);
+
 // App wiring: tab hidden and body gated.
 const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
 assert.match(app, /canSeeBetstampOddsBoard\(user\) && \(\s*<a[^>]*betstampBoard/);
