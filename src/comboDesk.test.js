@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   remainingFill,
+  overFillText,
   quotingState,
   tapeNoPrice,
   formatCents,
@@ -21,6 +22,14 @@ import {
   applyComboDeskPoll,
   buildParlayDesk,
 } from "./comboDesk.js";
+
+// ── over-fill label ──
+{
+  assert.equal(overFillText({ filled: 1309.48, ceiling: 1251 }), " (+58.48 over)");
+  assert.equal(overFillText({ filled: 1251, ceiling: 1251 }), "");
+  assert.equal(overFillText({ filled: 10, ceiling: 100 }), "");
+  assert.equal(overFillText({ filled: 5, ceiling: 0 }), "");
+}
 
 // ── remaining fill (ceilings accumulate; leftover is what the next RFQ can take) ──
 {

@@ -752,12 +752,14 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   const merged = mergeSubmissionFillCounts({}, [{
     parlay_id: "p-sea",
     order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    status: "filled",
     contracts: 105,
   }], [unattr]);
   assert.equal(merged["p-sea"], 98, "unattributed Kalshi fill + stamped quote → lock uses fill count");
   const desk = deskFillCounts([unattr], [{
     parlay_id: "p-sea",
     order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    status: "filled",
     contracts: 105,
   }]);
   assert.equal(desk.byParlay["p-sea"], 98);
@@ -765,9 +767,49 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   const fromSubOnly = deskFillCounts([], [{
     parlay_id: "p-sea",
     order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    status: "filled",
     contracts: 105,
   }]);
   assert.equal(fromSubOnly.byParlay["p-sea"], 105);
+  const quotedOnly = deskFillCounts([], [{
+    parlay_id: "p-sea",
+    order_id: "01a081a8-4a08-7823-a57f-2273007cd403",
+    status: "unfilled",
+    is_live: true,
+    contracts: 105,
+  }]);
+  assert.equal(quotedOnly.byParlay["p-sea"], undefined, "a posted quote is not a fill");
+}
+
+// Padres+Yankees+Dodgers (9816381e…): 11 real fills = 1309.48. Six Poly quote rows
+// (status unfilled, order_id set, RFQ-size contracts) used to be added on top
+// (+444 visible → the 1753.48 on screen). Only confirmed fills count.
+{
+  const pid = "9816381e-9812-470a-bbd4-b01d95043f58";
+  const kal = [451.67, 74.48, 32.58, 18.62, 232.77].map((c, i) => ({
+    fill_id: "k-fill-" + i, order_id: "k-ord-" + i, parlay_id: pid, count: c, no_price: 0.899, yes_price: 0.101,
+  }));
+  const poly = [["CVRGEVAFJYHR", 91.61], ["CVRQAT2DRYHR", 4.54], ["CVSBS6S7GYHR", 27.47], ["CVSTCZNNGYHR", 274.94], ["CVSW2CX04YHR", 9.19], ["CVT7SFW46YHR", 91.61]]
+    .map(([id, c]) => ({ fill_id: "poly-act:" + id, order_id: id, parlay_id: pid, count: c, raw: { venue: "polymarket", source: "poly-activity" } }));
+  const quoteRows = [["CVR62X6KJYG6", 101], ["CVRCKF3G2YHC", 5], ["CVS1S31E0YH0", 30], ["CVSGHA8F6YH8", 303], ["CVSJ8B9DJYG6", 10], ["CVSWZSYWYYG6", 101]]
+    .map(([id, c]) => ({ parlay_id: pid, order_id: id, venue: "polymarket", status: "unfilled", is_live: true, contracts: c }));
+  const fills = [...kal, ...poly];
+  const round = (n) => Math.round(n * 100) / 100;
+  assert.equal(round(deskFillCounts(fills, []).byParlay[pid]), 1309.48);
+  assert.equal(round(deskFillCounts(fills, quoteRows).byParlay[pid]), 1309.48, "quote rows never add");
+  // Any subset/window of the quote rows gives the same figure (no flicker).
+  for (let mask = 0; mask < 64; mask++) {
+    const sub = quoteRows.filter((_, i) => mask & (1 << i));
+    assert.equal(round(deskFillCounts(fills, sub).byParlay[pid]), 1309.48);
+  }
+  // A filled Poly submission (original order id) whose poly-act twin is booked is counted once.
+  const filledPoly = { parlay_id: pid, order_id: "ORIG-ORDER", venue: "polymarket", status: "filled", is_live: true, contracts: 101 };
+  assert.equal(round(deskFillCounts(fills, [filledPoly]).byParlay[pid]), 1309.48, "poly-act twin is not double-counted");
+  // ...but with no booked twin it is still a fill.
+  assert.equal(round(deskFillCounts(kal, [filledPoly]).byParlay[pid]), round(810.12 + 101));
+  // The same twin cannot be claimed twice.
+  const two = [filledPoly, { ...filledPoly, order_id: "ORIG-ORDER-2" }];
+  assert.equal(round(deskFillCounts([poly[5]], two).byParlay[pid]), round(91.61 + 101), "one twin claimed, one real");
 }
 
 // Bears+LAR+DET (parlay a87432ad…): 4 Kalshi trades each booked twice.
@@ -829,6 +871,8 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   assert.match(locks, /FillProgress/);
   assert.match(locks, /buildParlayDesk/);
   assert.match(locks, /deskFillCounts/);
+  assert.equal((locks.match(/setRealFills\(/g) || []).length, 1, "one fills write per poll (two writes flipped the bar)");
+  assert.match(locks, /overFillText\(fill\)/);
   assert.doesNotMatch(locks, /fillRows\.forEach\(\(f\) => \{ const c = Number\(f\.count \|\| 0\)/);
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /Miss tape/);

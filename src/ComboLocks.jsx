@@ -26,7 +26,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, overFillText, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
@@ -34,10 +34,11 @@ import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAb
 import { buildComboStatement } from "./comboStatement";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, filledAttemptEvents, historyFillsEmptyText, historyFillsHeading, historyQuotesHeading, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqHeading, matchedRfqMatchedCount, matchedRfqWatcherParked, collapseAttempts, visibleAttempts } from "./comboLockHistory";
-import { deskFillCounts } from "./comboTape";
+import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
+import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT, bucketReadoutRows, bucketAgeLabel } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
 import {
@@ -102,6 +103,69 @@ const QUOTE_CHIP = {
   kill: { bg: "rgba(239,68,68,.18)", color: "#fca5a5", mark: "⛔ ", title: "Kill-switch engaged — the live worker posts nothing." },
   ceiling: { bg: "rgba(139,92,246,.22)", color: "#c4b5fd", mark: "", title: "Ceiling reached — remaining fill is 0, so the worker stopped quoting this combo." },
 };
+// Per-lock pause: off = the worker stops quoting this lock (Kalshi + Polymarket) and cancels its
+// open quotes. Independent of the kill switch. Fills/history are kept.
+function PauseToggle({ parlay, onToggle, busy }) {
+  const paused = isLockPaused(parlay);
+  return (
+    <span className="pl-keep pause-wrap" title={pauseToggleTitle(paused)}>
+      <span className="pause-lbl">{paused ? "Paused" : "Quoting"}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!paused}
+        aria-label={(paused ? "Resume quoting " : "Pause quoting ") + (parlay.label || "lock")}
+        className={"pause-sw" + (paused ? "" : " on")}
+        disabled={busy}
+        onClick={(e) => { e.stopPropagation(); onToggle(parlay.id, !paused); }}
+      ><span className="knob" /></button>
+    </span>
+  );
+}
+function PausedBadge({ parlay }) {
+  if (!isLockPaused(parlay)) return null;
+  return <span className="chip pl-keep paused-badge" title="Paused: the worker is not quoting this lock on Kalshi or Polymarket. Fills and history are kept.">Paused</span>;
+}
+
+// Read-only Kalshi balances from the combo-worker bucket snapshot (owner only, via /api/combo-bucket).
+// Kalshi's app shows main + combo combined; this splits them.
+function BucketReadout({ supabase, ready }) {
+  const [bucket, setBucket] = useState(null);
+  useEffect(() => {
+    if (!ready) return undefined;
+    let alive = true;
+    const load = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session && session.access_token;
+        if (!token) return;
+        const r = await fetch("/api/combo-bucket", { headers: { accept: "application/json", authorization: "Bearer " + token } });
+        const j = await r.json().catch(() => null);
+        if (alive) setBucket(r.ok && j && j.ok ? j.bucket : null);
+      } catch (_) { /* readout is optional; keep the last value */ }
+    };
+    load();
+    const t = window.setInterval(load, 30000);
+    return () => { alive = false; window.clearInterval(t); };
+  }, [supabase, ready]);
+  const rows = bucketReadoutRows(bucket);
+  if (!rows.length) return null;
+  const age = bucketAgeLabel(bucket);
+  return (
+    <div className="bucket-readout num" aria-label="Kalshi balances">
+      {rows.map((r) => (
+        <span className="bk" key={r.key} title={r.tip}>
+          <span className="bk-l">{r.label}</span>
+          <span className="bk-v">{r.value}</span>
+          <span className="bk-s">{r.sub}</span>
+        </span>
+      ))}
+      <span className={"bk-age" + (bucket.stale ? " stale" : "")} title="Kalshi's app shows Main + Combo combined. Updated by the combo-worker heartbeat.">
+        {bucket.stale ? "stale · " : ""}{age}
+      </span>
+    </div>
+  );
+}
 function CopyLockLink({ lockId }) {
   const [status, setStatus] = useState("");
   if (!lockId) return null;
@@ -406,7 +470,7 @@ function FillProgress({ desk, thin }) {
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
         <span style={{ color: "#8a8f98", fontWeight: 600 }} title="Remaining ceiling accumulates across RFQs — the next quote can only take what's left.">{thin ? "Fill" : "Real fills (Kalshi account)"}</span>
         <span className="num" style={{ color: fill.filled > 0 ? "#34d399" : "#6b7280" }}>
-          {fill.filled} of {fill.ceiling} filled · {fill.left} left{quoted > fill.filled ? ` · ${quoted} quoted` : ""}
+          {fill.filled} of {fill.ceiling}{overFillText(fill)} filled · {fill.left} left{quoted > fill.filled ? ` · ${quoted} quoted` : ""}
         </span>
       </div>
       <div className={thin ? "bar thin" : "bar"}><div className="bar-fill" style={{ width: fill.pct + "%" }} /></div>
@@ -592,6 +656,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [history, setHistory] = useState([]);
   const [archived, setArchived] = useState([]);
   const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
+  const filledSubsRef = useRef([]); // last confirmed-fill submissions (kept if a poll's query fails)
   const [quoted, setQuoted] = useState({});       // parlay_id -> contracts the worker quoted (from combo_submissions)
   const [realUnattr, setRealUnattr] = useState(0);// real combo fills we couldn't tie to a specific parlay
   const [matchCounts, setMatchCounts] = useState({}); // parlay_id -> { n, locks_n, dollar_n, last_match }
@@ -763,7 +828,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
         supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
-        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live").or("status.eq.filled,is_live.eq.true"),
+        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live,order_id,venue,created_at").or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
         // How many RFQs matched each parlay (from the read-only watcher).
         supabase.from("combo_match_counts").select("*"),
         // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
@@ -811,17 +876,23 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       const ocRows = takeList(ocRes);
       if (ocRows) setOutcomes(ocRows);
       const fillRows = takeList(fillsRes);
-      if (fillRows) {
-        const summed = deskFillCounts(fillRows, []);
-        setComboFills(fillRows);
-        setRealFills(summed.byParlay);
-        setRealUnattr(summed.unattributed);
-      }
+      if (fillRows) setComboFills(fillRows);
       const bookedRows = takeList(bookedRes);
       if (bookedRows) {
         const q = {};
         bookedRows.forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
         setQuoted(q);
+        // Confirmed-fill submissions (status=filled) fill the one gap combo_fills can have: a stamped
+        // order_id whose combo_fills row is still unattributed. Unwindowed on purpose — the per-lock
+        // History window (newest 400 rows) must not change the fill count between polls.
+        filledSubsRef.current = bookedRows.filter(isConfirmedFillSubmission);
+      }
+      // ONE fills write per poll, from combo_fills (+ confirmed submissions). It used to be written
+      // twice (fills only, then fills + a windowed submission sample) so the bar flipped every poll.
+      if (fillRows) {
+        const summed = deskFillCounts(fillRows, filledSubsRef.current);
+        setRealFills(summed.byParlay);
+        setRealUnattr(summed.unattributed);
       }
       const matchRows = takeList(mrowsRes);
       const mbp = {};
@@ -849,11 +920,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (livingSubsOk) {
         const subRows = mergeSubmissionRows(livingSubRows);
         setSubmissions(subRows);
-        const deskFills = fillRows ? deskFillCounts(fillRows, subRows) : null;
-        if (deskFills) {
-          setRealFills(deskFills.byParlay);
-          setRealUnattr(deskFills.unattributed);
-        }
         refreshSettlements({
           living: livingRows,
           archived: archivedForSubs,
@@ -1237,6 +1303,20 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     await supabase.from("combo_parlays").update({ active: true }).eq("id", id);
     reload();
   };
+  // Per-lock pause. Persisted in combo_parlays.paused; combo-worker polls it (~5s). Owner RLS applies.
+  const [pauseBusy, setPauseBusy] = useState({});
+  const setParlayPaused = async (id, paused) => {
+    setPauseBusy((b) => ({ ...b, [id]: true }));
+    setParlays((prev) => prev.map((p) => (p.id === id ? { ...p, paused } : p)));
+    const { error } = await supabase.from("combo_parlays").update(pauseUpdate(paused)).eq("id", id);
+    setPauseBusy((b) => { const n = { ...b }; delete n[id]; return n; });
+    if (error) {
+      setMergeError(isMissingPausedColumn(error) ? PAUSE_SQL_HINT : "Could not " + (paused ? "pause" : "resume") + " that lock: " + error.message);
+    } else {
+      setMergeError("");
+    }
+    reload();
+  };
   const toggleKill = async () => {
     if (deskLoading || !deskReady) return;
     const next = !kill;
@@ -1377,6 +1457,20 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .hist-sub{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;margin:12px 0 6px}
         .cl .hist-sub:first-child{margin-top:0}
         .cl .hist-rpt{display:inline-block;margin-left:6px;color:#9aa3b2;font-weight:600;white-space:nowrap}
+        .cl .pause-wrap{display:inline-flex;align-items:center;gap:6px}
+        .cl .pause-lbl{font-size:11px;font-weight:600;color:#8a8f98}
+        .cl .pause-sw{position:relative;width:32px;height:18px;border-radius:999px;background:#3a3d46;cursor:pointer;border:none;padding:0}
+        .cl .pause-sw .knob{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .15s}
+        .cl .pause-sw.on{background:#10b981}.cl .pause-sw.on .knob{left:16px}
+        .cl .pause-sw:disabled{opacity:.5;cursor:wait}
+        .cl .chip.paused-badge{background:rgba(245,158,11,.18);color:#fcd34d}
+        .cl .parlay.paused{border-style:dashed}
+        .cl .parlay.paused > *:not(.plhead){opacity:.45}
+        .cl .parlay.paused .plhead > *:not(.pl-keep):not(.btn){opacity:.5}
+        .cl .bucket-readout{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:0 0 12px;padding:7px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.02);font-size:13px}
+        .cl .bucket-readout .bk{display:inline-flex;align-items:baseline;gap:5px;cursor:default}
+        .cl .bk-l{color:#c3c6cc;font-weight:600}.cl .bk-v{font-weight:700}.cl .bk-s{font-size:11px;color:#6b7280}
+        .cl .bk-age{margin-left:auto;font-size:11px;color:#6b7280}.cl .bk-age.stale{color:#fcd34d}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
@@ -1395,6 +1489,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         <span style={{ fontSize: 13, color: "#8a8f98", fontWeight: 600 }}>Kill-switch</span>
         <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
       </div>
+      <BucketReadout supabase={supabase} ready={deskReady} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
@@ -1423,8 +1518,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       {mergeError && <div className="note warn" style={{ marginBottom: 10 }}>{mergeError}</div>}
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {waitingKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : waitingKind === "empty" ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
-          <div className="parlay" key={p.id} id={"lock-" + p.id}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <div className={"parlay" + (isLockPaused(p) ? " paused" : "")} key={p.id} id={"lock-" + p.id}>
+            <div className="plhead" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
               <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
               <span style={{ fontWeight: 700 }}>{p.label}</span>
               <QuoteChip quote={(deskByParlay[p.id] || {}).quote} />
@@ -1432,7 +1527,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               <StakeOddsChip parlay={p} />
               <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
               <TakerFairChips parlay={p} />
+              <PausedBadge parlay={p} />
               <span style={{ flex: 1 }} />
+              <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
               <CopyLockLink lockId={p.id} />
               {p.active === false && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
               <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history — the worker stops watching it">Move to history</button>
@@ -1460,8 +1557,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         ) : filledParlays.map((p) => {
           const desk = deskByParlay[p.id];
           return (
-            <div className="parlay" key={p.id} id={"lock-" + p.id}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <div className={"parlay" + (isLockPaused(p) ? " paused" : "")} key={p.id} id={"lock-" + p.id}>
+              <div className="plhead" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                 <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
                 <span style={{ fontWeight: 700 }}>{p.label}</span>
                 <OutcomeChip out={lockOutcome(p, desk && desk.fill.filled)} filled />
@@ -1469,7 +1566,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <StakeOddsChip parlay={p} />
                 <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
                 <TakerFairChips parlay={p} />
+                <PausedBadge parlay={p} />
                 <span style={{ flex: 1 }} />
+                <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
                 <CopyLockLink lockId={p.id} />
                 {p.active === false && desk && desk.fill.left > 0 && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
                 <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history now">Move to history</button>

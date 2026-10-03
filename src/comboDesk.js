@@ -32,6 +32,15 @@ export function remainingFill({ filled = 0, ceiling = 0 } = {}) {
   return { filled: real, ceiling: cap, left, pct };
 }
 
+// "(+58.48 over)" when real fills exceeded the ceiling; "" otherwise.
+export function overFillText({ filled = 0, ceiling = 0 } = {}) {
+  const real = toNum(filled) || 0;
+  const cap = toNum(ceiling) || 0;
+  const over = Math.round((real - cap) * 100) / 100;
+  if (cap <= 0 || over <= 0) return "";
+  return ` (+${over} over)`;
+}
+
 // Precedence: ceiling (done quoting) > kill-switch > worker paused > watching.
 export function quotingState({ active, kill, filled, ceiling } = {}) {
   const rem = remainingFill({ filled, ceiling });
