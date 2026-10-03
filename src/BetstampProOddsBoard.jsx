@@ -78,7 +78,13 @@ import {
   novigStreamUrl,
   venueQuotesToMarkets,
   betstampRelayStreamUrl,
+  underdogRelayStreamUrl,
 } from "./venueLive.js";
+import {
+  UNDERDOG_RELAY_SILENT_MS,
+  underdogRelayFresh,
+  createUnderdogBook,
+} from "./underdogRelayStream.js";
 import {
   RELAY_SILENT_MS,
   RELAY_TICK_APPLY_MS,
@@ -1398,9 +1404,22 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     const ctrl = new AbortController();
     let cancelled = false;
     let inFlight = false;
+    // LIVE: the odds relay pushes Underdog (one shared ~2s poll). While that
+    // stream is fresh the 10s poll below stands down; the moment it is down,
+    // refused or silent for UNDERDOG_RELAY_SILENT_MS the poll resumes.
+    const relayUrl = liveOnly && ["NFL", "NCAAF", "MLB"].includes(league) ? underdogRelayStreamUrl({ league }) : null;
+    let relayLastAt = 0;
+    let relayConn = null;
+    const relayFresh = () => !!relayUrl && underdogRelayFresh(relayLastAt, Date.now(), UNDERDOG_RELAY_SILENT_MS);
+    const applyPhone = (phone) => {
+      phoneRef.current = phone;
+      if (cancelled || !gamesRef.current.length) return;
+      commitGames(withUnderdogPhone(gamesRef.current, phoneRef.current, league));
+    };
     const load = async () => {
       if (inFlight || cancelled) return;
       if (typeof document !== "undefined" && document.visibilityState === "hidden" && phoneRef.current) return;
+      if (phoneRef.current && relayFresh()) return;
       inFlight = true;
       try {
         const body = await fetchUnderdogPhone((url, init) => fetch(url, {
@@ -1421,6 +1440,58 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     };
     load();
     const timer = setInterval(load, liveOnly ? BETSTAMP_BOARD_UNDERDOG_LIVE_POLL_MS : BETSTAMP_BOARD_UNDERDOG_POLL_MS);
+    // Underdog via the relay. One connection per tab; reconnects with backoff.
+    const relayTimers = [];
+    let relayWatch = null;
+    const runRelay = async () => {
+      if (!relayUrl || cancelled) return;
+      let attempt = 0;
+      while (!cancelled && !ctrl.signal.aborted) {
+        const conn = new AbortController();
+        relayConn = conn;
+        const onAbort = () => conn.abort();
+        ctrl.signal.addEventListener("abort", onAbort);
+        const book = createUnderdogBook();
+        const startedAt = Date.now();
+        try {
+          await consumeBetstampStream({
+            url: relayUrl,
+            signal: conn.signal,
+            onEvent: (ev) => {
+              if (cancelled) return;
+              const out = book.apply(ev.data);
+              if (out.kind === "ignore" || out.kind === "error") return;
+              if (out.kind === "gap") { conn.abort(); return; }
+              relayLastAt = Date.now();
+              attempt = 0;
+              if (out.changed) applyPhone(book.payload());
+            },
+          });
+        } catch {
+          if (cancelled || ctrl.signal.aborted) { ctrl.signal.removeEventListener("abort", onAbort); return; }
+        }
+        ctrl.signal.removeEventListener("abort", onAbort);
+        if (relayConn === conn) relayConn = null;
+        if (cancelled || ctrl.signal.aborted) return;
+        // A stream that ends right after opening (relay restarting, 400 / 503)
+        // backs off so a tab never hammers the relay.
+        const lived = Date.now() - startedAt;
+        const wait = lived > 5000 ? 250 : Math.max(nextBackoffMs(attempt), 1000);
+        attempt += 1;
+        await new Promise((resolve) => { relayTimers.push(setTimeout(resolve, wait)); });
+      }
+    };
+    if (relayUrl) {
+      runRelay();
+      // Silent relay: drop the connection so it reconnects, poll right away.
+      relayWatch = setInterval(() => {
+        if (cancelled || !relayLastAt) return;
+        if (Date.now() - relayLastAt < UNDERDOG_RELAY_SILENT_MS) return;
+        relayLastAt = 0;
+        if (relayConn) relayConn.abort();
+        load();
+      }, 2000);
+    }
     // Tab visible again: refresh Underdog now instead of on the next tick.
     const onVisible = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") load();
@@ -1430,6 +1501,8 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
       cancelled = true;
       ctrl.abort();
       clearInterval(timer);
+      if (relayWatch) clearInterval(relayWatch);
+      relayTimers.forEach((t) => clearTimeout(t));
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
     };
   }, [boardSport, liveOnly, boardRefreshKey]);
