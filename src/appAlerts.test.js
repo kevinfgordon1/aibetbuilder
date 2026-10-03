@@ -7,6 +7,8 @@ import {
   bellLabel,
   fetchUnreadAppAlerts,
   markAppAlertsRead,
+  isSelfHealedAlert,
+  bannerAlerts,
 } from "./appAlerts.js";
 import { OWNER_EMAIL, KENNETH_GUIDO_EMAIL } from "./comboAccess.js";
 
@@ -77,6 +79,28 @@ assert.deepEqual(await fetchUnreadAppAlerts(fakeSupabase({ throws: true }), kevi
   assert.equal(await markAppAlertsRead(sb2, kevin, []), false);
   assert.deepEqual(sb2.calls, []);
   assert.equal(await markAppAlertsRead(fakeSupabase({ error: { message: "x" } }), kevin, ["a"]), false);
+}
+
+{
+  const mk = (o) => normalizeAppAlert({ id: o.id, title: "T", created_at: "2026-10-03T05:00:00Z", ...o });
+  const healed = mk({ id: "h", kind: "poly_ws_stall", severity: "info", resolved_at: "2026-10-03T05:00:01Z" });
+  const healedWarnLegacy = mk({ id: "hw", kind: "poly_ws_stall", severity: "warn", resolved_at: "2026-10-03T05:00:01Z" });
+  const open = mk({ id: "o", kind: "poly_ws_stall", severity: "info" });
+  const esc = mk({ id: "e", kind: "poly_ws_stall_escalated", severity: "warn" });
+  const escResolved = mk({ id: "er", kind: "poly_ws_stall_escalated", severity: "warn", resolved_at: "2026-10-03T06:00:00Z" });
+  const lowCashResolved = mk({ id: "l", kind: "combo_low_cash", severity: "warn", resolved_at: "2026-10-03T05:00:01Z" });
+  assert.equal(healed.resolvedAt, "2026-10-03T05:00:01Z");
+  assert.equal(isSelfHealedAlert(healed), true, "resolved stall auto-hides");
+  assert.equal(isSelfHealedAlert(healedWarnLegacy), true, "old warn-severity resolved stalls hide too");
+  assert.equal(isSelfHealedAlert(open), false, "an unrecovered stall stays");
+  assert.equal(isSelfHealedAlert(esc), false, "escalation (repeat/unrecovered) keeps its banner");
+  assert.equal(isSelfHealedAlert(lowCashResolved), false, "other kinds are untouched");
+  assert.deepEqual(bannerAlerts([healed, healedWarnLegacy, open, esc, escResolved, lowCashResolved]).map((a) => a.id), ["o", "e", "er", "l"]);
+  assert.deepEqual(bannerAlerts(null), []);
+  const sb = fakeSupabase({ data: [{ id: "h", title: "T", kind: "poly_ws_stall", resolved_at: "2026-10-03T05:00:01Z" }] });
+  const got = await fetchUnreadAppAlerts(sb, kevin);
+  assert.equal(got.length, 1, "history keeps the resolved row (read_at null)");
+  assert.equal(got[0].resolvedAt, "2026-10-03T05:00:01Z");
 }
 
 console.log("appAlerts.test.js ok");

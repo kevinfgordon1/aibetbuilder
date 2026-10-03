@@ -2,6 +2,7 @@ import { Component, useCallback, useEffect, useRef, useState } from "react";
 import {
   APP_ALERTS_POLL_MS,
   alertAgeLabel,
+  bannerAlerts,
   bellLabel,
   canSeeAppAlerts,
   fetchUnreadAppAlerts,
@@ -45,20 +46,25 @@ export function useAppAlerts(supabase, user, { initial = null } = {}) {
     if (!ok) refresh();
   }, [supabase, user && user.id, refresh]);
 
-  return { alerts: allowed ? alerts : [], dismiss, refresh, allowed };
+  // alerts = full unread history (bell panel); visible = banner/badge set
+  // (self-healed stall alerts that the worker already resolved are left out).
+  const all = allowed ? alerts : [];
+  return { alerts: all, visible: bannerAlerts(all), dismiss, refresh, allowed };
 }
 
 export function AppAlertsBell({ state, open, onToggle }) {
   if (!state.allowed) return null;
-  const n = state.alerts.length;
+  const visible = state.visible || state.alerts;
+  const n = visible.length;
+  const history = state.alerts.length - n;
   const label = bellLabel(n);
   return (
     <button
       type="button"
       onClick={onToggle}
-      aria-label={n ? `${n} unread alerts` : "Alerts"}
+      aria-label={n ? `${n} unread alerts` : (history ? `Alerts (${history} resolved)` : "Alerts")}
       aria-expanded={open}
-      title={n ? `${n} unread alert${n === 1 ? "" : "s"}` : "No unread alerts"}
+      title={n ? `${n} unread alert${n === 1 ? "" : "s"}` : (history ? `No active alerts (${history} self-resolved in history)` : "No unread alerts")}
       data-testid="app-alerts-bell"
       style={{
         position: "relative", background: open ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.06)",
@@ -106,18 +112,20 @@ function AlertRow({ a, onDismiss, now }) {
 // Banner under the header: newest unread alerts (up to `max`), each dismissible.
 // The bell panel (open) shows all of them.
 export function AppAlertsBanner({ state, open, max = 3, now = Date.now() }) {
-  if (!state.allowed || !state.alerts.length) return null;
-  const shown = open ? state.alerts : state.alerts.slice(0, max);
-  const hidden = state.alerts.length - shown.length;
+  // Closed: only alerts still needing attention. Open (bell panel): full history.
+  const list = open ? state.alerts : (state.visible || state.alerts);
+  if (!state.allowed || !list.length) return null;
+  const shown = open ? list : list.slice(0, max);
+  const hidden = list.length - shown.length;
   return (
     <div data-guard-allow="true" data-testid="app-alerts-banner" style={{ padding: "12px 32px 0", display: "flex", flexDirection: "column", gap: 8 }}>
       {shown.map((a) => <AlertRow key={a.id} a={a} onDismiss={state.dismiss} now={now} />)}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, alignItems: "center", fontSize: 11, color: "#6b7280" }}>
         {hidden > 0 && <span>+{hidden} more — open the bell</span>}
-        {state.alerts.length > 1 && (
+        {list.length > 1 && (
           <button
             type="button"
-            onClick={() => state.dismiss(state.alerts.map((a) => a.id))}
+            onClick={() => state.dismiss(list.map((a) => a.id))}
             style={{ background: "none", border: "none", color: "#9ca3af", fontSize: 11, textDecoration: "underline", cursor: "pointer", padding: 0 }}
           >Dismiss all</button>
         )}
