@@ -395,6 +395,61 @@ export function sumAttributedFills(fills = []) {
 // History / lock remaining: a stamped order_id on combo_submissions is a
 // real fill even if combo_fills.parlay_id is still null (shard ticker miss).
 // Prefer the Kalshi fill count when the same order_id is unattributed.
+//
+// Only CONFIRMED fills count: status === 'filled'. Posted quotes persist as
+// status 'unfilled' / 'quoted' with an order_id and the RFQ-size contracts;
+// they are not fills (a Polymarket quote row used to be added on top of the
+// real poly-act fill, which has a different order_id, so every Poly fill was
+// counted twice and the bar flickered as that row came and went).
+export function isConfirmedFillSubmission(s) {
+  return !!s && String(s.status || "").toLowerCase() === "filled";
+}
+
+function isPolySubmission(s) {
+  if (!s) return false;
+  if (String(s.venue || "").toLowerCase() === "polymarket") return true;
+  return /^poly-pos:/.test(String(s.order_id || ""));
+}
+
+function isPolyFillRow(f) {
+  if (!f) return false;
+  if (String(f.fill_id || "").startsWith("poly-act:")) return true;
+  const v = f.raw && f.raw.venue;
+  return String(v || "").toLowerCase() === "polymarket";
+}
+
+// Poly order_id on a submission is the original order id; the booked fill is a
+// poly-act row keyed by the trade id. Pair each filled Poly submission with at
+// most one unclaimed Poly fill row of the same lock (closest size within 25%)
+// so the position is counted once, by combo_fills.
+function polyTwinClaims(submissions, fills, attributedOrders) {
+  const pool = new Map();
+  (fills || []).forEach((f) => {
+    if (!isPolyFillRow(f) || !f.parlay_id) return;
+    (pool.get(f.parlay_id) || pool.set(f.parlay_id, []).get(f.parlay_id)).push({ f, used: false });
+  });
+  const claimed = new Set();
+  (submissions || []).forEach((s) => {
+    if (!isConfirmedFillSubmission(s) || !isPolySubmission(s) || !s.order_id || !s.parlay_id) return;
+    if (attributedOrders.has(s.order_id)) return;
+    const list = pool.get(s.parlay_id) || [];
+    const want = Math.max(0, toNum(s.contracts) || 0);
+    let best = null;
+    list.forEach((c) => {
+      if (c.used) return;
+      const have = Math.max(0, toNum(c.f.count) || 0);
+      const d = Math.abs(have - want);
+      if (want > 0 && d > 0.25 * want) return;
+      if (!best || d < best.d) best = { c, d };
+    });
+    if (best) {
+      best.c.used = true;
+      claimed.add(s.order_id);
+    }
+  });
+  return claimed;
+}
+
 export function mergeSubmissionFillCounts(byParlay, submissions = [], fills = []) {
   const attributedOrders = new Set();
   const unattrByOrder = new Map();
@@ -403,9 +458,11 @@ export function mergeSubmissionFillCounts(byParlay, submissions = [], fills = []
     if (f.parlay_id) attributedOrders.add(f.order_id);
     else unattrByOrder.set(f.order_id, f);
   });
+  const polyClaimed = polyTwinClaims(submissions, fills, attributedOrders);
   const next = { ...(byParlay || {}) };
   (submissions || []).forEach((s) => {
-    if (!s || !s.order_id || !s.parlay_id || attributedOrders.has(s.order_id)) return;
+    if (!isConfirmedFillSubmission(s)) return;
+    if (!s.order_id || !s.parlay_id || attributedOrders.has(s.order_id) || polyClaimed.has(s.order_id)) return;
     attributedOrders.add(s.order_id);
     const twin = unattrByOrder.get(s.order_id);
     const c = Math.max(0, toNum(twin ? twin.count : s.contracts) || 0);
@@ -419,7 +476,7 @@ export function deskFillCounts(fills = [], submissions = []) {
   const byParlay = mergeSubmissionFillCounts(summed.byParlay, submissions, fills);
   const assigned = new Set();
   (submissions || []).forEach((s) => {
-    if (s && s.order_id && s.parlay_id) assigned.add(s.order_id);
+    if (isConfirmedFillSubmission(s) && s.order_id && s.parlay_id) assigned.add(s.order_id);
   });
   let unattributed = 0;
   dedupeFillsByOrder(fills).forEach((f) => {
@@ -574,7 +631,7 @@ export function settlementSummaryText(tally) {
 }
 
 export function classifyMiss({ match, outcome, submission, fill, filled = 0, ceiling = 0 } = {}) {
-  if (fill || isFilledSubmission(submission)
+  if (fill || isConfirmedFillSubmission(submission)
     || (outcome && (outcome.outcome === "executed" || outcome.outcome === "accepted" || outcome.fill_confirmed))) {
     return { bucket: "filled", reason: "filled", missed: false };
   }
