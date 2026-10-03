@@ -486,3 +486,11 @@ console.log("comboLegResult.test.js ok");
   assert.equal(matchEspnSide("UTA", utaChi, "nhl"), "home");
   console.log("comboLegResult NHL tests passed");
 }
+
+{
+  // Player props settle from Kalshi's own market only: never from an ESPN moneyline guess.
+  const game = { sport: "mlb", date: "2026-10-03", completed: true, homeAbbr: "LAD", awayAbbr: "ATL", homeScore: 5, awayScore: 3 };
+  const propLeg = { ticker: "KXMLBHR-26OCT031600ATLLAD-ATLMOLSON28-1", gameKey: "mlb:26OCT031600ATLLAD", side: "yes", type: "prop", label: "Matt Olson: 1+" };
+  assert.deepEqual(legFromEspnGame(propLeg, game), { status: "pending", source: "espn" });
+  console.log("comboLegResult player-prop tests passed");
+}

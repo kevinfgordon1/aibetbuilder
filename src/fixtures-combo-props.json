@@ -1,0 +1,485 @@
+{
+ "capturedAt": "2026-10-03T14:50:00Z",
+ "note": "Real Kalshi KXMLBHR / KXNFLTD events (slimmed) captured 2026-10-03",
+ "hr": [
+  {
+   "event_ticker": "KXMLBHR-26OCT031300CWSCLE",
+   "title": "Chicago WS vs Cleveland: Home Runs",
+   "sub_title": "CWS vs CLE (Oct 3)",
+   "markets": [
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CLEBROCCHIO4-1",
+     "yes_sub_title": "Brayan Rocchio: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CLEBROCCHIO4-2",
+     "yes_sub_title": "Brayan Rocchio: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CWSCMONTGOMERY12-1",
+     "yes_sub_title": "Colson Montgomery: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CWSCMONTGOMERY12-2",
+     "yes_sub_title": "Colson Montgomery: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CLEJADELL7-1",
+     "yes_sub_title": "Jo Adell: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CLEJADELL7-2",
+     "yes_sub_title": "Jo Adell: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CLEJRAMREZ11-1",
+     "yes_sub_title": "José Ramírez: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CLEJRAMREZ11-2",
+     "yes_sub_title": "José Ramírez: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CWSMVARGAS20-1",
+     "yes_sub_title": "Miguel Vargas: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CWSMVARGAS20-2",
+     "yes_sub_title": "Miguel Vargas: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CWSMMURAKAMI5-1",
+     "yes_sub_title": "Munetaka Murakami: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031300CWSCLE-CWSMMURAKAMI5-2",
+     "yes_sub_title": "Munetaka Murakami: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T20:00:00Z"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXMLBHR-26OCT031600ATLLAD",
+   "title": "Atlanta vs Los Angeles D: Home Runs",
+   "sub_title": "ATL vs LAD (Oct 3)",
+   "markets": [
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADAPAGES44-1",
+     "yes_sub_title": "Andy Pages: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADAPAGES44-2",
+     "yes_sub_title": "Andy Pages: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLARILEY27-1",
+     "yes_sub_title": "Austin Riley: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLARILEY27-2",
+     "yes_sub_title": "Austin Riley: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLDBALDWIN30-1",
+     "yes_sub_title": "Drake Baldwin: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLDBALDWIN30-2",
+     "yes_sub_title": "Drake Baldwin: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADFFREEMAN5-1",
+     "yes_sub_title": "Freddie Freeman: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADFFREEMAN5-2",
+     "yes_sub_title": "Freddie Freeman: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLMOLSON28-1",
+     "yes_sub_title": "Matt Olson: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLMOLSON28-2",
+     "yes_sub_title": "Matt Olson: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADMBETTS50-1",
+     "yes_sub_title": "Mookie Betts: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADMBETTS50-2",
+     "yes_sub_title": "Mookie Betts: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLOALBIES1-1",
+     "yes_sub_title": "Ozzie Albies: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLOALBIES1-2",
+     "yes_sub_title": "Ozzie Albies: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLRACUNA13-1",
+     "yes_sub_title": "Ronald Acuña Jr.: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-ATLRACUNA13-2",
+     "yes_sub_title": "Ronald Acuña Jr.: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADSOHTANI17-1",
+     "yes_sub_title": "Shohei Ohtani: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    },
+    {
+     "ticker": "KXMLBHR-26OCT031600ATLLAD-LADSOHTANI17-2",
+     "yes_sub_title": "Shohei Ohtani: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-03T23:00:00Z"
+    }
+   ]
+  }
+ ],
+ "td": [
+  {
+   "event_ticker": "KXNFLTD-26OCT04NEBUF",
+   "title": "New England vs Buffalo: Touchdowns",
+   "sub_title": "NE vs BUF (Oct 4)",
+   "markets": [
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFKCOLEMAN0-1",
+     "yes_sub_title": "Keon Coleman: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFKCOLEMAN0-2",
+     "yes_sub_title": "Keon Coleman: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJCOOK4-1",
+     "yes_sub_title": "James Cook III: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJCOOK4-2",
+     "yes_sub_title": "James Cook III: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJCOOK4-3",
+     "yes_sub_title": "James Cook III: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFTJOHNSON26-1",
+     "yes_sub_title": "Ty Johnson: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFTJOHNSON26-2",
+     "yes_sub_title": "Ty Johnson: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDKINCAID86-1",
+     "yes_sub_title": "Dalton Kincaid: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDKINCAID86-2",
+     "yes_sub_title": "Dalton Kincaid: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDKINCAID86-3",
+     "yes_sub_title": "Dalton Kincaid: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDKNOX88-1",
+     "yes_sub_title": "Dawson Knox: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDKNOX88-2",
+     "yes_sub_title": "Dawson Knox: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDMOORE2-1",
+     "yes_sub_title": "DJ Moore: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDMOORE2-2",
+     "yes_sub_title": "DJ Moore: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFDMOORE2-3",
+     "yes_sub_title": "DJ Moore: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJPALMER5-1",
+     "yes_sub_title": "Joshua Palmer: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJPALMER5-2",
+     "yes_sub_title": "Joshua Palmer: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFKSHAKIR10-1",
+     "yes_sub_title": "Khalil Shakir: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFKSHAKIR10-2",
+     "yes_sub_title": "Khalil Shakir: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFKSHAKIR10-3",
+     "yes_sub_title": "Khalil Shakir: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NERDOUBS87-1",
+     "yes_sub_title": "Romeo Doubs: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NERDOUBS87-2",
+     "yes_sub_title": "Romeo Doubs: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEDDOUGLAS3-1",
+     "yes_sub_title": "DeMario Douglas: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEDDOUGLAS3-2",
+     "yes_sub_title": "DeMario Douglas: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NETHENDERSON32-1",
+     "yes_sub_title": "TreVeyon Henderson: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NETHENDERSON32-2",
+     "yes_sub_title": "TreVeyon Henderson: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NETHENDERSON32-3",
+     "yes_sub_title": "TreVeyon Henderson: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEHHENRY85-1",
+     "yes_sub_title": "Hunter Henry: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEHHENRY85-2",
+     "yes_sub_title": "Hunter Henry: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEMHOLLINS13-1",
+     "yes_sub_title": "Mack Hollins: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEMHOLLINS13-2",
+     "yes_sub_title": "Mack Hollins: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEDMAYE10-1",
+     "yes_sub_title": "Drake Maye: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEDMAYE10-2",
+     "yes_sub_title": "Drake Maye: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NERSTEVENSON38-1",
+     "yes_sub_title": "Rhamondre Stevenson: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NERSTEVENSON38-2",
+     "yes_sub_title": "Rhamondre Stevenson: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NERSTEVENSON38-3",
+     "yes_sub_title": "Rhamondre Stevenson: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEKWILLIAMS18-1",
+     "yes_sub_title": "Kyle Williams: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEKWILLIAMS18-2",
+     "yes_sub_title": "Kyle Williams: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFBUFDST-1",
+     "yes_sub_title": "BUF Bills D/ST: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NENEDST-1",
+     "yes_sub_title": "NE Patriots D/ST: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJHAWES85-1",
+     "yes_sub_title": "Jackson Hawes: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-NEECHISM86-1",
+     "yes_sub_title": "Efton Chism III: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFSBELL13-1",
+     "yes_sub_title": "Skyler Bell: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJALLEN17-1",
+     "yes_sub_title": "Josh Allen: 1+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJALLEN17-2",
+     "yes_sub_title": "Josh Allen: 2+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    },
+    {
+     "ticker": "KXNFLTD-26OCT04NEBUF-BUFJALLEN17-3",
+     "yes_sub_title": "Josh Allen: 3+",
+     "status": "active",
+     "occurrence_datetime": "2026-10-04T20:00:00Z"
+    }
+   ]
+  }
+ ]
+}
