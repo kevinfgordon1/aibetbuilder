@@ -26,7 +26,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
-import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSectionKind, comboSettledQuery, overFillText, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
+import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, skipLabel, skipReasonOf, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
@@ -814,7 +814,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       settleInflight.current = false;
     }
   }, []);
-  const reload = useCallback(async () => {
+  const deskFailStreakRef = useRef(0);
+  const loadDesk = useCallback(async () => {
     if (!owner) return;
     try {
       const settled = await Promise.allSettled([
@@ -836,7 +837,20 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         // Every RFQ that matched a parlay — for the per-lock drilldown.
         supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(400),
       ]);
-      const [parlaysRes, settingsRes, historyRes, archivedRes, fillsRes, bookedRes, mcRes, ocRes, mrowsRes] = settled.map(comboSettledQuery);
+      const [parlaysRaw, settingsRaw, historyRes, archivedRes, fillsRes, bookedRes, mcRes, ocRes, mrowsRes] = settled.map(comboSettledQuery);
+      // The locks + kill-switch reads are the only ones that can raise the banner. A transient failure
+      // (dropped connection, gateway blip) gets ONE retry before it counts.
+      let parlaysRes = parlaysRaw;
+      let settingsRes = settingsRaw;
+      if (!comboListQueryOk(parlaysRes) || !comboSettingsQueryOk(settingsRes)) {
+        await new Promise((resolve) => setTimeout(resolve, COMBO_DESK_RETRY_MS));
+        const [pRetry, sRetry] = await Promise.allSettled([
+          comboListQueryOk(parlaysRes) ? Promise.resolve(parlaysRes) : supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
+          comboSettingsQueryOk(settingsRes) ? Promise.resolve(settingsRes) : supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
+        ]);
+        parlaysRes = comboSettledQuery(pRetry);
+        settingsRes = comboSettledQuery(sRetry);
+      }
       const poll = applyComboDeskPoll({
         parlaysRes,
         settingsRes,
@@ -856,10 +870,17 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       parlaysReadyRef.current = poll.parlaysReady;
       settingsReadyRef.current = poll.settingsReady;
       setDeskReady(poll.deskReady);
-      setDeskError(poll.errorNote);
-      setSourceUnhealthy(!!poll.sourceUnhealthy);
-      setDeskHealthError(poll.healthError || null);
+      // Only warn after consecutive failed polls (the desk keeps its last known data meanwhile).
+      deskFailStreakRef.current = poll.failed ? deskFailStreakRef.current + 1 : 0;
+      const showDeskFailure = shouldShowDeskFailure({ failed: poll.failed, streak: deskFailStreakRef.current, hadReady: !!(parlaysReadyRef.current || settingsReadyRef.current) });
+      setDeskError(showDeskFailure ? poll.errorNote : null);
+      setSourceUnhealthy(showDeskFailure && !!poll.sourceUnhealthy);
+      setDeskHealthError(showDeskFailure ? (poll.healthError || null) : null);
 
+      // Everything below is secondary (history, fills, matches, per-lock attempts, settlement stamping).
+      // locks + kill-switch already loaded above, so a failure here must NOT raise the
+      // "Couldn't refresh locks / kill-switch" banner — it keeps the last known values and the next poll retries.
+      try {
       const takeList = (res) => (comboListQueryOk(res) ? res.data : null);
       const historyRows = takeList(historyRes);
       if (historyRows) setHistory(historyRows);
@@ -889,8 +910,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       }
       // ONE fills write per poll, from combo_fills (+ confirmed submissions). It used to be written
       // twice (fills only, then fills + a windowed submission sample) so the bar flipped every poll.
-      if (fillRows) {
-        const summed = deskFillCounts(fillRows, filledSubsRef.current);
+      const summed = fillRows ? deskFillCounts(fillRows, filledSubsRef.current) : null;
+      if (summed) {
         setRealFills(summed.byParlay);
         setRealUnattr(summed.unattributed);
       }
@@ -927,18 +948,40 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
           outcomes: ocRows || [],
           matchesByParlay: matchRows ? mbp : {},
           submissions: subRows,
-          filledById: deskFills ? deskFills.byParlay : {},
+          filledById: summed ? summed.byParlay : {},
         });
       }
+      } catch (secondaryErr) {
+        console.warn("Combo Locks: secondary desk refresh failed (locks / kill-switch are fine)", secondaryErr);
+      }
     } catch (err) {
+      // Only the locks / kill-switch path (or a transport-level throw) lands here.
+      deskFailStreakRef.current += 1;
       const hadReady = parlaysReadyRef.current || settingsReadyRef.current;
-      setDeskError(comboDeskCatchNote(err, hadReady));
-      setSourceUnhealthy(isSupabaseUnhealthy(err));
-      setDeskHealthError(isSupabaseUnhealthy(err) ? err : null);
+      if (shouldShowDeskFailure({ failed: true, streak: deskFailStreakRef.current, hadReady: !!hadReady })) {
+        setDeskError(comboDeskCatchNote(err, hadReady));
+        setSourceUnhealthy(isSupabaseUnhealthy(err));
+        setDeskHealthError(isSupabaseUnhealthy(err) ? err : null);
+      }
     } finally {
       setDeskLoading(false);
     }
   }, [owner, user, refreshSettlements]);
+  // Single-flight: the 20s poll, the pause toggle and every other action call reload(). Overlapping runs
+  // each fire ~45 submission queries and race each other's results, so a call that lands while one is
+  // running schedules ONE trailing run (which sees the write that triggered it).
+  const reloadInflightRef = useRef(false);
+  const reloadAgainRef = useRef(false);
+  const reload = useCallback(async () => {
+    if (reloadInflightRef.current) { reloadAgainRef.current = true; return; }
+    reloadInflightRef.current = true;
+    try {
+      await loadDesk();
+    } finally {
+      reloadInflightRef.current = false;
+      if (reloadAgainRef.current) { reloadAgainRef.current = false; reload(); }
+    }
+  }, [loadDesk]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
   // Apply a Promo Builder prefill once live (or sample) games are in. Prefill is

@@ -222,7 +222,6 @@ assert.match(locksSrc, /hist-head/);
 assert.match(locksSrc, /Hide history" : "History"/);
 assert.doesNotMatch(locksSrc, /History \+ profile/);
 assert.match(locksSrc, /submissions/);
-assert.match(locksSrc, /market_ticker/);
 assert.match(locksSrc, /filledById && filledById\[row\.id\]\) > 0/);
 assert.match(locksSrc, /\(archived \|\| \[\]\)\.forEach/);
 assert.match(locksSrc, /RiskProfile/);

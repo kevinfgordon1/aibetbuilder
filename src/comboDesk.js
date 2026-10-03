@@ -319,6 +319,17 @@ export function applyComboDeskPoll({
   };
 }
 
+// A failed locks / kill-switch read is retried once inside the poll; after that the desk keeps its last
+// known data and only warns once the NEXT poll fails too (DESK_FAIL_BANNER_STREAK consecutive polls).
+// Before the desk has ever loaded there is nothing to show, so a failure is surfaced right away.
+export const COMBO_DESK_RETRY_MS = 800;
+export const DESK_FAIL_BANNER_STREAK = 2;
+export function shouldShowDeskFailure({ failed, streak = 0, hadReady = false } = {}) {
+  if (!failed) return false;
+  if (!hadReady) return true;
+  return streak >= DESK_FAIL_BANNER_STREAK;
+}
+
 export function comboDeskChrome({ deskLoading, deskReady, kill, deskError, sourceUnhealthy } = {}) {
   const ready = deskReady === true && deskLoading !== true;
   return {
