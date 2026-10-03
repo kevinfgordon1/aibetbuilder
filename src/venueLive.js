@@ -124,6 +124,33 @@ export function betstampRelayStreamUrl({ league, bookIds } = {}) {
   return q ? `${base}/betstamp?${q}` : `${base}/betstamp`;
 }
 
+// Pro board LIVE Underdog feed from the relay (one shared poll, SSE out).
+// Null when no relay is configured or VITE_UNDERDOG_RELAY is 0 / false / off;
+// the board then keeps its own /api/underdog-predict poll.
+export function underdogRelayStreamUrl({ league } = {}) {
+  const base = oddsRelayBase();
+  if (!base) return null;
+  let raw;
+  try {
+    const env = import.meta && import.meta.env;
+    if (env && env.VITE_UNDERDOG_RELAY != null && env.VITE_UNDERDOG_RELAY !== "") raw = env.VITE_UNDERDOG_RELAY;
+  } catch {
+    /* node tests have no Vite env */
+  }
+  if (raw == null) {
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.VITE_UNDERDOG_RELAY != null) raw = process.env.VITE_UNDERDOG_RELAY;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!firstPartyPmLiveFromEnv(raw)) return null;
+  const p = new URLSearchParams();
+  if (league) p.set("league", league);
+  const q = p.toString();
+  return q ? `${base}/underdog?${q}` : `${base}/underdog`;
+}
+
 export function fourcastersStreamUrl({ league } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);
