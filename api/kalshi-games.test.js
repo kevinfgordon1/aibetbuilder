@@ -246,3 +246,69 @@ console.log('kalshi-games tests passed');
   // Day before: still listed.
   assert.equal(h.groupSportGames(by, Date.parse('2026-09-29T12:00:00Z'), OPTS).length, 1);
 }
+
+// ── Player props (KXMLBHR / KXNFLTD) from REAL captured Kalshi events ──
+{
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'fixtures-combo-props.json'), 'utf8'));
+  assert.deepEqual(handler.PROP_SERIES, { mlb: { series: 'KXMLBHR', kind: 'hr' }, nfl: { series: 'KXNFLTD', kind: 'td' } });
+  assert.deepEqual(h.parsePropLabel('Matt Olson: 1+'), { name: 'Matt Olson' });
+  assert.deepEqual(h.parsePropLabel('Ronald Acuña Jr.: 1+'), { name: 'Ronald Acuña Jr.' });
+  assert.equal(h.parsePropLabel('Matt Olson: 2+'), null);   // only the 1+ rung
+  assert.equal(h.parsePropLabel('BUF Bills D/ST: 1+'), null); // team defenses are not player props
+  assert.equal(h.parsePropLabel('Matt Olson'), null);
+  assert.equal(h.parsePropLabel(': 1+'), null);
+
+  const hrAtl = fx.hr.find((e) => e.event_ticker === 'KXMLBHR-26OCT031600ATLLAD');
+  const olson = h.expandProps(hrAtl.markets.map((m) => ({ ticker: m.ticker, label: m.yes_sub_title, status: m.status })), 'hr');
+  assert.equal(olson.length, 9); // 9 batters, 2+ rungs dropped
+  assert.ok(olson.every((p) => p.side === 'yes' && p.kind === 'hr' && /-1$/.test(p.ticker) && /: 1\+$/.test(p.label)));
+  assert.deepEqual(olson.find((p) => p.player === 'Matt Olson'), {
+    ticker: 'KXMLBHR-26OCT031600ATLLAD-ATLMOLSON28-1', side: 'yes', label: 'Matt Olson: 1+', player: 'Matt Olson', kind: 'hr',
+  });
+  // Inactive markets are skipped.
+  assert.equal(h.expandProps([{ ticker: 'KXMLBHR-26OCT031600ATLLAD-ATLMOLSON28-1', label: 'Matt Olson: 1+', status: 'closed' }], 'hr').length, 0);
+
+  const side = (series, key, a, b, aName, bName) => ({
+    event_ticker: `${series}-${key}`, title: `${aName} vs ${bName}`, sub_title: key,
+    markets: [{ ticker: `${series}-${key}-${a}`, yes_sub_title: aName }, { ticker: `${series}-${key}-${b}`, yes_sub_title: bName }],
+  });
+  const propEv = (e) => ({ ...e, markets: e.markets.map((m) => ({ ...m })) });
+
+  // MLB: props attach to the game with the SAME key and never rename it or move its start.
+  const mlb = h.groupSportGames({
+    prop: fx.hr.map(propEv), // prop first: must not name the game
+    side: [side('KXMLBGAME', '26OCT031600ATLLAD', 'ATL', 'LAD', 'Atlanta', 'Los Angeles D')],
+  }, Date.parse('2026-10-03T14:50:00Z'), { propKind: 'hr' });
+  assert.equal(mlb.length, 1); // CWSCLE has props but no moneyline pair -> not a game
+  assert.equal(mlb[0].key, '26OCT031600ATLLAD');
+  assert.equal(mlb[0].title, 'Atlanta vs Los Angeles D');
+  assert.equal(mlb[0].startTime, '2026-10-03T20:00:00.000Z');
+  assert.equal(mlb[0].markets.prop.length, 9);
+  assert.ok(mlb[0].markets.prop.every((p) => p.ticker.startsWith('KXMLBHR-26OCT031600ATLLAD-')));
+
+  // A game whose key differs from the prop event's gets NO props (no cross-game borrowing).
+  const other = h.groupSportGames({
+    prop: fx.hr.map(propEv),
+    side: [side('KXMLBGAME', '26OCT042000ATLLAD', 'ATL', 'LAD', 'Atlanta', 'Los Angeles D')],
+  }, Date.parse('2026-10-03T14:50:00Z'), { propKind: 'hr' });
+  assert.equal(other.length, 1);
+  assert.deepEqual(other[0].markets.prop, []);
+
+  // Without propKind (e.g. NHL / NCAAF) there is no prop key at all.
+  const none = h.groupSportGames({ side: [side('KXMLBGAME', '26OCT031600ATLLAD', 'ATL', 'LAD', 'Atlanta', 'Los Angeles D')] }, Date.parse('2026-10-03T14:50:00Z'));
+  assert.equal(none[0].markets.prop, undefined);
+
+  // NFL: anytime TD, D/ST excluded, football (date-only) start unchanged by prop occurrence times.
+  const nfl = h.groupSportGames({
+    side: [side('KXNFLGAME', '26OCT04NEBUF', 'NE', 'BUF', 'New England', 'Buffalo')],
+    prop: fx.td.map(propEv),
+  }, Date.parse('2026-10-03T14:50:00Z'), { propKind: 'td' });
+  assert.equal(nfl.length, 1);
+  const td = nfl[0].markets.prop;
+  assert.equal(td.length, 20);
+  assert.ok(td.every((p) => p.kind === 'td' && !/D\/ST/.test(p.label)));
+  assert.ok(td.some((p) => p.label === 'Josh Allen: 1+' && p.ticker === 'KXNFLTD-26OCT04NEBUF-BUFJALLEN17-1'));
+  assert.equal(nfl[0].startTime, new Date(h.dateOnlyUtcMs('26OCT04NEBUF')).toISOString());
+}

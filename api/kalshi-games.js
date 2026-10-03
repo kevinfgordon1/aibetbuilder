@@ -42,6 +42,15 @@ const MARKET_SERIES = {
   ncaaf: { side: 'KXNCAAFGAME', spread: 'KXNCAAFSPREAD', total: 'KXNCAAFTOTAL' },
   nhl: { side: 'KXNHLGAME', spread: 'KXNHLSPREAD', total: 'KXNHLTOTAL' },
 };
+// Player props ride on the same game key (KXMLBHR-26OCT031600ATLLAD,
+// KXNFLTD-26OCT05ATLNO) and only ever attach to a game that already has its
+// moneyline pair. Only the 1+ rung of a named player is exposed (MLB 1+ HR,
+// NFL anytime TD); label stays Kalshi's own "Matt Olson: 1+" because the
+// combo-worker's Polymarket prop crosswalk verifies that exact string.
+const PROP_SERIES = {
+  mlb: { series: 'KXMLBHR', kind: 'hr' },
+  nfl: { series: 'KXNFLTD', kind: 'td' },
+};
 // NHL keys are date-only (26SEP30PITPHI) but every market's occurrence_datetime is
 // puck drop + 3h (checked against ESPN's scoreboard: 46 of 47 listed games), so the
 // real start is occurrence - 3h. Used for the pre-game cutoff so a 7:30 PM game
@@ -147,6 +156,30 @@ function occurrenceMsOf(ev) {
     if (Number.isFinite(t) && t < best) best = t;
   }
   return best === Infinity ? NaN : best;
+}
+
+// ── player props ──
+// Kalshi yes_sub_title is "<Full Name>: 1+". Anything else (2+, 3+, D/ST team
+// defenses, blank names) is not exposed — skip, never guess.
+function parsePropLabel(label) {
+  const m = /^(.+?):\s*1\+\s*$/.exec(String(label || '').trim());
+  if (!m) return null;
+  const name = m[1].trim();
+  if (!name || /D\/ST/i.test(name)) return null;
+  return { name };
+}
+function expandProps(raw, kind) {
+  const seen = new Set();
+  const legs = [];
+  for (const m of raw || []) {
+    if (!m || !m.ticker || !/-1$/.test(m.ticker) || seen.has(m.ticker)) continue;
+    if (m.status && !/^(active|open)$/i.test(m.status)) continue;
+    const p = parsePropLabel(m.label);
+    if (!p) continue;
+    seen.add(m.ticker);
+    legs.push({ ticker: m.ticker, side: 'yes', label: `${p.name}: 1+`, player: p.name, kind });
+  }
+  return legs.sort((a, b) => a.player.localeCompare(b.player) || a.ticker.localeCompare(b.ticker));
 }
 
 // ── label parsers (validated against Kalshi's real strings in the test) ──
@@ -262,12 +295,14 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
     for (const ev of events) {
       const key = gameKeyOf(ev.event_ticker || ev.ticker); if (!key) continue;
       let g = byKey.get(key);
-      if (!g) { g = { key, title: null, date: null, occurrenceMs: NaN, raw: { side: [], spread: [], total: [] } }; byKey.set(key, g); }
-      if (type === 'side' || !g.title) { g.title = ev.title || g.title; g.date = ev.sub_title || g.date; }
-      const occ = occurrenceMsOf(ev);
+      if (!g) { g = { key, title: null, date: null, occurrenceMs: NaN, raw: { side: [], spread: [], total: [], prop: [] } }; byKey.set(key, g); }
+      // Props never name the game or move its start: "<Away> vs <Home>: Home Runs"
+      // is not a game title, and prop occurrence times differ from the game's.
+      if (type !== 'prop' && (type === 'side' || !g.title)) { g.title = ev.title || g.title; g.date = ev.sub_title || g.date; }
+      const occ = type === 'prop' ? NaN : occurrenceMsOf(ev);
       if (Number.isFinite(occ) && (!Number.isFinite(g.occurrenceMs) || occ < g.occurrenceMs)) g.occurrenceMs = occ;
       if (!g.raw[type]) g.raw[type] = [];
-      (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: marketLabel(m) }); });
+      (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: type === 'prop' ? (m.yes_sub_title || '') : marketLabel(m), ...(type === 'prop' ? { status: m.status || '' } : {}) }); });
     }
   }
   const games = [];
@@ -290,6 +325,7 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
         spread: expandSpreads(g.raw.spread || [], g.raw.side),
         total: expandTotals(g.raw.total || []),
+        ...(opts && opts.propKind ? { prop: expandProps(g.raw.prop || [], opts.propKind) } : {}),
       },
     });
   }
@@ -337,7 +373,11 @@ async function handler(req, res) {
     const sports = {};
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
-      const games = await fetchSportGames(seriesByType, { occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0 });
+      const propSpec = PROP_SERIES[sport];
+      const games = await fetchSportGames(propSpec ? { ...seriesByType, prop: propSpec.series } : seriesByType, {
+        occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0,
+        ...(propSpec ? { propKind: propSpec.kind } : {}),
+      });
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports });
@@ -348,9 +388,10 @@ async function handler(req, res) {
 
 module.exports = handler;
 module.exports.MARKET_SERIES = MARKET_SERIES;
+module.exports.PROP_SERIES = PROP_SERIES;
 module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports._helpers = {
-  parseTotal, parseSpread, expandTotals, expandSpreads, teamCodeOf, tickerTail,
+  parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
   groupSportGames, markComboEligible, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };
