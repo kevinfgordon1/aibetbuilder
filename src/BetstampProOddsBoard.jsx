@@ -114,6 +114,7 @@ import {
   holdPolymarketOtbCells,
   withNovigQuotes,
   BETSTAMP_BOARD_PINNED_BOOK_KEYS,
+  gameStripeMap,
 } from "./betstampProBoard.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import { maskStaleOdds, maskedOddsReason } from "./oddsFreshness.js";
@@ -1822,13 +1823,9 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     g.is_live ? "Live now" : formatDateGroup(g.commence_time || Date.now())
   )), [orderedGames]);
 
-  // Zebra index across the whole visible slate (date headers don't reset it).
-  const stripeByGameId = useMemo(() => {
-    const m = new Map();
-    let i = 0;
-    for (const block of grouped) for (const g of block.games) m.set(g.id, i++ % 2 === 1);
-    return m;
-  }, [grouped]);
+  // Zebra index among VISIBLE games only (grouped is already filtered by hide /
+  // search / LIVE), so hiding a game re-alternates the rest. Date headers don't reset it.
+  const stripeByGameId = useMemo(() => gameStripeMap(grouped), [grouped]);
 
   const visibleBooks = useMemo(
     () => [{ key: "best", label: "Best Odds" }, ...catalogBooks.filter((b) => selectedBooks.has(b.key))],

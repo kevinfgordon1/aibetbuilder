@@ -12,6 +12,7 @@ import {
   booksWithBoardData,
   wrapNamespacedStorage,
   betstampOddsBoardColumns,
+  gameStripeMap,
   withUnderdogPhone,
   underdogSlateForLeague,
   BETSTAMP_BOARD_UNDERDOG_POLL_MS,
@@ -119,7 +120,20 @@ assert.match(board, /className="nob-theme"/);
 // Zebra stripes: every other GAME block (both lines) paints --nob-surface-alt
 // across the whole row, and the sticky GAME cell reads the same row var.
 assert.match(board, /"--nob-surface-alt": "#[0-9a-f]{6}"/);
-assert.match(board, /stripeByGameId/);
+assert.match(board, /stripeByGameId = useMemo\(\(\) => gameStripeMap\(grouped\)/);
+{
+  const ids = ["a", "b", "c", "d", "e", "f"];
+  const groupsOf = (list) => [{ games: list.slice(0, 3).map((id) => ({ id })) }, { games: list.slice(3).map((id) => ({ id })) }];
+  const flags = (list) => list.map((id) => gameStripeMap(groupsOf(list)).get(id));
+  assert.deepEqual(flags(ids), [false, true, false, true, false, true], "alternates across date groups");
+  // Hide "b": the visible games re-alternate (c/d/e/f shift), not keep their old slots.
+  const hidden = ids.filter((id) => id !== "b");
+  assert.deepEqual(flags(hidden), [false, true, false, true, false], "hidden game frees its slot");
+  assert.equal(gameStripeMap(groupsOf(hidden)).has("b"), false);
+  // Hide the first one: the new first game is the base shade.
+  assert.equal(gameStripeMap(groupsOf(ids.slice(1))).get("b"), false);
+  assert.equal(gameStripeMap(null).size, 0);
+}
 assert.match(board, /data-stripe=\{stripe \? "1" : "0"\}/);
 assert.match(board, /\.obb-grid tr\[data-stripe="1"\] \{ --obb-row-bg: var\(--nob-surface-alt\); background: var\(--nob-surface-alt\); \}/);
 assert.match(board, /left: 0, background: "var\(--obb-row-bg, var\(--nob-surface\)\)", zIndex: 1/);

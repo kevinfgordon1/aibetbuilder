@@ -362,3 +362,18 @@ export function withNovigQuotes(games, quotes, league) {
     };
   });
 }
+
+/**
+ * Zebra striping for the Pro board: every other VISIBLE game block gets the
+ * lighter row shade. `groups` is the already-filtered slate ([{ games }]), so
+ * hidden / searched-out / non-live games never take a slot and the rest
+ * re-alternate immediately. Returns Map(gameId -> true when striped).
+ */
+export function gameStripeMap(groups) {
+  const m = new Map();
+  let i = 0;
+  for (const block of groups || []) {
+    for (const g of block?.games || []) m.set(g.id, i++ % 2 === 1);
+  }
+  return m;
+}
