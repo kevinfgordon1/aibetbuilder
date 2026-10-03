@@ -1,4 +1,6 @@
 import { getOddsBoardCell } from "./oddsBoard.js";
+import { maskStaleOdds } from "./oddsFreshness.js";
+import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
@@ -179,6 +181,51 @@ assert.equal(cleared.ml_away, null, "failed phone poll clears Underdog cells");
 const nextWeek = { ...bsGame, commence_time: "2026-10-06T00:15:00Z" };
 assert.equal(withUnderdogPhone([nextWeek], phone, "NFL")[0].bookOdds.underdog_predict.ml_away, null);
 assert.ok(booksWithBoardData([painted]).has("underdog_predict"), "Underdog column shows when priced");
+// Pro board ages Underdog from the slate fetch, not the quote's last change.
+// A live price that has not MOVED for 10 minutes (Underdog mirrors Kalshi and
+// re-stamps within ~1s of a move) must read seconds old and must not be hidden
+// by the 5-minute live age cap.
+{
+  const liveNow = Date.parse("2026-10-03T21:12:00Z");
+  const changed = liveNow - 10 * 60_000;
+  const quiet = {
+    ok: true,
+    fetchedAt: liveNow - 1_500,
+    games: [{
+      matchId: 226500, sport: "NFL", away: "Philadelphia Eagles", home: "Chicago Bears",
+      scheduledAt: "2026-09-29T00:15:00Z", status: "scoring", live: true,
+      lines: [
+        { market: "h2h", name: "Philadelphia Eagles", choice: "away", american: -164, updatedAt: changed },
+        { market: "h2h", name: "Chicago Bears", choice: "home", american: 133, updatedAt: changed },
+        { market: "spreads", name: "Philadelphia Eagles", point: -3.5, choice: "away", american: -109, updatedAt: changed, status: "suspended" },
+        { market: "spreads", name: "Chicago Bears", point: 3.5, choice: "home", american: -113, updatedAt: changed },
+      ],
+    }],
+  };
+  const liveGame = { ...bsGame, is_live: true, started_at: "2026-09-29T00:15:00Z" };
+  const stamped = withUnderdogPhone([liveGame], quiet, "NFL", liveNow)[0];
+  const st = stamped.bookLineUpdatedAt.underdog_predict;
+  assert.equal(st.ml_away, liveNow - 1_500, "active quote is as fresh as the slate fetch");
+  assert.equal(st.ml_home, liveNow - 1_500);
+  assert.equal(st.spr_home, liveNow - 1_500);
+  assert.equal(st.spr_away, changed, "a suspended quote keeps its own updated_at");
+  assert.equal(stamped.bookOdds.underdog_predict.ml_away, -164, "price itself is unchanged");
+  const masked = maskStaleOdds(stamped, { nowMs: liveNow, record: false });
+  assert.equal(masked.bookOdds.underdog_predict.ml_away, -164, "unmoved live price is not aged out");
+  // Without a fetch time (and on the New Odds Board path) the old stamp stands.
+  const { fetchedAt: _drop, ...noFetch } = quiet;
+  assert.equal(withUnderdogPhone([liveGame], noFetch, "NFL", liveNow)[0].bookLineUpdatedAt.underdog_predict.ml_away, changed);
+  assert.equal(applyUnderdogPhoneQuotes([liveGame], quiet)[0].bookLineUpdatedAt.underdog_predict.ml_away, changed, "New Odds Board stamps unchanged");
+  // A fetch time in the future (clock skew) is clamped to now.
+  const skew = withUnderdogPhone([liveGame], { ...quiet, fetchedAt: liveNow + 60_000 }, "NFL", liveNow)[0];
+  assert.equal(skew.bookLineUpdatedAt.underdog_predict.ml_away, liveNow);
+  // A stale slate (relay down, poll old) still ages honestly.
+  const old = withUnderdogPhone([liveGame], { ...quiet, fetchedAt: liveNow - 6 * 60_000 }, "NFL", liveNow)[0];
+  assert.equal(old.bookLineUpdatedAt.underdog_predict.ml_away, liveNow - 6 * 60_000);
+  // Pre-fix behaviour for contrast: the same quote with only its change time is hidden.
+  const before = maskStaleOdds(applyUnderdogPhoneQuotes([liveGame], quiet)[0], { nowMs: liveNow, record: false });
+  assert.equal(before.bookOdds.underdog_predict.ml_away, null, "change-time stamp aged out past the live cap");
+}
 assert.match(board, /fetchUnderdogPhone/);
 assert.match(board, /withUnderdogPhone\(/);
 assert.match(board, /betstampOddsBoardColumns\(\)/);

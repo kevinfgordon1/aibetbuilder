@@ -409,13 +409,31 @@ function blankBoardUnderdogOdds() {
   };
 }
 
-function stampPhone(stamps, field, line) {
+function stampPhone(stamps, field, line, confirmedAt) {
   if (line && line.updatedAt != null) stamps[field] = line.updatedAt;
   // /api/underdog-predict passes status only when it is not "active".
   if (line && line.status && stamps.flags) stamps.flags[field] = "suspended";
+  // Underdog's updated_at is when the quote last CHANGED (it mirrors the
+  // Kalshi book and re-stamps within ~1s of any move), not when Underdog was
+  // last asked. A price that simply has not moved for minutes looked "5m old"
+  // and the live age cap then hid it. confirmedAt is when we last fetched the
+  // slate and saw this quote still on it: an active quote is as fresh as that
+  // fetch. A suspended / non-active quote keeps its own updated_at.
+  if (confirmedAt != null && line && !line.status && line.american != null) {
+    const own = Number(line.updatedAt);
+    stamps[field] = Number.isFinite(own) && own > confirmedAt ? own : confirmedAt;
+  }
 }
 
-function fillBoardUnderdogOdds(odds, stamps, game, lines) {
+/** Slate fetch time (ms epoch or ISO), never in the future; null if unknown. */
+export function phoneSlateConfirmedAt(slate, nowMs = Date.now()) {
+  const raw = slate && slate.fetchedAt;
+  const t = typeof raw === "number" ? raw : Date.parse(raw);
+  if (!Number.isFinite(t) || t <= 0) return null;
+  return Math.min(t, nowMs);
+}
+
+function fillBoardUnderdogOdds(odds, stamps, game, lines, confirmedAt = null) {
   const away = game.away || game.away_team;
   const home = game.home || game.home_team;
   let spreadPoint = null;
@@ -425,10 +443,10 @@ function fillBoardUnderdogOdds(odds, stamps, game, lines) {
     if (line.market === "h2h" || line.market == null) {
       if (namesMatch(line.name, away)) {
         odds.ml_away = line.american;
-        stampPhone(stamps, "ml_away", line);
+        stampPhone(stamps, "ml_away", line, confirmedAt);
       } else if (namesMatch(line.name, home)) {
         odds.ml_home = line.american;
-        stampPhone(stamps, "ml_home", line);
+        stampPhone(stamps, "ml_home", line, confirmedAt);
       }
       continue;
     }
@@ -441,11 +459,11 @@ function fillBoardUnderdogOdds(odds, stamps, game, lines) {
       if (namesMatch(line.name, away)) {
         odds.spr_away = line.american;
         odds.spr_away_line = line.point;
-        stampPhone(stamps, "spr_away", line);
+        stampPhone(stamps, "spr_away", line, confirmedAt);
       } else if (namesMatch(line.name, home)) {
         odds.spr_home = line.american;
         odds.spr_home_line = line.point;
-        stampPhone(stamps, "spr_home", line);
+        stampPhone(stamps, "spr_home", line, confirmedAt);
       }
     }
     if (line.market === "totals" && line.point === totalPoint) {
@@ -453,11 +471,11 @@ function fillBoardUnderdogOdds(odds, stamps, game, lines) {
       if (side === "Over") {
         odds.tot_over = line.american;
         odds.tot_line = line.point;
-        stampPhone(stamps, "tot_over", line);
+        stampPhone(stamps, "tot_over", line, confirmedAt);
       } else if (side === "Under") {
         odds.tot_under = line.american;
         odds.tot_line = line.point;
-        stampPhone(stamps, "tot_under", line);
+        stampPhone(stamps, "tot_under", line, confirmedAt);
       }
     }
   }
@@ -468,7 +486,7 @@ function fillBoardUnderdogOdds(odds, stamps, game, lines) {
 // (phone fetch has not returned). A slate with no same-team game inside the
 // kickoff window clears the cell — Betstamp 196 is never left in place, and
 // another day's series price is not used.
-export function applyUnderdogPhoneQuotes(games, slate) {
+export function applyUnderdogPhoneQuotes(games, slate, { confirmedAt = null } = {}) {
   if (!slate) return games || [];
   const phoneGames = isPhoneSlate(slate) ? slate.games : [];
   return (games || []).map((game) => {
@@ -482,7 +500,7 @@ export function applyUnderdogPhoneQuotes(games, slate) {
     const odds = blankBoardUnderdogOdds();
     const flags = {};
     const stamps = Object.defineProperty({}, "flags", { value: flags, enumerable: false });
-    if (hit) fillBoardUnderdogOdds(odds, stamps, game, hit.lines);
+    if (hit) fillBoardUnderdogOdds(odds, stamps, game, hit.lines, confirmedAt);
     const bookLineSuspended = { ...(game.bookLineSuspended || {}) };
     if (bookLineSuspended.underdog_predict) bookLineSuspended.underdog_predict = {};
     const bookLineUpdatedAt = { ...(game.bookLineUpdatedAt || {}) };

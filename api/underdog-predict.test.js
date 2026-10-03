@@ -1075,6 +1075,21 @@ function linesFor(sport) {
     assert.equal(lines.find((l) => l.market === 'totals' && l.choice === 'lower').american, -134);
   }
 
+  // fetchedAt: when Underdog was asked (ms). A cache HIT reports the original fetch.
+  {
+    const fetchFn = async (url) => {
+      if (String(url).includes('/lobbies/scaffolds/sports')) return jsonRes(200, { sections: [] });
+      return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+    };
+    const cache = new Map();
+    const a = mockRes();
+    await handler({ method: 'GET', query: { live: '1', sport: 'NCAAF' } }, a, { env: {}, cache, scaffoldCache: new Map(), fetchFn, now: 1_700_000_000_000 });
+    assert.equal(a.body.fetchedAt, 1_700_000_000_000);
+    const b = mockRes();
+    await handler({ method: 'GET', query: { live: '1', sport: 'NCAAF' } }, b, { env: {}, cache, scaffoldCache: new Map(), fetchFn, now: 1_700_000_003_000 });
+    assert.equal(b.body.fetchedAt, 1_700_000_000_000, 'cache hit keeps the original fetch time');
+  }
+
   console.log('underdog-predict.test.js ok');
 })().catch((err) => {
   console.error(err);

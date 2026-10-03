@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   UNDERDOG_RELAY_SILENT_MS,
+  UNDERDOG_TICK_REPAINT_MS,
   underdogRelayFromEnv,
   underdogRelayFresh,
   createUnderdogBook,
@@ -34,6 +35,21 @@ const ev = (kind, seq, extra = {}) => ({ v: 1, kind, seq, t: 1, league: "NCAAF",
   assert.equal(book.apply(ev("error", 0, { error: "boom" })).kind, "error");
   assert.equal(book.apply({ v: 2, kind: "snapshot" }).kind, "ignore");
   assert.equal(book.apply(null).kind, "ignore");
+}
+
+// fetchedAt rides every applied event, ticks included.
+{
+  const book = createUnderdogBook();
+  assert.equal(book.payload().fetchedAt, null);
+  book.apply(ev("snapshot", 1, { fetchedAt: "2026-10-03T21:10:47.209Z", games: [g(1, -110)] }));
+  assert.equal(book.payload().fetchedAt, Date.parse("2026-10-03T21:10:47.209Z"));
+  assert.equal(book.apply(ev("tick", 2, { fetchedAt: "2026-10-03T21:10:49.288Z" })).changed, false);
+  assert.equal(book.payload().fetchedAt, Date.parse("2026-10-03T21:10:49.288Z"), "tick confirms the slate");
+  book.apply(ev("delta", 3, { fetchedAt: "2026-10-03T21:10:51.264Z", up: [], rm: [] }));
+  assert.equal(book.payload().fetchedAt, Date.parse("2026-10-03T21:10:51.264Z"));
+  assert.equal(book.apply(ev("error", 0, { error: "boom", fetchedAt: "2026-10-03T21:11:00.000Z" })).kind, "error");
+  assert.equal(book.payload().fetchedAt, Date.parse("2026-10-03T21:10:51.264Z"), "an error never counts as fresh");
+  assert.equal(UNDERDOG_TICK_REPAINT_MS, 3_000);
 }
 
 // URL: off without a relay base; league only

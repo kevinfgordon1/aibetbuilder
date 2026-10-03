@@ -10,7 +10,7 @@
 // GETs per league (markets + fixtures + teams), far under 25 req/s.
 
 import { betstampSnapshotUrl } from "./betstampLive.js";
-import { applyUnderdogPhoneQuotes, findUnderdogPhoneGame } from "./underdogPredictionQuote.js";
+import { applyUnderdogPhoneQuotes, findUnderdogPhoneGame, phoneSlateConfirmedAt } from "./underdogPredictionQuote.js";
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { novigQuotePrice } from "./venueTakerFee.js";
 import {
@@ -128,9 +128,12 @@ export function underdogSlateForLeague(slate, league) {
  * Paint Underdog Predict cells onto Betstamp board games. A null slate (phone
  * not back yet) leaves games alone; a failed/empty slate clears the cells.
  */
-export function withUnderdogPhone(games, slate, league) {
+export function withUnderdogPhone(games, slate, league, nowMs = Date.now()) {
   if (!slate) return games || [];
-  return applyUnderdogPhoneQuotes(games || [], underdogSlateForLeague(slate, league));
+  // Pro board only: age Underdog cells from the slate fetch (see stampPhone).
+  return applyUnderdogPhoneQuotes(games || [], underdogSlateForLeague(slate, league), {
+    confirmedAt: phoneSlateConfirmedAt(slate, nowMs),
+  });
 }
 
 // ── Polymarket (193) OTB hold ──────────────────────────────────────────

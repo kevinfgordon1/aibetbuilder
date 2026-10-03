@@ -82,6 +82,7 @@ import {
 } from "./venueLive.js";
 import {
   UNDERDOG_RELAY_SILENT_MS,
+  UNDERDOG_TICK_REPAINT_MS,
   underdogRelayFresh,
   createUnderdogBook,
 } from "./underdogRelayStream.js";
@@ -1409,6 +1410,7 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
     // refused or silent for UNDERDOG_RELAY_SILENT_MS the poll resumes.
     const relayUrl = liveOnly && ["NFL", "NCAAF", "MLB"].includes(league) ? underdogRelayStreamUrl({ league }) : null;
     let relayLastAt = 0;
+    let lastPhoneApplyAt = 0;
     let relayConn = null;
     const relayFresh = () => !!relayUrl && underdogRelayFresh(relayLastAt, Date.now(), UNDERDOG_RELAY_SILENT_MS);
     const applyPhone = (phone) => {
@@ -1428,7 +1430,9 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
           cache: "no-store",
         }), { live: liveOnly });
         if (cancelled || ctrl.signal.aborted) return;
-        phoneRef.current = body && Array.isArray(body.games) ? body : { ok: false, games: [] };
+        phoneRef.current = body && Array.isArray(body.games)
+          ? { ...body, fetchedAt: Number.isFinite(body.fetchedAt) ? body.fetchedAt : Date.now() }
+          : { ok: false, games: [] };
       } catch {
         if (cancelled || ctrl.signal.aborted) return;
         phoneRef.current = { ok: false, games: [] };
@@ -1464,7 +1468,12 @@ export default function BetstampProOddsBoard({ user = null, refreshKey = 0 } = {
               if (out.kind === "gap") { conn.abort(); return; }
               relayLastAt = Date.now();
               attempt = 0;
-              if (out.changed) applyPhone(book.payload());
+              // A tick moves no price but confirms every quote on the slate as
+              // of this poll, so repaint its age (throttled: ~2s ticks).
+              if (out.changed || relayLastAt - lastPhoneApplyAt >= UNDERDOG_TICK_REPAINT_MS) {
+                lastPhoneApplyAt = relayLastAt;
+                applyPhone(book.payload());
+              }
             },
           });
         } catch {

@@ -75,6 +75,9 @@ async function handler(req, res, deps) {
       missingConfig: !!result.missingConfig,
       configRejected: !!result.configRejected,
       games: result.games || [],
+      // When Underdog was actually asked (ms). A price's updated_at only moves
+      // when the quote CHANGES, so the Pro board ages Underdog from this.
+      fetchedAt: Number.isFinite(result.fetchedAt) ? result.fetchedAt : Date.now(),
       error: result.error || null,
     });
   } catch (e) {
