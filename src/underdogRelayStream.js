@@ -16,6 +16,8 @@
 // board reconnects to get a fresh snapshot.
 
 export const UNDERDOG_RELAY_SILENT_MS = 10_000;
+// A tick (poll found nothing new) repaints Underdog ages at most this often.
+export const UNDERDOG_TICK_REPAINT_MS = 3_000;
 
 export function underdogRelayFromEnv(raw) {
   if (raw == null || raw === "") return true;
@@ -34,7 +36,15 @@ export function underdogRelayFresh(lastEventAt, nowMs, silentMs = UNDERDOG_RELAY
 export function createUnderdogBook() {
   let games = new Map();
   let seq = null;
-  const payload = () => ({ ok: true, missingConfig: false, configRejected: false, games: [...games.values()], error: null });
+  // When the relay last asked Underdog (ms). Every applied poll sets it, tick
+  // or not: a tick means "asked again, nothing moved", which still confirms
+  // every quote on the slate as current.
+  let fetchedAt = null;
+  const stampFetched = (data) => {
+    const t = Date.parse(data && data.fetchedAt);
+    if (Number.isFinite(t)) fetchedAt = t;
+  };
+  const payload = () => ({ ok: true, missingConfig: false, configRejected: false, games: [...games.values()], fetchedAt, error: null });
   return {
     get seq() { return seq; },
     payload,
@@ -46,12 +56,14 @@ export function createUnderdogBook() {
         games = new Map();
         for (const g of data.games || []) if (g && g.matchId != null) games.set(String(g.matchId), g);
         seq = Number.isFinite(data.seq) ? data.seq : 0;
+        stampFetched(data);
         return { kind: "snapshot", changed: true };
       }
       if (kind !== "delta" && kind !== "tick") return { kind: "ignore" };
       if (seq == null) return { kind: "gap" };
       if (data.seq !== seq + 1) return { kind: "gap" };
       seq = data.seq;
+      stampFetched(data);
       if (kind === "tick") return { kind: "tick", changed: false };
       for (const g of data.up || []) if (g && g.matchId != null) games.set(String(g.matchId), g);
       for (const id of data.rm || []) games.delete(String(id));
