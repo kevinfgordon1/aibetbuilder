@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange, SCAN_MAX_PROMO_LEGS, SCAN_GROW_FROM_3_SEEDS } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, findBestAcrossLegCounts, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange, SCAN_MAX_PROMO_LEGS, SCAN_GROW_FROM_3_SEEDS } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -606,6 +606,22 @@ function namesOf(parlays) {
     "two sequential filter updates must match a single-shot final slate",
   );
   assert.ok(oneshot.some((p) => p.legs[0].name === "Chiefs ML"), "final slate includes the play the dirty bounds hid");
+}
+
+
+{
+  const calc = (ls) => ({ ev: ls.length * 5, parlayOdds: 100 * ls.length, boostedProfit: 0 });
+  const pool = [
+    mkLeg("A", "G1 @ G2", 110, -120),
+    mkLeg("B", "G3 @ G4", 120, -125),
+    mkLeg("C", "G5 @ G6", 130, -130),
+    mkLeg("D", "G7 @ G8", 140, -135),
+  ];
+  const best = await findBestAcrossLegCounts(pool, calc, { maxLegs: 3, yieldMs: 0, growFrom3Seeds: 8 });
+  assert.ok(best);
+  assert.equal(best.numLegs, 3);
+  assert.equal(best.pick.legs.length, 3);
+  assert.equal(await findBestAcrossLegCounts([], calc, { maxLegs: 3, yieldMs: 0 }), null);
 }
 
 console.log("promoParlayScan.test.js: ok");

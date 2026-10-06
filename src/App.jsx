@@ -103,7 +103,7 @@ import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
-import { rescaleParlaysForStake, findTopParlaysChunked, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
@@ -112,7 +112,7 @@ import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import BetstampProOddsBoard from "./BetstampProOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
-import { activePromoList, bestPromoCardId } from "./promoOptimize.js";
+import { activePromoList, bestPromoCardId, promoPickCardId, resolveOptimizeFocusId } from "./promoOptimize.js";
 import { playerPropEmptyDetail, playerPropHiddenCounts } from "./promoPlayerPropHint.js";
 import {
   PROMO_SPORT_RELOAD_DEBOUNCE_MS,
@@ -1561,7 +1561,10 @@ export default function App() {
   const [routeNotice, setRouteNotice] = useState(null);
   const focusedCardApplied = useRef(null);
   const pendingOptimize = useRef(false);
+  const pendingOptimizeTarget = useRef(null); // { numLegs, cardId } after cross-leg scan
+  const optimizeGen = useRef(0);
   const [optimizeTick, setOptimizeTick] = useState(0);
+  const [optimizeBusy, setOptimizeBusy] = useState(false);
   const [profilePrefs, setProfilePrefs] = useState(() => defaultProfilePrefs());
   const [profilePrefsReady, setProfilePrefsReady] = useState(false);
   const [whatsNewSessionDismissed, setWhatsNewSessionDismissed] = useState(false);
@@ -2406,49 +2409,102 @@ export default function App() {
     });
   };
 
-  // Optimize!: clear manual leg X's, then expand + scroll ★ Best Pick (index 0
-  // of the existing post-blend EV ranking). Options 2+ stay below.
+  // Optimize!: search EV across legs 1..MAX_PROMO_LEGS, switch Legs to the
+  // winning count, and focus that combo so its legs fill ★ Best Pick.
+  // Keeps promo type / book / stake / boost / sports / markets / filters.
   const onOptimizePromo = () => {
+    if (optimizeBusy) return;
+    if (promoType !== "boost" && promoType !== "nosweat" && promoType !== "freebet") return;
+    const gen = ++optimizeGen.current;
     pendingOptimize.current = true;
+    pendingOptimizeTarget.current = null;
     setExcludedPromoLegs(new Set());
-    setOptimizeTick((n) => n + 1);
+    setOptimizeBusy(true);
     window.gtag?.("event", "promo_optimize", {
       promo_type: promoType,
       book: promoBook,
       stake,
       num_legs: numLegs,
       boost_pct: promoType === "boost" ? boostPct : undefined,
+      across_legs: true,
     });
     logEvent(user, "promo_optimize", {
       promo_type: promoType,
       book: promoBook,
       stake,
       num_legs: numLegs,
+      across_legs: true,
+    });
+
+    const raw = Number(scanStakeRef.current);
+    const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
+    const calc = promoType === "nosweat"
+      ? (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct)
+      : promoType === "freebet"
+        ? (ls) => calcFreeBetParlayEV(ls, atStake)
+        : (ls) => calcParlayEV(ls, scanBoostPct, atStake);
+    const ac = new AbortController();
+    findBestAcrossLegCounts(parlayLegPool, calc, {
+      maxLegs: MAX_PROMO_LEGS,
+      minFinalOdds: parsedMinFinal,
+      maxFinalOdds: parsedMaxFinal,
+      signal: ac.signal,
+      acceptCombo: includeTeamTokens.length
+        ? (comboLegs) => pickMatchesTeamInclude(comboLegs, includeTeamTokens)
+        : null,
+    }).then((result) => {
+      if (gen !== optimizeGen.current) return;
+      setOptimizeBusy(false);
+      if (!result || !result.pick) {
+        pendingOptimize.current = false;
+        pendingOptimizeTarget.current = null;
+        return;
+      }
+      const cardId = promoPickCardId(result.pick, { promoType, book: promoBook, stake });
+      pendingOptimizeTarget.current = { numLegs: result.numLegs, cardId };
+      if (numLegs !== result.numLegs) setNumLegs(result.numLegs);
+      setOptimizeTick((n) => n + 1);
+    }).catch((err) => {
+      if (gen !== optimizeGen.current) return;
+      setOptimizeBusy(false);
+      pendingOptimize.current = false;
+      pendingOptimizeTarget.current = null;
+      if (err?.name === "AbortError") return;
+      console.error("[promo optimize]", err);
     });
   };
 
   useEffect(() => {
     if (!pendingOptimize.current) return;
+    const target = pendingOptimizeTarget.current;
+    // Cross-leg scan still running — wait for a target.
+    if (!target) return;
+    if (numLegs !== target.numLegs) return;
+    // Wait until deferred scan inputs + busy settle on the winning count.
+    if (scanNumLegs !== target.numLegs) return;
+    if (promoScanBusy || promoFilterPending) return;
     const list = activePromoList(promoType, {
       boost: topParlaysWithHedge,
       nosweat: topNoSweatsWithLock,
       freebet: topFreeBetsWithLock,
     });
     if (!list.length) {
-      // Still scanning / empty — keep pending until a list arrives or user tweaks filters.
-      if (promoScanBusy) return;
+      if (!scanCompletedForCurrent) return;
       pendingOptimize.current = false;
+      pendingOptimizeTarget.current = null;
       return;
     }
-    const id = bestPromoCardId(list, { promoType, book: promoBook, stake });
+    const id = resolveOptimizeFocusId(list, target.cardId, { promoType, book: promoBook, stake });
     if (!id) {
       pendingOptimize.current = false;
+      pendingOptimizeTarget.current = null;
       return;
     }
     pendingOptimize.current = false;
+    pendingOptimizeTarget.current = null;
     focusedCardApplied.current = null;
     setFocusCardId(id);
-  }, [optimizeTick, promoType, promoBook, stake, promoScanBusy, topParlaysWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
+  }, [optimizeTick, promoType, promoBook, stake, numLegs, scanNumLegs, promoScanBusy, promoFilterPending, scanCompletedForCurrent, topParlaysWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
 
   const sendToComboLocks = (p, kind = "cash") => {
     if (!canSeeComboLocks(user)) return;
@@ -2947,20 +3003,22 @@ export default function App() {
                     <button
                       type="button"
                       onClick={onOptimizePromo}
-                      title="Jump to the highest post-blend EV pick for your current promo settings"
+                      disabled={optimizeBusy}
+                      title="Search 1–10 legs for the highest EV bet, then switch Legs and fill that combo"
                       style={{
                         padding: "8px 18px",
                         borderRadius: 8,
                         border: "none",
                         fontSize: 13,
                         fontWeight: 800,
-                        cursor: "pointer",
+                        cursor: optimizeBusy ? "wait" : "pointer",
                         letterSpacing: 0.4,
                         background: "linear-gradient(135deg, #10b981 0%, #3b82f6 100%)",
                         color: "#fff",
                         boxShadow: "0 0 0 1px rgba(16,185,129,0.35), 0 8px 20px rgba(59,130,246,0.25)",
+                        opacity: optimizeBusy ? 0.75 : 1,
                       }}
-                    >Optimize!</button>
+                    >{optimizeBusy ? "Optimizing…" : "Optimize!"}</button>
                   </>)}
                 </div>
                 <div style={{ display: "flex", flexDirection: promoFiltersOpen ? "row" : "column", alignItems: promoFiltersOpen ? "center" : undefined, gap: promoFiltersOpen ? 8 : 12, flexWrap: "wrap" }}>
