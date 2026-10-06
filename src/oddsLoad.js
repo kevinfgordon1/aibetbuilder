@@ -10,8 +10,9 @@ export { isSupabaseDownError, isSupabaseUnhealthy } from "./dataSourceHealth.js"
 
 export const EVENT_ODDS_LOOKBACK_MS = 30 * 60 * 1000;
 
-// Sports with Promo player props in player_prop_cache (NFL TD, MLB HR).
-export const PLAYER_PROP_SPORT_KEYS = Object.freeze(["americanfootball_nfl", "baseball_mlb"]);
+// Sports with Promo player props in player_prop_cache (NFL TD, MLB HR,
+// NHL anytime goal).
+export const PLAYER_PROP_SPORT_KEYS = Object.freeze(["americanfootball_nfl", "baseball_mlb", "icehockey_nhl"]);
 
 export function loadModeForTab(tab) {
   if (tab === "ev" || tab === "odds") return "full";
@@ -56,7 +57,7 @@ export function buildOddsQueryPlan({
     futures: isFull,
     futuresKeys: isFull ? [...(futuresKeys || [])] : [],
     computeEv: isFull,
-    // player_prop_cache sports: NFL anytime TDs and MLB 1+ HR.
+    // player_prop_cache sports: NFL anytime TDs, MLB 1+ HR, NHL 1+ goal.
     playerPropSports: isFull ? [] : PLAYER_PROP_SPORT_KEYS.filter((k) => sports.includes(k)),
     includePlayerProps: !isFull && PLAYER_PROP_SPORT_KEYS.some((k) => sports.includes(k)),
   };
