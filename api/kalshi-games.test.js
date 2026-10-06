@@ -247,12 +247,16 @@ console.log('kalshi-games tests passed');
   assert.equal(h.groupSportGames(by, Date.parse('2026-09-29T12:00:00Z'), OPTS).length, 1);
 }
 
-// ── Player props (KXMLBHR / KXNFLTD) from REAL captured Kalshi events ──
+// ── Player props (KXMLBHR / KXNFLTD / KXNHLGOAL) from REAL captured Kalshi events ──
 {
   const fs = require('node:fs');
   const path = require('node:path');
   const fx = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'fixtures-combo-props.json'), 'utf8'));
-  assert.deepEqual(handler.PROP_SERIES, { mlb: { series: 'KXMLBHR', kind: 'hr' }, nfl: { series: 'KXNFLTD', kind: 'td' } });
+  assert.deepEqual(handler.PROP_SERIES, {
+    mlb: { series: 'KXMLBHR', kind: 'hr' },
+    nfl: { series: 'KXNFLTD', kind: 'td' },
+    nhl: { series: 'KXNHLGOAL', kind: 'goal' },
+  });
   assert.deepEqual(h.parsePropLabel('Matt Olson: 1+'), { name: 'Matt Olson' });
   assert.deepEqual(h.parsePropLabel('Ronald Acuña Jr.: 1+'), { name: 'Ronald Acuña Jr.' });
   assert.equal(h.parsePropLabel('Matt Olson: 2+'), null);   // only the 1+ rung
@@ -296,7 +300,7 @@ console.log('kalshi-games tests passed');
   assert.equal(other.length, 1);
   assert.deepEqual(other[0].markets.prop, []);
 
-  // Without propKind (e.g. NHL / NCAAF) there is no prop key at all.
+  // Without propKind (e.g. NCAAF) there is no prop key at all.
   const none = h.groupSportGames({ side: [side('KXMLBGAME', '26OCT031600ATLLAD', 'ATL', 'LAD', 'Atlanta', 'Los Angeles D')] }, Date.parse('2026-10-03T14:50:00Z'));
   assert.equal(none[0].markets.prop, undefined);
 
@@ -311,4 +315,29 @@ console.log('kalshi-games tests passed');
   assert.ok(td.every((p) => p.kind === 'td' && !/D\/ST/.test(p.label)));
   assert.ok(td.some((p) => p.label === 'Josh Allen: 1+' && p.ticker === 'KXNFLTD-26OCT04NEBUF-BUFJALLEN17-1'));
   assert.equal(nfl[0].startTime, new Date(h.dateOnlyUtcMs('26OCT04NEBUF')).toISOString());
+
+  // NHL: anytime 1+ goal (KXNHLGOAL), 2+ dropped, date-only start unchanged by prop occurrence.
+  const nhl = h.groupSportGames({
+    prop: fx.goal.map(propEv),
+    side: [side('KXNHLGAME', '26OCT06FLALA', 'FLA', 'LA', 'Florida', 'Los Angeles')],
+  }, Date.parse('2026-10-06T16:00:00Z'), { propKind: 'goal', occurrenceStartOffsetMs: 3 * 3600 * 1000 });
+  assert.equal(nhl.length, 1);
+  assert.equal(nhl[0].key, '26OCT06FLALA');
+  assert.equal(nhl[0].title, 'Florida vs Los Angeles');
+  const goals = nhl[0].markets.prop;
+  assert.equal(goals.length, 4); // 4 players at 1+; Trevor Moore 2+ dropped
+  assert.ok(goals.every((p) => p.kind === 'goal' && /-1$/.test(p.ticker) && /: 1\+$/.test(p.label)));
+  assert.deepEqual(goals.find((p) => p.player === 'Trevor Moore'), {
+    ticker: 'KXNHLGOAL-26OCT06FLALA-LATMOORE12-1', side: 'yes', label: 'Trevor Moore: 1+', player: 'Trevor Moore', kind: 'goal',
+  });
+  assert.ok(goals.some((p) => p.label === 'Sam Reinhart: 1+' && p.ticker === 'KXNHLGOAL-26OCT06FLALA-FLASREINHART13-1'));
+  // UTANJ has props but no moneyline pair in this payload -> not a game.
+  assert.ok(!nhl.some((g) => g.key === '26OCT06UTANJ'));
+  // A different NHL game key gets NO props (no cross-game borrowing).
+  const otherNhl = h.groupSportGames({
+    prop: fx.goal.map(propEv),
+    side: [side('KXNHLGAME', '26OCT06CARMTL', 'CAR', 'MTL', 'Carolina', 'Montreal')],
+  }, Date.parse('2026-10-06T16:00:00Z'), { propKind: 'goal' });
+  assert.equal(otherNhl.length, 1);
+  assert.deepEqual(otherNhl[0].markets.prop, []);
 }

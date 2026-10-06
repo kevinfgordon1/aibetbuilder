@@ -545,25 +545,31 @@ function noStrikeInRangeReason(kind, want, title) {
   return `no Kalshi ${kind} within ${STRIKE_SNAP_MAX} pts of ${want} on ${title}`;
 }
 
-// ── Player props (MLB 1+ HR, NFL anytime TD) ───────────────────────────────────
-// Promo legs are named "<Player> 1+ HR" / "<Player> 1+ TD" (lib/player-td legName)
-// and Kalshi lists the same rung as "<Player>: 1+" under KXMLBHR / KXNFLTD, on the
-// SAME game key as the game's moneyline pair. A prop maps only when ALL hold:
-//   - HR on an MLB game, TD on an NFL game (kind comes from the leg, not the name);
+// ── Player props (MLB 1+ HR, NFL anytime TD, NHL 1+ Goal) ──────────────────────
+// Promo legs are named "<Player> 1+ HR" / "<Player> 1+ TD" / "<Player> 1+ Goal"
+// (lib/player-td legName) and Kalshi lists the same rung as "<Player>: 1+" under
+// KXMLBHR / KXNFLTD / KXNHLGOAL, on the SAME game key as the game's moneyline
+// pair. A prop maps only when ALL hold:
+//   - HR on MLB, TD on NFL, Goal on NHL (kind comes from the leg, not the name);
 //   - the leg's rung is exactly 1+ (2+ / first TD / anything else is skipped);
 //   - the game is the one matchKalshiGame picked (teams + first-pitch gap), AND the
 //     leg's commence_time falls on that game key's ET calendar date;
 //   - the FULL player name equals Kalshi's after case/accent/punctuation folding
 //     (a Jr./II suffix is NOT dropped), and exactly one Kalshi market qualifies.
 // Anything else is skipped with a reason — never a nearest-name guess.
-const PROP_KIND_BY_MARKET = { HR: { kind: "hr", sport: "mlb", label: "HR" }, TD: { kind: "td", sport: "nfl", label: "TD" } };
+const PROP_KIND_BY_MARKET = {
+  HR: { kind: "hr", sport: "mlb", label: "HR" },
+  TD: { kind: "td", sport: "nfl", label: "TD" },
+  GOAL: { kind: "goal", sport: "nhl", label: "Goal" },
+};
+const PROP_WHAT = { hr: "1+ HR", td: "anytime TD", goal: "1+ Goal" };
 
 export function parsePromoProp(leg) {
   const spec = PROP_KIND_BY_MARKET[leg?.market];
   if (!spec) return null;
-  const m = /^(.*\S)\s+(\d+)\+\s+(HR|TD)$/i.exec(String(leg.name || "").trim());
+  const m = /^(.*\S)\s+(\d+)\+\s+(HR|TD|Goal)$/i.exec(String(leg.name || "").trim());
   if (!m) return { spec, player: null, rung: null };
-  if (m[3].toUpperCase() !== spec.label) return { spec, player: null, rung: null };
+  if (m[3].toUpperCase() !== spec.label.toUpperCase()) return { spec, player: null, rung: null };
   return { spec, player: m[1].trim(), rung: Number(m[2]) };
 }
 
@@ -586,7 +592,7 @@ function propPlayerName(label) {
 function matchPropMarket(promoLeg, game, sport) {
   const parsed = parsePromoProp(promoLeg);
   const spec = parsed.spec;
-  const what = spec.kind === "hr" ? "1+ HR" : "anytime TD";
+  const what = PROP_WHAT[spec.kind] || spec.label;
   const matchup = matchupLabel(game);
   if (sport !== spec.sport) {
     return { market: null, reason: `${spec.label} props map only on ${spec.sport.toUpperCase()} games` };
@@ -621,7 +627,7 @@ function matchPropMarket(promoLeg, game, sport) {
 function matchMarket(promoLeg, game, sport = "mlb") {
   const market = promoLeg.market;
   const title = game.title || game.key;
-  if (market === "HR" || market === "TD") return matchPropMarket(promoLeg, game, sport);
+  if (market === "HR" || market === "TD" || market === "GOAL") return matchPropMarket(promoLeg, game, sport);
   if (market === "ML") {
     const sides = game.markets?.side || [];
     if (sport === "ncaaf") {
@@ -713,7 +719,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
   for (const leg of promoLegs || []) {
     const sport = promoSportOf(leg);
     if (!sport) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines (plus MLB 1+ HR and NFL anytime TD props)"));
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines (plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props)"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }

@@ -1048,7 +1048,7 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   console.log("comboPrefill NHL tests passed");
 }
 
-// ── Player props: MLB 1+ HR and NFL anytime TD (REAL captured Kalshi events) ──
+// ── Player props: MLB 1+ HR, NFL anytime TD, NHL 1+ Goal (REAL captured Kalshi events) ──
 {
   const { readFileSync } = await import("node:fs");
   const fx = JSON.parse(readFileSync(new URL("./fixtures-combo-props.json", import.meta.url), "utf8"));
@@ -1057,6 +1057,7 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
     markets: [{ ticker: `${series}-${key}-${a}`, yes_sub_title: aName }, { ticker: `${series}-${key}-${b}`, yes_sub_title: bName }],
   });
   const PNOW = Date.parse("2026-10-03T14:50:00Z");
+  const GNOW = Date.parse("2026-10-06T16:00:00Z");
   const mlbGames = kalshiGames._helpers.groupSportGames({
     side: [
       side("KXMLBGAME", "26OCT031600ATLLAD", "ATL", "LAD", "Atlanta", "Los Angeles D"),
@@ -1069,9 +1070,14 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
     side: [side("KXNFLGAME", "26OCT04NEBUF", "NE", "BUF", "New England", "Buffalo")],
     prop: fx.td,
   }, PNOW, { propKind: "td" }).map((g) => ({ ...g, sport: "nfl" }));
-  const psports = { mlb: mlbGames, nfl: nflGames };
+  const nhlGames = kalshiGames._helpers.groupSportGames({
+    side: [side("KXNHLGAME", "26OCT06FLALA", "FLA", "LA", "Florida", "Los Angeles")],
+    prop: fx.goal,
+  }, GNOW, { propKind: "goal", occurrenceStartOffsetMs: 3 * 3600 * 1000 }).map((g) => ({ ...g, sport: "nhl" }));
+  const psports = { mlb: mlbGames, nfl: nflGames, nhl: nhlGames };
   const hr = (name, game, commence) => ({ name, market: "HR", game, commence_time: commence, sport: "baseball_mlb" });
   const td = (name, game, commence) => ({ name, market: "TD", game, commence_time: commence, sport: "americanfootball_nfl" });
+  const goal = (name, game, commence) => ({ name, market: "GOAL", game, commence_time: commence, sport: "icehockey_nhl" });
   const ATL = "Atlanta Braves @ Los Angeles Dodgers";
   const CWS = "Chicago White Sox @ Cleveland Guardians";
 
@@ -1132,5 +1138,30 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
 
   // Saved prop leg carries the exact label the combo-worker's Polymarket crosswalk verifies.
   assert.equal(psports.mlb.find((g) => g.key === "26OCT031600ATLLAD").markets.prop.find((p) => p.player === "Matt Olson").label, "Matt Olson: 1+");
+
+  // NHL anytime goal maps on the same game key; 2+ is refused.
+  const FLA = "Florida Panthers @ Los Angeles Kings";
+  const goalOk = mapPromoLegsToKalshi([
+    goal("Trevor Moore 1+ Goal", FLA, "2026-10-07T02:00:00Z"),
+    goal("Sam Reinhart 1+ Goal", FLA, "2026-10-07T02:00:00Z"),
+  ], psports, GNOW);
+  assert.deepEqual(goalOk.unmatched, []);
+  assert.deepEqual(goalOk.rows, [
+    { gameKey: "26OCT06FLALA", marketVal: encVal("KXNHLGOAL-26OCT06FLALA-LATMOORE12-1", "yes") },
+    { gameKey: "26OCT06FLALA", marketVal: encVal("KXNHLGOAL-26OCT06FLALA-FLASREINHART13-1", "yes") },
+  ]);
+  assert.equal(
+    psports.nhl.find((g) => g.key === "26OCT06FLALA").markets.prop.find((p) => p.player === "Trevor Moore").label,
+    "Trevor Moore: 1+",
+  );
+  const gbad = (leg) => { const r = mapPromoLegsToKalshi([leg], psports, GNOW); assert.equal(r.rows[0].marketVal, ""); assert.equal(r.unmatched.length, 1); return r.unmatched[0].reason; };
+  assert.match(gbad(goal("Trevor Moore 2+ Goal", FLA, "2026-10-07T02:00:00Z")), /only the 1\+ Goal rung/);
+  assert.match(gbad(goal("Trevor Moor 1+ Goal", FLA, "2026-10-07T02:00:00Z")), /no 1\+ Goal market for Trevor Moor/);
+  assert.match(gbad(goal("Jack Hughes 1+ Goal", FLA, "2026-10-07T02:00:00Z")), /no 1\+ Goal market for Jack Hughes/); // listed on UTANJ, not FLA
+  assert.match(gbad({ ...goal("Trevor Moore 1+ Goal", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z"), sport: "americanfootball_nfl" }), /Goal props map only on NHL/);
+  assert.match(gbad(goal("Trevor Moore 1+ HR", FLA, "2026-10-07T02:00:00Z")), /not a "<Player> 1\+ Goal" leg/);
+  // ET date must match the Kalshi game key (26OCT06… → 2026-10-06 ET).
+  assert.match(gbad(goal("Trevor Moore 1+ Goal", FLA, "2026-10-08T02:00:00Z")), /date could not be verified|no matching|listed yet/);
+
   console.log("comboPrefill player-prop tests passed");
 }

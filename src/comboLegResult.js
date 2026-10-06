@@ -284,7 +284,7 @@ export function legFromEspnGame(leg, game) {
   const type = String(leg.type || "").toLowerCase();
   const sport = sportFromTicker(leg.ticker, leg.gameKey);
 
-  // Player props (HR / anytime TD) cannot be derived from a final score. Kalshi's
+  // Player props (HR / anytime TD / NHL goal) cannot be derived from a final score. Kalshi's
   // own market result is the only source; never fall through to the moneyline path.
   if (type === "prop") return { status: "pending", source: "espn" };
 
