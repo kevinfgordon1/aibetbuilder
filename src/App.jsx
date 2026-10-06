@@ -112,6 +112,7 @@ import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import BetstampProOddsBoard from "./BetstampProOddsBoard.jsx";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
+import { activePromoList, bestPromoCardId } from "./promoOptimize.js";
 import { playerPropEmptyDetail, playerPropHiddenCounts } from "./promoPlayerPropHint.js";
 import {
   PROMO_SPORT_RELOAD_DEBOUNCE_MS,
@@ -1559,6 +1560,8 @@ export default function App() {
   const [focusCardId, setFocusCardId] = useState(null);
   const [routeNotice, setRouteNotice] = useState(null);
   const focusedCardApplied = useRef(null);
+  const pendingOptimize = useRef(false);
+  const [optimizeTick, setOptimizeTick] = useState(0);
   const [profilePrefs, setProfilePrefs] = useState(() => defaultProfilePrefs());
   const [profilePrefsReady, setProfilePrefsReady] = useState(false);
   const [whatsNewSessionDismissed, setWhatsNewSessionDismissed] = useState(false);
@@ -2403,6 +2406,50 @@ export default function App() {
     });
   };
 
+  // Optimize!: clear manual leg X's, then expand + scroll ★ Best Pick (index 0
+  // of the existing post-blend EV ranking). Options 2+ stay below.
+  const onOptimizePromo = () => {
+    pendingOptimize.current = true;
+    setExcludedPromoLegs(new Set());
+    setOptimizeTick((n) => n + 1);
+    window.gtag?.("event", "promo_optimize", {
+      promo_type: promoType,
+      book: promoBook,
+      stake,
+      num_legs: numLegs,
+      boost_pct: promoType === "boost" ? boostPct : undefined,
+    });
+    logEvent(user, "promo_optimize", {
+      promo_type: promoType,
+      book: promoBook,
+      stake,
+      num_legs: numLegs,
+    });
+  };
+
+  useEffect(() => {
+    if (!pendingOptimize.current) return;
+    const list = activePromoList(promoType, {
+      boost: topParlaysWithHedge,
+      nosweat: topNoSweatsWithLock,
+      freebet: topFreeBetsWithLock,
+    });
+    if (!list.length) {
+      // Still scanning / empty — keep pending until a list arrives or user tweaks filters.
+      if (promoScanBusy) return;
+      pendingOptimize.current = false;
+      return;
+    }
+    const id = bestPromoCardId(list, { promoType, book: promoBook, stake });
+    if (!id) {
+      pendingOptimize.current = false;
+      return;
+    }
+    pendingOptimize.current = false;
+    focusedCardApplied.current = null;
+    setFocusCardId(id);
+  }, [optimizeTick, promoType, promoBook, stake, promoScanBusy, topParlaysWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
+
   const sendToComboLocks = (p, kind = "cash") => {
     if (!canSeeComboLocks(user)) return;
     const american = kind === "freebet"
@@ -2895,6 +2942,25 @@ export default function App() {
                         style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
                       >+</button>
                     )}
+                  </>)}
+                  {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && controlBox(<>
+                    <button
+                      type="button"
+                      onClick={onOptimizePromo}
+                      title="Jump to the highest post-blend EV pick for your current promo settings"
+                      style={{
+                        padding: "8px 18px",
+                        borderRadius: 8,
+                        border: "none",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        letterSpacing: 0.4,
+                        background: "linear-gradient(135deg, #10b981 0%, #3b82f6 100%)",
+                        color: "#fff",
+                        boxShadow: "0 0 0 1px rgba(16,185,129,0.35), 0 8px 20px rgba(59,130,246,0.25)",
+                      }}
+                    >Optimize!</button>
                   </>)}
                 </div>
                 <div style={{ display: "flex", flexDirection: promoFiltersOpen ? "row" : "column", alignItems: promoFiltersOpen ? "center" : undefined, gap: promoFiltersOpen ? 8 : 12, flexWrap: "wrap" }}>
