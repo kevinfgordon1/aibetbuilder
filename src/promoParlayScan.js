@@ -345,6 +345,76 @@ const STAKE_LINEAR_FIELDS = [
   "creditValue",
 ];
 
+// Optimize!: best post-scan EV across every leg count 1..maxLegs.
+// Reuses one 3-leg seed pass for 4+ (same growFromSeeds path as the normal
+// scan) so we do not re-enumerate C(n,3) for each n. Returns
+// { numLegs, pick } or null when every count is empty.
+export async function findBestAcrossLegCounts(legs, calc, {
+  maxLegs = SCAN_MAX_PROMO_LEGS,
+  minFinalOdds = null,
+  maxFinalOdds = null,
+  signal = null,
+  yieldMs = SCAN_YIELD_MS,
+  yieldFn = yieldToMain,
+  growFrom3Seeds = SCAN_GROW_FROM_3_SEEDS,
+  acceptCombo = null,
+} = {}) {
+  const cap = Math.max(0, Math.min(Number(maxLegs) || 0, SCAN_MAX_PROMO_LEGS));
+  if (cap < 1) return null;
+
+  let best = null;
+  const consider = (n, pick) => {
+    if (!pick || typeof pick.ev !== "number") return;
+    if (!best || pick.ev > best.pick.ev) best = { numLegs: n, pick };
+  };
+
+  const scanOpts = { signal, yieldMs, yieldFn, acceptCombo };
+
+  if (cap >= 1) {
+    const top1 = await findTopParlaysChunked(legs, 1, calc, {
+      ...scanOpts,
+      maxResults: 1,
+      minFinalOdds,
+      maxFinalOdds,
+    });
+    consider(1, top1[0]);
+  }
+  if (cap >= 2) {
+    const top2 = await findTopParlaysChunked(legs, 2, calc, {
+      ...scanOpts,
+      maxResults: 1,
+      minFinalOdds,
+      maxFinalOdds,
+    });
+    consider(2, top2[0]);
+  }
+  if (cap < 3) return best;
+
+  // Unbounded 3-leg seeds feed growFromSeeds for 4..cap. Odds bounds apply
+  // when we pick the 3-leg winner and when growing longer parlays.
+  const seedCount = Math.max(1, growFrom3Seeds);
+  const seeds = await findTopParlaysChunked(legs, 3, calc, {
+    ...scanOpts,
+    maxResults: seedCount,
+    minFinalOdds: null,
+    maxFinalOdds: null,
+  });
+  throwIfAborted(signal);
+
+  const top3 = seeds.filter((p) => passesOddsBounds(p.parlayOdds, minFinalOdds, maxFinalOdds));
+  consider(3, top3[0] || null);
+
+  for (let n = 4; n <= cap; n++) {
+    throwIfAborted(signal);
+    const grown = growFromSeeds(legs, n, seeds, calc, 1, minFinalOdds, maxFinalOdds);
+    const filtered = typeof acceptCombo === "function"
+      ? grown.filter((p) => acceptCombo(p.legs))
+      : grown;
+    consider(n, filtered[0] || null);
+  }
+  return best;
+}
+
 export function rescaleParlaysForStake(parlays, fromStake, toStake) {
   if (!parlays?.length) return parlays || [];
   const from = Number(fromStake);
