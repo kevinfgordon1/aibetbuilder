@@ -43,13 +43,15 @@ const MARKET_SERIES = {
   nhl: { side: 'KXNHLGAME', spread: 'KXNHLSPREAD', total: 'KXNHLTOTAL' },
 };
 // Player props ride on the same game key (KXMLBHR-26OCT031600ATLLAD,
-// KXNFLTD-26OCT05ATLNO) and only ever attach to a game that already has its
-// moneyline pair. Only the 1+ rung of a named player is exposed (MLB 1+ HR,
-// NFL anytime TD); label stays Kalshi's own "Matt Olson: 1+" because the
-// combo-worker's Polymarket prop crosswalk verifies that exact string.
+// KXNFLTD-26OCT05ATLNO, KXNHLGOAL-26OCT06FLALA) and only ever attach to a game
+// that already has its moneyline pair. Only the 1+ rung of a named player is
+// exposed (MLB 1+ HR, NFL anytime TD, NHL anytime goal); label stays Kalshi's
+// own "Matt Olson: 1+" / "Trevor Moore: 1+" because the combo-worker's
+// Polymarket prop crosswalk verifies that exact string.
 const PROP_SERIES = {
   mlb: { series: 'KXMLBHR', kind: 'hr' },
   nfl: { series: 'KXNFLTD', kind: 'td' },
+  nhl: { series: 'KXNHLGOAL', kind: 'goal' },
 };
 // NHL keys are date-only (26SEP30PITPHI) but every market's occurrence_datetime is
 // puck drop + 3h (checked against ESPN's scoreboard: 46 of 47 listed games), so the

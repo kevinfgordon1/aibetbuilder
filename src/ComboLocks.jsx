@@ -610,7 +610,7 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
     sampleGame("26OCT07PITPHI", "PHI", "PIT", "Philadelphia", "Pittsburgh", NHL_SERIES, ["1.5", "2.5"], ["5.5", "6.5", "7.5"]),
   ],
 } };
-const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)", prop: "Player props (MLB 1+ HR / NFL anytime TD)" };
+const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)", prop: "Player props (MLB 1+ HR / NFL anytime TD / NHL 1+ Goal)" };
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
 const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", kind: "cash", starts: "", label: "", labelEdited: false, sportsbook: "", boostPct: "" };
@@ -1638,7 +1638,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             {prefillWarning && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
-                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF / NHL main lines, MLB 1+ HR and NFL anytime-TD props). Fill those rows by hand, then save — nothing has been inserted yet.
+                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF / NHL main lines, MLB 1+ HR, NFL anytime-TD, and NHL 1+ Goal props). Fill those rows by hand, then save — nothing has been inserted yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
                 </ul>
