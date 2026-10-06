@@ -3,8 +3,8 @@
 // array of MARKET_SCOPES values. ["all"] (the default) means no filter.
 // Main is non-alt game lines only (no player props); ML is h2h only.
 // Specific picks combine as a union, e.g. ["main", "props"] = main game
-// lines plus player props (NFL anytime TD + MLB 1+ HR), so multi-leg
-// parlays can mix both.
+// lines plus player props (NFL anytime TD + MLB 1+ HR + NHL anytime goal),
+// so multi-leg parlays can mix both.
 
 export const MARKET_SCOPES = [
   { val: "all", label: "All" },
@@ -23,9 +23,10 @@ export function isMoneylineLeg(leg) {
 }
 
 // Sportsbook player-prop legs from playerTdLegsForBook: NFL anytime TD
-// (market "TD") and MLB 1+ home run (market "HR"). Both carry playerTd.
+// (market "TD"), MLB 1+ home run (market "HR") and NHL anytime goal
+// (market "GOAL"). All carry playerTd.
 export function isPlayerPropLeg(leg) {
-  return !!(leg && (leg.playerTd || leg.playerProp || leg.market === "TD" || leg.market === "HR"));
+  return !!(leg && (leg.playerTd || leg.playerProp || leg.market === "TD" || leg.market === "HR" || leg.market === "GOAL"));
 }
 
 // Accepts the new array form or an old single string ("main", "props", ...)
