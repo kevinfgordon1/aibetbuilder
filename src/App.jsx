@@ -10,6 +10,8 @@ import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardMod
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, promoControlSummary } from "./guestAccess.js";
+import SignInPanel from "./SignInOptions.jsx";
+import { authCallbackError, bootAppHash, restoreAuthReturnUrl } from "./signIn.js";
 import {
   DEFAULT_PROMO_TYPE,
   effectiveBoostPct,
@@ -138,16 +140,24 @@ import {
 
 const { conflictsWithAny, playerTdLegsForBook, playerTdsFromCacheRows, promoLegsCorrelate } = playerTd;
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-);
+function createBrowserSupabase() {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  try {
+    return createClient(url, key);
+  } catch (err) {
+    console.error("Supabase client failed to start", err);
+    return null;
+  }
+}
+const supabase = createBrowserSupabase();
 
 // ── Activity logging helper ──────────────────────────────────────────────
 // NOTE: supabase-js v2 query builders are lazy thenables — the HTTP request
 // only fires when the builder is awaited/.then()'d. Do not remove the await.
 const logEvent = async (user, event, metadata = {}) => {
-  if (!user) return;
+  if (!user || !supabase) return;
   const { error } = await supabase.from('activity_log').insert({
     user_id: user.id,
     email: user.email,
@@ -961,13 +971,13 @@ function transformFuturesData(dataArray, futuresKey) {
   return { key: futuresKey, teams: Object.values(teams) };
 }
 
-// Full signed-out landing page. Shown when a logged-out visitor tries to interact
-// with the app (soft gate). onSignIn → Google auth; onBack → return to the preview.
-function LandingFull({ onSignIn, onBack }) {
+// Full signed-out landing / sign-up page. Header "Sign in" opens it.
+// onBack returns to the live preview. Google, email, X, and Facebook live in SignInPanel.
+function LandingFull({ onBack }) {
   const [barOpen, setBarOpen] = useState(true);
-  const GoogleIcon = () => (
-    <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#4285F4" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#34A853" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#EA4335" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-  );
+  const focusSignIn = () => {
+    document.getElementById("lf-signin")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   return (
     <div className="lf-root">
       <style>{`
@@ -1036,7 +1046,7 @@ function LandingFull({ onSignIn, onBack }) {
       {barOpen && (
         <div className="lf-bar">
           <span>🔒 You were viewing a live preview — <strong>sign in for free</strong> to use aibetbuilder.io.</span>
-          <button className="lf-bar-cta" onClick={onSignIn}>Sign in →</button>
+          <button className="lf-bar-cta" onClick={focusSignIn}>Sign in →</button>
           <button className="lf-bar-x" onClick={() => setBarOpen(false)} aria-label="Dismiss">×</button>
         </div>
       )}
@@ -1046,16 +1056,16 @@ function LandingFull({ onSignIn, onBack }) {
           <div className="lf-logo">B</div>
           <div className="lf-bn">AI Bet Builder</div>
         </div>
-        <button className="lf-navcta" onClick={onSignIn}>Sign in</button>
+        <button className="lf-navcta" onClick={focusSignIn}>Sign in</button>
       </div>
 
       <section className="lf-hero"><div className="wrap">
         <div className="lf-eyebrow"><span className="lf-dot"></span> Live odds from 15+ books &amp; exchanges</div>
         <h1>Make your sportsbook<br /><span className="lf-grad">promos actually pay.</span></h1>
         <p className="lf-sub">AI Bet Builder finds the highest-EV boosts, builds the optimal parlay to hit them, and turns free bets — singles or parlays — into EV-ranked plays. 1-leg free bets still convert to locked cash.</p>
-        <div className="lf-ctarow">
-          <button className="lf-google" onClick={onSignIn}><GoogleIcon /> Sign in with Google — It's Free</button>
-          <span className="lf-trust">No credit card · No bank account linking</span>
+        <div className="lf-ctarow" style={{ display: "block" }}>
+          <SignInPanel id="lf-signin" supabaseClient={supabase} />
+          <p className="lf-trust" style={{ textAlign: "center", margin: "14px 0 0" }}>No credit card · No bank account linking</p>
         </div>
         <div className="lf-stats">
           <div className="lf-stat"><div className="n b">15+</div><div className="l">Books &amp; exchanges</div></div>
@@ -1083,7 +1093,7 @@ function LandingFull({ onSignIn, onBack }) {
       <section className="lf-sec" style={{ background: "rgba(255,255,255,0.015)", borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}><div className="wrap">
         <div className="lf-sechead"><div className="k">How it works</div><h2>Three steps to your edge</h2></div>
         <div className="lf-steps">
-          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>One click with Google. No card, no bank account linking, no setup.</p></div>
+          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>Google, a link to your email, X, or Facebook. No card, no bank account linking, no setup.</p></div>
           <div className="lf-step"><div className="num">2</div><h3>Pick your book &amp; promo</h3><p>Choose your sportsbook and the boost or free bet you're working with.</p></div>
           <div className="lf-step"><div className="num">3</div><h3>Get the optimal play</h3><p>Get the highest-EV parlay or hedge, ranked and ready, from live odds.</p></div>
         </div>
@@ -1092,7 +1102,7 @@ function LandingFull({ onSignIn, onBack }) {
       <section className="lf-sec"><div className="wrap">
         <div className="lf-sechead"><div className="k">FAQ</div><h2>Good questions</h2></div>
         <div className="lf-faq">
-          <div className="lf-qa"><h4>Is it really free?</h4><p>Yes. Sign in with Google and everything's available — no credit card, no trial timer.</p></div>
+          <div className="lf-qa"><h4>Is it really free?</h4><p>Yes. Sign in with Google, email, X, or Facebook and everything's available — no credit card, no trial timer.</p></div>
           <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, and college football &amp; basketball — plus championship futures for each.</p></div>
           <div className="lf-qa"><h4>Do I have to link my sportsbook accounts?</h4><p>No. It reads public odds; you place bets yourself at whichever book has the edge.</p></div>
           <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 15+ US sportsbooks plus the Kalshi and Polymarket exchanges, refreshed continuously.</p></div>
@@ -1102,7 +1112,7 @@ function LandingFull({ onSignIn, onBack }) {
       <section className="lf-closing"><div className="lf-closingbox">
         <h2>Stop leaving value on the table.</h2>
         <p>Your next boost is worth more than you think. Let's find out how much.</p>
-        <button className="lf-google" onClick={onSignIn}><GoogleIcon /> Sign in with Google — It's Free</button>
+        <SignInPanel id="lf-signin-close" supabaseClient={supabase} />
       </div></section>
 
       <div className="lf-footer">
@@ -1519,10 +1529,12 @@ export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
   const [activeTab, setActiveTab] = useState(() => (
-    typeof window === "undefined" ? "promo" : initialAppTab(window.location.hash)
+    typeof window === "undefined" ? "promo" : initialAppTab(bootAppHash(window.location))
   ));
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [signInPrompt, setSignInPrompt] = useState(null);
+  const [signInNotice, setSignInNotice] = useState(null);
+  const [showLanding, setShowLanding] = useState(false);
   const [promoControlsOpen, setPromoControlsOpen] = useState(false);
   const [promoType, setPromoType] = useState(DEFAULT_PROMO_TYPE);
   const [boostPct, setBoostPct] = useState(30);
@@ -1562,7 +1574,7 @@ export default function App() {
   const [promoLoadedSports, setPromoLoadedSports] = useState(null);
   const [promoBoardData, setPromoBoardData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [fullBoardLoading, setFullBoardLoading] = useState(() => {
-    const tab = typeof window === "undefined" ? "promo" : initialAppTab(window.location.hash);
+    const tab = typeof window === "undefined" ? "promo" : initialAppTab(bootAppHash(window.location));
     return tab === "ev" || tab === "odds";
   });
   const [fullBoardLoaded, setFullBoardLoaded] = useState(false);
@@ -1604,7 +1616,20 @@ export default function App() {
   const [soccerPmNoStatus, setSoccerPmNoStatus] = useState("idle");
 
   useEffect(() => {
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
+    let cancelled = false;
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      const notice = authCallbackError(window.location);
+      const restored = restoreAuthReturnUrl(window.location);
+      if (restored) window.history.replaceState(null, "", restored);
+      if (notice) {
+        setSignInNotice(notice);
+        setSignInPrompt(notice.message);
+      }
       const u = session?.user ?? null;
       setUser(u);
       setAuthLoading(false);
@@ -1619,11 +1644,18 @@ export default function App() {
         // GA User-ID tracking
         window.gtag?.('config', 'G-H61PXF1WNS', { user_id: u.id });
       }
+    }).catch(() => {
+      if (!cancelled) setAuthLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const next = session?.user ?? null;
+      setUser(next);
+      if (next) setShowLanding(false);
     });
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -1907,11 +1939,6 @@ export default function App() {
     return () => clearTimeout(id);
   }, [promoSports]);
 
-  const signInWithGoogle = async () => {
-    window.gtag?.('event', 'sign_in_started', { method: 'google' });
-    await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
-  };
-
   const choosePromoType = (val) => {
     setPromoType(val);
     if (val === "nosweat") setNumLegs(1);
@@ -1920,6 +1947,7 @@ export default function App() {
   const guestLocked = !authLoading && !user;
   const askSignIn = (reason) => {
     if (!guestLocked) return;
+    setSignInNotice(null);
     setSignInPrompt(reason || "Sign in to continue.");
     window.gtag?.("event", "signup_gate_shown");
   };
@@ -2589,6 +2617,10 @@ export default function App() {
   const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || soccerLayBookLabel(key) || key;
   const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
+  if (!authLoading && !user && showLanding) {
+    return <LandingFull onBack={() => setShowLanding(false)} />;
+  }
+
   return (
     <div className="app-root" style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <style>{`
@@ -2616,9 +2648,10 @@ export default function App() {
           display: flex; align-items: center; justify-content: center; padding: 20px;
         }
         .signin-modal {
-          width: min(420px, 100%); background: #12131a; color: #e8eaed;
+          width: min(460px, 100%); background: #12131a; color: #e8eaed;
           border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px;
           box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+          max-height: min(92vh, 760px); overflow: auto;
         }
         .signin-modal h2 { margin: 0 0 8px; font-size: 18px; }
         .signin-modal p { margin: 0 0 16px; color: #9ca3af; font-size: 14px; line-height: 1.5; }
@@ -2703,8 +2736,8 @@ export default function App() {
               <button onClick={signOut} style={{ background: "rgba(255,255,255,0.06)", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign Out</button>
             </div>
           ) : (
-            <button className="app-signin" onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-              <span className="signin-long">Sign in with Google</span>
+            <button className="app-signin" onClick={() => { if (!authLoading) { setSignInPrompt(null); setShowLanding(true); } }} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <span className="signin-long">Sign in</span>
               <span className="signin-short">Sign in</span>
             </button>
           )}
@@ -2748,7 +2781,7 @@ export default function App() {
         <div className="guest-explainer-wrap">
           <div className="guest-explainer" data-guest-explainer="true">
             <p>{GUEST_EXPLAINER_COPY}</p>
-            <button type="button" onClick={signInWithGoogle}>Sign in</button>
+            <button type="button" onClick={() => askSignIn("Sign in to use aibetbuilder.io.")}>Sign in</button>
           </div>
         </div>
       )}
@@ -2757,7 +2790,7 @@ export default function App() {
         <div data-guard-allow="true" style={{ margin: "12px 32px 0", padding: "12px 16px", borderRadius: 10, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <span>{routeNotice === "signin" ? "Sign in to open this link." : "You don’t have access to this page."}</span>
           {routeNotice === "signin" && !user && (
-            <button type="button" onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign in with Google</button>
+            <button type="button" onClick={() => askSignIn("Sign in to open this link.")} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign in</button>
           )}
         </div>
       )}
@@ -3902,9 +3935,9 @@ export default function App() {
         <div className="signin-modal-back" onClick={() => setSignInPrompt(null)}>
           <div className="signin-modal" role="dialog" aria-modal="true" aria-labelledby="signin-prompt-title" onClick={(e) => e.stopPropagation()}>
             <h2 id="signin-prompt-title">Sign in to continue</h2>
-            <p>{signInPrompt} It’s free with Google — no card.</p>
-            <div className="signin-modal-actions">
-              <button type="button" onClick={signInWithGoogle} style={{ background: "#fff", color: "#1f2937", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Sign in with Google</button>
+            <p>{signInNotice ? "Something went wrong with that sign-in." : signInPrompt} It’s free — no card.</p>
+            <SignInPanel id="signin-modal-panel" supabaseClient={supabase} initialStatus={signInNotice} />
+            <div className="signin-modal-actions" style={{ marginTop: 14 }}>
               <button type="button" onClick={() => setSignInPrompt(null)} style={{ background: "transparent", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Not now</button>
             </div>
           </div>

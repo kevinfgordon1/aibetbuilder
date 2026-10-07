@@ -84,7 +84,7 @@ function legacyRange(commence_time, range, now) {
   const allBooks = app.slice(app.indexOf("function buildAllLegsAllBooks"), app.indexOf("function parlayLegKey"));
   assert.match(allBooks, /upcomingInRange\(data && data\.moneylines/);
   assert.doesNotMatch(allBooks, /isWithinDateRange\(/);
-  assert.match(app, /initialAppTab\(window\.location\.hash\)/);
+  assert.match(app, /initialAppTab\(bootAppHash\(window\.location\)\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /shouldFetchPromoOdds\(\{ tab: activeTab, forceRefresh: false, promoLoaded \}\)/);
 }

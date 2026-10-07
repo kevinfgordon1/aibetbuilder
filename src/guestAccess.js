@@ -1,7 +1,7 @@
 // Logged-out visitors can use the public tool. Sign-in is reserved for
 // actions that save, share, or page past the first results.
 
-export const GUEST_EXPLAINER_COPY = "Got a sportsbook boost or free bet? We find the bet where it's worth the most. Pick your book, see the best bet, place it yourself. Free with Google.";
+export const GUEST_EXPLAINER_COPY = "Got a sportsbook boost or free bet? We find the bet where it's worth the most. Pick your book, see the best bet, place it yourself. Free to sign in.";
 
 export const PUBLIC_APP_TABS = Object.freeze(["promo", "ev", "odds"]);
 

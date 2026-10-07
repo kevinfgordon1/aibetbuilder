@@ -1,4 +1,4 @@
-// Signed-in user profile. Identity is Google/Gmail; prefs are local defaults
+// Signed-in user profile. Identity comes from the Supabase user; prefs are local defaults
 // for Promo Builder. Combo Locks P/L uses profileShowsComboPnl (own profile
 // + canSeeComboLocks). isOwner / canSeeLocks default false so public or
 // non-allowlisted profiles never mention the feature or fetch combo_*.
@@ -125,7 +125,7 @@ export default function UserProfile({
         )}
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>{name}</div>
-          <div className="muted">{ident.email || "Signed in with Google"}</div>
+          <div className="muted">{ident.email || "Signed in"}</div>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 // User profile identity + editable Promo defaults.
-// Seeded from Google/Gmail sign-in (name, email, avatar). Prefs persist per
+// Seeded from the signed-in account (name, email, avatar). Prefs persist per
 // auth uid in localStorage and on the Supabase user (user_metadata) so
 // dismissed announcements follow the account across devices.
 // Billing / exchange-key vault is parked.
@@ -27,7 +27,7 @@ export function identityFromUser(user) {
     name,
     email,
     avatar,
-    provider: (user && user.app_metadata && user.app_metadata.provider) || "google",
+    provider: (user && user.app_metadata && user.app_metadata.provider) || "",
   };
 }
 

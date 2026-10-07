@@ -1,9 +1,16 @@
 // Combo Locks visibility — private until Kevin opens it up.
 //
-// Auth identity: Google/Gmail via Supabase. Kevin signs in as kev120909@gmail.com
-// (OWNER_EMAIL). Allow extra testers with VITE_COMBO_LOCKS_ALLOWLIST (comma-
-// separated emails and/or Supabase auth uids). Kevin's email is always included
-// so a missing env var cannot lock him out.
+// Auth identity: Supabase Auth email on the user record (Google, magic link,
+// Facebook, or X when X actually returns an email) plus the auth uid. Kevin
+// signs in as kev120909@gmail.com (OWNER_EMAIL). Allow extra testers with
+// VITE_COMBO_LOCKS_ALLOWLIST (comma-separated emails and/or Supabase auth
+// uids). Kevin's email is always included so a missing env var cannot lock
+// him out.
+//
+// user_metadata.email is not an allowlist key. It is user-editable, and X
+// often omits email entirely. A signed-in user with no auth email does not
+// match email gates (New Odds Board, Live Trading Desk, Combo Locks) and is
+// not treated as Kevin. Add their auth uid to an allowlist only on purpose.
 //
 // This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
 // Do not use this list to expand Miss tape / Unhedged / Live Trading Desk —
@@ -90,9 +97,8 @@ export function canSeeOwnerTools(user) {
 }
 
 function userEmailToken(user) {
-  if (!user) return "";
-  const meta = user.user_metadata || {};
-  return String(user.email || meta.email || "").trim().toLowerCase();
+  if (!user || !user.email) return "";
+  return String(user.email).trim().toLowerCase();
 }
 
 /**

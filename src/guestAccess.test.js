@@ -12,7 +12,7 @@ import {
 import { bookHasPostedPrice } from "./oddsBoard.js";
 
 assert.match(GUEST_EXPLAINER_COPY, /Got a sportsbook boost or free bet/);
-assert.match(GUEST_EXPLAINER_COPY, /Free with Google/);
+assert.match(GUEST_EXPLAINER_COPY, /Free to sign in/);
 assert.deepEqual(PUBLIC_APP_TABS, ["promo", "ev", "odds"]);
 assert.equal(isPublicAppTab("promo"), true);
 assert.equal(isPublicAppTab("ev"), true);
