@@ -393,8 +393,8 @@ function fullPlan() {
   assert.match(app, /selectEvScanView\(/);
   assert.match(app, /setPromoLoadedSports\(new Set\(plan\.eventSports\)\)/);
   assert.match(app, /queryOddsCaches\(supabase, plan\)/);
-  assert.match(app, /overlayBookmakerOnCacheRows/);
-  assert.match(app, /resolveBookmakerSnapshot\(/);
+  assert.doesNotMatch(app, /overlayBookmakerOnCacheRows/);
+  assert.doesNotMatch(app, /resolveBookmakerSnapshot\(/);
   assert.doesNotMatch(app, /overlayBetcrisOnCacheRows|fetchBetcrisSnapshot|promoBetcris/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   const fetchOddsFn = fs.readFileSync(path.join(dir, "../api/fetch-odds.js"), "utf8");

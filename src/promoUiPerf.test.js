@@ -83,13 +83,14 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
     "sport-add refetch must debounce, not fire on the chip click",
   );
   // Live prod: /api/betstamp-markets ~1.4MB, /api/fetch-odds ~9s TTFB.
-  // Promo chips must not touch either. Bookmaker overlay only runs inside
-  // loadPromoBoard / loadFullBoard (network), never on matching-book rematch.
+  // Promo chips must not touch either. The Bookmaker overlay no longer runs
+  // on the client — Betstamp's API is gone.
   assert.doesNotMatch(app, /\/api\/betstamp-markets/);
   assert.doesNotMatch(app, /\/api\/fetch-odds/);
-  assert.match(app, /resolveBookmakerSnapshot\(/);
+  assert.doesNotMatch(app, /resolveBookmakerSnapshot\(/);
+  assert.doesNotMatch(app, /forceBookmaker/);
   assert.match(app, /loadPromoBoard\(\{ background: true \}\)/);
-  assert.match(app, /loadPromoBoard\(\{ forceBookmaker: forceRefresh \}\)/);
+  assert.match(app, /await loadPromoBoard\(\)/);
   assert.match(app, /if \(!background\) \{\s*setExcludedPromoLegs\(new Set\(\)\);\s*setPromoLoading\(true\);/);
   assert.doesNotMatch(app, /fetchBookmakerSnapshot\(\{/);
 }

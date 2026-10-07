@@ -87,8 +87,9 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.match(app, /promoScanInputKey/);
   assert.match(app, /lastCompletedScanKey/);
   assert.match(app, /scanCompletedForCurrent/);
-  assert.match(app, /boostEmptyState === "no-results"/);
-  assert.match(app, /boostEmptyState === "scanning"/);
+  assert.match(app, /boostLikeEmptyState === "no-results"/);
+  assert.match(app, /boostLikeEmptyState === "scanning"/);
+  assert.match(app, /const boostLikeEmptyState = promoType === "nopromo" \? noPromoEmptyState : boostEmptyState/);
   assert.match(app, /freeBetEmptyState === "no-results"/);
   assert.match(app, /freeBetEmptyState === "scanning"/);
   assert.doesNotMatch(
@@ -111,7 +112,8 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.match(app, /soccerBlocksPromoPool\(/);
   assert.match(app, /parsedPromoLegOddsBounds\(/);
   assert.match(app, /preferExistingPromoBoard\(/);
-  assert.match(app, /\[promoType, parlayLegPool, scanNumLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey\]/);
+  assert.match(app, /\[promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey\]/);
+  assert.match(app, /const scanBoostForKey = effectiveBoostPct\(promoType, scanBoostPct\)/);
   assert.match(app, /if \(!shouldCommitPromoScan\(/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
   assert.equal(

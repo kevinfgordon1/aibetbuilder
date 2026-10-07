@@ -172,16 +172,16 @@ function mkLeg(name, game, dk, bestOpp, extra = {}) {
 
 // ── Legs UI + scan wiring shown for freebet (App.jsx)
 {
-  assert.match(app, /promoType === "boost" \|\| promoType === "nosweat" \|\| promoType === "freebet"/);
+  assert.match(app, /isParlayPromo && controlBox/);
   assert.match(app, /<label style=\{labelStyle\}>Legs<\/label>/);
-  const legsControl = app.match(/\{(\(promoType === "boost" \|\| promoType === "nosweat" \|\| promoType === "freebet"\)) && controlBox\(<>\s*<label style=\{labelStyle\}>Legs<\/label>/);
+  const legsControl = app.match(/\{isParlayPromo && controlBox\(<>\s*<label style=\{labelStyle\}>Legs<\/label>/);
   assert.ok(legsControl, "Legs control must render for freebet, not only boost/nosweat");
   assert.match(app, /calcFreeBetParlayEV\(ls, atStake\)/);
   assert.match(app, /findTopParlaysChunked/);
   assert.match(app, /attachFreeBetLock\(p, stake\)/);
   assert.match(app, /promoScanInputKey/);
   assert.match(app, /promoScanEmptyState/);
-  assert.match(app, /const isParlayPromo = promoType === "boost" \|\| promoType === "nosweat" \|\| promoType === "freebet"/);
+  assert.match(app, /const isParlayPromo = isParlayPromoType\(promoType\)/);
   assert.doesNotMatch(app, /const scannedFreeBetConversions = useMemo/);
   assert.doesNotMatch(app, /findTopFreeBetConversions/);
   // Empty state waits for first scan — same machine as boost/nosweat.
@@ -202,8 +202,8 @@ function mkLeg(name, game, dk, bestOpp, extra = {}) {
   assert.match(app, /useDebouncedValue\(stake,\s*PROMO_SCAN_DEBOUNCE_MS\)/);
   assert.match(app, /const PROMO_SCAN_DEBOUNCE_MS = 150/);
   // Min/max final / min/max leg filters apply to freebet.
-  assert.match(app, /promoType === "freebet"\) && numLegs >= 2 && controlBox\(<>\s*<label style=\{labelStyle\}>Min Leg Odds<\/label>/);
-  assert.match(app, /promoType === "freebet"\) && numLegs >= 2 && controlBox\(<>\s*<label style=\{labelStyle\}>Max Leg Odds<\/label>/);
+  assert.match(app, /isParlayPromo && numLegs >= 2 && controlBox\(<>\s*<label style=\{labelStyle\}>Min Leg Odds<\/label>/);
+  assert.match(app, /isParlayPromo && numLegs >= 2 && controlBox\(<>\s*<label style=\{labelStyle\}>Max Leg Odds<\/label>/);
   assert.match(app, /<label style=\{labelStyle\}>Max Final Odds<\/label>/);
 }
 

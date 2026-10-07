@@ -6,7 +6,7 @@ import { serializeAppHash } from "./comboAccess.js";
 import { DEFAULT_PROFILE_BOOK } from "./userProfile.js";
 import { formatPromoLegTitle } from "./soccerPairing.js";
 
-const PROMO_TYPES = new Set(["boost", "nosweat", "freebet"]);
+const PROMO_TYPES = new Set(["boost", "nopromo", "nosweat", "freebet"]);
 
 /** Default Promo type when the hash has no share/deep-link cardId. */
 export const DEFAULT_PROMO_TYPE = "boost";
@@ -136,6 +136,7 @@ export const SHARE_MARKET_LABELS = {
 
 export const SHARE_PROMO_TYPE_LABELS = {
   boost: "Profit Boost",
+  nopromo: "No Promo",
   nosweat: "No Sweat",
   freebet: "Free Bet",
 };
@@ -209,6 +210,7 @@ export function formatShareLeg(leg) {
 
 export function shareCardPromoRule(model = {}) {
   const type = model.promoType;
+  if (type === "nopromo") return "No Promo";
   if (type === "boost") {
     const pct = finiteNum(model.boostPct);
     return pct == null ? "Profit Boost" : pct + "% Profit Boost";
@@ -227,12 +229,13 @@ export function shareCardPromoRule(model = {}) {
 
 export function shareCardHeadline(model = {}) {
   if (model.kind === "ev") return model.title || "Plus EV";
+  if (model.promoType === "nopromo") return "No Promo";
   if (model.promoType === "boost") return model.promoRule || model.promoLabel || "Profit Boost";
   return model.promoLabel || "Promo";
 }
 
 export function shareCardSubline(model = {}) {
-  if (model.kind === "ev" || model.promoType === "boost" || model.promoType === "freebet") return "";
+  if (model.kind === "ev" || model.promoType === "boost" || model.promoType === "nopromo" || model.promoType === "freebet") return "";
   if (model.promoType === "nosweat") {
     return String(model.promoRule || "").replace(/^No Sweat(?: · )?/, "");
   }
@@ -262,7 +265,7 @@ export function shareCardBottomLine(model = {}) {
     if (cash != null) return "Walk away with $" + cash.toFixed(2) + " guaranteed from the free bet.";
     return ev ? "Expected profit " + ev + stakeBit + "." : "";
   }
-  if (model.promoType === "boost") {
+  if (model.promoType === "boost" || model.promoType === "nopromo") {
     return ev ? "Expected profit " + ev + stakeBit + "." : "";
   }
   return ev ? ev : "";

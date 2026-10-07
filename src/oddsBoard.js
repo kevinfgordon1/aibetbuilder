@@ -746,6 +746,42 @@ export function getBestForGame(game, market, selectedBookKeys, allBooks, freshne
   };
 }
 
+const POSTED_PRICE_FIELDS = [
+  "ml_away", "ml_home", "ml_draw",
+  "ml_away_no", "ml_home_no", "ml_draw_no",
+  "spr_away", "spr_home",
+  "tot_over", "tot_under",
+];
+
+/** True when this book has a posted American price on the public board. */
+export function bookHasPostedPrice(bookKey, oddsData, futuresData) {
+  if (!bookKey) return false;
+  const buckets = ["moneylines", "run_lines", "totals", "team_totals"];
+  for (const bucket of buckets) {
+    const games = oddsData && oddsData[bucket];
+    if (!Array.isArray(games)) continue;
+    for (const game of games) {
+      const cell = game && game.bookOdds && game.bookOdds[bookKey];
+      if (!cell) continue;
+      for (const field of POSTED_PRICE_FIELDS) {
+        const v = cell[field];
+        if (v != null && v !== "" && Number.isFinite(Number(v))) return true;
+      }
+    }
+  }
+  if (Array.isArray(futuresData)) {
+    for (const entry of futuresData) {
+      const teams = entry && entry.teams;
+      if (!Array.isArray(teams)) continue;
+      for (const team of teams) {
+        if (team && team.books && team.books[bookKey] != null && team.books[bookKey] !== "") return true;
+        if (team && team.noBooks && team.noBooks[bookKey] != null && team.noBooks[bookKey] !== "") return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function pickBestFromPriceMap(priceMap, sizeMap, selectedBookKeys, allBooks) {
   return pickBestSide(
     selectedBooks(allBooks, selectedBookKeys).map((b) => ({
