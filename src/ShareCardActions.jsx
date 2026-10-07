@@ -1,4 +1,5 @@
 import { useState } from "react";
+import GuestLock from "./GuestLock.jsx";
 import {
   absoluteShareUrl,
   copyTextToClipboard,
@@ -28,6 +29,8 @@ export default function ShareCardActions({
   model = null,
   showImage = true,
   origin,
+  locked = false,
+  onLocked,
 }) {
   const [status, setStatus] = useState("");
   const url = absoluteShareUrl({
@@ -45,6 +48,10 @@ export default function ShareCardActions({
   const onCopy = async (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (locked) {
+      onLocked?.("copy-link");
+      return;
+    }
     try {
       const result = await copyTextToClipboard(url);
       flash(result === "copied" ? "Copied" : "Copy failed");
@@ -56,6 +63,10 @@ export default function ShareCardActions({
   const onImage = async (e) => {
     e.preventDefault();
     e.stopPropagation();
+    if (locked) {
+      onLocked?.("share-image");
+      return;
+    }
     if (!model) return;
     try {
       const result = await shareOrDownloadCard({ model, url, title: model.badge });
@@ -72,10 +83,12 @@ export default function ShareCardActions({
       onPointerDown={(e) => e.stopPropagation()}
       style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
     >
-      <button type="button" onClick={onCopy} style={btn} title={url}>Copy link</button>
+      <button type="button" onClick={onCopy} style={btn} title={locked ? "Sign in to copy this link" : url}>
+        <GuestLock locked={locked} /> Copy link
+      </button>
       {showImage && model && (
-        <button type="button" onClick={onImage} style={btn} title="Download or share a PNG card">
-          Share image
+        <button type="button" onClick={onImage} style={btn} title={locked ? "Sign in to share an image" : "Download or share a PNG card"}>
+          <GuestLock locked={locked} /> Share image
         </button>
       )}
       {status && <span style={{ fontSize: 11, color: "#10b981", fontWeight: 600 }}>{status}</span>}

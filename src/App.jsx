@@ -8,6 +8,15 @@ import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
+import GuestLock from "./GuestLock.jsx";
+import { GUEST_EXPLAINER_COPY, promoControlSummary } from "./guestAccess.js";
+import {
+  LOGGED_OUT_DEFAULT_PROMO_TYPE,
+  SIGNED_IN_DEFAULT_PROMO_TYPE,
+  effectiveBoostPct,
+  isBoostLikePromo,
+  isParlayPromoType,
+} from "./promoTypes.js";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
 import { AppAlertsBanner, AppAlertsBell, AppAlertsBoundary, useAppAlerts } from "./AppAlerts";
@@ -85,7 +94,6 @@ import {
   selectEvScanView,
   evScanFromLegs,
 } from "./oddsLoad.js";
-import { overlayBookmakerOnCacheRows, readBookmakerClientCache, resolveBookmakerSnapshot } from "./promoBookmaker.js";
 import { maybeOverlayUnderdogPredictOnCacheRows } from "./promoUnderdogPredict.js";
 import { fetchUnderdogPhone } from "./underdogPhoneClient.js";
 import {
@@ -244,7 +252,7 @@ function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, pr
   if (liqPart) parts.push(liqPart);
   const teamPart = teamFilterSummary(includeTeamTokens, excludeTeamTokens);
   if (teamPart) parts.push(teamPart);
-  const isOddsPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
+  const isOddsPromo = isParlayPromoType(promoType);
   if (isOddsPromo && minFinalOdds !== "") parts.push(`min ${minFinalOdds}`);
   if (isOddsPromo && maxFinalOdds !== "") parts.push(`max ${maxFinalOdds}`);
   if (isOddsPromo && numLegs >= 2 && minLegOdds !== "") parts.push(`legs ${minLegOdds}`);
@@ -253,6 +261,7 @@ function formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, pr
 }
 
 const PROMO_TYPES = [
+  { val: "nopromo", label: "No Promo" },
   { val: "boost", label: "Profit Boost" },
   { val: "freebet", label: "Free Bet" },
   { val: "nosweat", label: "No Sweat" },
@@ -1135,6 +1144,24 @@ function LandingFull({ onSignIn, onBack }) {
   );
 }
 
+function ShowMorePicks({ remaining, locked, onShowMore, onLocked }) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (locked) { onLocked(); return; }
+        onShowMore();
+      }}
+      style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "#9ca3af"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "#6b7280"; }}
+    >
+      <GuestLock locked={locked} />
+      Show more ({remaining} remaining)
+    </button>
+  );
+}
+
 function SendToComboLocksButton({ onSend }) {
   return (
     <button
@@ -1523,8 +1550,10 @@ export default function App() {
   const [futuresData, setFuturesData] = useState([]);
   const [activeTab, setActiveTab] = useState("promo");
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
-  const [showLanding, setShowLanding] = useState(false);
-  const [promoType, setPromoType] = useState("boost");
+  const [signInPrompt, setSignInPrompt] = useState(null);
+  const [promoControlsOpen, setPromoControlsOpen] = useState(false);
+  const [promoType, setPromoType] = useState(LOGGED_OUT_DEFAULT_PROMO_TYPE);
+  const promoTypeTouched = useRef(false);
   const [boostPct, setBoostPct] = useState(30);
   const [creditConversionPct, setCreditConversionPct] = useState(DEFAULT_CREDIT_CONVERSION);
   const [refundPct, setRefundPct] = useState(DEFAULT_REFUND_PCT);
@@ -1587,13 +1616,13 @@ export default function App() {
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
   const [evScan, setEvScan] = useState(null);
   const [scannedBoostParlays, setScannedBoostParlays] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
+  const [scannedNoPromo, setScannedNoPromo] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
   const [scannedNoSweats, setScannedNoSweats] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
   const [scannedFreeBets, setScannedFreeBets] = useState({ parlays: [], atStake: PROMO_SCAN_STAKE });
   const [promoScanBusy, setPromoScanBusy] = useState(false);
   const [lastCompletedScanKey, setLastCompletedScanKey] = useState(null);
   const promoFetchGen = useRef(0);
   const underdogOverlayAppliedRef = useRef(false);
-  const bookmakerCacheRef = useRef(readBookmakerClientCache() || { snap: null, leagues: [] });
   const fullFetchGen = useRef(0);
   const promoScanGen = useRef(0);
   const soccerPmNoGen = useRef(0);
@@ -1605,6 +1634,13 @@ export default function App() {
       const u = session?.user ?? null;
       setUser(u);
       setAuthLoading(false);
+
+      if (u && !promoTypeTouched.current) {
+        const route = parseAppHash(window.location.hash);
+        if (!(route.cardId && decodePromoCardId(route.cardId))) {
+          setPromoType(SIGNED_IN_DEFAULT_PROMO_TYPE);
+        }
+      }
 
       if (u) {
         // Supabase activity log — session start
@@ -1618,7 +1654,14 @@ export default function App() {
       }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const next = session?.user ?? null;
+      setUser(next);
+      if (next && !promoTypeTouched.current) {
+        const route = parseAppHash(window.location.hash);
+        if (!(route.cardId && decodePromoCardId(route.cardId))) {
+          setPromoType(SIGNED_IN_DEFAULT_PROMO_TYPE);
+        }
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -1679,6 +1722,7 @@ export default function App() {
       if (resolved.tab === "promo") {
         const fromRoute = promoPrefsFromRoute(resolved);
         if (fromRoute.source === "share") {
+          promoTypeTouched.current = true;
           if (fromRoute.promoType) setPromoType(fromRoute.promoType);
           if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
           if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
@@ -1742,27 +1786,7 @@ export default function App() {
     return mergeOddsData([...featured, ...eventTransformed]);
   };
 
-  // A failed Betstamp fetch (401 / ok:false / timeout after TTL or Refresh)
-  // returns snap:null and fromCache:false. Drop the ref too — the next chip
-  // load would otherwise TTL-hit yesterday's Bookmaker. No-league skips stay
-  // fromCache and keep a still-fresh snap.
-  const applyResolvedBookmaker = (resolved) => {
-    if (resolved && resolved.snap) {
-      bookmakerCacheRef.current = {
-        snap: resolved.snap,
-        leagues: resolved.leagues,
-        fetchedAtByLeague: resolved.fetchedAtByLeague,
-        includeUnderdog: resolved.includeUnderdog,
-      };
-      return resolved.snap;
-    }
-    if (resolved && resolved.fromCache === false) {
-      bookmakerCacheRef.current = { snap: null, leagues: [], fetchedAtByLeague: {} };
-    }
-    return null;
-  };
-
-  const loadPromoBoard = async ({ background = false, forceBookmaker = false } = {}) => {
+  const loadPromoBoard = async ({ background = false } = {}) => {
     const gen = ++promoFetchGen.current;
     if (!background) {
       setExcludedPromoLegs(new Set());
@@ -1775,42 +1799,23 @@ export default function App() {
       futuresKeys: FUTURES_KEYS,
     });
     try {
-      // Refresh sets forceBookmaker and bypasses the 5-min client TTL.
-      // The Betstamp snapshot API still serves its own 5-min cache (Promo
-      // does not send refresh=1), so Refresh stays fast unless that snap is
-      // stale. Sport chips and remounts honor client TTL via memory/session.
       const includeUnderdog = canSeeUnderdogPredict(user);
       const phonePromise = includeUnderdog
         ? fetchUnderdogPhone().catch(() => ({ ok: false, games: [] }))
         : Promise.resolve(null);
-      const bookmakerPromise = resolveBookmakerSnapshot({
-        sports: plan.featuredSports,
-        cached: bookmakerCacheRef.current,
-        forceRefresh: forceBookmaker,
-        includeUnderdog: false,
-      });
       const { featured, events, playerProps } = await queryOddsCaches(supabase, plan);
       if (gen !== promoFetchGen.current) return;
-      // Apply before the odds-usable check so a 401 still drops the ref when
-      // the Odds API cache errors. Otherwise the next chip load TTL-hits it.
-      const resolvedBookmaker = await bookmakerPromise.catch(() => null);
-      if (gen !== promoFetchGen.current) return;
-      const bookmakerSnap = applyResolvedBookmaker(resolvedBookmaker);
       if (!featuredRowsUsable(featured)) {
         setOddsLoadCause(featured.error || { message: "Could not load live odds." });
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
         return;
       }
-      // Betstamp Bookmaker overlay is best-effort and re-runs every Promo
-      // fetch. It strips any cached `bookmaker` key first (odds_cache is Odds
-      // API only) then overlays 642 — a blip or failed join omits those cells.
-      // A failed snapshot clears the client cache so Promo does not keep
-      // yesterday's Bookmaker after an expired Betstamp key.
       // Underdog Predict is /api/underdog-predict (odds.prediction only),
       // for allowlisted users. A missing phone quote omits the line.
+      // Bookmaker (Betstamp 642) is not requested — that API is gone.
       const phone = await phonePromise;
       const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
-        overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
+        featured.data,
         phone,
         user,
         undefined,
@@ -1819,7 +1824,7 @@ export default function App() {
       // Alt-line events are best-effort: a hung event_odds_cache must not
       // block Promo — featured main lines are enough to use the builder.
       const eventRows = maybeOverlayUnderdogPredictOnCacheRows(
-        overlayBookmakerOnCacheRows(events.error ? [] : (events.data || []), bookmakerSnap),
+        events.error ? [] : (events.data || []),
         phone,
         user,
         undefined,
@@ -1866,17 +1871,8 @@ export default function App() {
       const phonePromise = includeUnderdog
         ? fetchUnderdogPhone().catch(() => ({ ok: false, games: [] }))
         : Promise.resolve(null);
-      const bookmakerPromise = resolveBookmakerSnapshot({
-        sports: plan.featuredSports,
-        cached: bookmakerCacheRef.current,
-        forceRefresh: true,
-        includeUnderdog: false,
-      });
       const { featured, futures } = await queryOddsCaches(supabase, plan);
       if (gen !== fullFetchGen.current) return;
-      const resolvedBookmaker = await bookmakerPromise.catch(() => null);
-      if (gen !== fullFetchGen.current) return;
-      const bookmakerSnap = applyResolvedBookmaker(resolvedBookmaker);
       if (!featuredRowsUsable(featured)) {
         setOddsLoadCause(featured.error || { message: "Could not load live odds." });
         setOddsLoadError(describeOddsLoadError(featured.error) || "Could not load live odds.");
@@ -1884,7 +1880,7 @@ export default function App() {
       }
       const phone = await phonePromise;
       const featuredRows = maybeOverlayUnderdogPredictOnCacheRows(
-        overlayBookmakerOnCacheRows(featured.data, bookmakerSnap),
+        featured.data,
         phone,
         user,
         undefined,
@@ -1916,7 +1912,7 @@ export default function App() {
       return;
     }
     if (shouldFetchPromoOdds({ tab, forceRefresh, promoLoaded })) {
-      await loadPromoBoard({ forceBookmaker: forceRefresh });
+      await loadPromoBoard();
     }
   };
 
@@ -1929,7 +1925,7 @@ export default function App() {
     if (authLoading || !promoLoaded) return;
     const want = canSeeUnderdogPredict(user);
     if (want === underdogOverlayAppliedRef.current) return;
-    loadPromoBoard({ forceBookmaker: false });
+    loadPromoBoard();
   }, [user, authLoading, promoLoaded]);
 
   useEffect(() => {
@@ -1952,6 +1948,19 @@ export default function App() {
   const signInWithGoogle = async () => {
     window.gtag?.('event', 'sign_in_started', { method: 'google' });
     await supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+  };
+
+  const choosePromoType = (val) => {
+    promoTypeTouched.current = true;
+    setPromoType(val);
+    if (val === "nosweat") setNumLegs(1);
+  };
+
+  const guestLocked = !authLoading && !user;
+  const askSignIn = (reason) => {
+    if (!guestLocked) return;
+    setSignInPrompt(reason || "Sign in to continue.");
+    window.gtag?.("event", "signup_gate_shown");
   };
 
   const signOut = async () => {
@@ -2131,7 +2140,8 @@ export default function App() {
     const expanded = expandSoccerSportKeys(scanPromoSports);
     return SPORT_KEYS.every((k) => expanded.has(k)) ? null : SPORT_KEYS.filter((k) => expanded.has(k));
   }, [scanPromoSports]);
-  const isParlayPromo = promoType === "boost" || promoType === "nosweat" || promoType === "freebet";
+  const isParlayPromo = isParlayPromoType(promoType);
+  const scanBoostForKey = effectiveBoostPct(promoType, scanBoostPct);
   const parsedLegBounds = parsedPromoLegOddsBounds(scanNumLegs, isParlayPromo ? scanMinLegOdds : "", isParlayPromo ? scanMaxLegOdds : "");
   const parsedMinLeg = parsedLegBounds.min;
   const parsedMaxLeg = parsedLegBounds.max;
@@ -2199,7 +2209,7 @@ export default function App() {
     () => promoScanInputKey({
       promoType,
       numLegs: scanNumLegs,
-      scanBoostPct,
+      scanBoostPct: scanBoostForKey,
       parsedMinFinal,
       parsedMaxFinal,
       refundPct,
@@ -2207,7 +2217,7 @@ export default function App() {
       pool: parlayLegPool,
       includeTeam: includeTeamTokens.join(","),
     }),
-    [promoType, scanNumLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool, includeTeamTokens],
+    [promoType, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, parlayLegPool, includeTeamTokens],
   );
   const scanCompletedForCurrent = lastCompletedScanKey === currentPromoScanKey;
 
@@ -2216,7 +2226,7 @@ export default function App() {
   // Do not scan (or mark done) before the slate is ready — an empty-pool []
   // from a mid-refetch / leftover-soccer gate must not look finished.
   useEffect(() => {
-    if (promoType !== "boost" && promoType !== "nosweat" && promoType !== "freebet") {
+    if (!isParlayPromoType(promoType)) {
       promoScanGen.current += 1;
       setPromoScanBusy(false);
       return;
@@ -2240,7 +2250,7 @@ export default function App() {
       ? (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct)
       : promoType === "freebet"
         ? (ls) => calcFreeBetParlayEV(ls, atStake)
-        : (ls) => calcParlayEV(ls, scanBoostPct, atStake);
+        : (ls) => calcParlayEV(ls, effectiveBoostPct(promoType, scanBoostPct), atStake);
     const ac = new AbortController();
     const scanKey = currentPromoScanKey;
     setPromoScanBusy(true);
@@ -2260,6 +2270,7 @@ export default function App() {
         slateReady: true,
       })) return;
       if (promoType === "boost") setScannedBoostParlays({ parlays, atStake });
+      else if (promoType === "nopromo") setScannedNoPromo({ parlays, atStake });
       else if (promoType === "nosweat") setScannedNoSweats({ parlays, atStake });
       else setScannedFreeBets({ parlays, atStake });
       setLastCompletedScanKey(scanKey);
@@ -2281,7 +2292,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, scanNumLegs, scanBoostPct, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2313,6 +2324,20 @@ export default function App() {
     );
   }, [topParlays, numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
 
+  const topNoPromo = useMemo(
+    () => rescaleParlaysForStake(scannedNoPromo.parlays, scannedNoPromo.atStake, stake),
+    [scannedNoPromo, stake],
+  );
+
+  const topNoPromoWithHedge = useMemo(() => {
+    return rankPromoPicks(
+      topNoPromo,
+      { promoType: "nopromo", numLegs, stake, boostPct: 0, hideLowLiquidity, includeTeamTokens, excludeTeamTokens },
+      (p) => attachBoostLockToPick(p, stake),
+      overlayParlayMetrics,
+    );
+  }, [topNoPromo, numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens]);
+
   const topFreeBets = useMemo(
     () => rescaleParlaysForStake(scannedFreeBets.parlays, scannedFreeBets.atStake, stake),
     [scannedFreeBets, stake],
@@ -2332,14 +2357,15 @@ export default function App() {
   // ladders arrive, order and EV stay on the top-of-book blend together.
   const activePromoBase = promoType === "nosweat" ? topNoSweatsWithLock
     : promoType === "freebet" ? topFreeBetsWithLock
-      : topParlaysWithHedge;
+      : promoType === "nopromo" ? topNoPromoWithHedge
+        : topParlaysWithHedge;
   const pageLadders = usePromoPageLadders(activePromoBase, promoPage);
   const promoDepthRank = useMemo(() => {
     const ctx = promoType === "nosweat"
       ? { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens }
       : promoType === "freebet"
         ? { promoType: "freebet", numLegs, stake, hideLowLiquidity, includeTeamTokens, excludeTeamTokens }
-        : { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens };
+        : { promoType: isBoostLikePromo(promoType) ? promoType : "boost", numLegs, stake, boostPct: effectiveBoostPct(promoType, boostPct), hideLowLiquidity, includeTeamTokens, excludeTeamTokens };
     const attach = promoType === "nosweat"
       ? (p) => attachNoSweatLockToPick(p, stake)
       : promoType === "freebet"
@@ -2358,6 +2384,14 @@ export default function App() {
     scanCompletedForCurrent,
     resultCount: promoType === "boost" ? promoRankedCount : topParlaysWithHedge.length,
   });
+  const noPromoEmptyState = promoScanEmptyState({
+    promoLoaded,
+    promoLoading: promoBusyForEmpty,
+    scanBusy: promoScanBusy,
+    scanCompletedForCurrent,
+    resultCount: promoType === "nopromo" ? promoRankedCount : topNoPromoWithHedge.length,
+  });
+  const boostLikeEmptyState = promoType === "nopromo" ? noPromoEmptyState : boostEmptyState;
   const noSweatEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
@@ -2389,8 +2423,9 @@ export default function App() {
     if (!focusCardId || focusedCardApplied.current === focusCardId) return;
     if (activeTab === "promo") {
       const list = promoType === "boost" ? topParlaysWithHedge
-        : promoType === "nosweat" ? topNoSweatsWithLock
-          : topFreeBetsWithLock;
+        : promoType === "nopromo" ? topNoPromoWithHedge
+          : promoType === "nosweat" ? topNoSweatsWithLock
+            : topFreeBetsWithLock;
       const idx = list.findIndex((p) => encodePromoCardId({ promoType, book: promoBook, stake, legs: p.legs }) === focusCardId);
       if (idx < 0) return;
       focusedCardApplied.current = focusCardId;
@@ -2412,7 +2447,7 @@ export default function App() {
       }, 80);
       return () => window.clearTimeout(t);
     }
-  }, [activeTab, focusCardId, promoType, promoBook, stake, promoPage, topParlaysWithHedge, topNoSweatsWithLock, topFreeBetsWithLock, evDisplayBets]);
+  }, [activeTab, focusCardId, promoType, promoBook, stake, promoPage, topParlaysWithHedge, topNoPromoWithHedge, topNoSweatsWithLock, topFreeBetsWithLock, evDisplayBets]);
 
   const excludePromoLeg = (leg) => {
     const key = promoLegIdentity(leg);
@@ -2429,7 +2464,7 @@ export default function App() {
   // Keeps promo type / book / stake / boost / sports / markets / filters.
   const onOptimizePromo = () => {
     if (optimizeBusy) return;
-    if (promoType !== "boost" && promoType !== "nosweat" && promoType !== "freebet") return;
+    if (!isParlayPromoType(promoType)) return;
     const gen = ++optimizeGen.current;
     pendingOptimize.current = true;
     pendingOptimizeTarget.current = null;
@@ -2440,7 +2475,7 @@ export default function App() {
       book: promoBook,
       stake,
       num_legs: numLegs,
-      boost_pct: promoType === "boost" ? boostPct : undefined,
+      boost_pct: promoType === "boost" ? boostPct : promoType === "nopromo" ? 0 : undefined,
       across_legs: true,
     });
     logEvent(user, "promo_optimize", {
@@ -2457,7 +2492,7 @@ export default function App() {
       ? (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct)
       : promoType === "freebet"
         ? (ls) => calcFreeBetParlayEV(ls, atStake)
-        : (ls) => calcParlayEV(ls, scanBoostPct, atStake);
+        : (ls) => calcParlayEV(ls, effectiveBoostPct(promoType, scanBoostPct), atStake);
     const ac = new AbortController();
     findBestAcrossLegCounts(parlayLegPool, calc, {
       maxLegs: MAX_PROMO_LEGS,
@@ -2500,6 +2535,7 @@ export default function App() {
     if (promoScanBusy || promoFilterPending) return;
     const list = activePromoList(promoType, {
       boost: topParlaysWithHedge,
+      nopromo: topNoPromoWithHedge,
       nosweat: topNoSweatsWithLock,
       freebet: topFreeBetsWithLock,
     });
@@ -2519,7 +2555,7 @@ export default function App() {
     pendingOptimizeTarget.current = null;
     focusedCardApplied.current = null;
     setFocusCardId(id);
-  }, [optimizeTick, promoType, promoBook, stake, numLegs, scanNumLegs, promoScanBusy, promoFilterPending, scanCompletedForCurrent, topParlaysWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
+  }, [optimizeTick, promoType, promoBook, stake, numLegs, scanNumLegs, promoScanBusy, promoFilterPending, scanCompletedForCurrent, topParlaysWithHedge, topNoPromoWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
 
   const sendToComboLocks = (p, kind = "cash") => {
     if (!canSeeComboLocks(user)) return;
@@ -2592,35 +2628,85 @@ export default function App() {
   const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || soccerLayBookLabel(key) || key;
   const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
-  // Soft gate: logged-out visitors can browse the live app, but the first time they
-  // interact with any control (outside the header) they're bounced to the full landing.
-  const guardClick = (e) => {
-    if (authLoading || user) return;
-    // Let middle / right / modified clicks through so nav <a href> can open in a new tab.
-    if (e.button != null && e.button !== 0) return;
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (e.target.closest && e.target.closest('[data-guard-allow]')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (!showLanding) { setShowLanding(true); window.gtag?.('event', 'signup_gate_shown'); }
-  };
-
-  if (!authLoading && !user && showLanding) {
-    return <LandingFull onSignIn={signInWithGoogle} onBack={() => setShowLanding(false)} />;
-  }
-
   return (
-    <div onClickCapture={guardClick} onMouseDownCapture={guardClick} style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    <div className="app-root" style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .signin-short { display: none; }
+        .promo-controls-summary { display: none; }
+        .promo-controls-body { display: block; }
+        .ev-k { display: none; }
+        .guest-explainer-wrap { padding: 16px 32px 0; }
+        .guest-explainer {
+          display: flex; align-items: center; gap: 14px;
+          padding: 10px 14px; border-radius: 12px;
+          background: linear-gradient(90deg, rgba(59,130,246,0.16), rgba(139,92,246,0.14));
+          border: 1px solid rgba(99,102,241,0.32);
+          color: #dbeafe; font-size: 13.5px; line-height: 1.45;
+        }
+        .guest-explainer p { margin: 0; flex: 1; }
+        .guest-explainer button {
+          flex: 0 0 auto; background: #fff; color: #1f2937; border: none; border-radius: 8px;
+          padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;
+          white-space: nowrap;
+        }
+        .signin-modal-back {
+          position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,0.55);
+          display: flex; align-items: center; justify-content: center; padding: 20px;
+        }
+        .signin-modal {
+          width: min(420px, 100%); background: #12131a; color: #e8eaed;
+          border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+        }
+        .signin-modal h2 { margin: 0 0 8px; font-size: 18px; }
+        .signin-modal p { margin: 0 0 16px; color: #9ca3af; font-size: 14px; line-height: 1.5; }
+        .signin-modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        @media (max-width: 720px) {
+          .app-header { padding: 8px 12px !important; flex-wrap: nowrap !important; gap: 8px !important; }
+          .app-brand { gap: 8px !important; min-width: 0; }
+          .app-logo { width: 28px !important; height: 28px !important; font-size: 14px !important; border-radius: 8px !important; }
+          .app-brand-name { font-size: 15px !important; letter-spacing: -0.3px !important; white-space: nowrap; }
+          .app-header-actions { gap: 8px !important; flex-wrap: nowrap !important; }
+          .app-freshness { display: none !important; }
+          .app-signin { padding: 7px 10px !important; font-size: 12px !important; white-space: nowrap; }
+          .signin-long { display: none; }
+          .signin-short { display: inline; }
+          .app-tabs { padding: 0 8px !important; flex-wrap: nowrap !important; overflow-x: auto; }
+          .app-tabs a, .app-tabs button { padding: 10px 10px !important; font-size: 13px !important; white-space: nowrap; }
+          .app-body { padding: 12px !important; }
+          .guest-explainer-wrap { padding: 10px 12px 0; }
+          .guest-explainer { flex-direction: column; align-items: stretch; gap: 8px; font-size: 12.5px; padding: 10px 12px; }
+          .guest-explainer button { align-self: flex-start; }
+          .promo-controls-summary {
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            width: 100%; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+            color: #e8eaed; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+            text-align: left;
+          }
+          .promo-controls-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .promo-controls-edit { flex: 0 0 auto; color: #93c5fd; font-weight: 700; }
+          .promo-controls-body { display: none; }
+          .promo-controls-body.is-open { display: block; }
+          .ev-list { background: transparent !important; border: none !important; display: flex; flex-direction: column; gap: 10px; }
+          .ev-head { display: none !important; }
+          .ev-card { border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 12px !important; background: rgba(255,255,255,0.03) !important; overflow: hidden; }
+          .ev-row-main { display: grid !important; grid-template-columns: 1fr 1fr !important; align-items: start !important; gap: 10px 12px !important; padding: 14px !important; }
+          .ev-bet { grid-column: 1 / -1; }
+          .ev-metric { text-align: left !important; }
+          .ev-k { display: block; font-size: 10px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+        }
+      `}</style>
 
-      <div data-guard-allow="true" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
-          <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
+      <div data-guard-allow="true" className="app-header" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div className="app-brand" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="app-logo" style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
+          <div className="app-brand-name" style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="app-header-actions" style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {(fetchedAt || activeTab === "oddsBetstamp") && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="app-freshness" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {fetchedAt && <OddsUpdatedStamp freshness={cacheFreshness} />}
               <button
                 onClick={() => {
@@ -2656,7 +2742,10 @@ export default function App() {
               <button onClick={signOut} style={{ background: "rgba(255,255,255,0.06)", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign Out</button>
             </div>
           ) : (
-            <button onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Sign in with Google</button>
+            <button className="app-signin" onClick={signInWithGoogle} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <span className="signin-long">Sign in with Google</span>
+              <span className="signin-short">Sign in</span>
+            </button>
           )}
         </div>
       </div>
@@ -2665,7 +2754,7 @@ export default function App() {
         <AppAlertsBanner state={appAlerts} open={appAlertsOpen} />
       </AppAlertsBoundary>
 
-      <div style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+      <div className="app-tabs" style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <a href={tabHash("promo")} style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
         <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
         <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
@@ -2685,10 +2774,23 @@ export default function App() {
             <a href={tabHash("liveDesk")} style={tabStyle("liveDesk")} onClick={onNavTabClick("liveDesk")}>Live Trading Desk</a>
           </>
         )}
-        {user && (
+        {!authLoading && (user ? (
           <a href={tabHash("profile")} style={tabStyle("profile")} onClick={onNavTabClick("profile")}>Profile</a>
-        )}
+        ) : (
+          <button type="button" style={tabStyle("profile")} onClick={() => askSignIn("Sign in to open your profile.")}>
+            Profile <GuestLock locked />
+          </button>
+        ))}
       </div>
+
+      {!authLoading && !user && (
+        <div className="guest-explainer-wrap">
+          <div className="guest-explainer" data-guest-explainer="true">
+            <p>{GUEST_EXPLAINER_COPY}</p>
+            <button type="button" onClick={signInWithGoogle}>Sign in</button>
+          </div>
+        </div>
+      )}
 
       {routeNotice && (
         <div data-guard-allow="true" style={{ margin: "12px 32px 0", padding: "12px 16px", borderRadius: 10, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -2742,7 +2844,7 @@ export default function App() {
       )}
 
       {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && activeTab !== "betstampBoard" && activeTab !== "liveDesk" && (
-        <div style={{ padding: "20px 32px" }}>
+        <div className="app-body" style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
@@ -2817,8 +2919,8 @@ export default function App() {
                   {filteredEvBets.length} {filteredEvBets.length === 1 ? "bet" : "bets"} · {filteredEvBets.filter(b => b.ev > 0).length} +EV
                 </span>
               </div>
-              <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
+              <div className="ev-list" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
+                <div className="ev-head" style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "12px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1 }}>
                   <div>Bet</div>
                   <div style={{ textAlign: "center" }}>Sportsbook</div>
                   <div style={{ textAlign: "center" }}>Odds</div>
@@ -2856,7 +2958,7 @@ export default function App() {
                     legs: [{ name: b.name, market: b.market, game: b.game, dk: b.dk }],
                   });
                   return (
-                    <div key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
+                    <div className="ev-card" key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
                       onClick={() => {
                         setExpandedEV(isExpanded ? null : i);
                         if (!isExpanded) {
@@ -2864,8 +2966,8 @@ export default function App() {
                           logEvent(user, 'ev_bet_expanded', { rank: i + 1, bet: b.name, book: b.bookKey });
                         }
                       }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", alignItems: "center" }}>
-                        <div>
+                      <div className="ev-row-main" style={{ display: "grid", gridTemplateColumns: "2.5fr 1.2fr 1fr 1fr 1fr 1fr 1fr", padding: "14px 20px", alignItems: "center" }}>
+                        <div className="ev-bet">
                           <div style={{ fontSize: 14, fontWeight: 600 }}>{b.name}</div>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 3 }}>
                             <SportBadge sport={b.sport} />
@@ -2874,15 +2976,15 @@ export default function App() {
                           <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(b.commence_time)}</div>
                           <div style={{ fontSize: 11, color: "#3b82f6", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
                           <div style={{ marginTop: 8 }}>
-                            <ShareCardActions tab="ev" cardId={evId} model={evShareModel} showImage={b.ev > 0} />
+                            <ShareCardActions tab="ev" cardId={evId} model={evShareModel} showImage={b.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                           </div>
                         </div>
-                        <div style={{ textAlign: "center" }}><BookBadge bookKey={b.bookKey} /></div>
-                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(b.dk)}</div>
-                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>{(b.prob * 100).toFixed(1)}%</div>
-                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#6b7280" }}>{(bookImplied * 100).toFixed(1)}%</div>
-                        <div style={{ textAlign: "center" }}><EVBadge ev={edge * 100} /></div>
-                        <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: b.ev > 0 ? "#10b981" : "#ef4444" }}>{b.ev > 0 ? "+" : ""}${b.ev.toFixed(2)}</div>
+                        <div className="ev-metric" style={{ textAlign: "center" }}><span className="ev-k">Sportsbook</span><BookBadge bookKey={b.bookKey} /></div>
+                        <div className="ev-metric" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 600, color: b.dk > 0 ? "#10b981" : "#e8eaed" }}><span className="ev-k">Odds</span>{formatOdds(b.dk)}</div>
+                        <div className="ev-metric" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}><span className="ev-k">True Prob</span>{(b.prob * 100).toFixed(1)}%</div>
+                        <div className="ev-metric" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#6b7280" }}><span className="ev-k">Implied</span>{(bookImplied * 100).toFixed(1)}%</div>
+                        <div className="ev-metric" style={{ textAlign: "center" }}><span className="ev-k">Edge</span><EVBadge ev={edge * 100} /></div>
+                        <div className="ev-metric" style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 14, fontWeight: 700, color: b.ev > 0 ? "#10b981" : "#ef4444" }}><span className="ev-k">EV ($100)</span>{b.ev > 0 ? "+" : ""}${b.ev.toFixed(2)}</div>
                       </div>
                       {isExpanded && (
                         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "16px 20px", background: "rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
@@ -2934,9 +3036,23 @@ export default function App() {
           )}
 
           {activeTab === "promo" && (
-            <div>
+            <div data-promo-type={promoType}>
+              <button
+                type="button"
+                className="promo-controls-summary"
+                aria-expanded={promoControlsOpen}
+                onClick={() => setPromoControlsOpen((v) => !v)}
+              >
+                <span className="promo-controls-summary-text">{promoControlSummary({ bookLabel: activePromoBookData.label, promoType, boostPct, stake, numLegs })}</span>
+                <span className="promo-controls-edit">{promoControlsOpen ? "— Hide" : "— Edit"}</span>
+              </button>
+              <div className={"promo-controls-body" + (promoControlsOpen ? " is-open" : "")}>
               <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
-                {promoType === "boost"
+                {promoType === "nopromo"
+                  ? (numLegs === 1
+                      ? "No promo applied. Find the single bets at your sportsbook with the most expected value — the same ranking as a 0% profit boost."
+                      : "No promo applied. Find the best bets at your sportsbook, ranked by expected value — the same math as a 0% profit boost.")
+                  : promoType === "boost"
                   ? (numLegs === 1
                       ? "Configure your boost and find the single bets with the most expected value."
                       : "Configure your boost and find the optimal parlay legs ranked by expected value.")
@@ -2952,8 +3068,7 @@ export default function App() {
                     <label style={labelStyle}>Promo Type</label>
                     {PROMO_TYPES.map(opt => (
                       <button key={opt.val} onClick={() => {
-                        setPromoType(opt.val);
-                        if (opt.val === "nosweat") setNumLegs(1);
+                        choosePromoType(opt.val);
                         window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val });
                         logEvent(user, 'promo_type_changed', { promo_type: opt.val });
                       }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
@@ -2988,7 +3103,7 @@ export default function App() {
                     <label style={labelStyle}>Refund %</label>
                     <input type="number" value={refundPct} onChange={(e) => setRefundPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                   </>)}
-                  {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && controlBox(<>
+                  {isParlayPromo && controlBox(<>
                     <label style={labelStyle}>Legs</label>
                     {[1, 2, 3].map(n => (
                       <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
@@ -3014,7 +3129,7 @@ export default function App() {
                       >+</button>
                     )}
                   </>)}
-                  {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && controlBox(<>
+                  {isParlayPromo && controlBox(<>
                     <button
                       type="button"
                       onClick={onOptimizePromo}
@@ -3118,19 +3233,19 @@ export default function App() {
                           </button>
                         ))}
                       </>)}
-                      {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && controlBox(<>
+                      {isParlayPromo && controlBox(<>
                         <label style={labelStyle}>Min Final Odds</label>
                         <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
-                      {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && controlBox(<>
+                      {isParlayPromo && controlBox(<>
                         <label style={labelStyle}>Max Final Odds</label>
                         <input type="number" value={maxFinalOdds} onChange={(e) => setMaxFinalOdds(e.target.value)} placeholder="e.g. 800" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
-                      {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && numLegs >= 2 && controlBox(<>
+                      {isParlayPromo && numLegs >= 2 && controlBox(<>
                         <label style={labelStyle}>Min Leg Odds</label>
                         <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
-                      {(promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && numLegs >= 2 && controlBox(<>
+                      {isParlayPromo && numLegs >= 2 && controlBox(<>
                         <label style={labelStyle}>Max Leg Odds</label>
                         <input type="number" value={maxLegOdds} onChange={(e) => setMaxLegOdds(e.target.value)} placeholder="e.g. 200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
@@ -3146,22 +3261,23 @@ export default function App() {
                   )}
                 </div>
               </div>
+              </div>
 
-              {((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && promoScanBusy && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0
+              {(isParlayPromo && promoScanBusy && activePromoBase.length > 0
                 || (promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0)
-                || ((promoType === "boost" || promoType === "nosweat" || promoType === "freebet") && (oddsBoundsPending || teamFilterPending || promoFilterPending) && (promoType === "boost" ? topParlaysWithHedge.length : promoType === "nosweat" ? topNoSweatsWithLock.length : topFreeBetsWithLock.length) > 0)) && (
+                || (isParlayPromo && (oddsBoundsPending || teamFilterPending || promoFilterPending) && activePromoBase.length > 0)) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
               )}
-              {((promoType === "boost" && boostEmptyState === "scanning")
+              {((isBoostLikePromo(promoType) && boostLikeEmptyState === "scanning")
                 || (promoType === "nosweat" && noSweatEmptyState === "scanning")
                 || (promoType === "freebet" && freeBetEmptyState === "scanning")) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>scanning…</div>
               )}
 
-              {/* ─── PROFIT BOOST RESULTS ─── */}
-              {promoType === "boost" && (
+              {/* ─── PROFIT BOOST / NO PROMO RESULTS ─── */}
+              {isBoostLikePromo(promoType) && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {boostEmptyState === "no-results" && (
+                  {boostLikeEmptyState === "no-results" && (
                     <div style={{ background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
                       <div style={{ fontSize: 28, marginBottom: 12 }}>🔍</div>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
@@ -3169,7 +3285,7 @@ export default function App() {
                       {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
                     </div>
                   )}
-                  {boostEmptyState === "scanning" && (
+                  {boostLikeEmptyState === "scanning" && (
                     <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", marginBottom: 8 }}>scanning…</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
@@ -3177,25 +3293,26 @@ export default function App() {
                   )}
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
+                    const shownBoostPct = effectiveBoostPct(promoType, boostPct);
                     const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
-                    const promoId = encodePromoCardId({ promoType: "boost", book: promoBook, stake, legs: p.legs });
+                    const promoId = encodePromoCardId({ promoType, book: promoBook, stake, legs: p.legs });
                     const isExpanded = expandedPromo === promoId;
 
                     return (
-                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType="boost" stake={stake} boostPct={boostPct}>
+                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType={promoType} stake={stake} boostPct={shownBoostPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
-                      promoType: "boost",
+                      promoType,
                       bookLabel: activePromoBookData.label,
                       ev: view.ev,
                       evPct: stake ? (view.ev / stake) * 100 : null,
-                      odds: formatOdds(boostedOdds),
+                      odds: formatOdds(promoType === "nopromo" ? p.parlayOdds : boostedOdds),
                       parlayOdds: formatOdds(p.parlayOdds),
                       stake,
-                      boostPct,
+                      boostPct: shownBoostPct,
                       legs: p.legs,
                     });
                     return (
@@ -3203,8 +3320,8 @@ export default function App() {
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : promoId);
                           if (!isExpanded) {
-                            window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: 'boost' });
-                            logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: 'boost', book: promoBook, legs: p.legs.map(l => l.name) });
+                            window.gtag?.('event', 'promo_card_expanded', { rank: i + 1, promo_type: promoType });
+                            logEvent(user, 'promo_card_expanded', { rank: i + 1, promo_type: promoType, book: promoBook, legs: p.legs.map(l => l.name) });
                           }
                         }}>
                         <div style={{ padding: "20px 24px" }}>
@@ -3219,14 +3336,14 @@ export default function App() {
                           <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
-                            <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>
+                            {promoType === "boost" && <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>}
                             <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span>EV: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                             {canSeeComboLocks(user) && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                             )}
@@ -3253,11 +3370,11 @@ export default function App() {
                               ladders={overlay.ladders}
                               blendCtx={overlay.ctx}
                               bookLabel={activePromoBookData.label}
-                              edgeCaption="(without boost)"
+                              edgeCaption={promoType === "nopromo" ? "" : "(without boost)"}
                               footer={
                                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1.4fr 1.2fr 0.8fr", padding: "12px 16px", borderTop: "2px solid rgba(255,255,255,0.1)", alignItems: "center", background: "rgba(255,255,255,0.03)" }}>
                                   <div style={{ fontSize: 13, fontWeight: 700, color: "#e8eaed" }}>
-                                    {isSingle ? "Total" : "Parlay Total"} <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>
+                                    {isSingle ? "Total" : "Parlay Total"}{promoType === "boost" && <span style={{ color: "#10b981", marginLeft: 6 }}>({formatOdds(boostedOdds)} w/ boost)</span>}
                                   </div>
                                   <div style={{ textAlign: "center", fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: "#f59e0b" }}>
                                     {formatOdds(trueParlayOdds)} ({(view.combinedProb * 100).toFixed(1)}%)
@@ -3293,14 +3410,12 @@ export default function App() {
                   })}
 
                   {promoDepthRank.rest.length > 0 && (
-                    <button
-                      onClick={() => setPromoPage(prev => prev + 5)}
-                      style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
-                      onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
-                      onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
-                    >
-                      Show more ({promoDepthRank.rest.length} remaining)
-                    </button>
+                    <ShowMorePicks
+                      remaining={promoDepthRank.rest.length}
+                      locked={guestLocked}
+                      onShowMore={() => setPromoPage((prev) => prev + 5)}
+                      onLocked={() => askSignIn("Sign in to see the rest of the ranked picks.")}
+                    />
                   )}
                 </div>
               )}
@@ -3381,7 +3496,7 @@ export default function App() {
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                           </div>
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
@@ -3506,14 +3621,12 @@ export default function App() {
                   })}
 
                   {promoDepthRank.rest.length > 0 && (
-                    <button
-                      onClick={() => setPromoPage(prev => prev + 5)}
-                      style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
-                      onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
-                      onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
-                    >
-                      Show more ({promoDepthRank.rest.length} remaining)
-                    </button>
+                    <ShowMorePicks
+                      remaining={promoDepthRank.rest.length}
+                      locked={guestLocked}
+                      onShowMore={() => setPromoPage((prev) => prev + 5)}
+                      onLocked={() => askSignIn("Sign in to see the rest of the ranked picks.")}
+                    />
                   )}
                 </div>
               )}
@@ -3639,7 +3752,7 @@ export default function App() {
                             </>
                           )}
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                             {canSeeComboLocks(user) && !isSingle && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
                             )}
@@ -3768,14 +3881,12 @@ export default function App() {
                   })}
 
                   {promoDepthRank.rest.length > 0 && (
-                    <button
-                      onClick={() => setPromoPage(prev => prev + 5)}
-                      style={{ width: "100%", padding: "14px", marginTop: 4, borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", color: "#6b7280", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
-                      onMouseEnter={e => { e.target.style.background = "rgba(255,255,255,0.06)"; e.target.style.color = "#9ca3af"; }}
-                      onMouseLeave={e => { e.target.style.background = "rgba(255,255,255,0.03)"; e.target.style.color = "#6b7280"; }}
-                    >
-                      Show more ({promoDepthRank.rest.length} remaining)
-                    </button>
+                    <ShowMorePicks
+                      remaining={promoDepthRank.rest.length}
+                      locked={guestLocked}
+                      onShowMore={() => setPromoPage((prev) => prev + 5)}
+                      onLocked={() => askSignIn("Sign in to see the rest of the ranked picks.")}
+                    />
                   )}
                 </div>
               )}
@@ -3824,6 +3935,19 @@ export default function App() {
             }
           }}
         />
+      )}
+
+      {signInPrompt && (
+        <div className="signin-modal-back" onClick={() => setSignInPrompt(null)}>
+          <div className="signin-modal" role="dialog" aria-modal="true" aria-labelledby="signin-prompt-title" onClick={(e) => e.stopPropagation()}>
+            <h2 id="signin-prompt-title">Sign in to continue</h2>
+            <p>{signInPrompt} It’s free with Google — no card.</p>
+            <div className="signin-modal-actions">
+              <button type="button" onClick={signInWithGoogle} style={{ background: "#fff", color: "#1f2937", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Sign in with Google</button>
+              <button type="button" onClick={() => setSignInPrompt(null)} style={{ background: "transparent", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Not now</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

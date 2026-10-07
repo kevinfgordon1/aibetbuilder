@@ -784,7 +784,7 @@ export function recommendedFillFromProb(combinedProb) {
 // "freebet" (Free bet). No Sweat has no option, so it stays Cash.
 // "boost" is label/metadata only — lockKind() treats it as cash, so hedge
 // contracts / profit match a manual Cash entry at the same boosted odds.
-export const PROMO_TYPE_TO_COMBO_KIND = { boost: "boost", freebet: "freebet", nosweat: "cash" };
+export const PROMO_TYPE_TO_COMBO_KIND = { boost: "boost", freebet: "freebet", nosweat: "cash", nopromo: "cash" };
 
 export function comboKindForPromo(promoType, kind) {
   if (promoType && Object.prototype.hasOwnProperty.call(PROMO_TYPE_TO_COMBO_KIND, promoType)) {

@@ -6,9 +6,10 @@
 
 import { encodePromoCardId } from "./shareCard.js";
 
-export function activePromoList(promoType, { boost, nosweat, freebet }) {
+export function activePromoList(promoType, { boost, nosweat, freebet, nopromo }) {
   if (promoType === "nosweat") return Array.isArray(nosweat) ? nosweat : [];
   if (promoType === "freebet") return Array.isArray(freebet) ? freebet : [];
+  if (promoType === "nopromo") return Array.isArray(nopromo) ? nopromo : [];
   return Array.isArray(boost) ? boost : [];
 }
 

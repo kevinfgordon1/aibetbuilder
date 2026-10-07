@@ -10,6 +10,7 @@ import {
   getOddsBoardCell,
   getBestForGame,
   pickBestFromPriceMap,
+  bookHasPostedPrice,
 } from "./oddsBoard.js";
 
 function impliedProb(odds) {
@@ -125,12 +126,18 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set((books || []).map((b) => b.key)));
+  const [booksOpen, setBooksOpen] = useState(false);
   const [boardSport, setBoardSport] = useState("baseball_mlb");
   const deferredBoardSport = useDeferredValue(boardSport);
   const deferredSearch = useDeferredValue(search);
   const deferredSelectedBooks = useDeferredValue(selectedBooks);
   const deferredMarket = useDeferredValue(market);
   const allBooks = books || [];
+  // Bookmaker only existed via the dead Betstamp overlay. Hide its toggle
+  // and column when the loaded board has no Bookmaker prices.
+  const boardBooks = useMemo(() => allBooks.filter((b) => (
+    b.key !== "bookmaker" || bookHasPostedPrice("bookmaker", oddsData, futuresData)
+  )), [allBooks, oddsData, futuresData]);
 
   const games = useMemo(() => {
     const t = Date.now();
@@ -172,13 +179,13 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
     allBooks,
   });
 
-  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...allBooks.filter((b) => deferredSelectedBooks.has(b.key))];
+  const visibleBooks = [{ key: "best", label: "Best Odds" }, ...boardBooks.filter((b) => deferredSelectedBooks.has(b.key))];
   const teamColWidth = 170;
   const oddsColWidth = 92;
 
   const champMeta = (futures || []).find((f) => boardSportMatches(f.sport, deferredBoardSport));
   const champEntry = (futuresData || []).find((f) => f.key === champMeta?.key);
-  const champBooks = [{ key: "best", label: "Best Odds" }, ...allBooks.filter((b) => deferredSelectedBooks.has(b.key))];
+  const champBooks = [{ key: "best", label: "Best Odds" }, ...boardBooks.filter((b) => deferredSelectedBooks.has(b.key))];
   const champTeams = (champEntry?.teams || [])
     .filter((t) => t.name.toLowerCase().includes(deferredSearch.toLowerCase()))
     .map((t) => {
@@ -236,8 +243,32 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
     background: isBestCell ? "rgba(16,185,129,0.08)" : isBestCol ? "rgba(16,185,129,0.04)" : "transparent",
   });
 
+  const selectedBookCount = boardBooks.filter((b) => selectedBooks.has(b.key)).length;
+
   return (
     <div>
+      <style>{`
+        .odds-books-toggle { display: none; }
+        .odds-book-toggles { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; flex: 1 1 280px; min-width: 0; }
+        @media (max-width: 720px) {
+          .odds-books-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(59,130,246,0.35);
+            background: rgba(59,130,246,0.12);
+            color: #93c5fd;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: inherit;
+          }
+          .odds-book-toggles { display: none; width: 100%; }
+          .odds-book-toggles.is-open { display: flex; }
+        }
+      `}</style>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {(sportChips || []).map((s) => (
           <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.id ? "#fff" : "#6b7280" }}>
@@ -252,12 +283,22 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
             {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : m === "tot" ? "Totals" : "Championship"}
           </button>
         ))}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
-        {allBooks.map((b) => (
-          <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
-            {b.label}
-          </button>
-        ))}
+        <button
+          type="button"
+          className="odds-books-toggle"
+          aria-expanded={booksOpen}
+          onClick={() => setBooksOpen((v) => !v)}
+        >
+          Books ({selectedBookCount})
+        </button>
+        <div className={"odds-book-toggles" + (booksOpen ? " is-open" : "")}>
+          <div className="odds-book-divider" style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
+          {boardBooks.map((b) => (
+            <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
+              {b.label}
+            </button>
+          ))}
+        </div>
       </div>
       {deferredMarket === "champ" && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
