@@ -176,6 +176,14 @@ const ALL_BOOKS = [
   { key: "betopenly", label: "BetOpenly", color: "#e879f9", bg: "rgba(232,121,249,0.15)", logo: null, exchange: true },
 ];
 
+// Promo Builder hides books with no live feed. Bookmaker came only from the
+// Betstamp 642 overlay (promoBookmaker.js), which lost API access. Overlay
+// code stays so it can return with a new feed; remove the key here to re-enable.
+const PROMO_HIDDEN_BOOK_KEYS = new Set(["bookmaker"]);
+const PROMO_DEFAULT_BOOK = "draftkings";
+const PROMO_BOOKS = ALL_BOOKS.filter((b) => !PROMO_HIDDEN_BOOK_KEYS.has(b.key));
+const sanitizePromoBook = (key) => (!key || PROMO_HIDDEN_BOOK_KEYS.has(key) ? PROMO_DEFAULT_BOOK : key);
+
 const TRUSTED_BOOK_KEYS = new Set([
   "draftkings", "fanduel", "williamhill_us", "betmgm", "betrivers",
   "fanatics", "hardrockbet", "betparx", "ballybet", "espnbet", "bovada", "mybookieag", "betonlineag",
@@ -1533,7 +1541,8 @@ export default function App() {
   const [expandedEV, setExpandedEV] = useState(null);
   const [evBookFilter, setEvBookFilter] = useState("all"); // "all" or a specific bookKey — filters the +EV Bets tab
   const [evDateRange, setEvDateRange] = useState(DEFAULT_EV_DATE_RANGE);
-  const [promoBook, setPromoBook] = useState("draftkings");
+  const [promoBook, setPromoBookRaw] = useState(PROMO_DEFAULT_BOOK);
+  const setPromoBook = (key) => setPromoBookRaw(sanitizePromoBook(key));
   const [promoSports, setPromoSports] = useState(new Set(DEFAULT_PROMO_SPORT_KEYS));
   // Multi-select Markets chips (array). normalizeMarketScope also migrates an
   // old single string value, so any stale "main" / "props" still works.
@@ -1966,9 +1975,15 @@ export default function App() {
   const scanPromoDateRange = useDeferredValue(promoDateRange);
   const scanMarketScope = useDeferredValue(marketScope);
   const scanPromoBook = useDeferredValue(promoBook);
-  const trustedVisible = useMemo(() => visibleTrustedBookKeys(user, TRUSTED_BOOK_KEYS), [user]);
+  const trustedVisible = useMemo(() => {
+    const vis = visibleTrustedBookKeys(user, TRUSTED_BOOK_KEYS);
+    return new Set([...vis].filter((k) => !PROMO_HIDDEN_BOOK_KEYS.has(k)));
+  }, [user]);
   const matchingVisible = useMemo(
-    () => matchingKeysVisibleToUser(matchingBookKeys, user, TRUSTED_BOOK_KEYS),
+    () => {
+      const vis = matchingKeysVisibleToUser(matchingBookKeys, user, TRUSTED_BOOK_KEYS);
+      return new Set([...vis].filter((k) => !PROMO_HIDDEN_BOOK_KEYS.has(k)));
+    },
     [matchingBookKeys, user],
   );
   const scanMatchingBookKeys = useDeferredValue(matchingVisible);
@@ -2573,7 +2588,7 @@ export default function App() {
   );
 
   const labelStyle = { fontSize: 13, fontWeight: 600, color: "#8a8f98" };
-  const activePromoBookData = ALL_BOOKS.find(b => b.key === promoBook) || ALL_BOOKS[0];
+  const activePromoBookData = PROMO_BOOKS.find(b => b.key === promoBook) || PROMO_BOOKS[0];
   const getBookLabel = (key) => ALL_BOOKS.find(x => x.key === key)?.label || soccerLayBookLabel(key) || key;
   const getAdjustmentNote = (key) => ADJUSTED_BOOK_NOTES[key] || null;
 
@@ -2953,7 +2968,7 @@ export default function App() {
                       window.gtag?.('event', 'sportsbook_selected', { book: e.target.value });
                       logEvent(user, 'sportsbook_selected', { book: e.target.value });
                     }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
-                      {ALL_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
+                      {PROMO_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
                     </select>
                   </>)}
                   {promoType === "boost" && controlBox(<>
@@ -3097,7 +3112,7 @@ export default function App() {
                       </>)}
                       {controlBox(<>
                         <label style={labelStyle}>Matching books</label>
-                        {ALL_BOOKS.filter(b => trustedVisible.has(b.key)).map(b => (
+                        {PROMO_BOOKS.filter(b => trustedVisible.has(b.key)).map(b => (
                           <button key={b.key} onClick={() => toggleMatchingBook(b.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: matchingBookKeys.has(b.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: matchingBookKeys.has(b.key) ? "#3b82f6" : "#6b7280" }}>
                             {b.label}
                           </button>
