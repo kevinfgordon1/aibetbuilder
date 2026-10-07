@@ -25,6 +25,7 @@ import {
   clearComboHash,
   serializeAppHash,
   resolveAppHash,
+  initialAppTab,
 } from "./comboAccess.js";
 import { visibleBetstampBooks, visibleBetstampBookIds, UNDERDOG_PREDICT_BOOK_ID, UNDERDOG_PREDICT_BOOK_KEY, BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
@@ -148,6 +149,12 @@ assert.deepEqual(parseAppHash("#desk"), { tab: "liveDesk", lockId: null, cardId:
 assert.equal(serializeAppHash({ tab: "liveDesk" }), "#live-trading-desk");
 assert.deepEqual(parseAppHash("#promo"), { tab: "promo", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#ev/abc"), { tab: "ev", lockId: null, cardId: "abc" });
+assert.equal(initialAppTab("#ev"), "ev");
+assert.equal(initialAppTab("#odds"), "odds");
+assert.equal(initialAppTab("#promo"), "promo");
+assert.equal(initialAppTab(""), "promo");
+assert.equal(initialAppTab("#combo"), "promo");
+assert.equal(initialAppTab("#live-trading-desk"), "promo");
 assert.equal(serializeAppHash({ tab: "odds" }), "#odds");
 assert.equal(comboLockHash("p1"), "#combo/p1");
 assert.equal(profileHash(), "#profile");
