@@ -332,6 +332,14 @@ export function resolveAppHash(parsed, user) {
   };
 }
 
+// Hash wins over the Promo default so #ev / #odds do not start a Promo fetch
+// on the first auth-ready render (that fetch used to run beside the +EV scan).
+export function initialAppTab(hash, user = null) {
+  const resolved = resolveAppHash(parseAppHash(hash), user);
+  if (!resolved.allowed) return "promo";
+  return resolved.tab || "promo";
+}
+
 export function hashesEqual(a, b) {
   const left = serializeAppHash(typeof a === "string" ? parseAppHash(a) : (a || {}));
   const right = serializeAppHash(typeof b === "string" ? parseAppHash(b) : (b || {}));

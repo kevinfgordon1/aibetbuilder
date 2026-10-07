@@ -5,7 +5,7 @@ import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import LiveTradingDesk from "./LiveTradingDesk";
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
@@ -106,6 +106,7 @@ import {
   underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
+import { isWithinDateRange, upcomingInRange } from "./dateRange.js";
 import * as playerTd from "../lib/player-td.mjs";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -279,20 +280,6 @@ const PARLAY_LEG_CAP = 200;
 // rescale a cached scan — they do not re-run findTopParlays.
 const PROMO_SCAN_STAKE = 100;
 const PROMO_SCAN_DEBOUNCE_MS = 150;
-
-function isWithinDateRange(commence_time, range) {
-  const now = new Date();
-  const ct = new Date(commence_time);
-  if (range === "any") return true;
-  if (range === "today") {
-    const estNow = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-    const estCt = new Date(ct.toLocaleString("en-US", { timeZone: "America/New_York" }));
-    return estCt.toDateString() === estNow.toDateString();
-  }
-  if (range === "24h") return ct <= new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  if (range === "7d") return ct <= new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return true;
-}
 
 
 
@@ -669,12 +656,13 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   const quoteNow = opts && opts.now != null ? Number(opts.now) : Date.now();
   const legs = [];
   const now = new Date();
+  const mlRows = upcomingInRange(data && data.moneylines, now, dateRange, sportFilter);
+  const rlRows = upcomingInRange(data && data.run_lines, now, dateRange, sportFilter);
+  const totRows = upcomingInRange(data && data.totals, now, dateRange, sportFilter);
+  const ttRows = upcomingInRange(data && data.team_totals, now, dateRange, sportFilter);
 
-  if (data.moneylines) {
-    data.moneylines.forEach(g => {
-      if (new Date(g.commence_time) <= now) return;
-      if (!isWithinDateRange(g.commence_time, dateRange)) return;
-      if (sportFilter && !sportFilter.includes(g.sport)) return;
+  if (mlRows.length) {
+    mlRows.forEach(g => {
       if (isSoccerSport(g.sport)) {
         pushSoccerMlLegs(legs, g, book, { minLegOdds, maxLegOdds });
         return;
@@ -692,12 +680,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
-  if (data.run_lines) {
+  if (rlRows.length) {
     const seen = new Set();
-    data.run_lines.forEach(g => {
-      if (new Date(g.commence_time) <= now) return;
-      if (!isWithinDateRange(g.commence_time, dateRange)) return;
-      if (sportFilter && !sportFilter.includes(g.sport)) return;
+    rlRows.forEach(g => {
       if (g.book !== book) return;
       const awayOdds = g.away_odds;
       const homeOdds = g.home_odds;
@@ -711,12 +696,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
-  if (data.totals) {
+  if (totRows.length) {
     const seen = new Set();
-    data.totals.forEach(g => {
-      if (new Date(g.commence_time) <= now) return;
-      if (!isWithinDateRange(g.commence_time, dateRange)) return;
-      if (sportFilter && !sportFilter.includes(g.sport)) return;
+    totRows.forEach(g => {
       if (g.book !== book) return;
       const overOdds = g.over_odds;
       const underOdds = g.under_odds;
@@ -730,12 +712,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
-  if (data.team_totals) {
+  if (ttRows.length) {
     const seen = new Set();
-    data.team_totals.forEach(g => {
-      if (new Date(g.commence_time) <= now) return;
-      if (!isWithinDateRange(g.commence_time, dateRange)) return;
-      if (sportFilter && !sportFilter.includes(g.sport)) return;
+    ttRows.forEach(g => {
       if (g.book !== book) return;
       const overOdds = g.over_odds;
       const underOdds = g.under_odds;
@@ -772,13 +751,14 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
   const now = new Date();
   const seen = new Set();
   const legs = [];
+  const mlRows = upcomingInRange(data && data.moneylines, now, dateRange, sportFilter);
+  const rlRows = upcomingInRange(data && data.run_lines, now, dateRange, sportFilter);
+  const totRows = upcomingInRange(data && data.totals, now, dateRange, sportFilter);
+  const ttRows = upcomingInRange(data && data.team_totals, now, dateRange, sportFilter);
 
   ALL_BOOKS.forEach(book => {
-    if (data.moneylines) {
-      data.moneylines.forEach(g => {
-        if (new Date(g.commence_time) <= now) return;
-        if (!isWithinDateRange(g.commence_time, dateRange)) return;
-        if (sportFilter && !sportFilter.includes(g.sport)) return;
+    if (mlRows.length) {
+      mlRows.forEach(g => {
         if (isSoccerSport(g.sport)) {
           pushSoccerMlLegs(legs, g, book.key, { seen });
           return;
@@ -793,11 +773,8 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (!seen.has(hk)) { seen.add(hk); legs.push(assignBookUpdatedAt({ name: `${g.home} ML`, dk: homeOdds, market: "ML", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: `${g.away} ML`, ...resolveOpp({ trustedOpp: g.best_away, trustedBook: g.best_away_book, trustedCount: g.ml_opp_count_home, trustedSize: g.best_away_size, sameBookOpp: awayOdds, sameBookKey: book.key, sameBookSize: g.bookOdds?.[book.key]?.ml_away_size, bookOdds: homeOdds }) }, g.bookOdds?.[book.key]?.ml_home_updatedAt)); }
       });
     }
-    if (data.run_lines) {
-      data.run_lines.forEach(g => {
-        if (new Date(g.commence_time) <= now) return;
-        if (!isWithinDateRange(g.commence_time, dateRange)) return;
-        if (sportFilter && !sportFilter.includes(g.sport)) return;
+    if (rlRows.length) {
+      rlRows.forEach(g => {
         if (g.book !== book.key) return;
         const awayOdds = g.away_odds;
         const homeOdds = g.home_odds;
@@ -808,11 +785,8 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (!seen.has(hk)) { seen.add(hk); legs.push(assignBookUpdatedAt({ name: `${g.home} ${g.home_line}`, dk: homeOdds, market: "SPR", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_home, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_home, trustedBook: g.bestOpp_home_book, trustedCount: g.bestOppCount_home, trustedSize: g.bestOpp_home_size, sameBookOpp: awayOdds, sameBookKey: book.key, sameBookSize: g.away_size, bookOdds: homeOdds }) }, g.home_updatedAt ?? g.bookOdds?.[book.key]?.spr_home_updatedAt)); }
       });
     }
-    if (data.totals) {
-      data.totals.forEach(g => {
-        if (new Date(g.commence_time) <= now) return;
-        if (!isWithinDateRange(g.commence_time, dateRange)) return;
-        if (sportFilter && !sportFilter.includes(g.sport)) return;
+    if (totRows.length) {
+      totRows.forEach(g => {
         if (g.book !== book.key) return;
         const overOdds = g.over_odds;
         const underOdds = g.under_odds;
@@ -823,11 +797,8 @@ function buildAllLegsAllBooks(data, sportFilter = null, dateRange = "any") {
         if (!seen.has(uk)) { seen.add(uk); legs.push(assignBookUpdatedAt({ name: `${g.away}/${g.home} u${g.line}`, dk: underOdds, market: "TOT", game: `${g.away} @ ${g.home}`, commence_time: g.commence_time, sport: g.sport, bookKey: book.key, bestOppName: g.bestOppName_under, isAlt: !!g.is_alt, ...resolveOpp({ trustedOpp: g.bestOpp_under, trustedBook: g.bestOpp_under_book, trustedCount: g.bestOppCount_under, trustedSize: g.bestOpp_under_size, sameBookOpp: overOdds, sameBookKey: book.key, sameBookSize: g.over_size, bookOdds: underOdds }) }, g.under_updatedAt ?? g.bookOdds?.[book.key]?.tot_under_updatedAt)); }
       });
     }
-    if (data.team_totals) {
-      data.team_totals.forEach(g => {
-        if (new Date(g.commence_time) <= now) return;
-        if (!isWithinDateRange(g.commence_time, dateRange)) return;
-        if (sportFilter && !sportFilter.includes(g.sport)) return;
+    if (ttRows.length) {
+      ttRows.forEach(g => {
         if (g.book !== book.key) return;
         const overOdds = g.over_odds;
         const underOdds = g.under_odds;
@@ -1548,7 +1519,9 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders,
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
-  const [activeTab, setActiveTab] = useState("promo");
+  const [activeTab, setActiveTab] = useState(() => (
+    typeof window === "undefined" ? "promo" : initialAppTab(window.location.hash)
+  ));
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [signInPrompt, setSignInPrompt] = useState(null);
   const [promoControlsOpen, setPromoControlsOpen] = useState(false);
@@ -1590,7 +1563,10 @@ export default function App() {
   const [promoLoaded, setPromoLoaded] = useState(false);
   const [promoLoadedSports, setPromoLoadedSports] = useState(null);
   const [promoBoardData, setPromoBoardData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
-  const [fullBoardLoading, setFullBoardLoading] = useState(false);
+  const [fullBoardLoading, setFullBoardLoading] = useState(() => {
+    const tab = typeof window === "undefined" ? "promo" : initialAppTab(window.location.hash);
+    return tab === "ev" || tab === "odds";
+  });
   const [fullBoardLoaded, setFullBoardLoaded] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
@@ -1918,8 +1894,17 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading) return;
-    fetchOdds({ forceRefresh: false });
-  }, [authLoading]);
+    // Read the tab from this render. #ev / #odds must not also start the Promo
+    // board — that used to transform event odds and scan parlays on the same
+    // tick as the +EV list.
+    if (shouldFetchFullBoard({ tab: activeTab, fullBoardLoaded, forceRefresh: false })) {
+      loadFullBoard();
+      return;
+    }
+    if (shouldFetchPromoOdds({ tab: activeTab, forceRefresh: false, promoLoaded })) {
+      loadPromoBoard();
+    }
+  }, [authLoading, activeTab, fullBoardLoaded, promoLoaded]);
 
   useEffect(() => {
     if (authLoading || !promoLoaded) return;
@@ -1932,12 +1917,6 @@ export default function App() {
     const id = setInterval(() => setNowMs(Date.now()), 30000);
     return () => clearInterval(id);
   }, []);
-
-  useEffect(() => {
-    if (shouldFetchFullBoard({ tab: activeTab, fullBoardLoaded, forceRefresh: false })) {
-      loadFullBoard();
-    }
-  }, [activeTab, fullBoardLoaded]);
 
   useEffect(() => {
     if (!promoSportsNeedNetworkReload(promoSports, promoLoadedSports, promoLoaded)) return;
