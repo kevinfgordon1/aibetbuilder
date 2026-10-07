@@ -6,11 +6,8 @@ export const PROMO_TYPE_BOOST = "boost";
 export const PROMO_TYPE_FREEBET = "freebet";
 export const PROMO_TYPE_NOSWEAT = "nosweat";
 
-/** First paint for a logged-out visitor: no invented 30% boost. */
-export const LOGGED_OUT_DEFAULT_PROMO_TYPE = PROMO_TYPE_NOPROMO;
-
-/** Returning signed-in sessions keep the historical Profit Boost default. */
-export const SIGNED_IN_DEFAULT_PROMO_TYPE = PROMO_TYPE_BOOST;
+/** Everyone starts on Profit Boost. No Promo is a menu option, not the default. */
+export const DEFAULT_PROMO_TYPE = PROMO_TYPE_BOOST;
 
 export const PROMO_TYPE_ORDER = Object.freeze([
   PROMO_TYPE_NOPROMO,

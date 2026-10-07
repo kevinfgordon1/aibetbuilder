@@ -11,8 +11,7 @@ import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, promoControlSummary } from "./guestAccess.js";
 import {
-  LOGGED_OUT_DEFAULT_PROMO_TYPE,
-  SIGNED_IN_DEFAULT_PROMO_TYPE,
+  DEFAULT_PROMO_TYPE,
   effectiveBoostPct,
   isBoostLikePromo,
   isParlayPromoType,
@@ -1525,8 +1524,7 @@ export default function App() {
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [signInPrompt, setSignInPrompt] = useState(null);
   const [promoControlsOpen, setPromoControlsOpen] = useState(false);
-  const [promoType, setPromoType] = useState(LOGGED_OUT_DEFAULT_PROMO_TYPE);
-  const promoTypeTouched = useRef(false);
+  const [promoType, setPromoType] = useState(DEFAULT_PROMO_TYPE);
   const [boostPct, setBoostPct] = useState(30);
   const [creditConversionPct, setCreditConversionPct] = useState(DEFAULT_CREDIT_CONVERSION);
   const [refundPct, setRefundPct] = useState(DEFAULT_REFUND_PCT);
@@ -1611,13 +1609,6 @@ export default function App() {
       setUser(u);
       setAuthLoading(false);
 
-      if (u && !promoTypeTouched.current) {
-        const route = parseAppHash(window.location.hash);
-        if (!(route.cardId && decodePromoCardId(route.cardId))) {
-          setPromoType(SIGNED_IN_DEFAULT_PROMO_TYPE);
-        }
-      }
-
       if (u) {
         // Supabase activity log — session start
         logEvent(u, 'session_start', {
@@ -1630,14 +1621,7 @@ export default function App() {
       }
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const next = session?.user ?? null;
-      setUser(next);
-      if (next && !promoTypeTouched.current) {
-        const route = parseAppHash(window.location.hash);
-        if (!(route.cardId && decodePromoCardId(route.cardId))) {
-          setPromoType(SIGNED_IN_DEFAULT_PROMO_TYPE);
-        }
-      }
+      setUser(session?.user ?? null);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -1698,7 +1682,6 @@ export default function App() {
       if (resolved.tab === "promo") {
         const fromRoute = promoPrefsFromRoute(resolved);
         if (fromRoute.source === "share") {
-          promoTypeTouched.current = true;
           if (fromRoute.promoType) setPromoType(fromRoute.promoType);
           if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
           if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
@@ -1930,7 +1913,6 @@ export default function App() {
   };
 
   const choosePromoType = (val) => {
-    promoTypeTouched.current = true;
     setPromoType(val);
     if (val === "nosweat") setNumLegs(1);
   };

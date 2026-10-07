@@ -26,13 +26,17 @@ for (const action of ["show-more", "copy-link", "share-image", "save", "combo", 
 assert.equal(guestActionNeedsSignIn("optimize"), false);
 assert.equal(guestActionNeedsSignIn("promo-type"), false);
 
+const defaultCollapsedSummary = promoControlSummary({
+  bookLabel: "DraftKings",
+  promoType: "boost",
+  boostPct: 30,
+  stake: 100,
+  numLegs: 3,
+});
+assert.equal(defaultCollapsedSummary, "DraftKings · 30% boost · $100 · 3 legs");
 assert.equal(
-  promoControlSummary({ bookLabel: "DraftKings", promoType: "boost", boostPct: 30, stake: 100, numLegs: 3 }),
-  "DraftKings · 30% boost · $100 · 3 legs",
-);
-assert.equal(
-  promoControlSummary({ bookLabel: "DraftKings", promoType: "nopromo", boostPct: 30, stake: 100, numLegs: 1 }),
-  "DraftKings · No promo · $100 · 1 leg",
+  promoControlSummary({ bookLabel: "DraftKings", promoType: "nopromo", boostPct: 30, stake: 100, numLegs: 3 }),
+  "DraftKings · No promo · $100 · 3 legs",
 );
 assert.equal(
   promoControlSummary({ bookLabel: "FanDuel", promoType: "freebet", stake: 50, numLegs: 2 }),
@@ -54,6 +58,11 @@ assert.match(app, /data-guest-explainer/);
 assert.match(app, /!authLoading && !user/);
 assert.match(app, /promo-controls-summary/);
 assert.match(app, /promoControlSummary\(/);
+assert.match(app, /promoControlsOpen \? "— Hide" : "— Edit"/);
+assert.match(app, /useState\(DEFAULT_PROMO_TYPE\)/);
+assert.match(app, /useState\(30\)/);
+assert.match(app, /useState\(3\)/);
+assert.match(app, /PROMO_DEFAULT_BOOK = "draftkings"/);
 assert.match(app, /className="ev-head"/);
 assert.match(app, /className="ev-row-main"/);
 assert.match(app, /className="app-header"/);

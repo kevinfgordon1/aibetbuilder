@@ -36,7 +36,8 @@ function money(stake) {
 
 /**
  * One-line mobile summary of the Promo controls.
- * "DraftKings · 30% boost · $100 · 3 legs"
+ * First visit (logged out or signed in) collapses to
+ * "DraftKings · 30% boost · $100 · 3 legs — Edit".
  */
 export function promoControlSummary({ bookLabel, promoType, boostPct, stake, numLegs } = {}) {
   const book = bookLabel || "Sportsbook";

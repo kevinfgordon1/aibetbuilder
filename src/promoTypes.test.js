@@ -3,8 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  LOGGED_OUT_DEFAULT_PROMO_TYPE,
-  SIGNED_IN_DEFAULT_PROMO_TYPE,
+  DEFAULT_PROMO_TYPE,
   PROMO_TYPE_ORDER,
   effectiveBoostPct,
   isBoostLikePromo,
@@ -22,8 +21,7 @@ import {
 } from "./shareCard.js";
 import { comboKindForPromo } from "./comboPrefill.js";
 
-assert.equal(LOGGED_OUT_DEFAULT_PROMO_TYPE, "nopromo");
-assert.equal(SIGNED_IN_DEFAULT_PROMO_TYPE, "boost");
+assert.equal(DEFAULT_PROMO_TYPE, "boost");
 assert.equal(PROMO_TYPE_ORDER[0], "nopromo");
 assert.equal(PROMO_TYPE_ORDER[1], "boost");
 
@@ -80,8 +78,14 @@ assert.ok(!chips.some((c) => /w\/ boost/.test(c)));
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
 assert.match(app, /val: "nopromo", label: "No Promo"/);
-assert.match(app, /LOGGED_OUT_DEFAULT_PROMO_TYPE/);
-assert.match(app, /SIGNED_IN_DEFAULT_PROMO_TYPE/);
+assert.match(app, /const \[promoType, setPromoType\] = useState\(DEFAULT_PROMO_TYPE\)/);
+assert.match(app, /const \[boostPct, setBoostPct\] = useState\(30\)/);
+assert.match(app, /const \[stake, setStake\] = useState\(100\)/);
+assert.match(app, /const \[numLegs, setNumLegs\] = useState\(3\)/);
+assert.match(app, /const PROMO_DEFAULT_BOOK = "draftkings"/);
+assert.doesNotMatch(app, /LOGGED_OUT_DEFAULT_PROMO_TYPE/);
+assert.doesNotMatch(app, /SIGNED_IN_DEFAULT_PROMO_TYPE/);
+assert.doesNotMatch(app, /promoTypeTouched/);
 assert.match(app, /effectiveBoostPct\(promoType, scanBoostPct\)/);
 assert.match(app, /effectiveBoostPct\(promoType, boostPct\)/);
 assert.match(app, /promoType === "boost" && controlBox/);
