@@ -122,13 +122,14 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
         .sip-email:focus { outline: 2px solid rgba(96,165,250,0.55); border-color: transparent; }
         .sip-send { background: rgba(59,130,246,0.16); color: #dbeafe; border: 1px solid rgba(96,165,250,0.45); }
         .sip-msg { margin: 0; font-size: 15px; line-height: 1.45; font-weight: 700; }
-        .sip-error {
-          color: #fff; background: #9f1239; border: 1px solid #fecdd3;
-          border-radius: 10px; padding: 12px 14px;
+        /* Two classes so this beats .signin-modal p (gray, 14px) in the popup. */
+        .sip-msg.sip-error {
+          margin: 0; color: #fff; background: #9f1239; border: 1px solid #fecdd3;
+          border-radius: 10px; padding: 12px 14px; font-size: 15px; line-height: 1.45; font-weight: 700;
         }
-        .sip-rate {
-          color: #1c1917; background: #fbbf24; border: 1px solid #fde68a;
-          border-radius: 10px; padding: 12px 14px;
+        .sip-msg.sip-rate {
+          margin: 0; color: #1c1917; background: #fbbf24; border: 1px solid #fde68a;
+          border-radius: 10px; padding: 12px 14px; font-size: 15px; line-height: 1.45; font-weight: 700;
         }
         .sip-sent {
           background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35);
