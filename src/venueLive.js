@@ -151,6 +151,38 @@ export function underdogRelayStreamUrl({ league } = {}) {
   return q ? `${base}/underdog?${q}` : `${base}/underdog`;
 }
 
+// DraftKings / FanDuel game lines from the odds relay (public JSON their own
+// sites load; Kevin approved Oct 7 2026). Relay only: there is no Vercel
+// fallback. Null without VITE_ODDS_RELAY_URL or when VITE_DKFD_FEED is
+// 0 / false / off (kill switch). The relay answers 503 until DKFD_FEED=1
+// there, and the board keeps the columns hidden until a packet arrives.
+export const DKFD_BOOKS = Object.freeze(["draftkings", "fanduel"]);
+
+export function dkfdStreamUrl({ league, book } = {}) {
+  if (!DKFD_BOOKS.includes(book)) return null;
+  const base = oddsRelayBase();
+  if (!base) return null;
+  let raw;
+  try {
+    const env = import.meta && import.meta.env;
+    if (env && env.VITE_DKFD_FEED != null && env.VITE_DKFD_FEED !== "") raw = env.VITE_DKFD_FEED;
+  } catch {
+    /* node tests have no Vite env */
+  }
+  if (raw == null) {
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.VITE_DKFD_FEED != null) raw = process.env.VITE_DKFD_FEED;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!firstPartyPmLiveFromEnv(raw)) return null;
+  const p = new URLSearchParams();
+  p.set("venue", book);
+  if (league) p.set("league", league);
+  return `${base}/stream?${p}`;
+}
+
 export function fourcastersStreamUrl({ league } = {}) {
   const p = new URLSearchParams();
   if (league) p.set("league", league);

@@ -24,12 +24,14 @@ function feeAsk(p) {
 
 const now = Date.parse("2026-09-22T18:00:00Z");
 
-assert.deepEqual(freeFeedBooks(null).map((b) => b.key), ["polymarket", "kalshi", "novig", "fourcasters"]);
+// DraftKings / FanDuel columns (Kevin approved Oct 7 2026) come last; the
+// board hides them until the relay's DK/FD stream sends a packet.
+assert.deepEqual(freeFeedBooks(null).map((b) => b.key), ["polymarket", "kalshi", "novig", "fourcasters", "draftkings", "fanduel"]);
 assert.deepEqual(
   freeFeedBooks({ email: "kev120909@gmail.com" }).map((b) => b.key),
-  ["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"],
+  ["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict", "draftkings", "fanduel"],
 );
-assert.equal(freeFeedBooks(null).some((b) => b.key === "draftkings" || b.key === "fanduel" || b.key === "prophetx"), false);
+assert.equal(freeFeedBooks(null).some((b) => b.key === "pinnacle" || b.key === "prophetx" || b.key === "betmgm"), false);
 
 const poly = {
   book: "polymarket",
@@ -376,7 +378,8 @@ assert.equal(games[0].bookOdds.underdog_predict.ml_home, -280);
 assert.equal(games[0].bookOdds.underdog_predict.spr_away, -110);
 assert.equal(games[0].bookOdds.underdog_predict.spr_away_line, 3.5);
 assert.equal(games[0].bookOdds.underdog_predict.tot_over, -105);
-assert.equal(games[0].bookOdds.draftkings, undefined);
+assert.equal(games[0].bookOdds.draftkings?.ml_away ?? null, null, "no DK feed, no DK price");
+assert.equal(games[0].bookOdds.fanduel?.ml_home ?? null, null, "no FD feed, no FD price");
 assert.equal(gameVisibleOnBoard(games[0], { liveOnly: false, now }), true);
 assert.equal(gameVisibleOnBoard(games[0], { liveOnly: true, now }), false);
 
@@ -685,3 +688,4 @@ console.log("freeFeedBoard.test.js ok");
   assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: "2026-10-04T17:00:00Z" }, { liveOnly: true, now: nowMs }), false);
   assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: "2026-10-04T17:00:00Z" }, { liveOnly: false, now: nowMs }), true);
 }
+

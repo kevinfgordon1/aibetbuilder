@@ -81,6 +81,8 @@ import {
   polymarketBoardUrl,
   novigStreamUrl,
   fourcastersStreamUrl,
+  dkfdStreamUrl,
+  DKFD_BOOKS,
 } from "./venueLive.js";
 import PlayerTdBoard from "./PlayerTdBoard.jsx";
 
@@ -105,7 +107,86 @@ import {
   mergeMonotonicQuotes,
   quotesAfterVenueEvent,
   mainLaddersFromGame,
+  confirmSportsbookQuotes,
+  sportsbookFeedState,
 } from "./freeFeedBoard.js";
+
+const DKFD_LABEL = Object.freeze({ draftkings: "DraftKings", fanduel: "FanDuel" });
+const DKFD_DOT_COLOR = Object.freeze({
+  fresh: "var(--nob-good)",
+  lagging: "var(--nob-warn)",
+  silent: "#ef4444",
+  blocked: "#ef4444",
+  unknown: "var(--nob-faint)",
+});
+
+function dkfdAgeText(ageMs) {
+  if (ageMs == null) return "never";
+  const sec = Math.floor(ageMs / 1000);
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  return `${Math.floor(sec / 3600)}h`;
+}
+
+// Header dot for the DK / FD columns: green while the relay re-reads the
+// book every few seconds, amber when a poll is late, red once silent 2m+.
+function DkfdFeedDot({ feedsRef, book }) {
+  const nowMs = useContext(AgeNowContext);
+  const feed = feedsRef.current && feedsRef.current[book];
+  const { state, ageMs } = sportsbookFeedState(feed, nowMs || Date.now());
+  const label = DKFD_LABEL[book] || book;
+  const title = state === "unknown"
+    ? `${label} feed: waiting for the first poll`
+    : `${label} feed ${state}: last good poll ${dkfdAgeText(ageMs)} ago${feed && feed.last_error ? ` (${feed.last_error})` : ""}`;
+  return (
+    <span
+      data-dkfd-dot={book}
+      data-feed-state={state}
+      title={title}
+      aria-label={title}
+      style={{ display: "inline-block", width: 7, height: 7, borderRadius: 999, background: DKFD_DOT_COLOR[state] || DKFD_DOT_COLOR.unknown, flexShrink: 0 }}
+    />
+  );
+}
+
+// In-app staleness alert: a DK / FD feed with no good poll for 2 minutes.
+function DkfdFeedBanner({ feedsRef, books }) {
+  const nowMs = useContext(AgeNowContext);
+  const now = nowMs || Date.now();
+  const rows = [];
+  for (const book of DKFD_BOOKS) {
+    if (!books.some((b) => b.key === book)) continue;
+    const feed = feedsRef.current && feedsRef.current[book];
+    if (!feed) continue;
+    const { state, ageMs } = sportsbookFeedState(feed, now);
+    if (state !== "silent" && state !== "blocked") continue;
+    const okAt = Number(feed.last_ok_at);
+    const clock = Number.isFinite(okAt) && okAt > 0 ? fmtClock(okAt) : null;
+    const why = state === "blocked" ? "blocked by the book (403)" : (feed.last_error ? feed.last_error : "no new poll");
+    rows.push({ book, text: `${DKFD_LABEL[book]} feed silent ${dkfdAgeText(ageMs)} (${why})${clock ? ` — last good pull ${clock}` : ""}` });
+  }
+  if (!rows.length) return null;
+  return (
+    <div
+      role="alert"
+      data-dkfd-stale={rows.map((r) => r.book).join(",")}
+      style={{
+        marginBottom: 16,
+        padding: "10px 14px",
+        borderRadius: 12,
+        border: "1px solid rgba(239,68,68,0.45)",
+        background: "rgba(127,29,29,0.25)",
+        color: "#fca5a5",
+        fontSize: 13,
+        fontWeight: 600,
+        lineHeight: 1.45,
+      }}
+    >
+      {rows.map((r) => r.text).join(" · ")}
+      {". Those cells keep the last price and say stale until the feed is back."}
+    </div>
+  );
+}
 
 const BestBookName = memo(function BestBookName({ book, extra = 0, title, size = 13 }) {
   if (!book) return null;
@@ -1049,13 +1130,21 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   // the feed is up and this slate has no price.
   const [novigOn, setNovigOn] = useState(false);
   const [fourcastersOn, setFourcastersOn] = useState(false);
+  // DraftKings / FanDuel join once the relay's DK/FD stream sends a packet
+  // (DKFD_FEED=1 on the relay). Their feed heartbeats live in a ref; the
+  // header dot and the staleness banner read it on the 1s age clock.
+  const [draftkingsOn, setDraftkingsOn] = useState(false);
+  const [fanduelOn, setFanduelOn] = useState(false);
+  const dkfdFeedsRef = useRef({});
   const books = useMemo(() => {
     let catalog = freeFeedBooks(user);
-    if (!venuesOn) catalog = catalog.filter((b) => b.key === "underdog_predict");
+    if (!venuesOn) catalog = catalog.filter((b) => b.key === "underdog_predict" || b.key === "draftkings" || b.key === "fanduel");
     if (!novigOn) catalog = catalog.filter((b) => b.key !== "novig");
     if (!fourcastersOn) catalog = catalog.filter((b) => b.key !== "fourcasters");
+    if (!draftkingsOn) catalog = catalog.filter((b) => b.key !== "draftkings");
+    if (!fanduelOn) catalog = catalog.filter((b) => b.key !== "fanduel");
     return catalog;
-  }, [user?.id, user?.email, venuesOn, novigOn, fourcastersOn]);
+  }, [user?.id, user?.email, venuesOn, novigOn, fourcastersOn, draftkingsOn, fanduelOn]);
   const seeUnderdog = books.some((b) => b.key === "underdog_predict");
   const bookKeysKey = books.map((b) => b.key).join(",");
   const knownBookKeysRef = useRef(bookKeysKey);
@@ -1150,7 +1239,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
     setSnapshotAt(null);
     setStreamStatus(liveOnly && venuesOn ? "connecting" : "idle");
 
-    const quoteRef = { polymarket: [], kalshi: [], novig: [], fourcasters: [] };
+    const quoteRef = { polymarket: [], kalshi: [], novig: [], fourcasters: [], draftkings: [], fanduel: [] };
+    dkfdFeedsRef.current = {};
     const quotePrint = (list) => (list || []).map((q) => `${q.token_id || q.ticker || q.side}:${q.odds}`).join("|");
     let phone = null;
     let sawPhone = !seeUnderdog;
@@ -1165,6 +1255,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         kalshi: venuesOn ? quoteRef.kalshi : [],
         novig: venuesOn ? quoteRef.novig : [],
         fourcasters: venuesOn ? quoteRef.fourcasters : [],
+        draftkings: confirmSportsbookQuotes(quoteRef.draftkings, dkfdFeedsRef.current.draftkings),
+        fanduel: confirmSportsbookQuotes(quoteRef.fanduel, dkfdFeedsRef.current.fanduel),
         underdog: seeUnderdog && sawPhone ? phone : null,
         nowMs: Date.now(),
       });
@@ -1332,6 +1424,58 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         });
       }
     };
+
+    // DraftKings / FanDuel via the odds relay. `quote` packets carry prices
+    // (updated_at = when the price last moved); `feed` heartbeats after every
+    // relay poll confirm the whole book as of last_ok_at.
+    const runDkfd = async (book) => {
+      const url = dkfdStreamUrl({ league, book });
+      if (!url || cancelled) return;
+      const setOn = book === "draftkings" ? setDraftkingsOn : setFanduelOn;
+      let attempt = 0;
+      while (!cancelled && !ctrl.signal.aborted) {
+        let connected = false;
+        let refused = false;
+        try {
+          await consumeBetstampStream({
+            url,
+            signal: ctrl.signal,
+            onStatus: (s) => { if (s === "live") connected = true; },
+            onEvent: (ev) => {
+              if (cancelled || gen !== fetchGen.current) return;
+              const payload = ev && ev.data && ev.data.payload;
+              if (!payload) return;
+              if (ev.event === "feed") {
+                if (!payload.feed) return;
+                dkfdFeedsRef.current = { ...dkfdFeedsRef.current, [book]: { ...payload.feed, received_at: Date.now() } };
+                // A failed-poll heartbeat (blocked / error) keeps last_ok_at
+                // where it was; it never adds a column that has had no price.
+                if (payload.feed.last_ok_at) setOn(true);
+                if (quoteRef[book].length) publish();
+                return;
+              }
+              const quotes = payload.quotes;
+              if (!Array.isArray(quotes) || !quotes.length) return;
+              setOn(true);
+              quoteRef[book] = quotesAfterVenueEvent(quoteRef[book], payload);
+              publish();
+            },
+          });
+        } catch (err) {
+          if (cancelled || ctrl.signal.aborted) return;
+          // 503: the relay has the DK/FD feed off. Check back slowly.
+          refused = !!(err && (err.status === 503 || err.status === 400));
+        }
+        if (cancelled || ctrl.signal.aborted) return;
+        const wait = refused ? 60_000 : (connected ? 250 : nextBackoffMs(attempt, { max: 30_000 }));
+        attempt = connected ? 0 : attempt + 1;
+        await new Promise((resolve) => {
+          const t = setTimeout(resolve, wait);
+          venueTimers.push(t);
+        });
+      }
+    };
+    for (const book of DKFD_BOOKS) runDkfd(book);
 
     if (venuesOn) {
       runVenue("polymarket", polymarketStreamUrl({ league }));
@@ -1857,7 +2001,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-gold)", letterSpacing: 0.2 }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "var(--nob-muted)", marginTop: 4 }}>
-            Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters appears when the server has credentials. No sportsbook columns.
+            Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters appears when the server has credentials. DraftKings and FanDuel appear when the odds relay is reading them (American odds only).
           </div>
           <div data-fee-legend="1" style={{ fontSize: 12, color: "var(--nob-text-2)", marginTop: 2 }}>
             {TAKER_FEE_LEGEND}
@@ -2055,6 +2199,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         </div>
       )}
 
+      <DkfdFeedBanner feedsRef={dkfdFeedsRef} books={books} />
+
       {feedNote && (
         <div data-feed-note="true" style={{ padding: "12px 16px", borderRadius: 12, border: "1px solid var(--nob-border)", color: "var(--nob-text-2)", marginBottom: 16, fontSize: 13 }}>
           {feedNote}
@@ -2107,6 +2253,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
                       />
                     )}
                     {b.key === "best" ? b.label : <BookLabel book={b} size={16} />}
+                    {DKFD_BOOKS.includes(b.key) && <DkfdFeedDot feedsRef={dkfdFeedsRef} book={b.key} />}
                   </span>
                 </th>
               ))}
@@ -2158,7 +2305,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       </div>
       )}
       <div style={{ fontSize: 11, color: "var(--nob-faint)", marginTop: 12 }}>
-        Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters only when the server has credentials. No DraftKings, FanDuel, or other sportsbook columns.
+        Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters only when the server has credentials. DraftKings and FanDuel (NJ) come from the public odds their own sites load, re-read every few seconds by the odds relay; they fill games already on the board (same teams, kickoff within 6h). The dot by their logo is the feed: green = polled in the last 20s, amber = late, red = silent 2m+ (a banner says so).
         {" · "}Moneyline from Polymarket, Kalshi, and Underdog. Novig and 4Casters also show moneyline when configured. Underdog, Novig, and 4Casters show the main spread and total; Polymarket and Kalshi cells stay blank there.
         {" · "}A blank — means this feed has no quote for that side. It is not an error.
         {" · "}Pregame polls Underdog and keeps the Polymarket, Kalshi, Novig, and 4Casters streams open. LIVE uses the same feeds, including in-game Underdog.
