@@ -650,23 +650,23 @@ console.log("freeFeedBoard.test.js ok");
 
 // ── LIVE needs a passed kickoff AND an in-progress flag ──────────────────
 {
-  const nowMs = Date.parse("2026-10-02T00:45:00Z");
-  const q = (away, home, side, extra) => ({ book: "polymarket", book_id: 193, league: "NFL", away, home, side, bet_type: "moneyline", odds: 0.5, updated_at: "2026-10-02T00:44:00.000Z", token_id: `${away}-${side}`, ...extra });
+  const nowMs = Date.parse("2026-10-07T12:00:00Z");
+  const q = (away, home, side, extra) => ({ book: "polymarket", book_id: 193, league: "NFL", away, home, side, bet_type: "moneyline", odds: 0.5, updated_at: "2026-10-07T11:59:00.000Z", token_id: `${away}-${side}`, ...extra });
   const rows = gamesFromFreeFeeds({
     league: "NFL",
     polymarket: [
-      q("Steelers", "Browns", "Steelers", { is_live: true, start: "2026-10-02T00:15:00Z" }),
-      q("Rams", "Eagles", "Rams", { is_live: false, start: "2026-10-04T17:00:00Z" }),
+      q("Steelers", "Browns", "Steelers", { is_live: true, start: "2026-10-07T00:15:00Z" }),
+      q("Rams", "Eagles", "Rams", { is_live: false, start: "2027-10-04T17:00:00Z" }),
       // A forced / stale flag before kickoff must be ignored.
-      q("Colts", "Commanders", "Colts", { is_live: true, start: "2026-10-04T13:30:00Z" }),
+      q("Colts", "Commanders", "Colts", { is_live: true, start: "2027-10-04T13:30:00Z" }),
     ],
     kalshi: [{
       book: "kalshi", book_id: 194, league: "NFL", away: "Arizona Cardinals", home: "New York Giants",
-      side: "Arizona", bet_type: "moneyline", odds: 0.55, is_live: true, start: "2026-10-04T17:00Z",
-      updated_at: "2026-10-02T00:44:00.000Z", ticker: "KXNFLGAME-26OCT04ARINYG-ARI",
+      side: "Arizona", bet_type: "moneyline", odds: 0.55, is_live: true, start: "2027-10-04T17:00Z",
+      updated_at: "2026-10-07T11:59:00.000Z", ticker: "KXNFLGAME-27OCT04ARINYG-ARI",
     }],
     underdog: { ok: true, games: [{
-      sport: "NFL", away: "New England Patriots", home: "Buffalo Bills", scheduledAt: "2026-10-04T17:00:00Z",
+      sport: "NFL", away: "New England Patriots", home: "Buffalo Bills", scheduledAt: "2027-10-04T17:00:00Z",
       status: "scoring", live: true, lines: [{ name: "New England Patriots", american: 150, market: "h2h" }],
     }] },
     nowMs,
@@ -682,6 +682,6 @@ console.log("freeFeedBoard.test.js ok");
     assert.equal(gameVisibleOnBoard(g, { liveOnly: false, now: nowMs }), !g.away.includes("Pittsburgh"), `${g.away} pregame tab`);
   }
   // Even a game object carrying is_live is demoted by the board filter before kickoff.
-  assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: "2026-10-04T17:00:00Z" }, { liveOnly: true, now: nowMs }), false);
-  assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: "2026-10-04T17:00:00Z" }, { liveOnly: false, now: nowMs }), true);
+  assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: "2027-10-04T17:00:00Z" }, { liveOnly: true, now: nowMs }), false);
+  assert.equal(gameVisibleOnBoard({ is_live: true, commence_time: "2027-10-04T17:00:00Z" }, { liveOnly: false, now: nowMs }), true);
 }

@@ -70,6 +70,30 @@ assert.equal(canSeeNewOddsBoard(kenneth), true);
 assert.equal(canSeeNewOddsBoard({ email: "KMGuido97@Gmail.com" }), true);
 assert.equal(canSeeNewOddsBoard({ email: "stranger@gmail.com" }), false);
 assert.equal(canSeeNewOddsBoard(null), false);
+
+{
+  const xNoEmail = {
+    id: "uid-x",
+    email: "",
+    app_metadata: { provider: "x" },
+    user_metadata: { email: "kev120909@gmail.com", user_name: "someone" },
+  };
+  assert.equal(canSeeOwnerTools(xNoEmail), false, "X without auth email is not Kevin");
+  assert.equal(canSeeNewOddsBoard(xNoEmail), false, "metadata email does not open New Odds Board");
+  assert.equal(canSeeComboLocks(xNoEmail), false);
+  assert.equal(canSeeUnderdogPredict(xNoEmail), false);
+  const xMetaOnly = {
+    id: "uid-x2",
+    app_metadata: { provider: "x" },
+    user_metadata: { email: "kmguido97@gmail.com" },
+  };
+  assert.equal(canSeeNewOddsBoard(xMetaOnly), false);
+  assert.equal(canSeeOwnerTools(xMetaOnly), false);
+  assert.equal(canSeeComboLocks({ id: "uid-x", email: null, app_metadata: { provider: "x" } }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-x" }), true);
+  assert.equal(canSeeOwnerTools({ id: "uid-x", email: null, app_metadata: { provider: "x" } }), false, "uid allowlist does not open Live Trading Desk");
+  assert.equal(canSeeNewOddsBoard({ id: "fb", email: "kmguido97@gmail.com", app_metadata: { provider: "facebook" } }), true);
+  assert.equal(canSeeOwnerTools({ id: "mail", email: "kev120909@gmail.com", app_metadata: { provider: "email" } }), true);
+}
 assert.equal(canSeeOwnerTools(kenneth), false);
 assert.equal(canSeeUnderdogPredict(kenneth), true);
 assert.equal(canSeeUnderdogPredict({ email: "KMGuido97@Gmail.com" }), true);

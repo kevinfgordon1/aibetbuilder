@@ -77,9 +77,9 @@ function memoryDb(seed) {
 }
 
 const legs = [
-  { ticker: 'KXNFLGAME-26OCT051300CLEVLV-CLE', side: 'yes', label: 'CLE' },
-  { ticker: 'KXNFLGAME-26OCT051300LVDAL-LV', side: 'yes', label: 'LV' },
-  { ticker: 'KXNFLGAME-26OCT051300PITBAL-PIT', side: 'yes', label: 'PIT' },
+  { ticker: 'KXNFLGAME-27OCT051300CLEVLV-CLE', side: 'yes', label: 'CLE' },
+  { ticker: 'KXNFLGAME-27OCT051300LVDAL-LV', side: 'yes', label: 'LV' },
+  { ticker: 'KXNFLGAME-27OCT051300PITBAL-PIT', side: 'yes', label: 'PIT' },
 ];
 
 function ticket(id, stake, american, created) {
@@ -99,7 +99,7 @@ function ticket(id, stake, american, created) {
     is_free_bet: false,
     bet_type: 'cash',
     max_contracts: Math.round(stake * (1 + american / 100)),
-    starts_at: '2026-10-05T17:00:00Z',
+    starts_at: '2027-10-05T17:00:00Z',
   };
 }
 

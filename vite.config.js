@@ -4,63 +4,67 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 
+const LOCAL_API_HANDLERS = {
+  '/api/betstamp-markets': './api/betstamp-markets.js',
+  '/api/betstamp-stream': './api/betstamp-stream.js',
+  '/api/underdog-predict': './api/underdog-predict.js',
+  '/api/polymarket-stream': './api/polymarket-stream.js',
+  '/api/polymarket-board': './api/polymarket-board.js',
+  '/api/kalshi-stream': './api/kalshi-stream.js',
+  '/api/kalshi-board': './api/kalshi-board.js',
+  '/api/novig-stream': './api/novig-stream.js',
+  '/api/4casters-stream': './api/4casters-stream.js',
+  '/api/live-trading-desk': './api/live-trading-desk.js',
+  '/api/player-td-board': './api/player-td-board.js',
+  '/api/scan-ev-parlays': './api/scan-ev-parlays.js',
+  '/api/fetch-player-props': './api/fetch-player-props.js',
+}
+
+function attachLocalApi(middlewares) {
+  middlewares.use(async (req, res, next) => {
+    const url = req.url || ''
+    const path = url.split('?')[0]
+    const handlerPath = LOCAL_API_HANDLERS[path]
+    if (!handlerPath) return next()
+    try {
+      if (path === '/api/live-trading-desk' && req.method === 'POST') {
+        const chunks = []
+        for await (const chunk of req) chunks.push(chunk)
+        const raw = Buffer.concat(chunks).toString('utf8')
+        try { req.body = raw ? JSON.parse(raw) : {} } catch { req.body = {} }
+      }
+      const handler = require(handlerPath)
+      if (typeof res.status !== 'function') {
+        res.status = (code) => {
+          res.statusCode = code
+          return res
+        }
+      }
+      if (typeof res.json !== 'function') {
+        res.json = (obj) => {
+          if (!res.headersSent) res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(obj))
+          return res
+        }
+      }
+      await handler(req, res)
+    } catch (err) {
+      if (res.headersSent) return
+      res.statusCode = 500
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ ok: false, error: String(err && err.message || err) }))
+    }
+  })
+}
+
 function betstampLocalApi() {
   return {
     name: 'betstamp-local-api',
     configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const url = req.url || ''
-        const path = url.split('?')[0]
-        if (path !== '/api/betstamp-markets' && path !== '/api/betstamp-stream' && path !== '/api/underdog-predict' && path !== '/api/polymarket-stream' && path !== '/api/polymarket-board' && path !== '/api/kalshi-stream' && path !== '/api/kalshi-board' && path !== '/api/novig-stream' && path !== '/api/4casters-stream' && path !== '/api/live-trading-desk' && path !== '/api/player-td-board') return next()
-        try {
-          if (path === '/api/live-trading-desk' && req.method === 'POST') {
-            const chunks = []
-            for await (const chunk of req) chunks.push(chunk)
-            const raw = Buffer.concat(chunks).toString('utf8')
-            try { req.body = raw ? JSON.parse(raw) : {} } catch { req.body = {} }
-          }
-          const handler = path === '/api/betstamp-stream'
-            ? require('./api/betstamp-stream.js')
-            : path === '/api/underdog-predict'
-              ? require('./api/underdog-predict.js')
-                : path === '/api/polymarket-stream'
-                ? require('./api/polymarket-stream.js')
-                : path === '/api/polymarket-board'
-                  ? require('./api/polymarket-board.js')
-                  : path === '/api/kalshi-stream'
-                  ? require('./api/kalshi-stream.js')
-                  : path === '/api/kalshi-board'
-                    ? require('./api/kalshi-board.js')
-                    : path === '/api/novig-stream'
-                      ? require('./api/novig-stream.js')
-                      : path === '/api/4casters-stream'
-                        ? require('./api/4casters-stream.js')
-                        : path === '/api/live-trading-desk'
-                          ? require('./api/live-trading-desk.js')
-                          : path === '/api/player-td-board'
-                            ? require('./api/player-td-board.js')
-                            : require('./api/betstamp-markets.js')
-          if (typeof res.status !== 'function') {
-            res.status = (code) => {
-              res.statusCode = code
-              return res
-            }
-          }
-          if (typeof res.json !== 'function') {
-            res.json = (obj) => {
-              if (!res.headersSent) res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify(obj))
-              return res
-            }
-          }
-          await handler(req, res)
-        } catch (err) {
-          if (res.headersSent) return
-          res.statusCode = 500
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: String(err && err.message || err) }))
-        }
-      })
+      attachLocalApi(server.middlewares)
+    },
+    configurePreviewServer(server) {
+      attachLocalApi(server.middlewares)
     },
   }
 }
