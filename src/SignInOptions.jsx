@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { X_OAUTH_PROVIDER, sendMagicLink, startOAuthSignIn } from "./signIn.js";
+import { useEffect, useState } from "react";
+import { X_OAUTH_PROVIDER, loadAuthSettings, oauthProviderEnabled, sendMagicLink, startOAuthSignIn } from "./signIn.js";
 
 function GoogleIcon() {
   return (
@@ -37,6 +37,32 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState(initialStatus);
   const [busy, setBusy] = useState(false);
+  // Hide X and Facebook until settings say they are on. A failed settings
+  // read shows them and probes authorize before any redirect.
+  const [gates, setGates] = useState({ x: false, facebook: false, google: true, probe: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    const url = import.meta.env.VITE_SUPABASE_URL;
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    loadAuthSettings({ url, anonKey }).then((settings) => {
+      if (cancelled) return;
+      if (!settings.ok) {
+        setGates({ x: true, facebook: true, google: true, probe: true });
+        return;
+      }
+      const x = oauthProviderEnabled(settings.external, "x");
+      const facebook = oauthProviderEnabled(settings.external, "facebook");
+      const google = oauthProviderEnabled(settings.external, "google");
+      setGates({
+        x: x === true,
+        facebook: facebook === true,
+        google: google !== false,
+        probe: false,
+      });
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const track = (method) => {
     window.gtag?.("event", "sign_in_started", { method });
@@ -56,7 +82,12 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
     }
   };
 
-  const onProvider = (provider) => run(provider, () => startOAuthSignIn(supabaseClient, provider, here()));
+  const onProvider = (provider) => run(provider, () => {
+    const known = gates.probe
+      ? null
+      : (provider === "google" ? gates.google : true);
+    return startOAuthSignIn(supabaseClient, provider, here(), { enabled: known });
+  });
 
   const onMagicLink = (event) => {
     event.preventDefault();
@@ -90,9 +121,15 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
         }
         .sip-email:focus { outline: 2px solid rgba(96,165,250,0.55); border-color: transparent; }
         .sip-send { background: rgba(59,130,246,0.16); color: #dbeafe; border: 1px solid rgba(96,165,250,0.45); }
-        .sip-msg { margin: 0; font-size: 13px; line-height: 1.45; }
-        .sip-error { color: #fca5a5; }
-        .sip-rate { color: #fcd34d; }
+        .sip-msg { margin: 0; font-size: 15px; line-height: 1.45; font-weight: 700; }
+        .sip-error {
+          color: #fff; background: #9f1239; border: 1px solid #fecdd3;
+          border-radius: 10px; padding: 12px 14px;
+        }
+        .sip-rate {
+          color: #1c1917; background: #fbbf24; border: 1px solid #fde68a;
+          border-radius: 10px; padding: 12px 14px;
+        }
         .sip-sent {
           background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35);
           border-radius: 12px; padding: 14px 14px 12px; color: #d1fae5;
@@ -116,17 +153,21 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
         <button type="button" className="sip-btn sip-google" data-signin-google="true" disabled={busy} onClick={() => onProvider("google")}>
           <GoogleIcon /> Sign in with Google
         </button>
-        <button type="button" className="sip-btn sip-x" data-signin-x="true" disabled={busy} onClick={() => onProvider(X_OAUTH_PROVIDER)}>
-          <XIcon /> Sign in with X
-        </button>
-        <button type="button" className="sip-btn sip-facebook" data-signin-facebook="true" disabled={busy} onClick={() => onProvider("facebook")}>
-          <FacebookIcon /> Sign in with Facebook
-        </button>
+        {gates.x ? (
+          <button type="button" className="sip-btn sip-x" data-signin-x="true" disabled={busy} onClick={() => onProvider(X_OAUTH_PROVIDER)}>
+            <XIcon /> Sign in with X
+          </button>
+        ) : null}
+        {gates.facebook ? (
+          <button type="button" className="sip-btn sip-facebook" data-signin-facebook="true" disabled={busy} onClick={() => onProvider("facebook")}>
+            <FacebookIcon /> Sign in with Facebook
+          </button>
+        ) : null}
 
         {sent ? null : (
           <>
             <div className="sip-or">or email</div>
-            <form onSubmit={onMagicLink}>
+            <form onSubmit={onMagicLink} noValidate>
               <label className="sip-label" htmlFor={(id || "sip") + "-email"}>Email</label>
               <input
                 id={(id || "sip") + "-email"}
@@ -138,6 +179,7 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                aria-invalid={status && status.kind === "error" ? "true" : "false"}
                 required
               />
               <button type="submit" className="sip-btn sip-send" data-signin-send="true" disabled={busy} style={{ marginTop: 10 }}>

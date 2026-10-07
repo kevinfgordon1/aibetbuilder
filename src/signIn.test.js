@@ -17,6 +17,9 @@ import {
   authCallbackError,
   startOAuthSignIn,
   sendMagicLink,
+  oauthProviderEnabled,
+  loadAuthSettings,
+  resetAuthSettingsCache,
 } from "./signIn.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -202,10 +205,106 @@ assert.equal(safeAppHash("https://evil.example/#ev"), "");
   assert.match(panel, /data-signin-error/);
   assert.match(panel, /data-signin-rate-limit/);
   assert.match(panel, /data-signin-sent/);
+  assert.match(panel, /loadAuthSettings/);
+  assert.match(panel, /oauthProviderEnabled/);
+  assert.match(panel, /noValidate/);
+  assert.match(panel, /gates\.x \?/);
+  assert.match(panel, /gates\.facebook \?/);
   assert.match(app, /function LandingFull/);
   assert.doesNotMatch(app, /signInWithOAuth\(\{ provider: "google", options: \{ redirectTo: window\.location\.origin \} \}\)/);
   assert.match(access, /user\.email/);
   assert.doesNotMatch(access, /user\.email \|\| meta\.email/);
+}
+
+{
+  const live = { google: true, email: true, twitter: false, facebook: false };
+  assert.equal(oauthProviderEnabled(live, "google"), true);
+  assert.equal(oauthProviderEnabled(live, "x"), false);
+  assert.equal(oauthProviderEnabled(live, "twitter"), false);
+  assert.equal(oauthProviderEnabled(live, "facebook"), false);
+  assert.equal(oauthProviderEnabled({ x: true, twitter: false, facebook: true }, "x"), true);
+  assert.equal(oauthProviderEnabled({ twitter: true }, "x"), true);
+  assert.equal(oauthProviderEnabled({ facebook: true }, "facebook"), true);
+  assert.equal(oauthProviderEnabled({}, "x"), null);
+  assert.equal(oauthProviderEnabled({}, "facebook"), null);
+  assert.equal(oauthProviderEnabled(null, "x"), null);
+}
+
+{
+  resetAuthSettingsCache();
+  let calls = 0;
+  const fetchImpl = async (url) => {
+    calls += 1;
+    assert.match(url, /\/auth\/v1\/settings$/);
+    return {
+      ok: true,
+      json: async () => ({ external: { google: true, twitter: false, facebook: false, email: true } }),
+    };
+  };
+  const first = await loadAuthSettings({ url: "https://example.supabase.co/", anonKey: "anon", fetchImpl });
+  const second = await loadAuthSettings({
+    url: "https://example.supabase.co",
+    anonKey: "anon",
+    fetchImpl: async () => { throw new Error("should use cache"); },
+  });
+  assert.equal(calls, 1);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(oauthProviderEnabled(second.external, "x"), false);
+  resetAuthSettingsCache();
+  const failed = await loadAuthSettings({
+    url: "https://example.supabase.co",
+    anonKey: "anon",
+    fetchImpl: async () => { throw new Error("offline"); },
+  });
+  assert.equal(failed.ok, false);
+  const missing = await loadAuthSettings({ url: "", anonKey: "" });
+  assert.equal(missing.ok, false);
+  resetAuthSettingsCache();
+}
+
+{
+  const loc = { origin: "https://www.aibetbuilder.io", pathname: "/", search: "", hash: "#ev" };
+  let called = false;
+  const blocked = await startOAuthSignIn({
+    auth: { async signInWithOAuth() { called = true; return { data: { url: "https://should-not" }, error: null }; } },
+  }, "x", loc, { enabled: false });
+  assert.equal(called, false);
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.message, /isn’t turned on yet/);
+
+  const calls = [];
+  let assigned = null;
+  const client = {
+    auth: {
+      async signInWithOAuth(args) {
+        calls.push(args);
+        return { data: { url: "https://auth.example/authorize?provider=x" }, error: null };
+      },
+    },
+  };
+  const denied = await startOAuthSignIn(client, "x", loc, {
+    enabled: null,
+    fetchImpl: async () => ({
+      status: 400,
+      json: async () => ({ msg: "Unsupported provider: provider is not enabled", error_code: "validation_failed", code: 400 }),
+    }),
+    assign: (href) => { assigned = href; },
+  });
+  assert.equal(denied.ok, false);
+  assert.match(denied.message, /isn’t turned on yet/);
+  assert.equal(calls[0].options.skipBrowserRedirect, true);
+  assert.equal(assigned, null);
+
+  const go = await startOAuthSignIn(client, "facebook", loc, {
+    enabled: null,
+    fetchImpl: async () => ({ status: 302, type: "opaqueredirect", json: async () => ({}) }),
+    assign: (href) => { assigned = href; },
+  });
+  assert.equal(go.ok, true);
+  assert.equal(assigned, "https://auth.example/authorize?provider=x");
+  assert.equal(calls[1].options.skipBrowserRedirect, true);
+  assert.equal(calls[1].options.scopes, "email,public_profile");
 }
 
 console.log("signIn.test.js ok");
