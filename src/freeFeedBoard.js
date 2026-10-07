@@ -1,7 +1,12 @@
 // New Odds Board fixture list and prices from first-party feeds only.
 // Polymarket CLOB, Kalshi public markets, Novig tape and 4Casters price
 // stream (when credentials are set), Underdog phone. No Betstamp fixtures
-// and no DraftKings / FanDuel / Pinnacle columns.
+// and no Pinnacle column.
+//
+// DraftKings and FanDuel (Kevin approved Oct 7 2026) come from the odds relay,
+// which polls the public JSON their own sites load. They paint rows the
+// prediction feeds already list (teams plus kickoff within 6h); they never
+// add a row of their own.
 //
 // NFL and MLB sides join on the Combo Locks team index (city, nickname,
 // and code are the same team). NCAAF joins on the team-name matcher.
@@ -16,7 +21,14 @@ import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import { novigLiveFeeRate } from "./venueTakerFee.js";
 
-export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
+export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict", "draftkings", "fanduel"]);
+export const SPORTSBOOK_FEED_BOOKS = Object.freeze(["draftkings", "fanduel"]);
+// DK / FD feed with no good poll for this long: in-app banner.
+export const DKFD_FEED_SILENT_MS = 120_000;
+// Header dot turns amber after this (relay polls every ~4s while watched).
+export const DKFD_FEED_LAGGING_MS = 20_000;
+// FanDuel lists kickoff +1 minute; Kalshi rows can carry a late start.
+export const DKFD_KICKOFF_TOLERANCE_MS = 6 * 3600 * 1000;
 export const FREE_FEED_POLL_MS = 20_000;
 export const FREE_FEED_LIVE_POLL_MS = 10_000;
 // JSON snapshot backstop. The SSE socket pushes ask changes. A poll this
@@ -399,12 +411,69 @@ export function mergeVenueQuotes(prev, incoming) {
   return [...map.values()];
 }
 
+function kickoffClose(game, quote, toleranceMs = DKFD_KICKOFF_TOLERANCE_MS) {
+  const a = Date.parse((game && game.commence_time) || "");
+  const b = Date.parse((quote && quote.start) || "");
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return true;
+  return Math.abs(a - b) <= toleranceMs;
+}
+
+// DK / FD quotes whose game is already a row: same two teams (either
+// orientation) and a kickoff within DKFD_KICKOFF_TOLERANCE_MS of the row.
+export function sportsbookQuotesForRows(games, quotes, league) {
+  const lg = String(league || "").toUpperCase();
+  const out = [];
+  for (const quote of quotes || []) {
+    if (!quote || quote.odds == null) continue;
+    if (String(quote.league || lg).toUpperCase() !== lg) continue;
+    const game = findGame(games, lg, quote.away, quote.home);
+    if (!game || !kickoffClose(game, quote)) continue;
+    out.push(quote);
+  }
+  return out;
+}
+
+function quoteMs(raw) {
+  if (raw == null || raw === "") return 0;
+  const parsed = Date.parse(String(raw));
+  if (Number.isFinite(parsed)) return parsed;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? (n < 1e12 ? n * 1000 : n) : 0;
+}
+
+// The relay stamps updated_at when a DK / FD price last moved and sends a
+// feed heartbeat after every poll. A sportsbook price that sat still but was
+// re-read 3s ago is 3s old, so the cell clock runs from the newer of the two.
+// A silent feed stops moving last_ok_at, and its cells age into "stale".
+export function confirmSportsbookQuotes(quotes, feed) {
+  const okAt = feed && Number(feed.last_ok_at);
+  if (!Number.isFinite(okAt) || okAt <= 0) return quotes || [];
+  return (quotes || []).map((q) => {
+    if (!q) return q;
+    return quoteMs(q.updated_at) >= okAt ? q : { ...q, updated_at: new Date(okAt).toISOString() };
+  });
+}
+
+// "fresh" | "lagging" | "silent" | "blocked" | "unknown" for one DK / FD feed.
+export function sportsbookFeedState(feed, nowMs = Date.now()) {
+  if (!feed) return { state: "unknown", ageMs: null };
+  const okAt = Number(feed.last_ok_at);
+  const ageMs = Number.isFinite(okAt) && okAt > 0 ? Math.max(0, nowMs - okAt) : null;
+  if (ageMs == null || ageMs >= DKFD_FEED_SILENT_MS) {
+    return { state: feed.state === "blocked" ? "blocked" : "silent", ageMs };
+  }
+  if (ageMs >= DKFD_FEED_LAGGING_MS) return { state: "lagging", ageMs };
+  return { state: "fresh", ageMs };
+}
+
 export function gamesFromFreeFeeds({
   league,
   polymarket = [],
   kalshi = [],
   novig = [],
   fourcasters = [],
+  draftkings = [],
+  fanduel = [],
   underdog = null,
   nowMs = Date.now(),
 } = {}) {
@@ -438,7 +507,8 @@ export function gamesFromFreeFeeds({
       nowMs: seenAt,
     });
   }
-  const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || []), ...(novig || []), ...(fourcasters || [])].filter((q) => (
+  const books = sportsbookQuotesForRows(games, [...(draftkings || []), ...(fanduel || [])], lg);
+  const markets = marketsFromQuotes(games, [...(polymarket || []), ...(kalshi || []), ...(novig || []), ...(fourcasters || []), ...books].filter((q) => (
     q && String(q.league || lg).toUpperCase() === lg
   )), lg);
   const painted = applyStreamMarkets(games, markets, {
