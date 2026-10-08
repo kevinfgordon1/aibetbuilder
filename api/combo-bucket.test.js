@@ -27,6 +27,7 @@ function setup({ user, rows, error, noService } = {}) {
           const api = {
             select(c) { q.calls.push(['select', c]); return api; },
             not(c, op, v) { q.calls.push(['not', c, op, v]); return api; },
+            eq(c, v) { q.calls.push(['eq', c, v]); return api; },
             order(c, o) { q.calls.push(['order', c, o]); return api; },
             async limit(n) { q.calls.push(['limit', n]); return { data: rows || [], error: error || null }; },
           };
@@ -76,6 +77,7 @@ const call = (headers, method = 'GET') => { const r = res(); return handler({ me
   assert.equal(queries.length, 1);
   assert.equal(queries[0].table, 'combo_worker_stats');
   assert.ok(queries[0].calls.some((c) => c[0] === 'not' && c[1] === 'bucket'));
+  assert.ok(queries[0].calls.some((c) => c[0] === 'eq' && c[1] === 'user_id' && c[2] === OWNER.id), 'owner desk stats only');
   assert.ok(!queries[0].calls.some((c) => ['insert', 'update', 'delete', 'upsert'].includes(c[0])));
 
   // Old snapshot is flagged stale.
