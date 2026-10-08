@@ -1103,7 +1103,7 @@ function LandingFull({ onBack }) {
         <div className="lf-sechead"><div className="k">FAQ</div><h2>Good questions</h2></div>
         <div className="lf-faq">
           <div className="lf-qa"><h4>Is it really free?</h4><p>Yes. Sign in with Google, email, X, or Facebook and everything's available — no credit card, no trial timer.</p></div>
-          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, and college football &amp; basketball — plus championship futures for each.</p></div>
+          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, college football &amp; basketball, plus EPL and MLS soccer — with championship futures too.</p></div>
           <div className="lf-qa"><h4>Do I have to link my sportsbook accounts?</h4><p>No. It reads public odds; you place bets yourself at whichever book has the edge.</p></div>
           <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 20+ sportsbooks and exchanges, including Kalshi and Polymarket, refreshed every 5 minutes.</p></div>
         </div>
