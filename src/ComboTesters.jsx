@@ -132,8 +132,9 @@ function CapsEditor({ user, busy, onSave }) {
   const [day, setDay] = useState(user.caps.perDayUsd ?? "");
   return (
     <span className="caps-edit">
-      <input aria-label="Max per lock" inputMode="decimal" value={lock} onChange={(e) => setLock(e.target.value)} />
-      <input aria-label="Max per day" inputMode="decimal" value={day} onChange={(e) => setDay(e.target.value)} />
+      <input aria-label="Max per lock" placeholder="$ / lock" title="Max $ per lock" inputMode="decimal" value={lock} onChange={(e) => setLock(e.target.value)} />
+      <input aria-label="Max per day" placeholder="$ / day" title="Max $ per day" inputMode="decimal" value={day} onChange={(e) => setDay(e.target.value)} />
+      <span className="muted" style={{ fontSize: 11 }}>lock / day</span>
       <button type="button" className="btn mini" disabled={busy} onClick={() => onSave(user, lock, day)}>Save</button>
     </span>
   );
