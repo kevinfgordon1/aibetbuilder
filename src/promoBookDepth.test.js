@@ -57,9 +57,11 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  assert.equal(over.displayLegs[0].bestOpp, 125);
-  assert.notEqual(over.displayLegs[0].bestOpp, pxLeg.bestOpp);
-  assert.equal(over.blends[depthCacheKey(pxLeg)].flag, "blended to $500 payout");
+  // Thin top ($100 at +200) cannot clear Hide low liquidity via deeper L2.
+  assert.equal(over.displayLegs[0].bestOpp, 104, "thin top keeps quoted opp");
+  assert.equal(over.displayLegs[0].lowLiquidity, true);
+  assert.match(over.blends[depthCacheKey(pxLeg)].flag, /of \$500 payout available/);
+  assert.doesNotMatch(over.blends[depthCacheKey(pxLeg)].flag, /blended to \$500/);
 
   const kevin = {
     dk: 200,

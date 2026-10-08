@@ -94,7 +94,8 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.match(cardinals.pmBlend.flag, /of \$500 payout available/);
 }
 
-// 1-leg walk VWAP uses $500 payout, same as multi-leg (not the small hedge $)
+// Thin top cannot clear Hide low liquidity by walking into worse depth.
+// Top +200 / $100 only funds $200 of $500 profit — low liquidity, keep quote.
 {
   const walked = applyPmBlendToLeg(
     { dk: 200, bestOpp: 200, bestOppBook: "kalshi", bestOppSize: 100 },
@@ -104,13 +105,49 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     ],
     { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 },
   );
-  assert.equal(walked.lowLiquidity, false);
+  assert.equal(walked.lowLiquidity, true, "thin top stays low liquidity despite deep L2");
   assert.equal(walked.bestOppQuoted, 200);
-  assert.equal(walked.bestOpp, 125, "VWAP to $500 profit walks into +100");
+  assert.equal(walked.bestOpp, 200, "do not replace quote with deep VWAP when top is thin");
   assert.equal(walked.pmBlend.mode, "payout");
-  assert.ok(walked.pmBlend.complete);
-  assert.ok(walked.pmBlend.levelsUsed > 1);
-  assert.match(walked.pmBlend.flag, /blended to \$500 payout/);
+  assert.equal(walked.pmBlend.thinTop, true);
+  assert.equal(walked.pmBlend.complete, false);
+  assert.match(walked.pmBlend.flag, /of \$500 payout available/);
+  assert.doesNotMatch(walked.pmBlend.flag, /blended to \$500/);
+}
+
+// Endries-style Kalshi No: $64 top + fat worse level must not claim $500.
+{
+  const endries = applyPmBlendToLeg(
+    {
+      dk: 2200,
+      bestOpp: -2038,
+      bestOppBook: "kalshi",
+      bestOppSize: 64,
+      bestOppLevels: [
+        { american: -2038, size: 64 },
+        { american: -2042, size: 23832 },
+      ],
+    },
+    null,
+    { promoType: "boost", numLegs: 3 },
+  );
+  assert.equal(endries.lowLiquidity, true);
+  assert.equal(endries.bestOpp, -2038);
+  assert.equal(endries.pmBlend.thinTop, true);
+  assert.match(endries.pmBlend.flag, /\$3 of \$500/);
+  assert.doesNotMatch(endries.pmBlend.flag, /blended to \$500/);
+}
+
+// Deep top alone still clears the bar (no thin-top tag).
+{
+  const deepTop = applyPmBlendToLeg(
+    { dk: 2200, bestOpp: -2038, bestOppBook: "kalshi", bestOppSize: 12000 },
+    [{ american: -2038, size: 12000 }],
+    { promoType: "boost", numLegs: 3 },
+  );
+  assert.equal(deepTop.lowLiquidity, false);
+  assert.equal(deepTop.pmBlend.thinTop, undefined);
+  assert.equal(deepTop.pmBlend.flag, "", "single deep top is not a blend tag");
 }
 
 // 1-leg no-sweat: lock H stays hedge-$ ; liquidity is $500 profit
@@ -270,21 +307,8 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(fdUnknown.pmBlend, null);
 }
 
-// ── Profit Boost EV uses blended American, not the thin top
+// ── Profit Boost: thin top stays quoted + lowLiquidity (no deep VWAP laundering)
 {
-  function calcParlayEV(legs, boostPct, stake) {
-    const dkDecimal = (o) => (o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o));
-    const trueProb = (o) => (o < 0 ? Math.abs(o) / (Math.abs(o) + 100) : 100 / (o + 100));
-    const ourTrue = (o) => 1 - trueProb(o);
-    let parlayDec = 1;
-    let combinedProb = 1;
-    legs.forEach((l) => {
-      parlayDec *= dkDecimal(l.dk);
-      combinedProb *= ourTrue(l.bestOpp);
-    });
-    const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
-    return (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
-  }
   const raw = {
     dk: 150,
     bestOpp: 200,
@@ -303,12 +327,31 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const { displayLegs } = applyPmBlendToLegs([raw], {
     ["kalshi|mlb|A @ B|B ML|ML"]: levels,
   }, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30 });
-  assert.equal(displayLegs[0].bestOpp, 125, "boost path uses $500-profit VWAP not +200 top");
-  assert.notEqual(displayLegs[0].bestOpp, 200);
-  assert.equal(trueOppAmerican(displayLegs[0]), 125);
-  const evTop = calcParlayEV([{ ...raw, bestOpp: 200 }], 30, 100);
-  const evBlend = calcParlayEV(displayLegs, 30, 100);
-  assert.notEqual(evBlend, evTop);
+  assert.equal(displayLegs[0].lowLiquidity, true);
+  assert.equal(displayLegs[0].bestOpp, 200, "thin top keeps quoted opp");
+  assert.equal(trueOppAmerican(displayLegs[0]), 200);
+  assert.match(displayLegs[0].pmBlend.flag, /of \$500 payout available/);
+}
+
+// Deep top that alone funds $500 still clears (no thin-top flag).
+{
+  const raw = {
+    dk: 150,
+    bestOpp: 200,
+    bestOppBook: "kalshi",
+    bestOppSize: 300,
+    sport: "mlb",
+    game: "A @ B",
+    name: "A ML",
+    bestOppName: "B ML",
+    market: "ML",
+  };
+  const { displayLegs } = applyPmBlendToLegs([raw], {
+    ["kalshi|mlb|A @ B|B ML|ML"]: [{ american: 200, size: 300 }],
+  }, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30 });
+  assert.equal(displayLegs[0].lowLiquidity, false);
+  assert.equal(displayLegs[0].bestOpp, 200);
+  assert.equal(displayLegs[0].pmBlend.flag, "");
 }
 
 // Prefer a full hedge fill over a short book when ranking 1-leg
@@ -379,7 +422,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(applied.pmBlend.flag, "blended · $73 of $500 payout available");
 }
 
-// ── Missouri-style Novig: thin top +223 must not drive true odds / EV
+// ── Missouri-style Novig: thin top +223 is low liquidity; keep quote, honest shortfall
 {
   const levels = [
     { american: 223, size: 80 },
@@ -389,7 +432,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const blend = blendAskLadderToPayout(levels);
   assert.ok(blend.payoutFilled + 0.5 < TARGET_PAYOUT_USD, "short of $500 → low liquidity");
   assert.equal(blend.complete, false);
-  assert.notEqual(blend.american, 223, "VWAP of the walk ≠ thin top");
+  assert.notEqual(blend.american, 223, "raw VWAP of the walk ≠ thin top");
   assert.match(blend.flag, /of \$500 payout available/);
 
   const raw = {
@@ -407,26 +450,11 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     ["novig|americanfootball_ncaaf|Missouri @ Rival|Rival ML|ML"]: levels,
   }, { promoType: "boost", numLegs: 3, stake: 100, boostPct: 30 });
   assert.equal(displayLegs[0].bestOppQuoted, 223);
-  assert.notEqual(displayLegs[0].bestOpp, 223);
-  assert.equal(displayLegs[0].bestOpp, blend.american);
-  assert.equal(trueOppAmerican(displayLegs[0]), blend.american);
-  const ourFromTop = 1 - americanToImpliedProb(223);
-  const ourFromBlend = 1 - americanToImpliedProb(displayLegs[0].bestOpp);
-  assert.notEqual(impliedProbToAmerican(ourFromTop), impliedProbToAmerican(ourFromBlend));
-  function calcParlayEV(legs, boostPct, stake) {
-    const dkDecimal = (o) => (o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o));
-    const trueProb = (o) => (o < 0 ? Math.abs(o) / (Math.abs(o) + 100) : 100 / (o + 100));
-    const ourTrue = (o) => 1 - trueProb(o);
-    let parlayDec = 1;
-    let combinedProb = 1;
-    legs.forEach((l) => {
-      parlayDec *= dkDecimal(l.dk);
-      combinedProb *= ourTrue(l.bestOpp);
-    });
-    const boostedProfit = (parlayDec - 1) * stake * (1 + boostPct / 100);
-    return (combinedProb * boostedProfit) - ((1 - combinedProb) * stake);
-  }
-  assert.notEqual(calcParlayEV(displayLegs, 30, 100), calcParlayEV([{ ...raw, bestOpp: 223 }], 30, 100));
+  assert.equal(displayLegs[0].bestOpp, 223, "thin top keeps quoted opp on the card");
+  assert.equal(displayLegs[0].lowLiquidity, true);
+  assert.equal(displayLegs[0].pmBlend.thinTop, true);
+  assert.match(displayLegs[0].pmBlend.flag, /of \$500 payout available/);
+  assert.doesNotMatch(displayLegs[0].pmBlend.flag, /blended to \$500/);
 }
 
 assert.equal(blendAskLadderToPayout(null), null);

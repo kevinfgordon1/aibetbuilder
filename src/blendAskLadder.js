@@ -6,6 +6,13 @@
 //   and No Sweat. "Payout" in UI copy is this profit, not face/total return
 //   (stake + win). Incomplete walk → lowLiquidity. Sportsbooks never flag.
 //
+// Top-of-book gate (Hide low liquidity):
+//   The best American price band alone must also fund $500 profit. Deeper,
+//   worse levels may still shape VWAP when the top is deep enough, but a
+//   thin top (e.g. $64 on a -2000 No) cannot clear Hide low liquidity by
+//   walking into junk/resting depth behind it — and must not claim
+//   "blended to $500 payout".
+//
 // Lock math is separate: requiredBoostHedgeStake / freebet / nosweat hedge $
 //   still describe the perfect-lock stake for Guaranteed Profit. That is not
 //   the Hide-low-liquidity completeness bar. Example: $100 stake, +200 boosted
@@ -99,11 +106,15 @@ export function blendDidWalk(blend, topAmerican) {
 export function formatBlendedPayoutFlag(blend, topAmerican) {
   if (!blend || blend.american == null) return "";
   const target = payoutTargetLabel(blend.targetPayout ?? TARGET_PAYOUT_USD);
-  if (blend.complete) {
+  // Thin top: never claim a full $500 fill even if worse levels could fund it.
+  if (blend.complete && !blend.thinTop) {
     if (!blendDidWalk(blend, topAmerican)) return "";
     return `blended to ${target} payout`;
   }
-  const filled = formatPayoutDollars(blend.payoutFilled);
+  const filledProfit = blend.thinTop && blend.topProfitFilled != null
+    ? blend.topProfitFilled
+    : blend.payoutFilled;
+  const filled = formatPayoutDollars(filledProfit);
   if (!filled) return `blended · $0 of ${target} payout available`;
   return `blended · ${filled} of ${target} payout available`;
 }
@@ -133,6 +144,23 @@ function normalizeLevels(levels) {
   }
   clean.sort((a, b) => b.american - a.american);
   return clean;
+}
+
+// Sum dollar stake at the best American only (ties after normalize). Hide low
+// liquidity requires this band to fund TARGET_PAYOUT_USD profit by itself.
+export function topBandCoversTarget(levels, targetPayout = TARGET_PAYOUT_USD) {
+  const target = Number(targetPayout);
+  if (!isFinite(target) || target <= 0) return false;
+  const ladder = normalizeLevels(levels);
+  if (!ladder.length) return false;
+  const topAm = ladder[0].american;
+  let size = 0;
+  for (const lvl of ladder) {
+    if (lvl.american !== topAm) break;
+    size += lvl.size;
+  }
+  const profit = stakeToProfit(size, topAm);
+  return profit != null && profit + COMPLETE_EPS >= target;
 }
 
 function finishBlend({ stakeFilled, payoutFilled, levelsUsed, complete, targetPayout, targetStake, mode }) {
@@ -306,6 +334,38 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
   if (!blend || blend.american == null) {
     return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
   }
+
+  // Hide low liquidity: top American band must fund $500 profit alone.
+  // Deeper levels must not launder a $64 top into "blended to $500".
+  const topOk = topBandCoversTarget(book);
+  if (!topOk) {
+    const topAm = book[0].american;
+    const topBand = book.filter((l) => l.american === topAm);
+    const topBlend = blendAskLadderToPayout(topBand) || blend;
+    const thin = {
+      ...topBlend,
+      complete: false,
+      lowLiquidity: true,
+      thinTop: true,
+      topProfitFilled: topBlend.payoutFilled,
+      // Keep full-ladder VWAP off the card when the top cannot clear the bar.
+      american: quoted,
+      impliedProb: americanToImpliedProb(quoted),
+      flag: undefined,
+    };
+    thin.flag = formatBlendedPayoutFlag(thin, quoted);
+    if (oppQuoteLooksInverted(leg.dk, thin.american) || quoteLooksWrongSideOf(quoted, thin.american)) {
+      return { ...leg, bestOppQuoted: quoted, bestOpp: quoted, lowLiquidity: true, pmBlend: null };
+    }
+    return {
+      ...leg,
+      bestOppQuoted: quoted,
+      bestOpp: quoted,
+      lowLiquidity: true,
+      pmBlend: thin,
+    };
+  }
+
   // Wrong-side depth (favorite ladder walked as the dog inverse) must not
   // replace a sane quoted opp with +2000-class "true" odds.
   if (oppQuoteLooksInverted(leg.dk, blend.american) || quoteLooksWrongSideOf(quoted, blend.american)) {
