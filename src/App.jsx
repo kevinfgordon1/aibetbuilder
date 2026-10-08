@@ -1507,8 +1507,13 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
   if (!leg?.bestOppBook) return null;
   const bookLabel = ALL_BOOKS.find(x => x.key === leg.bestOppBook)?.label || soccerLayBookLabel(leg.bestOppBook) || leg.bestOppBook;
   const note = ADJUSTED_BOOK_NOTES[leg.bestOppBook] || null;
-  const ladder = levelsProp !== undefined ? levelsProp : fetched;
-  const blendedLeg = applyPmBlendToLeg(leg, Array.isArray(ladder) ? ladder : null, blendCtx || {});
+  // Prefer live book-depth; fall back to cached TD/HR No ladder so the trail
+  // is honest when /api/book-depth cannot parse market TD/HR/GOAL.
+  const liveLadder = levelsProp !== undefined ? levelsProp : fetched;
+  const ladder = (Array.isArray(liveLadder) && liveLadder.length)
+    ? liveLadder
+    : (Array.isArray(leg.bestOppLevels) && leg.bestOppLevels.length ? leg.bestOppLevels : liveLadder);
+  const blendedLeg = applyPmBlendToLeg(leg, Array.isArray(liveLadder) && liveLadder.length ? liveLadder : null, blendCtx || {});
   const line = formatTrueOddsWithBlend({
     odds: quotedOppAmerican(leg) ?? leg.bestOpp,
     bookLabel,

@@ -2,11 +2,13 @@
 // Session-only (same as Markets / date / odds bounds). Default on.
 //
 // Reuses pickHasLowLiquidity / applyPmBlendToLeg — no second definition.
-// 1-leg and multi-leg: incomplete $500-profit walk (win excl. stake).
-// Sportsbooks never set lowLiquidity; only Kalshi/Polymarket/Novig/ProphetX.
-// Unproven PM books (empty ladder / missing bestOppSize) are low liquidity —
-// do not treat "unknown / no ladder" as OK. A positive bestOppSize still
-// counts as a one-level book (complete fill stays, shortfall drops).
+// 1-leg and multi-leg: incomplete $500-profit walk (win excl. stake), AND the
+// top American band alone must fund that $500 (thin tops cannot clear the
+// bar by walking into worse depth). Sportsbooks never set lowLiquidity; only
+// Kalshi/Polymarket/Novig/ProphetX. Unproven PM books (empty ladder / missing
+// bestOppSize) are low liquidity — do not treat "unknown / no ladder" as OK.
+// A positive bestOppSize still counts as a one-level book (complete fill
+// stays, shortfall drops).
 
 import { applyPmBlendToLeg, pickHasLowLiquidity } from "./blendAskLadder.js";
 

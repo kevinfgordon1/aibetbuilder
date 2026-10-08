@@ -125,8 +125,9 @@ function assertPostBlendOrder(promoType) {
   assert.equal(waiting.rest[0].id, "C");
 
   const page = visiblePromoAfterDepth(base, 5, ladders, rankPage(ctx));
-  assert.equal(page.visible[0].id, "B", `${promoType}: BEST PICK slot follows the post-blend EV`);
-  assert.ok(page.visible[0].ev > page.visible.find((p) => p.id === "A").ev, `${promoType}: blend dropped A below B`);
+  // Real ladder top is only $15 — Hide low liquidity drops A entirely.
+  assert.deepEqual(page.visible.map((p) => p.id), ["B", "C"], `${promoType}: thin-top A hidden after depth`);
+  assert.equal(page.visible[0].id, "B", `${promoType}: BEST PICK is the liquid book`);
   for (let i = 1; i < page.visible.length; i++) {
     assert.ok(page.visible[i - 1].ev >= page.visible[i].ev, `${promoType}: visible list sorted by displayed EV`);
   }
@@ -137,7 +138,8 @@ function assertPostBlendOrder(promoType) {
   }
 
   const window = visiblePromoAfterDepth(base, 2, ladders, rankPage(ctx));
-  assert.deepEqual(window.visible.map((p) => p.id), ["B", "A"]);
+  // Page window was [A,B]; A drops → [B]. C stays in rest until Show more.
+  assert.deepEqual(window.visible.map((p) => p.id), ["B"]);
   assert.equal(window.rest[0].id, "C", "picks below the page stay put until Show more");
   assert.equal(window.visible[0].id, "B");
 }
