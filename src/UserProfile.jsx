@@ -56,7 +56,7 @@ export default function UserProfile({
     try {
       const [{ data: parlays, error: pErr }, { data: fills, error: fErr }] = await Promise.all([
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(200),
-        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker").eq("is_combo", true).eq("is_taker", false),
+        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker").eq("user_id", user.id).eq("is_combo", true).eq("is_taker", false),
       ]);
       if (pErr) throw pErr;
       if (fErr) throw fErr;

@@ -13,7 +13,6 @@
 
 const lib = require('./combo-probe-lib');
 
-const OWNER = String(lib.OWNER_EMAIL || 'kev120909@gmail.com').toLowerCase();
 const STALE_MS = 10 * 60 * 1000;
 
 function defaultCreateClient(...args) {
@@ -47,7 +46,7 @@ async function requireOwner(req) {
   const { data, error } = await supabase.auth.getUser(token);
   const user = data && data.user;
   if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
-  if (String(user.email || '').trim().toLowerCase() !== OWNER) return { ok: false, status: 403, error: 'Not allowed' };
+  if (!lib.isComboOwner(user)) return { ok: false, status: 403, error: 'Not allowed' };
   return { ok: true, user };
 }
 

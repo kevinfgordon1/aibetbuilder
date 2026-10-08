@@ -212,6 +212,19 @@ function comboLocksAllowlist(env) {
   return items;
 }
 
+// Kevin's auth.users id (kev120909@gmail.com). Anything that spends or reads
+// Kevin's own exchange keys is owner-only, NOT the Combo Locks allowlist.
+const OWNER_USER_ID = '79ae1610-097e-4b46-a622-1e952f18e936';
+
+// Owner = Kevin's email, and (when the session carries an id, which every real
+// Supabase getUser does) Kevin's user id too.
+function isComboOwner(user) {
+  if (!user || !user.email) return false;
+  if (String(user.email).trim().toLowerCase() !== OWNER_EMAIL.toLowerCase()) return false;
+  if (user.id != null && String(user.id).trim().toLowerCase() !== OWNER_USER_ID) return false;
+  return true;
+}
+
 function canSeeComboLocks(user, env) {
   if (!user) return false;
   const allowed = comboLocksAllowlist(env);
@@ -337,6 +350,8 @@ module.exports = {
   MAX_WAIT_MS,
   PRICE_TICK,
   OWNER_EMAIL,
+  OWNER_USER_ID,
+  isComboOwner,
   COMBO_COLLECTION,
   KALSHI_API_BASE,
   clampWaitMs,

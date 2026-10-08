@@ -1,4 +1,5 @@
-// POST /api/combo-probe — owner-only Combo Locks Probe.
+// POST /api/combo-probe — owner-only Combo Locks Probe (Kevin's Kalshi key, so
+// the Combo Locks allowlist is NOT enough: lib.isComboOwner, same as combo-bucket).
 // Creates a real Kalshi RFQ at the lock's computed contract size, waits up to
 // ~8s for maker quotes (early-exit on a usable NO bid), returns the best
 // competing NO bid + implied American fill, then DELETE the RFQ. Never
@@ -40,7 +41,7 @@ function cors(res) {
   res.setHeader('Cache-Control', 'no-store');
 }
 
-async function requireComboOwner(req) {
+async function requireComboOwner(req, createClientImpl) {
   const token = lib.readBearer(req);
   if (!token) return { ok: false, status: 401, error: 'Sign in required' };
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -48,12 +49,12 @@ async function requireComboOwner(req) {
   if (!url || !anon) {
     return { ok: false, status: 503, error: 'Server auth is not configured (SUPABASE_URL + SUPABASE_ANON_KEY)' };
   }
-  const { createClient } = require('@supabase/supabase-js');
+  const createClient = createClientImpl || require('@supabase/supabase-js').createClient;
   const supabase = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await supabase.auth.getUser(token);
   const user = data && data.user;
   if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
-  if (!lib.canSeeComboLocks(user, process.env)) {
+  if (!lib.isComboOwner(user)) {
     return { ok: false, status: 403, error: 'Not allowed' };
   }
   return { ok: true, user };
