@@ -95,6 +95,8 @@ async function handler(req, res) {
     const { data, error } = await client
       .from('combo_worker_stats')
       .select('ts,bucket')
+      // Kevin's desk only: tester workers write their own stats rows.
+      .eq('user_id', lib.OWNER_USER_ID)
       .not('bucket', 'is', null)
       .order('ts', { ascending: false })
       .limit(1);
