@@ -38,6 +38,7 @@ import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
+import ComboTesters from "./ComboTesters";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT, bucketReadoutRows, bucketAgeLabel } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -1539,6 +1540,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
       </div>
       <BucketReadout supabase={supabase} ready={deskReady} />
+      <ComboTesters user={user} supabase={supabase} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
