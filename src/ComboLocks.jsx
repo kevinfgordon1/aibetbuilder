@@ -37,7 +37,7 @@ import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLoc
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
-import { OWNER_EMAIL, canSeeComboLocks, comboLockHash } from "./comboAccess";
+import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT, bucketReadoutRows, bucketAgeLabel } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -827,9 +827,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         supabase.from("combo_submissions").select("*").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
         // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
-        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("is_combo", true).eq("is_taker", false),
+        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("user_id", user.id).eq("is_combo", true).eq("is_taker", false),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
-        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live,order_id,venue,created_at").or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
+        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live,order_id,venue,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
         // How many RFQs matched each parlay (from the read-only watcher).
         supabase.from("combo_match_counts").select("*"),
         // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
@@ -1365,7 +1365,13 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     const next = !kill;
     killRef.current = next;
     setKill(next);
-    await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() });
+    const { error } = await supabase.from("combo_settings").upsert({ user_id: user.id, kill_switch: next, updated_at: new Date().toISOString() });
+    // Only approved live users may disarm (DB trigger). Put the switch back and say why.
+    if (error) {
+      killRef.current = !next;
+      setKill(!next);
+      alert(/not enabled/i.test(String(error.message || "")) ? "Live trading is not enabled for this account yet." : "Could not change the kill switch: " + (error.message || error));
+    }
   };
 
   const simulate = async () => {
@@ -1734,13 +1740,16 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <button className="btn primary" onClick={() => addParlay()}>Add to active parlays</button>
-              <button
-                type="button"
-                className="btn"
-                disabled={probeDisabled({ probing, legCount: readLegs().length, contracts: preview && preview.cap })}
-                title="Find the current best odds on the market for this combo size."
-                onClick={runProbe}
-              >{probing ? "Probing…" : "Probe"}</button>
+              {/* Probe opens a real RFQ on Kevin's Kalshi key: owner only (api/combo-probe enforces it too). */}
+              {canSeeOwnerTools(user) && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={probeDisabled({ probing, legCount: readLegs().length, contracts: preview && preview.cap })}
+                  title="Find the current best odds on the market for this combo size."
+                  onClick={runProbe}
+                >{probing ? "Probing…" : "Probe"}</button>
+              )}
               <button className="btn" onClick={loadExample}>Load example</button>
             </div>
             <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>

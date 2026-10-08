@@ -146,6 +146,29 @@ assert.equal(lib.canSeeComboLocks({ email: 'stranger@gmail.com' }, {}), false);
 assert.equal(lib.canSeeComboLocks({ email: 'tester@gmail.com' }, { VITE_COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com' }), true);
 assert.equal(lib.canSeeComboLocks(null, {}), false);
 
+// ── Probe spends Kevin's Kalshi key: owner only, never the Combo Locks allowlist ──
+const KEVIN_ID = '79ae1610-097e-4b46-a622-1e952f18e936';
+assert.equal(lib.OWNER_USER_ID, KEVIN_ID);
+assert.equal(lib.isComboOwner({ email: 'kev120909@gmail.com', id: KEVIN_ID }), true);
+assert.equal(lib.isComboOwner({ email: ' KEV120909@gmail.com ', id: KEVIN_ID.toUpperCase() }), true);
+assert.equal(lib.isComboOwner({ email: 'kev120909@gmail.com', id: '11111111-2222-4333-8444-555555555555' }), false);
+assert.equal(lib.isComboOwner({ email: 'tester@gmail.com', id: KEVIN_ID }), false);
+assert.equal(lib.isComboOwner({ id: KEVIN_ID }), false);
+assert.equal(lib.isComboOwner(null), false);
+{
+  const allow = { VITE_COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com', COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com' };
+  const tester = { email: 'tester@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' };
+  assert.equal(lib.canSeeComboLocks(tester, allow), true);
+  assert.equal(lib.isComboOwner(tester), false);
+}
+{
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'combo-probe.js'), 'utf8');
+  assert.ok(/lib\.isComboOwner\(user\)/.test(src), 'combo-probe gates on isComboOwner');
+  assert.ok(!/canSeeComboLocks/.test(src), 'combo-probe no longer accepts the Combo Locks allowlist');
+  const bucket = require('fs').readFileSync(require('path').join(__dirname, 'combo-bucket.js'), 'utf8');
+  assert.ok(/lib\.isComboOwner\(user\)/.test(bucket), 'combo-bucket uses the same owner check');
+}
+
 // ── signer: PEM normalize + RSA-PSS round-trip ──
 {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -230,6 +253,24 @@ function src() {
     const res = mockRes();
     await handler({ method: 'GET' }, res);
     assert.equal(res.out.statusCode, 405);
+  }
+
+  // Real requireComboOwner with a mocked Supabase getUser: allowlisted tester => 403.
+  {
+    const saved = { ...process.env };
+    process.env.SUPABASE_URL = 'https://example.supabase.co';
+    process.env.SUPABASE_ANON_KEY = 'anon';
+    process.env.COMBO_LOCKS_ALLOWLIST = 'tester@gmail.com';
+    const fake = (user) => () => ({ auth: { getUser: async () => ({ data: { user }, error: null }) } });
+    const tester = { email: 'tester@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' };
+    const req = { headers: { authorization: 'Bearer tok' } };
+    assert.equal((await handler._requireComboOwner({ headers: {} }, fake(tester))).status, 401);
+    assert.equal((await handler._requireComboOwner(req, fake(tester))).status, 403);
+    assert.equal((await handler._requireComboOwner(req, fake({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }))).ok, true);
+    assert.equal((await handler._requireComboOwner(req, fake(null))).status, 401);
+    for (const k of ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'COMBO_LOCKS_ALLOWLIST']) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
   }
 
   handler._setDeps({

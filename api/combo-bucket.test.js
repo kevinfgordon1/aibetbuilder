@@ -38,7 +38,7 @@ function setup({ user, rows, error, noService } = {}) {
   return queries;
 }
 
-const OWNER = { email: 'kev120909@gmail.com', id: 'u1' };
+const OWNER = { email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' };
 const call = (headers, method = 'GET') => { const r = res(); return handler({ method, headers: headers || {} }, r).then(() => r); };
 
 (async () => {
