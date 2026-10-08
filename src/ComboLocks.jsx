@@ -472,7 +472,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [openParlays, setOpenParlays] = useState({});         // id / hist-<id> / arch-<id> -> expanded?
   const [legRows, setLegRows] = useState(() => emptyLegRows(prefill?.legs?.length));
   const [form, setForm] = useState(() => formFromPrefill(prefill));
-  const [sim, setSim] = useState({ parlayId: "", size: 2000, result: null });
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState(null);
   const [gamesReady, setGamesReady] = useState(false);
@@ -1174,27 +1173,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     }
   };
 
-  const simulate = async () => {
-    const p = parlays.find((x) => x.id === sim.parlayId);
-    if (!p) return setSim((s) => ({ ...s, result: { kind: "empty" } }));
-    const d = decideAtFill({ parlayStake: p.parlay_stake, parlayAmerican: p.parlay_american, fillAmerican: p.fill_american,
-      fairAmerican: p.fair_american, rfqContracts: +sim.size, hedgeMode: p.hedge_mode || "1x", kind: lockKind(p) });
-    setSim((s) => ({ ...s, result: { ...d, parlay: p, kill } }));
-    if (d.ok && d.locks) {
-      const sub = { user_id: user.id, parlay_id: p.id, label: p.label, fill_american: d.fillAmerican, contracts: d.contracts, worst_lock: d.worst, status: "shadow" };
-      await supabase.from("combo_submissions").insert(sub); reload();
-    }
-  };
-  const loadExample = () => {
-    const g = gameList;
-    setLegRows([
-      { id: 1, gameKey: g[0] ? comboGameId(g[0]) : "", marketVal: g[0] ? encVal(g[0].markets.side[0].ticker, "yes") : "" },
-      { id: 2, gameKey: g[1] ? comboGameId(g[1]) : "", marketVal: g[1]?.markets.total[0] ? encVal(g[1].markets.total[0].ticker, g[1].markets.total[0].side) : "" },
-      { id: 3, gameKey: g[2] ? comboGameId(g[2]) : "", marketVal: g[2]?.markets.spread[0] ? encVal(g[2].markets.spread[0].ticker, g[2].markets.spread[0].side) : "" },
-    ]);
-    setForm({ ...DEFAULT_FORM });
-  };
-
   const historyStatement = useMemo(() => buildComboStatement({
     parlays: archived,
     fillsById: realFills,
@@ -1230,7 +1208,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         {g.markets[t].map((m) => { const v = encVal(m.ticker, m.side); return <option key={v} value={v}>{m.label}</option>; })}
       </optgroup>) : null);
   };
-  const res = sim.result;
   const historyTotalsAll = historyTotals(historyStatement.lines);
   const historyEmptyText = `Nothing here yet. A lock moves to History about ${HISTORY_BUFFER_HOURS} hours after its game starts, or when you tap "Move to history".`;
   const matchedCountText = (p) => {
@@ -1311,7 +1288,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#6b7280;margin:22px 2px 10px}
         .cl label{display:block;font-size:12px;font-weight:600;color:#8a8f98;margin:0 0 4px}
         .cl input,.cl select{width:100%;padding:9px 10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#12141a;color:#e8eaed;font:inherit}
-        .cl .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
         .cl .row{display:grid;gap:12px;margin-bottom:12px}.cl .c3{grid-template-columns:1fr 1fr 1fr}.cl .c2{grid-template-columns:1fr 1fr}
         .cl .legrow{display:grid;grid-template-columns:1fr 1.15fr auto;gap:8px;margin-bottom:8px;align-items:end}
         .cl .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer}
@@ -1332,9 +1308,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .profile .tile.now{display:flex;flex-direction:column;justify-content:center;gap:4px}
         .cl .profile .tile.now .v{margin-top:0}
         .cl .pos{color:#34d399}.cl .neg{color:#f87171}.cl .muted{color:#8a8f98}
-        .cl .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:14px}
         .cl .note{font-size:13px;padding:8px 10px;border-radius:8px;margin-top:8px}.cl .note.ok{background:rgba(16,185,129,.12);color:#6ee7b7}.cl .note.warn{background:rgba(245,158,11,.12);color:#fcd34d}
-        .cl .post{background:#0c1512;color:#9ff0be;border-radius:8px;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:13px;white-space:pre-wrap;margin-top:6px}
         .cl table{width:100%;border-collapse:collapse;font-size:13px}
         .cl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;font-weight:600;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.1)}
         .cl td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.06);font-variant-numeric:tabular-nums}
@@ -1473,8 +1447,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>{realUnattr} filled contract{realUnattr === 1 ? "" : "s"} couldn't be matched to a specific lock. They're counted, just not shown on a card.</div>}
       </div>
 
-      <div className="grid2" style={{ marginTop: 16 }}>
-        <div ref={createFormRef}>
+      <div className="add-lock" ref={createFormRef} style={{ marginTop: 16 }}>
           <div className="sec-h">
             <h2>Add a lock</h2>
             <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }} title={srcLive ? "Game list is live from Kalshi." : "Couldn't load live games, showing sample games."}>{srcLive ? "Live games" : "Sample games"}</span>
@@ -1592,7 +1565,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                   onClick={runProbe}
                 >{probing ? "Checking…" : "Check market price"}</button>
               )}
-              <button className="btn" onClick={loadExample}>Load example</button>
             </div>
             {canSeeOwnerTools(user) && (
               <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>
@@ -1601,60 +1573,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             {probeResult && (
               <div className={"note " + (probeResult.ok && fillBeatsMarket(+form.fill, probeResult.bestAmerican) ? "ok" : "warn")}>
-                {plainAttemptLabel(formatProbeNote(probeResult, form.fill === "" ? null : +form.fill))}
+                {formatProbeNote(probeResult, form.fill === "" ? null : +form.fill)}
               </div>
             )}
           </div>
         </div>
-
-        <div>
-          <div className="sec-h">
-            <h2>Test a request</h2>
-            <div className="sec-sub">See what a lock would do if a trader asked for it. Nothing is sent.</div>
-          </div>
-          <div className="card">
-            <div className="row c2">
-              <div><label>Lock</label>
-                <select value={sim.parlayId} onChange={(e) => setSim({ ...sim, parlayId: e.target.value })}>
-                  <option value="">— pick a lock —</option>
-                  {parlays.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select></div>
-              <div><label>Request size (contracts)</label><input className="num" type="number" value={sim.size} onChange={(e) => setSim({ ...sim, size: e.target.value })} /></div>
-            </div>
-            <button className="btn primary" onClick={simulate}>See what it would do</button>
-            <div style={{ marginTop: 16 }}>
-              {res && res.kind === "empty" && <div className="empty">Pick a lock first.</div>}
-              {res && res.ok === false && res.kind !== "empty" && (
-                <div><div style={{ fontWeight: 700, color: "#fca5a5", marginBottom: 8 }}>Would skip this request</div>
-                  <div className="kv"><span>Why</span><span className="num">{res.reason === "over_limit" ? `A request for ${sim.size} is bigger than this lock's size (${res.cap})` : plainAttemptLabel(res.reason)}</span></div></div>
-              )}
-              {res && res.ok && (
-                <div>
-                  <div style={{ fontWeight: 700, marginBottom: 8, color: res.locks ? "#34d399" : "#fcd34d" }}>
-                    {res.locks ? "✓ Would offer it. Profit is locked either way." : "! Doesn't lock profit at this size. This would be a bet, not a hedge."}
-                  </div>
-                  <div className="tiles">
-                    <div className="tile"><div className="k">If the parlay hits</div><div className={"v " + (res.hit >= 0 ? "pos" : "neg")}>{money(res.hit)}</div></div>
-                    <div className="tile"><div className="k">If the parlay misses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
-                    <div className="tile"><div className="k">Worst case</div><div className={"v " + (res.worst >= 0 ? "pos" : "neg")}>{money(res.worst)}</div></div>
-                  </div>
-                  <div className="kv"><span>You sell at (after your fee)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
-                  <div className="kv"><span>Buyer gets</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
-                  <div className="kv"><span>Contracts</span><span className="num">{res.contracts}</span></div>
-                  {res.competitive != null && <div className={"note " + (res.competitive ? "ok" : "warn")}>{res.competitive ? `✓ Your ${fmtAm(res.fillAmerican)} is better than fair odds of ${fmtAm(res.parlay.fair_american)}, so it should get taken.` : `⚠ Your ${fmtAm(res.fillAmerican)} is worse than fair odds of ${fmtAm(res.parlay.fair_american)}, so it probably won't get taken.`}</div>}
-                  {res.locks && (
-                    <details style={{ marginTop: 12 }}>
-                      <summary style={{ cursor: "pointer", fontSize: 12, color: "#8a8f98", fontWeight: 600 }}>Technical: the quote it would send</summary>
-                      <div className="post">POST /communications/quotes{"\n"}{JSON.stringify(res.quote, null, 2)}</div>
-                    </details>
-                  )}
-                  {res.kill && <div className="note warn">All quoting is stopped, so this wouldn't actually be sent.</div>}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
 
       <SectionHead id="cl-history" title="History" count={archivedKind === "rows" ? historyStatement.lines.length : null} sub="Locks whose games are over, newest first. Tap a row for the details." />
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>

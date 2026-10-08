@@ -136,8 +136,9 @@ export const COMBO_VIEW_CSS = `
   .cl .venue{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:rgba(255,255,255,0.06);color:#c3c6cc;white-space:nowrap}
   .cl .venue.kalshi{background:rgba(16,185,129,.12);color:#6ee7b7}
   .cl .venue.polymarket{background:rgba(99,102,241,.16);color:#a5b4fc}
+  .cl .add-lock input,.cl .add-lock select,.cl .add-lock textarea{box-sizing:border-box;max-width:100%;min-width:0}
+  .cl .add-lock .row>div,.cl .add-lock .legrow>div{min-width:0}
   @media (max-width:860px){
-    .cl .grid2{grid-template-columns:1fr}
     .cl .hist-totals{grid-template-columns:1fr 1fr}
   }
   @media (max-width:640px){
