@@ -1,4 +1,5 @@
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
+const { dropExcludedBooks } = require('../lib/odds-excluded-books');
 
 // Championship / outright futures for six leagues. The Odds API supplies the
 // sportsbook (Yes) side; Kalshi + Polymarket are pulled directly for the exchange
@@ -265,7 +266,7 @@ module.exports = async (req, res) => {
           console.error(`Failed to fetch futures ${sport}: ${response.status}`);
           return;
         }
-        const rawData = await response.json();
+        const rawData = dropExcludedBooks(await response.json());
         // Inject direct Kalshi/Polymarket exchange futures (Yes + No) before fee adjustment.
         let exDiag = {};
         try {
