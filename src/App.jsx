@@ -1060,7 +1060,7 @@ function LandingFull({ onBack }) {
       </div>
 
       <section className="lf-hero"><div className="wrap">
-        <div className="lf-eyebrow"><span className="lf-dot"></span> Live odds from 15+ books &amp; exchanges</div>
+        <div className="lf-eyebrow"><span className="lf-dot"></span> Live odds from 20+ books &amp; exchanges</div>
         <h1>Make your sportsbook<br /><span className="lf-grad">promos actually pay.</span></h1>
         <p className="lf-sub">AI Bet Builder finds the highest-EV boosts, builds the optimal parlay to hit them, and turns free bets — singles or parlays — into EV-ranked plays. 1-leg free bets still convert to locked cash.</p>
         <div className="lf-ctarow" style={{ display: "block" }}>
@@ -1068,16 +1068,16 @@ function LandingFull({ onBack }) {
           <p className="lf-trust" style={{ textAlign: "center", margin: "14px 0 0" }}>No credit card · No bank account linking</p>
         </div>
         <div className="lf-stats">
-          <div className="lf-stat"><div className="n b">15+</div><div className="l">Books &amp; exchanges</div></div>
-          <div className="lf-stat"><div className="n g">14,000+</div><div className="l">Bets analyzed daily</div></div>
-          <div className="lf-stat"><div className="n p">6</div><div className="l">Leagues &amp; futures</div></div>
-          <div className="lf-stat"><div className="n">10 min</div><div className="l">Odds update every 10 min</div></div>
+          <div className="lf-stat"><div className="n b">20+</div><div className="l">Sportsbooks &amp; exchanges</div></div>
+          <div className="lf-stat"><div className="n g">8,000+</div><div className="l">Bets tracked live</div></div>
+          <div className="lf-stat"><div className="n p">8</div><div className="l">Leagues + futures</div></div>
+          <div className="lf-stat"><div className="n">5 min</div><div className="l">Odds refresh</div></div>
         </div>
       </div></section>
 
       <section className="lf-sec"><div className="wrap">
         <div className="lf-sechead"><div className="k">What's inside</div><h2>Everything you need to beat the promo</h2>
-          <p>Built for people who actually work their sportsbook offers — not casual bettors.</p></div>
+          <p>Whether you bet once a week or work every promo, find the best value on every bet.</p></div>
         <div className="lf-grid">
           <div className="lf-card"><div className="ic lf-green">🎯</div><h3>Promo Builder</h3>
             <p>Set your boost and constraints — it searches thousands of leg combinations and returns the parlay with the highest expected value, with the boosted and true odds side by side.</p></div>
@@ -1086,7 +1086,7 @@ function LandingFull({ onBack }) {
           <div className="lf-card"><div className="ic">📈</div><h3>+EV Bets</h3>
             <p>Every available bet ranked by expected value, with true win probability derived from the sharpest opposing prices across trusted books. See your edge, in dollars, instantly.</p></div>
           <div className="lf-card"><div className="ic lf-purple">📊</div><h3>Odds &amp; Futures Board</h3>
-            <p>Compare moneyline, spreads, and totals across 15+ books — plus championship futures with real two-sided Yes/No pricing from Kalshi and Polymarket.</p></div>
+            <p>Compare moneyline, spreads, and totals across 20+ books — plus championship futures with real two-sided Yes/No pricing from Kalshi and Polymarket.</p></div>
         </div>
       </div></section>
 
@@ -1103,9 +1103,9 @@ function LandingFull({ onBack }) {
         <div className="lf-sechead"><div className="k">FAQ</div><h2>Good questions</h2></div>
         <div className="lf-faq">
           <div className="lf-qa"><h4>Is it really free?</h4><p>Yes. Sign in with Google, email, X, or Facebook and everything's available — no credit card, no trial timer.</p></div>
-          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, and college football &amp; basketball — plus championship futures for each.</p></div>
+          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, college football &amp; basketball, plus EPL and MLS soccer — with championship futures too.</p></div>
           <div className="lf-qa"><h4>Do I have to link my sportsbook accounts?</h4><p>No. It reads public odds; you place bets yourself at whichever book has the edge.</p></div>
-          <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 15+ US sportsbooks plus the Kalshi and Polymarket exchanges, refreshed continuously.</p></div>
+          <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 20+ sportsbooks and exchanges, including Kalshi and Polymarket, refreshed every 5 minutes.</p></div>
         </div>
       </div></section>
 
