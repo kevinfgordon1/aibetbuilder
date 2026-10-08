@@ -3,6 +3,7 @@
 // the page copy stays testable. American odds everywhere; never show raw
 // Kalshi tickers or cent prices to the user.
 
+import { parseSkipReason, skipReasonOf } from "./comboDesk.js";
 import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
@@ -172,6 +173,33 @@ export function lockStatus({ parlay, filled = 0, ceiling = null, kill = false } 
   return { key: "quoting", label: "Quoting", tone: "blue", hint: "Looking for a buyer on Kalshi and Polymarket at your price." };
 }
 
+function legFairProb(leg) {
+  if (!leg) return null;
+  const p = toNum(leg.fair_prob != null ? leg.fair_prob : leg.true_prob);
+  if (p != null && p > 0 && p < 1) return p;
+  const dec = decimalFromAmerican(leg.fair_american);
+  return dec && dec > 1 ? 1 / dec : null;
+}
+
+/**
+ * Fair (true) odds for the parlay, in American. The lock's saved
+ * fair_american wins. Without it, multiply the legs' own fair chances when
+ * every leg carries one. Otherwise "—"; never invent a number.
+ */
+export function fairOdds(parlay) {
+  const stored = toNum(parlay && parlay.fair_american);
+  if (stored != null && Math.abs(stored) >= 100) {
+    return { american: Math.round(stored), text: fmtAmerican(stored), source: "saved" };
+  }
+  const legs = ((parlay && parlay.legs) || []).filter(Boolean);
+  const probs = legs.map(legFairProb);
+  if (legs.length && probs.every((p) => p != null)) {
+    const a = americanFromProb(probs.reduce((x, y) => x * y, 1));
+    if (a != null) return { american: a, text: fmtAmerican(a), source: "legs" };
+  }
+  return { american: null, text: "—", source: null };
+}
+
 /** Your sportsbook bet in numbers: stake, odds, max payout. */
 export function betSummary(parlay) {
   if (!parlay) return null;
@@ -189,6 +217,7 @@ export function betSummary(parlay) {
     maxPayout,
     sellAt: fmtAmerican(parlay.fill_american),
     book: String(parlay.sportsbook || "").trim(),
+    fair: fairOdds(parlay),
     boostPct: boost > 0 ? boost : null,
     betLine: stake > 0 && american ? `${freeBet ? "Free bet " : ""}${dollars(stake)} at ${fmtAmerican(american)}` : "—",
   };
@@ -314,10 +343,159 @@ export function historyRow(line, parlay) {
     sports: parlay ? lockSports(p).join(" + ") : ((line && line.sportLabels) || []).join(" + "),
     bet: s.betLine || "—",
     book: s.book || "",
+    fair: s.fair ? s.fair.text : "—",
     soldAt: p.fill_american != null ? fmtAmerican(p.fill_american) : "—",
     hedged: ((line && line.filled) || 0) > 0,
     result: res.text,
     resultTone: res.tone,
     pnl: line ? line.pnl : null,
+  };
+}
+
+/* ── Per-lock quote history (Details → Quote history) ──────────────────────
+ * Built from the same per-lock tape the old Activity / Matched requests tables
+ * read (comboLockHistory.buildLockAttempts → comboTape.buildLockTape), which
+ * joins combo_submissions, combo_fills, quote_outcomes and combo_matches for
+ * this lock only. Filled first, then everything that did not fill. */
+
+export const QUOTE_ROWS_SHOWN = 5;
+
+const SKIP_WORDS = [
+  [/^(oversized|rfq_too_large|over_limit|overlimit|too_large)$/, "over limit", "warn"],
+  [/^(limit_reached|limitreached|cap_reached)$/, "lock already full", "warn"],
+  [/^(insufficient_balance|insufficient_funds|insufficientbalance|insufficientfunds|underfunded|low_balance)$/, "not enough funds", "warn"],
+  [/^(game_started|started)$/, "game already started", "skip"],
+  [/^kill_switch$/, "master switch on", "skip"],
+  [/^no_lock$/, "price wouldn't lock profit", "skip"],
+  [/^paused$/, "lock paused", "skip"],
+  [/^(no_lock_overlap.*|leg_count|same_games_no_match|missing_team|doubleheader|no_shared_game|no_rfq_tokens)$/, "different parlay", "skip"],
+];
+
+function skipWords(row) {
+  const code = parseSkipReason(skipReasonOf(row.submission) || skipReasonOf(row) || (row.skip && row.skip.reason) || "").key;
+  if (row.bucket === "oversized" && !code) return ["over limit", "warn"];
+  for (const [re, word, tone] of SKIP_WORDS) if (re.test(code)) return [word, tone];
+  if (row.bucket === "oversized") return ["over limit", "warn"];
+  return [code ? plainAttemptLabel(code) : "skipped", "skip"];
+}
+
+function quotePrice(row, offered) {
+  if (!offered) return "—";
+  const s = row.submission || {};
+  const o = row.outcome || {};
+  const am = toNum(s.fill_american) || toNum(o.fill_american);
+  if (am) return fmtAmerican(am);
+  const no = row.ourNo != null ? row.ourNo : (row.fill ? row.fill.no_price : null);
+  const a = americanFromNoPrice(no);
+  return a == null ? "—" : fmtAmerican(a);
+}
+
+function statusOf(row) {
+  return String((row.submission && row.submission.status) || "").toLowerCase();
+}
+
+/** One quote row: time (ET), price (American), size, venue, plain result. */
+export function quoteRow(row, { left = 0, ended = false } = {}) {
+  if (!row) return null;
+  const s = row.submission || {};
+  const o = row.outcome || {};
+  const size = toNum(row.contracts);
+  const asked = toNum(s.contracts);
+  const details = [];
+  let result;
+  let tone;
+  let offered = true;
+  const lossReason = String(o.loss_reason || "").toLowerCase();
+  if (row.bucket === "filled") {
+    const partial = asked != null && size != null && size < asked;
+    result = partial ? "partly filled" : "filled";
+    tone = "win";
+    if (partial) details.push(`${countText(size)} of ${countText(asked)} asked`);
+  } else if (row.bucket === "skipped" || row.bucket === "oversized") {
+    offered = false;
+    [result, tone] = skipWords(row);
+    if (result === "over limit" && size != null) {
+      details.push(left > 0 ? `asked ${countText(size)}, room for ${countText(left)}` : `asked ${countText(size)}`);
+    }
+    if (row.skipFill === "filled") {
+      const a = americanFromNoPrice(row.tapeNo);
+      details.push(a != null ? `someone else filled it at ${fmtAmerican(a)}` : "someone else filled it");
+    }
+  } else if (lossReason === "expired" || statusOf(row) === "expired" || (row.bucket === "awaiting" && ended)) {
+    result = "expired";
+    tone = "lose";
+  } else if (row.bucket === "awaiting") {
+    result = row.reason === "open" ? "offer resting · waiting" : "waiting for buyer";
+    tone = "wait";
+  } else if (row.bucket === "outbid") {
+    result = "outbid";
+    tone = "lose";
+    const a = americanFromNoPrice(row.tapeNo);
+    if (a != null) details.push(`winning price ${fmtAmerican(a)}`);
+  } else if (row.bucket === "too_slow") {
+    result = "too slow";
+    tone = "lose";
+  } else if (row.reason === "cancelled") {
+    result = "cancelled";
+    tone = "lose";
+  } else if (row.bucket === "no_taker" || row.bucket === "lost") {
+    result = "not taken";
+    tone = "lose";
+  } else {
+    result = row.reason ? plainAttemptLabel(row.reason) : "offered";
+    tone = "wait";
+  }
+  if (offered && o.responded_ms != null && row.bucket !== "filled") {
+    details.push(`answered in ${(Number(o.responded_ms) / 1000).toFixed(1)}s`);
+  }
+  const worst = toNum(s.worst_lock);
+  if (offered && worst != null && worst !== 0) details.push(`worst case ${signedDollars(worst)}`);
+  return {
+    id: row.rfqId || row.fillId || `${row.at || ""}-${row.contracts ?? ""}-${row.bucket}`,
+    at: row.at || null,
+    time: etStamp(row.at),
+    price: quotePrice(row, offered),
+    size: size == null ? "—" : countText(size),
+    venue: row.venue || "Kalshi",
+    venueKey: row.venueKey || null,
+    result,
+    tone,
+    detail: details.join(" · "),
+  };
+}
+
+function tsOf(v) {
+  const t = v ? Date.parse(v) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Split a lock's tape into { filled, notFilled } quote rows, newest first,
+ * plus counts. `attempts` is buildLockAttempts() output.
+ */
+export function quoteHistory(attempts, { parlay, now = Date.now() } = {}) {
+  const tape = (attempts && attempts.tape) || {};
+  const p = parlay || tape.parlay || null;
+  const fill = tape.fill || {};
+  const left = toNum(fill.left) || 0;
+  const startMs = p && p.starts_at ? tsOf(p.starts_at) : 0;
+  const ended = !!(p && (p.archived_at || (startMs && now >= startMs)));
+  const rows = [...(tape.rows || [])].sort((a, b) => tsOf(b.at) - tsOf(a.at));
+  const filled = [];
+  const notFilled = [];
+  for (const r of rows) {
+    const q = quoteRow(r, { left, ended });
+    if (!q) continue;
+    (r.bucket === "filled" ? filled : notFilled).push(q);
+  }
+  const filledContracts = rows
+    .filter((r) => r.bucket === "filled")
+    .reduce((n, r) => n + (toNum(r.contracts) || 0), 0);
+  return {
+    filled,
+    notFilled,
+    filledContracts,
+    addedText: p && p.created_at ? etDateTime(p.created_at) : "",
+    afterKickoff: toNum(tape.afterKickoff) || 0,
   };
 }

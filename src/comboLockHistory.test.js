@@ -518,45 +518,26 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
 
 {
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
-  // Living cards: history starts collapsed behind hist-<id>; archive expands in the Statement board.
-  assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle, showSummary = true \}\)/);
-  // One shared lock card (renderLock) serves Waiting + Filled.
-  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 1);
-  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
+  // Details → Quote history (living cards and History rows): filled first,
+  // then not filled, built from the per-lock tape (submissions, fills,
+  // outcomes, matches). Replaces the old Activity + Matched requests tables.
+  const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
+  assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[p\.id\], \{ parlay: p \}\)\}/);
+  assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
+  assert.match(locksSrc, /<DetailBlock title="Quote history">/);
   assert.match(locksSrc, /<ComboHistory/);
   assert.match(locksSrc, /buildComboStatement/);
   assert.match(locksSrc, /useStatementView\(historyStatement\)/);
-  assert.match(locksSrc, /className="hist-head"/);
-  assert.match(locksSrc, /className="hist-sub"/);
-  assert.match(locksSrc, /function AttemptRows\(\{ events \}\)/);
-  assert.match(locksSrc, /AttemptSummary/);
-  assert.match(locksSrc, /attemptSummaryParts/);
-  assert.match(locksSrc, /attemptRepeatLabel/);
-  assert.match(locksSrc, /hist-sum/);
-  assert.match(locksSrc, /hist-rpt/);
-  // Plain headings ("Fills", "Every offer and skip") replace the old helper copy.
-  assert.match(locksSrc, /Every offer and skip/);
-  assert.match(locksSrc, /historyFillsEmptyText/);
-  assert.match(locksSrc, /filledAttemptEvents/);
-  assert.match(locksSrc, /Matched requests/);
-  assert.match(locksSrc, /matchedRfqCounts/);
-  assert.match(locksSrc, /matchedRfqEmptyText/);
-  assert.match(locksSrc, /matchedRfqFillRows/);
   assert.match(locksSrc, /matchedRfqMatchedCount/);
   assert.match(locksSrc, /matchedRfqWatcherParked/);
-  assert.match(locksSrc, /counts\.filled === 0/);
-  assert.match(locksSrc, /<MatchedRfqTable attempts=\{attemptsByParlay\[p\.id\]\}/);
-  assert.match(locksSrc, /function VenueChip\(\{ venue, venueKey \}\)/);
-  assert.match(locksSrc, /<th>Where<\/th>/);
-  assert.match(locksSrc, /<VenueChip venue=\{row\.venue\} venueKey=\{row\.venueKey\} \/>/);
-  assert.match(locksSrc, /<VenueChip venue=\{e\.venue\} venueKey=\{e\.venueKey\} \/>/);
-  assert.match(locksSrc, /chip\.venue-kalshi/);
-  assert.match(locksSrc, /chip\.venue-poly/);
-  assert.doesNotMatch(locksSrc, /History — every attempt \(not fills only\)/);
+  assert.doesNotMatch(locksSrc, /AttemptHistory|MatchedRfqTable|function AttemptRows/);
+  assert.match(viewSrc, /export function QuoteHistory\(\{ history, note \}\)/);
+  assert.match(viewSrc, /title="Filled"/);
+  assert.match(viewSrc, /title="Not filled"/);
+  assert.match(viewSrc, /<th>Time \(ET\)<\/th><th>Price<\/th><th>Size<\/th><th>Where<\/th><th>Result<\/th>/);
+  assert.match(viewSrc, /`Show \$\{extra\} more`/);
   assert.doesNotMatch(locksSrc, /watcher went live/);
   assert.doesNotMatch(locksSrc, /matched 0 RFQs/);
-  assert.match(locksSrc, /const tapeRows = matchedRfqFillRows\(attempts\)/);
-  assert.doesNotMatch(locksSrc, /const tapeRows = \[\.\.\.\(\(attempts && attempts\.tape && attempts\.tape\.rows\)/);
 }
 
 console.log("comboLockHistory.test.js ok");

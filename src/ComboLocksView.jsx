@@ -4,7 +4,7 @@
 import React from "react";
 import {
   betSummary, countText, dollars, etDateTime, fmtAmerican, historyRow, historyTotals,
-  lockMetaLine, lockTitle, plainLeg, profitLine, signedDollars,
+  lockMetaLine, lockTitle, plainLeg, profitLine, QUOTE_ROWS_SHOWN, signedDollars,
 } from "./comboLockView";
 import { STATEMENT_DATE_FILTERS } from "./comboStatement";
 
@@ -107,6 +107,29 @@ export const COMBO_VIEW_CSS = `
   .cl .adv>summary{cursor:pointer;padding:12px 14px;font-weight:700;color:#9aa3b2;font-size:14px}
   .cl .adv .adv-body{padding:0 14px 14px}
   .cl .adv h3{margin-top:14px}
+  .cl .fact .s .fair{color:#c3c6cc;font-weight:600}
+  .cl .htable .c-fair{white-space:nowrap}
+  .cl .htable .m-lbl{display:none}
+  .cl .qh-sec{margin:0 0 12px}
+  .cl .qh-h{display:flex;align-items:baseline;gap:4px 8px;flex-wrap:wrap;margin:2px 0 6px;font-size:13px;font-weight:700;color:#e8eaed}
+  .cl .qh-h>span:first-child{white-space:nowrap}
+  .cl .qh-h .cnt{font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,0.08);color:#c3c6cc}
+  .cl .qh-h.ok .cnt{background:rgba(16,185,129,.16);color:#6ee7b7}
+  .cl .qh-h .qh-s{font-size:12px;font-weight:500;color:#8a8f98}
+  .cl .qtable{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+  .cl .qtable th:nth-child(1){width:20%}.cl .qtable th:nth-child(2){width:11%}.cl .qtable th:nth-child(3){width:10%}.cl .qtable th:nth-child(4){width:14%}
+  .cl .qtable th{font-size:11px;padding:6px 8px;text-align:left}
+  .cl .qtable td{padding:7px 8px;vertical-align:top;border-top:1px solid rgba(255,255,255,0.05)}
+  .cl .qtable .q-price,.cl .qtable .q-size{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cl .qtable .q-time{white-space:nowrap;color:#c3c6cc}
+  .cl .qtable .q-det{font-size:12px;color:#8a8f98;margin-top:2px}
+  .cl .res.skip{background:rgba(255,255,255,0.07);color:#9aa3b2}
+  .cl .res.warn{background:rgba(245,158,11,.15);color:#fcd34d}
+  .cl .qh-more{margin-top:6px}
+  .cl .qh-foot{font-size:12px;color:#6b7280;margin-top:4px}
+  .cl .venue{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:rgba(255,255,255,0.06);color:#c3c6cc;white-space:nowrap}
+  .cl .venue.kalshi{background:rgba(16,185,129,.12);color:#6ee7b7}
+  .cl .venue.polymarket{background:rgba(99,102,241,.16);color:#a5b4fc}
   @media (max-width:860px){
     .cl .grid2{grid-template-columns:1fr}
     .cl .hist-totals{grid-template-columns:1fr 1fr}
@@ -136,8 +159,22 @@ export const COMBO_VIEW_CSS = `
     .cl .htable>tbody>tr.hrow>.c-pnl{grid-column:2;grid-row:1}
     .cl .htable>tbody>tr.hrow>.c-res{grid-column:2;grid-row:2;text-align:right}
     .cl .htable>tbody>tr.hrow>.c-bet{grid-column:1;grid-row:2;font-size:13px;color:#9aa3b2}
+    .cl .htable>tbody>tr.hrow>.c-fair{grid-column:1;grid-row:3;font-size:13px;color:#9aa3b2}
+    .cl .htable .m-lbl{display:inline;color:#6b7280;font-weight:600}
     .cl .htable>tbody>tr.hrow>.c-date,.cl .htable>tbody>tr.hrow>.c-sold,.cl .htable>tbody>tr.hrow>.h-car{display:none}
+    .cl .qtable thead{display:none}
+    .cl .qtable,.cl .qtable tbody{display:block}
+    .cl .qh-h .qh-s{flex-basis:100%;font-size:11px}
+    .cl .qtable tr{display:grid;grid-template-columns:auto 1fr auto;gap:3px 8px;padding:8px 2px;border-top:1px solid rgba(255,255,255,0.05);align-items:center}
+    .cl .qtable td{display:block;padding:0;border:0}
+    .cl .qtable .q-res{grid-column:1 / 3;grid-row:1}
+    .cl .qtable .q-price{grid-column:3;grid-row:1;text-align:right;font-weight:700;align-self:start}
+    .cl .qtable .q-time{grid-column:1;grid-row:2;font-size:12px;color:#8a8f98}
+    .cl .qtable .q-venue{grid-column:2;grid-row:2}
+    .cl .qtable .q-size{grid-column:3;grid-row:2;text-align:right;font-size:12px;color:#8a8f98}
+    .cl .qtable .q-size::after{content:" contracts"}
     .cl .htable .h-subdate{display:inline}
+    .cl .htable .hrow:hover td{background:transparent}
     .cl .htable>tbody>tr.hrow.open{background:rgba(147,197,253,.06)}
     .cl .htable>tbody>tr.hrow.open>td{background:transparent}
     .cl .htable>tbody>tr.hdetail{display:block}
@@ -205,6 +242,17 @@ export function SectionHead({ id, title, count, sub }) {
   );
 }
 
+/** Under the original bet: fair odds (always, "—" if unknown) + sportsbook (only if set). */
+function BetSub({ summary }) {
+  const fair = summary && summary.fair;
+  return (
+    <>
+      <span className="fair" title={fair && fair.source === "legs" ? "Estimated from each leg's fair chance" : "The fair (true) odds saved on this lock"}>Fair odds {fair ? fair.text : "—"}{fair && fair.source === "legs" ? " (est.)" : ""}</span>
+      {summary && summary.book ? <span> · {summary.book}</span> : null}
+    </>
+  );
+}
+
 function Fact({ k, v, s, title }) {
   return (
     <div className="fact" title={title}>
@@ -245,7 +293,7 @@ export function DetailBlock({ title, children }) {
 
 /**
  * The always-visible lock card. Status + legs + the four numbers that matter
- * (your bet, payout, sell price, how much is hedged) + one profit line.
+ * (your original bet, payout, sell price, how much is hedged) + one profit line.
  * Everything else lives behind Details (children).
  */
 export function LockCard({ parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children }) {
@@ -267,7 +315,7 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
       </div>
       <div className="lk-meta">{lockMetaLine(parlay)}</div>
       <div className="lk-facts">
-        <Fact k="Your bet" v={s.betLine} s={s.book || undefined} />
+        <Fact k="Your original bet" v={s.betLine} s={<BetSub summary={s} />} />
         <Fact k={s.freeBet ? "Wins if it hits" : "Pays up to"} v={dollars(s.maxPayout)} s={s.freeBet ? "profit only" : "stake included"} />
         <Fact k="Selling at" v={s.sellAt} s="on Kalshi / Polymarket" title="The odds you're offering traders, after your fees." />
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
@@ -337,7 +385,7 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
       </div>
       {lines.length === 0 ? <div className="empty">No locks match these filters.</div> : (
         <table className="htable">
-          <thead><tr><th>Date (ET)</th><th>Parlay</th><th>Your bet</th><th>Sold at</th><th>Result</th><th className="r">P/L</th><th aria-hidden="true"></th></tr></thead>
+          <thead><tr><th>Date (ET)</th><th>Parlay</th><th>Your original bet</th><th>Fair odds</th><th>Sold at</th><th>Result</th><th className="r">P/L</th><th aria-hidden="true"></th></tr></thead>
           <tbody>
             {lines.map((line) => {
               const r = historyRow(line, archivedById[line.id]);
@@ -360,14 +408,15 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
                       <div className="h-title">{r.title}</div>
                       <div className="h-sub">{r.sports}{r.date ? <span className="h-subdate">{r.sports ? " · " : ""}{r.date}</span> : null}<span className="tag">{r.hedged ? "Hedged" : "Not hedged"}</span></div>
                     </td>
-                    <td className="c-bet num">{r.bet}{r.book ? <div className="h-sub">{r.book}</div> : null}</td>
+                    <td className="c-bet num"><span className="m-lbl">Your original bet </span>{r.bet}{r.book ? <div className="h-sub">{r.book}</div> : null}</td>
+                    <td className="c-fair num"><span className="m-lbl">Fair odds </span>{r.fair}</td>
                     <td className="c-sold num">{r.soldAt}</td>
                     <td className="c-res"><span className={"res " + r.resultTone}>{r.result}</span></td>
                     <td className={"c-pnl h-pnl num " + (r.pnl == null ? "" : r.pnl > 0 ? "pos" : r.pnl < 0 ? "neg" : "")}>{r.pnl == null ? "—" : signedDollars(r.pnl)}</td>
                     <td className="h-car" aria-hidden="true">{open ? "▴" : "▾"}</td>
                   </tr>
                   {open && renderDetail ? (
-                    <tr className="hdetail"><td colSpan={7}>{renderDetail(line)}</td></tr>
+                    <tr className="hdetail"><td colSpan={8}>{renderDetail(line)}</td></tr>
                   ) : null}
                 </React.Fragment>
               );
@@ -375,6 +424,78 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+function VenueTag({ venue, venueKey }) {
+  const key = String(venueKey || venue || "").toLowerCase().includes("poly") ? "polymarket" : "kalshi";
+  return <span className={"venue " + key}>{venue || (key === "polymarket" ? "Polymarket" : "Kalshi")}</span>;
+}
+
+function QuoteSection({ title, rows, sub, ok, empty }) {
+  const [all, setAll] = React.useState(false);
+  const shown = all ? rows : rows.slice(0, QUOTE_ROWS_SHOWN);
+  const extra = rows.length - shown.length;
+  return (
+    <div className="qh-sec" data-quotes={ok ? "filled" : "not-filled"}>
+      <div className={"qh-h" + (ok ? " ok" : "")}>
+        <span>{title}</span><span className="cnt num">{rows.length}</span>
+        {sub ? <span className="qh-s">{sub}</span> : null}
+      </div>
+      {rows.length === 0 ? <div className="empty">{empty}</div> : (
+        <table className="qtable">
+          <thead><tr><th>Time (ET)</th><th>Price</th><th>Size</th><th>Where</th><th>Result</th></tr></thead>
+          <tbody>
+            {shown.map((q) => (
+              <tr key={q.id}>
+                <td className="q-time">{q.time}</td>
+                <td className="q-price">{q.price}</td>
+                <td className="q-size">{q.size}</td>
+                <td className="q-venue"><VenueTag venue={q.venue} venueKey={q.venueKey} /></td>
+                <td className="q-res">
+                  <span className={"res " + q.tone}>{q.result}</span>
+                  {q.detail ? <div className="q-det">{q.detail}</div> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {rows.length > QUOTE_ROWS_SHOWN ? (
+        <button type="button" className="btn mini qh-more" onClick={() => setAll((v) => !v)} aria-expanded={all}>
+          {all ? "Show fewer" : `Show ${extra} more`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Details → Quote history for one lock: every quote that FILLED first, then
+ * every one that did not (outbid, too slow, not taken, expired, over limit,
+ * skipped). `history` is comboLockView.quoteHistory() output.
+ */
+export function QuoteHistory({ history, note }) {
+  if (!history) return null;
+  const c = history.filledContracts;
+  return (
+    <div className="qh">
+      {note ? <div className="note">{note}</div> : null}
+      <QuoteSection
+        title="Filled"
+        ok
+        rows={history.filled}
+        sub={c > 0 ? `${countText(c)} contracts` : ""}
+        empty="No fills yet."
+      />
+      <QuoteSection
+        title="Not filled"
+        rows={history.notFilled}
+        sub="outbid, too slow, not taken, expired or skipped"
+        empty="Nothing here. Every request we answered filled."
+      />
+      {history.addedText ? <div className="qh-foot">Lock added {history.addedText}{history.afterKickoff ? ` · ${history.afterKickoff} request${history.afterKickoff === 1 ? "" : "s"} after the game started not shown` : ""}</div> : null}
     </div>
   );
 }

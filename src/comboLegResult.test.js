@@ -453,12 +453,10 @@ assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
   // Source (Kalshi combo / ESPN) moved into the outcome chip tooltip.
   assert.match(locksSrc, /Source: \$\{chrome\.sourceText\}/);
   assert.match(locksSrc, /<ComboHistory/);
-  assert.match(locksSrc, /className="hist-head"/);
-  assert.match(locksSrc, /expanded \? "Hide" : "Show"/);
   assert.doesNotMatch(locksSrc, /History \+ profile/);
   // One shared lock card (renderLock) for the Waiting and Filled sections.
-  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 1);
-  assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
+  assert.equal((locksSrc.match(/const renderLock = /g) || []).length, 1);
+  assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
   const tapeSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboTape.jsx"), "utf8");
   assert.doesNotMatch(tapeSrc, /outcomeChrome|arch-head|hist-head/);
 }
