@@ -132,7 +132,27 @@ export const SHARE_MARKET_LABELS = {
   SPR: "Spread",
   TOT: "Total",
   TT: "Team Total",
+  TD: "Touchdown scorer",
+  HR: "Home run",
+  GOAL: "Goal scorer",
 };
+
+const ET_SHARE_TIME = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** "Sun, Oct 12, 1:00 PM ET" — empty when the time is missing/invalid. */
+export function formatShareTimeET(commenceTime) {
+  if (commenceTime == null || commenceTime === "") return "";
+  const ms = new Date(commenceTime).getTime();
+  if (!Number.isFinite(ms)) return "";
+  return ET_SHARE_TIME.format(ms) + " ET";
+}
 
 export const SHARE_PROMO_TYPE_LABELS = {
   boost: "Profit Boost",
@@ -141,10 +161,14 @@ export const SHARE_PROMO_TYPE_LABELS = {
   freebet: "Free Bet",
 };
 
-const SHARE_MAX_LEGS = 6;
-const SHARE_BASE_HEIGHT = 630;
-const SHARE_MAX_HEIGHT = 800;
-const SHARE_LEG_ROW = 54;
+// Share image: 1080px wide portrait card (reads as a phone screenshot or a
+// social post). Height grows with the number of legs; rows shrink as legs
+// are added so 10 legs still fit. Anything past SHARE_MAX_LEGS collapses
+// into a "+N more legs" row.
+const SHARE_WIDTH = 1080;
+const SHARE_MIN_HEIGHT = 1080;
+const SHARE_PAD = 64;
+const SHARE_MAX_LEGS = 10;
 
 function finiteNum(v) {
   if (v == null || v === "") return null;
@@ -198,14 +222,15 @@ export function formatShareLeg(leg) {
   if (leg == null) return null;
   if (typeof leg === "string") {
     const name = leg.trim();
-    return name ? { name, market: "", game: "", odds: "" } : null;
+    return name ? { name, market: "", game: "", odds: "", time: "" } : null;
   }
   const name = formatPromoLegTitle(leg) || String(leg.name || leg.label || "").trim();
   const market = formatShareMarket(leg.market);
   const game = String(leg.game || "").trim();
   const odds = formatShareAmerican(leg.odds != null ? leg.odds : leg.dk);
+  const time = formatShareTimeET(leg.commence_time || leg.commenceTime);
   if (!name && !market && !game) return null;
-  return { name: name || "Leg", market, game, odds };
+  return { name: name || "Leg", market, game, odds, time };
 }
 
 export function shareCardPromoRule(model = {}) {
@@ -300,24 +325,169 @@ export function shareCardMetaChips(model = {}) {
     const conv = finiteNum(m.conversionRate);
     const cash = finiteNum(m.guaranteedCash);
     if (cash != null) chips.push("$" + cash.toFixed(2) + " locked");
-    if (conv != null) chips.push((conv <= 1 ? conv * 100 : conv).toFixed(1) + "% conversion");
+    if (conv != null) chips.push((conv * 100).toFixed(1) + "% conversion");
     else if (finiteNum(m.winProfit) != null) chips.push("win +$" + Math.round(m.winProfit));
   }
   if (m.kind === "ev" && m.marketLabel) chips.push(m.marketLabel);
   return chips.filter(Boolean);
 }
 
+function parseAmerican(odds) {
+  const n = finiteNum(typeof odds === "string" ? odds.replace(/^\+/, "") : odds);
+  return n == null || n === 0 ? null : n;
+}
+
+function americanToDecimal(odds) {
+  const n = parseAmerican(odds);
+  if (n == null) return null;
+  return n > 0 ? 1 + n / 100 : 1 + 100 / Math.abs(n);
+}
+
+function wholeOrCents(n) {
+  const v = finiteNum(n);
+  if (v == null) return "";
+  const abs = Math.abs(v);
+  const body = Math.abs(abs - Math.round(abs)) < 0.005
+    ? Math.round(abs).toLocaleString("en-US")
+    : abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (v < 0 ? "-$" : "$") + body;
+}
+
+/** Cash returned if the promo bet wins. Free-bet stake is not returned. */
+export function shareCardPayout(model = {}) {
+  const m = model || {};
+  if (finiteNum(m.payout) != null) return finiteNum(m.payout);
+  const stake = finiteNum(m.stake);
+  const win = finiteNum(m.winProfit);
+  if (m.promoType === "freebet") {
+    if (win != null) return win;
+    const d = americanToDecimal(m.odds);
+    return stake != null && d ? stake * (d - 1) : null;
+  }
+  if (stake != null && win != null) return stake + win;
+  const d = americanToDecimal(m.odds);
+  return stake != null && d ? stake * d : null;
+}
+
+/** Big result line + the smaller line under it. */
+export function shareCardResult(model = {}) {
+  const m = model || {};
+  const stake = finiteNum(m.stake);
+  const stakeTxt = stake != null ? "$" + Math.round(stake) : "";
+  const cash = finiteNum(m.guaranteedCash);
+  if (m.promoType === "freebet" && cash != null && m.hedge) {
+    const conv = finiteNum(m.conversionRate);
+    return {
+      headline: wholeOrCents(cash) + " guaranteed",
+      sub: (stakeTxt ? "from a " + stakeTxt + " free bet" : "from a free bet") + (conv != null ? " · " + (conv * 100).toFixed(0) + "% converted to cash" : ""),
+      positive: true,
+    };
+  }
+  const ev = finiteNum(m.ev);
+  const positive = ev == null || ev >= 0;
+  const headline = ev == null ? (m.title || "Top pick") : formatSignedMoney(ev) + " EV";
+  let sub;
+  if (m.kind === "ev") sub = "expected profit per $100 bet";
+  else if (m.promoType === "freebet") sub = "expected profit on a " + (stakeTxt || "") + " free bet";
+  else if (m.promoType === "nosweat") sub = "expected profit on a " + (stakeTxt || "") + " no-sweat bet";
+  else sub = "expected profit on a " + (stakeTxt || "") + " bet";
+  return { headline, sub: sub.replace(/ {2,}/g, " "), positive };
+}
+
+/** "DraftKings · 30% Profit Boost · $100" */
+export function shareCardPromoLine(model = {}) {
+  const m = model || {};
+  const stake = finiteNum(m.stake);
+  const stakeTxt = stake != null ? "$" + Math.round(stake) : "";
+  const parts = [m.bookLabel];
+  if (m.kind === "ev") {
+    parts.push(m.marketLabel, m.odds);
+  } else if (m.promoType === "boost") {
+    parts.push(m.promoRule || "Profit Boost", stakeTxt);
+  } else if (m.promoType === "nopromo") {
+    parts.push("No promo", stakeTxt ? stakeTxt + " bet" : "");
+  } else if (m.promoType === "freebet") {
+    parts.push(stakeTxt ? stakeTxt + " Free Bet" : "Free Bet");
+  } else if (m.promoType === "nosweat") {
+    const refundPct = finiteNum(m.refundPct);
+    parts.push("No Sweat", stakeTxt, refundPct != null ? refundPct + "% back as credit if it loses" : "");
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+/** Stat tiles under the legs (label / value / optional note). */
+export function shareCardStats(model = {}) {
+  const m = model || {};
+  const stake = finiteNum(m.stake);
+  const stakeTxt = stake != null ? wholeOrCents(stake) : "—";
+  if (m.kind === "ev") {
+    return [
+      { k: "True chance", v: m.trueProb != null ? (m.trueProb * 100).toFixed(1) + "%" : "—" },
+      { k: "Book implies", v: m.implied != null ? (m.implied * 100).toFixed(1) + "%" : "—" },
+      { k: "Your edge", v: formatSignedPct(m.edge != null ? m.edge * 100 : null) || "—", good: (m.edge || 0) >= 0 },
+    ];
+  }
+  const payout = shareCardPayout(m);
+  const n = (m.legs || []).length;
+  const oddsLabel = n > 1 ? "Parlay odds" : "Odds";
+  const tiles = [];
+  if (m.promoType === "boost" && m.parlayOdds && m.odds && m.parlayOdds !== m.odds) {
+    tiles.push({ k: oddsLabel, v: m.parlayOdds + " → " + m.odds, note: "with boost" });
+  } else {
+    tiles.push({ k: oddsLabel, v: m.odds || m.parlayOdds || "—" });
+  }
+  if (m.promoType === "freebet") {
+    tiles.push({ k: "Free bet", v: stakeTxt });
+    tiles.push({ k: "Wins", v: payout != null ? wholeOrCents(payout) : "—", note: "stake not returned", good: true });
+  } else {
+    tiles.push({ k: "Bet", v: stakeTxt });
+    tiles.push({ k: "Pays", v: payout != null ? wholeOrCents(payout) : "—", good: true });
+  }
+  return tiles;
+}
+
+function shareRowSpec(n) {
+  if (n <= 3) return { h: 132, title: 36, sub: 23 };
+  if (n <= 5) return { h: 116, title: 33, sub: 22 };
+  if (n <= 7) return { h: 100, title: 30, sub: 21 };
+  return { h: 88, title: 27, sub: 19 };
+}
+
+/** Vertical layout shared by shareCardDimensions and paintShareCard. */
+export function shareCardLayout(model = {}) {
+  const m = model || {};
+  const total = (m.legs || []).length;
+  const steps = m.promoType === "freebet" && m.hedge && total === 1;
+  const shown = steps ? 1 : Math.min(SHARE_MAX_LEGS, total);
+  const more = steps ? 0 : Math.max(0, total - shown);
+  const row = shareRowSpec(shown);
+  const L = {};
+  let y = SHARE_PAD;
+  L.header = y; y += 64 + 44;            // logo row
+  L.badge = y; y += 44 + 34;             // pill
+  L.headline = y; y += 92;               // big result
+  L.sub = y; y += 44 + 26;
+  L.promo = y; y += 64 + 44;             // promo pill
+  if (steps) {
+    L.step1 = y; y += 236 + 20;
+    L.step2 = y; y += 236 + 24;
+    L.keep = y; y += 96;
+  } else {
+    L.listLabel = y; y += 40;
+    L.list = y; y += shown * row.h + (more ? 64 : 0);
+    y += 28;
+    L.stats = y; y += 132;
+  }
+  y += 40;
+  const contentEnd = y;
+  const height = Math.max(SHARE_MIN_HEIGHT, contentEnd + 104);
+  L.footer = height - 104;
+  return { width: SHARE_WIDTH, height, shown, more, steps, row, L };
+}
+
 export function shareCardDimensions(model = {}) {
-  const total = (model.legs || []).length;
-  const shown = Math.min(SHARE_MAX_LEGS, total);
-  const moreRow = total > SHARE_MAX_LEGS ? 1 : 0;
-  const extraRows = Math.max(0, shown - 3) + moreRow;
-  const evStats = model.kind === "ev" && (model.trueProb != null || model.implied != null || model.edge != null) ? 1 : 0;
-  const height = Math.min(
-    SHARE_MAX_HEIGHT,
-    SHARE_BASE_HEIGHT + extraRows * SHARE_LEG_ROW + evStats * 36,
-  );
-  return { width: 1200, height, shown, more: Math.max(0, total - shown) };
+  const { width, height, shown, more } = shareCardLayout(model);
+  return { width, height, shown, more };
 }
 
 export function buildShareCardModel({
@@ -345,6 +515,8 @@ export function buildShareCardModel({
   implied = null,
   edge = null,
   market = "",
+  payout = null,
+  hedge = null,
 } = {}) {
   const evNum = finiteNum(ev);
   const stakeNum = finiteNum(stake);
@@ -390,6 +562,14 @@ export function buildShareCardModel({
     legsCount: formattedLegs.length,
     title: String(title || ""),
     subtitle: String(subtitle || ""),
+    payout: finiteNum(payout),
+    hedge: hedge && finiteNum(hedge.stake) != null ? {
+      stake: finiteNum(hedge.stake),
+      bookLabel: String(hedge.bookLabel || ""),
+      odds: formatShareAmerican(hedge.odds),
+      selection: String(hedge.selection || ""),
+      payout: finiteNum(hedge.payout),
+    } : null,
     brand: "AI Bet Builder",
     footer: "aibetbuilder.io",
   };
@@ -474,176 +654,244 @@ function drawChip(ctx, x, y, label, opts = {}) {
   return w;
 }
 
-export function paintShareCard(ctx, model, w, h) {
-  const m = model || {};
-  const accent = accentFor(m);
-  const evPositive = m.ev == null || m.ev >= 0;
-  const evColor = evPositive ? "#10b981" : "#ef4444";
+// Shrink the font (down to minSize) before truncating with an ellipsis.
+function fitFont(ctx, text, maxWidth, fontFn, weight, size, minSize) {
+  const t = String(text == null ? "" : text);
+  let px = size;
+  ctx.font = fontFn(weight, px);
+  while (px > minSize && ctx.measureText(t).width > maxWidth) {
+    px -= 1;
+    ctx.font = fontFn(weight, px);
+  }
+  return fitText(ctx, t, maxWidth);
+}
 
-  ctx.fillStyle = "#0a0b0f";
-  ctx.fillRect(0, 0, w, h);
-
-  const wash = ctx.createLinearGradient(0, 0, w, h);
-  wash.addColorStop(0, m.kind === "ev" ? "rgba(16,185,129,0.14)" : accent.soft);
-  wash.addColorStop(0.55, "rgba(10,11,15,0)");
-  wash.addColorStop(1, "rgba(139,92,246,0.10)");
-  ctx.fillStyle = wash;
-  ctx.fillRect(0, 0, w, h);
-
+function drawLogo(ctx, x, y, size) {
+  const g = ctx.createLinearGradient(x, y, x + size, y + size);
+  g.addColorStop(0, "#3b82f6");
+  g.addColorStop(1, "#8b5cf6");
+  fillRound(ctx, x, y, size, size, size * 0.24, g);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = sans("800", Math.round(size * 0.6));
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("B", x + size / 2, y + size / 2 + 2);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "#e8eaed";
-  ctx.font = sans("700", 22);
-  ctx.fillText(m.brand || "AI Bet Builder", 36, 40);
-  ctx.fillStyle = "#6b7280";
-  ctx.font = sans("500", 15);
+}
+
+function legSubline(leg) {
+  return [leg.market, leg.game, leg.time].filter(Boolean).join(" · ");
+}
+
+function oddsColor(odds) {
+  return String(odds || "").startsWith("+") ? "#34d399" : "#f3f4f6";
+}
+
+export function paintShareCard(ctx, model, w, h) {
+  const m = model || {};
+  const layout = shareCardLayout(m);
+  const L = layout.L;
+  const W = w || layout.width;
+  const H = h || layout.height;
+  const accent = accentFor(m);
+  const PAD = SHARE_PAD;
+  const inner = W - PAD * 2;
+  const result = shareCardResult(m);
+  const good = "#34d399";
+  const bad = "#f87171";
+
+  // Background: site dark + soft blue/purple glow.
+  ctx.fillStyle = "#0a0b0f";
+  ctx.fillRect(0, 0, W, H);
+  const wash = ctx.createLinearGradient(0, 0, W, H);
+  wash.addColorStop(0, "rgba(59,130,246,0.20)");
+  wash.addColorStop(0.45, "rgba(10,11,15,0)");
+  wash.addColorStop(1, "rgba(139,92,246,0.20)");
+  ctx.fillStyle = wash;
+  ctx.fillRect(0, 0, W, H);
+
+  // Header: logo + wordmark, URL on the right.
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  drawLogo(ctx, PAD, L.header, 64);
+  ctx.fillStyle = "#f3f4f6";
+  ctx.font = sans("700", 34);
+  ctx.fillText(m.brand || "AI Bet Builder", PAD + 84, L.header + 44);
   ctx.textAlign = "right";
-  ctx.fillText(m.footer || "aibetbuilder.io", w - 36, 40);
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = sans("600", 26);
+  ctx.fillText(m.footer || "aibetbuilder.io", W - PAD, L.header + 42);
   ctx.textAlign = "left";
 
-  const cardX = 28;
-  const cardY = 56;
-  const cardW = w - 56;
-  const cardH = h - cardY - 20;
-  fillRound(ctx, cardX, cardY, cardW, cardH, 16, "rgba(255,255,255,0.035)");
-  strokeRound(ctx, cardX, cardY, cardW, cardH, 16, "rgba(255,255,255,0.10)", 1);
-  ctx.fillStyle = accent.fill;
-  ctx.fillRect(cardX, cardY + 16, 4, cardH - 32);
+  // Badge pill.
+  const badge = String(m.badge || "PICK").toUpperCase();
+  ctx.font = sans("800", 20);
+  const bw = Math.ceil(ctx.measureText(badge).width) + 36;
+  fillRound(ctx, PAD, L.badge, bw, 44, 22, accent.soft);
+  strokeRound(ctx, PAD, L.badge, bw, 44, 22, accent.border, 1.5);
+  ctx.fillStyle = m.kind === "ev" ? good : (m.promoType === "freebet" || m.promoType === "nosweat") ? "#c4b5fd" : "#93c5fd";
+  ctx.textBaseline = "middle";
+  ctx.fillText(badge, PAD + 18, L.badge + 23);
+  ctx.textBaseline = "alphabetic";
 
-  const padL = cardX + 28;
-  const padR = cardX + cardW - 24;
-  const contentW = padR - padL;
-  let y = cardY + 28;
+  // Result headline.
+  ctx.fillStyle = result.positive ? good : bad;
+  const headline = fitFont(ctx, result.headline, inner, sans, "800", 88, 52);
+  ctx.fillText(headline, PAD, L.headline + 80);
+  ctx.fillStyle = "#d1d5db";
+  ctx.fillText(fitFont(ctx, result.sub, inner, sans, "500", 32, 22), PAD, L.sub + 36);
 
-  ctx.font = sans("800", 12);
-  ctx.fillStyle = accent.fill;
-  ctx.fillText(String(m.badge || "PICK").toUpperCase(), padL, y);
-
-  const evBlockW = 280;
-  ctx.textAlign = "right";
-  ctx.fillStyle = evColor;
-  ctx.font = mono("700", 40);
-  const evMain = m.ev != null ? formatSignedMoney(m.ev) : (m.title || "");
-  ctx.fillText(fitText(ctx, evMain, evBlockW), padR, y + 28);
-  ctx.font = sans("600", 14);
-  ctx.fillStyle = evPositive ? "rgba(16,185,129,0.85)" : "#ef4444";
-  const evSub = [m.ev != null ? "EV" : "", m.evPctText].filter(Boolean).join("  ·  ");
-  if (evSub) ctx.fillText(evSub, padR, y + 52);
-  ctx.textAlign = "left";
-
-  const typeLine = shareCardHeadline(m);
-  const subline = shareCardSubline(m);
-  ctx.fillStyle = "#e8eaed";
-  ctx.font = sans("700", 26);
-  ctx.fillText(fitText(ctx, typeLine, contentW - evBlockW - 16), padL, y + 36);
-  if (subline) {
-    ctx.fillStyle = "#9ca3af";
-    ctx.font = sans("600", 14);
-    ctx.fillText(fitText(ctx, subline, contentW - evBlockW - 16), padL, y + 58);
+  // Book · promo · stake.
+  const promoLine = shareCardPromoLine(m);
+  if (promoLine) {
+    fillRound(ctx, PAD, L.promo, inner, 64, 14, "rgba(255,255,255,0.05)");
+    strokeRound(ctx, PAD, L.promo, inner, 64, 14, "rgba(255,255,255,0.10)", 1);
+    ctx.fillStyle = "#f3f4f6";
+    ctx.textBaseline = "middle";
+    ctx.fillText(fitFont(ctx, promoLine, inner - 48, sans, "700", 28, 20), PAD + 24, L.promo + 33);
+    ctx.textBaseline = "alphabetic";
   }
 
-  y += subline ? 86 : 72;
-  const chips = shareCardMetaChips(m);
-  let cx = padL;
-  const chipY = y;
-  for (const chip of chips) {
-    const used = drawChip(ctx, cx, chipY, chip);
-    cx += used + 8;
-    if (cx > padR - 80) break;
-  }
-  y += 46;
-
-  if (m.kind === "ev" && (m.trueProb != null || m.implied != null || m.edge != null)) {
-    const tiles = [
-      { k: "True Prob", v: m.trueProb != null ? (m.trueProb * 100).toFixed(1) + "%" : "—", c: "#f59e0b" },
-      { k: "Book Implied", v: m.implied != null ? (m.implied * 100).toFixed(1) + "%" : "—", c: "#e8eaed" },
-      { k: "Edge", v: formatSignedPct(m.edge != null ? m.edge * 100 : null) || "—", c: (m.edge || 0) >= 0 ? "#10b981" : "#ef4444" },
-    ];
-    const gap = 10;
-    const tw = (contentW - gap * 2) / 3;
-    tiles.forEach((t, i) => {
-      const tx = padL + i * (tw + gap);
-      fillRound(ctx, tx, y, tw, 58, 10, "rgba(255,255,255,0.03)");
-      strokeRound(ctx, tx, y, tw, 58, 10, "rgba(255,255,255,0.07)", 1);
-      ctx.fillStyle = "#6b7280";
-      ctx.font = sans("600", 11);
-      ctx.fillText(t.k.toUpperCase(), tx + 12, y + 20);
-      ctx.fillStyle = t.c;
-      ctx.font = mono("700", 18);
-      ctx.fillText(t.v, tx + 12, y + 44);
-    });
-    y += 72;
-  }
-
-  const dim = shareCardDimensions(m);
-  const rows = (m.legs || []).slice(0, dim.shown);
-  const tableH = cardY + cardH - y - 16;
-  fillRound(ctx, padL, y, contentW, Math.max(48, tableH), 10, "rgba(0,0,0,0.22)");
-  strokeRound(ctx, padL, y, contentW, Math.max(48, tableH), 10, "rgba(255,255,255,0.06)", 1);
-
-  const colMarket = 150;
-  const colOdds = 110;
-  const nameW = contentW - colMarket - colOdds - 36;
-  const headY = y + 22;
-  ctx.font = sans("600", 11);
-  ctx.fillStyle = "#6b7280";
-  ctx.fillText("LEG", padL + 16, headY);
-  ctx.textAlign = "center";
-  ctx.fillText("MARKET", padL + 16 + nameW + colMarket / 2, headY);
-  ctx.fillText("ODDS", padL + contentW - colOdds / 2 - 8, headY);
-  ctx.textAlign = "left";
-
-  let rowY = y + 34;
-  const rowH = Math.min(SHARE_LEG_ROW, Math.max(44, (tableH - 36 - (dim.more ? 28 : 0)) / Math.max(1, rows.length)));
-  rows.forEach((leg, i) => {
-    const ry = rowY + i * rowH;
-    if (i % 2 === 0) {
-      ctx.fillStyle = "rgba(255,255,255,0.02)";
-      ctx.fillRect(padL + 1, ry, contentW - 2, rowH);
-    }
-    ctx.fillStyle = "#e8eaed";
-    ctx.font = sans("600", 15);
-    ctx.fillText(fitText(ctx, leg.name, nameW), padL + 16, ry + (leg.game ? 20 : rowH / 2 + 5));
-    if (leg.game) {
-      ctx.fillStyle = "#6b7280";
-      ctx.font = sans("500", 12);
-      ctx.fillText(fitText(ctx, leg.game, nameW), padL + 16, ry + 38);
-    }
-    ctx.textAlign = "center";
-    const marketX = padL + 16 + nameW + colMarket / 2;
-    if (leg.market) {
-      ctx.font = sans("600", 12);
-      const mw = Math.min(colMarket - 12, Math.ceil(ctx.measureText(leg.market).width) + 16);
-      fillRound(ctx, marketX - mw / 2, ry + rowH / 2 - 12, mw, 24, 7, "rgba(255,255,255,0.06)");
+  if (layout.steps) {
+    const leg = (m.legs || [])[0] || {};
+    const hedge = m.hedge || {};
+    const stake = finiteNum(m.stake);
+    const freeWins = shareCardPayout(m);
+    const step = (y, opts) => {
+      fillRound(ctx, PAD, y, inner, 236, 16, opts.bg);
+      strokeRound(ctx, PAD, y, inner, 236, 16, opts.border, 1.5);
+      const x = PAD + 28;
+      const rightW = 230;
+      const textW = inner - 56 - rightW - 16;
+      ctx.fillStyle = opts.labelColor;
+      ctx.fillText(fitFont(ctx, opts.label, inner - 56, sans, "800", 20, 15), x, y + 44);
+      ctx.fillStyle = "#f9fafb";
+      ctx.fillText(fitFont(ctx, opts.title, textW, sans, "700", 36, 24), x, y + 100);
+      ctx.fillStyle = "#b4bac4";
+      ctx.fillText(fitFont(ctx, opts.sub1, textW, sans, "500", 23, 17), x, y + 142);
+      if (opts.sub2) {
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText(fitFont(ctx, opts.sub2, textW, sans, "500", 22, 17), x, y + 178);
+      }
+      ctx.textAlign = "right";
+      ctx.fillStyle = oddsColor(opts.odds);
+      ctx.font = mono("700", 40);
+      ctx.fillText(opts.odds || "", PAD + inner - 28, y + 100);
+      ctx.fillStyle = "#f3f4f6";
+      ctx.font = mono("700", 30);
+      ctx.fillText(opts.amount, PAD + inner - 28, y + 150);
       ctx.fillStyle = "#9ca3af";
-      ctx.fillText(leg.market, marketX, ry + rowH / 2 + 5);
-    } else {
-      ctx.fillStyle = "#6b7280";
-      ctx.font = sans("600", 13);
-      ctx.fillText("—", marketX, ry + rowH / 2 + 5);
-    }
-    ctx.fillStyle = String(leg.odds || "").startsWith("+") ? "#10b981" : "#e8eaed";
-    ctx.font = mono("700", 15);
-    ctx.fillText(leg.odds || "—", padL + contentW - colOdds / 2 - 8, ry + rowH / 2 + 5);
-    ctx.textAlign = "left";
-  });
-
-  if (dim.more) {
-    ctx.fillStyle = "#93c5fd";
-    ctx.font = sans("700", 13);
-    ctx.fillText("+" + dim.more + " more", padL + 16, y + tableH - 14);
+      ctx.font = sans("600", 21);
+      ctx.fillText(opts.amountNote, PAD + inner - 28, y + 184);
+      ctx.textAlign = "left";
+    };
+    step(L.step1, {
+      bg: "rgba(139,92,246,0.10)",
+      border: "rgba(139,92,246,0.40)",
+      labelColor: "#c4b5fd",
+      label: "STEP 1 · USE YOUR " + (stake != null ? "$" + Math.round(stake) + " " : "") + "FREE BET AT " + String(m.bookLabel || "YOUR BOOK").toUpperCase(),
+      title: leg.name,
+      sub1: [leg.market, leg.game].filter(Boolean).join(" · "),
+      sub2: leg.time,
+      odds: leg.odds,
+      amount: stake != null ? wholeOrCents(stake) : "",
+      amountNote: freeWins != null ? "wins " + wholeOrCents(freeWins) : "free bet",
+    });
+    step(L.step2, {
+      bg: "rgba(16,185,129,0.09)",
+      border: "rgba(16,185,129,0.38)",
+      labelColor: "#6ee7b7",
+      label: "STEP 2 · HEDGE " + wholeOrCents(hedge.stake) + " CASH AT " + String(hedge.bookLabel || "ANOTHER BOOK").toUpperCase(),
+      title: hedge.selection || "Opposite side",
+      sub1: [leg.game].filter(Boolean).join(" · "),
+      sub2: "",
+      odds: hedge.odds,
+      amount: wholeOrCents(hedge.stake),
+      amountNote: hedge.payout != null ? "pays " + wholeOrCents(hedge.payout) : "cash",
+    });
+    fillRound(ctx, PAD, L.keep, inner, 76, 14, "rgba(16,185,129,0.12)");
+    ctx.fillStyle = "#d1fae5";
+    ctx.textBaseline = "middle";
+    const keep = "Either way, you keep " + wholeOrCents(m.guaranteedCash) + " in cash.";
+    ctx.fillText(fitFont(ctx, keep, inner - 48, sans, "700", 30, 20), PAD + 24, L.keep + 39);
+    ctx.textBaseline = "alphabetic";
   } else {
-    const used = 34 + rows.length * rowH;
-    const bottom = shareCardBottomLine(m);
-    if (bottom && tableH - used > 44) {
-      const by = y + tableH - 36;
-      ctx.fillStyle = evPositive ? "rgba(16,185,129,0.08)" : "rgba(255,255,255,0.04)";
-      ctx.fillRect(padL + 1, by - 10, contentW - 2, 36);
-      ctx.fillStyle = evPositive ? "#6ee7b7" : "#9ca3af";
-      ctx.font = sans("600", 13);
-      ctx.fillText(fitText(ctx, bottom, contentW - 32), padL + 16, by + 14);
+    const legs = (m.legs || []).slice(0, layout.shown);
+    const n = (m.legs || []).length;
+    const label = m.kind === "ev" ? "THE BET" : n > 1 ? n + "-LEG PARLAY" : "THE BET";
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = sans("800", 20);
+    ctx.fillText(label, PAD, L.listLabel + 22);
+
+    const row = layout.row;
+    const listH = legs.length * row.h + (layout.more ? 64 : 0);
+    fillRound(ctx, PAD, L.list, inner, Math.max(row.h, listH), 16, "rgba(255,255,255,0.035)");
+    strokeRound(ctx, PAD, L.list, inner, Math.max(row.h, listH), 16, "rgba(255,255,255,0.10)", 1);
+    const oddsW = 170;
+    const textW = inner - 56 - oddsW;
+    legs.forEach((leg, i) => {
+      const ry = L.list + i * row.h;
+      if (i > 0) {
+        ctx.fillStyle = "rgba(255,255,255,0.07)";
+        ctx.fillRect(PAD + 24, ry, inner - 48, 1);
+      }
+      const titleY = ry + row.h / 2 - row.sub * 0.25;
+      ctx.fillStyle = "#f9fafb";
+      ctx.fillText(fitFont(ctx, leg.name, textW, sans, "700", row.title, Math.max(18, row.title - 10)), PAD + 28, titleY);
+      const sub = legSubline(leg);
+      if (sub) {
+        ctx.fillStyle = "#a1a7b3";
+        ctx.fillText(fitFont(ctx, sub, textW, sans, "500", row.sub, Math.max(15, row.sub - 5)), PAD + 28, titleY + row.sub + 12);
+      }
+      ctx.textAlign = "right";
+      ctx.fillStyle = oddsColor(leg.odds);
+      ctx.font = mono("700", row.title + 2);
+      ctx.textBaseline = "middle";
+      ctx.fillText(leg.odds || "—", PAD + inner - 28, ry + row.h / 2);
+      ctx.textBaseline = "alphabetic";
+      ctx.textAlign = "left";
+    });
+    if (layout.more) {
+      const my = L.list + legs.length * row.h;
+      ctx.fillStyle = "rgba(255,255,255,0.07)";
+      ctx.fillRect(PAD + 24, my, inner - 48, 1);
+      ctx.fillStyle = "#93c5fd";
+      ctx.font = sans("700", 22);
+      ctx.textBaseline = "middle";
+      ctx.fillText("+" + layout.more + " more " + (layout.more === 1 ? "leg" : "legs") + " on aibetbuilder.io", PAD + 28, my + 33);
+      ctx.textBaseline = "alphabetic";
     }
+
+    const tiles = shareCardStats(m);
+    const gap = 16;
+    const tw = (inner - gap * (tiles.length - 1)) / tiles.length;
+    tiles.forEach((t, i) => {
+      const tx = PAD + i * (tw + gap);
+      fillRound(ctx, tx, L.stats, tw, 124, 14, "rgba(255,255,255,0.045)");
+      strokeRound(ctx, tx, L.stats, tw, 124, 14, "rgba(255,255,255,0.09)", 1);
+      ctx.fillStyle = "#9ca3af";
+      ctx.fillText(fitFont(ctx, t.k.toUpperCase(), tw - 40, sans, "700", 19, 14), tx + 20, L.stats + 38);
+      ctx.fillStyle = t.good ? good : "#f3f4f6";
+      ctx.fillText(fitFont(ctx, t.v, tw - 40, mono, "700", 34, 20), tx + 20, L.stats + 84);
+      if (t.note) {
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillText(fitFont(ctx, t.note, tw - 40, sans, "500", 18, 13), tx + 20, L.stats + 110);
+      }
+    });
   }
+
+  // Footer.
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.fillRect(PAD, L.footer, inner, 1);
+  ctx.fillStyle = "#9ca3af";
+  ctx.font = sans("600", 21);
+  ctx.fillText("21+ · Gambling problem? Call 1-800-GAMBLER", PAD, L.footer + 58);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#6b7280";
+  ctx.font = sans("500", 19);
+  ctx.fillText("Odds change. Check your book.", W - PAD, L.footer + 58);
+  ctx.textAlign = "left";
 }
 
 export function renderShareCardCanvas(model, opts = {}) {

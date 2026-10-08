@@ -3026,7 +3026,7 @@ export default function App() {
                     trueProb: b.prob,
                     implied: bookImplied,
                     edge,
-                    legs: [{ name: b.name, market: b.market, game: b.game, dk: b.dk }],
+                    legs: [{ name: b.name, market: b.market, game: b.game, dk: b.dk, commence_time: b.commence_time }],
                   });
                   return (
                     <div className="ev-card" key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
@@ -3384,6 +3384,7 @@ export default function App() {
                       parlayOdds: formatOdds(p.parlayOdds),
                       stake,
                       boostPct: shownBoostPct,
+                      winProfit: p.boostedProfit,
                       legs: p.legs,
                     });
                     return (
@@ -3688,6 +3689,14 @@ export default function App() {
                       winProfit: p.winProfit,
                       conversionRate: lock?.conversionRate,
                       guaranteedCash: lock?.guaranteedCash,
+                      // Locked singles: the image shows STEP 1 / STEP 2 like the card.
+                      hedge: showLock && lock ? {
+                        stake: lock.hedgeStake,
+                        bookLabel: getBookLabel(leg?.bestOppBook),
+                        odds: quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp,
+                        selection: leg?.bestOppName,
+                        payout: lock.hedgeStake * (lock.d_h || dkDecimal(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)),
+                      } : null,
                       legs: p.legs,
                     });
                     return (

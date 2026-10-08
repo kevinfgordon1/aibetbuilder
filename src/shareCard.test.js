@@ -234,8 +234,8 @@ assert.ok(shareCardMetaChips(model).includes("+817 w/ boost"));
 assert.ok(shareCardMetaChips(model).some((c) => /Parlay \+650/.test(c)));
 assert.equal(shareCardFilename(model), "aibetbuilder-promo-best-pick.png");
 assert.equal(shareCardFilename({ kind: "ev", badge: "+EV" }), "aibetbuilder-ev-ev.png");
-assert.equal(shareCardDimensions(model).width, 1200);
-assert.equal(shareCardDimensions(model).height, 630);
+assert.equal(shareCardDimensions(model).width, 1080);
+assert.ok(shareCardDimensions(model).height >= 1080);
 
 const ns = buildShareCardModel({
   kind: "promo",
@@ -288,7 +288,7 @@ assert.equal(shareCardPromoRule(evModel), "");
 assert.equal(shareCardHeadline(evModel), "Chiefs ML");
 assert.ok(!shareCardMetaChips(evModel).some((c) => /Profit Boost|No Sweat|Free Bet/.test(c)));
 assert.equal(evModel.legs[0].market, "Moneyline");
-assert.ok(shareCardDimensions(evModel).height >= 630);
+assert.ok(shareCardDimensions(evModel).height >= 1080);
 
 {
   const texts = [];
@@ -312,11 +312,15 @@ assert.ok(shareCardDimensions(evModel).height >= 630);
     measureText(t) { return { width: String(t).length * 8 }; },
     fillText(t) { texts.push(String(t)); },
   };
-  paintShareCard(ctx, model, 1200, 630);
+  paintShareCard(ctx, model, 1080, 1080);
   const blob = texts.join("\n");
   assert.match(blob, /AI Bet Builder/);
   assert.match(blob, /BEST PICK/);
-  assert.match(blob, /30% Profit Boost/);
+  assert.match(blob, /DraftKings · 30% Profit Boost · \$100/);
+  assert.match(blob, /\+\$12\.40 EV/);
+  assert.match(blob, /1-800-GAMBLER/);
+  assert.match(blob, /aibetbuilder\.io/);
+  assert.doesNotMatch(blob, /\bSPR\b|\bTOT\b|^ML$/m);
   assert.match(blob, /Yankees ML/);
   assert.match(blob, /Moneyline|Spread/);
   assert.doesNotMatch(blob, /Powered by Claude/);
@@ -436,3 +440,53 @@ const stranger = { id: "u2", email: "stranger@gmail.com" };
 }
 
 console.log("shareCard.test.js ok");
+
+// ── Share image v2: result headline, plain markets, ET times, steps, long parlays
+{
+  const {
+    shareCardResult, shareCardPromoLine, shareCardStats, shareCardPayout, shareCardLayout, formatShareTimeET,
+  } = await import("./shareCard.js");
+  assert.equal(formatShareTimeET("2026-10-12T17:00:00Z"), "Mon, Oct 12, 1:00 PM ET");
+  assert.equal(formatShareTimeET("nope"), "");
+  assert.equal(formatShareMarket("TD"), "Touchdown scorer");
+  assert.equal(formatShareMarket("HR"), "Home run");
+
+  const boost = buildShareCardModel({
+    kind: "promo", promoType: "boost", bookLabel: "DraftKings", ev: 52.4, stake: 100, boostPct: 30,
+    odds: "+631", parlayOdds: "+485", winProfit: 631.14,
+    legs: [{ name: "Chiefs -3.5", market: "SPR", game: "JAX @ KC", dk: -112, commence_time: "2026-10-11T00:20:00Z" }],
+  });
+  assert.equal(boost.legs[0].time, "Sat, Oct 10, 8:20 PM ET");
+  assert.deepEqual(shareCardResult(boost), { headline: "+$52.40 EV", sub: "expected profit on a $100 bet", positive: true });
+  assert.equal(shareCardPromoLine(boost), "DraftKings · 30% Profit Boost · $100");
+  assert.equal(shareCardPayout(boost), 731.14);
+  const stats = shareCardStats(boost);
+  assert.equal(stats[0].v, "+485 → +631");
+  assert.equal(stats[2].v, "$731.14");
+
+  const fbLock = buildShareCardModel({
+    kind: "promo", promoType: "freebet", bookLabel: "DraftKings", stake: 100, odds: "+1140",
+    winProfit: 1140, guaranteedCash: 95, conversionRate: 0.95,
+    hedge: { stake: 1045, bookLabel: "FanDuel", odds: -950, selection: "Missouri State +17.5", payout: 1140 },
+    legs: [{ name: "WKU -17.5", market: "SPR", game: "MOST @ WKU", dk: 1140 }],
+  });
+  assert.equal(shareCardResult(fbLock).headline, "$95 guaranteed");
+  assert.match(shareCardResult(fbLock).sub, /from a \$100 free bet · 95% converted to cash/);
+  assert.equal(fbLock.hedge.odds, "-950");
+  assert.equal(shareCardLayout(fbLock).steps, true);
+  assert.equal(shareCardPromoLine(fbLock), "DraftKings · $100 Free Bet");
+
+  // Conversion above 100% must not read as "1.1%".
+  const fbOver = buildShareCardModel({ kind: "promo", promoType: "freebet", stake: 100, conversionRate: 1.0857, guaranteedCash: 108.57, legs: legsA.slice(0, 1) });
+  assert.ok(shareCardMetaChips(fbOver).includes("108.6% conversion"));
+
+  const many = buildShareCardModel({
+    kind: "promo", promoType: "boost", stake: 25, ev: 3, odds: "+9000",
+    legs: Array.from({ length: 12 }, (_, i) => ({ name: "Team " + i + " with a really really long name -3.5", market: "SPR", game: "A @ B", dk: -110 })),
+  });
+  const lay = shareCardLayout(many);
+  assert.equal(lay.shown, 10);
+  assert.equal(lay.more, 2);
+  assert.ok(lay.height > 1080 && lay.height < 2000);
+  assert.ok(lay.L.footer > lay.L.stats);
+}
