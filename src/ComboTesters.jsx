@@ -17,7 +17,8 @@ const TESTERS_CSS = `
 .cl .tst .tst-venue{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid rgba(255,255,255,0.06)}
 .cl .tst .tst-venue:first-of-type{border-top:0}
 .cl .tst textarea{width:100%;min-height:96px;padding:9px 10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#12141a;color:#e8eaed;font:12px/1.4 ui-monospace,Menlo,monospace}
-.cl .tst .tst-form{display:grid;gap:10px;margin-top:8px;width:100%}
+.cl .tst .tst-form{display:grid;gap:10px;margin-top:8px;width:100%;min-width:0}
+.cl .tst .tst-form input,.cl .tst textarea{box-sizing:border-box;width:100%;max-width:100%}
 .cl .tst .tst-actions{display:flex;gap:8px;flex-wrap:wrap}
 .cl .tst-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .cl .tst-table th{text-align:left;font-weight:600;color:#8a8f98;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap}
