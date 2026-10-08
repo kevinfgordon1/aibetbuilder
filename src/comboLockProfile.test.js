@@ -166,7 +166,16 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.match(locksSrc, /is_free_bet/);
   assert.match(locksSrc, /hedgeCap/);
   assert.match(locksSrc, /decideAtFill/);
-  assert.match(locksSrc, /profile\.filled > 0 \? "Right now \(with fills\)" : "Right now \(not hedged\)"/);
+  // With fills the first Profit picture tile is just the two outcomes.
+  assert.doesNotMatch(locksSrc, /Right now \(with fills\)/);
+  assert.match(locksSrc, /If parlay hits <span className=\{profile\.current\.hit < 0 \? "neg" : "pos"\}>\{signedMoney\(profile\.current\.hit\)\}<\/span>/);
+  assert.match(locksSrc, /If it loses <span className=\{missTone\}>\{signedMoney\(profile\.current\.miss\)\}<\/span>/);
+  assert.match(locksSrc, /const missTone = profile\.current\.miss < 0 \? "neg" : "pos";/);
+  // Whole card summary toggles Details; real controls do not.
+  assert.match(viewSrc, /className="lk-sum"\s+role="button"\s+tabIndex=\{0\}\s+aria-expanded=\{!!open\}/);
+  assert.match(viewSrc, /onClick=\{summaryClick\}/);
+  assert.match(viewSrc, /onKeyDown=\{summaryKey\}/);
+  assert.match(viewSrc, /className="lk-ctl" data-no-toggle=""/);
   assert.match(locksSrc, /\.cl \.pos\{color:#34d399\}\.cl \.neg\{color:#f87171\}\.cl \.muted\{color:#8a8f98\}/);
   assert.doesNotMatch(locksSrc, /className="v num">\{profile\.current\.text\}/);
   assert.match(locksSrc, /Risk-free — floor \$0, keep upside/);

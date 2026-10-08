@@ -297,43 +297,45 @@ function OutcomeChip({ out, filled }) {
 function RiskProfile({ parlay, filled }) {
   const profile = lockProfile(parlay, filled);
   if (!profile.current) return null;
-  const standingLocked = profile.filled > 0 && !(profile.current.miss < 0);
   const freeBet = profile.current.kind === "freebet";
   const missTone = profile.current.miss < 0 ? "neg" : "pos";
   return (
     <div className="profile">
-      <div className="tile">
-        <div className="k">{profile.filled > 0 ? "Right now (with fills)" : "Right now (not hedged)"}</div>
-        <div className="v num">
-          {standingLocked ? (
-            <>
-              <span className="pos">{signedMoney(profile.current.hit)}</span>
-              {" / "}
-              <span className="pos">{signedMoney(profile.current.miss)}</span>
-            </>
-          ) : freeBet ? (
-            <>
-              <span className="pos">{((profile.current.conversionRate || 0) * 100).toFixed(1)}%</span>
-              <span className="muted"> conversion · </span>
-              <span className="pos">{moneyAbs(profile.current.unhedgedUpside ?? profile.current.profit)}</span>
-              <span className="muted"> unhedged upside</span>
-            </>
-          ) : (
-            <>
-              <span className="muted">risk </span>
-              <span className="neg">{moneyAbs(profile.current.risk)}</span>
-              <span className="muted"> for </span>
-              <span className="pos">{moneyAbs(profile.current.profit)}</span>
-              <span className="muted"> profit</span>
-            </>
-          )}
+      {profile.filled > 0 ? (
+        // With fills: just the two outcomes. Green when that side is a profit
+        // (a fully / over-hedged lock can be + even if the parlay loses).
+        <div className="tile now" data-tile="now">
+          <div className="v num">If parlay hits <span className={profile.current.hit < 0 ? "neg" : "pos"}>{signedMoney(profile.current.hit)}</span></div>
+          <div className="v num">If it loses <span className={missTone}>{signedMoney(profile.current.miss)}</span></div>
         </div>
-        <div className="sub">
-          If it hits <span className="pos">{signedMoney(profile.current.hit)}</span>
-          {" · "}
-          if it loses <span className={missTone}>{signedMoney(profile.current.miss)}</span>
+      ) : (
+        <div className="tile">
+          <div className="k">Right now (not hedged)</div>
+          <div className="v num">
+            {freeBet ? (
+              <>
+                <span className="pos">{((profile.current.conversionRate || 0) * 100).toFixed(1)}%</span>
+                <span className="muted"> conversion · </span>
+                <span className="pos">{moneyAbs(profile.current.unhedgedUpside ?? profile.current.profit)}</span>
+                <span className="muted"> unhedged upside</span>
+              </>
+            ) : (
+              <>
+                <span className="muted">risk </span>
+                <span className="neg">{moneyAbs(profile.current.risk)}</span>
+                <span className="muted"> for </span>
+                <span className="pos">{moneyAbs(profile.current.profit)}</span>
+                <span className="muted"> profit</span>
+              </>
+            )}
+          </div>
+          <div className="sub">
+            If it hits <span className="pos">{signedMoney(profile.current.hit)}</span>
+            {" · "}
+            if it loses <span className={missTone}>{signedMoney(profile.current.miss)}</span>
+          </div>
         </div>
-      </div>
+      )}
       <div className="tile">
         <div className="k">When fully hedged</div>
         {profile.target ? (
@@ -1327,6 +1329,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .tile .sub{font-size:12px;color:#8a8f98;margin-top:4px;line-height:1.4}
         .cl .profile{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 4px}
         .cl .profile .tile .v{font-size:15px;line-height:1.35}
+        .cl .profile .tile.now{display:flex;flex-direction:column;justify-content:center;gap:4px}
+        .cl .profile .tile.now .v{margin-top:0}
         .cl .pos{color:#34d399}.cl .neg{color:#f87171}.cl .muted{color:#8a8f98}
         .cl .kv{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:14px}
         .cl .note{font-size:13px;padding:8px 10px;border-radius:8px;margin-top:8px}.cl .note.ok{background:rgba(16,185,129,.12);color:#6ee7b7}.cl .note.warn{background:rgba(245,158,11,.12);color:#fcd34d}

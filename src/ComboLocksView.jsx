@@ -7,6 +7,7 @@ import {
   lockMetaLine, lockTitle, plainLeg, profitLine, QUOTE_ROWS_SHOWN, signedDollars,
 } from "./comboLockView";
 import { STATEMENT_DATE_FILTERS } from "./comboStatement";
+import { shouldToggleFromCard } from "./comboCardToggle.js";
 
 export const COMBO_VIEW_CSS = `
   .cl .cl-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
@@ -52,6 +53,11 @@ export const COMBO_VIEW_CSS = `
   .cl .lk.lk-stopped{border-left-color:rgba(248,113,113,.75)}
   .cl .lk.lk-off{border-left-color:rgba(255,255,255,.2)}
   .cl .lk.open{border-color:rgba(147,197,253,.3)}
+  .cl .lk{transition:border-color .12s,background-color .12s}
+  .cl .lk-sum{cursor:pointer;border-radius:10px;outline:none}
+  .cl .lk:has(.lk-sum:hover){border-color:rgba(147,197,253,.28);background-color:rgba(255,255,255,0.035)}
+  .cl .lk-sum:focus-visible{box-shadow:0 0 0 2px rgba(147,197,253,.55)}
+  .cl .lk-sum .lk-ctl,.cl .lk-sum button{cursor:pointer}
   .cl .lk-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .cl .lk-title{font-size:16px;font-weight:700;line-height:1.35;flex:1 1 260px;min-width:0;color:#f3f4f6}
   .cl .lk-ctl{display:flex;align-items:center;gap:8px;margin-left:auto}
@@ -301,14 +307,28 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
   const cap = Number(ceiling) > 0 ? Number(ceiling) : Number(parlay && parlay.max_contracts) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((Number(filled || 0) / cap) * 100)) : 0;
   const pl = profitLine(profile);
+  const summaryClick = (e) => { if (shouldToggleFromCard(e)) onToggle(); };
+  const summaryKey = (e) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); }
+  };
   return (
     <article className={"lk lk-" + status.key + (open ? " open" : "")} id={"lock-" + parlay.id}>
+      <div
+        className="lk-sum"
+        role="button"
+        tabIndex={0}
+        aria-expanded={!!open}
+        aria-label={(open ? "Hide details for " : "Show details for ") + lockTitle(parlay)}
+        onClick={summaryClick}
+        onKeyDown={summaryKey}
+      >
       <div className="lk-top">
         <StatusPill status={status} />
         <div className="lk-title">{lockTitle(parlay)}</div>
-        <div className="lk-ctl">
+        <div className="lk-ctl" data-no-toggle="">
           {controls}
-          <button type="button" className="btn mini" aria-expanded={!!open} onClick={onToggle}>
+          <button type="button" className="btn mini" aria-expanded={!!open} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
             {open ? "Hide details ▴" : "Details ▾"}
           </button>
         </div>
@@ -328,6 +348,7 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
         </div>
       )}
       <div className="lk-hint">{status.hint}</div>
+      </div>
       {open ? <div className="lk-details">{children}</div> : null}
     </article>
   );
