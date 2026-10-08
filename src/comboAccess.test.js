@@ -280,7 +280,7 @@ assert.equal(clearComboHash("#profile"), "#profile");
 
   assert.match(locks, /canSeeComboLocks\(user\)/);
   assert.match(locks, /focusLockId/);
-  assert.match(locks, /id=\{\"lock-\" \+ p\.id\}/);
+  assert.match(fs.readFileSync(path.join(dir, "ComboLocksView.jsx"), "utf8"), /id=\{"lock-" \+ parlay\.id\}/);
   assert.doesNotMatch(locks, /This tab is private/);
   assert.doesNotMatch(locks, /UNHEDGED_RFQ_LIVE/);
 

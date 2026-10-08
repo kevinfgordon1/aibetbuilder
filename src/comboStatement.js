@@ -443,6 +443,8 @@ export function lockStatementLine({
     bucket,
     settled,
     pnl,
+    // Which way the parlay went: hit | miss | push | null (still open).
+    side: settled ? side : null,
     resultKind,
     resultLabel,
     resultFilter,

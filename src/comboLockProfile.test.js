@@ -148,9 +148,11 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
 
 {
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
-  assert.equal((locksSrc.match(/<StakeOddsChip parlay=\{/g) || []).length, 3);
-  assert.match(locksSrc, /<StakeOddsChip parlay=\{p\} \/>/);
-  assert.match(locksSrc, /<StakeOddsChip parlay=\{a\} \/>/);
+  // Stake @ odds now lives in the shared LockCard ("Your bet") and History rows.
+  const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
+  assert.match(viewSrc, /<Fact k="Your bet" v=\{s\.betLine\}/);
+  assert.match(viewSrc, /<th>Your bet<\/th>/);
+  assert.match(locksSrc, /<LockCard/);
   assert.doesNotMatch(locksSrc, /have \{fmtAm/);
   assert.match(locksSrc, /moneyAbs\(profile\.current\.risk\)/);
   assert.match(locksSrc, /moneyAbs\(profile\.current\.profit\)/);
@@ -163,9 +165,7 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.match(locksSrc, /is_free_bet/);
   assert.match(locksSrc, /hedgeCap/);
   assert.match(locksSrc, /decideAtFill/);
-  assert.match(locksSrc, /Current \(standing\)/);
-  assert.match(locksSrc, /Current \(unhedged\)/);
-  assert.match(locksSrc, /profile\.filled > 0 \? "Current \(standing\)" : "Current \(unhedged\)"/);
+  assert.match(locksSrc, /profile\.filled > 0 \? "Right now \(with fills\)" : "Right now \(not hedged\)"/);
   assert.match(locksSrc, /\.cl \.pos\{color:#34d399\}\.cl \.neg\{color:#f87171\}\.cl \.muted\{color:#8a8f98\}/);
   assert.doesNotMatch(locksSrc, /className="v num">\{profile\.current\.text\}/);
   assert.match(locksSrc, /Risk-free — floor \$0, keep upside/);
@@ -174,8 +174,8 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.match(locksSrc, /2× — directional short \(can lose big\)/);
   assert.doesNotMatch(locksSrc, /<option value="3x">/);
   assert.match(locksSrc, /"3x": "3× \(directional\)"/);
-  assert.match(locksSrc, /if the parlay wins/);
-  assert.match(locksSrc, /if the parlay loses/);
+  assert.match(locksSrc, /if the parlay hits/);
+  assert.match(locksSrc, /if the parlay misses/);
 }
 
 {
@@ -404,11 +404,12 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
 // Partial-fill locks (Filled section) keep the "taker gets" + "fair" header chips, same as 0-fill locks.
 {
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
-  assert.equal((locksSrc.match(/<TakerFairChips parlay=\{p\} \/>/g) || []).length, 2);
+  // One shared renderLock() card for both sections, so both keep the chips.
+  assert.equal((locksSrc.match(/<TakerFairChips parlay=\{p\} \/>/g) || []).length, 1);
   assert.match(locksSrc, /function TakerFairChips\(\{ parlay \}\)/);
   assert.match(locksSrc, /parlay\.fair_american/);
-  const filledBlock = locksSrc.slice(locksSrc.indexOf("filledParlays.map((p) =>"), locksSrc.indexOf("<h3>", locksSrc.indexOf("filledParlays.map((p) =>")) > 0 ? locksSrc.indexOf("<DeskChips desk={desk} thin />") : undefined);
-  assert.match(filledBlock, /<TakerFairChips parlay=\{p\} \/>/);
+  assert.match(locksSrc, /waiting\.map\(\(p\) => renderLock\(p, \{ filledSection: false \}\)\)/);
+  assert.match(locksSrc, /filledParlays\.map\(\(p\) => renderLock\(p, \{ filledSection: true \}\)\)/);
 }
 
 console.log("comboLockProfile.test.js ok");

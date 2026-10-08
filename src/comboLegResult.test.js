@@ -450,13 +450,14 @@ assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
 {
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
   assert.match(locksSrc, /outcomeChrome/);
-  assert.match(locksSrc, /chip src/);
-  assert.match(locksSrc, /StatementBoard/);
+  // Source (Kalshi combo / ESPN) moved into the outcome chip tooltip.
+  assert.match(locksSrc, /Source: \$\{chrome\.sourceText\}/);
+  assert.match(locksSrc, /<ComboHistory/);
   assert.match(locksSrc, /className="hist-head"/);
-  assert.match(locksSrc, /Hide history" : "History"/);
-  assert.match(locksSrc, /Show lock detail/);
+  assert.match(locksSrc, /expanded \? "Hide" : "Show"/);
   assert.doesNotMatch(locksSrc, /History \+ profile/);
-  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
+  // One shared lock card (renderLock) for the Waiting and Filled sections.
+  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 1);
   assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
   const tapeSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboTape.jsx"), "utf8");
   assert.doesNotMatch(tapeSrc, /outcomeChrome|arch-head|hist-head/);
