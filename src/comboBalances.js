@@ -84,7 +84,7 @@ export function emptyBalances(now = new Date()) {
 export function cellText(cell) {
   if (!cell || cell.state === "waiting") return "Checking…";
   if (cell.state === "ok") return usd(cell.amount);
-  if (cell.amount != null) return `${usd(cell.amount)} (couldn't refresh)`;
+  if (cell.amount != null) return usd(cell.amount); // last good amount; cellNote explains
   return "Couldn't load";
 }
 
@@ -92,7 +92,7 @@ export function cellNote(cell, now = new Date()) {
   if (!cell) return "";
   if (cell.state === "waiting") return "First balance check runs within a minute.";
   if (cell.state === "stale") return cell.checkedAt ? `Not updated since ${etTime(cell.checkedAt, now)}.` : "Not updated recently.";
-  if (cell.state === "error") return cell.at ? `Last loaded ${etTime(cell.at, now)}.` : "Couldn't reach the exchange. Retrying every minute.";
+  if (cell.state === "error") return cell.at ? `Couldn't refresh · last loaded ${etTime(cell.at, now)}.` : "Couldn't reach the exchange. Retrying every minute.";
   return "";
 }
 

@@ -28,8 +28,8 @@ assert.equal(balanceCell({ ...fresh, checked_at: new Date(now.getTime() - BALANC
 assert.equal(cellText(balanceCell(fresh, now)), "$987.65");
 assert.equal(cellText(balanceCell(null, now)), "Checking…");
 assert.equal(cellText({ state: "error", amount: null }), "Couldn't load");
-assert.equal(cellText({ state: "error", amount: 5 }), "$5.00 (couldn't refresh)");
-assert.match(cellNote({ state: "error", at: "2026-10-08T18:10:00Z" }, now), /Last loaded 2:10 PM ET/);
+assert.equal(cellText({ state: "error", amount: 5 }), "$5.00");
+assert.match(cellNote({ state: "error", at: "2026-10-08T18:10:00Z" }, now), /Couldn't refresh · last loaded 2:10 PM ET/);
 assert.match(cellNote({ state: "stale", checkedAt: "2026-10-08T18:00:00Z" }, now), /Not updated since 2:00 PM ET/);
 
 const by = balancesByUser([

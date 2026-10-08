@@ -44,6 +44,8 @@ const TESTERS_CSS = `
 .cl .tst .tst-bal-cell .amt{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
 .cl .tst .tst-bal-cell .sub{font-size:11px;color:#8a8f98}
 .cl .tst .tst-bal-cell.err .amt{font-size:13px;color:#fca5a5}
+.cl .tst .tst-bal-cell.old .amt{color:#8a8f98}
+.cl .tst .tst-bal-cell.old .sub{color:#fcd34d}
 @media (max-width:600px){.cl .tst .tst-bal-cells{width:100%}.cl .tst .tst-bal-cell{flex:1 1 0}}
 @media (max-width:600px){.cl .tst-table thead{display:none}.cl .tst-table tr{display:block;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08)}.cl .tst-table td{display:flex;justify-content:space-between;gap:10px;border:0;padding:3px 0}.cl .tst-table td::before{content:attr(data-k);color:#8a8f98}}
 `;
@@ -153,7 +155,7 @@ function useLockNeeds(supabase, userId, enabled = true) {
 function BalanceCell({ label, cell, sub, hi, now }) {
   const bad = cell.state === "error" || cell.state === "stale";
   return (
-    <div className={"tst-bal-cell" + (hi ? " hi" : "") + (bad && cell.amount == null ? " err" : "")}>
+    <div className={"tst-bal-cell" + (hi ? " hi" : "") + (bad && cell.amount == null ? " err" : "") + (bad && cell.amount != null ? " old" : "")}>
       <div className="lbl">{label}</div>
       <div className="amt">{cellText(cell)}</div>
       {(cellNote(cell, now) || sub) && <div className="sub">{cellNote(cell, now) || sub}</div>}
