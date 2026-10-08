@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import {
   formatAmerican,
-  formatNoBid,
   fillBeatsMarket,
   probeDisabled,
   formatProbeNote,
@@ -14,7 +13,6 @@ import {
 assert.equal(formatAmerican(1200), "+1200");
 assert.equal(formatAmerican(-110), "-110");
 assert.equal(formatAmerican(null), "—");
-assert.equal(formatNoBid(0.92), "$0.92");
 
 assert.equal(fillBeatsMarket(1300, 1200), true);
 assert.equal(fillBeatsMarket(1200, 1200), false);
@@ -26,58 +24,39 @@ assert.equal(probeDisabled({ probing: true, legCount: 2, contracts: 750 }), true
 assert.equal(probeDisabled({ probing: false, legCount: 1, contracts: 750 }), true);
 assert.equal(probeDisabled({ probing: false, legCount: 2, contracts: 0 }), true);
 
-assert.match(
-  formatProbeNote({
-    ok: true,
-    bestAmerican: 1184,
-    bestNoBid: 0.92,
-    quoteCount: 3,
-    contracts: 750,
-    waitedMs: 4000,
-    suggestFillAmerican: 1329,
-  }, 1000),
-  /Best market \+1184 \(NO \$0\.92\) from 3 quotes at 750 contracts/,
+// Plain words, American odds only: no NO cents, no request ids.
+assert.equal(
+  formatProbeNote({ ok: true, bestAmerican: 2577, bestNoBid: 0.96, quoteCount: 14, contracts: 2811, waitedMs: 8000, suggestFillAmerican: 3291, rfqId: "f3df1234" }, 2571),
+  "Best price traders are paying right now: +2577 (14 quotes, 2,811 contracts). Your +2571 doesn't beat it. Try +3291 or better.",
 );
-assert.match(
-  formatProbeNote({
-    ok: true,
-    bestAmerican: 1184,
-    bestNoBid: 0.92,
-    quoteCount: 3,
-    suggestFillAmerican: 1329,
-  }, 1000),
-  /does not beat it.*Suggested fill \+1329/,
+assert.equal(
+  formatProbeNote({ ok: true, bestAmerican: 1184, bestNoBid: 0.92, quoteCount: 1 }, 1400),
+  "Best price traders are paying right now: +1184 (1 quote). Your +1400 beats it, so it should get taken.",
 );
-assert.match(
-  formatProbeNote({
-    ok: true,
-    bestAmerican: 1184,
-    bestNoBid: 0.92,
-    quoteCount: 1,
-  }, 1400),
-  /beats it/,
+assert.equal(
+  formatProbeNote({ ok: true, bestAmerican: 1184, quoteCount: 3, contracts: 750 }, null),
+  "Best price traders are paying right now: +1184 (3 quotes, 750 contracts).",
 );
-assert.match(
+assert.equal(
   formatProbeNote({ ok: true, quoteCount: 0, waitedMs: 4001, contracts: 583, rfqId: "rfq-abc" }, 414),
-  /0 quotes returned from Kalshi in 4001ms at 583 contracts\. RFQ rfq-abc\./,
+  "No trader quoted this parlay in 4 seconds (583 contracts). Try again closer to game time.",
 );
-assert.match(
-  formatProbeNote({
-    ok: true,
-    quoteCount: 3,
-    usableQuoteCount: 0,
-    bestAmerican: null,
-    waitedMs: 4001,
-    contracts: 583,
-    rfqId: "rfq-abc",
-  }, 414),
-  /3 quotes from Kalshi but no usable NO bid in 4001ms at 583 contracts\. RFQ rfq-abc\./,
+assert.equal(
+  formatProbeNote({ ok: true, quoteCount: 3, usableQuoteCount: 0, bestAmerican: null, waitedMs: 4001, contracts: 583, rfqId: "rfq-abc" }, 414),
+  "3 traders answered but none with a usable price (583 contracts). Try again closer to game time.",
 );
-assert.match(
+assert.equal(
   formatProbeNote({ ok: true, quoteCount: 0, waitedMs: 2100, listError: "must provide user filter" }, 414),
-  /Kalshi quote list failed in 2100ms: must provide user filter/,
+  "Couldn't read the market's quotes. Try again in a minute.",
 );
 assert.equal(formatProbeNote({ ok: false, error: "Sign in required" }), "Sign in required");
+for (const r of [
+  { ok: true, bestAmerican: 2577, bestNoBid: 0.96, quoteCount: 14, contracts: 2811, suggestFillAmerican: 3291, rfqId: "f3df1234" },
+  { ok: true, quoteCount: 0, rfqId: "rfq-abc" },
+]) {
+  const t = formatProbeNote(r, 2571);
+  assert.doesNotMatch(t, /NO \$|¢|\$0\.|rfq|RFQ|request [0-9a-f]|f3df/);
+}
 
 {
   const src = fs.readFileSync(path.join(__dirname, "ComboLocks.jsx"), "utf8");
@@ -87,6 +66,10 @@ assert.equal(formatProbeNote({ ok: false, error: "Sign in required" }), "Sign in
   assert.match(src, /\/api\/combo-probe/);
   assert.match(src, /authorization: "Bearer "/);
   assert.match(src, /waitMs:\s*8000/);
+  assert.match(src, /\{formatProbeNote\(probeResult, form\.fill === "" \? null : \+form\.fill\)\}/);
+  // Kevin removed these from the Add a lock form.
+  assert.doesNotMatch(src, /Load example|loadExample|Test a request|See what it would do|const simulate|setSim\(/);
+  assert.match(src, /className="add-lock" ref=\{createFormRef\}/);
 }
 
 console.log("comboProbe ui tests passed");
