@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X_OAUTH_PROVIDER, loadAuthSettings, oauthProviderEnabled, sendMagicLink, startOAuthSignIn } from "./signIn.js";
+import { X_LOGIN_ENABLED, X_OAUTH_PROVIDER, loadAuthSettings, oauthProviderEnabled, sendMagicLink, startOAuthSignIn } from "./signIn.js";
 
 function GoogleIcon() {
   return (
@@ -55,7 +55,7 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
       const facebook = oauthProviderEnabled(settings.external, "facebook");
       const google = oauthProviderEnabled(settings.external, "google");
       setGates({
-        x: x === true,
+        x: x === true || X_LOGIN_ENABLED,
         facebook: facebook === true,
         google: google !== false,
         probe: false,

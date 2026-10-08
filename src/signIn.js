@@ -14,6 +14,12 @@ export const AUTH_NEXT_PARAM = "auth_next";
 /** OAuth 2.0 provider id. Use "twitter" only on a supabase-js that lacks "x". */
 export const X_OAUTH_PROVIDER = "x";
 
+/**
+ * X (OAuth 2.0) is on in Supabase, but GET /auth/v1/settings has no `x` key
+ * (only legacy `twitter: false`), so settings alone would hide the button.
+ */
+export const X_LOGIN_ENABLED = true;
+
 export const SIGN_IN_PROVIDERS = Object.freeze(["google", X_OAUTH_PROVIDER, "facebook"]);
 
 const UNAVAILABLE = "Sign-in is temporarily unavailable. Please try again in a moment.";
