@@ -1,5 +1,5 @@
 // Combo Locks — private tab for the Kalshi combo RFQ auto-quoter.
-// Gated by canSeeComboLocks (OWNER_EMAIL + VITE_COMBO_LOCKS_ALLOWLIST). This
+// Gated by canSeeComboLocks (hardcoded COMBO_LOCKS_ACCOUNTS in comboAccess). This
 // component returns null for anyone else — no copy that names the feature.
 // Backed by Supabase (combo_parlays / combo_settings / combo_submissions) so the
 // always-on worker reads the same active parlays. NO live prices — the lock uses
@@ -38,6 +38,7 @@ import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
+import ComboTesters from "./ComboTesters";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT, bucketReadoutRows, bucketAgeLabel } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -1580,6 +1581,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         </div>
       )}
       <BucketReadout supabase={supabase} ready={deskReady} />
+      <ComboTesters user={user} supabase={supabase} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}

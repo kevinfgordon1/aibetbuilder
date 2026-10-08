@@ -196,19 +196,20 @@ function parseContracts(n) {
   return i;
 }
 
-function parseAllowlist(raw) {
-  if (raw == null || raw === '') return [];
-  return String(raw)
-    .split(/[,;\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+// Combo Locks is private. Who may see it is HARDCODED here (no env allowlist):
+// Kevin's two accounts plus one approved tester. Each entry pins the auth email
+// AND the auth uid, so a look-alike account or a stale env var cannot match.
+// Mirror of COMBO_LOCKS_ACCOUNTS in src/comboAccess.js; keep both in sync.
+const COMBO_LOCKS_ACCOUNTS = Object.freeze([
+  Object.freeze({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }),
+  Object.freeze({ email: 'kevin.f.gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }),
+  Object.freeze({ email: 'gmoneyvikes@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' }),
+]);
 
-function comboLocksAllowlist(env) {
-  const items = new Set([OWNER_EMAIL.toLowerCase()]);
-  const e = env || process.env;
-  const raw = e.VITE_COMBO_LOCKS_ALLOWLIST || e.COMBO_LOCKS_ALLOWLIST || '';
-  for (const token of parseAllowlist(raw)) items.add(token.toLowerCase());
+// Kept for callers that list who is allowed; env is ignored on purpose.
+function comboLocksAllowlist(_env) {
+  const items = new Set();
+  for (const a of COMBO_LOCKS_ACCOUNTS) { items.add(a.email); items.add(a.id); }
   return items;
 }
 
@@ -225,13 +226,11 @@ function isComboOwner(user) {
   return true;
 }
 
-function canSeeComboLocks(user, env) {
-  if (!user) return false;
-  const allowed = comboLocksAllowlist(env);
-  const tokens = [];
-  if (user.email) tokens.push(String(user.email).trim().toLowerCase());
-  if (user.id) tokens.push(String(user.id).trim().toLowerCase());
-  return tokens.some((t) => allowed.has(t));
+function canSeeComboLocks(user, _env) {
+  if (!user || !user.email || !user.id) return false;
+  const email = String(user.email).trim().toLowerCase();
+  const id = String(user.id).trim().toLowerCase();
+  return COMBO_LOCKS_ACCOUNTS.some((a) => a.email === email && a.id === id);
 }
 
 function selectedMarkets(legs) {
@@ -373,6 +372,7 @@ module.exports = {
   eventTickerFromMarket,
   normalizeLegs,
   parseContracts,
+  COMBO_LOCKS_ACCOUNTS,
   comboLocksAllowlist,
   canSeeComboLocks,
   selectedMarkets,
