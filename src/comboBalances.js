@@ -135,12 +135,17 @@ export function filledByParlay(fills) {
   return out;
 }
 
-/** Compact Balance cell for the owner table. */
+/** Compact Balance cell for the owner table. "*" = couldn't refresh (last amount). */
 export function adminBalanceText(b, { kalshi = true, poly = false } = {}) {
   if (!b) return "—";
-  const parts = [];
-  if (kalshi) parts.push(`Combo ${b.kalshiCombo.state === "ok" ? usd(b.kalshiCombo.amount, { cents: false }) : b.kalshiCombo.state === "waiting" ? "…" : b.kalshiCombo.amount != null ? usd(b.kalshiCombo.amount, { cents: false }) + "*" : "?"}`);
-  if (kalshi) parts.push(`Main ${b.kalshiMain.state === "ok" ? usd(b.kalshiMain.amount, { cents: false }) : b.kalshiMain.state === "waiting" ? "…" : b.kalshiMain.amount != null ? usd(b.kalshiMain.amount, { cents: false }) + "*" : "?"}`);
-  if (poly) parts.push(`PM ${b.poly.state === "ok" ? usd(b.poly.amount, { cents: false }) : b.poly.state === "waiting" ? "…" : b.poly.amount != null ? usd(b.poly.amount, { cents: false }) + "*" : "?"}`);
-  return parts.join(" · ");
+  const cells = [];
+  if (kalshi) cells.push(["Combo", b.kalshiCombo], ["Main", b.kalshiMain]);
+  if (poly) cells.push(["PM", b.poly]);
+  if (!cells.length) return "—";
+  if (cells.every(([, c]) => c.amount == null && (c.state === "error" || c.state === "stale"))) {
+    const err = cells.map(([, c]) => c.error).find(Boolean);
+    return `Couldn't load${err ? ` (${err})` : ""}`;
+  }
+  const one = (c) => (c.state === "waiting" ? "…" : c.amount == null ? "—" : usd(c.amount, { cents: false }) + (c.state === "ok" ? "" : "*"));
+  return cells.map(([k, c]) => `${k} ${one(c)}`).join(" · ");
 }

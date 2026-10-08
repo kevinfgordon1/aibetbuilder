@@ -45,7 +45,9 @@ assert.equal(by.u.updatedAt, "2026-10-08T18:19:30Z");
 assert.equal(by.v.kalshiCombo.state, "error");
 assert.equal(by.v.kalshiMain.state, "waiting");
 assert.equal(adminBalanceText(by.u, { kalshi: true, poly: true }), "Combo $988 · Main $5,000 · PM $250");
-assert.equal(adminBalanceText(by.v), "Combo ? · Main …");
+assert.equal(adminBalanceText(by.v), "Combo — · Main …");
+assert.equal(adminBalanceText({ kalshiCombo: { state: "error", amount: null, error: "HTTP 401" }, kalshiMain: { state: "error", amount: null, error: "HTTP 401" }, poly: { state: "waiting", amount: null } }), "Couldn't load (HTTP 401)");
+assert.equal(adminBalanceText({ kalshiCombo: { state: "stale", amount: 10 }, kalshiMain: { state: "ok", amount: 5 }, poly: {} }), "Combo $10* · Main $5");
 assert.equal(adminBalanceText(undefined), "—");
 
 // Worst-case need: remaining contracts x NO price.
