@@ -30,10 +30,10 @@ import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrom
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
-import { lockProfile, formatTargetLine, formatFillProgress, signedMoney, moneyAbs, formatStakeOddsChip, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
+import { lockProfile, signedMoney, moneyAbs, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
-import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
-import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, filledAttemptEvents, historyFillsEmptyText, historyFillsHeading, historyQuotesHeading, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqHeading, matchedRfqMatchedCount, matchedRfqWatcherParked, collapseAttempts, visibleAttempts } from "./comboLockHistory";
+import { downloadStatementCsv, useStatementView } from "./StatementBoard";
+import { attemptRepeatLabel, attemptSummaryFilled, attemptSummaryParts, buildLockAttempts, filledAttemptEvents, historyFillsEmptyText, matchedRfqCounts, matchedRfqEmptyText, matchedRfqFillRows, matchedRfqMatchedCount, matchedRfqWatcherParked, collapseAttempts, visibleAttempts } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
@@ -41,6 +41,8 @@ import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT, bucketReadoutRows, bucketAgeLabel } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
+import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, fmtAmerican as fmtAmOdds } from "./comboLockView";
+import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
   buildMergePlan,
   findDuplicateGroups,
@@ -97,19 +99,13 @@ const MODE_LABEL = {
   "2x": "2× (directional)",
   "3x": "3× (directional)",
 };
-const QUOTE_CHIP = {
-  watching: { bg: "rgba(16,185,129,.15)", color: "#6ee7b7", mark: "● ", title: "The worker is watching the RFQ firehose for this combo." },
-  paused: { bg: "rgba(245,158,11,.15)", color: "#fcd34d", mark: "⏸ ", title: "The worker paused this parlay. It is NOT watching for RFQs until you reactivate it." },
-  kill: { bg: "rgba(239,68,68,.18)", color: "#fca5a5", mark: "⛔ ", title: "Kill-switch engaged — the live worker posts nothing." },
-  ceiling: { bg: "rgba(139,92,246,.22)", color: "#c4b5fd", mark: "", title: "Ceiling reached — remaining fill is 0, so the worker stopped quoting this combo." },
-};
 // Per-lock pause: off = the worker stops quoting this lock (Kalshi + Polymarket) and cancels its
 // open quotes. Independent of the kill switch. Fills/history are kept.
 function PauseToggle({ parlay, onToggle, busy }) {
   const paused = isLockPaused(parlay);
   return (
     <span className="pl-keep pause-wrap" title={pauseToggleTitle(paused)}>
-      <span className="pause-lbl">{paused ? "Paused" : "Quoting"}</span>
+      <span className="pause-lbl">Active</span>
       <button
         type="button"
         role="switch"
@@ -121,10 +117,6 @@ function PauseToggle({ parlay, onToggle, busy }) {
       ><span className="knob" /></button>
     </span>
   );
-}
-function PausedBadge({ parlay }) {
-  if (!isLockPaused(parlay)) return null;
-  return <span className="chip pl-keep paused-badge" title="Paused: the worker is not quoting this lock on Kalshi or Polymarket. Fills and history are kept.">Paused</span>;
 }
 
 // Read-only Kalshi balances from the combo-worker bucket snapshot (owner only, via /api/combo-bucket).
@@ -193,16 +185,6 @@ function CopyLockLink({ lockId }) {
   );
 }
 
-function QuoteChip({ quote }) {
-  if (!quote) return null;
-  const s = QUOTE_CHIP[quote.key] || QUOTE_CHIP.watching;
-  return <span className="chip" style={{ background: s.bg, color: s.color }} title={s.title}>{s.mark}{quote.label}</span>;
-}
-function StakeOddsChip({ parlay }) {
-  const text = formatStakeOddsChip(parlay);
-  if (!text) return null;
-  return <span className="chip num" title="Original soft-book stake at the odds you put on — not the RFQ fill.">{text}</span>;
-}
 // "taker gets" + "fair" header chips. Shared by the Active (0 fills) and Filled (≥1 fill) lock headers so
 // a partially-filled lock keeps them — both come from the saved lock (fill_american / fair_american).
 function TakerFairChips({ parlay }) {
@@ -212,8 +194,8 @@ function TakerFairChips({ parlay }) {
   const beatsFair = eff && eff.effTaker != null && fair != null && eff.effTaker >= fair;
   return (
     <>
-      {eff && eff.effTaker != null && <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>taker gets {fmtAm(eff.effTaker)}</span>}
-      {fair != null && <span className="chip num">fair {fmtAm(fair)}</span>}
+      {eff && eff.effTaker != null && <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>Buyer gets {fmtAm(eff.effTaker)} after their fee</span>}
+      {fair != null && <span className="chip num" title="Your estimate of the fair price for this parlay.">Fair odds {fmtAm(fair)}</span>}
     </>
   );
 }
@@ -260,10 +242,10 @@ function MergedOrder({ parlay, bets, fills, onUndo, busy }) {
   });
   return (
     <div style={{ marginTop: 8 }}>
-      <span className="chip">Merged from {rows.length} bets</span>
+      <span className="chip">Combined from {rows.length} sportsbook bets</span>
       {econ && (
         <div className="num" style={{ fontSize: 13, marginTop: 6 }}>
-          at risk {formatDollars(econ.totalAtRisk)} · win {formatDollars(econ.totalProfit)} · true odds {formatAmerican(econ.trueAmericanExact)}
+          At risk {formatDollars(econ.totalAtRisk)} · wins {formatDollars(econ.totalProfit)} · combined odds {formatAmerican(econ.trueAmericanExact)}
         </div>
       )}
       <ul className="merged-list">
@@ -307,8 +289,7 @@ function OutcomeChip({ out, filled }) {
   const title = outcomeChipTitle(chrome);
   return (
     <span className="outcome-pair">
-      <span className={"chip " + outcomeChipClass(chrome)} title={title}>{chrome.text}</span>
-      {chrome.sourceText ? <span className="chip src" title={title}>{chrome.sourceText}</span> : null}
+      <span className={"chip " + outcomeChipClass(chrome)} title={title + (chrome.sourceText ? ` Source: ${chrome.sourceText}.` : "")}>{plainOutcomeText(chrome.text)}</span>
     </span>
   );
 }
@@ -321,7 +302,7 @@ function RiskProfile({ parlay, filled }) {
   return (
     <div className="profile">
       <div className="tile">
-        <div className="k">{profile.filled > 0 ? "Current (standing)" : "Current (unhedged)"}</div>
+        <div className="k">{profile.filled > 0 ? "Right now (with fills)" : "Right now (not hedged)"}</div>
         <div className="v num">
           {standingLocked ? (
             <>
@@ -353,26 +334,26 @@ function RiskProfile({ parlay, filled }) {
         </div>
       </div>
       <div className="tile">
-        <div className="k">Target (after RFQ fills)</div>
+        <div className="k">When fully hedged</div>
         {profile.target ? (
           <>
             <div className={"v num " + (profile.target.locks ? "pos" : "neg")}>{signedMoney(profile.target.hit)} / {signedMoney(profile.target.miss)}</div>
-            <div className="sub">{formatTargetLine(profile.target)}</div>
+            <div className="sub">{profile.target.contracts.toLocaleString("en-US")} contracts · {profile.target.locks ? "profit locked either way" : "doesn't fully lock"}</div>
           </>
         ) : (
           <>
-            <div className="v num" style={{ color: "#fcd34d" }}>target TBD</div>
-            <div className="sub">Need fill odds and a contract cap to compute the hedge.</div>
+            <div className="v num" style={{ color: "#fcd34d" }}>Not set yet</div>
+            <div className="sub">Add your sell odds and a size to see the locked profit.</div>
           </>
         )}
       </div>
       <div className="tile">
-        <div className="k">Fills toward target</div>
-        <div className="v num">{formatFillProgress(profile)}</div>
+        <div className="k">Hedged so far</div>
+        <div className="v num">{profile.targetTbd ? "Not set yet" : `${profile.filled.toLocaleString("en-US")} of ${Number(profile.targetContracts).toLocaleString("en-US")} contracts`}</div>
         <div className="sub">
           {profile.filled > 0 && profile.soFar
             ? `so far ${signedMoney(profile.soFar.hit)} / ${signedMoney(profile.soFar.miss)}`
-            : (isFreeBetLock(parlay) ? "0 filled — still the unhedged free bet" : "0 filled — still the unhedged book bet")}
+            : (isFreeBetLock(parlay) ? "Nothing filled yet. It's still just your free bet." : "Nothing filled yet. It's still just your sportsbook bet.")}
         </div>
       </div>
     </div>
@@ -396,31 +377,31 @@ function AttemptSummary({ attempts }) {
         <span
           className={"chip num hist-sum " + (attemptSummaryFilled(attempts) ? "ok" : "warn")}
           title="Miss-tape skips — Kalshi and Polymarket"
-        >{parts.skip}</span>
+        >{plainAttemptLabel(parts.skip)}</span>
       )}
       {parts.miss && (
         <span
           className="chip num hist-sum warn"
           title="Quoted misses — posted, no take. Kalshi and Polymarket"
-        >{parts.miss}</span>
+        >{plainAttemptLabel(parts.miss)}</span>
       )}
     </>
   );
 }
 function AttemptRows({ events }) {
   return (
-    <table><thead><tr><th>Time</th><th>Status</th><th>Size</th><th>Venue</th></tr></thead>
+    <div className="tbl-wrap"><table><thead><tr><th>Time (ET)</th><th>What happened</th><th>Size</th><th>Where</th></tr></thead>
       <tbody>{events.map((e, i) => (
         <tr key={(e.at || e.key) + "-" + e.reason + "-" + i}>
           <td>{e.count > 1
             ? <span className="hist-rpt" title={`${e.count} identical attempts`}>{attemptRepeatLabel(e)}</span>
-            : (e.at ? new Date(e.at).toLocaleString() : "—")}</td>
-          <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{e.label}</td>
+            : etStamp(e.at)}</td>
+          <td style={{ color: ATTEMPT_COLOR[e.key] || "#c3c6cc" }}>{plainAttemptLabel(e.label)}</td>
           <td className="num">{e.contracts != null ? e.contracts : "—"}</td>
           <td><VenueChip venue={e.venue} venueKey={e.venueKey} /></td>
         </tr>
       ))}</tbody>
-    </table>
+    </table></div>
   );
 }
 function AttemptHistory({ attempts, open = true, onToggle, showSummary = true }) {
@@ -430,15 +411,15 @@ function AttemptHistory({ attempts, open = true, onToggle, showSummary = true })
   const fillsEmpty = historyFillsEmptyText(attempts);
   const toggleable = typeof onToggle === "function";
   const expanded = toggleable ? !!open : true;
-  const heading = "History";
+  const heading = "Activity";
   const summary = showSummary ? <AttemptSummary attempts={attempts} /> : null;
   const body = (
     <>
-      <div className="hist-sub">{historyFillsHeading(attempts)}</div>
-      {fillEvents.length === 0 ? <div className="empty">{fillsEmpty}</div> : <AttemptRows events={fillEvents} />}
-      <div className="hist-sub">{historyQuotesHeading()}</div>
+      <div className="hist-sub">{(() => { const c = matchedRfqCounts(attempts); return c.filled > 0 ? `Fills · ${c.filled} order${c.filled === 1 ? "" : "s"}${c.contracts > 0 ? ` · ${c.contracts} contracts` : ""}` : "Fills"; })()}</div>
+      {fillEvents.length === 0 ? <div className="empty">{plainAttemptLabel(fillsEmpty).replace(/see History and the fill bar|see the fill bar/, "see the Hedged bar")}</div> : <AttemptRows events={fillEvents} />}
+      <div className="hist-sub">Every offer and skip</div>
       {summary && !toggleable ? <div className="hist-static" style={{ marginTop: 0 }}>{summary}</div> : null}
-      {shown.length === 0 ? <div className="empty">No attempts recorded.</div> : <AttemptRows events={shown} />}
+      {shown.length === 0 ? <div className="empty">Nothing yet.</div> : <AttemptRows events={shown} />}
       {extra > 0 && <div className="empty">Showing newest {shown.length} rows. {extra} older omitted.</div>}
     </>
   );
@@ -450,33 +431,15 @@ function AttemptHistory({ attempts, open = true, onToggle, showSummary = true })
           className="hist-head"
           onClick={onToggle}
           aria-expanded={expanded}
-          title={expanded ? "Hide attempt history" : "Show attempt history"}
+          title={expanded ? "Hide activity" : "Show every offer, skip and fill for this lock"}
         >
           <span className="arch-caret" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
           <span>{heading}</span>
           {summary}
-          <span className="chip hist-toggle">{expanded ? "Hide history" : "History"}</span>
+          <span className="chip hist-toggle">{expanded ? "Hide" : "Show"}</span>
         </button>
       ) : null}
       {expanded ? body : null}
-    </div>
-  );
-}
-function FillProgress({ desk, thin }) {
-  if (!desk) return null;
-  const { fill, quoted } = desk;
-  return (
-    <div style={{ marginTop: thin ? 6 : 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 }}>
-        <span style={{ color: "#8a8f98", fontWeight: 600 }} title="Remaining ceiling accumulates across RFQs — the next quote can only take what's left.">{thin ? "Fill" : "Real fills (Kalshi account)"}</span>
-        <span className="num" style={{ color: fill.filled > 0 ? "#34d399" : "#6b7280" }}>
-          {fill.filled} of {fill.ceiling}{overFillText(fill)} filled · {fill.left} left{quoted > fill.filled ? ` · ${quoted} quoted` : ""}
-        </span>
-      </div>
-      <div className={thin ? "bar thin" : "bar"}><div className="bar-fill" style={{ width: fill.pct + "%" }} /></div>
-      {!thin && quoted > fill.filled && (
-        <div style={{ fontSize: 11, color: "#fcd34d", marginTop: 3 }}>⚠ {quoted} contracts quoted, only {fill.filled} confirmed filled by Kalshi — the difference wasn’t accepted (or hasn’t executed yet).</div>
-      )}
     </div>
   );
 }
@@ -487,9 +450,9 @@ function DeskChips({ desk, thin }) {
   if (!skip && !loss && !(desk.awaiting && !thin)) return null;
   return (
     <div className={"desk" + (thin ? " thin" : "")}>
-      {desk.awaiting && !thin && <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#93c5fd" }} title="A quote was posted for this combo but the taker hasn't accepted it — no position held yet.">quote posted — awaiting acceptance</span>}
-      {skip && <span className="chip skip num" title="Matched RFQ the worker did not quote. Oversized RFQs are skipped (Kalshi makers cannot partial-fill).">{skip.text}</span>}
-      {loss && <span className="chip loss num" title="Last lost quote. Tape-matched no_purchase / outbid rows show the inferred clearing price.">{loss.text}</span>}
+      {desk.awaiting && !thin && <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#93c5fd" }} title="An offer is out for this parlay, but no buyer has taken it yet.">Offer out · waiting for a buyer</span>}
+      {skip && <span className="chip skip num" title="Matched RFQ the worker did not quote. Oversized RFQs are skipped (Kalshi makers cannot partial-fill).">Last skip: {plainAttemptLabel(skip.text)}</span>}
+      {loss && <span className="chip loss num" title="Last lost quote. Tape-matched no_purchase / outbid rows show the inferred clearing price.">Last miss: {plainAttemptLabel(loss.text)}</span>}
     </div>
   );
 }
@@ -527,13 +490,13 @@ function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, de
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 10 }}>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".5px", color: "#6b7280", marginBottom: 6 }}>
-        {matchedRfqHeading(attempts)}
+        Matched requests{counts.filled ? ` · ${counts.filled} filled` : ""}
       </div>
       {parked ? (
-        <div className="empty" style={{ paddingTop: 0, paddingBottom: 6 }}>Quote-watcher is parked. Fill rows come from combo_fills / filled submissions, not watcher combo_matches.</div>
+        <div className="empty" style={{ paddingTop: 0, paddingBottom: 6 }}>The request watcher is paused. Fills below still come straight from your account.</div>
       ) : null}
-      {counts.filled === 0 ? <div className="empty">{empty}</div> : (
-        <table><thead><tr><th>Time</th><th>Venue</th><th>Requested</th><th>Lockable</th><th>Worst</th><th>You quoted</th><th>Outcome</th><th>Why · speed</th></tr></thead>
+      {counts.filled === 0 ? <div className="empty">{plainAttemptLabel(empty).replace("in History", "under Activity").replace(/see History and the fill bar/, "see the Hedged bar")}</div> : (
+        <div className="tbl-wrap"><table><thead><tr><th>Time (ET)</th><th>Where</th><th>Size</th><th>Locks profit?</th><th>Worst case</th><th>You offered</th><th>Outcome</th><th>Notes</th></tr></thead>
           <tbody>{tapeRows.map((row) => {
             const m = (row.rfqId && matchByRfq[row.rfqId]) || null;
             const oc = (row.rfqId && outcomeByRfq[row.rfqId]) || row.outcome || null;
@@ -541,7 +504,7 @@ function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, de
             const contracts = (m && m.contracts != null) ? m.contracts : row.contracts;
             const req = m && m.sizing === "dollar" ? `$${m.target_dollars} (dollar)` : `${contracts != null ? contracts : "—"} contracts`;
             const locks = m ? m.locks : null;
-            const lockable = locks === true ? "✓ yes" : locks === false ? "no" : "—";
+            const lockable = locks === true ? "Yes" : locks === false ? "No" : "—";
             const worst = (m && m.worst != null) ? m.worst : (twin && twin.worst_lock != null ? twin.worst_lock : null);
             const skip = !oc ? skipLabel({
               ...(m || {}),
@@ -556,20 +519,21 @@ function MatchedRfqTable({ attempts, matches, submissions, outcomeByRfq = {}, de
             const quotedNo = oc && oc.submitted_no_bid != null ? oc.submitted_no_bid
               : (oc && oc.no_bid != null ? oc.no_bid : row.ourNo);
             const speed = oc && oc.responded_ms != null ? `${(oc.responded_ms / 1000).toFixed(1)}s${oc.rfq_lifetime_ms != null ? `/${(oc.rfq_lifetime_ms / 1000).toFixed(1)}s` : ""}` : "";
-            const whyBits = [why, tape && oc && oc.outcome === "lost" && !String(why).includes("¢") ? `tape ${tape}` : "", speed].filter(Boolean);
+            const tapeAm = tape ? americanFromNoPrice(parseFloat(tape) / 100) : null;
+            const whyBits = [plainAttemptLabel(why), tapeAm != null && oc && oc.outcome === "lost" && !String(why).includes("¢") ? `market ${fmtAmOdds(tapeAm)}` : "", speed].filter(Boolean);
             return (
               <tr key={row.rfqId || row.fillId || `${row.at}-${row.contracts}`}>
-                <td>{row.at ? new Date(row.at).toLocaleTimeString() : "—"}</td>
+                <td>{etStamp(row.at)}</td>
                 <td><VenueChip venue={row.venue} venueKey={row.venueKey} /></td>
                 <td className="num">{req}</td>
                 <td className="num" style={{ color: locks === true ? "#6ee7b7" : locks === false ? "#fcd34d" : "#6b7280" }}>{lockable}</td>
                 <td className="num">{worst != null ? money(worst) : "—"}</td>
-                <td className="num">{quotedNo != null ? `NO $${Number(quotedNo).toFixed(2)}` : "—"}</td>
-                <td style={{ color: ocCol }}>{ocLbl}</td>
+                <td className="num">{quotedNo != null ? fmtAmOdds(americanFromNoPrice(quotedNo)) : "—"}</td>
+                <td style={{ color: ocCol }}>{plainAttemptLabel(ocLbl)}</td>
                 <td style={{ color: "#8a8f98" }}>{whyBits.join(" · ")}</td>
               </tr>
             );
-          })}</tbody></table>
+          })}</tbody></table></div>
       )}
     </div>
   );
@@ -1431,6 +1395,72 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       </optgroup>) : null);
   };
   const res = sim.result;
+  const historyTotalsAll = historyTotals(historyStatement.lines);
+  const historyEmptyText = `Nothing here yet. A lock moves to History about ${HISTORY_BUFFER_HOURS} hours after its game starts, or when you tap "Move to history".`;
+  const matchedCountText = (p) => {
+    const mc = matchCounts[p.id];
+    const n = Math.max((mc && mc.n) || 0, matchedRfqMatchedCount(attemptsByParlay[p.id]));
+    if (!n) return "";
+    return `Matched ${n} request${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} would lock profit)` : ""}`;
+  };
+  // One lock card for both the Waiting and Filled sections. Summary up top,
+  // everything technical behind Details.
+  const renderLock = (p, { filledSection }) => {
+    const desk = deskByParlay[p.id];
+    const filledN = filledSection ? (desk ? desk.fill.filled : (realFills[p.id] || 0)) : (realFills[p.id] || 0);
+    const ceiling = desk && desk.fill ? desk.fill.ceiling : p.max_contracts;
+    const status = lockStatus({ parlay: p, filled: filledN, ceiling, kill: deskReady && !deskLoading ? kill : false });
+    const out = outcomeChrome(lockOutcome(p, filledN), { filled: filledN > 0 });
+    const matched = matchedCountText(p);
+    const open = !!openParlays[p.id];
+    const toggle = () => setOpenParlays((o) => {
+      const next = !o[p.id];
+      return { ...o, [p.id]: next, ...(next ? {} : { ["hist-" + p.id]: false }) };
+    });
+    return (
+      <LockCard
+        key={p.id}
+        parlay={p}
+        status={status}
+        profile={lockProfile(p, filledN)}
+        filled={filledN}
+        ceiling={ceiling}
+        overText={desk && desk.fill ? overFillText(desk.fill) : ""}
+        open={open}
+        onToggle={toggle}
+        controls={<PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />}
+      >
+        <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
+        <DetailBlock title="Profit picture"><RiskProfile parlay={p} filled={filledN} /></DetailBlock>
+        <DetailBlock title="Price and size">
+          <div className="chips">
+            <span className="chip fill num">Selling at {fmtAm(p.fill_american)}</span>
+            <TakerFairChips parlay={p} />
+            <span className="chip">{MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"}</span>
+            <span className="chip num">Up to {p.max_contracts} contracts</span>
+            {matched && <span className="chip num">{matched}</span>}
+            {p.starts_at
+              ? <span className="chip">Moves to History {etDateTime(historyMoveAt(p.starts_at))}</span>
+              : <span className="chip">Move to History by hand when the games end</span>}
+            {out && out.kind !== "pending" && <OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} />}
+          </div>
+          {desk && desk.quoted > desk.fill.filled && (
+            <div className="note warn">We offered {desk.quoted.toLocaleString("en-US")} contracts and {desk.fill.filled.toLocaleString("en-US")} were confirmed filled. The rest weren't taken (or haven't gone through yet).</div>
+          )}
+          <DeskChips desk={desk} />
+        </DetailBlock>
+        <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
+        <div className="actions">
+          <CopyLockLink lockId={p.id} />
+          {p.active === false && (!filledSection || (desk && desk.fill.left > 0)) && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Start offering this lock again">Reactivate</button>}
+          <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Stop offering it and move it to History">Move to history</button>
+          {!filledSection && <button className="btn mini danger" onClick={() => { if (window.confirm("Remove this lock? It stops being offered and is deleted.")) removeParlay(p.id); }}>Remove</button>}
+        </div>
+        <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} showSummary={false} />
+        {matchedRfqCounts(attemptsByParlay[p.id]).filled > 0 && <MatchedRfqTable attempts={attemptsByParlay[p.id]} matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
+      </LockCard>
+    );
+  };
 
   return (
     <div className="cl">
@@ -1526,25 +1556,45 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .info::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);border:6px solid transparent;border-top-color:#0c1016;opacity:0;transition:opacity .12s;z-index:31}
         .cl .info:hover::after,.cl .info:focus::after,.cl .info:hover::before,.cl .info:focus::before{opacity:1}
       `}</style>
+      <style>{COMBO_VIEW_CSS}</style>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>Combo Locks</div>
-        <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }}>games: {srcLive ? "live" : "sample"}</span>
-        {deskLoading && <span className="chip">loading desk…</span>}
-        {!deskLoading && deskError && (deskChrome.sourceUnhealthy
-          ? <DataSourceChip status={deskHealth} label="Supabase flaky" />
-          : <span className="chip">refresh failed</span>)}
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 13, color: "#8a8f98", fontWeight: 600 }}>Kill-switch</span>
-        <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} aria-label="kill switch" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading desk…" : (kill ? "Kill-switch on — worker posts nothing" : "Kill-switch off")}><span className="knob" /></button>
+      <div className="cl-head">
+        <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          <div className="cl-title">Combo Locks</div>
+          <div className="cl-sub">Lock in profit on a sportsbook parlay by offering the same parlay to traders on Kalshi and Polymarket. All odds are American and all times are ET.</div>
+        </div>
+        <div className={"cl-master" + (deskChrome.killSwitchOn ? " stopped" : "")}>
+          <div>
+            <div className="m-k">Stop all quoting</div>
+            <div className="m-s">{!deskReady ? "Loading…" : kill ? "On. Nothing is being offered." : "Your active locks are being offered."}</div>
+          </div>
+          <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} role="switch" aria-checked={!!deskChrome.killSwitchOn} aria-label="Stop all quoting" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading…" : (kill ? "Everything is stopped. Turn off to start offering again." : "Turn on to stop offering every lock at once.")}><span className="knob" /></button>
+        </div>
       </div>
+      {(deskLoading || (!deskLoading && deskError)) && (
+        <div className="chips" style={{ marginBottom: 10 }}>
+          {deskLoading && <span className="chip">Loading your locks…</span>}
+          {!deskLoading && deskError && (deskChrome.sourceUnhealthy
+            ? <DataSourceChip status={deskHealth} label="Supabase flaky" />
+            : <span className="chip">Refresh failed. Retrying…</span>)}
+        </div>
+      )}
       <BucketReadout supabase={supabase} ready={deskReady} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
-      {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ Kill-switch engaged — the live worker posts nothing. Simulations below are shown for reference only.</div>}
+      {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ All quoting is stopped, so nothing is being offered. You can still add locks and run test requests below.</div>}
 
-      <h3>Active — waiting to be filled</h3>
+      <HowItWorks />
+      <SummaryStrip
+        waiting={waiting.length}
+        filled={filledParlays.length}
+        net={historyTotalsAll.net}
+        settled={historyTotalsAll.settled}
+        onJump={(id) => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
+      />
+
+      <SectionHead id="cl-waiting" title="Waiting for a match" count={waitingKind === "rows" ? waiting.length : null} sub="Offered on Kalshi and Polymarket at your price. Nothing is hedged yet." />
       {dupGroups.filter((group) => !dismissedDupes[group.signature]).map((group) => {
         const plan = buildMergePlan({
           survivor: group.survivor,
@@ -1558,99 +1608,47 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             <div>{group.warning}</div>
             <MergeFigures plan={plan} />
             <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-              <button type="button" className="btn mini primary" disabled={mergeBusy || !plan.ok} onClick={() => mergeExistingGroup(group)}>Merge</button>
+              <button type="button" className="btn mini primary" disabled={mergeBusy || !plan.ok} onClick={() => mergeExistingGroup(group)}>Combine</button>
               <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => setDismissedDupes((prev) => ({ ...prev, [group.signature]: true }))}>Keep separate</button>
             </div>
           </div>
         );
       })}
       {mergeError && <div className="note warn" style={{ marginBottom: 10 }}>{mergeError}</div>}
-      <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
-        {waitingKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : waitingKind === "empty" ? <div className="empty">Nothing waiting — add a parlay below, or check the Filled / History sections.</div> : waiting.map((p) => (
-          <div className={"parlay" + (isLockPaused(p) ? " paused" : "")} key={p.id} id={"lock-" + p.id}>
-            <div className="plhead" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
-              <span style={{ fontWeight: 700 }}>{p.label}</span>
-              <QuoteChip quote={(deskByParlay[p.id] || {}).quote} />
-              <OutcomeChip out={lockOutcome(p, 0)} />
-              <StakeOddsChip parlay={p} />
-              <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
-              <TakerFairChips parlay={p} />
-              <PausedBadge parlay={p} />
-              <span style={{ flex: 1 }} />
-              <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
-              <CopyLockLink lockId={p.id} />
-              {p.active === false && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
-              <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history — the worker stops watching it">Move to history</button>
-              <button className="btn mini danger" onClick={() => removeParlay(p.id)}>Remove</button>
-            </div>
-            <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-            <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }} className="num">collection {p.mve_collection} · {MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"} · cap {p.max_contracts} contracts{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : ""}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqMatchedCount(attemptsByParlay[p.id])); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} lockable)` : ""}` : ""; })()}</div>
-            <FillProgress desk={deskByParlay[p.id]} />
-            <RiskProfile parlay={p} filled={realFills[p.id] || 0} />
-            <DeskChips desk={deskByParlay[p.id]} />
-            <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
-            {openParlays[p.id] && <MatchedRfqTable attempts={attemptsByParlay[p.id]} matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={deskByParlay[p.id]} />}
-          </div>
-        ))}
-        {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>Note: {realUnattr} real combo contract(s) filled couldn’t be tied to a specific parlay (Kalshi fills carry no quote id) — counted but shown unattributed.</div>}
+      <div aria-busy={deskLoading || !deskReady || undefined}>
+        {waitingKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
+          : waitingKind === "empty" ? <div className="card empty">No locks waiting. Add a parlay below and it shows up here while we look for a buyer.</div>
+          : waiting.map((p) => renderLock(p, { filledSection: false }))}
       </div>
 
-      <h3>Filled — awaiting settlement</h3>
-      <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
-        {filledKind === "loading" ? (
-          <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
-        ) : filledKind === "empty" ? (
-          <div className="empty">No confirmed fills yet. A parlay lands here once Kalshi actually executes a real position for it (from your account fills) — a posted quote that no taker accepted does not count.</div>
-        ) : filledParlays.map((p) => {
-          const desk = deskByParlay[p.id];
-          return (
-            <div className={"parlay" + (isLockPaused(p) ? " paused" : "")} key={p.id} id={"lock-" + p.id}>
-              <div className="plhead" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                <button className="btn mini" onClick={() => toggleOpen(p.id)} title="Show/hide the RFQs this lock matched" style={{ padding: "2px 9px" }}>{openParlays[p.id] ? "▾" : "▸"}</button>
-                <span style={{ fontWeight: 700 }}>{p.label}</span>
-                <OutcomeChip out={lockOutcome(p, desk && desk.fill.filled)} filled />
-                <QuoteChip quote={desk && desk.quote} />
-                <StakeOddsChip parlay={p} />
-                <span className="chip fill num">fill {fmtAm(p.fill_american)}</span>
-                <TakerFairChips parlay={p} />
-                <PausedBadge parlay={p} />
-                <span style={{ flex: 1 }} />
-                <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
-                <CopyLockLink lockId={p.id} />
-                {p.active === false && desk && desk.fill.left > 0 && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Resume watching for RFQs on this combo">Reactivate</button>}
-                <button className="btn mini" onClick={() => archiveParlay(p.id)} title="Move to history now">Move to history</button>
-              </div>
-              <div>{(p.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-              <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
-              <FillProgress desk={desk} thin />
-              <RiskProfile parlay={p} filled={desk ? desk.fill.filled : (realFills[p.id] || 0)} />
-              <DeskChips desk={desk} thin />
-              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }} className="num">{MODE_LABEL[p.hedge_mode] || p.hedge_mode}{(() => { const mc = matchCounts[p.id]; const n = Math.max((mc && mc.n) || 0, matchedRfqMatchedCount(attemptsByParlay[p.id])); return n ? ` · matched ${n} RFQ${n === 1 ? "" : "s"}` : ""; })()}{p.starts_at ? ` · moves to history ~${historyMoveAt(p.starts_at).toLocaleString()}` : " · move to history manually when games end"}</div>
-              <AttemptHistory attempts={attemptsByParlay[p.id]} open={!!openParlays["hist-" + p.id]} onToggle={() => toggleOpen("hist-" + p.id)} />
-              {openParlays[p.id] && <MatchedRfqTable attempts={attemptsByParlay[p.id]} matches={matchesByParlay[p.id] || []} submissions={submissionsByParlay[p.id] || []} outcomeByRfq={outcomeByRfq} desk={desk} />}
-            </div>
-          );
-        })}
+      <SectionHead id="cl-filled" title="Filled" count={filledKind === "rows" ? filledParlays.length : null} sub="At least part of these is hedged. They move to History after the games end." />
+      <div aria-busy={deskLoading || !deskReady || undefined}>
+        {filledKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
+          : filledKind === "empty" ? <div className="card empty">Nothing filled yet. A lock moves here once a trader actually takes your offer (a quote nobody took doesn't count).</div>
+          : filledParlays.map((p) => renderLock(p, { filledSection: true }))}
+        {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>{realUnattr} filled contract{realUnattr === 1 ? "" : "s"} couldn't be matched to a specific lock. They're counted, just not shown on a card.</div>}
       </div>
 
       <div className="grid2" style={{ marginTop: 16 }}>
         <div ref={createFormRef}>
-          <h3>Add a parlay</h3>
+          <div className="sec-h">
+            <h2>Add a lock</h2>
+            <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }} title={srcLive ? "Game list is live from Kalshi." : "Couldn't load live games, showing sample games."}>{srcLive ? "Live games" : "Sample games"}</span>
+            <div className="sec-sub">Already placed the parlay at your sportsbook? Enter it here.</div>
+          </div>
           <div className="card">
             {prefill && !gamesReady && (
-              <div className="note warn" style={{ marginBottom: 12 }}>Matching Promo Builder legs to live Kalshi games…</div>
+              <div className="note warn" style={{ marginBottom: 12 }}>Matching your Promo Builder legs to live games…</div>
             )}
             {prefillWarning && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
-                Couldn't map {prefillWarning.length} promo leg{prefillWarning.length === 1 ? "" : "s"} to Kalshi (MLB / NFL / NCAAF / NHL main lines, MLB 1+ HR, NFL anytime-TD, and NHL 1+ Goal props). Fill those rows by hand, then save — nothing has been inserted yet.
+                Couldn't match {prefillWarning.length} leg{prefillWarning.length === 1 ? "" : "s"} automatically (supported: MLB, NFL, college football and NHL main lines, MLB home runs, NFL anytime TDs, NHL goals). Pick those rows by hand, then save. Nothing has been saved yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
                 </ul>
               </div>
             )}
-            <label>Legs — pick each game, then the market (side / spread / total, incl. alternates)</label>
+            <label>Legs: pick each game, then the bet (moneyline, spread, total, or player prop)</label>
             {legRows.map((r) => (
               <div className="legrow" key={r.id}>
                 <div><label>Game</label>
@@ -1658,11 +1656,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                     <option value="">— game —</option>
                     {gameList.map((g) => <option key={comboGameId(g)} value={comboGameId(g)}>{formatGameOption(g)}</option>)}
                   </select></div>
-                <div><label>Market</label>
+                <div><label>Bet</label>
                   <select value={r.marketVal} onChange={(e) => setLeg(r.id, { marketVal: e.target.value })}>
-                    <option value="">— market —</option>{marketGroups(r.gameKey, r.marketVal)}
+                    <option value="">— bet —</option>{marketGroups(r.gameKey, r.marketVal)}
                   </select></div>
-                <button className="btn mini" title="remove" onClick={() => removeLeg(r.id)}>✕</button>
+                <button className="btn mini" title="Remove this leg" aria-label="Remove this leg" onClick={() => removeLeg(r.id)}>✕</button>
               </div>
             ))}
             <button className="btn mini" onClick={addLeg}>+ Add leg</button>
@@ -1673,19 +1671,19 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                   <option value="boost">Profit boost</option>
                   <option value="freebet">Free bet</option>
                 </select></div>
-              <div><label>Sportsbook — optional</label><input value={form.sportsbook} onChange={(e) => setForm({ ...form, sportsbook: e.target.value })} placeholder="FanDuel, DraftKings…" /></div>
-              <div><label>Boost % — optional</label><input className="num" type="number" value={form.boostPct} onChange={(e) => setForm({ ...form, boostPct: e.target.value })} placeholder="25" /></div>
+              <div><label>Sportsbook (optional)</label><input value={form.sportsbook} onChange={(e) => setForm({ ...form, sportsbook: e.target.value })} placeholder="FanDuel, DraftKings…" /></div>
+              <div><label>Boost % (optional)</label><input className="num" type="number" value={form.boostPct} onChange={(e) => setForm({ ...form, boostPct: e.target.value })} placeholder="25" /></div>
             </div>
             <div className="row c3" style={{ marginTop: 14 }}>
-              <div><label>{lockKind(form) === "freebet" ? "Free bet ($) — face value" : "Stake ($) — your bet"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
-              <div><label>{lockKind(form) === "freebet" ? "Book parlay odds — you have" : "Boosted odds — you have"}</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
-              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Fill odds — you sell at (after maker fees)
-                {+form.fill ? <span className="info" tabIndex={0} data-tip={`The taker is matched at ${fmtAm(fillView(+form.fill).effTaker)} — worse than your ${fmtAm(+form.fill)}, because their taker fee (7%) is 4× your maker fee. That's what a taker actually gets.`}>i</span> : null}
-              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter fill odds" : undefined} /></div>
+              <div><label>{lockKind(form) === "freebet" ? "Free bet amount ($)" : "Your stake ($)"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
+              <div><label>{lockKind(form) === "freebet" ? "Your parlay odds at the book" : "Your odds at the book (boosted)"}</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
+              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Sell at (odds you offer, after fees)
+                {+form.fill ? <span className="info" tabIndex={0} data-tip={`The buyer gets ${fmtAm(fillView(+form.fill).effTaker)}, a bit worse than your ${fmtAm(+form.fill)}, because their fee (7%) is bigger than yours. That's the price they shop on.`}>i</span> : null}
+              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter sell odds" : undefined} /></div>
             </div>
             <div className="row c2">
-              <div><label>Fair odds — optional</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
-              <div><label>Hedge mode — sets contracts automatically</label>
+              <div><label>Fair odds (optional)</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
+              <div><label>Hedge style (sets the size for you)</label>
                 <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })}>
                   <option value="riskfree">Risk-free — floor $0, keep upside</option>
                   <option value="1x">1× pure hedge — equal both sides (default)</option>
@@ -1694,19 +1692,19 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 </select></div>
             </div>
             <div style={{ marginBottom: 12 }}>
-              <label>Game start — optional (auto-moves this parlay to history once the time passes)</label>
+              <label>Game start (optional, ET). The lock moves to History after this</label>
               <input className="num" type="datetime-local" value={form.starts} onChange={(e) => { startsTouched.current = true; setForm({ ...form, starts: e.target.value }); }} />
             </div>
             {preview && (
               <div className="tiles" style={{ marginTop: 2 }}>
-                <div className="tile"><div className="k">Auto contracts (cap)</div><div className="v num">{preview.cap}</div></div>
+                <div className="tile"><div className="k">Size (contracts)</div><div className="v num">{preview.cap}</div></div>
                 <div className="tile"><div className="k">You profit</div>
                   <div className="num" style={{ marginTop: 4, fontSize: 15, fontWeight: 700, lineHeight: 1.45 }}>
-                    <div className={preview.d.hit >= 0 ? "pos" : "neg"}>{money(preview.d.hit)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay wins</span></div>
-                    <div className={preview.d.miss >= 0 ? "pos" : "neg"}>{money(preview.d.miss)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay loses</span></div>
+                    <div className={preview.d.hit >= 0 ? "pos" : "neg"}>{money(preview.d.hit)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay hits</span></div>
+                    <div className={preview.d.miss >= 0 ? "pos" : "neg"}>{money(preview.d.miss)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay misses</span></div>
                   </div>
                 </div>
-                <div className="tile"><div className="k">{preview.kind === "freebet" ? "Conversion at cap" : "Worst case at cap"}</div>
+                <div className="tile"><div className="k">{preview.kind === "freebet" ? "Free bet kept" : "Worst case"}</div>
                   <div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>
                     {preview.kind === "freebet" && +form.stake > 0
                       ? `${((Math.max(0, preview.d.worst) / +form.stake) * 100).toFixed(1)}% · ${money(preview.d.worst)}`
@@ -1716,87 +1714,97 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
               </div>
             )}
             {lockKind(form) === "freebet" && (
-              <div className="note ok">Free-bet lock: miss costs $0; a hit pays profit only. 1× sizes the combo RFQ so both sides return the same cash (conversion = locked cash / free-bet $).</div>
+              <div className="note ok">Free bet: if the parlay misses you lose nothing, and if it hits you keep the winnings. A 1× hedge makes both outcomes pay the same cash.</div>
             )}
             {preview && !preview.d.locks && form.mode !== "2x" && form.mode !== "3x" && (
-              <div className="note warn">⚠ This won't fully lock — your {lockKind(form) === "freebet" ? "book parlay" : "boosted"} odds and fill odds are too close. Widen the gap ({lockKind(form) === "freebet" ? "longer book odds" : "bigger boost"}, or offer stingier fill odds).</div>
+              <div className="note warn">⚠ This won't fully lock in profit: your {lockKind(form) === "freebet" ? "parlay" : "boosted"} odds and sell odds are too close. Widen the gap ({lockKind(form) === "freebet" ? "longer parlay odds" : "a bigger boost"}, or sell at shorter odds).</div>
             )}
             {preview && (form.mode === "2x" || form.mode === "3x") && (
-              <div className="note warn">⚠ Directional: {MODE_LABEL[form.mode]} sells past the hedge. You profit if the combo misses but take the loss shown above if it hits.</div>
+              <div className="note warn">⚠ Directional: {MODE_LABEL[form.mode]} sells more than the hedge. You profit if the parlay misses but take the loss shown above if it hits.</div>
             )}
-            <label>Label — auto-filled from your legs, edit if you like</label>
+            <label>Name (filled in from your legs; edit if you like)</label>
             <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value, labelEdited: true })} placeholder="pick legs above…" />
             {mergePrompt && mergePrompt.kind === "new" && (
               <div className="note warn" style={{ marginTop: 12 }}>
                 <div>{mergePrompt.plan.warning}</div>
                 <MergeFigures plan={mergePrompt.plan} />
-                <div style={{ fontSize: 12, marginTop: 6 }}>The merged order keeps this lock's fill odds. Originals stay on the card for weekly P&L.</div>
+                <div style={{ fontSize: 12, marginTop: 6 }}>The combined lock keeps this lock's sell odds. The original bets stay listed on the card.</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                  <button type="button" className="btn mini primary" disabled={mergeBusy} onClick={confirmMerge}>Merge</button>
+                  <button type="button" className="btn mini primary" disabled={mergeBusy} onClick={confirmMerge}>Combine</button>
                   <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => addParlay({ separate: true })}>Keep separate</button>
                 </div>
                 {mergeError && <div style={{ marginTop: 8 }}>{mergeError}</div>}
               </div>
             )}
             <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <button className="btn primary" onClick={() => addParlay()}>Add to active parlays</button>
+              <button className="btn primary" onClick={() => addParlay()}>Add lock</button>
               {/* Probe opens a real RFQ on Kevin's Kalshi key: owner only (api/combo-probe enforces it too). */}
               {canSeeOwnerTools(user) && (
                 <button
                   type="button"
                   className="btn"
                   disabled={probeDisabled({ probing, legCount: readLegs().length, contracts: preview && preview.cap })}
-                  title="Find the current best odds on the market for this combo size."
+                  title="Ask the market for its best price on this parlay at this size."
                   onClick={runProbe}
-                >{probing ? "Probing…" : "Probe"}</button>
+                >{probing ? "Checking…" : "Check market price"}</button>
               )}
               <button className="btn" onClick={loadExample}>Load example</button>
             </div>
-            <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>
-              Finds the current best odds available on the market right now (for this combo size).
-            </div>
+            {canSeeOwnerTools(user) && (
+              <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>
+                "Check market price" shows the best price traders would pay for this parlay right now. It doesn't place anything.
+              </div>
+            )}
             {probeResult && (
               <div className={"note " + (probeResult.ok && fillBeatsMarket(+form.fill, probeResult.bestAmerican) ? "ok" : "warn")}>
-                {formatProbeNote(probeResult, form.fill === "" ? null : +form.fill)}
+                {plainAttemptLabel(formatProbeNote(probeResult, form.fill === "" ? null : +form.fill))}
               </div>
             )}
           </div>
         </div>
 
         <div>
-          <h3>Simulate an incoming RFQ</h3>
+          <div className="sec-h">
+            <h2>Test a request</h2>
+            <div className="sec-sub">See what a lock would do if a trader asked for it. Nothing is sent.</div>
+          </div>
           <div className="card">
             <div className="row c2">
-              <div><label>Against parlay</label>
+              <div><label>Lock</label>
                 <select value={sim.parlayId} onChange={(e) => setSim({ ...sim, parlayId: e.target.value })}>
-                  <option value="">— add a parlay first —</option>
+                  <option value="">— pick a lock —</option>
                   {parlays.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select></div>
-              <div><label>RFQ size (contracts)</label><input className="num" type="number" value={sim.size} onChange={(e) => setSim({ ...sim, size: e.target.value })} /></div>
+              <div><label>Request size (contracts)</label><input className="num" type="number" value={sim.size} onChange={(e) => setSim({ ...sim, size: e.target.value })} /></div>
             </div>
             <button className="btn primary" onClick={simulate}>See what it would do</button>
             <div style={{ marginTop: 16 }}>
-              {res && res.kind === "empty" && <div className="empty">Add a parlay first.</div>}
+              {res && res.kind === "empty" && <div className="empty">Pick a lock first.</div>}
               {res && res.ok === false && res.kind !== "empty" && (
-                <div><div style={{ fontWeight: 700, color: "#fca5a5", marginBottom: 8 }}>Would decline this RFQ</div>
-                  <div className="kv"><span>Reason</span><span className="num">{res.reason === "over_limit" ? `RFQ ${sim.size} > cap ${res.cap}` : res.reason}</span></div></div>
+                <div><div style={{ fontWeight: 700, color: "#fca5a5", marginBottom: 8 }}>Would skip this request</div>
+                  <div className="kv"><span>Why</span><span className="num">{res.reason === "over_limit" ? `A request for ${sim.size} is bigger than this lock's size (${res.cap})` : plainAttemptLabel(res.reason)}</span></div></div>
               )}
               {res && res.ok && (
                 <div>
                   <div style={{ fontWeight: 700, marginBottom: 8, color: res.locks ? "#34d399" : "#fcd34d" }}>
-                    {res.locks ? "✓ Would quote — profit locked either way" : "! Does NOT lock at this size — this would be a bet, not an arb"}
+                    {res.locks ? "✓ Would offer it. Profit is locked either way." : "! Doesn't lock profit at this size. This would be a bet, not a hedge."}
                   </div>
                   <div className="tiles">
-                    <div className="tile"><div className="k">You profit if parlay wins</div><div className={"v " + (res.hit >= 0 ? "pos" : "neg")}>{money(res.hit)}</div></div>
-                    <div className="tile"><div className="k">You profit if parlay loses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
+                    <div className="tile"><div className="k">If the parlay hits</div><div className={"v " + (res.hit >= 0 ? "pos" : "neg")}>{money(res.hit)}</div></div>
+                    <div className="tile"><div className="k">If the parlay misses</div><div className={"v " + (res.miss >= 0 ? "pos" : "neg")}>{money(res.miss)}</div></div>
                     <div className="tile"><div className="k">Worst case</div><div className={"v " + (res.worst >= 0 ? "pos" : "neg")}>{money(res.worst)}</div></div>
                   </div>
-                  <div className="kv"><span>You sell at (after your maker fee)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
-                  <div className="kv"><span>Taker is matched at</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
+                  <div className="kv"><span>You sell at (after your fee)</span><span className="num">{fmtAm(res.fillAmerican)}</span></div>
+                  <div className="kv"><span>Buyer gets</span><span className="num">{fmtAm(res.effTakerOdds)}</span></div>
                   <div className="kv"><span>Contracts</span><span className="num">{res.contracts}</span></div>
-                  {res.competitive != null && <div className={"note " + (res.competitive ? "ok" : "warn")}>{res.competitive ? `✓ Your fill ${fmtAm(res.fillAmerican)} beats fair ${fmtAm(res.parlay.fair_american)} — competitive.` : `⚠ Your fill ${fmtAm(res.fillAmerican)} is stingier than fair ${fmtAm(res.parlay.fair_american)} — probably won't fill.`}</div>}
-                  {res.locks && <><label style={{ marginTop: 12 }}>Quote it would post to Kalshi</label><div className="post">POST /communications/quotes{"\n"}{JSON.stringify(res.quote, null, 2)}</div></>}
-                  {res.kill && <div className="note warn">Kill-switch is engaged — the live worker would not actually post this.</div>}
+                  {res.competitive != null && <div className={"note " + (res.competitive ? "ok" : "warn")}>{res.competitive ? `✓ Your ${fmtAm(res.fillAmerican)} is better than fair odds of ${fmtAm(res.parlay.fair_american)}, so it should get taken.` : `⚠ Your ${fmtAm(res.fillAmerican)} is worse than fair odds of ${fmtAm(res.parlay.fair_american)}, so it probably won't get taken.`}</div>}
+                  {res.locks && (
+                    <details style={{ marginTop: 12 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 12, color: "#8a8f98", fontWeight: 600 }}>Technical: the quote it would send</summary>
+                      <div className="post">POST /communications/quotes{"\n"}{JSON.stringify(res.quote, null, 2)}</div>
+                    </details>
+                  )}
+                  {res.kill && <div className="note warn">All quoting is stopped, so this wouldn't actually be sent.</div>}
                 </div>
               )}
             </div>
@@ -1804,102 +1812,102 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         </div>
       </div>
 
-      <h3>History — games over</h3>
+      <SectionHead id="cl-history" title="History" count={archivedKind === "rows" ? historyStatement.lines.length : null} sub="Locks whose games are over, newest first. Tap a row for the details." />
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
-        {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div> : archivedKind === "empty" ? <div className="empty">Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~{HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).</div> : (
-          <StatementBoard
+        {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading history…</div> : archivedKind === "empty" ? <div className="empty">{historyEmptyText}</div> : (
+          <ComboHistory
             statement={historyStatement}
             view={historyView}
-            onOpenLock={(id) => toggleOpen("arch-" + id)}
-            isExpanded={(line) => !!openParlays["arch-" + line.id]}
-            actionLabel={(line) => (openParlays["arch-" + line.id] ? "Hide lock" : "Open lock")}
-            rowTitle={(_line, open) => (open ? "Hide lock detail" : "Show lock detail")}
+            archivedById={archivedById}
+            isOpen={(id) => !!openParlays["arch-" + id]}
+            onToggle={(id) => toggleOpen("arch-" + id)}
             onExportCsv={() => downloadStatementCsv(historyView.filtered && historyView.filtered.lines)}
-            filtersAriaLabel="History filters"
-            emptyText={`Nothing here yet. A parlay moves to History when you click “Move to history”, or automatically ~${HISTORY_BUFFER_HOURS}h after its game start (approx when the games finish).`}
-            renderExpanded={(line) => {
+            emptyText={historyEmptyText}
+            renderDetail={(line) => {
               const a = archivedById[line.id];
               if (!a) return null;
               const filledN = realFills[a.id] || 0;
-              const out = lockOutcome(a, filledN);
               return (
-                <>
+                <div style={{ paddingTop: 8 }}>
                   <div className="hist-detail-head">
-                    <OutcomeChip out={out} filled={filledN > 0} />
-                    <StakeOddsChip parlay={a} />
-                    <span className="chip fill num">fill {fmtAm(a.fill_american)}</span>
-                    <span className="muted num">{MODE_LABEL[a.hedge_mode] || a.hedge_mode} · cap {a.max_contracts}</span>
+                    <span className="chip num">Sold at {fmtAm(a.fill_american)}</span>
+                    {filledN > 0 && <span className="chip num">{filledN.toLocaleString("en-US")} contracts filled</span>}
+                    <span className="muted num">{MODE_LABEL[a.hedge_mode] || a.hedge_mode} · up to {a.max_contracts} contracts</span>
                     <span style={{ flex: 1 }} />
                     <CopyLockLink lockId={a.id} />
                   </div>
-                  {(a.legs || []).length > 0 && (
-                    <div style={{ marginBottom: 8 }}>{(a.legs || []).map((l, i) => <span className="leg" key={i}><span className="ty">{l.type}</span>{l.label} · {l.ticker}:{l.side}</span>)}</div>
-                  )}
+                  <DetailBlock title="The legs"><LegList legs={a.legs} /></DetailBlock>
                   <MergedOrder parlay={a} bets={betsByParlay[a.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
-                  <RiskProfile parlay={a} filled={filledN} />
                   <AttemptHistory attempts={attemptsByParlay[a.id]} showSummary={false} />
-                </>
+                </div>
               );
             }}
           />
         )}
       </div>
 
-      <h3>Submitted bets — history</h3>
-      <div className="card">
-        {history.length === 0 ? <div className="empty">No submissions yet. Shadow quotes you run land here; once the worker is live, real fills and no-fills show as REAL with a Filled / Unfilled status.</div> : (
-          <table><thead><tr><th>Type</th><th>When</th><th>Parlay</th><th>Fill</th><th>Contracts</th><th>Worst lock</th><th>Status</th></tr></thead>
-            <tbody>{history.map((h) => {
-              const isReal = h.is_live || h.status === "filled" || h.status === "unfilled";
-              // A row logged 'filled' but with NO order_id is a posted quote that wasn't accepted —
-              // show it honestly as "quoted", not "filled". Only a real execution id counts as filled.
-              const executed = !!h.order_id;
-              const dispStatus = h.status === "filled" && !executed ? "quoted (awaiting)"
-                : h.status === "shadow" ? "would post"
-                : h.status;
-              const stClass = h.status === "filled" && !executed ? "unfilled" : h.status;
-              return (
-              <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "REAL" : "SHADOW"}</span></td><td>{new Date(h.created_at).toLocaleString()}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
-                <td><span className={"st " + stClass} title={h.status === "filled" && !executed ? "Quote posted to Kalshi but not accepted — no position held." : ""}>{dispStatus}</span></td></tr>
-            ); })}</tbody></table>
-        )}
-      </div>
+      <details className="adv">
+        <summary>Advanced logs: every offer the worker sent</summary>
+        <div className="adv-body">
+          <h3>Offers sent</h3>
+          <div className="card">
+            {history.length === 0 ? <div className="empty">No offers yet. Test requests you run show up here as Test; live offers show as Live with whether they were taken.</div> : (
+              <div className="tbl-wrap"><table><thead><tr><th>Type</th><th>When (ET)</th><th>Lock</th><th>Sold at</th><th>Contracts</th><th>Worst case</th><th>Status</th></tr></thead>
+                <tbody>{history.map((h) => {
+                  const isReal = h.is_live || h.status === "filled" || h.status === "unfilled";
+                  // A row logged 'filled' but with NO order_id is a posted quote that wasn't accepted —
+                  // show it honestly as offered, not filled. Only a real execution id counts as filled.
+                  const executed = !!h.order_id;
+                  const dispStatus = h.status === "filled" && !executed ? "offered · waiting"
+                    : h.status === "shadow" ? "test only"
+                    : h.status === "unfilled" ? "not taken"
+                    : h.status === "declined" ? "skipped"
+                    : h.status;
+                  const stClass = h.status === "filled" && !executed ? "unfilled" : h.status;
+                  return (
+                  <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "Live" : "Test"}</span></td><td>{etStamp(h.created_at)}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
+                    <td><span className={"st " + stClass} title={h.status === "filled" && !executed ? "Offer sent but not taken. No position held." : ""}>{dispStatus}</span></td></tr>
+                ); })}</tbody></table></div>
+            )}
+          </div>
 
-      <h3>Quote outcomes — did our quotes win?</h3>
-      <div className="card">
-        {outcomes.length === 0 ? (
-          <div className="empty">No quote outcomes yet. Once the read-only watcher is running, every quote the worker posts is tracked here: <b>accepted</b> / <b>executed</b> (real fill) / <b>lost</b> (outbid, or the taker took no one), with response latency and a Kalshi fill reconcile.</div>
-        ) : (
-          <table><thead><tr><th>When</th><th>Parlay</th><th>Your quote</th><th>Outcome</th><th>Why (if lost)</th><th>Your speed vs window</th><th>Real fill</th></tr></thead>
-            <tbody>{outcomes.map((o) => {
-              const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "executed"], accepted: ["rgba(147,197,253,.18)", "#93c5fd", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "lost"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "awaiting"] };
-              const [bg, col, lbl] = map[o.outcome] || map.posted;
-              const whyMap = { outbid: "outbid — a better price won", too_slow: "too slow — window closed first", no_taker: "taker accepted no one", no_purchase: "no purchase — RFQ closed with no fill", unknown: "unknown" };
-              const why = o.outcome === "lost" ? (formatLoss(o) || (o.loss_reason ? (whyMap[o.loss_reason] || o.loss_reason) : "checking…")) : "—";
-              const whyCol = o.loss_reason === "too_slow" ? "#fcd34d" : (o.loss_reason === "outbid" || formatCents(tapeNoPrice(o)) ? "#fca5a5" : o.loss_reason === "no_taker" || o.loss_reason === "no_purchase" ? "#9aa3b2" : "#6b7280");
-              const secs = (ms) => (ms != null ? `${(ms / 1000).toFixed(1)}s` : null);
-              return (
-              <tr key={o.id || o.quote_id}>
-                <td>{o.posted_at ? new Date(o.posted_at).toLocaleString() : "—"}</td>
-                <td>{o.label || "—"}</td>
-                <td className="num">{(() => {
-                  const sub = o.submitted_no_bid, intended = o.no_bid;
-                  if (sub != null) {
-                    const mismatch = intended != null && Math.abs(Number(sub) - Number(intended)) > 0.005;
-                    return <>NO ${Number(sub).toFixed(2)} <span style={{ color: "#6b7280" }}>sent</span>{mismatch ? <span style={{ color: "#fcd34d" }}> ≠ ${Number(intended).toFixed(2)} intended</span> : null}</>;
-                  }
-                  return intended != null ? `NO $${Number(intended).toFixed(2)}` : "—";
-                })()}{o.fill_american ? ` · ${fmtAm(o.fill_american)}` : ""}</td>
-                <td><span className="st" style={{ background: bg, color: col }} title={o.outcome === "executed" ? "Kalshi executed a real position." : ""}>{lbl}</span></td>
-                <td style={{ color: whyCol }}>{why}</td>
-                <td className="num" style={{ color: o.in_time === false ? "#fcd34d" : "#c3c6cc" }} title="How fast you answered vs how long the RFQ stayed open. Answering after the window closes means the taker already accepted someone.">
-                  {secs(o.responded_ms) || "—"}{o.rfq_lifetime_ms != null ? ` / ${secs(o.rfq_lifetime_ms)} window` : ""}{o.in_time === false ? " ⚠ late" : (o.in_time === true ? " ✓" : "")}
-                </td>
-                <td className="num">{o.fill_confirmed ? `✓ ${o.fill_count || ""}` : (o.outcome === "executed" ? "checking…" : "—")}</td>
-              </tr>
-            ); })}</tbody></table>
-        )}
-      </div>
+          <h3>Did our offers win?</h3>
+          <div className="card">
+            {outcomes.length === 0 ? (
+              <div className="empty">Nothing tracked yet. Once the watcher is running, every offer shows here as filled, accepted or missed, with how fast we answered.</div>
+            ) : (
+              <div className="tbl-wrap"><table><thead><tr><th>When (ET)</th><th>Lock</th><th>You offered</th><th>Outcome</th><th>Why (if missed)</th><th>Speed vs window</th><th>Confirmed fill</th></tr></thead>
+                <tbody>{outcomes.map((o) => {
+                  const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "filled"], accepted: ["rgba(147,197,253,.18)", "#93c5fd", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "missed"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "waiting"] };
+                  const [bg, col, lbl] = map[o.outcome] || map.posted;
+                  const whyMap = { outbid: "outbid: a better price won", too_slow: "too slow: window closed first", no_taker: "buyer took no one", no_purchase: "request closed with no fill", unknown: "unknown" };
+                  const why = o.outcome === "lost" ? plainAttemptLabel(formatLoss(o) || (o.loss_reason ? (whyMap[o.loss_reason] || o.loss_reason) : "checking…")) : "—";
+                  const whyCol = o.loss_reason === "too_slow" ? "#fcd34d" : (o.loss_reason === "outbid" || formatCents(tapeNoPrice(o)) ? "#fca5a5" : o.loss_reason === "no_taker" || o.loss_reason === "no_purchase" ? "#9aa3b2" : "#6b7280");
+                  const secs = (ms) => (ms != null ? `${(ms / 1000).toFixed(1)}s` : null);
+                  return (
+                  <tr key={o.id || o.quote_id}>
+                    <td>{etStamp(o.posted_at)}</td>
+                    <td>{o.label || "—"}</td>
+                    <td className="num">{(() => {
+                      const sub = o.submitted_no_bid, intended = o.no_bid;
+                      if (sub != null) {
+                        const mismatch = intended != null && Math.abs(Number(sub) - Number(intended)) > 0.005;
+                        return <>{fmtAmOdds(americanFromNoPrice(sub))}{mismatch ? <span style={{ color: "#fcd34d" }}> (meant {fmtAmOdds(americanFromNoPrice(intended))})</span> : null}</>;
+                      }
+                      return intended != null ? fmtAmOdds(americanFromNoPrice(intended)) : (o.fill_american ? fmtAm(o.fill_american) : "—");
+                    })()}</td>
+                    <td><span className="st" style={{ background: bg, color: col }} title={o.outcome === "executed" ? "A real position was filled." : ""}>{lbl}</span></td>
+                    <td style={{ color: whyCol }}>{why}</td>
+                    <td className="num" style={{ color: o.in_time === false ? "#fcd34d" : "#c3c6cc" }} title="How fast we answered vs how long the request stayed open. Answering after it closes means the buyer already took someone else.">
+                      {secs(o.responded_ms) || "—"}{o.rfq_lifetime_ms != null ? ` / ${secs(o.rfq_lifetime_ms)}` : ""}{o.in_time === false ? " ⚠ late" : (o.in_time === true ? " ✓" : "")}
+                    </td>
+                    <td className="num">{o.fill_confirmed ? `✓ ${o.fill_count || ""}` : (o.outcome === "executed" ? "checking…" : "—")}</td>
+                  </tr>
+                ); })}</tbody></table></div>
+            )}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

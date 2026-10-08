@@ -868,11 +868,11 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const locks = fs.readFileSync(path.join(dir, "ComboLocks.jsx"), "utf8");
   assert.match(locks, /DeskChips/);
-  assert.match(locks, /FillProgress/);
+  assert.match(locks, /<LockCard/);
   assert.match(locks, /buildParlayDesk/);
   assert.match(locks, /deskFillCounts/);
   assert.equal((locks.match(/setRealFills\(/g) || []).length, 1, "one fills write per poll (two writes flipped the bar)");
-  assert.match(locks, /overFillText\(fill\)/);
+  assert.match(locks, /overFillText\(desk\.fill\)/);
   assert.doesNotMatch(locks, /fillRows\.forEach\(\(f\) => \{ const c = Number\(f\.count \|\| 0\)/);
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /Miss tape/);

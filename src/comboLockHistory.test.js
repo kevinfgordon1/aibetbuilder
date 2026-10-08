@@ -520,9 +520,10 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
   // Living cards: history starts collapsed behind hist-<id>; archive expands in the Statement board.
   assert.match(locksSrc, /function AttemptHistory\(\{ attempts, open = true, onToggle, showSummary = true \}\)/);
-  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 2);
+  // One shared lock card (renderLock) serves Waiting + Filled.
+  assert.equal((locksSrc.match(/onToggle=\{\(\) => toggleOpen\("hist-" \+ p\.id\)\}/g) || []).length, 1);
   assert.match(locksSrc, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
-  assert.match(locksSrc, /StatementBoard/);
+  assert.match(locksSrc, /<ComboHistory/);
   assert.match(locksSrc, /buildComboStatement/);
   assert.match(locksSrc, /useStatementView\(historyStatement\)/);
   assert.match(locksSrc, /className="hist-head"/);
@@ -533,11 +534,11 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /attemptRepeatLabel/);
   assert.match(locksSrc, /hist-sum/);
   assert.match(locksSrc, /hist-rpt/);
-  assert.match(locksSrc, /historyFillsHeading/);
-  assert.match(locksSrc, /historyQuotesHeading/);
+  // Plain headings ("Fills", "Every offer and skip") replace the old helper copy.
+  assert.match(locksSrc, /Every offer and skip/);
   assert.match(locksSrc, /historyFillsEmptyText/);
   assert.match(locksSrc, /filledAttemptEvents/);
-  assert.match(locksSrc, /matchedRfqHeading/);
+  assert.match(locksSrc, /Matched requests/);
   assert.match(locksSrc, /matchedRfqCounts/);
   assert.match(locksSrc, /matchedRfqEmptyText/);
   assert.match(locksSrc, /matchedRfqFillRows/);
@@ -546,7 +547,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.match(locksSrc, /counts\.filled === 0/);
   assert.match(locksSrc, /<MatchedRfqTable attempts=\{attemptsByParlay\[p\.id\]\}/);
   assert.match(locksSrc, /function VenueChip\(\{ venue, venueKey \}\)/);
-  assert.match(locksSrc, /<th>Venue<\/th>/);
+  assert.match(locksSrc, /<th>Where<\/th>/);
   assert.match(locksSrc, /<VenueChip venue=\{row\.venue\} venueKey=\{row\.venueKey\} \/>/);
   assert.match(locksSrc, /<VenueChip venue=\{e\.venue\} venueKey=\{e\.venueKey\} \/>/);
   assert.match(locksSrc, /chip\.venue-kalshi/);

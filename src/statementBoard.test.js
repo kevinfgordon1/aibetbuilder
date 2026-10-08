@@ -11,6 +11,7 @@ import {
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const board = fs.readFileSync(path.join(dir, "StatementBoard.jsx"), "utf8");
 const locks = fs.readFileSync(path.join(dir, "ComboLocks.jsx"), "utf8");
+const locksView = fs.readFileSync(path.join(dir, "ComboLocksView.jsx"), "utf8");
 const profile = fs.readFileSync(path.join(dir, "UserProfile.jsx"), "utf8");
 
 assert.match(board, /export function useStatementView/);
@@ -39,17 +40,21 @@ assert.match(profile, /useStatementView\(statement\)/);
 assert.match(profile, /P\/L statement/);
 assert.doesNotMatch(profile, /STATEMENT_DATE_FILTERS\.map/);
 
-assert.match(locks, /<StatementBoard/);
+// Combo Locks History uses its own plain table (ComboHistory) over the same
+// statement lines + useStatementView filters; Profile keeps StatementBoard.
+assert.match(locks, /<ComboHistory/);
+assert.doesNotMatch(locks, /<StatementBoard/);
 assert.match(locks, /buildComboStatement/);
 assert.match(locks, /parlays: archived/);
 assert.match(locks, /useStatementView\(historyStatement\)/);
-assert.match(locks, /History — games over/);
-assert.match(locks, /filtersAriaLabel="History filters"/);
+assert.match(locks, /title="History"/);
+assert.match(locksView, /aria-label="History filters"/);
+assert.match(locksView, /Date \(ET\)/);
+assert.match(locksView, /Net profit \/ loss/);
+assert.match(locksView, /id=\{"lock-" \+ line\.id\}/);
 assert.match(locks, /<AttemptHistory attempts=\{attemptsByParlay\[a\.id\]\} showSummary=\{false\} \/>/);
-assert.match(locks, /<StakeOddsChip parlay=\{a\} \/>/);
-assert.match(locks, /<StakeOddsChip parlay=\{p\} \/>/);
-assert.match(locks, /Open lock/);
-assert.match(locks, /Hide lock/);
+assert.match(locksView, /<LockCard|export function LockCard/);
+assert.match(locksView, /betSummary\(parlay\)/);
 assert.doesNotMatch(locks, /archived \{a\.archived_at/);
 assert.doesNotMatch(locks, /History — every attempt[\s\S]*archived\.map/);
 
