@@ -1,5 +1,5 @@
 // Combo Locks — private tab for the Kalshi combo RFQ auto-quoter.
-// Gated by canSeeComboLocks (OWNER_EMAIL + VITE_COMBO_LOCKS_ALLOWLIST). This
+// Gated by canSeeComboLocks (hardcoded COMBO_LOCKS_ACCOUNTS in comboAccess). This
 // component returns null for anyone else — no copy that names the feature.
 // Backed by Supabase (combo_parlays / combo_settings / combo_submissions) so the
 // always-on worker reads the same active parlays. NO live prices — the lock uses

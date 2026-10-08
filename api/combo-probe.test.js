@@ -140,11 +140,19 @@ assert.equal(lib.parseContracts(750), 750);
 assert.equal(lib.parseContracts(0), null);
 assert.equal(lib.parseContracts(-3), null);
 
-// ── owner allowlist (same as Combo Locks UI) ──
-assert.equal(lib.canSeeComboLocks({ email: 'kev120909@gmail.com' }, {}), true);
-assert.equal(lib.canSeeComboLocks({ email: 'stranger@gmail.com' }, {}), false);
-assert.equal(lib.canSeeComboLocks({ email: 'tester@gmail.com' }, { VITE_COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com' }), true);
+// ── Combo Locks visibility: hardcoded accounts (email AND uid), env ignored ──
+assert.equal(lib.COMBO_LOCKS_ACCOUNTS.length, 3);
+assert.equal(lib.canSeeComboLocks({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }, {}), true);
+assert.equal(lib.canSeeComboLocks({ email: 'Kevin.F.Gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }), true);
+assert.equal(lib.canSeeComboLocks({ email: 'gmoneyvikes@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' }), true);
+assert.equal(lib.canSeeComboLocks({ email: 'kev120909@gmail.com' }, {}), false, 'uid required');
+assert.equal(lib.canSeeComboLocks({ email: 'kev120909@gmail.com', id: 'u-lookalike' }), false);
+assert.equal(lib.canSeeComboLocks({ email: 'gmoneyvikes@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }), false, 'pairs do not mix');
+assert.equal(lib.canSeeComboLocks({ email: 'kmguido97@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' }), false, 'Kenneth: no Combo Locks');
+assert.equal(lib.canSeeComboLocks({ email: 'stranger@gmail.com', id: 'u2' }, {}), false);
+assert.equal(lib.canSeeComboLocks({ email: 'tester@gmail.com', id: 't1' }, { VITE_COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com', COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com' }), false, 'env allowlist ignored');
 assert.equal(lib.canSeeComboLocks(null, {}), false);
+assert.equal(lib.comboLocksAllowlist({ VITE_COMBO_LOCKS_ALLOWLIST: 'x@y.com' }).has('x@y.com'), false);
 
 // ── Probe spends Kevin's Kalshi key: owner only, never the Combo Locks allowlist ──
 const KEVIN_ID = '79ae1610-097e-4b46-a622-1e952f18e936';
@@ -157,9 +165,10 @@ assert.equal(lib.isComboOwner({ id: KEVIN_ID }), false);
 assert.equal(lib.isComboOwner(null), false);
 {
   const allow = { VITE_COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com', COMBO_LOCKS_ALLOWLIST: 'tester@gmail.com' };
-  const tester = { email: 'tester@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' };
+  const tester = { email: 'gmoneyvikes@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' };
   assert.equal(lib.canSeeComboLocks(tester, allow), true);
   assert.equal(lib.isComboOwner(tester), false);
+  assert.equal(lib.isComboOwner({ email: 'kevin.f.gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }), false);
 }
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'combo-probe.js'), 'utf8');

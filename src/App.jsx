@@ -3131,7 +3131,7 @@ export default function App() {
                     ? "Place a cash bet. If it loses, the stake comes back as site credit, counted at 70¢ on the dollar. Ranked by expected value. 1-leg no-sweats can lock guaranteed cash by hedging the other side."
                     : (numLegs === 1
                       ? "Use a free bet on a single or a parlay. 1-leg still converts to locked cash by hedging the other side. Ranked by free-bet EV — you don't risk cash; a win pays profit only."
-                      : "Use a free bet on a parlay ranked by free-bet EV. You don't risk cash (a loss costs $0); a win pays profit only — the stake is not returned. 1-leg still converts to locked cash. Multi-leg can lock via Combo Locks (combo RFQ hedges hit vs miss).")}
+                      : "Use a free bet on a parlay ranked by free-bet EV. You don't risk cash (a loss costs $0); a win pays profit only — the stake is not returned. 1-leg still converts to locked cash." + (canSeeComboLocks(user) ? " Multi-leg can lock via Combo Locks (combo RFQ hedges hit vs miss)." : ""))}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -3823,7 +3823,7 @@ export default function App() {
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                                   <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${fbAmount} free bet.
-                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss."}
+                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : canSeeComboLocks(user) ? "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss." : "A per-leg 2-way cannot lock every multi-leg outcome."}
                                 </div>
                                 {canSeeComboLocks(user) && !isSingle && (
                                   <div style={{ marginTop: 12 }}>

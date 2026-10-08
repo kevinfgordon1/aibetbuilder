@@ -1,18 +1,15 @@
-// Combo Locks visibility — private until Kevin opens it up.
+// Combo Locks visibility — PRIVATE. Hardcoded, no env allowlist.
 //
-// Auth identity: Supabase Auth email on the user record (Google, magic link,
-// Facebook, or X when X actually returns an email) plus the auth uid. Kevin
-// signs in as kev120909@gmail.com (OWNER_EMAIL). Allow extra testers with
-// VITE_COMBO_LOCKS_ALLOWLIST (comma-separated emails and/or Supabase auth
-// uids). Kevin's email is always included so a missing env var cannot lock
-// him out.
+// Only COMBO_LOCKS_ACCOUNTS may see the Combo Locks tab, page, links, copy,
+// and lock P/L: Kevin's two accounts plus one approved tester. Each entry pins
+// the Supabase Auth email AND the auth uid, so a look-alike account, an X
+// sign-in without email, or a stale VITE_COMBO_LOCKS_ALLOWLIST cannot match.
+// Kenneth is NOT on this list. Server mirror: api/combo-probe-lib.js.
 //
-// user_metadata.email is not an allowlist key. It is user-editable, and X
-// often omits email entirely. A signed-in user with no auth email does not
-// match email gates (New Odds Board, Live Trading Desk, Combo Locks) and is
-// not treated as Kevin. Add their auth uid to an allowlist only on purpose.
+// user_metadata.email is never a key (user-editable).
 //
-// This is a UI/route gate only. combo_* rows stay behind existing Supabase RLS.
+// This is a UI/route gate only. combo_* rows stay behind Supabase RLS (each
+// user sees only their own rows; Kevin sees all).
 // Do not use this list to expand Miss tape / Unhedged / Live Trading Desk —
 // those stay OWNER_EMAIL.
 // New Odds Board is owner plus NEW_ODDS_BOARD_SHARED_EMAILS (Kenneth).
@@ -23,7 +20,7 @@ export const OWNER_EMAIL = "kev120909@gmail.com";
 export const KENNETH_GUIDO_EMAIL = "kmguido97@gmail.com";
 export const NEW_ODDS_BOARD_SHARED_EMAILS = Object.freeze([KENNETH_GUIDO_EMAIL]);
 
-/** Vite public env: comma / space / semicolon separated emails or auth uids. */
+/** Former Combo Locks env allowlist name. IGNORED now (see COMBO_LOCKS_ACCOUNTS). */
 export const COMBO_LOCKS_ALLOWLIST_ENV = "VITE_COMBO_LOCKS_ALLOWLIST";
 
 /** Underdog Predict phone prices — New Odds Board column + Promo true-odds. */
@@ -45,10 +42,6 @@ function readNamedAllowlist(env, viteKey, altKey) {
   return "";
 }
 
-function readEnvAllowlist(env) {
-  return readNamedAllowlist(env, COMBO_LOCKS_ALLOWLIST_ENV, "COMBO_LOCKS_ALLOWLIST");
-}
-
 export function parseComboLocksAllowlist(raw) {
   if (raw == null || raw === "") return [];
   return String(raw)
@@ -57,11 +50,16 @@ export function parseComboLocksAllowlist(raw) {
     .filter(Boolean);
 }
 
-export function comboLocksAllowlist(env) {
-  const items = new Set([OWNER_EMAIL.toLowerCase()]);
-  for (const token of parseComboLocksAllowlist(readEnvAllowlist(env))) {
-    items.add(token.toLowerCase());
-  }
+export const COMBO_LOCKS_ACCOUNTS = Object.freeze([
+  Object.freeze({ email: "kev120909@gmail.com", id: "79ae1610-097e-4b46-a622-1e952f18e936" }),
+  Object.freeze({ email: "kevin.f.gordon1@gmail.com", id: "968efed8-54db-48a6-808b-194a7a03a4cb" }),
+  Object.freeze({ email: "gmoneyvikes@gmail.com", id: "dd23a3a8-cb45-4866-be11-df72b4767c26" }),
+]);
+
+/** Emails + uids allowed to see Combo Locks. The env var is ignored on purpose. */
+export function comboLocksAllowlist(_env) {
+  const items = new Set();
+  for (const a of COMBO_LOCKS_ACCOUNTS) { items.add(a.email); items.add(a.id); }
   return items;
 }
 
@@ -74,10 +72,11 @@ function userTokens(user) {
 }
 
 /** True when this signed-in user may see Combo Locks UI, routes, and lock P/L. */
-export function canSeeComboLocks(user, env) {
-  if (!user) return false;
-  const allowed = comboLocksAllowlist(env);
-  return userTokens(user).some((t) => allowed.has(t));
+export function canSeeComboLocks(user, _env) {
+  if (!user || !user.email || !user.id) return false;
+  const email = String(user.email).trim().toLowerCase();
+  const id = String(user.id).trim().toLowerCase();
+  return COMBO_LOCKS_ACCOUNTS.some((a) => a.email === email && a.id === id);
 }
 
 /**

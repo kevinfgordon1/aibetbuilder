@@ -5,7 +5,9 @@ const handler = require('./combo-keys.js');
 const keys = require('./combo-keys-lib.js');
 
 const KEVIN = '79ae1610-097e-4b46-a622-1e952f18e936';
-const T = '11111111-2222-4333-8444-555555555555';
+const T = 'dd23a3a8-cb45-4866-be11-df72b4767c26'; // the one approved tester
+const EMAILS = { [KEVIN]: 'kev120909@gmail.com', [T]: 'gmoneyvikes@gmail.com' };
+const STRANGER = '11111111-2222-4333-8444-555555555555';
 const { privateKey: rsa } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const RSA_PEM = rsa.export({ type: 'pkcs1', format: 'pem' });
 const { privateKey: ed } = crypto.generateKeyPairSync('ed25519');
@@ -53,6 +55,8 @@ function res() {
 }
 
 function setup({ user, live = null, keyRows = [], fetchImpl } = {}) {
+  if (user && user.id && !('email' in user)) user = { ...user, email: EMAILS[user.id] || 'someone@example.com' };
+  const reads = [];
   const rpcs = [];
   const logs = [];
   const origErr = console.error;
@@ -64,6 +68,7 @@ function setup({ user, live = null, keyRows = [], fetchImpl } = {}) {
       if (key === 'anon') return { auth: { async getUser(t) { return t === 'good' ? { data: { user }, error: null } : { data: null, error: { message: 'bad' } }; } } };
       return {
         from(table) {
+          reads.push(table);
           const api = {
             select() { return api; },
             eq() { return table === 'combo_live_users' ? api : Promise.resolve({ data: keyRows, error: null }); },
@@ -80,7 +85,7 @@ function setup({ user, live = null, keyRows = [], fetchImpl } = {}) {
       };
     },
   });
-  return { rpcs, logs, restore: () => { console.error = origErr; } };
+  return { rpcs, logs, reads, restore: () => { console.error = origErr; } };
 }
 
 const call = (method, body, query) => { const r = res(); return handler({ method, headers: { authorization: 'Bearer good' }, body, query: query || {} }, r).then(() => r); };
@@ -102,6 +107,19 @@ function kalshiFetch(scopes, extra = {}) {
     const s = setup({ user: { id: T } });
     const r = res(); await handler({ method: 'GET', headers: {}, query: {} }, r);
     assert.equal(r.code, 401);
+    s.restore();
+  }
+  // Combo Locks is private: anyone outside COMBO_LOCKS_ACCOUNTS gets 403 on every
+  // method, before any DB read, even if a combo_live_users row exists for them.
+  for (const user of [{ id: STRANGER, email: 'random@example.com' }, { id: STRANGER, email: 'gmoneyvikes@gmail.com' }, { id: T, email: 'random@example.com' }, { id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47', email: 'kmguido97@gmail.com' }]) {
+    const f = kalshiFetch(['read', 'write::trade']);
+    const s = setup({ user, live: { ...APPROVED, user_id: user.id }, fetchImpl: f });
+    assert.equal((await call('GET')).code, 403);
+    assert.equal((await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM })).code, 403);
+    assert.equal((await call('DELETE', null, { venue: 'kalshi' })).code, 403);
+    assert.deepEqual(s.reads, []);
+    assert.equal(s.rpcs.length, 0);
+    assert.equal(f.seen.length, 0);
     s.restore();
   }
   // Not approved: GET shows approved=false; POST refused before contacting the exchange.

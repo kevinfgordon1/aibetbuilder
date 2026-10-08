@@ -360,7 +360,7 @@ assert.equal(clearComboHash("#combo/p1"), "");
 assert.equal(clearComboHash("#promo"), "#promo");
 assert.equal(hashesEqual("#promo/" + id1, { tab: "promo", cardId: id1 }), true);
 
-const kevin = { id: "k", email: OWNER_EMAIL };
+const kevin = { id: "79ae1610-097e-4b46-a622-1e952f18e936", email: OWNER_EMAIL };
 const stranger = { id: "u2", email: "stranger@gmail.com" };
 
 {

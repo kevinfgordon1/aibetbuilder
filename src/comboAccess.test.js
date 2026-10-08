@@ -9,6 +9,7 @@ import {
   UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT,
   parseComboLocksAllowlist,
   comboLocksAllowlist,
+  COMBO_LOCKS_ACCOUNTS,
   canSeeComboLocks,
   canSeeOwnerTools,
   canSeeNewOddsBoard,
@@ -37,30 +38,46 @@ assert.equal(UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT, "UNDERDOG_PREDICT_ALLOWLIST");
 assert.deepEqual(parseComboLocksAllowlist("a@x.com, uid-1; B@Y.com"), ["a@x.com", "uid-1", "B@Y.com"]);
 assert.deepEqual(parseComboLocksAllowlist(""), []);
 
+// Combo Locks is hardcoded: Kevin's two accounts + one approved tester.
+// Email AND uid must both match; the env var is ignored.
+const KEVIN_ID = "79ae1610-097e-4b46-a622-1e952f18e936";
+const KEVIN_ALT = { id: "968efed8-54db-48a6-808b-194a7a03a4cb", email: "kevin.f.gordon1@gmail.com" };
+const GTESTER = { id: "dd23a3a8-cb45-4866-be11-df72b4767c26", email: "gmoneyvikes@gmail.com" };
 {
-  const list = comboLocksAllowlist({ VITE_COMBO_LOCKS_ALLOWLIST: "" });
-  assert.equal(list.has(OWNER_EMAIL), true);
-  assert.equal(list.size, 1);
-}
-{
+  assert.equal(COMBO_LOCKS_ACCOUNTS.length, 3);
   const list = comboLocksAllowlist({ VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com, abc-uid" });
   assert.equal(list.has(OWNER_EMAIL), true);
-  assert.equal(list.has("tester@gmail.com"), true);
-  assert.equal(list.has("abc-uid"), true);
+  assert.equal(list.has(KEVIN_ID), true);
+  assert.equal(list.has(KEVIN_ALT.email), true);
+  assert.equal(list.has(GTESTER.email), true);
+  assert.equal(list.has("tester@gmail.com"), false, "env allowlist is ignored");
+  assert.equal(list.has("abc-uid"), false);
+  assert.equal(list.has(KENNETH_GUIDO_EMAIL), false, "Kenneth does not get Combo Locks");
+  assert.equal(list.size, 6);
 }
 
-const kevin = { id: "supabase-kevin", email: "Kev120909@gmail.com", user_metadata: { full_name: "Kevin Gordon" } };
+const kevin = { id: KEVIN_ID, email: "Kev120909@gmail.com", user_metadata: { full_name: "Kevin Gordon" } };
 assert.equal(canSeeComboLocks(kevin), true);
 assert.equal(canSeeComboLocks(kevin, { VITE_COMBO_LOCKS_ALLOWLIST: "" }), true);
+assert.equal(canSeeComboLocks(KEVIN_ALT), true);
+assert.equal(canSeeComboLocks(GTESTER), true);
+assert.equal(canSeeComboLocks({ ...GTESTER, email: "GMoneyVikes@Gmail.com " }), true);
 assert.equal(canSeeOwnerTools(kevin), true);
+assert.equal(canSeeOwnerTools(GTESTER), false);
+assert.equal(canSeeOwnerTools(KEVIN_ALT), false);
 
 assert.equal(canSeeComboLocks(null), false);
 assert.equal(canSeeComboLocks({ email: "stranger@gmail.com", id: "u2" }), false);
+assert.equal(canSeeComboLocks({ email: OWNER_EMAIL, id: "u-lookalike" }), false, "email alone is not enough");
+assert.equal(canSeeComboLocks({ email: OWNER_EMAIL }), false, "uid required");
+assert.equal(canSeeComboLocks({ email: "someone@x.com", id: KEVIN_ID }), false, "uid alone is not enough");
+assert.equal(canSeeComboLocks({ email: GTESTER.email, id: KEVIN_ALT.id }), false, "pairs do not mix");
+assert.equal(canSeeComboLocks({ email: KENNETH_GUIDO_EMAIL, id: "42b5ee16-68d5-4b3b-a931-40aa17cd1a47" }), false);
 assert.equal(canSeeOwnerTools({ email: "stranger@gmail.com" }), false);
 assert.equal(canSeeOwnerTools(null), false);
 
-assert.equal(canSeeComboLocks({ email: "tester@gmail.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), true);
-assert.equal(canSeeComboLocks({ id: "uid-99", email: "x@y.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-99" }), true);
+assert.equal(canSeeComboLocks({ email: "tester@gmail.com", id: "t1" }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), false);
+assert.equal(canSeeComboLocks({ id: "uid-99", email: "x@y.com" }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-99" }), false);
 assert.equal(canSeeOwnerTools({ email: "tester@gmail.com" }), false);
 
 assert.equal(KENNETH_GUIDO_EMAIL, "kmguido97@gmail.com");
@@ -89,7 +106,7 @@ assert.equal(canSeeNewOddsBoard(null), false);
   };
   assert.equal(canSeeNewOddsBoard(xMetaOnly), false);
   assert.equal(canSeeOwnerTools(xMetaOnly), false);
-  assert.equal(canSeeComboLocks({ id: "uid-x", email: null, app_metadata: { provider: "x" } }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-x" }), true);
+  assert.equal(canSeeComboLocks({ id: "uid-x", email: null, app_metadata: { provider: "x" } }, { VITE_COMBO_LOCKS_ALLOWLIST: "uid-x" }), false);
   assert.equal(canSeeOwnerTools({ id: "uid-x", email: null, app_metadata: { provider: "x" } }), false, "uid allowlist does not open Live Trading Desk");
   assert.equal(canSeeNewOddsBoard({ id: "fb", email: "kmguido97@gmail.com", app_metadata: { provider: "facebook" } }), true);
   assert.equal(canSeeOwnerTools({ id: "mail", email: "kev120909@gmail.com", app_metadata: { provider: "email" } }), true);
@@ -148,15 +165,15 @@ assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }), false);
 }
 
 const stranger = { email: "stranger@gmail.com", id: "u2" };
-const tester = { email: "tester@gmail.com", id: "uid-tester" };
+const tester = GTESTER;
 assert.equal(profileShowsComboPnl(kevin), false, "own-profile flag must be explicit");
 assert.equal(profileShowsComboPnl(kevin, { isOwner: false }), false);
 assert.equal(profileShowsComboPnl(kevin, { isOwner: true }), true);
 assert.equal(profileShowsComboPnl(kevin, { isOwner: true }, { VITE_COMBO_LOCKS_ALLOWLIST: "" }), true);
 assert.equal(profileShowsComboPnl(stranger, { isOwner: true }), false);
-assert.equal(profileShowsComboPnl(stranger, { isOwner: true }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), false);
-assert.equal(profileShowsComboPnl(tester, { isOwner: true }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), true);
-assert.equal(profileShowsComboPnl(tester, { isOwner: false }, { VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com" }), false);
+assert.equal(profileShowsComboPnl(stranger, { isOwner: true }, { VITE_COMBO_LOCKS_ALLOWLIST: "stranger@gmail.com" }), false);
+assert.equal(profileShowsComboPnl(tester, { isOwner: true }), true);
+assert.equal(profileShowsComboPnl(tester, { isOwner: false }), false);
 assert.equal(profileShowsComboPnl(null, { isOwner: true }), false);
 
 assert.deepEqual(parseAppHash("#profile"), { tab: "profile", lockId: null, cardId: null });
@@ -267,6 +284,11 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.doesNotMatch(app, /^\s+isOwner\s*$/m);
   assert.doesNotMatch(app, /activeTab === "combo" && user\?\.email === OWNER_EMAIL && <ComboLocks/);
   assert.doesNotMatch(landingSlice, /Combo Locks|combo lock|ComboLocks/i);
+  // Promo copy that names Combo Locks only renders for Combo Locks accounts.
+  for (const m of app.matchAll(/"[^"\n]*Combo Locks[^"\n]*"/g)) {
+    const before = app.slice(Math.max(0, m.index - 60), m.index);
+    assert.match(before, /canSeeComboLocks\(user\) \? $/, "ungated Combo Locks copy: " + m[0].slice(0, 60));
+  }
   assert.doesNotMatch(app, /UNHEDGED_RFQ_LIVE/);
 
   assert.match(profile, /profileShowsComboPnl\(user, \{ isOwner: isOwner && canSeeLocks \}\)/);
@@ -285,7 +307,7 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.doesNotMatch(locks, /UNHEDGED_RFQ_LIVE/);
 
   const envEx = fs.readFileSync(path.join(dir, "..", ".env.example"), "utf8");
-  assert.match(envEx, /VITE_COMBO_LOCKS_ALLOWLIST=/);
+  assert.doesNotMatch(envEx, /^VITE_COMBO_LOCKS_ALLOWLIST=/m, "Combo Locks gate is hardcoded, not env");
   assert.match(envEx, /VITE_UNDERDOG_PREDICT_ALLOWLIST=/);
   assert.match(envEx, /\/api\/betstamp-markets is anon/);
   assert.match(envEx, /kev120909@gmail.com/);
