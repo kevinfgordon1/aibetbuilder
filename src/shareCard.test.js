@@ -10,6 +10,8 @@ import {
   encodeEvCardId,
   DEFAULT_PROMO_TYPE,
   persistPickFocusInHash,
+  hashCardIdForTab,
+  shouldApplySharePromoPrefs,
   hashCardIdAfterPickViewToggle,
   promoPrefsFromRoute,
   sharePath,
@@ -85,6 +87,15 @@ assert.match(evId, /^fanduel\.[a-z0-9]+$/);
 
 assert.equal(DEFAULT_PROMO_TYPE, "boost");
 assert.equal(persistPickFocusInHash(), false);
+assert.equal(hashCardIdForTab({ tab: "promo", focusCardId: "boost.draftkings.100.abc", shareCardId: null }), null);
+assert.equal(hashCardIdForTab({ tab: "promo", focusCardId: "boost.williamhill_us.100.abc", shareCardId: "boost.williamhill_us.100.abc" }), "boost.williamhill_us.100.abc");
+assert.equal(hashCardIdForTab({ tab: "promo", focusCardId: "boost.draftkings.100.abc", shareCardId: "boost.williamhill_us.100.abc" }), null);
+assert.equal(hashCardIdForTab({ tab: "odds", focusCardId: "x", shareCardId: "x" }), null);
+assert.equal(shouldApplySharePromoPrefs("boost.williamhill_us.100.abc", null), true);
+assert.equal(shouldApplySharePromoPrefs("boost.williamhill_us.100.abc", "boost.williamhill_us.100.abc"), false);
+assert.equal(shouldApplySharePromoPrefs("boost.draftkings.100.abc", "boost.williamhill_us.100.abc"), true);
+assert.equal(shouldApplySharePromoPrefs(null, null), false);
+
 
 {
   const profile = { promoBook: "draftkings" };
