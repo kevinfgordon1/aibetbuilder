@@ -55,30 +55,80 @@ export function decodePromoCardId(cardId) {
 /**
  * Expanding/collapsing a Promo or +EV pick is view-only. Do not persist that
  * pick's cardId in the URL — a refresh would decode it and override Profile
- * promoBook / the default promo type. Share / deep-link cardIds still live
- * in the hash when the user opens or copies a real share URL.
+ * promoBook / the default promo type.
  */
 export function persistPickFocusInHash() {
   return false;
 }
 
+/** sessionStorage key set by /s/ share landing before it redirects to #hash. */
+export const PENDING_SHARE_CARD_KEY = "aibetbuilder.pendingShareCard";
+
+function shareStorage(storage) {
+  if (storage !== undefined) return storage;
+  try {
+    return globalThis.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** /s/ landing calls this so a full-page #hash open is treated as intentional. */
+export function markPendingShareCard(cardId, storage) {
+  const id = String(cardId || "").trim();
+  const store = shareStorage(storage);
+  if (!id || !store || typeof store.setItem !== "function") return false;
+  try {
+    store.setItem(PENDING_SHARE_CARD_KEY, id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when this cardId was opened via /s/ share landing (not a leftover
+ * Optimize! / sticky hash). Consumes the marker so a plain Refresh cannot
+ * re-apply the baked sportsbook over Profile defaults.
+ */
+export function consumePendingShareCard(cardId, storage) {
+  const id = String(cardId || "").trim();
+  if (!id) return false;
+  const store = shareStorage(storage);
+  if (!store || typeof store.getItem !== "function") return false;
+  try {
+    const pending = String(store.getItem(PENDING_SHARE_CARD_KEY) || "");
+    if (pending && pending === id) {
+      store.removeItem(PENDING_SHARE_CARD_KEY);
+      return true;
+    }
+    // Stale marker for a different card — drop it.
+    if (pending) store.removeItem(PENDING_SHARE_CARD_KEY);
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 /**
  * Which cardId belongs in the URL for Promo / +EV.
- * Real share/deep-link cardIds stay. In-app focus (Optimize!, expand) does
- * not — putting those in the hash made TOKEN_REFRESHED on tab-return re-read
- * the cardId and force the sportsbook back to the book baked into it.
+ * Never persist cardIds: Optimize! must not stick, and share cardIds are
+ * consumed once on load then stripped so Refresh falls back to Profile
+ * promoBook (DraftKings) instead of re-forcing Caesars from a leftover hash.
  */
 export function hashCardIdForTab({ tab, focusCardId, shareCardId } = {}) {
   if (tab !== "promo" && tab !== "ev") return null;
-  if (shareCardId && focusCardId && shareCardId === focusCardId) return shareCardId;
-  if (shareCardId && !focusCardId) return null;
-  if (persistPickFocusInHash()) return focusCardId || null;
+  if (persistPickFocusInHash()) return focusCardId || shareCardId || null;
   return null;
 }
 
-/** Apply share promo prefs only the first time we see this cardId. */
-export function shouldApplySharePromoPrefs(cardId, alreadyAppliedCardId) {
-  if (!cardId) return false;
+/**
+ * Apply share promo prefs only the first time we see this cardId, and only
+ * when the open was intentional (/s/ pending marker). Orphan sticky hashes
+ * from old Optimize! writes must not override Profile on Refresh.
+ */
+export function shouldApplySharePromoPrefs(cardId, alreadyAppliedCardId, { intentional = true } = {}) {
+  if (!cardId || !intentional) return false;
   return String(cardId) !== String(alreadyAppliedCardId || "");
 }
 

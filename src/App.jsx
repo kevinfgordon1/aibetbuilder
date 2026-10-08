@@ -6,7 +6,7 @@ import UnhedgedTape from "./UnhedgedTape";
 import LiveTradingDesk from "./LiveTradingDesk";
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
-import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs } from "./shareCard";
+import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, guestActionNeedsSignIn, promoControlSummary } from "./guestAccess.js";
@@ -1791,15 +1791,24 @@ export default function App() {
       if (resolved.tab === "promo") {
         const fromRoute = promoPrefsFromRoute(resolved);
         if (fromRoute.source === "share") {
-          shareCardIdRef.current = resolved.cardId;
-          if (shouldApplySharePromoPrefs(resolved.cardId, sharePrefsAppliedRef.current)) {
+          // Only /s/ landings set the pending marker. A leftover Optimize!
+          // cardId in the address bar must not force Caesars (or any book)
+          // over Profile on a plain Refresh.
+          const intentional = consumePendingShareCard(resolved.cardId);
+          if (shouldApplySharePromoPrefs(resolved.cardId, sharePrefsAppliedRef.current, { intentional })) {
             sharePrefsAppliedRef.current = resolved.cardId;
+            shareCardIdRef.current = resolved.cardId;
             if (fromRoute.promoType) setPromoType(fromRoute.promoType);
             if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
             if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
+            setFocusCardId(resolved.cardId);
+            focusedCardApplied.current = null;
+          } else {
+            // Orphan sticky hash (or already-applied share): strip it so the
+            // next Refresh is a clean #promo + Profile book.
+            shareCardIdRef.current = null;
+            if (!intentional) sharePrefsAppliedRef.current = null;
           }
-          setFocusCardId(resolved.cardId);
-          focusedCardApplied.current = null;
         } else {
           // Plain #promo: keep in-memory Optimize focus; do not re-apply a book.
           shareCardIdRef.current = null;

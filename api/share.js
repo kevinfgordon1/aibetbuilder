@@ -194,7 +194,15 @@ function handler(req, res) {
 <body style="background:#0a0b0f;color:#e8eaed;font-family:system-ui,sans-serif;padding:40px;text-align:center">
   <p>Opening AI Bet Builder…</p>
   <p><a href="${esc(dest)}" style="color:#60a5fa">Continue</a></p>
-  <script>location.replace(${JSON.stringify(dest)});</script>
+  <script>
+    (function () {
+      try {
+        var card = ${JSON.stringify(parsed.rest || '')};
+        if (card) sessionStorage.setItem('aibetbuilder.pendingShareCard', card);
+      } catch (e) {}
+      location.replace(${JSON.stringify(dest)});
+    })();
+  </script>
 </body>
 </html>`;
   res.statusCode = 200;
