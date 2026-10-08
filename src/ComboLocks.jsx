@@ -39,7 +39,7 @@ import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLoc
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import ComboTesters from "./ComboTesters";
-import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT, bucketReadoutRows, bucketAgeLabel } from "./comboLockPause";
+import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
@@ -120,45 +120,6 @@ function PauseToggle({ parlay, onToggle, busy }) {
   );
 }
 
-// Read-only Kalshi balances from the combo-worker bucket snapshot (owner only, via /api/combo-bucket).
-// Kalshi's app shows main + combo combined; this splits them.
-function BucketReadout({ supabase, ready }) {
-  const [bucket, setBucket] = useState(null);
-  useEffect(() => {
-    if (!ready) return undefined;
-    let alive = true;
-    const load = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session && session.access_token;
-        if (!token) return;
-        const r = await fetch("/api/combo-bucket", { headers: { accept: "application/json", authorization: "Bearer " + token } });
-        const j = await r.json().catch(() => null);
-        if (alive) setBucket(r.ok && j && j.ok ? j.bucket : null);
-      } catch (_) { /* readout is optional; keep the last value */ }
-    };
-    load();
-    const t = window.setInterval(load, 30000);
-    return () => { alive = false; window.clearInterval(t); };
-  }, [supabase, ready]);
-  const rows = bucketReadoutRows(bucket);
-  if (!rows.length) return null;
-  const age = bucketAgeLabel(bucket);
-  return (
-    <div className="bucket-readout num" aria-label="Kalshi balances">
-      {rows.map((r) => (
-        <span className="bk" key={r.key} title={r.tip}>
-          <span className="bk-l">{r.label}</span>
-          <span className="bk-v">{r.value}</span>
-          <span className="bk-s">{r.sub}</span>
-        </span>
-      ))}
-      <span className={"bk-age" + (bucket.stale ? " stale" : "")} title="Kalshi's app shows Main + Combo combined. Updated by the combo-worker heartbeat.">
-        {bucket.stale ? "stale · " : ""}{age}
-      </span>
-    </div>
-  );
-}
 function CopyLockLink({ lockId }) {
   const [status, setStatus] = useState("");
   if (!lockId) return null;
@@ -1363,10 +1324,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         .cl .parlay.paused{border-style:dashed}
         .cl .parlay.paused > *:not(.plhead){opacity:.45}
         .cl .parlay.paused .plhead > *:not(.pl-keep):not(.btn){opacity:.5}
-        .cl .bucket-readout{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;margin:0 0 12px;padding:7px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.02);font-size:13px}
-        .cl .bucket-readout .bk{display:inline-flex;align-items:baseline;gap:5px;cursor:default}
-        .cl .bk-l{color:#c3c6cc;font-weight:600}.cl .bk-v{font-weight:700}.cl .bk-s{font-size:11px;color:#6b7280}
-        .cl .bk-age{margin-left:auto;font-size:11px;color:#6b7280}.cl .bk-age.stale{color:#fcd34d}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
         .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
@@ -1396,7 +1353,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             : <span className="chip">Refresh failed. Retrying…</span>)}
         </div>
       )}
-      <BucketReadout supabase={supabase} ready={deskReady} />
       <ComboTesters user={user} supabase={supabase} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />

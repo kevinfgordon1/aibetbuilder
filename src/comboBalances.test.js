@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   noBidFromFill, usd, etTime, balanceCell, balancesByUser, cellText, cellNote, lockNeedUsd, comboShortfall, filledByParlay, adminBalanceText, BALANCE_STALE_MS,
 } from "./comboBalances.js";
@@ -70,5 +71,12 @@ assert.deepEqual(filledByParlay([{ parlay_id: "a", count: 10 }, { parlay_id: "a"
   assert.equal(comboShortfall({ comboUsd: 94, parlays }).short, false);
   assert.equal(comboShortfall({ comboUsd: null, parlays }).short, false);
   assert.equal(comboShortfall({ comboUsd: 10, parlays: [] }).short, false);
+}
+// The old bucket-monitor Main/Combo readout is gone from the page; "Available to trade" replaces it.
+{
+  const locks = fs.readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
+  assert.doesNotMatch(locks, /BucketReadout|bucket-readout|\/api\/combo-bucket/);
+  const testers = fs.readFileSync(new URL("./ComboTesters.jsx", import.meta.url), "utf8");
+  assert.match(testers, /Available to trade/);
 }
 console.log("comboBalances.test.js ok");
