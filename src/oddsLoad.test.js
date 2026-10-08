@@ -305,7 +305,7 @@ function fullPlan() {
 
 // ── +EV tab view: live scan wins, else cached; no promo-board header scan
 {
-  assert.equal(DEFAULT_EV_DATE_RANGE, "today");
+  assert.equal(DEFAULT_EV_DATE_RANGE, "24h");
   const live = { allEvLegs: [1, 2], evBets: [{ ev: 9, name: "Full" }], positiveEV: [{}] };
   const cached = { allEvLegs: [1], evBets: [{ ev: 1, name: "Cached" }], positiveEV: [] };
   assert.equal(selectEvScanView({ liveEvScan: live, cachedEvScan: cached }), live);
