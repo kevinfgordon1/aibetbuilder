@@ -1,4 +1,5 @@
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
+const { guardSportData, logOutlierFlags, readConfig } = require('../lib/odds-outlier-guard');
 const {
   parseRequestedSports,
   isFeaturedOnlyQuery,
@@ -32,6 +33,9 @@ module.exports = async (req, res) => {
       apiKey: process.env.ODDS_API_KEY,
       supabaseClient: supabase,
       applyBookAdjustments,
+      // Drops obvious mistake prices before cache (ODDS_OUTLIER_GUARD=off|dry|on).
+      outlierGuard: (sport, data, opts) => guardSportData(sport, data, { ...opts, config: readConfig() }),
+      logOutlierFlags,
     });
     if (cacheUnreachable) {
       return res.status(503).json({
