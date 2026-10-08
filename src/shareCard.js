@@ -63,6 +63,26 @@ export function persistPickFocusInHash() {
 }
 
 /**
+ * Which cardId belongs in the URL for Promo / +EV.
+ * Real share/deep-link cardIds stay. In-app focus (Optimize!, expand) does
+ * not — putting those in the hash made TOKEN_REFRESHED on tab-return re-read
+ * the cardId and force the sportsbook back to the book baked into it.
+ */
+export function hashCardIdForTab({ tab, focusCardId, shareCardId } = {}) {
+  if (tab !== "promo" && tab !== "ev") return null;
+  if (shareCardId && focusCardId && shareCardId === focusCardId) return shareCardId;
+  if (shareCardId && !focusCardId) return null;
+  if (persistPickFocusInHash()) return focusCardId || null;
+  return null;
+}
+
+/** Apply share promo prefs only the first time we see this cardId. */
+export function shouldApplySharePromoPrefs(cardId, alreadyAppliedCardId) {
+  if (!cardId) return false;
+  return String(cardId) !== String(alreadyAppliedCardId || "");
+}
+
+/**
  * Hash cardId after a view-only expand/collapse.
  * Never introduces a sticky cardId. Leaves an existing share-link cardId alone.
  */

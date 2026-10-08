@@ -6,7 +6,7 @@ import UnhedgedTape from "./UnhedgedTape";
 import LiveTradingDesk from "./LiveTradingDesk";
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
-import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
+import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, guestActionNeedsSignIn, promoControlSummary } from "./guestAccess.js";
@@ -1642,6 +1642,11 @@ export default function App() {
   const [focusCardId, setFocusCardId] = useState(null);
   const [routeNotice, setRouteNotice] = useState(null);
   const focusedCardApplied = useRef(null);
+  // Share/deep-link cardId currently owned by the URL. Optimize! focus must
+  // not write into this — see hashCardIdForTab.
+  const shareCardIdRef = useRef(null);
+  const sharePrefsAppliedRef = useRef(null);
+  const profilePrefsUserRef = useRef(null);
   const pendingOptimize = useRef(false);
   const pendingOptimizeTarget = useRef(null); // { numLegs, cardId } after cross-leg scan
   const optimizeGen = useRef(0);
@@ -1718,6 +1723,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user) {
+      profilePrefsUserRef.current = null;
       setProfilePrefs(defaultProfilePrefs());
       setProfilePrefsReady(false);
       setWhatsNewSessionDismissed(false);
@@ -1726,22 +1732,28 @@ export default function App() {
       setTargetedAlertSessionDismissed(false);
       return;
     }
-    const loaded = loadProfilePrefs(user, {
-      allowedSports: new Set(SPORT_KEYS),
-      allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
-    });
-    setProfilePrefs(loaded);
-    setProfilePrefsReady(true);
-    setWhatsNewSessionDismissed(false);
-    setWhatsNewReady(false);
-    setTargetedAlertSessionDismissed(false);
-    if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
-    if (loaded.promoBook) {
-      const route = parseAppHash(window.location.hash);
-      const sharedPromo = route.tab === "promo" && decodePromoCardId(route.cardId);
-      if (!sharedPromo) setPromoBook(loaded.promoBook);
+    // Load saved Promo defaults once per sign-in. TOKEN_REFRESHED on tab
+    // return must not re-apply them over the user's live selection.
+    const already = profilePrefsUserRef.current === user.id;
+    if (!already) {
+      profilePrefsUserRef.current = user.id;
+      const loaded = loadProfilePrefs(user, {
+        allowedSports: new Set(SPORT_KEYS),
+        allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+      });
+      setProfilePrefs(loaded);
+      setProfilePrefsReady(true);
+      setWhatsNewSessionDismissed(false);
+      setTargetedAlertSessionDismissed(false);
+      if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));
+      if (loaded.promoBook) {
+        const route = parseAppHash(window.location.hash);
+        const sharedPromo = route.tab === "promo" && decodePromoCardId(route.cardId);
+        if (!sharedPromo) setPromoBook(loaded.promoBook);
+      }
     }
     let cancelled = false;
+    if (!already) setWhatsNewReady(false);
     fetchActiveAnnouncement(supabase).then((ann) => {
       if (cancelled) return;
       setWhatsNew(ann);
@@ -1765,6 +1777,8 @@ export default function App() {
         setActiveTab("promo");
         setFocusLockId(null);
         setFocusCardId(null);
+        shareCardIdRef.current = null;
+        sharePrefsAppliedRef.current = null;
         return;
       }
       setActiveTab(resolved.tab || "promo");
@@ -1772,27 +1786,47 @@ export default function App() {
       if (resolved.tab === "promo") {
         const fromRoute = promoPrefsFromRoute(resolved);
         if (fromRoute.source === "share") {
-          if (fromRoute.promoType) setPromoType(fromRoute.promoType);
-          if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
-          if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
-        }
-        if (resolved.cardId) {
+          shareCardIdRef.current = resolved.cardId;
+          if (shouldApplySharePromoPrefs(resolved.cardId, sharePrefsAppliedRef.current)) {
+            sharePrefsAppliedRef.current = resolved.cardId;
+            if (fromRoute.promoType) setPromoType(fromRoute.promoType);
+            if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
+            if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
+          }
           setFocusCardId(resolved.cardId);
           focusedCardApplied.current = null;
         } else {
-          setFocusCardId(null);
+          // Plain #promo: keep in-memory Optimize focus; do not re-apply a book.
+          shareCardIdRef.current = null;
+          sharePrefsAppliedRef.current = null;
+          if (!persistPickFocusInHash()) {
+            // Leave focusCardId alone so Optimize! scroll target survives a
+            // TOKEN_REFRESHED. Only clear when the hash explicitly changes away.
+          } else {
+            setFocusCardId(null);
+          }
         }
       } else if (resolved.tab === "ev") {
-        setFocusCardId(resolved.cardId || null);
-        focusedCardApplied.current = resolved.cardId ? null : focusedCardApplied.current;
+        if (resolved.cardId) {
+          shareCardIdRef.current = resolved.cardId;
+          setFocusCardId(resolved.cardId);
+          focusedCardApplied.current = null;
+        } else {
+          shareCardIdRef.current = null;
+          if (persistPickFocusInHash()) setFocusCardId(null);
+        }
       } else {
+        shareCardIdRef.current = null;
+        sharePrefsAppliedRef.current = null;
         setFocusCardId(null);
       }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, [user, authLoading]);
+    // user.id only: a TOKEN_REFRESHED builds a new user object and must not
+    // re-run this (that was re-applying a sticky share/Optimize cardId book).
+  }, [user && user.id, authLoading]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -1822,7 +1856,7 @@ export default function App() {
     const desired = serializeAppHash({
       tab: activeTab || "promo",
       lockId: activeTab === "combo" ? focusLockId : null,
-      cardId: (activeTab === "promo" || activeTab === "ev") ? focusCardId : null,
+      cardId: hashCardIdForTab({ tab: activeTab, focusCardId, shareCardId: shareCardIdRef.current }),
     });
     if (!hashesEqual(window.location.hash, desired)) {
       window.history.replaceState(null, "", desired || (window.location.pathname + window.location.search));
@@ -3150,9 +3184,22 @@ export default function App() {
                   {controlBox(<>
                     <label style={labelStyle}>Sportsbook</label>
                     <select value={promoBook} onChange={e => {
-                      setPromoBook(e.target.value);
-                      window.gtag?.('event', 'sportsbook_selected', { book: e.target.value });
-                      logEvent(user, 'sportsbook_selected', { book: e.target.value });
+                      const book = e.target.value;
+                      setPromoBook(book);
+                      // Sticky share/Optimize cardIds must not win on the next
+                      // token refresh after the user picks a different book.
+                      shareCardIdRef.current = null;
+                      sharePrefsAppliedRef.current = null;
+                      setFocusCardId(null);
+                      if (user) {
+                        const saved = saveProfilePrefs(user, { ...profilePrefs, promoBook: sanitizePromoBook(book) }, {
+                          allowedSports: new Set(SPORT_KEYS),
+                          allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+                        });
+                        setProfilePrefs(saved);
+                      }
+                      window.gtag?.('event', 'sportsbook_selected', { book });
+                      logEvent(user, 'sportsbook_selected', { book });
                     }} style={{ background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: activePromoBookData.color, padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer" }}>
                       {PROMO_BOOKS.map(b => <option key={b.key} value={b.key}>{b.label}</option>)}
                     </select>
