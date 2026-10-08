@@ -1,6 +1,10 @@
 // Combo Locks testers UI (kept out of ComboLocks.jsx so the page stays lean):
 //   - Approved testers: "Connect your exchange" with masked status + Disconnect.
 //   - Owner: collapsible "All users" admin view with pause/resume and caps.
+//   - "Available to trade" (testers on their card, Kevin on his server-keys card)
+//     and a Balance column in "All users". Balances come from public.combo_balances,
+//     written every ~60s by combo-worker with each account's own keys (RLS: own rows,
+//     owner sees all). The browser never calls an exchange and never sees a key.
 // Keys go straight to /api/combo-keys (server only); the page never stores,
 // logs, or re-displays a secret.
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -8,6 +12,9 @@ import { canSeeOwnerTools } from "./comboAccess";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
 } from "./comboTesters";
+import {
+  adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, usd,
+} from "./comboBalances";
 
 const TESTERS_CSS = `
 .cl .tst{margin:0 0 14px}
@@ -26,6 +33,18 @@ const TESTERS_CSS = `
 .cl .tst-scroll{overflow-x:auto}
 .cl .tst .caps-edit{display:flex;gap:6px;align-items:center}
 .cl .tst .caps-edit input{width:80px;padding:5px 7px}
+.cl .tst .tst-bal{margin-top:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.02)}
+.cl .tst .tst-bal-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;font-weight:600;font-size:13px}
+.cl .tst .tst-bal-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid rgba(255,255,255,0.05)}
+.cl .tst .tst-bal-row:first-of-type{border-top:0}
+.cl .tst .tst-bal-cells{display:flex;gap:8px;flex-wrap:wrap}
+.cl .tst .tst-bal-cell{min-width:120px;padding:6px 10px;border-radius:8px;background:rgba(255,255,255,0.03)}
+.cl .tst .tst-bal-cell.hi{background:rgba(16,185,129,0.08);box-shadow:inset 0 0 0 1px rgba(16,185,129,0.35)}
+.cl .tst .tst-bal-cell .lbl{font-size:11px;color:#8a8f98}
+.cl .tst .tst-bal-cell .amt{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.cl .tst .tst-bal-cell .sub{font-size:11px;color:#8a8f98}
+.cl .tst .tst-bal-cell.err .amt{font-size:13px;color:#fca5a5}
+@media (max-width:600px){.cl .tst .tst-bal-cells{width:100%}.cl .tst .tst-bal-cell{flex:1 1 0}}
 @media (max-width:600px){.cl .tst-table thead{display:none}.cl .tst-table tr{display:block;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08)}.cl .tst-table td{display:flex;justify-content:space-between;gap:10px;border:0;padding:3px 0}.cl .tst-table td::before{content:attr(data-k);color:#8a8f98}}
 `;
 
@@ -87,7 +106,118 @@ function VenueRow({ venue, row, busy, onConnect, onDisconnect }) {
   );
 }
 
-function ConnectPanel({ supabase, status, setStatus }) {
+const BAL_COLS = "user_id,venue,shard,available_usd,portfolio_usd,buying_power_usd,ok,error,fetched_at,checked_at";
+
+/** Balance rows (RLS-scoped) re-read every 60s; userId=null reads all (owner). */
+function useBalances(supabase, userId, enabled = true) {
+  const [state, setState] = useState({ rows: null, failed: false, now: new Date() });
+  const load = useCallback(async () => {
+    let q = supabase.from("combo_balances").select(BAL_COLS);
+    if (userId) q = q.eq("user_id", userId);
+    const { data, error } = await q;
+    setState((s) => ({ rows: error ? s.rows : (data || []), failed: !!error, now: new Date() }));
+  }, [supabase, userId]);
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    const run = () => { if (alive) load().catch(() => setState((s) => ({ ...s, failed: true, now: new Date() }))); };
+    run();
+    const t = setInterval(run, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [enabled, load]);
+  return { ...state, reload: load };
+}
+
+/** This user's active locks + filled contracts, for the combo-balance warning. */
+function useLockNeeds(supabase, userId, enabled = true) {
+  const [needs, setNeeds] = useState({ parlays: [], filledById: {} });
+  useEffect(() => {
+    if (!enabled || !userId) return undefined;
+    let alive = true;
+    (async () => {
+      const pq = await supabase.from("combo_parlays").select("id,label,max_contracts,fill_american,paused,archived_at,user_id").eq("user_id", userId).is("archived_at", null).limit(500);
+      if (pq.error || !alive) return;
+      const ids = (pq.data || []).map((p) => p.id);
+      let filledById = {};
+      if (ids.length) {
+        const fq = await supabase.from("combo_fills").select("parlay_id,count").in("parlay_id", ids).eq("is_combo", true).eq("is_taker", false).limit(10000);
+        if (!fq.error) filledById = filledByParlay(fq.data || []);
+      }
+      if (alive) setNeeds({ parlays: pq.data || [], filledById });
+    })().catch(() => {});
+    return () => { alive = false; };
+  }, [supabase, userId, enabled]);
+  return needs;
+}
+
+function BalanceCell({ label, cell, sub, hi, now }) {
+  const bad = cell.state === "error" || cell.state === "stale";
+  return (
+    <div className={"tst-bal-cell" + (hi ? " hi" : "") + (bad && cell.amount == null ? " err" : "")}>
+      <div className="lbl">{label}</div>
+      <div className="amt">{cellText(cell)}</div>
+      {(cellNote(cell, now) || sub) && <div className="sub">{cellNote(cell, now) || sub}</div>}
+    </div>
+  );
+}
+
+/** "Available to trade" per connected exchange. */
+function BalanceBlock({ supabase, userId, kalshi, poly }) {
+  const { rows, failed, now } = useBalances(supabase, userId, !!(kalshi || poly));
+  const needs = useLockNeeds(supabase, userId, !!kalshi);
+  if (!kalshi && !poly) return null;
+  const b = (rows && balancesByUser(rows, now)[userId]) || emptyBalances(now);
+  const short = kalshi && b.kalshiCombo.state === "ok"
+    ? comboShortfall({ comboUsd: b.kalshiCombo.amount, parlays: needs.parlays, filledById: needs.filledById })
+    : { short: false };
+  return (
+    <div className="tst-bal" aria-label="Available to trade">
+      <div className="tst-bal-head">
+        <span>Available to trade</span>
+        <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>
+          {rows === null && !failed ? "Loading…" : failed && !rows ? "Couldn't load balances" : b.updatedAt ? `Updated ${etTime(b.updatedAt, now)}` : "Waiting for first check"}
+        </span>
+      </div>
+      {kalshi && (
+        <div className="tst-bal-row">
+          <div style={{ fontWeight: 600 }}>Kalshi</div>
+          <div className="tst-bal-cells">
+            <BalanceCell label="Combos (used by these locks)" cell={b.kalshiCombo} hi now={now} />
+            <BalanceCell label="Single-game" cell={b.kalshiMain} now={now} />
+          </div>
+        </div>
+      )}
+      {poly && (
+        <div className="tst-bal-row">
+          <div style={{ fontWeight: 600 }}>Polymarket US</div>
+          <div className="tst-bal-cells">
+            <BalanceCell label="Buying power" cell={b.poly} hi now={now} />
+          </div>
+        </div>
+      )}
+      {short.short && (
+        <div className="note warn" style={{ marginTop: 8 }}>
+          Your Kalshi combo balance ({usd(b.kalshiCombo.amount)}) is below the {usd(short.need)} that “{short.parlay.label || "a lock"}” could need if it fills in full. Kalshi may reject those quotes until the combo balance covers it.
+        </div>
+      )}
+      {kalshi && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Kalshi keeps combos in a separate balance from single-game markets; its app shows the two added together. Refreshes every minute.</div>}
+    </div>
+  );
+}
+
+function OwnerBalances({ supabase, user }) {
+  return (
+    <div className="card tst">
+      <div className="tst-head">
+        <div className="tst-title">Your exchange accounts</div>
+        <span className="chip">Server keys</span>
+      </div>
+      <BalanceBlock supabase={supabase} userId={user.id} kalshi poly />
+    </div>
+  );
+}
+
+function ConnectPanel({ supabase, userId, status, setStatus }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const connect = async (payload) => {
@@ -124,6 +254,9 @@ function ConnectPanel({ supabase, status, setStatus }) {
       {["kalshi", "polymarket_us"].map((v) => (
         <VenueRow key={v} venue={v} row={status.venues && status.venues[v]} busy={busy} onConnect={connect} onDisconnect={disconnect} />
       ))}
+      <BalanceBlock supabase={supabase} userId={userId}
+        kalshi={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected)}
+        poly={!!(status.venues && status.venues.polymarket_us && status.venues.polymarket_us.connected)} />
     </div>
   );
 }
@@ -148,6 +281,7 @@ function AdminPanel({ supabase }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [editing, setEditing] = useState(null);
+  const bal = useBalances(supabase, null, open);
   const load = useCallback(async () => {
     setErr(null);
     const r = await authedFetch(supabase, "/api/combo-admin");
@@ -177,7 +311,7 @@ function AdminPanel({ supabase }) {
       <div className="tst-head">
         <div className="tst-title">All users {users ? <span className="muted" style={{ fontWeight: 400 }}>· {rows.length} with locks or access · {testers} approved tester{testers === 1 ? "" : "s"}</span> : null}</div>
         <div className="tst-actions">
-          {open && <button type="button" className="btn mini" disabled={busy} onClick={load}>Refresh</button>}
+          {open && <button type="button" className="btn mini" disabled={busy} onClick={() => { load(); bal.reload(); }}>Refresh</button>}
           <button type="button" className="btn mini" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Show"}</button>
         </div>
       </div>
@@ -186,7 +320,7 @@ function AdminPanel({ supabase }) {
       {open && users && (
         <div className="tst-scroll" style={{ marginTop: 8 }}>
           <table className="tst-table num">
-            <thead><tr><th>User</th><th>Status</th><th>Limits</th><th>Kalshi</th><th>Polymarket US</th><th>Locks</th><th>Orders 30d</th><th>Fills</th><th>Realized P/L</th><th /></tr></thead>
+            <thead><tr><th>User</th><th>Status</th><th>Limits</th><th>Kalshi</th><th>Polymarket US</th><th>Balance</th><th>Locks</th><th>Orders 30d</th><th>Fills</th><th>Realized P/L</th><th /></tr></thead>
             <tbody>
               {rows.map((u) => {
                 const st = userTradingState(u);
@@ -201,6 +335,15 @@ function AdminPanel({ supabase }) {
                       : ownerDesk ? "No limits" : u.in_live_users ? capsLine(u.caps) : "—"}</td>
                     <td data-k="Kalshi">{ownerDesk ? "Server keys" : u.keys.kalshi.connected ? `••••${u.keys.kalshi.hint}${u.keys.kalshi.scopeStatus === "unverified" ? " (review)" : ""}` : "—"}</td>
                     <td data-k="Polymarket US">{ownerDesk ? "Server keys" : u.keys.polymarket_us.connected ? `••••${u.keys.polymarket_us.hint}` : "—"}</td>
+                    <td data-k="Balance">{(() => {
+                      const k = ownerDesk || u.keys.kalshi.connected;
+                      const pm = ownerDesk || u.keys.polymarket_us.connected;
+                      if (!k && !pm) return "—";
+                      if (!bal.rows) return bal.failed ? "Couldn't load" : "…";
+                      const b = balancesByUser(bal.rows, bal.now)[u.user_id];
+                      if (!b) return <span className="muted">Waiting</span>;
+                      return <span title={b.updatedAt ? `Updated ${etTime(b.updatedAt, bal.now)}. * = couldn't refresh, last amount shown.` : ""}>{adminBalanceText(b, { kalshi: k, poly: pm })}{b.updatedAt ? <div className="muted" style={{ fontSize: 11 }}>{etTime(b.updatedAt, bal.now)}</div> : null}</span>;
+                    })()}</td>
                     <td data-k="Locks">{u.locks.active} active / {u.locks.total}</td>
                     <td data-k="Orders 30d">{u.orders.last30d}</td>
                     <td data-k="Fills">{u.fills.count} · {Math.round(u.fills.contracts).toLocaleString("en-US")} ct{u.fills.todayContracts ? ` · ${Math.round(u.fills.todayContracts)} today` : ""}</td>
@@ -220,7 +363,7 @@ function AdminPanel({ supabase }) {
               })}
             </tbody>
           </table>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Keys are shown masked only. Testers trade on their own accounts. Kevin's desk uses the server keys. Pause engages the user's kill switch; Resume clears only your pause, and the user re-arms their own kill switch.</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Keys are shown masked only. Balance = Kalshi combo / single-game and Polymarket US buying power, refreshed every minute. Testers trade on their own accounts. Kevin's desk uses the server keys. Pause engages the user's kill switch; Resume clears only your pause, and the user re-arms their own kill switch.</div>
         </div>
       )}
     </div>
@@ -240,8 +383,9 @@ export default function ComboTesters({ user, supabase }) {
   return (
     <>
       <style>{TESTERS_CSS}</style>
+      {isOwner && <OwnerBalances supabase={supabase} user={user} />}
       {isOwner && <AdminPanel supabase={supabase} />}
-      {!isOwner && status && status.approved && <ConnectPanel supabase={supabase} status={status} setStatus={setStatus} />}
+      {!isOwner && status && status.approved && <ConnectPanel supabase={supabase} userId={user.id} status={status} setStatus={setStatus} />}
     </>
   );
 }
