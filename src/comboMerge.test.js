@@ -442,7 +442,7 @@ function free100() {
 {
   const locks = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
   assert.match(locks, /Keep separate/);
-  assert.match(locks, /Merged from /);
+  assert.match(locks, /Combined from /);
   assert.match(locks, /Undo merge/);
   assert.match(locks, /sportsbook/);
   assert.match(locks, /boostPct/);

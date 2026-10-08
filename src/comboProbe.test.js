@@ -81,9 +81,9 @@ assert.equal(formatProbeNote({ ok: false, error: "Sign in required" }), "Sign in
 
 {
   const src = fs.readFileSync(path.join(__dirname, "ComboLocks.jsx"), "utf8");
-  assert.match(src, /\{probing \? "Probing…" : "Probe"\}/);
-  assert.match(src, /Find the current best odds on the market for this combo size/);
-  assert.match(src, /Finds the current best odds available on the market right now \(for this combo size\)/);
+  assert.match(src, /\{probing \? "Checking…" : "Check market price"\}/);
+  assert.match(src, /Ask the market for its best price on this parlay at this size/);
+  assert.match(src, /shows the best price traders would pay for this parlay right now/);
   assert.match(src, /\/api\/combo-probe/);
   assert.match(src, /authorization: "Bearer "/);
   assert.match(src, /waitMs:\s*8000/);
