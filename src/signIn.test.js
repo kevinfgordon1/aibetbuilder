@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AUTH_NEXT_PARAM,
+  X_LOGIN_ENABLED,
   X_OAUTH_PROVIDER,
   SIGN_IN_PROVIDERS,
   normalizeSignInEmail,
@@ -25,6 +26,7 @@ import {
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
 assert.equal(X_OAUTH_PROVIDER, "x");
+assert.equal(X_LOGIN_ENABLED, true);
 assert.deepEqual(SIGN_IN_PROVIDERS, ["google", "x", "facebook"]);
 assert.equal(normalizeSignInEmail("  A@B.com "), "a@b.com");
 assert.equal(isPlausibleEmail("a@b.com"), true);
