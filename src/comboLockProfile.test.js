@@ -148,10 +148,11 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
 
 {
   const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
-  // Stake @ odds now lives in the shared LockCard ("Your bet") and History rows.
+  // Stake @ odds now lives in the shared LockCard ("Your original bet") and History rows.
   const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
-  assert.match(viewSrc, /<Fact k="Your bet" v=\{s\.betLine\}/);
-  assert.match(viewSrc, /<th>Your bet<\/th>/);
+  assert.match(viewSrc, /<Fact k="Your original bet" v=\{s\.betLine\} s=\{<BetSub summary=\{s\} \/>\} \/>/);
+  assert.match(viewSrc, /<th>Your original bet<\/th><th>Fair odds<\/th>/);
+  assert.doesNotMatch(viewSrc + locksSrc, /Your bet\b/);
   assert.match(locksSrc, /<LockCard/);
   assert.doesNotMatch(locksSrc, /have \{fmtAm/);
   assert.match(locksSrc, /moneyAbs\(profile\.current\.risk\)/);

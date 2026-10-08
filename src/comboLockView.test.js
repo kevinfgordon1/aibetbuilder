@@ -3,7 +3,9 @@ import {
   fmtAmerican, americanFromNoPrice, dollars, signedDollars, etDateTime, etDay, etStamp,
   plainLeg, lockTitle, lockStatus, betSummary, lockMetaLine, profitLine, plainAttemptLabel,
   historyResult, historyTotals, historyRow, lockSports, plainOutcomeText,
+  fairOdds, quoteRow, quoteHistory, QUOTE_ROWS_SHOWN,
 } from "./comboLockView.js";
+import { buildLockAttempts } from "./comboLockHistory.js";
 
 assert.equal(fmtAmerican(1300), "+1300");
 assert.equal(fmtAmerican(-110), "-110");
@@ -97,5 +99,57 @@ assert.equal(row.bet, "$50 at +1950");
 assert.equal(row.soldAt, "+1300");
 assert.equal(row.hedged, true);
 assert.equal(row.result, "Parlay missed");
+
+// Fair odds: the saved fair_american wins; else the legs' fair chances; else "—".
+assert.deepEqual(fairOdds({ fair_american: 1250 }), { american: 1250, text: "+1250", source: "saved" });
+assert.equal(fairOdds({ fair_american: null, legs: [{ label: "A" }] }).text, "—");
+assert.equal(fairOdds({ fair_american: "", legs: [] }).source, null);
+assert.deepEqual(fairOdds({ legs: [{ fair_prob: 0.5 }, { fair_american: 100 }] }), { american: 300, text: "+300", source: "legs" });
+assert.equal(betSummary({ parlay_stake: 50, parlay_american: 1950, fair_american: 1250 }).fair.text, "+1250");
+assert.equal(row.fair, "—");
+assert.equal(historyRow({ id: "y" }, { fair_american: 760 }).fair, "+760");
+
+// Quote history: filled first, then not filled, each row in plain words.
+{
+  const P = "p1";
+  const parlay = { id: P, user_id: "u", active: true, archived_at: null, fill_american: 1300, max_contracts: 1025, starts_at: "2026-10-11T17:00:00Z", created_at: "2026-10-07T20:15:00Z", legs: [] };
+  const sub = (id, status, contracts, at, extra = {}) => ({ id, user_id: "u", parlay_id: P, status, contracts, created_at: at, rfq_id: "rfq-" + id, venue: "kalshi", is_live: true, ...extra });
+  const attempts = buildLockAttempts({
+    parlay,
+    fills: [{ parlay_id: P, count: 250, order_id: "ord-1", fill_id: "f-1", kalshi_created_time: "2026-10-07T21:12:00Z", no_price: 0.93 }],
+    submissions: [
+      sub("s1", "filled", 400, "2026-10-07T21:12:00Z", { fill_american: 1300, order_id: "ord-1", worst_lock: 9.1 }),
+      sub("s2", "quoted", 300, "2026-10-07T22:41:00Z", { fill_american: 1300, quote_id: "q2" }),
+      sub("s3", "declined", 3000, "2026-10-07T21:05:00Z", { skip_reason: "over_limit" }),
+      sub("s4", "declined", 200, "2026-10-07T20:50:00Z", { skip_reason: "game_started", venue: "polymarket" }),
+    ],
+    outcomes: [{ rfq_id: "rfq-s2", parlay_id: P, outcome: "lost", loss_reason: "outbid", submitted_no_bid: 0.92, tape_no_price: 0.93, responded_ms: 410, posted_at: "2026-10-07T22:41:00Z" }],
+    now: Date.parse("2026-10-08T12:00:00Z"),
+  });
+  const qh = quoteHistory(attempts, { parlay, now: Date.parse("2026-10-08T12:00:00Z") });
+  assert.equal(qh.filled.length, 1);
+  assert.equal(qh.filled[0].result, "partly filled");
+  assert.equal(qh.filled[0].detail, "250 of 400 asked · worst case +$9.10");
+  assert.equal(qh.filled[0].price, "+1300");
+  assert.equal(qh.filled[0].size, "250");
+  assert.equal(qh.filled[0].venue, "Kalshi");
+  assert.equal(qh.filled[0].time, "Oct 7, 5:12 PM ET");
+  assert.equal(qh.filledContracts, 250);
+  assert.deepEqual(qh.notFilled.map((q) => q.result), ["outbid", "over limit", "game already started"]);
+  assert.equal(qh.notFilled[0].detail, "winning price +1329 · answered in 0.4s");
+  assert.equal(qh.notFilled[1].price, "—");
+  assert.equal(qh.notFilled[1].detail, "asked 3,000, room for 775");
+  assert.equal(qh.notFilled[1].tone, "warn");
+  assert.equal(qh.notFilled[2].venue, "Polymarket");
+  assert.equal(qh.addedText, "Wed, Oct 7 · 4:15 PM ET");
+  assert.ok(QUOTE_ROWS_SHOWN >= 3);
+}
+assert.equal(quoteRow({ bucket: "awaiting", reason: "open", at: null, contracts: 10 }, { ended: true }).result, "expired");
+assert.equal(quoteRow({ bucket: "awaiting", reason: "open", contracts: 10 }).result, "offer resting · waiting");
+assert.equal(quoteRow({ bucket: "too_slow", contracts: 10, ourNo: 0.92 }).price, "+1150");
+assert.equal(quoteRow({ bucket: "no_taker", reason: "quoted · no take", contracts: 10 }).result, "not taken");
+assert.equal(quoteRow({ bucket: "no_taker", reason: "cancelled", contracts: 10 }).result, "cancelled");
+assert.equal(quoteRow({ bucket: "lost", outcome: { loss_reason: "expired" }, contracts: 10 }).result, "expired");
+assert.deepEqual(quoteHistory(null), { filled: [], notFilled: [], filledContracts: 0, addedText: "", afterKickoff: 0 });
 
 console.log("comboLockView.test.js ok");
