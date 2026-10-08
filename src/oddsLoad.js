@@ -67,7 +67,9 @@ export function shouldRunEvScan(mode) {
   return mode === "full";
 }
 
-export const DEFAULT_EV_DATE_RANGE = "today";
+// Rolling 24h, not the ET calendar day: at 10 PM "Today" is empty while
+// tomorrow's slate already has odds.
+export const DEFAULT_EV_DATE_RANGE = "24h";
 
 export function selectEvScanView({ liveEvScan, cachedEvScan }) {
   return liveEvScan || cachedEvScan || null;

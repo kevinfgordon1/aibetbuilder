@@ -1,5 +1,7 @@
 // Logged-out visitors can use the public tool. Sign-in is reserved for
-// actions that save, share, or page past the first results.
+// actions that save or page past the first results. Copy link and Share image
+// stay open to guests: both run in the browser (no server auth), and every
+// shared link is free marketing.
 
 export const GUEST_EXPLAINER_COPY = "Got a sportsbook boost or free bet? We find the bet where it's worth the most. Pick your book, see the best bet, place it yourself. Free to sign in.";
 
@@ -7,8 +9,6 @@ export const PUBLIC_APP_TABS = Object.freeze(["promo", "ev", "odds"]);
 
 export const GUEST_GATED_ACTIONS = Object.freeze([
   "show-more",
-  "copy-link",
-  "share-image",
   "save",
   "combo",
   "profile",

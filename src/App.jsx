@@ -9,7 +9,9 @@ import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampO
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
-import { GUEST_EXPLAINER_COPY, promoControlSummary } from "./guestAccess.js";
+import { GUEST_EXPLAINER_COPY, guestActionNeedsSignIn, promoControlSummary } from "./guestAccess.js";
+import { evEmptyState } from "./evEmptyState.js";
+import SiteFooterLinks from "./SiteFooterLinks.jsx";
 import SignInPanel from "./SignInOptions.jsx";
 import { authCallbackError, bootAppHash, restoreAuthReturnUrl } from "./signIn.js";
 import {
@@ -311,25 +313,18 @@ function BookBadge({ bookKey }) {
   );
 }
 
-function LockMathRow({ label, value, sub, valueColor = "#e8eaed" }) {
-  if (!value) return null;
-  const lines = (Array.isArray(sub) ? sub : [sub]).filter(Boolean);
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "8px 0" }}>
-      <div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</div>
-        {lines.map((line, i) => (
-          <div key={i} style={{ fontSize: 11, color: "#6b7280", marginTop: 3, lineHeight: 1.45 }}>{line}</div>
-        ))}
-      </div>
-      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: valueColor, textAlign: "right", whiteSpace: "nowrap" }}>{value}</div>
-    </div>
-  );
-}
-
-function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant = "boost", creditValue = 0, conversionPct = DEFAULT_CREDIT_CONVERSION, refund = null }) {
-  const [open, setOpen] = useState(false);
+// One "Guaranteed Profit — locking $X" dropdown per locked pick. Opened, it
+// holds the whole how-to: STEP 1 / STEP 2 cards, one outcome table, the
+// bottom line, and the math behind a collapsed "Show the math" toggle.
+// Free Bet and No Sweat cards pass open/onToggle so tapping the card opens it.
+// Numbers come straight from the lock helpers — nothing is recomputed here.
+function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant = "boost", creditValue = 0, conversionPct = DEFAULT_CREDIT_CONVERSION, refund = null, open: openProp, onToggle, hedgeExtra = null }) {
+  const [openState, setOpenState] = useState(false);
+  const [mathOpen, setMathOpen] = useState(false);
   if (!lock || !lock.valid) return null;
+  const controlled = typeof openProp === "boolean";
+  const open = controlled ? openProp : openState;
+  const toggle = () => { if (controlled) onToggle?.(!open); else setOpenState(!open); };
 
   const hedgeBook = ALL_BOOKS.find(x => x.key === leg.bestOppBook);
   const hedgeBookLabel = hedgeBook?.label || soccerLayBookLabel(leg.bestOppBook) || leg.bestOppBook || null;
@@ -340,6 +335,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
   const promoOdds = isNoSweat || isFreeBet || !(stake > 0)
     ? leg.dk
     : decimalToAmerican(1 + boostedProfit / stake);
+  const hedgeOdds = quotedOppAmerican(leg);
   const explainer = describePromoLock({
     variant,
     stake,
@@ -349,7 +345,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
     promoOdds,
     promoSelection: formatPromoLegTitle(leg),
     hedgeBookLabel,
-    hedgeOdds: quotedOppAmerican(leg),
+    hedgeOdds,
     hedgeSelection: leg.bestOppName,
     hedgeIsExchange: !!hedgeBook?.exchange,
     hedgeAvailableSize: leg.bestOppSize,
@@ -360,29 +356,36 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
   });
   if (!explainer) return null;
 
-  const promoBits = [
-    explainer.promo.selection,
-    explainer.promo.book,
-    explainer.promo.odds && `${explainer.promo.odds} (${explainer.promo.oddsNote})`,
-  ].filter(Boolean);
-  const hedgeWhere = [
-    explainer.hedge.selection,
-    explainer.hedge.book,
-    explainer.hedge.odds,
-  ].filter(Boolean).join(" · ");
-  const hedgeBits = [
-    hedgeWhere,
-    explainer.hedge.contractsText,
-    explainer.hedge.availableText,
-    explainer.hedge.note,
-  ].filter(Boolean);
+  const usd = (n) => `$${Number(n).toFixed(2)}`;
+  const stakeN = Number(stake);
+  const winN = Number(boostedProfit);
+  const hedgeStake = Number(lock.hedgeStake);
+  const d_h = Number(lock.d_h) || dkDecimal(hedgeOdds ?? leg.bestOpp);
+  const promoName = isFreeBet ? "Free bet" : isNoSweat ? "No-sweat" : "Boosted bet";
+  const step1Label = isFreeBet
+    ? `Step 1 — Use your free bet on ${bookLabel}`
+    : isNoSweat
+      ? `Step 1 — Place your no-sweat cash bet on ${bookLabel}`
+      : `Step 1 — Place your boosted bet on ${bookLabel}`;
+  const promoOddsText = isNoSweat || isFreeBet
+    ? formatOdds(leg.dk)
+    : `${formatOdds(promoOdds)} with boost`;
+  // Free-bet stake is not returned: the payout is the win only.
+  const promoPays = isFreeBet ? winN : stakeN + winN;
+  const hedgePays = hedgeStake * d_h;
+  const hedgeLines = [explainer.hedge.contractsText, explainer.hedge.availableText, explainer.hedge.note].filter(Boolean);
+  const cardRow = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8 };
+  const stepLabel = { fontSize: 11, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 };
+  const mono = { fontFamily: "'JetBrains Mono', monospace" };
 
   return (
-    <div>
+    <div data-lock-dropdown={variant}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
         <button
-          onClick={e => { e.stopPropagation(); setOpen(!open); }}
-          style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.45)", cursor: "pointer", transition: "all 0.15s", boxShadow: open ? "none" : "0 0 0 0 rgba(139,92,246,0.4)" }}
+          type="button"
+          aria-expanded={open}
+          onClick={e => { e.stopPropagation(); toggle(); }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.45)", cursor: "pointer", transition: "all 0.15s" }}
           onMouseEnter={e => { e.currentTarget.style.background = "rgba(139,92,246,0.3)"; e.currentTarget.style.color = "#c4b5fd"; }}
           onMouseLeave={e => { e.currentTarget.style.background = open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)"; e.currentTarget.style.color = "#a78bfa"; }}
         >
@@ -399,53 +402,107 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
       {open && (
         <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
           onClick={e => e.stopPropagation()}>
-          <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 10 }}>
-            Place both now. Either way you keep <strong style={{ color: "#10b981" }}>{explainer.lockedText}</strong>.
+          <div style={{ fontSize: 12.5, color: "#9ca3af", marginBottom: 14 }}>
+            Place both bets now. Whatever happens in the game, you keep <strong style={{ color: "#10b981" }}>{explainer.lockedText}</strong>.
           </div>
 
-          <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", padding: "4px 14px" }}>
-            <LockMathRow
-              label={explainer.promo.label}
-              value={explainer.promo.stakeText}
-              sub={[
-                promoBits.join(" · "),
-                explainer.promo.winText && `${explainer.promo.winLabel} ${explainer.promo.winText}`,
-                ...explainer.promo.extras,
-              ]}
-            />
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
-            <LockMathRow
-              label="Hedge"
-              value={explainer.hedge.stakeText}
-              sub={hedgeBits}
-            />
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
-            <LockMathRow
-              label={explainer.eitherWay.ifHits.label}
-              value={explainer.eitherWay.ifHits.netText}
-              sub={explainer.eitherWay.ifHits.detail}
-              valueColor="#10b981"
-            />
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }} />
-            <LockMathRow
-              label={explainer.eitherWay.ifLoses.label}
-              value={explainer.eitherWay.ifLoses.netText}
-              sub={explainer.eitherWay.ifLoses.detail}
-              valueColor="#10b981"
-            />
+          <div style={{ marginBottom: 12 }}>
+            <div style={stepLabel}>{step1Label}</div>
+            <div style={{ ...cardRow, background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{joinPromoLegSubtitle(leg, [promoOddsText, formatET(leg.commence_time)])}<DaysAwayWarning commence_time={leg.commence_time} /></div>
+                <UnderdogStaleOddsChip leg={leg} />
+              </div>
+              <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+                <div style={{ ...mono, fontWeight: 700, color: "#a78bfa", fontSize: 16 }}>{usd(stakeN)}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af" }}>{isFreeBet ? "free bet" : "cash stake"}</div>
+                {isFinite(promoPays) && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{isFreeBet ? "wins" : "pays"} <span style={{ ...mono, color: "#e8eaed" }}>{usd(promoPays)}</span></div>}
+              </div>
+            </div>
           </div>
 
-          {isNoSweat ? (
-            <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.15)", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
-              Site credit is counted as {conversionPct}% cash — we use ${Number(creditValue).toFixed(0)} of cash value, not the raw lost stake.
+          <div style={{ marginBottom: 14 }}>
+            <div style={stepLabel}>Step 2 — Hedge with cash on {hedgeBookLabel}</div>
+            <div style={{ ...cardRow, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg.bestOppName}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{[formatPromoLegGame(leg), formatOdds(hedgeOdds ?? leg.bestOpp)].filter(Boolean).join(" · ")}</div>
+                {hedgeLines.map((line, k) => <div key={k} style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{line}</div>)}
+                {hedgeExtra}
+              </div>
+              <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+                <div style={{ ...mono, fontWeight: 700, color: "#10b981", fontSize: 16 }}>{usd(hedgeStake)}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af" }}>cash hedge</div>
+                {isFinite(hedgePays) && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>pays <span style={{ ...mono, color: "#e8eaed" }}>{usd(hedgePays)}</span></div>}
+              </div>
             </div>
-          ) : isFreeBet ? (
-            <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.15)", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
-              Locked cash is the conversion of the free bet. Hedge only if you want that cash for sure.
+          </div>
+
+          <div data-lock-outcomes="true" style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              <div>If…</div>
+              <div style={{ textAlign: "right" }}>You keep</div>
             </div>
-          ) : (
-            <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(245,158,11,0.06)", borderRadius: 8, border: "1px solid rgba(245,158,11,0.2)", fontSize: 12, color: "#9ca3af", lineHeight: 1.6 }}>
-              <strong style={{ color: "#f59e0b" }}>⚠</strong> Long-run, taking the boost unhedged is correct — hedge only if you want certainty.
+            {[
+              { label: `${promoName} wins, hedge loses`, row: explainer.eitherWay.ifHits },
+              { label: `Hedge wins, ${promoName.toLowerCase()} loses`, row: explainer.eitherWay.ifLoses },
+            ].map(({ label, row }, k) => (
+              <div key={k} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, padding: "9px 12px", borderTop: k ? "1px solid rgba(255,255,255,0.04)" : "none", fontSize: 12, alignItems: "center" }}>
+                <div>
+                  <div style={{ color: "#e8eaed" }}>{label}</div>
+                  {row.detail && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{row.detail}</div>}
+                </div>
+                <div style={{ ...mono, textAlign: "right", fontWeight: 700, color: "#10b981" }}>{row.netText}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.15)", lineHeight: 1.6 }}>
+            <strong style={{ color: "#a78bfa" }}>Bottom line:</strong>{" "}
+            {isFreeBet ? (
+              <>Place a ${stakeN} free bet on <strong style={{ color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</strong> and {usd(hedgeStake)} cash on <strong style={{ color: "#e8eaed" }}>{leg.bestOppName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>{usd(locked)}</strong> guaranteed — that's a {((lock.conversionRate ?? 0) * 100).toFixed(1)}% conversion of the free bet's face value into real cash.</>
+            ) : isNoSweat ? (
+              <>Place a ${stakeN.toFixed(0)} no-sweat on <strong style={{ color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</strong> and {usd(hedgeStake)} cash on <strong style={{ color: "#e8eaed" }}>{leg.bestOppName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>{usd(locked)}</strong> guaranteed. We count the refund as ${Number(creditValue).toFixed(0)}{refund != null ? `, not $${Number(refund).toFixed(0)}` : ""}.</>
+            ) : (
+              <>Place ${stakeN.toFixed(0)} on <strong style={{ color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</strong> with your boost and {usd(hedgeStake)} cash on <strong style={{ color: "#e8eaed" }}>{leg.bestOppName}</strong>. You lock in <strong style={{ color: "#10b981" }}>{usd(locked)}</strong> either way. Long-run, taking the boost unhedged is worth more — hedge only if you want certainty.</>
+            )}
+          </div>
+
+          <button
+            type="button"
+            aria-expanded={mathOpen}
+            data-lock-math-toggle="true"
+            onClick={e => { e.stopPropagation(); setMathOpen(!mathOpen); }}
+            style={{ marginTop: 10, background: "none", border: "none", padding: "6px 0", color: "#9ca3af", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            {mathOpen ? "Hide the math ▲" : "Show the math ▼"}
+          </button>
+          {mathOpen && (
+            <div style={{ ...mono, fontSize: 12.5, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginTop: 4, overflowX: "auto" }}>
+              {isFreeBet ? (
+                <>
+                  <div>Hedge stake = (free bet decimal − 1) × free bet $ ÷ hedge decimal</div>
+                  <div>= ({dkDecimal(leg.dk).toFixed(3)} − 1) × ${stakeN} ÷ {dkDecimal(hedgeOdds ?? leg.bestOpp).toFixed(3)}</div>
+                  <div>= <strong style={{ color: "#10b981" }}>{usd(hedgeStake)}</strong></div>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Guaranteed cash = {usd(hedgeStake)} × ({dkDecimal(hedgeOdds ?? leg.bestOpp).toFixed(3)} − 1) = <strong style={{ color: "#10b981" }}>{usd(locked)}</strong></div>
+                  <div>Conversion rate = {usd(locked)} ÷ ${stakeN} = <strong style={{ color: "#10b981" }}>{((lock.conversionRate ?? 0) * 100).toFixed(1)}%</strong></div>
+                </>
+              ) : isNoSweat ? (
+                <>
+                  <div>Win: +{usd(winN)} − {usd(hedgeStake)} = <strong style={{ color: "#10b981" }}>+{usd(locked)}</strong></div>
+                  <div>Lose: −{usd(stakeN)} + {usd(creditValue)} credit + {usd(hedgeStake)} = <strong style={{ color: "#10b981" }}>+{usd(locked)}</strong></div>
+                  <div>Hedge stake = (win profit + stake − credit cash) ÷ hedge decimal</div>
+                  <div>= ({usd(winN)} + {usd(stakeN)} − {usd(creditValue)}) ÷ {Number(lock.d_h).toFixed(3)} = <strong style={{ color: "#10b981" }}>{usd(hedgeStake)}</strong></div>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>We treat site credit as {conversionPct}% cash{refund != null ? `: $${Number(refund).toFixed(0)} refund = $${Number(creditValue).toFixed(0)}` : ""}.</div>
+                </>
+              ) : (
+                <>
+                  <div>Hedge stake = (boosted win + stake) ÷ hedge decimal</div>
+                  <div>= ({usd(winN)} + {usd(stakeN)}) ÷ {d_h.toFixed(3)} = <strong style={{ color: "#10b981" }}>{usd(hedgeStake)}</strong></div>
+                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Locked = boosted win − hedge = {usd(winN)} − {usd(hedgeStake)} = <strong style={{ color: "#10b981" }}>{usd(locked)}</strong></div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1035,7 +1092,7 @@ function LandingFull({ onBack }) {
         .lf-closing h2 { font-size: 36px; font-weight: 800; letter-spacing: -0.8px; margin-bottom: 14px; }
         .lf-closing p { font-size: 16px; color: #9ca3af; margin-bottom: 30px; }
         .lf-footer { border-top: 1px solid rgba(255,255,255,0.06); padding: 28px 40px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
-        .lf-footer .muted { font-size: 12px; color: #4b5563; }
+        .lf-footer .muted { font-size: 12px; color: #6b7280; }
         @media (max-width: 900px) {
           .lf-root h1 { font-size: 40px; } .lf-root h2 { font-size: 30px; }
           .lf-stats, .lf-grid { grid-template-columns: 1fr 1fr; }
@@ -1118,7 +1175,8 @@ function LandingFull({ onBack }) {
       <div className="lf-footer">
         <div className="lf-brand" onClick={onBack}><div className="lf-logo" style={{ width: 30, height: 30, fontSize: 16, borderRadius: 8 }}>B</div>
           <span style={{ fontSize: 14, fontWeight: 600 }}>AI Bet Builder</span></div>
-        <span className="muted">An analytics tool, not betting advice · 21+</span>
+        <SiteFooterLinks />
+        <span className="muted">An analytics tool, not betting advice</span>
       </div>
     </div>
   );
@@ -2923,11 +2981,30 @@ export default function App() {
                   <div style={{ textAlign: "center" }}>Edge</div>
                   <div style={{ textAlign: "center" }}>EV ($100)</div>
                 </div>
-                {filteredEvBets.length === 0 && (
-                  <div style={{ padding: "40px 20px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>
-                    {evBookFilter === "all" ? "No bets available right now." : `No bets found for ${getBookLabel(evBookFilter)} right now.`}
-                  </div>
-                )}
+                {filteredEvBets.length === 0 && (() => {
+                  const empty = evEmptyState({ dateRange: evDateRange, bookFilter: evBookFilter, bookLabel: evBookFilter === "all" ? "" : getBookLabel(evBookFilter) });
+                  return (
+                    <div data-ev-empty="true" style={{ padding: "40px 20px", textAlign: "center" }}>
+                      <div style={{ color: "#d1d5db", fontSize: 15, fontWeight: 600 }}>{empty.message}</div>
+                      <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 6 }}>{empty.hint}</div>
+                      {empty.action && (
+                        <button
+                          type="button"
+                          data-ev-empty-action="true"
+                          onClick={() => {
+                            if (empty.action.dateRange) setEvDateRange(empty.action.dateRange);
+                            if (empty.action.bookFilter) setEvBookFilter(empty.action.bookFilter);
+                            setExpandedEV(null);
+                            window.gtag?.("event", "ev_empty_action", { action: empty.action.label });
+                          }}
+                          style={{ marginTop: 16, padding: "10px 18px", minHeight: 40, borderRadius: 8, border: "1px solid rgba(59,130,246,0.45)", background: "rgba(59,130,246,0.18)", color: "#93c5fd", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                        >
+                          {empty.action.label} →
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {evDisplayBets.map((b, i) => {
                   const bookImplied = impliedProb(b.dk);
                   const edge = b.prob - bookImplied;
@@ -2949,7 +3026,7 @@ export default function App() {
                     trueProb: b.prob,
                     implied: bookImplied,
                     edge,
-                    legs: [{ name: b.name, market: b.market, game: b.game, dk: b.dk }],
+                    legs: [{ name: b.name, market: b.market, game: b.game, dk: b.dk, commence_time: b.commence_time }],
                   });
                   return (
                     <div className="ev-card" key={evId} id={"ev-" + evId} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)", cursor: "pointer" }}
@@ -2970,7 +3047,7 @@ export default function App() {
                           <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(b.commence_time)}</div>
                           <div style={{ fontSize: 11, color: "#3b82f6", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
                           <div style={{ marginTop: 8 }}>
-                            <ShareCardActions tab="ev" cardId={evId} model={evShareModel} showImage={b.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
+                            <ShareCardActions tab="ev" cardId={evId} model={evShareModel} showImage={b.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                           </div>
                         </div>
                         <div className="ev-metric" style={{ textAlign: "center" }}><span className="ev-k">Sportsbook</span><BookBadge bookKey={b.bookKey} /></div>
@@ -3307,6 +3384,7 @@ export default function App() {
                       parlayOdds: formatOdds(p.parlayOdds),
                       stake,
                       boostPct: shownBoostPct,
+                      winProfit: p.boostedProfit,
                       legs: p.legs,
                     });
                     return (
@@ -3337,7 +3415,7 @@ export default function App() {
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                             {canSeeComboLocks(user) && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                             )}
@@ -3490,7 +3568,7 @@ export default function App() {
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                           </div>
                           {p.isGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
@@ -3504,78 +3582,19 @@ export default function App() {
                                 creditValue={p.creditValue}
                                 conversionPct={creditConversionPct}
                                 refund={p.refund}
+                                open={isExpanded}
+                                onToggle={(next) => setExpandedPromo(next ? promoId : null)}
+                                hedgeExtra={<PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} />}
                               />
                             </div>
                           )}
                         </div>
 
-                        {isExpanded && (
+                        {/* Locked single: the Guaranteed Profit dropdown above IS the expanded view. */}
+                        {isExpanded && !p.isGuaranteed && (
                           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
                             onClick={e => e.stopPropagation()}>
-                            {p.isGuaranteed ? (
-                              <>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 8 }}>How to lock in ${p.lock.lockedProfit.toFixed(2)}</div>
-                                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place both bets at the same time. Whatever happens, you keep ${p.lock.lockedProfit.toFixed(2)}.</div>
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Place your no-sweat cash bet on {activePromoBookData.label}</div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
-                                    <div>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(p.legs[0])}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{joinPromoLegSubtitle(p.legs[0], [formatOdds(p.legs[0].dk), formatET(p.legs[0].commence_time)])}<DaysAwayWarning commence_time={p.legs[0].commence_time} /></div>
-                                    </div>
-                                    <div style={{ textAlign: "right" }}>
-                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${Number(stake).toFixed(2)}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280" }}>cash stake</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 2 — Hedge with cash on {getBookLabel(p.legs[0].bestOppBook)}</div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
-                                    <div>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{p.legs[0].bestOppName}</div>
-                                      <PromoLegGameLine leg={p.legs[0]} />
-                                      <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} />
-                                    </div>
-                                    <div style={{ textAlign: "right" }}>
-                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${p.lock.hedgeStake.toFixed(2)}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280" }}>cash hedge</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — both paths return ${p.lock.lockedProfit.toFixed(2)}</div>
-                                  <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
-                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                                      <div>Outcome</div>
-                                      <div style={{ textAlign: "right" }}>No Sweat</div>
-                                      <div style={{ textAlign: "right" }}>Net Cash</div>
-                                    </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 12, alignItems: "center" }}>
-                                      <div style={{ color: "#e8eaed" }}>No-sweat WINS, hedge LOSES</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#10b981" }}>+${p.winProfit.toFixed(2)}</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${p.lock.lockedProfit.toFixed(2)}</div>
-                                    </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", fontSize: 12, alignItems: "center" }}>
-                                      <div style={{ color: "#e8eaed" }}>No-sweat LOSES, hedge WINS</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#6b7280" }}>${p.refund.toFixed(0)} credit ≈ ${p.creditValue.toFixed(0)}</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${p.lock.lockedProfit.toFixed(2)}</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
-                                  <div>Win: +${p.winProfit.toFixed(2)} − ${p.lock.hedgeStake.toFixed(2)} = <strong style={{ color: "#10b981" }}>+${p.lock.lockedProfit.toFixed(2)}</strong></div>
-                                  <div>Lose: −${Number(stake).toFixed(2)} + ${p.creditValue.toFixed(2)} credit + ${p.lock.hedgeStake.toFixed(2)} = <strong style={{ color: "#10b981" }}>+${p.lock.lockedProfit.toFixed(2)}</strong></div>
-                                  <div>Hedge stake = (win profit + stake − credit cash) ÷ hedge decimal</div>
-                                  <div>= (${p.winProfit.toFixed(2)} + ${Number(stake).toFixed(2)} − ${p.creditValue.toFixed(2)}) ÷ {p.lock.d_h.toFixed(3)} = <strong style={{ color: "#10b981" }}>${p.lock.hedgeStake.toFixed(2)}</strong></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>We treat site credit as {creditConversionPct}% cash: ${p.refund.toFixed(0)} refund = ${p.creditValue.toFixed(0)}.</div>
-                                </div>
-                                <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.04)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.1)" }}>
-                                  <strong style={{ color: "#8b5cf6" }}>Bottom line:</strong> Place a ${Number(stake).toFixed(0)} no-sweat on <strong style={{ color: "#e8eaed" }}>{formatPromoLegTitle(p.legs[0])}</strong> and ${p.lock.hedgeStake.toFixed(2)} cash on <strong style={{ color: "#e8eaed" }}>{p.legs[0].bestOppName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>${p.lock.lockedProfit.toFixed(2)}</strong> guaranteed. We count the refund as ${p.creditValue.toFixed(0)}, not ${p.refund.toFixed(0)}.
-                                </div>
-                              </>
-                            ) : (
+                            {(
                               <>
                                 <PromoExpandedLegsTable
                                   legs={overlay.displayLegs}
@@ -3670,6 +3689,14 @@ export default function App() {
                       winProfit: p.winProfit,
                       conversionRate: lock?.conversionRate,
                       guaranteedCash: lock?.guaranteedCash,
+                      // Locked singles: the image shows STEP 1 / STEP 2 like the card.
+                      hedge: showLock && lock ? {
+                        stake: lock.hedgeStake,
+                        bookLabel: getBookLabel(leg?.bestOppBook),
+                        odds: quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp,
+                        selection: leg?.bestOppName,
+                        payout: lock.hedgeStake * (lock.d_h || dkDecimal(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)),
+                      } : null,
                       legs: p.legs,
                     });
                     return (
@@ -3746,7 +3773,7 @@ export default function App() {
                             </>
                           )}
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
-                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
+                            <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                             {canSeeComboLocks(user) && !isSingle && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
                             )}
@@ -3760,78 +3787,18 @@ export default function App() {
                                 boostedProfit={p.winProfit}
                                 lock={lock}
                                 bookLabel={activePromoBookData.label}
+                                open={isExpanded}
+                                onToggle={(next) => setExpandedFreeBet(next ? promoId : null)}
+                                hedgeExtra={<PromoTrueOddsSubline leg={hedgeLeg || leg} live levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} />}
                               />
                             </div>
                           )}
                         </div>
 
-                        {isExpanded && (
+                        {/* Locked single: the Guaranteed Profit dropdown above IS the expanded view. */}
+                        {isExpanded && !showLock && (
                           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
-                            {showLock ? (
-                              <>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: "#8b5cf6", marginBottom: 8 }}>How to lock in the conversion</div>
-                                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>Place both bets at the same time. Whatever happens in the game, you keep ${(lock?.guaranteedCash ?? 0).toFixed(2)}.</div>
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 1 — Use your free bet on {activePromoBookData.label}</div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.2)" }}>
-                                    <div>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{joinPromoLegSubtitle(leg, [formatOdds(leg?.dk), formatET(leg?.commence_time)])}<DaysAwayWarning commence_time={leg?.commence_time} /></div>
-                                      <UnderdogStaleOddsChip leg={leg} />
-                                    </div>
-                                    <div style={{ textAlign: "right" }}>
-                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#8b5cf6", fontSize: 16 }}>${fbAmount.toFixed(2)}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280" }}>free bet</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Step 2 — Hedge with real cash on {getBookLabel(leg?.bestOppBook)}</div>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(16,185,129,0.06)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.2)" }}>
-                                    <div>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg?.bestOppName}</div>
-                                      <PromoLegGameLine leg={leg} />
-                                      <PromoTrueOddsSubline leg={hedgeLeg || leg} live levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} />
-                                    </div>
-                                    <div style={{ textAlign: "right" }}>
-                                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981", fontSize: 16 }}>${(lock?.hedgeStake ?? 0).toFixed(2)}</div>
-                                      <div style={{ fontSize: 11, color: "#6b7280" }}>cash stake</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Outcome matrix — both paths return ${(lock?.guaranteedCash ?? 0).toFixed(2)}</div>
-                                  <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
-                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
-                                      <div>Outcome</div>
-                                      <div style={{ textAlign: "right" }}>Free Bet</div>
-                                      <div style={{ textAlign: "right" }}>Net Cash</div>
-                                    </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", borderBottom: "1px solid rgba(255,255,255,0.04)", fontSize: 12, alignItems: "center" }}>
-                                      <div style={{ color: "#e8eaed" }}>Free bet WINS, hedge LOSES</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(2)}</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${(lock?.guaranteedCash ?? 0).toFixed(2)}</div>
-                                    </div>
-                                    <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 12px", fontSize: 12, alignItems: "center" }}>
-                                      <div style={{ color: "#e8eaed" }}>Free bet LOSES, hedge WINS</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", color: "#6b7280" }}>$0 (no stake)</div>
-                                      <div style={{ textAlign: "right", fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, color: "#10b981" }}>+${(lock?.guaranteedCash ?? 0).toFixed(2)}</div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1.8, color: "#9ca3af", padding: "12px 16px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 12 }}>
-                                  <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>Math</div>
-                                  <div>Hedge stake = (free bet decimal − 1) × free bet $ ÷ hedge decimal</div>
-                                  <div>= ({dkDecimal(leg?.dk).toFixed(3)} − 1) × ${fbAmount} ÷ {dkDecimal(quotedOppAmerican(leg) ?? leg?.bestOpp).toFixed(3)}</div>
-                                  <div>= <strong style={{ color: "#10b981" }}>${(lock?.hedgeStake ?? 0).toFixed(2)}</strong></div>
-                                  <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: 6, marginTop: 6 }}>Guaranteed cash = ${(lock?.hedgeStake ?? 0).toFixed(2)} × ({dkDecimal(quotedOppAmerican(leg) ?? leg?.bestOpp).toFixed(3)} − 1) = <strong style={{ color: "#10b981" }}>${(lock?.guaranteedCash ?? 0).toFixed(2)}</strong></div>
-                                  <div>Conversion rate = ${(lock?.guaranteedCash ?? 0).toFixed(2)} ÷ ${fbAmount} = <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></div>
-                                </div>
-                                <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.04)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.1)" }}>
-                                  <strong style={{ color: "#8b5cf6" }}>Bottom line:</strong> Place a ${fbAmount} free bet on <strong style={{ color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</strong> and ${(lock?.hedgeStake ?? 0).toFixed(2)} cash on <strong style={{ color: "#e8eaed" }}>{leg?.bestOppName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>${(lock?.guaranteedCash ?? 0).toFixed(2)}</strong> guaranteed — that's a {((lock?.conversionRate ?? 0) * 100).toFixed(1)}% conversion of the free bet's face value into real cash.
-                                </div>
-                              </>
-                            ) : (
+                            {(
                               <>
                                 <PromoExpandedLegsTable
                                   legs={overlay.displayLegs}
@@ -3889,9 +3856,10 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ padding: "20px 32px", borderTop: "1px solid rgba(255,255,255,0.06)", textAlign: "center", fontSize: 11, color: "#4b5563" }}>
-        AI Bet Builder — aibetbuilder.io — For informational purposes only. Not financial advice. Please gamble responsibly.
-      </div>
+      <footer className="app-footer" style={{ padding: "20px 32px", borderTop: "1px solid rgba(255,255,255,0.06)", textAlign: "center", fontSize: 11, color: "#6b7280", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+        <SiteFooterLinks />
+        <div>AI Bet Builder — aibetbuilder.io — For informational purposes only. Not financial advice. Please gamble responsibly.</div>
+      </footer>
 
       {user && profilePrefsReady && shouldShowKennethOddsBoardAlert(user, profilePrefs, { sessionDismissed: targetedAlertSessionDismissed }) && (
         <WhatsNewModal

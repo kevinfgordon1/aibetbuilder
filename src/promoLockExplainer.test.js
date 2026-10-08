@@ -199,7 +199,7 @@ const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
 // App wires the explainer into Guaranteed Profit and debounces odds bounds
 {
   assert.match(app, /describePromoLock/);
-  assert.match(app, /If promo hits|ifHits\.label/);
+  assert.match(app, /If promo hits|ifHits\.label|eitherWay\.ifHits/);
   assert.match(app, /useDebouncedValue\(minFinalOdds/);
   assert.match(app, /useDebouncedValue\(maxFinalOdds/);
   assert.match(app, /useDebouncedValue\(minLegOdds/);

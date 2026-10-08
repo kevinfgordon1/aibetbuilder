@@ -66,4 +66,17 @@ function run(query, url) {
   assert.match(body, /#ev\/draftkings\.abc/);
 }
 
+{
+  // Every unfurl (including gated routes) gets the large site image.
+  for (const p of ['promo/boost.draftkings.100.k3', 'ev/draftkings.abc', 'combo/secret-lock-99']) {
+    const { body } = run({ p });
+    assert.match(body, /og:image" content="https:\/\/aibetbuilder\.io\/og-image\.png"/);
+    assert.match(body, /twitter:image" content="https:\/\/aibetbuilder\.io\/og-image\.png"/);
+    assert.match(body, /twitter:card" content="summary_large_image"/);
+  }
+  const { shareOgImageUrl } = handler._helpers;
+  assert.equal(shareOgImageUrl('https://www.aibetbuilder.io/'), 'https://www.aibetbuilder.io/og-image.png');
+  assert.equal(shareOgImageUrl(''), 'https://www.aibetbuilder.io/og-image.png');
+}
+
 console.log('api/share.test.js ok');

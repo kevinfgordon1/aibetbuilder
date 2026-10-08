@@ -20,9 +20,12 @@ assert.equal(isPublicAppTab("odds"), true);
 assert.equal(isPublicAppTab("liveDesk"), false);
 assert.equal(isPublicAppTab("oddsBetstamp"), false);
 
-for (const action of ["show-more", "copy-link", "share-image", "save", "combo", "profile"]) {
+for (const action of ["show-more", "save", "combo", "profile"]) {
   assert.equal(guestActionNeedsSignIn(action), true, action);
 }
+// Guests can share: Copy link and Share image never open the sign-in popup.
+assert.equal(guestActionNeedsSignIn("copy-link"), false);
+assert.equal(guestActionNeedsSignIn("share-image"), false);
 assert.equal(guestActionNeedsSignIn("optimize"), false);
 assert.equal(guestActionNeedsSignIn("promo-type"), false);
 

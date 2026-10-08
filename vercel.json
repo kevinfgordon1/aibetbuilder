@@ -80,6 +80,28 @@
     }
   },
   "rewrites": [
-    { "source": "/s/:path*", "destination": "/api/share?p=:path*" }
+    {
+      "source": "/s/:path*",
+      "destination": "/api/share?p=:path*"
+    },
+    {
+      "source": "/about",
+      "destination": "/about.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/contact",
+      "destination": "/about#contact",
+      "permanent": false
+    }
   ]
 }

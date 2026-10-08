@@ -1,6 +1,8 @@
 // Lightweight share landing for OG unfurls. Hash fragments never reach the
 // server, so Copy link uses /s/{tab}/{id} → this page → /#{tab}/{id}.
 // Combo / owner routes get a generic card — no lock contents in the HTML.
+// Share-card PNGs are drawn in the browser (no hosted copy per pick), so
+// every unfurl uses the site-wide 1200x630 /og-image.png.
 
 'use strict';
 
@@ -139,6 +141,12 @@ function originFromReq(req) {
   return String(proto).split(',')[0].trim() + '://' + String(host).split(',')[0].trim();
 }
 
+const OG_IMAGE_PATH = '/og-image.png';
+
+function shareOgImageUrl(origin) {
+  return String(origin || 'https://www.aibetbuilder.io').replace(/\/+$/, '') + OG_IMAGE_PATH;
+}
+
 function handler(req, res) {
   const q = (req && req.query) || {};
   const fromQuery = q.p || q.path || '';
@@ -159,6 +167,7 @@ function handler(req, res) {
       : og.description;
   const origin = originFromReq(req);
   const dest = origin + '/#' + parsed.raw;
+  const image = shareOgImageUrl(origin);
   const page = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -170,9 +179,15 @@ function handler(req, res) {
   <meta property="og:title" content="${esc(title)}" />
   <meta property="og:description" content="${esc(description)}" />
   <meta property="og:url" content="${esc(dest)}" />
-  <meta name="twitter:card" content="summary" />
+  <meta property="og:site_name" content="AI Bet Builder" />
+  <meta property="og:image" content="${esc(image)}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${esc(title)}" />
   <meta name="twitter:description" content="${esc(description)}" />
+  <meta name="twitter:image" content="${esc(image)}" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
   <meta http-equiv="refresh" content="0;url=${esc(dest)}" />
   <link rel="canonical" href="${esc(dest)}" />
 </head>
@@ -188,5 +203,5 @@ function handler(req, res) {
   res.end(page);
 }
 
-handler._helpers = { parseSharePath, esc, GATED, TAB_LABEL, shareOgCopy, parsePromoShareId, bookLabel };
+handler._helpers = { parseSharePath, esc, GATED, TAB_LABEL, shareOgCopy, parsePromoShareId, bookLabel, shareOgImageUrl };
 module.exports = handler;

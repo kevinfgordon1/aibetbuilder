@@ -310,8 +310,8 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   assert.match(app, /joinPromoLegSubtitle/);
   assert.match(app, /<PromoLegGameLine leg=\{l\} \/>/);
   assert.match(app, /joinPromoLegSubtitle\(l\)/);
-  assert.match(app, /joinPromoLegSubtitle\(p\.legs\[0\], \[formatOdds\(p\.legs\[0\]\.dk\), formatET\(p\.legs\[0\]\.commence_time\)\]\)/);
-  assert.match(app, /joinPromoLegSubtitle\(leg, \[formatOdds\(leg\?\.dk\), formatET\(leg\?\.commence_time\)\]\)/);
+  // Locked No Sweat / Free Bet STEP 1 card (shared Guaranteed Profit dropdown).
+  assert.match(app, /joinPromoLegSubtitle\(leg, \[promoOddsText, formatET\(leg\.commence_time\)\]\)/);
   assert.match(app, /joinPromoLegSubtitle\(leg, \[activePromoBookData\.label\]\)/);
   assert.match(app, /isSoccerSport\(g\.sport\)/);
   assert.match(app, /soccerPromoEmptyDetail/);
