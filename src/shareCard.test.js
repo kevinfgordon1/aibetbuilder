@@ -191,15 +191,15 @@ const soccerMlShare = formatShareLeg({
   game: "Crystal Palace @ Manchester City",
   dk: 115,
 });
-assert.equal(soccerMlShare.name, "Manchester City ML - 3 way market");
+assert.equal(soccerMlShare.name, "Manchester City - 3 way market");
 assert.equal(soccerMlShare.market, "Moneyline");
 assert.equal(
   formatShareLeg({ name: "Yankees ML", market: "ML", sport: "baseball_mlb", dk: -120 }).name,
-  "Yankees ML",
+  "Yankees",
 );
 assert.equal(
   formatShareLeg({ name: "Draw", market: "ML", sport: "soccer_usa_mls", dk: 240 }).name,
-  "Draw ML - 3 way market",
+  "Draw - 3 way market",
 );
 
 const model = buildShareCardModel({
@@ -224,7 +224,7 @@ assert.equal(model.promoLabel, "Profit Boost");
 assert.equal(model.promoRule, "30% Profit Boost");
 assert.equal(model.brand, "AI Bet Builder");
 assert.equal(model.legs.length, 2);
-assert.equal(model.legs[0].name, "Yankees ML");
+assert.equal(model.legs[0].name, "Yankees");
 assert.equal(model.legs[0].market, "Moneyline");
 assert.equal(model.legs[1].market, "Spread");
 assert.ok(shareCardMetaChips(model).includes("DraftKings"));
@@ -321,7 +321,8 @@ assert.ok(shareCardDimensions(evModel).height >= 1080);
   assert.match(blob, /1-800-GAMBLER/);
   assert.match(blob, /aibetbuilder\.io/);
   assert.doesNotMatch(blob, /\bSPR\b|\bTOT\b|^ML$/m);
-  assert.match(blob, /Yankees ML/);
+  assert.match(blob, /^Yankees$/m);
+  assert.doesNotMatch(blob, /\bML\b/);
   assert.match(blob, /Moneyline|Spread/);
   assert.doesNotMatch(blob, /Powered by Claude/);
   assert.doesNotMatch(blob, /— SPR ·/);
@@ -489,4 +490,14 @@ console.log("shareCard.test.js ok");
   assert.equal(lay.more, 2);
   assert.ok(lay.height > 1080 && lay.height < 2000);
   assert.ok(lay.L.footer > lay.L.stats);
+}
+
+// Share legs use plain words, not market codes.
+{
+  const { plainShareLegName, formatShareLeg } = await import("./shareCard.js");
+  assert.equal(plainShareLegName("Seattle Seahawks ML"), "Seattle Seahawks");
+  assert.equal(plainShareLegName("Tampa Bay Buccaneers +8.5"), "Tampa Bay Buccaneers +8.5");
+  const leg = formatShareLeg({ name: "Seattle Seahawks ML", market: "ML", odds: -155 });
+  assert.equal(leg.name, "Seattle Seahawks");
+  assert.equal(leg.market, "Moneyline");
 }

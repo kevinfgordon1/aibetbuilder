@@ -218,13 +218,22 @@ export function formatSharePromoType(promoType) {
   return SHARE_PROMO_TYPE_LABELS[promoType] || "";
 }
 
+// Selections from the app can end in a market code ("Seattle Seahawks ML").
+// The sub line already says "Moneyline", so drop the code from the title.
+export function plainShareLegName(name) {
+  return String(name || "")
+    .replace(/\s+(ML|SPR|TOT|TT)(?=\s+-\s+3 way market$)/i, "")
+    .replace(/\s+(ML|SPR|TOT|TT)$/i, "")
+    .trim();
+}
+
 export function formatShareLeg(leg) {
   if (leg == null) return null;
   if (typeof leg === "string") {
     const name = leg.trim();
     return name ? { name, market: "", game: "", odds: "", time: "" } : null;
   }
-  const name = formatPromoLegTitle(leg) || String(leg.name || leg.label || "").trim();
+  const name = plainShareLegName(formatPromoLegTitle(leg) || String(leg.name || leg.label || "").trim());
   const market = formatShareMarket(leg.market);
   const game = String(leg.game || "").trim();
   const odds = formatShareAmerican(leg.odds != null ? leg.odds : leg.dk);
@@ -567,7 +576,7 @@ export function buildShareCardModel({
       stake: finiteNum(hedge.stake),
       bookLabel: String(hedge.bookLabel || ""),
       odds: formatShareAmerican(hedge.odds),
-      selection: String(hedge.selection || ""),
+      selection: plainShareLegName(hedge.selection),
       payout: finiteNum(hedge.payout),
     } : null,
     brand: "AI Bet Builder",
