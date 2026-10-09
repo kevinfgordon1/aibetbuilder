@@ -8,6 +8,7 @@ import {
 } from "./comboLockView";
 import { STATEMENT_DATE_FILTERS } from "./comboStatement";
 import { shouldToggleFromCard } from "./comboCardToggle.js";
+import { formatAmerican, formatDollars, sortOriginalBets } from "./comboMerge";
 
 export const COMBO_VIEW_CSS = `
   .cl .cl-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
@@ -45,6 +46,7 @@ export const COMBO_VIEW_CSS = `
   .cl .pill.amber{background:rgba(245,158,11,.17);color:#fcd34d}
   .cl .pill.red{background:rgba(239,68,68,.18);color:#fca5a5}
   .cl .pill.grey{background:rgba(255,255,255,0.08);color:#9aa3b2}
+  .cl .pill.merged{background:rgba(139,92,246,.18);color:#c4b5fd}
   @keyframes cl-pulse{0%,100%{opacity:1}50%{opacity:.35}}
   .cl .lk{border:1px solid rgba(255,255,255,0.09);border-radius:14px;padding:14px 16px;margin-bottom:12px;background:rgba(255,255,255,0.025);border-left:4px solid rgba(147,197,253,.55)}
   .cl .lk.lk-partial{border-left-color:rgba(94,234,212,.7)}
@@ -171,6 +173,7 @@ export const COMBO_VIEW_CSS = `
     .cl .lk{padding:12px}
     .cl .lk-title{flex-basis:100%;order:2;font-size:15px}
     .cl .lk-top .pill{order:1}
+    .cl .lk-top .pill.merged{order:1}
     .cl .lk-ctl{order:1}
     .cl .lk-facts{grid-template-columns:1fr 1fr}
     .cl .lk-facts .fact.out{grid-column:1 / -1}
@@ -380,12 +383,34 @@ export function DetailBlock({ title, children }) {
   );
 }
 
+/** Header chip when a lock was merged from 2+ sportsbook bets (combo_parlay_bets). */
+export function MergedTag({ bets }) {
+  const rows = sortOriginalBets(bets);
+  if (rows.length < 2) return null;
+  const tip = rows.map((bet) => {
+    const stake = formatDollars(bet.stake);
+    const odds = formatAmerican(bet.american);
+    const book = String(bet.sportsbook || "").trim();
+    return book ? `${stake} @ ${odds} ${book}` : `${stake} @ ${odds}`;
+  }).join(", ");
+  const n = rows.length;
+  return (
+    <span
+      className="pill merged"
+      title={tip || `Merged from ${n} bets`}
+      aria-label={tip ? `Merged from ${n} bets: ${tip}` : `Merged from ${n} bets`}
+    >
+      Merged · {n} bet{n === 1 ? "" : "s"}
+    </span>
+  );
+}
+
 /**
  * The always-visible lock card. Status + legs + where you stand now (first tile),
  * sell price and how much is hedged, then a small "Your original bet" reminder.
  * Everything else lives behind Details (children).
  */
-export function LockCard({ parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children }) {
+export function LockCard({ parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
   const s = betSummary(parlay) || {};
   const cap = Number(ceiling) > 0 ? Number(ceiling) : Number(parlay && parlay.max_contracts) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((Number(filled || 0) / cap) * 100)) : 0;
@@ -408,6 +433,7 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
       >
       <div className="lk-top">
         <StatusPill status={status} />
+        <MergedTag bets={bets} />
         <div className="lk-title">{lockTitle(parlay)}</div>
         <div className="lk-ctl" data-no-toggle="">
           {controls}
