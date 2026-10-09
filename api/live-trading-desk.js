@@ -1,4 +1,5 @@
-// Live Trading Desk — Kevin only. Polymarket US Retail (api.polymarket.us).
+// Live Trading Desk — Kevin only. Venues: polymarket-us (default), novig.
+// Polymarket US Retail (api.polymarket.us). Novig v3 (api.novig.com / paper).
 // GET  /api/live-trading-desk[?slug=]  positions, open orders, recent trades, filled orders, NFL slate
 // GET  /api/live-trading-desk?positionFills=<slug>[&net=<signed instrument net>]
 //      every fill for one market (paged, marketSlug filter), for the Open positions drill-down.
@@ -59,6 +60,7 @@ const { createPolymarketUsClient } = require('./polymarket-us-client');
 const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
+const novigDesk = require('./novig-desk');
 
 let sharedStore = null;
 function defaultProtectStore() {
@@ -705,6 +707,14 @@ async function handler(req, res) {
         return;
       }
     }
+    const store = deps.protectStore();
+    const q = (req.query) || {};
+    let venue = String((body && body.venue) || q.venue || 'polymarket-us').trim().toLowerCase();
+    if (venue === 'polymarket' || venue === 'pm' || venue === 'pm-us') venue = 'polymarket-us';
+    if (venue === 'novig') {
+      await novigDesk.handle({ req, res, json, deps, owner, store, body, query: q });
+      return;
+    }
     const creds = deps.creds();
     if (!creds.ok) {
       const missing = auth.missingKeysError(creds.missing);
@@ -712,9 +722,7 @@ async function handler(req, res) {
       return;
     }
     const client = clientFromCreds(creds);
-    const store = deps.protectStore();
     if (req.method === 'GET') {
-      const q = (req.query) || {};
       let drill = q.positionFills || '';
       let netRaw = q.net;
       if (!drill && req.url) {

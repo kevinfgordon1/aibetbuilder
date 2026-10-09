@@ -9,6 +9,7 @@ import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, pr
 import LiveDeskFilledOrders from "./LiveDeskFilledOrders";
 import LiveDeskPositionFills from "./LiveDeskPositionFills";
 import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLimit, mergeDeskBoard } from "./liveDeskRefresh";
+import { NOVIG_VENUE, isNovigMarketId, quoteNovigRest } from "./liveDeskNovig";
 
 let supabaseClient = null;
 function supabase() {
@@ -148,6 +149,7 @@ function Chip({ on, children, onClick, disabled }) {
 
 function LiveTradingDeskView({ user }) {
   const [board, setBoard] = useState(null);
+  const [venue, setVenue] = useState("polymarket-us");
   const [slug, setSlug] = useState("");
   const [slugDraft, setSlugDraft] = useState("");
   const [gameId, setGameId] = useState("");
@@ -175,6 +177,7 @@ function LiveTradingDeskView({ user }) {
     fillsStale: false,
   });
   const slugRef = useRef("");
+  const venueRef = useRef("polymarket-us");
   const seq = useRef(0);
   const boardRef = useRef(null);
   const delayRef = useRef(DESK_REFRESH_MS);
@@ -185,6 +188,29 @@ function LiveTradingDeskView({ user }) {
   const quote = useMemo(() => {
     if (!market) return null;
     try {
+      if (venue === "novig" || market.venue === "novig") {
+        const q = quoteNovigRest({
+          american,
+          outcome,
+          action,
+          dollars,
+          longOutcomeId: market.longOutcomeId,
+          shortOutcomeId: market.shortOutcomeId,
+        });
+        if (!q.ok) return q;
+        // Shape like Polymarket quote so orderTicket / confirm still work.
+        return {
+          ...q,
+          yesPriceValue: q.orderPrice,
+          yesMicro: Math.round(Number(q.orderProb) * 1e6),
+          outcomeMicro: Math.round(Number(q.outcomeProb) * 1e6),
+          centsLabel: (Math.round(Number(q.outcomeProb) * 1000) / 10) + "¢",
+          yesCentsLabel: (Math.round(Number(q.orderProb) * 1000) / 10) + "¢",
+          bookSide: "bid",
+          intent: q.action === "sell" ? "SELL" : "BUY",
+          tick: market.tick,
+        };
+      }
       return quoteRestingOrder({
         american,
         outcome,
@@ -196,7 +222,7 @@ function LiveTradingDeskView({ user }) {
     } catch (err) {
       return { ok: false, error: deskErrorText(err, "Could not price that order.") };
     }
-  }, [market, american, outcome, action, dollars]);
+  }, [market, american, outcome, action, dollars, venue]);
 
   const protectXParsed = useMemo(
     () => parseProtectCents(protectX, DEFAULT_PROTECT_X_CENTS, { min: 0.1 }),
@@ -258,7 +284,14 @@ function LiveTradingDeskView({ user }) {
         }
         return;
       }
-      const q = nextSlug ? "?slug=" + encodeURIComponent(nextSlug) : "";
+      const v = venueRef.current || "polymarket-us";
+      const params = new URLSearchParams();
+      params.set("venue", v);
+      if (nextSlug) {
+        if (v === "novig") params.set("marketId", String(nextSlug).replace(/^novig:/i, ""));
+        else params.set("slug", nextSlug);
+      }
+      const q = "?" + params.toString();
       const res = await fetch("/api/live-trading-desk" + q, { headers });
       let data = null;
       try { data = await res.json(); } catch (_) { data = null; }
@@ -311,6 +344,10 @@ function LiveTradingDeskView({ user }) {
   }, [slug]);
 
   useEffect(() => {
+    venueRef.current = venue;
+  }, [venue]);
+
+  useEffect(() => {
     if (!canSeeOwnerTools(user)) return undefined;
     let stopped = false;
     let timer = 0;
@@ -339,7 +376,7 @@ function LiveTradingDeskView({ user }) {
       armRef.current = () => {};
       window.clearTimeout(timer);
     };
-  }, [user]);
+  }, [user, venue]);
 
   function preferBuy() {
     setAction("buy");
@@ -380,6 +417,22 @@ function LiveTradingDeskView({ user }) {
 
   function selectPosition(row) {
     const next = row && typeof row.slug === "string" ? row.slug : "";
+    if (venue === "novig" || String(next).startsWith("novig:")) {
+      const id = String(row.marketId || next.replace(/^novig:/i, "")).trim();
+      if (!isNovigMarketId(id)) {
+        setScopeNote("That Novig position is missing a market id.");
+        return;
+      }
+      setGameId(String(row.eventId || row.gameId || ""));
+      setMarketType("moneyline");
+      setScopeNote("");
+      setSlug("novig:" + id);
+      setSlugDraft("novig:" + id);
+      if (row.side) setOutcome(row.side === "short" ? "short" : "long");
+      preferBuy();
+      load("novig:" + id, { silent: true });
+      return;
+    }
     const classified = classifyDeskMarket(next);
     if (!classified.ok) {
       setScopeNote(classified.message);
@@ -409,7 +462,7 @@ function LiveTradingDeskView({ user }) {
     if (!next) {
       setSlug("");
       setSlugDraft("");
-      setScopeNote("That game has no Polymarket US moneyline on this slate.");
+      setScopeNote(venue === "novig" ? "That game has no Novig moneyline on this slate." : "That game has no Polymarket US moneyline on this slate.");
       load("", { silent: true });
       return;
     }
@@ -448,7 +501,12 @@ function LiveTradingDeskView({ user }) {
   async function submit(e) {
     e.preventDefault();
     if (!market || !quote || !quote.ok || !ticket || busy) return;
-    if (marketType !== "moneyline" || market.slug !== moneylineSlugForGame(gameId)) {
+    if (venue === "novig") {
+      if (!(market.marketId || isNovigMarketId(String(market.slug || "").replace(/^novig:/i, "")))) {
+        setScopeNote("Pick a Novig NFL moneyline from the game list before resting.");
+        return;
+      }
+    } else if (marketType !== "moneyline" || market.slug !== moneylineSlugForGame(gameId)) {
       setScopeNote("Pick the NFL game moneyline before resting.");
       return;
     }
@@ -476,7 +534,9 @@ function LiveTradingDeskView({ user }) {
         headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           op: "place",
+          venue,
           marketSlug: market.slug,
+          marketId: market.marketId || (venue === "novig" ? String(market.slug || "").replace(/^novig:/i, "") : undefined),
           gameId,
           outcome,
           action,
@@ -588,17 +648,53 @@ function LiveTradingDeskView({ user }) {
       <style>{`
         .desk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .desk-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-        .desk-picks { display: grid; grid-template-columns: 1.5fr 0.7fr; gap: 8px; margin-top: 12; }
+        .desk-picks { display: grid; grid-template-columns: 1.5fr 0.7fr; gap: 8px; margin-top: 12px; }
+        .desk-slug-row { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
+        .desk-protect-xy { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         @media (max-width: 900px) {
           .desk-grid { grid-template-columns: 1fr; }
           .desk-picks { grid-template-columns: 1fr; }
+          .desk-slug-row { flex-direction: column; align-items: stretch; }
+          .desk-protect-xy { grid-template-columns: 1fr; }
+          .desk-order-row { flex-direction: column; align-items: stretch !important; }
         }
       `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>Live Trading Desk</div>
           <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 4 }}>
-            Polymarket US only. Small resting limits against your open positions. Kalshi is not on this desk.
+            Small resting limits against your open positions. Kalshi is not on this desk.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {[
+              { id: "polymarket-us", label: "Polymarket US" },
+              { id: "novig", label: "Novig" },
+            ].map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => {
+                  if (venue === v.id) return;
+                  setBoard(null);
+                  setSlug("");
+                  setSlugDraft("");
+                  setGameId("");
+                  setError("");
+                  setNotice("");
+                  setVenue(v.id);
+                }}
+                style={{
+                  background: venue === v.id ? "rgba(168,85,247,0.2)" : "rgba(255,255,255,0.04)",
+                  border: venue === v.id ? "1px solid rgba(168,85,247,0.55)" : "1px solid rgba(255,255,255,0.12)",
+                  color: venue === v.id ? "#e9d5ff" : "#d1d5db",
+                  borderRadius: 8,
+                  padding: "7px 12px",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >{v.label}</button>
+            ))}
           </div>
         </div>
         <button
@@ -618,12 +714,12 @@ function LiveTradingDeskView({ user }) {
       <div className="desk-grid">
         <section style={card}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Open positions{freshness.positionsStale ? " · stale" : ""}</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Every Polymarket US position stays listed. Click an NFL moneyline to hedge that game. A spread, total, or other board will not load.</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{venue === "novig" ? "Novig positions for this trading key. Click a row or pick an NFL moneyline below." : "Every Polymarket US position stays listed. Click an NFL moneyline to hedge that game. A spread, total, or other board will not load."}</div>
           {freshness.positionsStale && (
-            <div style={{ color: "#fcd34d", fontSize: 12, marginTop: 8 }}>Last loaded positions, marked stale until Polymarket accepts a refresh.</div>
+            <div style={{ color: "#fcd34d", fontSize: 12, marginTop: 8 }}>{venue === "novig" ? "Last loaded positions, marked stale until Novig accepts a refresh." : "Last loaded positions, marked stale until Polymarket accepts a refresh."}</div>
           )}
-          {loading && !board && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>Loading Polymarket US…</div>}
-          {!loading && positions.length === 0 && !freshness.positionsFailed && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>No open Polymarket US positions.</div>}
+          {loading && !board && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>{venue === "novig" ? "Loading Novig…" : "Loading Polymarket US…"}</div>}
+          {!loading && positions.length === 0 && !freshness.positionsFailed && <div style={{ color: "#9ca3af", fontSize: 13, marginTop: 14 }}>{venue === "novig" ? "No open Novig positions." : "No open Polymarket US positions."}</div>}
           {!loading && positions.length === 0 && freshness.positionsFailed && (
             <div style={{ color: "#fcd34d", fontSize: 13, marginTop: 14 }}>Positions did not load. This is not an empty book.</div>
           )}
@@ -715,7 +811,7 @@ function LiveTradingDeskView({ user }) {
               {deskErrorText(scopeNote || slateNote, "Pick an NFL game.")}
             </div>
           )}
-          <form onSubmit={loadDraft} style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}>
+          <form onSubmit={loadDraft} className="desk-slug-row">
             <div style={{ flex: 1 }}>
               <label style={label} htmlFor="desk-slug">Advanced slug</label>
               <input
@@ -790,7 +886,7 @@ function LiveTradingDeskView({ user }) {
                 <summary style={{ cursor: "pointer", fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
                   {(protectXParsed.ok ? protectXParsed.cents : protectX) + "¢ through mid · re-rest " + (protectYParsed.ok ? protectYParsed.cents : protectY) + "¢ better"}
                 </summary>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                <div className="desk-protect-xy">
                   <div>
                     <label style={label} htmlFor="desk-protect-x">Through mid (¢)</label>
                     <input
@@ -898,7 +994,7 @@ function LiveTradingDeskView({ user }) {
           )}
           <div className="desk-list">
             {orders.filter((order) => order && typeof order === "object").map((order, index) => (
-              <div key={typeof order.id === "string" && order.id ? order.id : "ord-" + index} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div key={typeof order.id === "string" && order.id ? order.id : "ord-" + index} className="desk-order-row" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(order.title, "Order")}</div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>

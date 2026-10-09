@@ -48,7 +48,10 @@ assert.equal(access.canSeeOwnerTools({ email: 'tester@gmail.com' }), false);
   assert.doesNotMatch(ui, /useState\("sell"\)/);
   assert.doesNotMatch(ui, /setAction\("sell"\);/);
   assert.match(ui, /function preferBuy\(\) \{\s*setAction\("buy"\);/);
-  assert.equal((ui.match(/preferBuy\(\)/g) || []).length, 3);
+  assert.equal((ui.match(/preferBuy\(\)/g) || []).length, 4); // + Novig selectPosition path
+  assert.match(ui, /setVenue\("novig"\)|id: "novig"/);
+  assert.match(ui, /quoteNovigRest/);
+  assert.match(ui, /NOVIG_DESK_KEY_ID|venue === "novig"/);
   const submitFn = ui.slice(ui.indexOf("async function submit"), ui.indexOf("async function cancel"));
   const rejectedAt = submitFn.indexOf("Order was not accepted");
   const clearedAt = submitFn.indexOf("clearRestForm()");
