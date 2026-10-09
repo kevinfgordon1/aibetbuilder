@@ -440,9 +440,14 @@ function free100() {
 }
 
 {
-  const locks = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const locks = fs.readFileSync(path.join(dir, "ComboLocks.jsx"), "utf8");
+  const view = fs.readFileSync(path.join(dir, "ComboLocksView.jsx"), "utf8");
   assert.match(locks, /Keep separate/);
   assert.match(locks, /Combined from /);
+  assert.match(view, /Merged · /);
+  assert.match(view, /export function MergedTag/);
+  assert.match(locks, /bets=\{betsByParlay/);
   assert.match(locks, /Undo merge/);
   assert.match(locks, /sportsbook/);
   assert.match(locks, /boostPct/);

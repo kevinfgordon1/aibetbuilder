@@ -1208,6 +1208,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         overText={desk && desk.fill ? overFillText(desk.fill) : ""}
         open={open}
         onToggle={toggle}
+        bets={betsByParlay[p.id]}
         controls={<PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />}
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
