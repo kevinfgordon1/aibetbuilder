@@ -1,11 +1,11 @@
-// Combo Locks prepaid credits card: balance + "Add credits" (USDC via Coinbase).
+// Combo Locks prepaid credits card: balance + "Add credits" (USDC via Coinbase or card via Stripe).
 // Visible only inside Combo Locks (allowlist). The balance is read from the
 // combo_credit_balances view (RLS: own rows; Kevin sees all). The button calls
-// /api/combo-credits, which creates a Coinbase checkout; credits land only when
-// the webhook confirms payment. No fees are charged yet.
+// /api/combo-credits (Coinbase) or /api/stripe-checkout (Stripe); credits land
+// only when the matching webhook confirms payment. No fees are charged yet.
 import { useCallback, useEffect, useState } from "react";
 import {
-  CREDIT_PRESETS_USD, CREDITS_PRICING, DEFAULT_PRESET_USD, addCreditsState, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote,
+  CREDIT_PRESETS_USD, CREDITS_PRICING, DEFAULT_PRESET_USD, addCreditsState, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
 } from "./comboCredits";
 
 const CREDITS_CSS = `
@@ -21,6 +21,8 @@ const CREDITS_CSS = `
 .cl .crd .crd-preset.on{border-color:#60a5fa;background:rgba(59,130,246,.18);color:#dbeafe}
 .cl .crd .crd-preset:disabled{opacity:.5;cursor:not-allowed}
 .cl .crd .crd-go{padding:9px 14px;border-radius:10px;border:0;background:#2563eb;color:#fff;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.cl .crd .crd-actions{display:flex;gap:8px;flex-wrap:wrap}
+.cl .crd .crd-go.alt{background:#0f766e}
 .cl .crd .crd-go:disabled{background:#3a3d46;color:#9aa3b2;cursor:not-allowed}
 .cl .crd .crd-note{font-size:12.5px;color:#fcd34d;margin-top:6px}
 .cl .crd .crd-note.ok{color:#6ee7b7}
@@ -48,7 +50,9 @@ const etDate = (iso) => {
 };
 
 export default function ComboCredits({ supabase, user }) {
+  const usdcOn = showUsdcCreditsEnabled();
   const [configured, setConfigured] = useState(false);
+  const [cardConfigured, setCardConfigured] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(true);
   const [balance, setBalance] = useState(null);
   const [rows, setRows] = useState([]);
@@ -62,7 +66,7 @@ export default function ComboCredits({ supabase, user }) {
     if (!user || !user.id) return;
     const [balQ, rowsQ] = await Promise.all([
       supabase.from("combo_credit_balances").select("balance_usd").eq("user_id", user.id).maybeSingle(),
-      supabase.from("combo_credit_ledger").select("id,kind,amount_usd,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10),
+      supabase.from("combo_credit_ledger").select("id,kind,amount_usd,source,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(10),
     ]);
     if (balQ.error || rowsQ.error) {
       if (isMissingCreditsSchema(balQ.error || rowsQ.error)) setSchemaMissing(true);
@@ -78,10 +82,16 @@ export default function ComboCredits({ supabase, user }) {
     let alive = true;
     (async () => {
       try {
-        const r = await authedFetch(supabase, "/api/combo-credits");
-        if (alive) setConfigured(!!(r.ok && r.body.configured));
+        const [r, c] = await Promise.all([
+          authedFetch(supabase, "/api/combo-credits").catch(() => ({ ok: false, body: {} })),
+          authedFetch(supabase, "/api/stripe-checkout").catch(() => ({ ok: false, body: {} })),
+        ]);
+        if (alive) {
+          setConfigured(usdcOn && !!(r.ok && r.body.configured));
+          setCardConfigured(!!(c.ok && c.body.configured));
+        }
       } catch (_) {
-        if (alive) setConfigured(false);
+        if (alive) { setConfigured(false); setCardConfigured(false); }
       } finally {
         if (alive) setCfgLoading(false);
       }
@@ -104,16 +114,17 @@ export default function ComboCredits({ supabase, user }) {
     return () => clearInterval(t);
   }, [back, loadBalance]);
 
-  const add = async () => {
-    setBusy(true);
+  const add = async (method) => {
+    const card = method === "card";
+    setBusy(card ? "card" : "usdc");
     setError(null);
     try {
-      const r = await authedFetch(supabase, "/api/combo-credits", { method: "POST", body: JSON.stringify({ amount }) });
+      const r = await authedFetch(supabase, card ? "/api/stripe-checkout" : "/api/combo-credits", { method: "POST", body: JSON.stringify({ amount }) });
       if (r.ok && r.body.url) {
         window.location.assign(r.body.url);
         return;
       }
-      if (r.body && r.body.code === "not_configured") setConfigured(false);
+      if (r.body && r.body.code === "not_configured") (card ? setCardConfigured : setConfigured)(false);
       setError((r.body && r.body.error) || "Could not start checkout. Please try again.");
     } catch (_) {
       setError("Could not start checkout. Please try again.");
@@ -121,7 +132,7 @@ export default function ComboCredits({ supabase, user }) {
     setBusy(false);
   };
 
-  const state = addCreditsState({ configured: configured && !schemaMissing, loading: cfgLoading, busy, error });
+  const state = addCreditsState({ configured: (configured || cardConfigured) && !schemaMissing, loading: cfgLoading, busy, error });
   const feesOn = CREDITS_PRICING.feesEnabled;
 
   return (
@@ -136,13 +147,16 @@ export default function ComboCredits({ supabase, user }) {
         <span className="crd-sub">{schemaMissing ? "Credits aren't set up yet." : "1 credit = $1"}</span>
       </div>
       <p>Credits will pay for Combo Locks. Right now Combo Locks is free, so nothing is taken from your balance. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>
-      <p>Add credits with USDC, a digital dollar, from Coinbase or any crypto wallet. You'll finish on Coinbase's secure checkout page.</p>
+      <p>{usdcOn ? "Pay with a debit or credit card on Stripe's secure checkout page, or add USDC, a digital dollar, from Coinbase or any crypto wallet." : "Pay with a debit or credit card on Stripe's secure checkout page."}</p>
       <div className="crd-presets" role="group" aria-label="Amount to add">
         {CREDIT_PRESETS_USD.map((v) => (
           <button key={v} type="button" className={"crd-preset" + (amount === v ? " on" : "")} aria-pressed={amount === v} disabled={state.disabled && !error} onClick={() => setAmount(v)}>${v}</button>
         ))}
       </div>
-      <button type="button" className="crd-go" disabled={state.disabled} onClick={add}>{busy ? "Opening checkout…" : `Add $${amount} with USDC`}</button>
+      <div className="crd-actions">
+        <button type="button" className="crd-go" disabled={state.disabled || !cardConfigured || schemaMissing} onClick={() => add("card")}>{busy === "card" ? "Opening checkout…" : `Pay $${amount} with card`}</button>
+        {usdcOn && <button type="button" className="crd-go alt" disabled={state.disabled || !configured || schemaMissing} onClick={() => add("usdc")}>{busy === "usdc" ? "Opening checkout…" : `Add $${amount} with USDC`}</button>}
+      </div>
       {state.note && <div className="crd-note">{state.note}</div>}
       {back && <div className={"crd-note" + (back.kind === "ok" ? " ok" : "")}>{back.text}</div>}
       {rows.length > 0 && (
