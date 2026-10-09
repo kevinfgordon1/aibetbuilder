@@ -436,7 +436,7 @@ function CapsEditor({ user, busy, onSave }) {
   );
 }
 
-function AdminPanel({ supabase }) {
+function AdminPanel({ supabase, selfId = null }) {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState(null);
   const [pnl, setPnl] = useState({});
@@ -528,7 +528,7 @@ function AdminPanel({ supabase }) {
               })}
             </tbody>
           </table>
-          <LowCashAdminList rows={lowCash.rows}
+          <LowCashAdminList rows={lowCash.rows} selfId={selfId}
             nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
           <FundMoves supabase={supabase} userId={null} enabled title="Tester auto-funding (latest 20)" limit={20}
             nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
@@ -553,7 +553,7 @@ export default function ComboTesters({ user, supabase }) {
     <>
       <style>{TESTERS_CSS}</style>
       {isOwner && <OwnerBalances supabase={supabase} user={user} />}
-      {isOwner && <AdminPanel supabase={supabase} />}
+      {isOwner && <AdminPanel supabase={supabase} selfId={user.id} />}
       {!isOwner && status && status.approved && <ConnectPanel supabase={supabase} userId={user.id} status={status} setStatus={setStatus} />}
     </>
   );

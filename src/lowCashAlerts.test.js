@@ -17,4 +17,5 @@ const row = (o) => ({ id: "a" + (n++), user_id: "u1", venue: "kalshi", parlay_id
   const g = openAlertsByUser([row({ id: "5" }), row({ id: "6", user_id: "u2" })]);
   assert.deepEqual(Object.keys(g).sort(), ["u1", "u2"]);
 }
+assert.equal(lowCashText(normalizeUserAlert(row({ shortfall_usd: 18 })), { owner: true }).body, "Some of their Combo Locks quotes were skipped because their combos cash is too low. They're about $18.00 short. Add money on Kalshi or raise their Amount to keep for combos.");
 console.log("lowCashAlerts tests passed");

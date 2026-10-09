@@ -46,7 +46,7 @@ export function LowCashBanner({ supabase, user, initialRows = null }) {
 }
 
 /** Owner "All users": one line per open low-cash alert, with whose it is. */
-export function LowCashAdminList({ rows, nameFor }) {
+export function LowCashAdminList({ rows, nameFor, selfId = null }) {
   const by = openAlertsByUser(rows);
   const ids = Object.keys(by);
   if (!ids.length) return null;
@@ -55,7 +55,7 @@ export function LowCashAdminList({ rows, nameFor }) {
       <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 4 }}>Low cash alerts (open)</div>
       {ids.flatMap((id) => by[id].map((a) => (
         <div key={a.id} className="note warn" style={{ marginBottom: 6, fontSize: 12 }}>
-          <b>{nameFor ? nameFor(id) : String(id).slice(0, 8)}</b>{" · "}{lowCashText(a).body}
+          <b>{nameFor ? nameFor(id) : String(id).slice(0, 8)}</b>{" · "}{lowCashText(a, { owner: id !== selfId }).body}
           {a.createdAt ? <span className="muted"> · since {etTime(a.createdAt)}</span> : null}
         </div>
       )))}
@@ -67,5 +67,5 @@ export function LowCashAdminList({ rows, nameFor }) {
 export function lowCashChip(alerts) {
   if (!alerts || !alerts.length) return null;
   const short = alerts.reduce((s, a) => s + (Number(a.shortfallUsd) || 0), 0);
-  return <span className="chip warn" style={{ marginTop: 3, display: "inline-block" }} title={lowCashText(alerts[0]).body}>Low cash{short > 0 ? ` · ~$${short.toFixed(2)} short` : ""}</span>;
+  return <span className="chip warn" style={{ marginTop: 3, display: "inline-block" }} title={lowCashText(alerts[0], { owner: true }).body}>Low cash{short > 0 ? ` · ~$${short.toFixed(2)} short` : ""}</span>;
 }

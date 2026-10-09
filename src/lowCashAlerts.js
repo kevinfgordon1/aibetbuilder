@@ -34,23 +34,26 @@ export function normalizeUserAlert(raw) {
 }
 
 /** Plain-language copy for one alert. */
-export function lowCashText(a) {
+export function lowCashText(a, { owner = false } = {}) {
   if (!a) return { title: "", body: "" };
   const short = money(a.shortfallUsd);
   const lock = a.lockLabel ? ` on ${a.lockLabel}` : "";
+  // owner=true: Kevin reading someone else's alert in All users.
+  const your = owner ? "their" : "your";
+  const you = owner ? "They're" : "You're";
   if (a.venue === "polymarket") {
     return {
       title: "Some Combo Locks quotes were skipped: not enough Polymarket cash",
-      body: `Some of your Combo Locks quotes${lock} were skipped because your Polymarket US buying power is too low.` +
-        (short ? ` You're about ${short} short.` : "") +
+      body: `Some of ${your} Combo Locks quotes${lock} were skipped because ${your} Polymarket US buying power is too low.` +
+        (short ? ` ${you} about ${short} short.` : "") +
         " Add money on Polymarket US to keep quoting.",
     };
   }
   return {
     title: "Some Combo Locks quotes were skipped: combos cash too low",
-    body: `Some of your Combo Locks quotes${lock} were skipped because your combos cash is too low.` +
-      (short ? ` You're about ${short} short.` : "") +
-      " Add money on Kalshi or raise your Amount to keep for combos.",
+    body: `Some of ${your} Combo Locks quotes${lock} were skipped because ${your} combos cash is too low.` +
+      (short ? ` ${you} about ${short} short.` : "") +
+      ` Add money on Kalshi or raise ${your} Amount to keep for combos.`,
   };
 }
 
