@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {
   fmtAmerican, americanFromNoPrice, dollars, signedDollars, etDateTime, etDay, etStamp,
-  plainLeg, lockTitle, lockStatus, betSummary, lockMetaLine, profitLine, plainAttemptLabel,
+  plainLeg, lockTitle, lockStatus, betSummary, lockMetaLine, profitLine, cardOutcomeTiles, plainAttemptLabel,
   historyResult, historyTotals, historyRow, lockSports, plainOutcomeText,
   fairOdds, quoteRow, quoteHistory, QUOTE_ROWS_SHOWN,
 } from "./comboLockView.js";
@@ -73,6 +73,21 @@ assert.deepEqual(profitLine({ filled: 0, current: { hit: 975, miss: -50 }, targe
 assert.equal(profitLine({ filled: 300, current: { hit: 10, miss: 12 }, target: { hit: 11, miss: 11, locks: true }, remaining: 0 }).lead, "Locked profit");
 assert.equal(profitLine({ filled: 100, current: { hit: 500, miss: -20 }, target: { hit: 11, miss: 11, locks: true }, remaining: 300 }).text, "+$500.00 if it hits · -$20.00 if it misses");
 assert.equal(profitLine(null), null);
+// Card outcome tiles: now (actual fills) + at target fill (whole lock at the Selling at price).
+{
+  const unfilled = cardOutcomeTiles({ filled: 0, current: { hit: 975, miss: -50 }, target: { hit: 23.21, miss: 23.21, locks: true, contracts: 1025 }, remaining: 1025 });
+  assert.deepEqual(unfilled.now, { lead: "Where you stand now", hit: "+$975.00", miss: "-$50.00", hitTone: "pos", missTone: "neg", either: false });
+  assert.deepEqual(unfilled.target, { lead: "At target fill", hit: "+$23.21", miss: "+$23.21", hitTone: "pos", missTone: "pos", either: true, contracts: 1025, locks: true });
+  const partial = cardOutcomeTiles({ filled: 100, current: { hit: 500, miss: -20 }, target: { hit: 11, miss: -3, locks: false, contracts: 400 }, remaining: 300 });
+  assert.equal(partial.now.lead, "Where you stand now");
+  assert.equal(partial.target.missTone, "neg");
+  assert.equal(partial.target.locks, false);
+  const full = cardOutcomeTiles({ filled: 400, current: { hit: 11, miss: 11 }, target: { hit: 11, miss: 11, locks: true, contracts: 400 }, remaining: 0 });
+  assert.equal(full.now.lead, "Locked profit");
+  assert.equal(full.now.either, true);
+  assert.equal(cardOutcomeTiles({ filled: 0, current: { hit: 975, miss: -50 }, target: null, remaining: null, targetTbd: true }).target, null);
+  assert.deepEqual(cardOutcomeTiles(null), { now: null, target: null });
+}
 
 assert.equal(plainAttemptLabel("skipped · over_limit"), "skipped · too big for this lock");
 assert.equal(plainAttemptLabel("unfilled · outbid"), "not taken · outbid");
