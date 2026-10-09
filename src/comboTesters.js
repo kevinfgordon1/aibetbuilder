@@ -8,29 +8,77 @@ export const VENUE_LABEL = { kalshi: "Kalshi", polymarket_us: "Polymarket US" };
 export const CONNECT_COPY = {
   title: "Your exchange accounts",
   intro: "Combo Locks quotes and hedges on your own exchange account, with your own money and at your own risk. Profits and losses are yours.",
-  keyAdvice: "Use a trade-only API key (steps below). Disconnect here, or delete the key at the exchange, any time.",
+  keyAdvice: "Use a Kalshi API key with Full access, or with Read, Trade and Transfers (steps below). Disconnect here, or delete the key at the exchange, any time.",
   never: "Never share your exchange password or 2FA codes. We only ask for an API key, and nobody from aibetbuilder will ever ask for your password.",
 };
 
 // "How to connect your Kalshi key": short numbered guide on the card. Matches
 // Kalshi's Create API key screen (Oct 2026). Open by default until Kalshi is
-// connected.
+// connected. Full access (or Read + Trade + Transfers) lets combo-worker keep
+// the tester's Combos balance funded from their own Default balance.
 export const KALSHI_HOWTO = {
   title: "How to connect your Kalshi key",
   steps: [
     "On a computer, sign in at kalshi.com, open your Account settings and find API keys. Click Create API key.",
     "Key type: Ed25519 (Kalshi's default) or RSA. Either one works.",
-    "Permissions: check only Read all data and Trade. Leave everything else unchecked (Full access, Transfers, Accept block trades). Leave the sub-account blank.",
+    "Permissions: choose Full access (simplest), or check Read, Trade and Transfers. Leave the sub-account blank.",
     "Click Create. Copy the Key ID and download the private key file. Kalshi shows the private key only once.",
     "Back here, click Connect Kalshi. Paste the Key ID, then open the private key file and paste all of it, including the BEGIN and END lines. Click Check & save key.",
-    "Put money in your Combos balance: on kalshi.com go to Settings > Advance shard settings (kalshi.com/account/exchange-indexes). Turn on \"Disable balance management\", click Transfer, and move money from Exchange 0 (Default) to Exchange 1 (Combos). Then turn the switch back off so your normal Kalshi bets keep working.",
+    "The site moves money into your Combos balance for you, up to the cap you set. Nothing to do here.",
   ],
-  safe: "This key can only read your account and place trades. It can't move or withdraw money, and you can delete it in Kalshi any time.",
+  safe: "The site only uses this key to place your Combo Locks trades and move money between your own Kalshi balances. It never withdraws money.",
 };
+
+// Auto-funding status line under the Kalshi row.
+export const AUTOFUND_COPY = {
+  off: "Auto-funding is off for this key. To have the site fill your Combos balance for you, reconnect with a key that has Transfers or Full access. Your trades keep working meanwhile.",
+  review: "Auto-funding starts once the owner confirms this key's permissions.",
+  noCap: "Auto-funding is waiting for a daily limit. The owner sets it.",
+  paused: "Auto-funding is paused (your cap is $0).",
+};
+
+// The cap the worker uses: the tester's own cap, never above the daily limit.
+export function effectiveCap(ownCap, dailyLimit) {
+  const daily = Number(dailyLimit);
+  if (dailyLimit == null || !(daily > 0)) return null;
+  if (ownCap == null || ownCap === "") return daily;
+  const own = Number(ownCap);
+  if (!Number.isFinite(own) || own < 0) return daily;
+  return Math.min(own, daily);
+}
+
+// "$120" / "120.50" -> 120.5; "" -> null (use the daily limit); bad -> NaN.
+export function parseCapInput(v) {
+  const t = String(v == null ? "" : v).replace(/[$,\s]/g, "");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : NaN;
+}
+
+export function autoFundLine(row, caps, ownCap = null) {
+  if (!row || !row.connected) return null;
+  if (row.scopeStatus === "unverified") return { tone: "muted", text: AUTOFUND_COPY.review };
+  if (!row.autoFund) return { tone: "warn", text: AUTOFUND_COPY.off };
+  const cap = effectiveCap(ownCap, caps && caps.perDayUsd);
+  if (cap == null) return { tone: "muted", text: AUTOFUND_COPY.noCap };
+  if (cap === 0) return { tone: "muted", text: AUTOFUND_COPY.paused };
+  return { tone: "ok", text: `Auto-funding is on: we keep your Combos balance topped up to ${money(cap)}.` };
+}
+
+const FUND_STATUS = { sending: "sending", accepted: "processing", confirmed: "done", failed: "failed" };
+
+// One line per logged move (combo_fund_moves row).
+export function fundMoveText(row) {
+  if (!row) return "";
+  const amt = Number(row.amount_usd);
+  const amount = Number.isFinite(amt) ? "$" + amt.toFixed(2) : "—";
+  const dir = Number(row.from_shard) === 1 ? "Combos → Default" : "Default → Combos";
+  return `${amount} ${dir} · ${FUND_STATUS[row.status] || row.status || "—"}`;
+}
 
 export const VENUE_HELP = {
   kalshi: {
-    where: "Follow the steps above: Read all data + Trade only. Ed25519 or RSA keys both work.",
+    where: "Follow the steps above: Full access, or Read, Trade and Transfers. Ed25519 or RSA keys both work.",
     idLabel: "Key ID",
     secretLabel: "Private key (the whole file, including the BEGIN/END lines)",
     secretPlaceholder: "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----",
