@@ -104,7 +104,7 @@ function ceilContracts(n) {
 //                   back to an unpersisted cap it could overfill.)
 //   1x            : N = W + S.
 //   riskfree_open : N = W / (1 − y), rounded DOWN. Win side stays ≥ $0; miss pays.
-//   2x / 3x       : multiples of the 1× count. 3× is no longer in the form, but saved rows still size.
+//   2x / 3x       : multiples of the 1× count. Neither is in the form anymore; saved rows still size.
 // Pass profit / atRisk to use a merged order's total_profit_if_win and total_at_risk
 // instead of recomputing them from a single stake and American price.
 export function hedgeCap({
