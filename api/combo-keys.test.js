@@ -31,13 +31,60 @@ const KID = 'a1b2c3d4-e5f6-4711-8899-aabbccdd1234';
   assert.equal(bad(['read', 'write::trade'], { subaccount: 3 }), 'subaccount_key');
   assert.equal(bad(['read', 'write::trade'], {}, 50), 'attestation_lapsed');
   assert.equal(bad(['read', 'write::trade', 'read::portfolio_balance']), null);
+  // Exact scope strings from Kalshi's Create API key screen (Oct 2026).
+  assert.equal(bad(['read', 'write::trade', 'read::portfolio_balance', 'read::block_trade_accept']), null, 'Read all data + Trade (with implied read::*) is OK');
+  assert.equal(bad(['write::trade', 'read']), null, 'order does not matter');
+  assert.equal(bad([' READ ', 'Write::Trade']), null, 'case/whitespace tolerant');
+  assert.equal(bad(['read', 'write::trade', 'write']), 'transfer_scope', 'Full access');
+  assert.equal(bad(['read', 'write']), 'transfer_scope', 'old-format Read + Write key = Full access');
+  assert.equal(bad(['write']), 'transfer_scope');
+  assert.equal(bad(['read', 'write::transfer']), 'transfer_scope', 'Transfers without Trade');
+  assert.equal(bad(['read', 'write::trade', 'write::block_trade_accept']), 'extra_scope', 'Accept block trades');
+  assert.equal(bad(['read', 'write::trade', 'read::block_trade_accept']), null, 'Read block trades is read-only');
+  assert.equal(bad(['read::portfolio_balance', 'write::trade']), 'missing_read', 'granular read only, no Read all data');
+  assert.equal(bad(['read', 'write::trade', 'write::something_new']), 'extra_scope', 'unknown write scope');
+  assert.equal(bad([]), 'missing_trade');
+  {
+    let msg = '';
+    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade', 'write::transfer'] }, 9999999999, 1); } catch (e) { msg = e.message; }
+    assert.match(msg, /Transfers/);
+    assert.match(msg, /Read all data and Trade/);
+    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write'] }, 9999999999, 1); } catch (e) { msg = e.message; }
+    assert.match(msg, /Full access/);
+  }
+  assert.deepEqual(keys.classifyKalshiScopes(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']),
+    { scopes: ['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], money: ['write::transfer'], extra: ['write::block_trade_accept'], missing: [] });
   const noTs = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade'] }, null);
   assert.equal(noTs.warnings.length, 1);
   const missing = keys.assessKalshiKey(null, null);
   assert.equal(missing.scopeStatus, 'unverified');
   assert.equal(keys.keyHint(KID), '1234');
   assert.equal(keys.maskedLabel('kalshi', '1234'), 'Kalshi connected ••••1234');
-  assert.throws(() => keys.parseKalshiPem(ED_PEM), /RSA key/);
+  // Ed25519 (Kalshi's default key type) is accepted and signs with plain Ed25519.
+  const edParsed = keys.parseKalshiPem(ED_PEM);
+  assert.equal(edParsed.key.asymmetricKeyType, 'ed25519');
+  {
+    const h = keys.kalshiHeaders(KID, edParsed.key, 'GET', '/trade-api/v2/api_keys', 1700000000000);
+    const pub = crypto.createPublicKey(edParsed.key);
+    assert.ok(crypto.verify(null, Buffer.from('1700000000000GET/trade-api/v2/api_keys'), pub, Buffer.from(h['KALSHI-ACCESS-SIGNATURE'], 'base64')));
+  }
+  // Ed25519 body pasted without BEGIN/END lines still parses (as PKCS#8).
+  {
+    const bare = ED_PEM.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+    const p2 = keys.parseKalshiPem(bare);
+    assert.equal(p2.key.asymmetricKeyType, 'ed25519');
+    assert.match(p2.pem, /^-----BEGIN PRIVATE KEY-----/);
+  }
+  // RSA still signs with RSA-PSS.
+  {
+    const r = keys.parseKalshiPem(RSA_PEM);
+    const h = keys.kalshiHeaders(KID, r.key, 'GET', '/trade-api/v2/api_keys', 1700000000000);
+    assert.ok(crypto.verify('sha256', Buffer.from('1700000000000GET/trade-api/v2/api_keys'), { key: crypto.createPublicKey(r.key), padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST }, Buffer.from(h['KALSHI-ACCESS-SIGNATURE'], 'base64')));
+  }
+  {
+    const { privateKey: ec } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    assert.throws(() => keys.parseKalshiPem(ec.export({ type: 'pkcs8', format: 'pem' })), /not a Kalshi API key/);
+  }
   assert.throws(() => keys.parseKalshiPem('not a key'), /could not be read/);
   assert.throws(() => keys.cleanKeyId('x'), /key ID/);
   const row = keys.publicKeyRow({ venue: 'kalshi', key_hint: '1234', scope_status: 'ok', key_id: KID, secret_id: 'v' });
@@ -143,6 +190,17 @@ function kalshiFetch(scopes, extra = {}) {
     assert.equal((await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM })).code, 403);
     assert.equal((await call('GET')).body.owner, true);
     s.restore();
+  }
+  // Ed25519 key (Kalshi's default) with Kalshi's current scope list connects too.
+  {
+    const f = kalshiFetch(['read', 'read::portfolio_balance', 'read::block_trade_accept', 'write::trade']);
+    const s = setup({ user: { id: T }, live: APPROVED, fetchImpl: f });
+    const p = await call('POST', JSON.stringify({ venue: 'kalshi', key_id: KID, secret: ED_PEM }));
+    assert.equal(p.code, 200, JSON.stringify(p.body));
+    const h = f.seen[0].headers;
+    assert.ok(crypto.verify(null, Buffer.from(h['KALSHI-ACCESS-TIMESTAMP'] + 'GET/trade-api/v2/api_keys'), crypto.createPublicKey(ed), Buffer.from(h['KALSHI-ACCESS-SIGNATURE'], 'base64')));
+    assert.equal(s.rpcs[0][1].p_scope_status, 'ok');
+    assert.match(s.rpcs[0][1].p_secret, /BEGIN PRIVATE KEY/);
   }
   // Approved tester connects a Read+Trade Kalshi key: signed check, stored via RPC, masked reply.
   {

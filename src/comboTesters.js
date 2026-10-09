@@ -8,16 +8,16 @@ export const VENUE_LABEL = { kalshi: "Kalshi", polymarket_us: "Polymarket US" };
 export const CONNECT_COPY = {
   title: "Your exchange accounts",
   intro: "Combo Locks quotes and hedges on your own exchange account, with your own money and at your own risk. Profits and losses are yours.",
-  keyAdvice: "Create a trade-only API key. On Kalshi, give it Read and Trade only (no Transfer). Disconnect here, or delete the key at the exchange, any time.",
+  keyAdvice: "Create a trade-only API key. On Kalshi, check Read all data and Trade only. Leave Full access, Transfers and Accept block trades unchecked. Disconnect here, or delete the key at the exchange, any time.",
   never: "Never share your exchange password or 2FA codes. We only ask for an API key, and nobody from aibetbuilder will ever ask for your password.",
 };
 
 export const VENUE_HELP = {
   kalshi: {
-    where: "In Kalshi's web app open your account settings → API keys → Create key. Choose Read + Trade only and leave the sub-account blank.",
+    where: "In Kalshi's web app open Account & security → API keys → Create API key. Key type: Ed25519 (recommended) or RSA, both work. Permissions: check Read all data and Trade only; leave Full access, Transfers and Accept block trades unchecked, and leave the sub-account blank. Click Create, then paste the Key ID and the private key file here.",
     idLabel: "Key ID",
     secretLabel: "Private key (the whole file, including the BEGIN/END lines)",
-    secretPlaceholder: "-----BEGIN RSA PRIVATE KEY-----\n…\n-----END RSA PRIVATE KEY-----",
+    secretPlaceholder: "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----",
   },
   polymarket_us: {
     where: "polymarket.us/developer → Create API key. Use the same sign-in method as the app.",

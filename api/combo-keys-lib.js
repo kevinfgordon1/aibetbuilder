@@ -41,54 +41,111 @@ function cleanKeyId(v) {
 
 // --- Kalshi -----------------------------------------------------------------
 
-// RSA only: the worker signs with RSA-PSS (Kalshi web-generated keys are RSA).
+// Kalshi keys: RSA (signed with RSA-PSS/SHA-256) or Ed25519 (Kalshi's default
+// in the web app; signed with plain Ed25519). Both are accepted by the API.
+const KALSHI_KEY_TYPES = Object.freeze(['rsa', 'ed25519']);
+
+function pkcs8Armor(raw) {
+  const body = String(raw || '').replace(/-----[^-]+-----/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
+  if (!body) return '';
+  return `-----BEGIN PRIVATE KEY-----\n${(body.match(/.{1,64}/g) || []).join('\n')}\n-----END PRIVATE KEY-----\n`;
+}
+
 function parseKalshiPem(raw) {
   const s = String(raw == null ? '' : raw);
   if (!s.trim() || s.length > MAX_SECRET_LEN) throw new KeyError('Paste the full private key file contents (-----BEGIN … PRIVATE KEY-----).');
-  const pem = normalizePem(s);
-  let key;
-  try { key = crypto.createPrivateKey(pem); } catch (_) {
-    throw new KeyError('That private key could not be read. Paste the whole .key/.txt file Kalshi gave you, including the BEGIN/END lines.');
+  let pem = normalizePem(s);
+  let key = null;
+  try { key = crypto.createPrivateKey(pem); } catch (_) { key = null; }
+  // Body pasted without BEGIN/END lines: normalizePem assumes RSA; an Ed25519
+  // key is PKCS#8, so retry with the generic PRIVATE KEY armor.
+  if (!key && !s.trim().startsWith('-----BEGIN')) {
+    const alt = pkcs8Armor(s);
+    try { key = crypto.createPrivateKey(alt); pem = alt; } catch (_) { key = null; }
   }
-  if (key.asymmetricKeyType !== 'rsa') {
-    throw new KeyError('Please create an RSA key (the default in Kalshi’s web app). Ed25519 keys are not supported yet.');
+  if (!key) {
+    throw new KeyError('That private key could not be read. Paste the whole private key file Kalshi gave you, including the BEGIN/END lines.');
+  }
+  if (!KALSHI_KEY_TYPES.includes(key.asymmetricKeyType)) {
+    throw new KeyError('That is not a Kalshi API key. Create a new key in Kalshi (Ed25519 or RSA both work) and paste its private key.');
   }
   return { pem, key };
 }
 
-function kalshiHeaders(keyId, key, method, signPath, ts = Date.now()) {
-  const msg = String(ts) + method + signPath;
-  const sig = crypto.sign('sha256', Buffer.from(msg, 'utf8'), {
+function kalshiSignature(key, msg) {
+  const data = Buffer.from(msg, 'utf8');
+  if (key.asymmetricKeyType === 'ed25519') return crypto.sign(null, data, key).toString('base64');
+  return crypto.sign('sha256', data, {
     key, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
   }).toString('base64');
-  return { 'KALSHI-ACCESS-KEY': keyId, 'KALSHI-ACCESS-TIMESTAMP': String(ts), 'KALSHI-ACCESS-SIGNATURE': sig, Accept: 'application/json' };
 }
 
+function kalshiHeaders(keyId, key, method, signPath, ts = Date.now()) {
+  const msg = String(ts) + method + signPath;
+  return { 'KALSHI-ACCESS-KEY': keyId, 'KALSHI-ACCESS-TIMESTAMP': String(ts), 'KALSHI-ACCESS-SIGNATURE': kalshiSignature(key, msg), Accept: 'application/json' };
+}
+
+// Kalshi scopes (GET /api_keys). Kalshi's Create API key screen:
+//   Broad:     "Read all data" = read        "Full access" = write
+//   Granular:  read::portfolio_balance, read::block_trade_accept (both implied by read)
+//              "Trade" = write::trade        "Transfers" = write::transfer
+//              "Accept block trades" = write::block_trade_accept
+//   (API-only: write::fcm_risk.)  Older keys list the same strings (read / write).
+// A tester key must be read + write::trade. Any read::* is fine. Rejected:
+//   write (Full access = every write endpoint, transfers included),
+//   write::transfer (moves money), write::block_trade_accept (would let the
+//   key accept block trades: new positions/obligations outside our caps),
+//   write::fcm_risk and any other write::* or unknown scope.
+const KALSHI_REQUIRED = Object.freeze(['read', 'write::trade']);
+const KALSHI_MONEY_SCOPES = Object.freeze(['write', 'write::transfer']);
+
+function normScopes(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((s) => String(s == null ? '' : s).trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function classifyKalshiScopes(list) {
+  const scopes = normScopes(list);
+  const money = scopes.filter((s) => KALSHI_MONEY_SCOPES.includes(s));
+  const allowed = (s) => s === 'read' || s === 'write::trade' || /^read::[a-z0-9_]+$/.test(s);
+  const extra = scopes.filter((s) => !allowed(s) && !KALSHI_MONEY_SCOPES.includes(s));
+  const missing = KALSHI_REQUIRED.filter((s) => !scopes.includes(s));
+  return { scopes, money, extra, missing };
+}
+
+const SCOPE_WORDS = {
+  write: 'Full access',
+  'write::transfer': 'Transfers',
+  'write::block_trade_accept': 'Accept block trades',
+  'write::fcm_risk': 'FCM risk',
+};
+const KEY_FIX = 'Delete it in Kalshi and create a new key with only Read all data and Trade checked (leave Full access, Transfers and Accept block trades unchecked).';
+
 // Decide whether a Kalshi key's scopes are acceptable for a tester.
-// Needs read + write::trade (quotes/orders/RFQs); must NOT carry the broad
-// `write` scope or write::transfer (moving money), and must not be locked to a
-// sub-account (restricted keys cannot open the RFQ WebSocket).
+// Also refuses keys locked to a sub-account (restricted keys cannot open the
+// RFQ WebSocket) and lapsed location checks.
 function assessKalshiKey(entry, regionExpTs, nowSec = Math.floor(Date.now() / 1000)) {
   const warnings = [];
   if (!entry) {
     return { ok: true, scopes: [], scopeStatus: 'unverified', warnings: ['Kalshi did not list this key’s scopes; it is flagged for owner review.'] };
   }
-  const scopes = Array.isArray(entry.scopes) ? entry.scopes.map(String) : [];
-  if (scopes.includes('write::transfer') || scopes.includes('write')) {
-    throw new KeyError('This key can move money (Kalshi “Write”/transfer permission). Delete it and create a new key with only Read + Trade.', 400, 'transfer_scope');
+  const c = classifyKalshiScopes(entry.scopes);
+  const words = (list) => list.map((s) => SCOPE_WORDS[s] || s).join(' and ');
+  if (c.money.length) {
+    throw new KeyError(`This key has ${words(c.money)} turned on, which can move money. ${KEY_FIX}`, 400, 'transfer_scope');
   }
-  if (!scopes.includes('write::trade')) throw new KeyError('This key cannot trade. Create a key with Read + Trade permissions.', 400, 'missing_trade');
-  if (!scopes.includes('read')) throw new KeyError('This key cannot read your portfolio. Create a key with Read + Trade permissions.', 400, 'missing_read');
-  const extra = scopes.filter((s) => !['read', 'write::trade', 'read::portfolio_balance'].includes(s));
-  if (extra.length) throw new KeyError('This key has extra permissions. Create a key with only Read + Trade.', 400, 'extra_scope');
+  if (c.extra.length) throw new KeyError(`This key has extra permissions (${words(c.extra)}). ${KEY_FIX}`, 400, 'extra_scope');
+  if (c.missing.includes('write::trade')) throw new KeyError(`This key cannot trade (Trade is unchecked). ${KEY_FIX}`, 400, 'missing_trade');
+  if (c.missing.includes('read')) throw new KeyError(`This key cannot read your account (Read all data is unchecked). ${KEY_FIX}`, 400, 'missing_read');
   if (entry.subaccount != null) {
-    throw new KeyError('This key is locked to a sub-account, which Kalshi blocks from RFQ quoting. Create an unrestricted Read + Trade key.', 400, 'subaccount_key');
+    throw new KeyError('This key is locked to a sub-account, which Kalshi blocks from RFQ quoting. Create a new key with Read all data + Trade and no sub-account.', 400, 'subaccount_key');
   }
   if (regionExpTs != null && Number(regionExpTs) < nowSec) {
     throw new KeyError('Kalshi says your location check for API trading has lapsed. Re-verify your location in the Kalshi app, then try again.', 400, 'attestation_lapsed');
   }
   if (regionExpTs == null) warnings.push('Kalshi has no API location check on file for this account yet; sports trading may be refused until you complete it in the Kalshi app.');
-  return { ok: true, scopes, scopeStatus: 'ok', warnings };
+  return { ok: true, scopes: c.scopes, scopeStatus: 'ok', warnings };
 }
 
 async function verifyKalshiKey({ keyId, secret, env = process.env, fetchImpl = fetch }) {
@@ -109,7 +166,15 @@ async function verifyKalshiKey({ keyId, secret, env = process.env, fetchImpl = f
   try { body = await res.json(); } catch (_) { body = null; }
   const list = body && Array.isArray(body.api_keys) ? body.api_keys : [];
   const entry = list.find((k) => k && String(k.api_key_id) === id) || null;
-  const a = assessKalshiKey(entry, body ? body.api_key_region_expiration_ts : null);
+  let a;
+  try {
+    a = assessKalshiKey(entry, body ? body.api_key_region_expiration_ts : null);
+  } catch (e) {
+    // Scope names + key type only (never the key id or secret) so a rejected
+    // key can be diagnosed later.
+    if (e instanceof KeyError) console.warn('[combo-keys] kalshi key refused', e.code, JSON.stringify(normScopes(entry && entry.scopes)), key.asymmetricKeyType);
+    throw e;
+  }
   return { venue: 'kalshi', keyId: id, secret: pem, hint: keyHint(id), ...a };
 }
 
@@ -169,5 +234,5 @@ function publicKeyRow(row) {
 
 module.exports = {
   VENUES, KEVIN_IDS, KeyError, keyHint, maskedLabel, cleanKeyId, parseKalshiPem,
-  assessKalshiKey, verifyKalshiKey, verifyPolymarketKey, verifyKey, publicKeyRow, kalshiHeaders,
+  assessKalshiKey, classifyKalshiScopes, kalshiSignature, verifyKalshiKey, verifyPolymarketKey, verifyKey, publicKeyRow, kalshiHeaders,
 };
