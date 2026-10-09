@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
-  noBidFromFill, usd, etTime, balanceCell, balancesByUser, cellText, cellNote, lockNeedUsd, comboShortfall, filledByParlay, adminBalanceText, BALANCE_STALE_MS,
+  noBidFromFill, usd, etTime, balanceCell, balancesByUser, cellText, cellNote, lockNeedUsd, comboShortfall, filledByParlay, adminBalanceText, totalCashCell, pendingMovesCell, BALANCE_STALE_MS,
 } from "./comboBalances.js";
 
 // Same math as ComboLocks fillView / worker engine.fillView (cent floor).
@@ -72,11 +72,33 @@ assert.deepEqual(filledByParlay([{ parlay_id: "a", count: 10 }, { parlay_id: "a"
   assert.equal(comboShortfall({ comboUsd: null, parlays }).short, false);
   assert.equal(comboShortfall({ comboUsd: 10, parlays: [] }).short, false);
 }
+
+{
+  const main = balanceCell({ ...fresh, shard: 0, available_usd: 5000 }, now);
+  const combo = balanceCell(fresh, now);
+  assert.equal(totalCashCell(main, combo).amount, 5987.65);
+  assert.equal(totalCashCell(main, combo).state, "ok");
+  assert.equal(totalCashCell(balanceCell(null, now), combo).amount, null);
+  assert.equal(pendingMovesCell(null).amount, null);
+  assert.equal(pendingMovesCell([]).amount, 0);
+  assert.equal(pendingMovesCell([
+    { amount_usd: 40, status: "sending" },
+    { amount_usd: 10.5, status: "accepted" },
+    { amount_usd: 99, status: "confirmed" },
+    { amount_usd: 5, status: "failed" },
+  ]).amount, 50.5);
+}
 // The old bucket-monitor Main/Combo readout is gone from the page; "Available to trade" replaces it.
 {
   const locks = fs.readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
   assert.doesNotMatch(locks, /BucketReadout|bucket-readout|\/api\/combo-bucket/);
   const testers = fs.readFileSync(new URL("./ComboTesters.jsx", import.meta.url), "utf8");
   assert.match(testers, /Available to trade/);
+  assert.match(testers, /Total cash available/);
+  assert.match(testers, /Pending transactions/);
+  assert.match(testers, /Cash available for combos/);
+  assert.match(testers, /Amount to keep for combos/);
+  assert.doesNotMatch(testers, /Combos \(used by these locks\)/);
+  assert.doesNotMatch(testers, /Single-game/);
 }
 console.log("comboBalances.test.js ok");
