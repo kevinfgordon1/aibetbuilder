@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { lowCashText, openUserAlerts, openAlertsByUser, normalizeUserAlert } from "./lowCashAlerts.js";
+
+let n = 0;
+const row = (o) => ({ id: "a" + (n++), user_id: "u1", venue: "kalshi", parlay_id: "p1", created_at: "2026-10-09T20:00:00Z", ...o });
+
+{
+  const t = lowCashText(normalizeUserAlert(row({ shortfall_usd: 42.5, lock_label: "Guardians ML + Brewers ML" })));
+  assert.equal(t.body, "Some of your Combo Locks quotes on Guardians ML + Brewers ML were skipped because your combos cash is too low. You're about $42.50 short. Add money on Kalshi or raise your Amount to keep for combos.");
+  assert.ok(!/short\./.test(lowCashText(normalizeUserAlert(row({}))).body), "no shortfall line when unknown");
+  assert.match(lowCashText(normalizeUserAlert(row({ venue: "polymarket" }))).body, /Polymarket US/);
+}
+{
+  const rows = [row({ id: "1" }), row({ id: "2", created_at: "2026-10-09T21:00:00Z" }), row({ id: "3", resolved_at: "x" }), row({ id: "4", parlay_id: "p2", read_at: "x" })];
+  assert.deepEqual(openUserAlerts(rows).map((a) => a.id), ["2"]);
+  assert.deepEqual(openUserAlerts(rows, { includeRead: true }).map((a) => a.id), ["2", "4"]);
+  const g = openAlertsByUser([row({ id: "5" }), row({ id: "6", user_id: "u2" })]);
+  assert.deepEqual(Object.keys(g).sort(), ["u1", "u2"]);
+}
+console.log("lowCashAlerts tests passed");

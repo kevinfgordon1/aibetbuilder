@@ -39,6 +39,7 @@ import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLoc
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import ComboTesters from "./ComboTesters";
+import { LowCashBanner } from "./LowCashAlerts";
 import ComboCredits from "./ComboCredits";
 import { showCreditsCardEnabled } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
@@ -1356,6 +1357,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             : <span className="chip">Refresh failed. Retrying…</span>)}
         </div>
       )}
+      <LowCashBanner supabase={supabase} user={user} />
       <ComboTesters user={user} supabase={supabase} />
       {showCreditsCardEnabled() ? <ComboCredits user={user} supabase={supabase} /> : null}
       {deskHealth.show

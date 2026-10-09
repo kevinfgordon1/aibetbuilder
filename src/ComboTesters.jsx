@@ -16,6 +16,8 @@ import {
 import {
   adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, pendingMovesCell, totalCashCell, usd,
 } from "./comboBalances";
+import { LowCashAdminList, lowCashChip, useUserAlertRows } from "./LowCashAlerts";
+import { openAlertsByUser } from "./lowCashAlerts.js";
 
 const TESTERS_CSS = `
 .cl .tst{margin:0 0 14px}
@@ -442,6 +444,8 @@ function AdminPanel({ supabase }) {
   const [err, setErr] = useState(null);
   const [editing, setEditing] = useState(null);
   const bal = useBalances(supabase, null, open);
+  const lowCash = useUserAlertRows(supabase, null, open);
+  const lowByUser = useMemo(() => openAlertsByUser(lowCash.rows), [lowCash.rows]);
   const load = useCallback(async () => {
     setErr(null);
     const r = await authedFetch(supabase, "/api/combo-admin");
@@ -471,7 +475,7 @@ function AdminPanel({ supabase }) {
       <div className="tst-head">
         <div className="tst-title">All users {users ? <span className="muted" style={{ fontWeight: 400 }}>· {rows.length} with locks or access · {testers} approved tester{testers === 1 ? "" : "s"}</span> : null}</div>
         <div className="tst-actions">
-          {open && <button type="button" className="btn mini" disabled={busy} onClick={() => { load(); bal.reload(); }}>Refresh</button>}
+          {open && <button type="button" className="btn mini" disabled={busy} onClick={() => { load(); bal.reload(); lowCash.reload(); }}>Refresh</button>}
           <button type="button" className="btn mini" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Show"}</button>
         </div>
       </div>
@@ -498,11 +502,12 @@ function AdminPanel({ supabase }) {
                     <td data-k="Balance">{(() => {
                       const k = ownerDesk || u.keys.kalshi.connected;
                       const pm = ownerDesk || u.keys.polymarket_us.connected;
-                      if (!k && !pm) return "—";
+                      const low = lowCashChip(lowByUser[u.user_id]);
+                      if (!k && !pm) return low || "—";
                       if (!bal.rows) return bal.failed ? "Couldn't load" : "…";
                       const b = balancesByUser(bal.rows, bal.now)[u.user_id];
                       if (!b) return <span className="muted">Waiting</span>;
-                      return <span title={b.updatedAt ? `Updated ${etTime(b.updatedAt, bal.now)}. * = couldn't refresh, last amount shown.` : ""}>{adminBalanceText(b, { kalshi: k, poly: pm })}{b.updatedAt ? <div className="muted" style={{ fontSize: 11 }}>{etTime(b.updatedAt, bal.now)}</div> : null}</span>;
+                      return <span title={b.updatedAt ? `Updated ${etTime(b.updatedAt, bal.now)}. * = couldn't refresh, last amount shown.` : ""}>{adminBalanceText(b, { kalshi: k, poly: pm })}{b.updatedAt ? <div className="muted" style={{ fontSize: 11 }}>{etTime(b.updatedAt, bal.now)}</div> : null}{low ? <div>{low}</div> : null}</span>;
                     })()}</td>
                     <td data-k="Locks">{u.locks.active} active / {u.locks.total}</td>
                     <td data-k="Orders 30d">{u.orders.last30d}</td>
@@ -523,6 +528,8 @@ function AdminPanel({ supabase }) {
               })}
             </tbody>
           </table>
+          <LowCashAdminList rows={lowCash.rows}
+            nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
           <FundMoves supabase={supabase} userId={null} enabled title="Tester auto-funding (latest 20)" limit={20}
             nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Keys are shown masked only. Balance = Kalshi combo / single-game and Polymarket US buying power, refreshed every minute. Testers trade on their own accounts. Kevin's desk uses the server keys. Pause engages the user's kill switch; Resume clears only your pause, and the user re-arms their own kill switch.</div>
