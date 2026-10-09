@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canSeeOwnerTools } from "./comboAccess";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
+  KALSHI_HOWTO,
 } from "./comboTesters";
 import {
   adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, usd,
@@ -27,6 +28,11 @@ const TESTERS_CSS = `
 .cl .tst .tst-form{display:grid;gap:10px;margin-top:8px;width:100%;min-width:0}
 .cl .tst .tst-form input,.cl .tst textarea{box-sizing:border-box;width:100%;max-width:100%}
 .cl .tst .tst-actions{display:flex;gap:8px;flex-wrap:wrap}
+.cl .tst .tst-howto{margin:10px 0;padding:10px 12px;border:1px solid rgba(147,197,253,.25);border-radius:10px;background:rgba(147,197,253,.05)}
+.cl .tst .tst-howto summary{cursor:pointer;font-weight:700;font-size:13.5px;color:#dbeafe}
+.cl .tst .tst-howto ol{margin:8px 0 6px;padding-left:22px;display:grid;gap:6px;font-size:13px;line-height:1.45;color:#d1d5db}
+.cl .tst .tst-howto li::marker{color:#93c5fd;font-weight:700}
+.cl .tst .tst-safe{font-size:12.5px;color:#34d399;margin-top:4px}
 .cl .tst-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .cl .tst-table th{text-align:left;font-weight:600;color:#8a8f98;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap}
 .cl .tst-table td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);vertical-align:top}
@@ -219,6 +225,19 @@ function OwnerBalances({ supabase, user }) {
   );
 }
 
+/** Numbered "How to connect your Kalshi key" guide; open until Kalshi is connected. */
+function KalshiHowTo({ connected }) {
+  return (
+    <details className="tst-howto" key={connected ? "c" : "n"} open={!connected}>
+      <summary>{KALSHI_HOWTO.title}</summary>
+      <ol>
+        {KALSHI_HOWTO.steps.map((s, i) => <li key={i}>{s}</li>)}
+      </ol>
+      <div className="tst-safe">{KALSHI_HOWTO.safe}</div>
+    </details>
+  );
+}
+
 function ConnectPanel({ supabase, userId, status, setStatus }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -251,6 +270,7 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
       </div>
       <p>{CONNECT_COPY.intro}</p>
       <p>{CONNECT_COPY.keyAdvice}</p>
+      <KalshiHowTo connected={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected)} />
       <p style={{ color: "#fcd34d" }}>{CONNECT_COPY.never}</p>
       {msg && <div className={"note " + msg.tone} style={{ margin: "8px 0" }}>{msg.text}</div>}
       {["kalshi", "polymarket_us"].map((v) => (

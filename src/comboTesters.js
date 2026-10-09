@@ -8,13 +8,29 @@ export const VENUE_LABEL = { kalshi: "Kalshi", polymarket_us: "Polymarket US" };
 export const CONNECT_COPY = {
   title: "Your exchange accounts",
   intro: "Combo Locks quotes and hedges on your own exchange account, with your own money and at your own risk. Profits and losses are yours.",
-  keyAdvice: "Create a trade-only API key. On Kalshi, check Read all data and Trade only. Leave Full access, Transfers and Accept block trades unchecked. Disconnect here, or delete the key at the exchange, any time.",
+  keyAdvice: "Use a trade-only API key (steps below). Disconnect here, or delete the key at the exchange, any time.",
   never: "Never share your exchange password or 2FA codes. We only ask for an API key, and nobody from aibetbuilder will ever ask for your password.",
+};
+
+// "How to connect your Kalshi key": short numbered guide on the card. Matches
+// Kalshi's Create API key screen (Oct 2026). Open by default until Kalshi is
+// connected.
+export const KALSHI_HOWTO = {
+  title: "How to connect your Kalshi key",
+  steps: [
+    "On a computer, sign in at kalshi.com, open your Account settings and find API keys. Click Create API key.",
+    "Key type: Ed25519 (Kalshi's default) or RSA. Either one works.",
+    "Permissions: check only Read all data and Trade. Leave everything else unchecked (Full access, Transfers, Accept block trades). Leave the sub-account blank.",
+    "Click Create. Copy the Key ID and download the private key file. Kalshi shows the private key only once.",
+    "Back here, click Connect Kalshi. Paste the Key ID, then open the private key file and paste all of it, including the BEGIN and END lines. Click Check & save key.",
+    "Move the money you want to trade into your Kalshi Combos balance at kalshi.com/account/exchange-indexes. Combo quotes use only that balance.",
+  ],
+  safe: "This key can only read your account and place trades. It can't move or withdraw money, and you can delete it in Kalshi any time.",
 };
 
 export const VENUE_HELP = {
   kalshi: {
-    where: "In Kalshi's web app open Account & security → API keys → Create API key. Key type: Ed25519 (recommended) or RSA, both work. Permissions: check Read all data and Trade only; leave Full access, Transfers and Accept block trades unchecked, and leave the sub-account blank. Click Create, then paste the Key ID and the private key file here.",
+    where: "Follow the steps above: Read all data + Trade only. Ed25519 or RSA keys both work.",
     idLabel: "Key ID",
     secretLabel: "Private key (the whole file, including the BEGIN/END lines)",
     secretPlaceholder: "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----",
