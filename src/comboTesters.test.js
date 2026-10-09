@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { capsLine, venueStatusText, userTradingState, pnlByUser, signedMoney, emptyForm, CONNECT_COPY, money } from "./comboTesters.js";
+import { capsLine, venueStatusText, userTradingState, pnlByUser, signedMoney, emptyForm, CONNECT_COPY, VENUE_HELP, money } from "./comboTesters.js";
 
 assert.equal(capsLine({ perLockUsd: 50, perDayUsd: 250 }), "$50 per lock · $250 per day");
 assert.equal(capsLine(null), "No limits");
@@ -31,5 +31,8 @@ assert.equal(signedMoney(2), "+$2.00");
 assert.deepEqual(emptyForm(), { keyId: "", secret: "" });
 assert.ok(/own money/.test(CONNECT_COPY.intro) && /own risk/.test(CONNECT_COPY.intro));
 assert.ok(/trade-only/.test(CONNECT_COPY.keyAdvice));
+assert.ok(/Read all data and Trade only/.test(CONNECT_COPY.keyAdvice));
+assert.ok(/Full access, Transfers and Accept block trades unchecked/.test(CONNECT_COPY.keyAdvice));
+assert.ok(/Ed25519 \(recommended\) or RSA, both work/.test(VENUE_HELP.kalshi.where));
 assert.ok(/Never share your exchange password/.test(CONNECT_COPY.never));
 console.log("comboTesters.test.js ok");
