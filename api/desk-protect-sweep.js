@@ -5,6 +5,8 @@
 // Same cancel / re-rest as the desk. The secret cannot place or cancel.
 // Armed rests only (desk rests are armed by default; an order switched off is
 // not in the registry, so it is never touched).
+// Polymarket US rests and Novig rests (market_slug novig:<uuid>) are swept in
+// the same call. Novig uses the desk trading key (NOVIG_DESK_*) only.
 'use strict';
 
 const crypto = require('crypto');
@@ -14,6 +16,9 @@ const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
 const { watcherEventsFromActions } = require('../lib/desk-protect-events');
+const { readNovigDeskCreds } = require('./novig-auth');
+const { createNovigClient } = require('./novig-client');
+const { runNovigProtectSweep } = require('../lib/desk-protect-sweep-novig');
 
 const MIN_SECRET_LEN = 16;
 
@@ -78,6 +83,16 @@ const defaults = {
   },
   fetchImpl: (...args) => fetch(...args),
   authorized: sweepAuthorized,
+  novigCreds: () => readNovigDeskCreds(process.env),
+  runNovigSweep: runNovigProtectSweep,
+  novigClientFromCreds(creds) {
+    return createNovigClient({
+      keyId: creds.keyId,
+      privateKey: creds.privateKey,
+      apiBase: creds.apiBase,
+      fetchImpl: deps.fetchImpl,
+    });
+  },
 };
 
 let deps = { ...defaults };
@@ -130,29 +145,69 @@ async function handler(req, res) {
     return;
   }
   const creds = deps.creds();
-  if (!creds.ok) {
+  const novigCreds = deps.novigCreds ? deps.novigCreds() : { ok: false };
+  if (!creds.ok && !novigCreds.ok) {
     json(res, 503, auth.missingKeysError(creds.missing));
     return;
   }
-  try {
-    const swept = await deps.runSweep({
-      client: deps.clientFromCreds(creds),
-      store: deps.protectStore(),
-      notify: deps.notify,
-      now: deps.now,
+  const runs = [];
+  if (creds.ok) {
+    runs.push({
+      venue: 'polymarket-us',
+      promise: Promise.resolve().then(() => deps.runSweep({
+        client: deps.clientFromCreds(creds),
+        store: deps.protectStore(),
+        notify: deps.notify,
+        now: deps.now,
+      })),
     });
-    if (!swept || swept.ok === false) {
-      json(res, (swept && swept.status) || 503, { ok: false, error: (swept && swept.error) || 'Sweep failed' });
+  }
+  if (novigCreds.ok) {
+    runs.push({
+      venue: 'novig',
+      promise: Promise.resolve().then(() => deps.runNovigSweep({
+        client: deps.novigClientFromCreds(novigCreds),
+        store: deps.protectStore(),
+        notify: deps.notify,
+        now: deps.now,
+      })),
+    });
+  }
+  const settled = await Promise.allSettled(runs.map((r) => r.promise));
+  const actions = [];
+  const errors = {};
+  let firstFail = null;
+  let okCount = 0;
+  settled.forEach((result, i) => {
+    const venue = runs[i].venue;
+    if (result.status === 'rejected') {
+      const err = result.reason;
+      const detail = sweepErrorDetail(err);
+      console.error('[desk-protect-sweep] ' + venue + ' sweep failed:', detail);
+      errors[venue] = detail;
+      if (!firstFail) {
+        const status = err && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 502;
+        firstFail = { status, body: { ok: false, error: 'Sweep failed', detail } };
+      }
       return;
     }
-    const events = watcherEventsFromActions(swept.actions, body.ackedIds);
-    json(res, 200, { ok: true, events });
-  } catch (err) {
-    const status = err && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 502;
-    const detail = sweepErrorDetail(err);
-    console.error('[desk-protect-sweep] sweep failed:', detail);
-    json(res, status, { ok: false, error: 'Sweep failed', detail });
+    const swept = result.value;
+    if (!swept || swept.ok === false) {
+      errors[venue] = (swept && swept.error) || 'Sweep failed';
+      if (!firstFail) firstFail = { status: (swept && swept.status) || 503, body: { ok: false, error: (swept && swept.error) || 'Sweep failed' } };
+      return;
+    }
+    okCount += 1;
+    for (const a of swept.actions || []) actions.push(a);
+  });
+  if (!okCount && firstFail) {
+    json(res, firstFail.status, firstFail.body);
+    return;
   }
+  const events = watcherEventsFromActions(actions, body.ackedIds);
+  const out = { ok: true, events };
+  if (Object.keys(errors).length) out.errors = errors;
+  json(res, 200, out);
 }
 
 handler.config = { maxDuration: 15 };
