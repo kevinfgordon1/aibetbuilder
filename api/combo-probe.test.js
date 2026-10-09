@@ -141,7 +141,7 @@ assert.equal(lib.parseContracts(0), null);
 assert.equal(lib.parseContracts(-3), null);
 
 // ── Combo Locks visibility: hardcoded accounts (email AND uid), env ignored ──
-assert.equal(lib.COMBO_LOCKS_ACCOUNTS.length, 3);
+assert.equal(lib.COMBO_LOCKS_ACCOUNTS.length, 4);
 assert.equal(lib.canSeeComboLocks({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }, {}), true);
 assert.equal(lib.canSeeComboLocks({ email: 'Kevin.F.Gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }), true);
 assert.equal(lib.canSeeComboLocks({ email: 'gmoneyvikes@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' }), true);
@@ -557,3 +557,7 @@ function src() {
   console.error(e);
   process.exit(1);
 });
+
+// c.w.higgins1 tester (Kevin approved 2026-10-09)
+assert.equal(lib.canSeeComboLocks({ email: 'c.w.higgins1@gmail.com', id: '721c1166-be0b-4856-8a88-6de3a8b047b9' }), true);
+assert.equal(lib.canSeeComboLocks({ email: 'c.w.higgins1@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' }), false);
