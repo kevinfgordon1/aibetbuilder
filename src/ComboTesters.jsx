@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canSeeOwnerTools } from "./comboAccess";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
-  KALSHI_HOWTO, autoFundLine, fundMoveText,
+  KALSHI_HOWTO, autoFundLine, fundMoveText, effectiveCap, parseCapInput,
 } from "./comboTesters";
 import {
   adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, usd,
@@ -33,7 +33,8 @@ const TESTERS_CSS = `
 .cl .tst .tst-howto ol{margin:8px 0 6px;padding-left:22px;display:grid;gap:6px;font-size:13px;line-height:1.45;color:#d1d5db}
 .cl .tst .tst-howto li::marker{color:#93c5fd;font-weight:700}
 .cl .tst .tst-safe{font-size:12.5px;color:#34d399;margin-top:4px}
-.cl .tst .tst-fallback{font-size:12px;color:#9ca3af;margin-top:6px}
+.cl .tst .tst-cap{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:12.5px;color:#b6bac2}
+.cl .tst .tst-cap input{width:90px;padding:5px 7px;box-sizing:border-box}
 .cl .tst .tst-fund{font-size:12.5px;line-height:1.45;margin-top:4px}
 .cl .tst .tst-fund.ok{color:#34d399}
 .cl .tst .tst-fund.warn{color:#fcd34d}
@@ -76,7 +77,46 @@ async function authedFetch(supabase, url, init = {}) {
   return { ok: r.ok && body && body.ok !== false, status: r.status, body: body || {} };
 }
 
-function VenueRow({ venue, row, caps, busy, onConnect, onDisconnect }) {
+/** The tester's own auto-funding cap (combo_settings.autofund_cap_usd). ok=false hides the editor. */
+function useOwnCap(supabase, userId, enabled) {
+  const [state, setState] = useState({ ok: false, value: null, loaded: false });
+  useEffect(() => {
+    if (!enabled || !userId) return undefined;
+    let alive = true;
+    (async () => {
+      const { data, error } = await supabase.from("combo_settings").select("autofund_cap_usd").eq("user_id", userId).maybeSingle();
+      if (alive) setState({ ok: !error, value: data && data.autofund_cap_usd != null ? Number(data.autofund_cap_usd) : null, loaded: true });
+    })().catch(() => { if (alive) setState({ ok: false, value: null, loaded: true }); });
+    return () => { alive = false; };
+  }, [supabase, userId, enabled]);
+  const save = useCallback(async (value) => {
+    const { error } = await supabase.from("combo_settings").upsert({ user_id: userId, autofund_cap_usd: value }, { onConflict: "user_id" });
+    if (!error) setState((s) => ({ ...s, value }));
+    return !error;
+  }, [supabase, userId]);
+  return { ...state, save };
+}
+
+function CapEditor({ cap, daily }) {
+  const [text, setText] = useState(cap.value == null ? "" : String(cap.value));
+  const [msg, setMsg] = useState(null);
+  useEffect(() => { setText(cap.value == null ? "" : String(cap.value)); }, [cap.value]);
+  const onSave = async () => {
+    const v = parseCapInput(text);
+    if (Number.isNaN(v)) { setMsg("Enter a dollar amount, like 100."); return; }
+    setMsg((await cap.save(v)) ? "Saved." : "Couldn't save. Try again.");
+  };
+  return (
+    <div className="tst-cap">
+      <label htmlFor="tst-cap-in">Your cap</label>
+      <input id="tst-cap-in" inputMode="decimal" placeholder={daily != null ? money(daily) : "$"} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }} />
+      <button type="button" className="btn mini" onClick={onSave}>Save</button>
+      <span className="muted">{msg || (daily != null ? `Up to your ${money(daily)} daily limit. Blank = ${money(daily)}.` : "")}</span>
+    </div>
+  );
+}
+
+function VenueRow({ venue, row, caps, cap, busy, onConnect, onDisconnect }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const help = VENUE_HELP[venue];
@@ -95,9 +135,12 @@ function VenueRow({ venue, row, caps, busy, onConnect, onDisconnect }) {
           <div className="muted" style={{ fontSize: 12 }}>{venue === "kalshi" ? "Permissions not confirmed. The owner will review this key." : "Polymarket US keys have no permission settings."}</div>
         )}
         {venue === "kalshi" && row && row.connected && row.scopeStatus !== "unverified" && (() => {
-          const line = autoFundLine(row, caps);
+          const line = autoFundLine(row, caps, cap && cap.ok ? cap.value : null);
           return line ? <div className={"tst-fund " + line.tone}>{line.text}</div> : null;
         })()}
+        {venue === "kalshi" && row && row.connected && row.autoFund && cap && cap.ok && caps && caps.perDayUsd != null && (
+          <CapEditor cap={cap} daily={effectiveCap(null, caps.perDayUsd)} />
+        )}
         {venue === "polymarket_us" && !(row && row.connected) && <div className="muted" style={{ fontSize: 12 }}>Optional</div>}
       </div>
       <div className="tst-actions">
@@ -248,12 +291,11 @@ function KalshiHowTo({ connected }) {
         {KALSHI_HOWTO.steps.map((s, i) => <li key={i}>{s}</li>)}
       </ol>
       <div className="tst-safe">{KALSHI_HOWTO.safe}</div>
-      <div className="tst-fallback">{KALSHI_HOWTO.fallback}</div>
     </details>
   );
 }
 
-const MOVE_COLS = "id,user_id,amount_usd,status,error,created_at";
+const MOVE_COLS = "id,user_id,amount_usd,status,error,from_shard,to_shard,created_at";
 
 /** Auto-funding log (combo_fund_moves, RLS: own rows, owner sees all). Hidden if unreadable. */
 function useFundMoves(supabase, userId, enabled = true, limit = 5) {
@@ -279,7 +321,7 @@ function FundMoves({ supabase, userId, enabled, title = "Auto-funding moves", li
   if (!enabled || !Array.isArray(rows)) return null;
   return (
     <div className="tst-moves" aria-label={title}>
-      <div className="tst-moves-head"><span>{title}</span><span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>Kalshi Default → Combos</span></div>
+      <div className="tst-moves-head"><span>{title}</span><span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>Kalshi Default ↔ Combos</span></div>
       {rows.length === 0
         ? <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>No moves yet. When your Combos balance runs low, the next move shows up here.</div>
         : (
@@ -298,6 +340,8 @@ function FundMoves({ supabase, userId, enabled, title = "Auto-funding moves", li
 
 function ConnectPanel({ supabase, userId, status, setStatus }) {
   const [busy, setBusy] = useState(false);
+  const kalshiRow = status.venues && status.venues.kalshi;
+  const cap = useOwnCap(supabase, userId, !!(kalshiRow && kalshiRow.connected && kalshiRow.autoFund));
   const [msg, setMsg] = useState(null);
   const connect = async (payload) => {
     setBusy(true); setMsg(null);
@@ -333,7 +377,7 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
       <p style={{ color: "#fcd34d" }}>{CONNECT_COPY.never}</p>
       {msg && <div className={"note " + msg.tone} style={{ margin: "8px 0" }}>{msg.text}</div>}
       {["kalshi", "polymarket_us"].map((v) => (
-        <VenueRow key={v} venue={v} row={status.venues && status.venues[v]} caps={status.caps} busy={busy} onConnect={connect} onDisconnect={disconnect} />
+        <VenueRow key={v} venue={v} row={status.venues && status.venues[v]} caps={status.caps} cap={v === "kalshi" ? cap : null} busy={busy} onConnect={connect} onDisconnect={disconnect} />
       ))}
       <BalanceBlock supabase={supabase} userId={userId}
         kalshi={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected)}

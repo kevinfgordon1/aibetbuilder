@@ -21,29 +21,48 @@ export const KALSHI_HOWTO = {
   steps: [
     "On a computer, sign in at kalshi.com, open your Account settings and find API keys. Click Create API key.",
     "Key type: Ed25519 (Kalshi's default) or RSA. Either one works.",
-    "Permissions: pick Full access (simplest). Or check Read all data, Trade and Transfers. Leave the sub-account blank.",
+    "Permissions: choose Full access (simplest), or check Read, Trade and Transfers. Leave the sub-account blank.",
     "Click Create. Copy the Key ID and download the private key file. Kalshi shows the private key only once.",
     "Back here, click Connect Kalshi. Paste the Key ID, then open the private key file and paste all of it, including the BEGIN and END lines. Click Check & save key.",
-    "That's it. The site moves money from your Kalshi Default balance into your Combos balance for you, up to your daily limit. Every move shows up on this card.",
+    "The site moves money into your Combos balance for you, up to the cap you set. Nothing to do here.",
   ],
-  fallback: "Rather move it yourself? On kalshi.com go to Settings > Advance shard settings, turn on \"Disable balance management\", click Transfer and move money from Exchange 0 (Default) to Exchange 1 (Combos). Then turn the switch back off.",
-  safe: "The key works only on your own Kalshi account. The site only moves your money between your own Default and Combos balances, never past your limit. Kalshi's API can't withdraw to a bank or send money to anyone else, and you can delete the key in Kalshi any time.",
+  safe: "The site only uses this key to place your Combo Locks trades and move money between your own Kalshi balances. It never withdraws money.",
 };
 
 // Auto-funding status line under the Kalshi row.
 export const AUTOFUND_COPY = {
-  off: "Auto-funding is off: this key can't move money into your Combos balance. To turn it on, create a new Kalshi key with Full access (or check Transfers too), then disconnect this one and connect the new key. Trading still works meanwhile.",
+  off: "Auto-funding is off for this key. To have the site fill your Combos balance for you, reconnect with a key that has Transfers or Full access. Your trades keep working meanwhile.",
   review: "Auto-funding starts once the owner confirms this key's permissions.",
   noCap: "Auto-funding is waiting for a daily limit. The owner sets it.",
+  paused: "Auto-funding is paused (your cap is $0).",
 };
 
-export function autoFundLine(row, caps) {
+// The cap the worker uses: the tester's own cap, never above the daily limit.
+export function effectiveCap(ownCap, dailyLimit) {
+  const daily = Number(dailyLimit);
+  if (dailyLimit == null || !(daily > 0)) return null;
+  if (ownCap == null || ownCap === "") return daily;
+  const own = Number(ownCap);
+  if (!Number.isFinite(own) || own < 0) return daily;
+  return Math.min(own, daily);
+}
+
+// "$120" / "120.50" -> 120.5; "" -> null (use the daily limit); bad -> NaN.
+export function parseCapInput(v) {
+  const t = String(v == null ? "" : v).replace(/[$,\s]/g, "");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : NaN;
+}
+
+export function autoFundLine(row, caps, ownCap = null) {
   if (!row || !row.connected) return null;
   if (row.scopeStatus === "unverified") return { tone: "muted", text: AUTOFUND_COPY.review };
   if (!row.autoFund) return { tone: "warn", text: AUTOFUND_COPY.off };
-  const cap = caps && caps.perDayUsd;
-  if (cap == null || !(Number(cap) > 0)) return { tone: "muted", text: AUTOFUND_COPY.noCap };
-  return { tone: "ok", text: `Auto-funding is on. We top up your Combos balance from your Default balance, up to ${money(cap)} (your daily limit).` };
+  const cap = effectiveCap(ownCap, caps && caps.perDayUsd);
+  if (cap == null) return { tone: "muted", text: AUTOFUND_COPY.noCap };
+  if (cap === 0) return { tone: "muted", text: AUTOFUND_COPY.paused };
+  return { tone: "ok", text: `Auto-funding is on: we keep your Combos balance topped up to ${money(cap)}.` };
 }
 
 const FUND_STATUS = { sending: "sending", accepted: "processing", confirmed: "done", failed: "failed" };
@@ -53,12 +72,13 @@ export function fundMoveText(row) {
   if (!row) return "";
   const amt = Number(row.amount_usd);
   const amount = Number.isFinite(amt) ? "$" + amt.toFixed(2) : "—";
-  return `${amount} Default → Combos · ${FUND_STATUS[row.status] || row.status || "—"}`;
+  const dir = Number(row.from_shard) === 1 ? "Combos → Default" : "Default → Combos";
+  return `${amount} ${dir} · ${FUND_STATUS[row.status] || row.status || "—"}`;
 }
 
 export const VENUE_HELP = {
   kalshi: {
-    where: "Follow the steps above: Full access (or Read all data + Trade + Transfers). Ed25519 or RSA keys both work.",
+    where: "Follow the steps above: Full access, or Read, Trade and Transfers. Ed25519 or RSA keys both work.",
     idLabel: "Key ID",
     secretLabel: "Private key (the whole file, including the BEGIN/END lines)",
     secretPlaceholder: "-----BEGIN PRIVATE KEY-----\n…\n-----END PRIVATE KEY-----",

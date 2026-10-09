@@ -1,7 +1,8 @@
 -- Combo Locks tester auto-funding log. combo-worker (service role) writes one
--- row per automatic move of a tester's OWN Kalshi money from Exchange 0
--- (Default) to Exchange 1 (Combos), using that tester's own key. Nothing else
--- is ever moved: the checks below only allow 0 -> 1 on Kalshi. Read-only to
+-- row per automatic move of a tester's OWN Kalshi money between Exchange 0
+-- (Default) and Exchange 1 (Combos), using that tester's own key: top-ups
+-- 0 -> 1 and sweeps 1 -> 0 of Combos cash above the tester's cap. Nothing else
+-- is ever moved: the checks below only allow 0 <-> 1 on Kalshi. Read-only to
 -- users: own rows, Kevin (combo_is_owner) sees all. No key material here.
 --
 -- status: sending   = row written, transfer about to be sent (written FIRST,
@@ -13,8 +14,8 @@ create table if not exists public.combo_fund_moves (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   venue text not null default 'kalshi' check (venue = 'kalshi'),
-  from_shard smallint not null default 0 check (from_shard = 0),
-  to_shard smallint not null default 1 check (to_shard = 1),
+  from_shard smallint not null default 0,
+  to_shard smallint not null default 1,
   amount_usd numeric(12, 2) not null check (amount_usd > 0),
   status text not null check (status in ('sending', 'accepted', 'confirmed', 'failed')),
   transfer_id text,
@@ -24,7 +25,8 @@ create table if not exists public.combo_fund_moves (
   reason text check (reason is null or length(reason) <= 80),
   error text check (error is null or length(error) <= 120),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint combo_fund_moves_own_shards check ((from_shard, to_shard) in ((0, 1), (1, 0)))
 );
 
 create index if not exists combo_fund_moves_user_created_idx
@@ -42,4 +44,12 @@ revoke insert, update, delete, truncate on public.combo_fund_moves from authenti
 grant select on public.combo_fund_moves to authenticated;
 
 comment on table public.combo_fund_moves is
-  'Combo Locks tester auto-funding: Kalshi Default (0) -> Combos (1) moves on the tester''s own account, written by combo-worker (service role). RLS: own rows + owner.';
+  'Combo Locks tester auto-funding: Kalshi Default (0) <-> Combos (1) moves on the tester''s own account, written by combo-worker (service role). RLS: own rows + owner.';
+
+-- The tester's own auto-funding cap (Combo Locks card). Null = their daily
+-- limit (combo_live_users.max_per_day_usd); the worker never goes above that
+-- limit either way. 0 = auto-funding off. Testers already update their own
+-- combo_settings row (RLS combo_settings_update / _insert).
+alter table public.combo_settings
+  add column if not exists autofund_cap_usd numeric(12, 2)
+  check (autofund_cap_usd is null or (autofund_cap_usd >= 0 and autofund_cap_usd <= 100000));

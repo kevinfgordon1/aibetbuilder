@@ -138,7 +138,7 @@ const SCOPE_WORDS = {
   'write::fcm_risk': 'FCM risk',
 };
 const KEY_FIX = 'Create a new key in Kalshi with Full access (simplest), or with Read all data, Trade and Transfers checked, and connect that one.';
-const NO_TRANSFER_NOTE = 'Auto-funding is off: this key can’t move money into your Combos balance. To turn it on, create a new Kalshi key with Full access (or check Transfers too), then disconnect this one and connect the new key. Trading still works meanwhile.';
+const NO_TRANSFER_NOTE = 'Auto-funding is off for this key. To have the site fill your Combos balance for you, reconnect with a key that has Transfers or Full access. Your trades keep working meanwhile.';
 
 // Decide whether a Kalshi key's scopes are acceptable for a tester.
 // Also refuses keys locked to a sub-account (restricted keys cannot open the

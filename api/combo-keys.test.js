@@ -29,7 +29,7 @@ const KID = 'a1b2c3d4-e5f6-4711-8899-aabbccdd1234';
   assert.equal(tradeOnly.autoFund, false);
   assert.equal(tradeOnly.warnings.length, 1);
   assert.match(tradeOnly.warnings[0], /Auto-funding is off/);
-  assert.match(tradeOnly.warnings[0], /Full access \(or check Transfers too\)/);
+  assert.match(tradeOnly.warnings[0], /reconnect with a key that has Transfers or Full access/);
   const bad = (scopes, extra = {}, ts = 9999999999) => {
     try { keys.assessKalshiKey({ api_key_id: KID, scopes, ...extra }, ts, 100); return null; } catch (e) { return e.code; }
   };
