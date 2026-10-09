@@ -67,14 +67,17 @@ const KIND_LABEL = Object.freeze({
 
 export function ledgerLabel(row) {
   if (!row) return "";
+  if (row.kind === "deposit" && row.source === "stripe_checkout") return "Added with card";
+  if (row.kind === "refund" && row.source === "stripe_refund") return "Refunded to card";
   return KIND_LABEL[row.kind] || "Credit change";
 }
 
-/** Copy for the "Add credits" button/notes, based on server config status. */
+/** Copy for the "Add credits" buttons/notes, based on server config status.
+ * configured = USDC (Coinbase) or card (Stripe) is switched on; busy = false | "usdc" | "card". */
 export function addCreditsState({ configured, loading = false, busy = false, error = null } = {}) {
   if (loading) return { disabled: true, note: "Checking…" };
   if (!configured) return { disabled: true, note: "Coming soon. Adding credits isn't switched on yet." };
-  if (busy) return { disabled: true, note: "Opening Coinbase checkout…" };
+  if (busy) return { disabled: true, note: busy === "card" ? "Opening card checkout…" : "Opening Coinbase checkout…" };
   if (error) return { disabled: false, note: error };
   return { disabled: false, note: "" };
 }

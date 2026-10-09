@@ -31,6 +31,9 @@ assert.equal(creditsText(34.77), "$34.77");
 assert.equal(creditsText("x"), "—");
 assert.equal(ledgerLabel({ kind: "deposit" }), "Added with USDC");
 assert.equal(ledgerLabel({ kind: "fee" }), "Combo Locks fee");
+assert.equal(ledgerLabel({ kind: "deposit", source: "stripe_checkout" }), "Added with card");
+assert.equal(ledgerLabel({ kind: "refund", source: "stripe_refund" }), "Refunded to card");
+assert.equal(addCreditsState({ configured: true, busy: "card" }).note, "Opening card checkout…");
 
 // Button state: degrades to "coming soon" when Coinbase isn't configured.
 assert.deepEqual(addCreditsState({ configured: false }), { disabled: true, note: "Coming soon. Adding credits isn't switched on yet." });
