@@ -1463,7 +1463,6 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                   <option value="riskfree">Risk-free — floor $0, keep upside</option>
                   <option value="1x">1× pure hedge — equal both sides (default)</option>
                   <option value="riskfree_open">Risk-free — floor $0, open to larger orders (new)</option>
-                  <option value="2x">2× — directional short (can lose big)</option>
                 </select></div>
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -1491,11 +1490,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             {lockKind(form) === "freebet" && (
               <div className="note ok">Free bet: if the parlay misses you lose nothing, and if it hits you keep the winnings. A 1× hedge makes both outcomes pay the same cash.</div>
             )}
-            {preview && !preview.d.locks && form.mode !== "2x" && form.mode !== "3x" && (
+            {preview && !preview.d.locks && (
               <div className="note warn">⚠ This won't fully lock in profit: your {lockKind(form) === "freebet" ? "parlay" : "boosted"} odds and sell odds are too close. Widen the gap ({lockKind(form) === "freebet" ? "longer parlay odds" : "a bigger boost"}, or sell at shorter odds).</div>
-            )}
-            {preview && (form.mode === "2x" || form.mode === "3x") && (
-              <div className="note warn">⚠ Directional: {MODE_LABEL[form.mode]} sells more than the hedge. You profit if the parlay misses but take the loss shown above if it hits.</div>
             )}
             <label>Name (filled in from your legs; edit if you like)</label>
             <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value, labelEdited: true })} placeholder="pick legs above…" />

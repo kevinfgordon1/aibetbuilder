@@ -184,7 +184,8 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   assert.match(locksSrc, /Risk-free — floor \$0, keep upside/);
   assert.match(locksSrc, /1× pure hedge — equal both sides \(default\)/);
   assert.match(locksSrc, /Risk-free — floor \$0, open to larger orders \(new\)/);
-  assert.match(locksSrc, /2× — directional short \(can lose big\)/);
+  assert.doesNotMatch(locksSrc, /<option value="2x">/);
+  assert.match(locksSrc, /"2x": "2× \(directional\)"/);
   assert.doesNotMatch(locksSrc, /<option value="3x">/);
   assert.match(locksSrc, /"3x": "3× \(directional\)"/);
   assert.match(locksSrc, /if the parlay hits/);
