@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import {
   CREDIT_PRESETS_USD, CREDITS_PRICING, addCreditsState, balanceFromLedger, creditsText, fillFeeUsd, isMissingCreditsSchema,
-  isPresetAmount, ledgerLabel, monthlyAllowanceUsd, returnNote, showCreditsCardFromEnv, showCreditsCardEnabled,
+  isPresetAmount, ledgerLabel, showUsdcCreditsEnabled, monthlyAllowanceUsd, returnNote, showCreditsCardFromEnv, showCreditsCardEnabled,
 } from "./comboCredits.js";
 
 const require = createRequire(import.meta.url);
@@ -77,3 +77,8 @@ assert.equal(serverLib.siteOrigin({ headers: { "x-forwarded-host": "aibetbuilder
 assert.equal(serverLib.siteOrigin({ headers: { host: "evil.example.com" } }, {}), "https://aibetbuilder.io");
 
 console.log("comboCredits tests passed");
+
+{ const prev = process.env.VITE_SHOW_USDC_CREDITS; delete process.env.VITE_SHOW_USDC_CREDITS;
+  assert.equal(showUsdcCreditsEnabled(), false);
+  process.env.VITE_SHOW_USDC_CREDITS = "1"; assert.equal(showUsdcCreditsEnabled(), true);
+  if (prev === undefined) delete process.env.VITE_SHOW_USDC_CREDITS; else process.env.VITE_SHOW_USDC_CREDITS = prev; }

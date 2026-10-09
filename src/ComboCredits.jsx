@@ -5,7 +5,7 @@
 // only when the matching webhook confirms payment. No fees are charged yet.
 import { useCallback, useEffect, useState } from "react";
 import {
-  CREDIT_PRESETS_USD, CREDITS_PRICING, DEFAULT_PRESET_USD, addCreditsState, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote,
+  CREDIT_PRESETS_USD, CREDITS_PRICING, DEFAULT_PRESET_USD, addCreditsState, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
 } from "./comboCredits";
 
 const CREDITS_CSS = `
@@ -50,6 +50,7 @@ const etDate = (iso) => {
 };
 
 export default function ComboCredits({ supabase, user }) {
+  const usdcOn = showUsdcCreditsEnabled();
   const [configured, setConfigured] = useState(false);
   const [cardConfigured, setCardConfigured] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(true);
@@ -86,7 +87,7 @@ export default function ComboCredits({ supabase, user }) {
           authedFetch(supabase, "/api/stripe-checkout").catch(() => ({ ok: false, body: {} })),
         ]);
         if (alive) {
-          setConfigured(!!(r.ok && r.body.configured));
+          setConfigured(usdcOn && !!(r.ok && r.body.configured));
           setCardConfigured(!!(c.ok && c.body.configured));
         }
       } catch (_) {
@@ -146,7 +147,7 @@ export default function ComboCredits({ supabase, user }) {
         <span className="crd-sub">{schemaMissing ? "Credits aren't set up yet." : "1 credit = $1"}</span>
       </div>
       <p>Credits will pay for Combo Locks. Right now Combo Locks is free, so nothing is taken from your balance. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>
-      <p>Pay with a debit or credit card on Stripe's secure checkout page, or add USDC, a digital dollar, from Coinbase or any crypto wallet.</p>
+      <p>{usdcOn ? "Pay with a debit or credit card on Stripe's secure checkout page, or add USDC, a digital dollar, from Coinbase or any crypto wallet." : "Pay with a debit or credit card on Stripe's secure checkout page."}</p>
       <div className="crd-presets" role="group" aria-label="Amount to add">
         {CREDIT_PRESETS_USD.map((v) => (
           <button key={v} type="button" className={"crd-preset" + (amount === v ? " on" : "")} aria-pressed={amount === v} disabled={state.disabled && !error} onClick={() => setAmount(v)}>${v}</button>
@@ -154,7 +155,7 @@ export default function ComboCredits({ supabase, user }) {
       </div>
       <div className="crd-actions">
         <button type="button" className="crd-go" disabled={state.disabled || !cardConfigured || schemaMissing} onClick={() => add("card")}>{busy === "card" ? "Opening checkout…" : `Pay $${amount} with card`}</button>
-        <button type="button" className="crd-go alt" disabled={state.disabled || !configured || schemaMissing} onClick={() => add("usdc")}>{busy === "usdc" ? "Opening checkout…" : `Add $${amount} with USDC`}</button>
+        {usdcOn && <button type="button" className="crd-go alt" disabled={state.disabled || !configured || schemaMissing} onClick={() => add("usdc")}>{busy === "usdc" ? "Opening checkout…" : `Add $${amount} with USDC`}</button>}
       </div>
       {state.note && <div className="crd-note">{state.note}</div>}
       {back && <div className={"crd-note" + (back.kind === "ok" ? " ok" : "")}>{back.text}</div>}

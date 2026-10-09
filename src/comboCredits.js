@@ -139,3 +139,12 @@ export function isMissingCreditsSchema(error) {
   const code = String((error && error.code) || "");
   return code === "42P01" || code === "PGRST205" || /combo_credit_|schema cache|does not exist/i.test(msg);
 }
+
+/** USDC (Coinbase) button on the credits card. Off by default; set
+ * VITE_SHOW_USDC_CREDITS=1 / true / on to show it. Backend stays in place. */
+export function showUsdcCreditsEnabled() {
+  let raw;
+  try { const env = import.meta && import.meta.env; if (env && env.VITE_SHOW_USDC_CREDITS != null && env.VITE_SHOW_USDC_CREDITS !== "") raw = env.VITE_SHOW_USDC_CREDITS; } catch { /* node */ }
+  if (raw == null) { try { if (typeof process !== "undefined" && process.env) raw = process.env.VITE_SHOW_USDC_CREDITS; } catch { /* ignore */ } }
+  return showCreditsCardFromEnv(raw);
+}
