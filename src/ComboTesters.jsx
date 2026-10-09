@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canSeeOwnerTools } from "./comboAccess";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
-  KALSHI_HOWTO,
+  KALSHI_HOWTO, autoFundLine, fundMoveText,
 } from "./comboTesters";
 import {
   adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, usd,
@@ -33,6 +33,16 @@ const TESTERS_CSS = `
 .cl .tst .tst-howto ol{margin:8px 0 6px;padding-left:22px;display:grid;gap:6px;font-size:13px;line-height:1.45;color:#d1d5db}
 .cl .tst .tst-howto li::marker{color:#93c5fd;font-weight:700}
 .cl .tst .tst-safe{font-size:12.5px;color:#34d399;margin-top:4px}
+.cl .tst .tst-fallback{font-size:12px;color:#9ca3af;margin-top:6px}
+.cl .tst .tst-fund{font-size:12.5px;line-height:1.45;margin-top:4px}
+.cl .tst .tst-fund.ok{color:#34d399}
+.cl .tst .tst-fund.warn{color:#fcd34d}
+.cl .tst .tst-fund.muted{color:#8a8f98}
+.cl .tst .tst-moves{margin-top:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.02)}
+.cl .tst .tst-moves-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-weight:600;font-size:13px}
+.cl .tst .tst-moves ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;font-size:12.5px}
+.cl .tst .tst-moves li{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.cl .tst .tst-moves li.failed{color:#fca5a5}
 .cl .tst-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .cl .tst-table th{text-align:left;font-weight:600;color:#8a8f98;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,0.08);white-space:nowrap}
 .cl .tst-table td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.05);vertical-align:top}
@@ -66,7 +76,7 @@ async function authedFetch(supabase, url, init = {}) {
   return { ok: r.ok && body && body.ok !== false, status: r.status, body: body || {} };
 }
 
-function VenueRow({ venue, row, busy, onConnect, onDisconnect }) {
+function VenueRow({ venue, row, caps, busy, onConnect, onDisconnect }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const help = VENUE_HELP[venue];
@@ -84,6 +94,10 @@ function VenueRow({ venue, row, busy, onConnect, onDisconnect }) {
         {row && row.connected && row.scopeStatus === "unverified" && (
           <div className="muted" style={{ fontSize: 12 }}>{venue === "kalshi" ? "Permissions not confirmed. The owner will review this key." : "Polymarket US keys have no permission settings."}</div>
         )}
+        {venue === "kalshi" && row && row.connected && row.scopeStatus !== "unverified" && (() => {
+          const line = autoFundLine(row, caps);
+          return line ? <div className={"tst-fund " + line.tone}>{line.text}</div> : null;
+        })()}
         {venue === "polymarket_us" && !(row && row.connected) && <div className="muted" style={{ fontSize: 12 }}>Optional</div>}
       </div>
       <div className="tst-actions">
@@ -234,7 +248,51 @@ function KalshiHowTo({ connected }) {
         {KALSHI_HOWTO.steps.map((s, i) => <li key={i}>{s}</li>)}
       </ol>
       <div className="tst-safe">{KALSHI_HOWTO.safe}</div>
+      <div className="tst-fallback">{KALSHI_HOWTO.fallback}</div>
     </details>
+  );
+}
+
+const MOVE_COLS = "id,user_id,amount_usd,status,error,created_at";
+
+/** Auto-funding log (combo_fund_moves, RLS: own rows, owner sees all). Hidden if unreadable. */
+function useFundMoves(supabase, userId, enabled = true, limit = 5) {
+  const [state, setState] = useState({ rows: null, now: new Date() });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    const run = async () => {
+      let q = supabase.from("combo_fund_moves").select(MOVE_COLS);
+      if (userId) q = q.eq("user_id", userId);
+      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
+      if (alive) setState({ rows: error ? null : (data || []), now: new Date() });
+    };
+    run().catch(() => {});
+    const t = setInterval(() => { run().catch(() => {}); }, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [supabase, userId, enabled, limit]);
+  return state;
+}
+
+function FundMoves({ supabase, userId, enabled, title = "Auto-funding moves", limit = 5, nameFor = null }) {
+  const { rows, now } = useFundMoves(supabase, userId, enabled, limit);
+  if (!enabled || !Array.isArray(rows)) return null;
+  return (
+    <div className="tst-moves" aria-label={title}>
+      <div className="tst-moves-head"><span>{title}</span><span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>Kalshi Default → Combos</span></div>
+      {rows.length === 0
+        ? <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>No moves yet. When your Combos balance runs low, the next move shows up here.</div>
+        : (
+          <ul>
+            {rows.map((r) => (
+              <li key={r.id} className={r.status === "failed" ? "failed" : ""}>
+                <span>{nameFor ? <span className="muted">{nameFor(r.user_id)} · </span> : null}{fundMoveText(r)}</span>
+                <span className="muted">{etTime(r.created_at, now)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+    </div>
   );
 }
 
@@ -247,7 +305,8 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
       const r = await authedFetch(supabase, "/api/combo-keys", { method: "POST", body: JSON.stringify(payload) });
       if (!r.ok) { setMsg({ tone: "warn", text: r.body.error || "Could not save the key." }); return false; }
       setStatus(r.body);
-      const warn = (r.body.warnings || []).join(" ");
+      // The auto-funding note already shows under the Kalshi row.
+      const warn = (r.body.warnings || []).filter((w) => !/^Auto-funding is off/.test(w)).join(" ");
       setMsg({ tone: warn ? "warn" : "ok", text: `${VENUE_LABEL[payload.venue]} connected.${warn ? " " + warn : ""}` });
       return true;
     } finally { setBusy(false); }
@@ -274,11 +333,13 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
       <p style={{ color: "#fcd34d" }}>{CONNECT_COPY.never}</p>
       {msg && <div className={"note " + msg.tone} style={{ margin: "8px 0" }}>{msg.text}</div>}
       {["kalshi", "polymarket_us"].map((v) => (
-        <VenueRow key={v} venue={v} row={status.venues && status.venues[v]} busy={busy} onConnect={connect} onDisconnect={disconnect} />
+        <VenueRow key={v} venue={v} row={status.venues && status.venues[v]} caps={status.caps} busy={busy} onConnect={connect} onDisconnect={disconnect} />
       ))}
       <BalanceBlock supabase={supabase} userId={userId}
         kalshi={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected)}
         poly={!!(status.venues && status.venues.polymarket_us && status.venues.polymarket_us.connected)} />
+      <FundMoves supabase={supabase} userId={userId}
+        enabled={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected && status.venues.kalshi.autoFund)} />
     </div>
   );
 }
@@ -355,7 +416,7 @@ function AdminPanel({ supabase }) {
                     <td data-k="Limits">{editing === u.user_id
                       ? <CapsEditor user={u} busy={busy} onSave={(usr, lock, day) => act({ action: "caps", user_id: usr.user_id, max_per_lock_usd: lock, max_per_day_usd: day })} />
                       : ownerDesk ? "No limits" : u.in_live_users ? capsLine(u.caps) : "—"}</td>
-                    <td data-k="Kalshi">{ownerDesk ? "Server keys" : u.keys.kalshi.connected ? `••••${u.keys.kalshi.hint}${u.keys.kalshi.scopeStatus === "unverified" ? " (review)" : ""}` : "—"}</td>
+                    <td data-k="Kalshi">{ownerDesk ? "Server keys" : u.keys.kalshi.connected ? <>{`••••${u.keys.kalshi.hint}${u.keys.kalshi.scopeStatus === "unverified" ? " (review)" : ""}`}<div className="muted" style={{ fontSize: 11 }}>{u.keys.kalshi.autoFund ? "auto-fund on" : "no transfers"}</div></> : "—"}</td>
                     <td data-k="Polymarket US">{ownerDesk ? "Server keys" : u.keys.polymarket_us.connected ? `••••${u.keys.polymarket_us.hint}` : "—"}</td>
                     <td data-k="Balance">{(() => {
                       const k = ownerDesk || u.keys.kalshi.connected;
@@ -385,6 +446,8 @@ function AdminPanel({ supabase }) {
               })}
             </tbody>
           </table>
+          <FundMoves supabase={supabase} userId={null} enabled title="Tester auto-funding (latest 20)" limit={20}
+            nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Keys are shown masked only. Balance = Kalshi combo / single-game and Polymarket US buying power, refreshed every minute. Testers trade on their own accounts. Kevin's desk uses the server keys. Pause engages the user's kill switch; Resume clears only your pause, and the user re-arms their own kill switch.</div>
         </div>
       )}

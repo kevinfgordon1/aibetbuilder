@@ -74,7 +74,7 @@ async function listEmails(client, ids) {
 async function buildUsers(client) {
   const [liveQ, keysQ, settingsQ, statsQ] = await Promise.all([
     client.from('combo_live_users').select('user_id,is_owner,can_trade,paused,paused_at,max_per_lock_usd,max_per_day_usd,note,added_at'),
-    client.from('combo_exchange_keys').select('user_id,venue,key_hint,scope_status,verified_at,updated_at'),
+    client.from('combo_exchange_keys').select('user_id,venue,key_hint,scopes,scope_status,verified_at,updated_at'),
     client.from('combo_settings').select('user_id,kill_switch,updated_at'),
     // Aggregates in SQL (service role only): locks, orders (30d), fills.
     client.rpc('combo_admin_user_stats'),

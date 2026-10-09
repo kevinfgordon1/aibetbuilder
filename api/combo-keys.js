@@ -57,7 +57,7 @@ function serviceClient() {
 async function loadStatus(client, userId) {
   const [liveQ, keysQ] = await Promise.all([
     client.from('combo_live_users').select('user_id,is_owner,can_trade,paused,max_per_lock_usd,max_per_day_usd').eq('user_id', userId).maybeSingle(),
-    client.from('combo_exchange_keys').select('venue,key_hint,scope_status,verified_at,updated_at').eq('user_id', userId),
+    client.from('combo_exchange_keys').select('venue,key_hint,scopes,scope_status,verified_at,updated_at').eq('user_id', userId),
   ]);
   if (liveQ.error) throw liveQ.error;
   if (keysQ.error) throw keysQ.error;

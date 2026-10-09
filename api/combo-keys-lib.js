@@ -91,13 +91,19 @@ function kalshiHeaders(keyId, key, method, signPath, ts = Date.now()) {
 //              "Trade" = write::trade        "Transfers" = write::transfer
 //              "Accept block trades" = write::block_trade_accept
 //   (API-only: write::fcm_risk.)  Older keys list the same strings (read / write).
-// A tester key must be read + write::trade. Any read::* is fine. Rejected:
-//   write (Full access = every write endpoint, transfers included),
-//   write::transfer (moves money), write::block_trade_accept (would let the
-//   key accept block trades: new positions/obligations outside our caps),
-//   write::fcm_risk and any other write::* or unknown scope.
-const KALSHI_REQUIRED = Object.freeze(['read', 'write::trade']);
-const KALSHI_MONEY_SCOPES = Object.freeze(['write', 'write::transfer']);
+// Accepted tester keys (Oct 9 2026, Kevin):
+//   Full access:  read + write. Includes every write group (trade, transfer).
+//   Granular:     read + write::trade + write::transfer (any read::* is fine).
+// Either one turns on auto-funding: combo-worker moves the tester's OWN money
+// from Exchange 0 (Default) to Exchange 1 (Combos), up to their cap. Kalshi's
+// public API has no withdraw or send-to-another-user endpoint, so neither
+// scope can move money off the tester's own account through the API.
+//   read + write::trade (no Transfers): still accepted and trades, but
+//   auto-funding is off and the tester sees a reconnect note.
+// Refused: missing Read or Trade; on granular keys write::block_trade_accept,
+// write::fcm_risk or any other write::* (Full access already includes them, so
+// they are only redundant there); unknown scope strings; sub-account keys.
+const GRANULAR_OK = Object.freeze(['read', 'write::trade', 'write::transfer']);
 
 function normScopes(list) {
   return (Array.isArray(list) ? list : [])
@@ -107,11 +113,22 @@ function normScopes(list) {
 
 function classifyKalshiScopes(list) {
   const scopes = normScopes(list);
-  const money = scopes.filter((s) => KALSHI_MONEY_SCOPES.includes(s));
-  const allowed = (s) => s === 'read' || s === 'write::trade' || /^read::[a-z0-9_]+$/.test(s);
-  const extra = scopes.filter((s) => !allowed(s) && !KALSHI_MONEY_SCOPES.includes(s));
-  const missing = KALSHI_REQUIRED.filter((s) => !scopes.includes(s));
-  return { scopes, money, extra, missing };
+  const full = scopes.includes('write');
+  const known = (s) => s === 'read' || s === 'write' || /^read::[a-z0-9_]+$/.test(s) || /^write::[a-z0-9_]+$/.test(s);
+  const extra = full
+    ? scopes.filter((s) => !known(s))
+    : scopes.filter((s) => !GRANULAR_OK.includes(s) && !/^read::[a-z0-9_]+$/.test(s));
+  const missing = [];
+  if (!scopes.includes('read')) missing.push('read');
+  if (!full && !scopes.includes('write::trade')) missing.push('write::trade');
+  const autoFund = full || scopes.includes('write::transfer');
+  return { scopes, full, extra, missing, autoFund };
+}
+
+// Stored scopes -> does this key let the worker fund the tester's Combos balance?
+function kalshiAutoFund(scopes) {
+  const s = normScopes(scopes);
+  return s.includes('write') || s.includes('write::transfer');
 }
 
 const SCOPE_WORDS = {
@@ -120,7 +137,8 @@ const SCOPE_WORDS = {
   'write::block_trade_accept': 'Accept block trades',
   'write::fcm_risk': 'FCM risk',
 };
-const KEY_FIX = 'Delete it in Kalshi and create a new key with only Read all data and Trade checked (leave Full access, Transfers and Accept block trades unchecked).';
+const KEY_FIX = 'Create a new key in Kalshi with Full access (simplest), or with Read all data, Trade and Transfers checked, and connect that one.';
+const NO_TRANSFER_NOTE = 'Auto-funding is off: this key can’t move money into your Combos balance. To turn it on, create a new Kalshi key with Full access (or check Transfers too), then disconnect this one and connect the new key. Trading still works meanwhile.';
 
 // Decide whether a Kalshi key's scopes are acceptable for a tester.
 // Also refuses keys locked to a sub-account (restricted keys cannot open the
@@ -128,24 +146,22 @@ const KEY_FIX = 'Delete it in Kalshi and create a new key with only Read all dat
 function assessKalshiKey(entry, regionExpTs, nowSec = Math.floor(Date.now() / 1000)) {
   const warnings = [];
   if (!entry) {
-    return { ok: true, scopes: [], scopeStatus: 'unverified', warnings: ['Kalshi did not list this key’s scopes; it is flagged for owner review.'] };
+    return { ok: true, scopes: [], scopeStatus: 'unverified', autoFund: false, warnings: ['Kalshi did not list this key’s scopes; it is flagged for owner review. Auto-funding stays off until it is confirmed.'] };
   }
   const c = classifyKalshiScopes(entry.scopes);
   const words = (list) => list.map((s) => SCOPE_WORDS[s] || s).join(' and ');
-  if (c.money.length) {
-    throw new KeyError(`This key has ${words(c.money)} turned on, which can move money. ${KEY_FIX}`, 400, 'transfer_scope');
-  }
-  if (c.extra.length) throw new KeyError(`This key has extra permissions (${words(c.extra)}). ${KEY_FIX}`, 400, 'extra_scope');
-  if (c.missing.includes('write::trade')) throw new KeyError(`This key cannot trade (Trade is unchecked). ${KEY_FIX}`, 400, 'missing_trade');
-  if (c.missing.includes('read')) throw new KeyError(`This key cannot read your account (Read all data is unchecked). ${KEY_FIX}`, 400, 'missing_read');
+  if (c.extra.length) throw new KeyError(`This key has extra permissions we don’t use (${words(c.extra)}). ${KEY_FIX}`, 400, 'extra_scope');
+  if (c.missing.includes('write::trade')) throw new KeyError(`This key can’t trade (Trade is unchecked). ${KEY_FIX}`, 400, 'missing_trade');
+  if (c.missing.includes('read')) throw new KeyError(`This key can’t read your account (Read all data is unchecked). ${KEY_FIX}`, 400, 'missing_read');
   if (entry.subaccount != null) {
-    throw new KeyError('This key is locked to a sub-account, which Kalshi blocks from RFQ quoting. Create a new key with Read all data + Trade and no sub-account.', 400, 'subaccount_key');
+    throw new KeyError('This key is locked to a sub-account, which Kalshi blocks from RFQ quoting. Create a new key with Full access (or Read all data, Trade and Transfers) and leave the sub-account blank.', 400, 'subaccount_key');
   }
   if (regionExpTs != null && Number(regionExpTs) < nowSec) {
     throw new KeyError('Kalshi says your location check for API trading has lapsed. Re-verify your location in the Kalshi app, then try again.', 400, 'attestation_lapsed');
   }
   if (regionExpTs == null) warnings.push('Kalshi has no API location check on file for this account yet; sports trading may be refused until you complete it in the Kalshi app.');
-  return { ok: true, scopes: c.scopes, scopeStatus: 'ok', warnings };
+  if (!c.autoFund) warnings.push(NO_TRANSFER_NOTE);
+  return { ok: true, scopes: c.scopes, scopeStatus: 'ok', autoFund: c.autoFund, warnings };
 }
 
 async function verifyKalshiKey({ keyId, secret, env = process.env, fetchImpl = fetch }) {
@@ -227,6 +243,8 @@ function publicKeyRow(row) {
     hint: row.key_hint || '',
     label: maskedLabel(row.venue, row.key_hint),
     scopeStatus: row.scope_status || 'unverified',
+    // Kalshi only: the key can move the tester's own money into Combos.
+    ...(row.venue === 'kalshi' ? { autoFund: (row.scope_status === 'ok') && kalshiAutoFund(row.scopes) } : {}),
     verifiedAt: row.verified_at || null,
     updatedAt: row.updated_at || null,
   };
@@ -234,5 +252,5 @@ function publicKeyRow(row) {
 
 module.exports = {
   VENUES, KEVIN_IDS, KeyError, keyHint, maskedLabel, cleanKeyId, parseKalshiPem,
-  assessKalshiKey, classifyKalshiScopes, kalshiSignature, verifyKalshiKey, verifyPolymarketKey, verifyKey, publicKeyRow, kalshiHeaders,
+  assessKalshiKey, classifyKalshiScopes, kalshiAutoFund, NO_TRANSFER_NOTE, kalshiSignature, verifyKalshiKey, verifyPolymarketKey, verifyKey, publicKeyRow, kalshiHeaders,
 };

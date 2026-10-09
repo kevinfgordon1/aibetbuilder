@@ -17,47 +17,64 @@ const KID = 'a1b2c3d4-e5f6-4711-8899-aabbccdd1234';
 
 // --- lib: scope rules -------------------------------------------------------
 {
-  const ok = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade'] }, 9999999999, 1);
+  const ok = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade', 'write::transfer'] }, 9999999999, 1);
   assert.equal(ok.scopeStatus, 'ok');
+  assert.equal(ok.autoFund, true);
   assert.deepEqual(ok.warnings, []);
+  const full = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write'] }, 9999999999, 1);
+  assert.equal(full.autoFund, true, 'Full access enables auto-funding');
+  assert.deepEqual(full.warnings, []);
+  const tradeOnly = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade'] }, 9999999999, 1);
+  assert.equal(tradeOnly.scopeStatus, 'ok', 'Read + Trade keys still connect and trade');
+  assert.equal(tradeOnly.autoFund, false);
+  assert.equal(tradeOnly.warnings.length, 1);
+  assert.match(tradeOnly.warnings[0], /Auto-funding is off/);
+  assert.match(tradeOnly.warnings[0], /Full access \(or check Transfers too\)/);
   const bad = (scopes, extra = {}, ts = 9999999999) => {
     try { keys.assessKalshiKey({ api_key_id: KID, scopes, ...extra }, ts, 100); return null; } catch (e) { return e.code; }
   };
-  assert.equal(bad(['read', 'write']), 'transfer_scope');
-  assert.equal(bad(['read', 'write::trade', 'write::transfer']), 'transfer_scope');
+  // Accepted.
+  assert.equal(bad(['read', 'write']), null, 'Full access (old Read + Write format too)');
+  assert.equal(bad(['read', 'write::trade', 'write']), null, 'Full access listed with Trade');
+  assert.equal(bad(['read', 'write', 'write::block_trade_accept', 'write::transfer', 'write::trade']), null, 'Full access with its implied children');
+  assert.equal(bad(['read', 'write::trade', 'write::transfer']), null);
+  assert.equal(bad(['read', 'read::portfolio_balance', 'read::block_trade_accept', 'write::trade', 'write::transfer']), null, 'Kalshi screen: Read all data + Trade + Transfers');
+  assert.equal(bad([' READ ', 'Write::Trade', 'WRITE::TRANSFER']), null, 'case/whitespace tolerant');
+  assert.equal(bad(['read', 'write::trade']), null, 'Read + Trade only: accepted, auto-funding off');
+  // Refused.
+  assert.equal(bad(['write']), 'missing_read');
   assert.equal(bad(['read']), 'missing_trade');
-  assert.equal(bad(['write::trade']), 'missing_read');
+  assert.equal(bad(['write::trade', 'write::transfer']), 'missing_read');
+  assert.equal(bad(['read', 'write::transfer']), 'missing_trade', 'Transfers without Trade');
+  assert.equal(bad(['read::portfolio_balance', 'write::trade', 'write::transfer']), 'missing_read', 'granular read only, no Read all data');
+  assert.equal(bad(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']), 'extra_scope', 'Accept block trades on a granular key');
   assert.equal(bad(['read', 'write::trade', 'write::fcm_risk']), 'extra_scope');
-  assert.equal(bad(['read', 'write::trade'], { subaccount: 3 }), 'subaccount_key');
-  assert.equal(bad(['read', 'write::trade'], {}, 50), 'attestation_lapsed');
-  assert.equal(bad(['read', 'write::trade', 'read::portfolio_balance']), null);
-  // Exact scope strings from Kalshi's Create API key screen (Oct 2026).
-  assert.equal(bad(['read', 'write::trade', 'read::portfolio_balance', 'read::block_trade_accept']), null, 'Read all data + Trade (with implied read::*) is OK');
-  assert.equal(bad(['write::trade', 'read']), null, 'order does not matter');
-  assert.equal(bad([' READ ', 'Write::Trade']), null, 'case/whitespace tolerant');
-  assert.equal(bad(['read', 'write::trade', 'write']), 'transfer_scope', 'Full access');
-  assert.equal(bad(['read', 'write']), 'transfer_scope', 'old-format Read + Write key = Full access');
-  assert.equal(bad(['write']), 'transfer_scope');
-  assert.equal(bad(['read', 'write::transfer']), 'transfer_scope', 'Transfers without Trade');
-  assert.equal(bad(['read', 'write::trade', 'write::block_trade_accept']), 'extra_scope', 'Accept block trades');
-  assert.equal(bad(['read', 'write::trade', 'read::block_trade_accept']), null, 'Read block trades is read-only');
-  assert.equal(bad(['read::portfolio_balance', 'write::trade']), 'missing_read', 'granular read only, no Read all data');
   assert.equal(bad(['read', 'write::trade', 'write::something_new']), 'extra_scope', 'unknown write scope');
+  assert.equal(bad(['read', 'write', 'admin']), 'extra_scope', 'unknown scope string even with Full access');
+  assert.equal(bad(['read', 'write'], { subaccount: 3 }), 'subaccount_key');
+  assert.equal(bad(['read', 'write::trade', 'write::transfer'], { subaccount: 0 }), 'subaccount_key');
+  assert.equal(bad(['read', 'write'], {}, 50), 'attestation_lapsed');
   assert.equal(bad([]), 'missing_trade');
   {
     let msg = '';
-    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade', 'write::transfer'] }, 9999999999, 1); } catch (e) { msg = e.message; }
-    assert.match(msg, /Transfers/);
-    assert.match(msg, /Read all data and Trade/);
-    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write'] }, 9999999999, 1); } catch (e) { msg = e.message; }
-    assert.match(msg, /Full access/);
+    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read'] }, 9999999999, 1); } catch (e) { msg = e.message; }
+    assert.match(msg, /Trade is unchecked/);
+    assert.match(msg, /Full access \(simplest\)/);
+    assert.match(msg, /Read all data, Trade and Transfers/);
+    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade', 'write::block_trade_accept'] }, 9999999999, 1); } catch (e) { msg = e.message; }
+    assert.match(msg, /Accept block trades/);
   }
   assert.deepEqual(keys.classifyKalshiScopes(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']),
-    { scopes: ['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], money: ['write::transfer'], extra: ['write::block_trade_accept'], missing: [] });
-  const noTs = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade'] }, null);
+    { scopes: ['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], full: false, extra: ['write::block_trade_accept'], missing: [], autoFund: true });
+  assert.equal(keys.kalshiAutoFund(['read', 'write']), true);
+  assert.equal(keys.kalshiAutoFund(['read', 'write::trade', 'write::transfer']), true);
+  assert.equal(keys.kalshiAutoFund(['read', 'write::trade']), false);
+  assert.equal(keys.kalshiAutoFund(null), false);
+  const noTs = keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write'] }, null);
   assert.equal(noTs.warnings.length, 1);
   const missing = keys.assessKalshiKey(null, null);
   assert.equal(missing.scopeStatus, 'unverified');
+  assert.equal(missing.autoFund, false);
   assert.equal(keys.keyHint(KID), '1234');
   assert.equal(keys.maskedLabel('kalshi', '1234'), 'Kalshi connected ••••1234');
   // Ed25519 (Kalshi's default key type) is accepted and signs with plain Ed25519.
@@ -87,9 +104,13 @@ const KID = 'a1b2c3d4-e5f6-4711-8899-aabbccdd1234';
   }
   assert.throws(() => keys.parseKalshiPem('not a key'), /could not be read/);
   assert.throws(() => keys.cleanKeyId('x'), /key ID/);
-  const row = keys.publicKeyRow({ venue: 'kalshi', key_hint: '1234', scope_status: 'ok', key_id: KID, secret_id: 'v' });
+  const row = keys.publicKeyRow({ venue: 'kalshi', key_hint: '1234', scope_status: 'ok', scopes: ['read', 'write'], key_id: KID, secret_id: 'v' });
   assert.equal(JSON.stringify(row).includes(KID), false);
   assert.equal(JSON.stringify(row).includes('secret'), false);
+  assert.equal(row.autoFund, true);
+  assert.equal(keys.publicKeyRow({ venue: 'kalshi', key_hint: '47df', scope_status: 'ok', scopes: ['read', 'write::trade'] }).autoFund, false, 'existing Read + Trade key (gmoneyvikes): trades, auto-funding off');
+  assert.equal(keys.publicKeyRow({ venue: 'kalshi', key_hint: '1', scope_status: 'unverified', scopes: ['read', 'write'] }).autoFund, false, 'unverified scopes never auto-fund');
+  assert.equal('autoFund' in keys.publicKeyRow({ venue: 'polymarket_us', key_hint: '1', scope_status: 'unverified' }), false);
 }
 
 // --- handler ----------------------------------------------------------------
@@ -125,7 +146,7 @@ function setup({ user, live = null, keyRows = [], fetchImpl } = {}) {
         },
         async rpc(name, args) {
           rpcs.push([name, args]);
-          if (name === 'combo_exchange_key_put') keyRows = keyRows.filter((r) => r.venue !== args.p_venue).concat([{ venue: args.p_venue, key_hint: args.p_hint, scope_status: args.p_scope_status, verified_at: 'now', updated_at: 'now' }]);
+          if (name === 'combo_exchange_key_put') keyRows = keyRows.filter((r) => r.venue !== args.p_venue).concat([{ venue: args.p_venue, key_hint: args.p_hint, scopes: args.p_scopes, scope_status: args.p_scope_status, verified_at: 'now', updated_at: 'now' }]);
           if (name === 'combo_exchange_key_delete') keyRows = keyRows.filter((r) => r.venue !== args.p_venue);
           return { data: null, error: null };
         },
@@ -219,6 +240,8 @@ function kalshiFetch(scopes, extra = {}) {
     assert.deepEqual(args.p_scopes, ['read', 'write::trade']);
     assert.equal(args.p_scope_status, 'ok');
     assert.equal(p.body.venues.kalshi.label, 'Kalshi connected ••••1234');
+    assert.equal(p.body.venues.kalshi.autoFund, false);
+    assert.match(p.body.warnings.join(' '), /Auto-funding is off/);
     assert.deepEqual(p.body.caps, { perLockUsd: 50, perDayUsd: 250 });
     const out = JSON.stringify(p.body);
     assert.ok(!out.includes(KID) && !out.includes('PRIVATE KEY'), 'reply never echoes the key');
@@ -229,13 +252,33 @@ function kalshiFetch(scopes, extra = {}) {
     assert.equal(d.body.venues.kalshi.connected, false);
     s.restore();
   }
-  // Transfer-capable key rejected; nothing stored; secret not in logs or reply.
+  // Full access key connects with auto-funding on.
   {
     const f = kalshiFetch(['read', 'write']);
     const s = setup({ user: { id: T }, live: APPROVED, fetchImpl: f });
+    const p = await call('POST', { venue: 'kalshi', key_id: KID, secret: ED_PEM });
+    assert.equal(p.code, 200, JSON.stringify(p.body));
+    assert.deepEqual(s.rpcs[0][1].p_scopes, ['read', 'write']);
+    assert.equal(p.body.venues.kalshi.autoFund, true);
+    assert.deepEqual(p.body.warnings, []);
+    s.restore();
+  }
+  // Read + Trade + Transfers connects with auto-funding on.
+  {
+    const f = kalshiFetch(['read', 'write::trade', 'write::transfer']);
+    const s = setup({ user: { id: T }, live: APPROVED, fetchImpl: f });
+    const p = await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM });
+    assert.equal(p.code, 200, JSON.stringify(p.body));
+    assert.equal(p.body.venues.kalshi.autoFund, true);
+    s.restore();
+  }
+  // Sub-account key / block-trade scope refused; nothing stored; secret not in logs or reply.
+  for (const [scopes, extra, code] of [[['read', 'write'], { subaccount: 2 }, 'subaccount_key'], [['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], {}, 'extra_scope']]) {
+    const f = kalshiFetch(scopes, extra);
+    const s = setup({ user: { id: T }, live: APPROVED, fetchImpl: f });
     const p = await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM });
     assert.equal(p.code, 400);
-    assert.equal(p.body.code, 'transfer_scope');
+    assert.equal(p.body.code, code);
     assert.equal(s.rpcs.length, 0);
     assert.ok(!JSON.stringify(p.body).includes('PRIVATE KEY'));
     assert.ok(!s.logs.join('\n').includes('PRIVATE KEY'));
