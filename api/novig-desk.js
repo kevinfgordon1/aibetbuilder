@@ -1,7 +1,7 @@
 // Novig venue branch for Live Trading Desk (Kevin only; caller gates owner).
 'use strict';
 
-const { createNovigClient } = require('./novig-client');
+const { createNovigClient, openOrdersFrom } = require('./novig-client');
 const { readNovigDeskCreds, missingKeysError, locationErrorText } = require('./novig-auth');
 
 let novigMod = null;
@@ -113,24 +113,51 @@ function mapPosition(row, market) {
   };
 }
 
-function mapOrder(row, market) {
+// One resting Novig order, in the fields the desk Open orders list reads
+// (title, outcomeName, americanLabel, quantity, protect). Novig only has bids,
+// so every rest is a buy of its own outcome at `price`.
+function mapOrder(row, market, protectRow) {
   const price = Number(row.price);
-  const qty = Number(row.qty != null ? row.qty : row.remaining) || 0;
-  const remaining = row.remaining != null ? Number(row.remaining) : qty;
-  return {
+  const qty = Number(row.remaining != null ? row.remaining : row.qty) || 0;
+  const outcomeId = String(row.outcomeId || '');
+  let outcomeName = '';
+  if (market && market.ok !== false) {
+    if (outcomeId === market.longOutcomeId) outcomeName = market.longName;
+    else if (outcomeId === market.shortOutcomeId) outcomeName = market.shortName;
+  }
+  const american = price > 0 && price < 1 ? priceMod.americanFromProb(price) : null;
+  const order = {
     id: String(row.orderId || row.id || ''),
-    marketSlug: market ? market.slug : novigMod.protectSlugForNovig(row.marketId),
+    marketSlug: market && market.slug ? market.slug : novigMod.protectSlugForNovig(row.marketId),
     marketId: String(row.marketId || ''),
-    outcomeId: String(row.outcomeId || ''),
+    outcomeId,
     price,
-    american: priceMod.americanFromProb(price),
-    qty: remaining,
-    contracts: remaining,
+    american,
+    americanLabel: american != null ? (priceMod.formatAmerican(american) || '') : '',
+    action: 'buy',
+    outcomeName,
+    qty,
+    contracts: qty,
+    quantity: qty,
     tif: row.tif || 'GTC',
     status: row.status || 'OPEN',
     venue: 'novig',
-    title: market ? (market.longName + ' / ' + market.shortName) : '',
+    title: market && market.ok !== false
+      ? ('Novig · ' + (market.description || (market.longName + ' / ' + market.shortName)))
+      : 'Novig order',
   };
+  const badge = protectRow ? protectMath.protectBadge(protectRow) : null;
+  return badge ? { ...order, protect: badge } : order;
+}
+
+async function marketsFor(client, ids) {
+  const out = new Map();
+  await Promise.all([...new Set(ids.filter(Boolean))].slice(0, 25).map(async (id) => {
+    try {
+      out.set(id, novigMod.readNovigMarket(await client.getMarket(id)));
+    } catch (_) { /* label falls back */ }
+  }));
+  return out;
 }
 
 async function snapshot(client, marketId, store) {
@@ -152,9 +179,19 @@ async function snapshot(client, marketId, store) {
     positionsError = novigMod.deskErrorFromNovig(err, 'Could not load Novig positions.');
   }
 
+  let protectRows = [];
+  if (store && store.configured && store.listArmed) {
+    try {
+      const armed = await store.listArmed();
+      protectRows = (armed || []).filter((r) => String(r.market_slug || '').startsWith('novig:'));
+    } catch (_) { /* optional */ }
+  }
+
   try {
-    const rawOrders = await client.listOpenOrders();
-    orders = asList(rawOrders).map((r) => mapOrder(r, null));
+    const rawOrders = openOrdersFrom(await client.listOpenOrders());
+    const markets = await marketsFor(client, rawOrders.map((r) => String(r.marketId || '')));
+    const byOrder = new Map(protectRows.map((r) => [String(r.order_id), r]));
+    orders = rawOrders.map((r) => mapOrder(r, markets.get(String(r.marketId || '')), byOrder.get(String(r.orderId || r.id || ''))));
   } catch (err) {
     ordersError = novigMod.deskErrorFromNovig(err, 'Could not load Novig open orders.');
   }
@@ -205,14 +242,6 @@ async function snapshot(client, marketId, store) {
         error: novigMod.deskErrorFromNovig(err, 'Could not load that Novig market.'),
       };
     }
-  }
-
-  let protectRows = [];
-  if (store && store.configured && store.listArmed) {
-    try {
-      const armed = await store.listArmed();
-      protectRows = (armed || []).filter((r) => String(r.market_slug || '').startsWith('novig:'));
-    } catch (_) { /* optional */ }
   }
 
   return {
@@ -416,6 +445,7 @@ async function handle({ req, res, json, deps, owner, store, body, query }) {
 module.exports = {
   handle,
   snapshot,
+  mapOrder,
   placeOrder,
   cancelOrder,
   ensureMods,

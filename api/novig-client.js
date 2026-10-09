@@ -124,7 +124,10 @@ function createNovigClient({
     publicListMarkets: (query) => okJson('GET', '/v3/public/catalog/markets', { query, publicRoute: true }),
     publicListEvents: (query) => okJson('GET', '/v3/public/catalog/events', { query, publicRoute: true }),
     publicGetBook: (id, query) => okJson('GET', '/v3/public/catalog/markets/' + encodeURIComponent(id) + '/book', { query, publicRoute: true }),
+    // Answers { seq, open: OpenOrder[] } (OrdersSnapshot). Use openOrdersFrom() to read it.
     listOpenOrders: () => okJson('GET', '/v3/account/orders'),
+    getOrder: (orderId) => okJson('GET', '/v3/orders/' + encodeURIComponent(orderId)),
+    getEvent: (eventId) => okJson('GET', '/v3/catalog/events/' + encodeURIComponent(eventId)),
     listPositions: () => okJson('GET', '/v3/portfolio/positions'),
     listFills: (query) => okJson('GET', '/v3/portfolio/fills', { query }),
     placeOrder: (body) => okJson('POST', '/v3/orders', { body }),
@@ -142,8 +145,20 @@ function createNovigClient({
   };
 }
 
+// GET /v3/account/orders answers an OrdersSnapshot: { seq, open: [...] }.
+// Older code read .items / .orders, which do not exist, and counted 0.
+function openOrdersFrom(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  if (Array.isArray(payload.open)) return payload.open;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.orders)) return payload.orders;
+  return [];
+}
+
 module.exports = {
   createNovigClient,
+  openOrdersFrom,
   queryString,
   httpError,
 };
