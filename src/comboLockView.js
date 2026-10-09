@@ -7,6 +7,7 @@ import { parseSkipReason, skipReasonOf } from "./comboDesk.js";
 import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
+import { effectiveTakerPrice, VENUE_TAKER_FEE_RATE } from "./venueTakerFee.js";
 
 export const ET_ZONE = "America/New_York";
 
@@ -216,11 +217,28 @@ export function betSummary(parlay) {
     freeBet,
     maxPayout,
     sellAt: fmtAmerican(parlay.fill_american),
+    takerAt: takerOddsAfterFee(parlay.fill_american),
     book: String(parlay.sportsbook || "").trim(),
     fair: fairOdds(parlay),
     boostPct: boost > 0 ? boost : null,
     betLine: stake > 0 && american ? `${freeBet ? "Free bet " : ""}${dollars(stake)} at ${fmtAmerican(american)}` : "—",
   };
+}
+
+/**
+ * What the taker (buyer of the parlay YES) effectively gets after the venue's
+ * estimated taker fee: YES price P = 1/(decimal of the Selling at odds), then
+ * P + rate·P·(1−P) per contract. Kalshi and Polymarket US both use rate 0.07
+ * (venueTakerFee.js), so mixed-venue fills give the same estimate. Per-contract
+ * rate, before Kalshi's round-up of the whole order fee to the cent.
+ */
+export function takerOddsAfterFee(fillAmerican, venue = "kalshi") {
+  const dec = decimalFromAmerican(fillAmerican);
+  if (!dec) return null;
+  const rate = VENUE_TAKER_FEE_RATE[venue] ?? VENUE_TAKER_FEE_RATE.kalshi;
+  const eff = effectiveTakerPrice(1 / dec, rate);
+  const a = eff == null ? null : americanFromProb(eff);
+  return a == null ? null : { american: a, text: fmtAmerican(a) };
 }
 
 /** "NFL · Sun, Oct 12 · 1:00 PM ET · DraftKings · 30% boost" */
