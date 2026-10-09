@@ -47,7 +47,8 @@ export function useAppAlerts(supabase, user, { initial = null } = {}) {
   }, [supabase, user && user.id, refresh]);
 
   // alerts = full unread history (bell panel); visible = banner/badge set
-  // (self-healed stall alerts that the worker already resolved are left out).
+  // (self-healed stall alerts the worker already resolved, and log-only kinds
+  // such as routine bucket transfers, are left out).
   const all = allowed ? alerts : [];
   return { alerts: all, visible: bannerAlerts(all), dismiss, refresh, allowed };
 }
@@ -62,9 +63,9 @@ export function AppAlertsBell({ state, open, onToggle }) {
     <button
       type="button"
       onClick={onToggle}
-      aria-label={n ? `${n} unread alerts` : (history ? `Alerts (${history} resolved)` : "Alerts")}
+      aria-label={n ? `${n} unread alerts` : (history ? `Alerts (${history} in history)` : "Alerts")}
       aria-expanded={open}
-      title={n ? `${n} unread alert${n === 1 ? "" : "s"}` : (history ? `No active alerts (${history} self-resolved in history)` : "No unread alerts")}
+      title={n ? `${n} unread alert${n === 1 ? "" : "s"}` : (history ? `No active alerts (${history} logged in history)` : "No unread alerts")}
       data-testid="app-alerts-bell"
       style={{
         position: "relative", background: open ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.06)",

@@ -3,6 +3,7 @@ import {
   canSeeAppAlerts,
   normalizeAppAlert,
   unreadAppAlerts,
+  isLogOnlyAlert,
   alertAgeLabel,
   bellLabel,
   fetchUnreadAppAlerts,
@@ -101,6 +102,17 @@ assert.deepEqual(await fetchUnreadAppAlerts(fakeSupabase({ throws: true }), kevi
   const got = await fetchUnreadAppAlerts(sb, kevin);
   assert.equal(got.length, 1, "history keeps the resolved row (read_at null)");
   assert.equal(got[0].resolvedAt, "2026-10-03T05:00:01Z");
+}
+
+{
+  const mk = (o) => normalizeAppAlert({ id: o.id, title: "T", created_at: "2026-10-09T15:00:00Z", ...o });
+  const moved = mk({ id: "m", kind: "bucket_transfer", severity: "info" });
+  const failed = mk({ id: "f", kind: "bucket_transfer_failed", severity: "error" });
+  const unconf = mk({ id: "u", kind: "bucket_transfer_unconfirmed", severity: "error" });
+  const blocked = mk({ id: "b", kind: "bucket_blocked", severity: "warn" });
+  assert.equal(isLogOnlyAlert(moved), true, "a routine bucket transfer is log-only");
+  assert.equal(isLogOnlyAlert(failed), false);
+  assert.deepEqual(bannerAlerts([moved, failed, unconf, blocked]).map((a) => a.id), ["f", "u", "b"], "failures and blocks still banner");
 }
 
 console.log("appAlerts.test.js ok");

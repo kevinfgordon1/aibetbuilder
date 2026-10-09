@@ -43,9 +43,21 @@ export function isSelfHealedAlert(a) {
   return !!(a && SELF_HEALING_KINDS.has(a.kind) && a.resolvedAt);
 }
 
-// Alerts that deserve the banner / badge (everything except healed ones).
+// Routine, successful activity that is logged only: never a banner or a bell
+// badge, but still listed in the bell history while unread. A completed
+// Kalshi shard 0 <-> shard 1 bucket transfer is one. Failed, unconfirmed and
+// blocked transfers use other kinds (bucket_transfer_failed,
+// bucket_transfer_unconfirmed, bucket_blocked) and keep alerting.
+export const LOG_ONLY_KINDS = new Set(["bucket_transfer"]);
+
+export function isLogOnlyAlert(a) {
+  return !!(a && LOG_ONLY_KINDS.has(a.kind));
+}
+
+// Alerts that deserve the banner / badge (everything except healed and
+// log-only ones).
 export function bannerAlerts(list) {
-  return (Array.isArray(list) ? list : []).filter((a) => !isSelfHealedAlert(a));
+  return (Array.isArray(list) ? list : []).filter((a) => !isSelfHealedAlert(a) && !isLogOnlyAlert(a));
 }
 
 // Newest first; unread only; severity does not reorder (recency wins).
