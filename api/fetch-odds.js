@@ -1,4 +1,5 @@
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
+const { createNovigDirect } = require('../lib/novig-direct');
 const { guardSportData, logOutlierFlags, readConfig } = require('../lib/odds-outlier-guard');
 const {
   parseRequestedSports,
@@ -36,6 +37,8 @@ module.exports = async (req, res) => {
       // Drops obvious mistake prices before cache (ODDS_OUTLIER_GUARD=off|dry|on).
       outlierGuard: (sport, data, opts) => guardSportData(sport, data, { ...opts, config: readConfig() }),
       logOutlierFlags,
+      // Novig from Novig's own feed via the odds relay (PROMO_NOVIG_DIRECT=0 turns it off).
+      novigDirect: createNovigDirect(),
     });
     if (cacheUnreachable) {
       return res.status(503).json({
