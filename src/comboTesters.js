@@ -23,7 +23,7 @@ export const KALSHI_HOWTO = {
     "Permissions: check only Read all data and Trade. Leave everything else unchecked (Full access, Transfers, Accept block trades). Leave the sub-account blank.",
     "Click Create. Copy the Key ID and download the private key file. Kalshi shows the private key only once.",
     "Back here, click Connect Kalshi. Paste the Key ID, then open the private key file and paste all of it, including the BEGIN and END lines. Click Check & save key.",
-    "Move the money you want to trade into your Kalshi Combos balance at kalshi.com/account/exchange-indexes. Combo quotes use only that balance.",
+    "Put money in your Combos balance: on kalshi.com go to Settings > Advance shard settings (kalshi.com/account/exchange-indexes). Turn on \"Disable balance management\", click Transfer, and move money from Exchange 0 (Default) to Exchange 1 (Combos). Then turn the switch back off so your normal Kalshi bets keep working.",
   ],
   safe: "This key can only read your account and place trades. It can't move or withdraw money, and you can delete it in Kalshi any time.",
 };
