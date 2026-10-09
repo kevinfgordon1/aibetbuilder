@@ -261,6 +261,34 @@ export function profitLine(profile) {
   return { lead: "Not hedged yet", text: both(profile.current), tone: "muted" };
 }
 
+/**
+ * The card's two outcome tiles from comboLockProfile.lockProfile():
+ *  - now:    where you stand right now (actual fills; "Locked profit" once fully hedged)
+ *  - target: where you'd stand if the whole lock fills at the Selling at price
+ *            (same math as the Details "When fully hedged" tile: profile.target).
+ * Each side carries a pos/neg tone so the tile can color hit and miss separately.
+ */
+export function cardOutcomeTiles(profile) {
+  if (!profile) return { now: null, target: null };
+  const close = (a, b) => Math.abs(Number(a) - Number(b)) < 0.01;
+  const tone = (v) => (Number(v) < 0 ? "neg" : "pos");
+  const side = (p) => (p && Number.isFinite(Number(p.hit)) && Number.isFinite(Number(p.miss))
+    ? { hit: signedDollars(p.hit), miss: signedDollars(p.miss), hitTone: tone(p.hit), missTone: tone(p.miss), either: close(p.hit, p.miss) }
+    : null);
+  const full = !!profile.target && profile.remaining === 0 && profile.filled > 0;
+  const nowSide = side(profile.current);
+  const targetSide = side(profile.target);
+  return {
+    now: nowSide ? { lead: full ? "Locked profit" : "Where you stand now", ...nowSide } : null,
+    target: targetSide ? {
+      lead: "At target fill",
+      ...targetSide,
+      contracts: profile.target.contracts,
+      locks: !!profile.target.locks,
+    } : null,
+  };
+}
+
 const ATTEMPT_WORDS = [
   [/\bover_limit\b/g, "too big for this lock"],
   [/\boversized\b/g, "too big for this lock"],

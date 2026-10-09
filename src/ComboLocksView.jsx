@@ -3,8 +3,8 @@
 // everything here is display only. Copy is plain English with American odds.
 import React from "react";
 import {
-  betSummary, countText, dollars, etDateTime, fmtAmerican, historyRow, historyTotals,
-  lockMetaLine, lockTitle, plainLeg, profitLine, QUOTE_ROWS_SHOWN, signedDollars,
+  betSummary, countText, etDateTime, fmtAmerican, historyRow, historyTotals,
+  lockMetaLine, lockTitle, plainLeg, cardOutcomeTiles, QUOTE_ROWS_SHOWN, signedDollars,
 } from "./comboLockView";
 import { STATEMENT_DATE_FILTERS } from "./comboStatement";
 import { shouldToggleFromCard } from "./comboCardToggle.js";
@@ -62,7 +62,21 @@ export const COMBO_VIEW_CSS = `
   .cl .lk-title{font-size:16px;font-weight:700;line-height:1.35;flex:1 1 260px;min-width:0;color:#f3f4f6}
   .cl .lk-ctl{display:flex;align-items:center;gap:8px;margin-left:auto}
   .cl .lk-meta{font-size:13px;color:#8a8f98;margin-top:4px}
-  .cl .lk-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0 10px}
+  .cl .lk-facts{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1.45fr) minmax(0,1fr) minmax(0,1fr);gap:8px;margin:12px 0 10px}
+  .cl .fact.out{background:rgba(255,255,255,0.045);border-color:rgba(255,255,255,0.1)}
+  .cl .fact.stand{border-color:rgba(147,197,253,.3)}
+  .cl .fact.out .srows{display:grid;gap:1px;margin-top:3px}
+  .cl .fact.out .srow{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  .cl .fact.out .sl{font-size:12px;color:#8a8f98;font-weight:600}
+  .cl .fact.out .sv{font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cl .fact.out .sv.pos{color:#34d399}
+  .cl .fact.out .sv.neg{color:#f87171}
+  .cl .fact.tgt .sv{font-size:15px;font-weight:700}
+  .cl .lk-orig{display:block;line-height:1.5;font-size:12.5px;margin-top:8px;color:#8a8f98;font-variant-numeric:tabular-nums}
+  .cl .lk-orig .lead{font-weight:600}
+  .cl .lk-orig .val{color:#c3c6cc;font-weight:700}
+  .cl .lk-orig .sub{color:#6b7280}
+  .cl .lk-orig .val,.cl .lk-orig .sub>span{white-space:nowrap}
   .cl .fact{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:8px 10px;min-width:0}
   .cl .fact .k{font-size:11px;font-weight:600;color:#8a8f98;text-transform:uppercase;letter-spacing:.4px}
   .cl .fact .v{font-size:16px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -139,6 +153,7 @@ export const COMBO_VIEW_CSS = `
   .cl .add-lock input,.cl .add-lock select,.cl .add-lock textarea{box-sizing:border-box;max-width:100%;min-width:0}
   .cl .add-lock .row>div,.cl .add-lock .legrow>div{min-width:0}
   @media (max-width:860px){
+    .cl .lk-facts{grid-template-columns:1fr 1fr}
     .cl .hist-totals{grid-template-columns:1fr 1fr}
   }
   @media (max-width:640px){
@@ -153,6 +168,7 @@ export const COMBO_VIEW_CSS = `
     .cl .lk-top .pill{order:1}
     .cl .lk-ctl{order:1}
     .cl .lk-facts{grid-template-columns:1fr 1fr}
+    .cl .lk-facts .fact.out{grid-column:1 / -1}
     .cl .row.c3,.cl .row.c2{grid-template-columns:1fr}
     .cl .profile,.cl .tiles{grid-template-columns:1fr}
     .cl .legrow{grid-template-columns:1fr auto}
@@ -249,14 +265,56 @@ export function SectionHead({ id, title, count, sub }) {
   );
 }
 
-/** Under the original bet: fair odds (always, "—" if unknown) + sportsbook (only if set). */
-function BetSub({ summary }) {
+/** Reminder line under the tiles: "$100 at +716 · BetMGM · Fair odds +592". */
+function OrigSub({ summary }) {
   const fair = summary && summary.fair;
   return (
-    <>
+    <span className="sub">
+      {summary && summary.book ? <>{"\u00a0· "}<span>{summary.book}</span></> : null}
+      {"\u00a0· "}
       <span className="fair" title={fair && fair.source === "legs" ? "Estimated from each leg's fair chance" : "The fair (true) odds saved on this lock"}>Fair odds {fair ? fair.text : "—"}{fair && fair.source === "legs" ? " (est.)" : ""}</span>
-      {summary && summary.book ? <span> · {summary.book}</span> : null}
-    </>
+    </span>
+  );
+}
+
+/** "If it hits +$X / If it misses -$Y" rows (or "+$X either way"), each side green/red by sign. */
+function OutcomeRows({ o }) {
+  if (o.either) return <div className="v"><span className={"sv " + o.hitTone}>{o.hit}</span> <span className="sl">either way</span></div>;
+  return (
+    <div className="srows">
+      <div className="srow"><span className="sl">If it hits</span><span className={"sv " + o.hitTone}>{o.hit}</span></div>
+      <div className="srow"><span className="sl">If it misses</span><span className={"sv " + o.missTone}>{o.miss}</span></div>
+    </div>
+  );
+}
+
+/** First tile: where the lock stands right now (actual fills). */
+function StandTile({ now }) {
+  return (
+    <div className="fact out stand" title="Your profit or loss right now, counting only what has been hedged so far.">
+      <div className="k">{now ? now.lead : "Where you stand now"}</div>
+      {now ? <OutcomeRows o={now} /> : <div className="v">—</div>}
+    </div>
+  );
+}
+
+/** Second tile: where you'd stand if the whole lock fills at the Selling at price. */
+function TargetTile({ target, sellAt }) {
+  return (
+    <div className="fact out tgt" title={"If the whole lock fills" + (sellAt ? " at " + sellAt : "") + "."}>
+      <div className="k">At target fill</div>
+      {target ? (
+        <>
+          <OutcomeRows o={target} />
+          <div className="s">{countText(target.contracts)} contracts{sellAt ? ` at ${sellAt}` : ""} · {target.locks ? "profit locked either way" : "doesn't fully lock"}</div>
+        </>
+      ) : (
+        <>
+          <div className="v">—</div>
+          <div className="s">size not set</div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -299,15 +357,15 @@ export function DetailBlock({ title, children }) {
 }
 
 /**
- * The always-visible lock card. Status + legs + the four numbers that matter
- * (your original bet, payout, sell price, how much is hedged) + one profit line.
+ * The always-visible lock card. Status + legs + where you stand now (first tile),
+ * sell price and how much is hedged, then a small "Your original bet" reminder.
  * Everything else lives behind Details (children).
  */
 export function LockCard({ parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children }) {
   const s = betSummary(parlay) || {};
   const cap = Number(ceiling) > 0 ? Number(ceiling) : Number(parlay && parlay.max_contracts) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((Number(filled || 0) / cap) * 100)) : 0;
-  const pl = profitLine(profile);
+  const tiles = cardOutcomeTiles(profile);
   const summaryClick = (e) => { if (shouldToggleFromCard(e)) onToggle(); };
   const summaryKey = (e) => {
     if (e.target !== e.currentTarget) return;
@@ -336,18 +394,19 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
       </div>
       <div className="lk-meta">{lockMetaLine(parlay)}</div>
       <div className="lk-facts">
-        <Fact k="Your original bet" v={s.betLine} s={<BetSub summary={s} />} />
-        <Fact k={s.freeBet ? "Wins if it hits" : "Pays up to"} v={dollars(s.maxPayout)} s={s.freeBet ? "profit only" : "stake included"} />
+        <StandTile now={tiles.now} />
+        <TargetTile target={tiles.target} sellAt={s.sellAt} />
         <Fact k="Selling at" v={s.sellAt} s="on Kalshi / Polymarket" title="The odds you're offering traders, after your fees." />
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
-      {pl && (
-        <div className={"lk-profit " + pl.tone}>
-          <span className="lead">{pl.lead}:</span>
-          <span className="val">{pl.text}</span>
+      {s.betLine ? (
+        <div className="lk-orig">
+          <span className="lead">Your original bet:</span>{" "}
+          <span className="val">{s.betLine}</span>
+          <OrigSub summary={s} />
         </div>
-      )}
+      ) : null}
       <div className="lk-hint">{status.hint}</div>
       </div>
       {open ? <div className="lk-details">{children}</div> : null}
