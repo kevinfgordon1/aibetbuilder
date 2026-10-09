@@ -88,6 +88,48 @@ export function returnNote(search) {
   return null;
 }
 
+/** Env kill switch for the Combo Locks "Your credits" card.
+ * Off by default. Set VITE_SHOW_CREDITS_CARD=1 / true / on to show it again.
+ * Backend, tables, and Coinbase webhook stay in place either way.
+ */
+export function showCreditsCardFromEnv(raw) {
+  if (raw == null || raw === "") return false;
+  const s = String(raw).trim().toLowerCase();
+  return s === "1" || s === "true" || s === "on" || s === "yes";
+}
+
+export function showCreditsCardEnabled() {
+  let raw;
+  try {
+    const env = import.meta && import.meta.env;
+    if (env && env.VITE_SHOW_CREDITS_CARD != null && env.VITE_SHOW_CREDITS_CARD !== "") {
+      raw = env.VITE_SHOW_CREDITS_CARD;
+    }
+  } catch {
+    /* node tests have no Vite env */
+  }
+  if (raw == null) {
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.VITE_SHOW_CREDITS_CARD != null) {
+        raw = process.env.VITE_SHOW_CREDITS_CARD;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (raw == null) {
+    try {
+      if (typeof process !== "undefined" && process.env && process.env.SHOW_CREDITS_CARD != null) {
+        raw = process.env.SHOW_CREDITS_CARD;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  // Hard default: hidden until Kevin turns the card back on (unset → false).
+  return showCreditsCardFromEnv(raw);
+}
+
 /** True when a Supabase error means the credits tables aren't installed yet. */
 export function isMissingCreditsSchema(error) {
   const msg = String((error && (error.message || error.details)) || error || "");

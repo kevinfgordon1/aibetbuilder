@@ -40,6 +40,7 @@ import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } fr
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import ComboTesters from "./ComboTesters";
 import ComboCredits from "./ComboCredits";
+import { showCreditsCardEnabled } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -1355,7 +1356,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         </div>
       )}
       <ComboTesters user={user} supabase={supabase} />
-      <ComboCredits user={user} supabase={supabase} />
+      {showCreditsCardEnabled() ? <ComboCredits user={user} supabase={supabase} /> : null}
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}

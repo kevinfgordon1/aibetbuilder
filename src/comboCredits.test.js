@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import {
   CREDIT_PRESETS_USD, CREDITS_PRICING, addCreditsState, balanceFromLedger, creditsText, fillFeeUsd, isMissingCreditsSchema,
-  isPresetAmount, ledgerLabel, monthlyAllowanceUsd, returnNote,
+  isPresetAmount, ledgerLabel, monthlyAllowanceUsd, returnNote, showCreditsCardFromEnv, showCreditsCardEnabled,
 } from "./comboCredits.js";
 
 const require = createRequire(import.meta.url);
@@ -45,6 +45,28 @@ assert.equal(returnNote("?x=1"), null);
 assert.ok(isMissingCreditsSchema({ code: "42P01", message: "relation does not exist" }));
 assert.ok(isMissingCreditsSchema({ code: "PGRST205", message: "Could not find the table 'public.combo_credit_balances' in the schema cache" }));
 assert.ok(!isMissingCreditsSchema({ code: "500", message: "timeout" }));
+
+// Credits card is off by default; only explicit truthy env values show it.
+assert.equal(showCreditsCardFromEnv(undefined), false);
+assert.equal(showCreditsCardFromEnv(""), false);
+assert.equal(showCreditsCardFromEnv("0"), false);
+assert.equal(showCreditsCardFromEnv("false"), false);
+assert.equal(showCreditsCardFromEnv("off"), false);
+assert.equal(showCreditsCardFromEnv("1"), true);
+assert.equal(showCreditsCardFromEnv("true"), true);
+assert.equal(showCreditsCardFromEnv("ON"), true);
+const prevVite = process.env.VITE_SHOW_CREDITS_CARD;
+const prevShow = process.env.SHOW_CREDITS_CARD;
+delete process.env.VITE_SHOW_CREDITS_CARD;
+delete process.env.SHOW_CREDITS_CARD;
+assert.equal(showCreditsCardEnabled(), false);
+process.env.VITE_SHOW_CREDITS_CARD = "1";
+assert.equal(showCreditsCardEnabled(), true);
+process.env.VITE_SHOW_CREDITS_CARD = "0";
+assert.equal(showCreditsCardEnabled(), false);
+if (prevVite === undefined) delete process.env.VITE_SHOW_CREDITS_CARD; else process.env.VITE_SHOW_CREDITS_CARD = prevVite;
+if (prevShow === undefined) delete process.env.SHOW_CREDITS_CARD; else process.env.SHOW_CREDITS_CARD = prevShow;
+
 
 // Redirect origin stays on our site.
 assert.equal(serverLib.siteOrigin({ headers: { host: "aibetbuilder.io" } }, {}), "https://aibetbuilder.io");
