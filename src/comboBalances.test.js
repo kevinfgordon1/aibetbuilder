@@ -98,6 +98,7 @@ assert.deepEqual(filledByParlay([{ parlay_id: "a", count: 10 }, { parlay_id: "a"
   assert.match(testers, /Pending transactions/);
   assert.match(testers, /Cash available for combos/);
   assert.match(testers, /Amount to keep for combos/);
+  assert.match(testers, /not enough cash/);
   assert.doesNotMatch(testers, /Combos \(used by these locks\)/);
   assert.doesNotMatch(testers, /Single-game/);
 }

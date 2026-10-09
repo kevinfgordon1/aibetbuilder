@@ -268,6 +268,9 @@ function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps =
     : { short: false };
   const autoOn = !!(kalshiRow && kalshiRow.connected && kalshiRow.autoFund);
   const showCap = !!(autoOn && cap && cap.ok && caps && caps.perDayUsd != null);
+  const capTarget = showCap ? effectiveCap(cap.value, caps.perDayUsd) : null;
+  // Effective target is min(cap, total cash): worker never moves more than Default has.
+  const shortCash = showCap && total && total.amount != null && capTarget != null && capTarget > 0 && total.amount < capTarget;
   const kalshiNote = !kalshi ? null
     : (kalshiRow && kalshiRow.connected && !kalshiRow.autoFund)
       ? "Move money to combos on Kalshi to trade."
@@ -290,6 +293,11 @@ function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps =
             <div className="tst-bal-combo">
               <BalanceCell label="Cash available for combos" cell={b.kalshiCombo} hi now={now} />
               {showCap && <CapEditor cap={cap} daily={effectiveCap(null, caps.perDayUsd)} />}
+              {shortCash && (
+                <div className="tst-cap-hint" style={{ marginTop: 4 }}>
+                  Keeping {usd(total.amount)} of your {usd(capTarget)} target (not enough cash).
+                </div>
+              )}
             </div>
           </div>
         </div>
