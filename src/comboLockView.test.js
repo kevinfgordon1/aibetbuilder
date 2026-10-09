@@ -168,3 +168,10 @@ assert.equal(quoteRow({ bucket: "lost", outcome: { loss_reason: "expired" }, con
 assert.deepEqual(quoteHistory(null), { filled: [], notFilled: [], filledContracts: 0, addedText: "", afterKickoff: 0 });
 
 console.log("comboLockView.test.js ok");
+
+// Selling at tile: taker's odds after the 0.07·P·(1−P) taker fee.
+{
+  const { takerOddsAfterFee: t } = await import("./comboLockView.js");
+  assert.equal(t(333).text, "+311");
+  assert.equal(t(null), null);
+}

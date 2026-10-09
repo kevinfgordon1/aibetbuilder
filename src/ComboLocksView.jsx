@@ -62,7 +62,12 @@ export const COMBO_VIEW_CSS = `
   .cl .lk-title{font-size:16px;font-weight:700;line-height:1.35;flex:1 1 260px;min-width:0;color:#f3f4f6}
   .cl .lk-ctl{display:flex;align-items:center;gap:8px;margin-left:auto}
   .cl .lk-meta{font-size:13px;color:#8a8f98;margin-top:4px}
-  .cl .lk-facts{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1.45fr) minmax(0,1fr) minmax(0,1fr);gap:8px;margin:12px 0 10px}
+  .cl .lk-facts{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.3fr) minmax(0,1.45fr) minmax(0,0.8fr);gap:8px;margin:12px 0 10px}
+  .cl .fact.sell .sgrid{display:grid;grid-template-columns:auto 1fr;column-gap:10px;row-gap:1px;margin-top:3px;align-items:baseline}
+  .cl .fact.sell .sl{font-size:11.5px;color:#8a8f98;font-weight:600;white-space:nowrap}
+  .cl .fact.sell .sv{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .cl .fact.sell .sv.main{font-size:16px;font-weight:800}
+  .cl .fact.sell .sx{font-size:11px;font-weight:600;color:#8a8f98;margin-left:4px}
   .cl .fact.out{background:rgba(255,255,255,0.045);border-color:rgba(255,255,255,0.1)}
   .cl .fact.stand{border-color:rgba(147,197,253,.3)}
   .cl .fact.out .srows{display:grid;gap:1px;margin-top:3px}
@@ -169,6 +174,7 @@ export const COMBO_VIEW_CSS = `
     .cl .lk-ctl{order:1}
     .cl .lk-facts{grid-template-columns:1fr 1fr}
     .cl .lk-facts .fact.out{grid-column:1 / -1}
+    .cl .lk-facts .fact.sell{grid-column:1 / -1}
     .cl .row.c3,.cl .row.c2{grid-template-columns:1fr}
     .cl .profile,.cl .tiles{grid-template-columns:1fr}
     .cl .legrow{grid-template-columns:1fr auto}
@@ -318,6 +324,24 @@ function TargetTile({ target, sellAt }) {
   );
 }
 
+/** Third tile: your original odds, what you're selling for (+ taker's odds after fees), fair odds. */
+function SellTile({ summary: s }) {
+  const fair = s && s.fair;
+  return (
+    <div className="fact sell" title="Your sportsbook odds, the odds you're offering traders on Kalshi / Polymarket, and the fair odds.">
+      <div className="k">Selling at</div>
+      <div className="sgrid">
+        <span className="sl">Your original odds</span>
+        <span className="sv">{s.odds || "—"}{s.book ? <span className="sx"> {s.book}</span> : null}</span>
+        <span className="sl">Selling for</span>
+        <span className="sv main">{s.sellAt || "—"}{s.takerAt ? <span className="sx" title="Estimated odds the taker gets after the Kalshi / Polymarket taker fee (0.07 × P × (1−P) per contract)."> taker {s.takerAt.text} after fees</span> : null}</span>
+        <span className="sl">Fair odds</span>
+        <span className="sv">{fair ? fair.text : "—"}{fair && fair.source === "legs" ? <span className="sx"> est.</span> : null}</span>
+      </div>
+    </div>
+  );
+}
+
 function Fact({ k, v, s, title }) {
   return (
     <div className="fact" title={title}>
@@ -396,7 +420,7 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
       <div className="lk-facts">
         <StandTile now={tiles.now} />
         <TargetTile target={tiles.target} sellAt={s.sellAt} />
-        <Fact k="Selling at" v={s.sellAt} s="on Kalshi / Polymarket" title="The odds you're offering traders, after your fees." />
+        <SellTile summary={s} />
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
