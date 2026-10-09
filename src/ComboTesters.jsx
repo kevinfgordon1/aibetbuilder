@@ -208,7 +208,7 @@ function BalanceBlock({ supabase, userId, kalshi, poly }) {
           Your Kalshi combo balance ({usd(b.kalshiCombo.amount)}) is below the {usd(short.need)} that “{short.parlay.label || "a lock"}” could need if it fills in full. Kalshi may reject those quotes until the combo balance covers it.
         </div>
       )}
-      {kalshi && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Kalshi keeps combos in a separate balance from single-game markets; its app shows the two added together. Refreshes every minute.</div>}
+      {kalshi && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Kalshi keeps combos in a separate balance from single-game markets. Locks use only your Combos balance. Kalshi’s app shows the two added together. Refreshes every minute.</div>}
     </div>
   );
 }
