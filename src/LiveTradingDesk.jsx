@@ -648,10 +648,15 @@ function LiveTradingDeskView({ user }) {
       <style>{`
         .desk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
         .desk-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-        .desk-picks { display: grid; grid-template-columns: 1.5fr 0.7fr; gap: 8px; margin-top: 12; }
+        .desk-picks { display: grid; grid-template-columns: 1.5fr 0.7fr; gap: 8px; margin-top: 12px; }
+        .desk-slug-row { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
+        .desk-protect-xy { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         @media (max-width: 900px) {
           .desk-grid { grid-template-columns: 1fr; }
           .desk-picks { grid-template-columns: 1fr; }
+          .desk-slug-row { flex-direction: column; align-items: stretch; }
+          .desk-protect-xy { grid-template-columns: 1fr; }
+          .desk-order-row { flex-direction: column; align-items: stretch !important; }
         }
       `}</style>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-end", marginBottom: 16, flexWrap: "wrap" }}>
@@ -806,7 +811,7 @@ function LiveTradingDeskView({ user }) {
               {deskErrorText(scopeNote || slateNote, "Pick an NFL game.")}
             </div>
           )}
-          <form onSubmit={loadDraft} style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}>
+          <form onSubmit={loadDraft} className="desk-slug-row">
             <div style={{ flex: 1 }}>
               <label style={label} htmlFor="desk-slug">Advanced slug</label>
               <input
@@ -881,7 +886,7 @@ function LiveTradingDeskView({ user }) {
                 <summary style={{ cursor: "pointer", fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
                   {(protectXParsed.ok ? protectXParsed.cents : protectX) + "¢ through mid · re-rest " + (protectYParsed.ok ? protectYParsed.cents : protectY) + "¢ better"}
                 </summary>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                <div className="desk-protect-xy">
                   <div>
                     <label style={label} htmlFor="desk-protect-x">Through mid (¢)</label>
                     <input
@@ -989,7 +994,7 @@ function LiveTradingDeskView({ user }) {
           )}
           <div className="desk-list">
             {orders.filter((order) => order && typeof order === "object").map((order, index) => (
-              <div key={typeof order.id === "string" && order.id ? order.id : "ord-" + index} style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div key={typeof order.id === "string" && order.id ? order.id : "ord-" + index} className="desk-order-row" style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{plain(order.title, "Order")}</div>
                   <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, marginTop: 4 }}>
