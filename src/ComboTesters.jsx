@@ -14,7 +14,7 @@ import {
   KALSHI_HOWTO, autoFundLine, fundMoveText, effectiveCap, parseCapInput,
 } from "./comboTesters";
 import {
-  adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, usd,
+  adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, pendingMovesCell, totalCashCell, usd,
 } from "./comboBalances";
 
 const TESTERS_CSS = `
@@ -33,8 +33,12 @@ const TESTERS_CSS = `
 .cl .tst .tst-howto ol{margin:8px 0 6px;padding-left:22px;display:grid;gap:6px;font-size:13px;line-height:1.45;color:#d1d5db}
 .cl .tst .tst-howto li::marker{color:#93c5fd;font-weight:700}
 .cl .tst .tst-safe{font-size:12.5px;color:#34d399;margin-top:4px}
-.cl .tst .tst-cap{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:12.5px;color:#b6bac2}
+.cl .tst .tst-cap{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px;font-size:12.5px;color:#b6bac2}
+.cl .tst .tst-cap .tst-cap-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .cl .tst .tst-cap input{width:90px;padding:5px 7px;box-sizing:border-box}
+.cl .tst .tst-cap .tst-cap-hint{font-size:11px;color:#8a8f98;line-height:1.35}
+.cl .tst .tst-bal-combo{display:flex;flex-direction:column;gap:0;min-width:160px}
+.cl .tst .tst-bal-cell.wide{min-width:140px}
 .cl .tst .tst-fund{font-size:12.5px;line-height:1.45;margin-top:4px}
 .cl .tst .tst-fund.ok{color:#34d399}
 .cl .tst .tst-fund.warn{color:#fcd34d}
@@ -108,10 +112,12 @@ function CapEditor({ cap, daily }) {
   };
   return (
     <div className="tst-cap">
-      <label htmlFor="tst-cap-in">Your cap</label>
-      <input id="tst-cap-in" inputMode="decimal" placeholder={daily != null ? money(daily) : "$"} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }} />
-      <button type="button" className="btn mini" onClick={onSave}>Save</button>
-      <span className="muted">{msg || (daily != null ? `Up to your ${money(daily)} daily limit. Blank = ${money(daily)}.` : "")}</span>
+      <div className="tst-cap-row">
+        <label htmlFor="tst-cap-in">Amount to keep for combos</label>
+        <input id="tst-cap-in" inputMode="decimal" aria-label="Amount to keep for combos" placeholder={daily != null ? money(daily) : "$"} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }} />
+        <button type="button" className="btn mini" onClick={onSave}>Save</button>
+      </div>
+      <div className="tst-cap-hint">{msg || "The site keeps your combos cash topped up to this amount."}{!msg && daily != null ? ` Blank = ${money(daily)} daily limit · $0 = off.` : ""}</div>
     </div>
   );
 }
@@ -138,9 +144,6 @@ function VenueRow({ venue, row, caps, cap, busy, onConnect, onDisconnect }) {
           const line = autoFundLine(row, caps, cap && cap.ok ? cap.value : null);
           return line ? <div className={"tst-fund " + line.tone}>{line.text}</div> : null;
         })()}
-        {venue === "kalshi" && row && row.connected && row.autoFund && cap && cap.ok && caps && caps.perDayUsd != null && (
-          <CapEditor cap={cap} daily={effectiveCap(null, caps.perDayUsd)} />
-        )}
         {venue === "polymarket_us" && !(row && row.connected) && <div className="muted" style={{ fontSize: 12 }}>Optional</div>}
       </div>
       <div className="tst-actions">
@@ -226,15 +229,52 @@ function BalanceCell({ label, cell, sub, hi, now }) {
   );
 }
 
+const MOVE_COLS = "id,user_id,amount_usd,status,error,from_shard,to_shard,created_at";
+
+/** Auto-funding log (combo_fund_moves, RLS: own rows, owner sees all). Hidden if unreadable. */
+function useFundMoves(supabase, userId, enabled = true, limit = 5) {
+  const [state, setState] = useState({ rows: null, now: new Date() });
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let alive = true;
+    const run = async () => {
+      let q = supabase.from("combo_fund_moves").select(MOVE_COLS);
+      if (userId) q = q.eq("user_id", userId);
+      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
+      if (alive) setState({ rows: error ? null : (data || []), now: new Date() });
+    };
+    run().catch(() => {});
+    const t = setInterval(() => { run().catch(() => {}); }, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [supabase, userId, enabled, limit]);
+  return state;
+}
+
 /** "Available to trade" per connected exchange. */
-function BalanceBlock({ supabase, userId, kalshi, poly }) {
+function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps = null, cap = null }) {
   const { rows, failed, now } = useBalances(supabase, userId, !!(kalshi || poly));
   const needs = useLockNeeds(supabase, userId, !!kalshi);
+  // Pending = unconfirmed auto-funding moves only. Cash reserved by resting
+  // orders is not stored in combo_balances (Kalshi available_usd is free cash).
+  const pendingQ = useFundMoves(supabase, userId, !!kalshi, 50);
   if (!kalshi && !poly) return null;
   const b = (rows && balancesByUser(rows, now)[userId]) || emptyBalances(now);
+  const total = kalshi ? totalCashCell(b.kalshiMain, b.kalshiCombo) : null;
+  const pending = kalshi
+    ? (pendingQ.rows == null ? { state: "waiting", amount: null, at: null, checkedAt: null, error: null } : pendingMovesCell(pendingQ.rows))
+    : null;
   const short = kalshi && b.kalshiCombo.state === "ok"
     ? comboShortfall({ comboUsd: b.kalshiCombo.amount, parlays: needs.parlays, filledById: needs.filledById })
     : { short: false };
+  const autoOn = !!(kalshiRow && kalshiRow.connected && kalshiRow.autoFund);
+  const showCap = !!(autoOn && cap && cap.ok && caps && caps.perDayUsd != null);
+  const capTarget = showCap ? effectiveCap(cap.value, caps.perDayUsd) : null;
+  // Effective target is min(cap, total cash): worker never moves more than Default has.
+  const shortCash = showCap && total && total.amount != null && capTarget != null && capTarget > 0 && total.amount < capTarget;
+  const kalshiNote = !kalshi ? null
+    : (kalshiRow && kalshiRow.connected && !kalshiRow.autoFund)
+      ? "Move money to combos on Kalshi to trade."
+      : "Combo Locks trades from your combos cash. The site moves money there for you, up to your cap.";
   return (
     <div className="tst-bal" aria-label="Available to trade">
       <div className="tst-bal-head">
@@ -247,8 +287,18 @@ function BalanceBlock({ supabase, userId, kalshi, poly }) {
         <div className="tst-bal-row">
           <div style={{ fontWeight: 600 }}>Kalshi</div>
           <div className="tst-bal-cells">
-            <BalanceCell label="Combos (used by these locks)" cell={b.kalshiCombo} hi now={now} />
-            <BalanceCell label="Single-game" cell={b.kalshiMain} now={now} />
+            <BalanceCell label="Total cash available" cell={total} now={now} />
+            <BalanceCell label="Pending transactions" cell={pending} now={now}
+              sub={pending && pending.state === "ok" && pending.amount > 0 ? "Auto-funding in transit" : null} />
+            <div className="tst-bal-combo">
+              <BalanceCell label="Cash available for combos" cell={b.kalshiCombo} hi now={now} />
+              {showCap && <CapEditor cap={cap} daily={effectiveCap(null, caps.perDayUsd)} />}
+              {shortCash && (
+                <div className="tst-cap-hint" style={{ marginTop: 4 }}>
+                  Keeping {usd(total.amount)} of your {usd(capTarget)} target (not enough cash).
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -265,7 +315,7 @@ function BalanceBlock({ supabase, userId, kalshi, poly }) {
           Your Kalshi combo balance ({usd(b.kalshiCombo.amount)}) is below the {usd(short.need)} that “{short.parlay.label || "a lock"}” could need if it fills in full. Kalshi may reject those quotes until the combo balance covers it.
         </div>
       )}
-      {kalshi && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Kalshi keeps combos in a separate balance from single-game markets. Locks use only your Combos balance. Kalshi’s app shows the two added together. Refreshes every minute.</div>}
+      {kalshiNote && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{kalshiNote}</div>}
     </div>
   );
 }
@@ -295,26 +345,6 @@ function KalshiHowTo({ connected }) {
   );
 }
 
-const MOVE_COLS = "id,user_id,amount_usd,status,error,from_shard,to_shard,created_at";
-
-/** Auto-funding log (combo_fund_moves, RLS: own rows, owner sees all). Hidden if unreadable. */
-function useFundMoves(supabase, userId, enabled = true, limit = 5) {
-  const [state, setState] = useState({ rows: null, now: new Date() });
-  useEffect(() => {
-    if (!enabled) return undefined;
-    let alive = true;
-    const run = async () => {
-      let q = supabase.from("combo_fund_moves").select(MOVE_COLS);
-      if (userId) q = q.eq("user_id", userId);
-      const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
-      if (alive) setState({ rows: error ? null : (data || []), now: new Date() });
-    };
-    run().catch(() => {});
-    const t = setInterval(() => { run().catch(() => {}); }, 60000);
-    return () => { alive = false; clearInterval(t); };
-  }, [supabase, userId, enabled, limit]);
-  return state;
-}
 
 function FundMoves({ supabase, userId, enabled, title = "Auto-funding moves", limit = 5, nameFor = null }) {
   const { rows, now } = useFundMoves(supabase, userId, enabled, limit);
@@ -381,7 +411,10 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
       ))}
       <BalanceBlock supabase={supabase} userId={userId}
         kalshi={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected)}
-        poly={!!(status.venues && status.venues.polymarket_us && status.venues.polymarket_us.connected)} />
+        poly={!!(status.venues && status.venues.polymarket_us && status.venues.polymarket_us.connected)}
+        kalshiRow={status.venues && status.venues.kalshi}
+        caps={status.caps}
+        cap={cap} />
       <FundMoves supabase={supabase} userId={userId}
         enabled={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected && status.venues.kalshi.autoFund)} />
     </div>

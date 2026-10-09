@@ -135,6 +135,43 @@ export function filledByParlay(fills) {
   return out;
 }
 
+
+/** Sum of single-game + combos cash when both amounts are known; else null amount. */
+export function totalCashCell(main, combo) {
+  const m = main || balanceCell(null);
+  const c = combo || balanceCell(null);
+  if (m.amount == null || c.amount == null) {
+    if (m.state === "waiting" && c.state === "waiting") return { state: "waiting", amount: null, at: null, checkedAt: null, error: null };
+    const worse = m.amount == null ? m : c;
+    return { state: worse.state === "ok" ? "waiting" : worse.state, amount: null, at: worse.at, checkedAt: worse.checkedAt, error: m.error || c.error };
+  }
+  const amount = Math.round((m.amount + c.amount) * 100) / 100;
+  const state = [m.state, c.state].includes("error") ? "error"
+    : [m.state, c.state].includes("stale") ? "stale"
+    : [m.state, c.state].includes("waiting") ? "waiting"
+    : "ok";
+  const at = [m.at, c.at].filter(Boolean).sort().pop() || null;
+  const checkedAt = [m.checkedAt, c.checkedAt].filter(Boolean).sort().pop() || null;
+  return { state, amount, at, checkedAt, error: m.error || c.error };
+}
+
+/**
+ * Dollars in unconfirmed auto-funding moves (status sending|accepted).
+ * Cash reserved by resting orders is not in combo_balances — callers show only this.
+ * moves=null -> amount null ("—"); empty -> $0.
+ */
+export function pendingMovesCell(moves) {
+  if (moves == null) return { state: "ok", amount: null, at: null, checkedAt: null, error: null };
+  let sum = 0;
+  for (const r of moves) {
+    if (!r) continue;
+    if (r.status !== "sending" && r.status !== "accepted") continue;
+    const n = num(r.amount_usd);
+    if (n != null && n > 0) sum += n;
+  }
+  return { state: "ok", amount: Math.round(sum * 100) / 100, at: null, checkedAt: null, error: null };
+}
+
 /** Compact Balance cell for the owner table. "*" = couldn't refresh (last amount). */
 export function adminBalanceText(b, { kalshi = true, poly = false } = {}) {
   if (!b) return "—";
