@@ -30,6 +30,7 @@ const defaults = {
   loadUserKalshiCreds: loadUserKalshiCreds,
   createClient: defaultCreateClient,
   rateLimiter: probeRate,
+  serviceClient: () => serviceClient(),
 };
 
 let deps = { ...defaults };
@@ -376,6 +377,171 @@ async function runProbe({ legs: rawLegs, contracts, waitMs, collection: requeste
   };
 }
 
+// ── Check market price on a pending lock ──
+// 1) hold the lock's own quotes (probe_hold_until; worker cancels within ~2-5s),
+// 2) RFQ the lock's combo on the LOCK OWNER's key (Kevin: server key; tester: their
+//    Vault key, never Kevin's), 3) collect quotes, cancel the RFQ, never accept,
+// 4) always clear the hold (worker also drops any hold after 30s).
+async function lockCreds(parlay) {
+  if (String(parlay.user_id || '').toLowerCase() === lib.OWNER_USER_ID) {
+    const creds = deps.kalshiCreds();
+    if (!creds.ok) return { ok: false, status: 503, body: lib.missingKalshiKeysError(creds.missing) };
+    return { ok: true, creds, source: 'owner-env' };
+  }
+  const loaded = await deps.loadUserKalshiCreds(parlay.user_id);
+  if (!loaded.ok) {
+    return { ok: false, status: loaded.status || 400, body: { ok: false, error: loaded.error || lib.CONNECT_KALSHI_ERROR, needKalshiKey: !!loaded.needKalshiKey || !!loaded.missingKey } };
+  }
+  return { ok: true, creds: { ok: true, keyId: loaded.keyId, pem: loaded.pem }, source: 'user-vault' };
+}
+
+async function setHold(client, parlayId, untilIso) {
+  const { error } = await client.from('combo_parlays').update({ probe_hold_until: untilIso }).eq('id', parlayId);
+  return error ? { ok: false, error: String(error.message || error) } : { ok: true };
+}
+
+async function clearHold(client, parlayId, untilIso) {
+  try {
+    // Only clear our own hold (a newer probe may have written a later one).
+    await client.from('combo_parlays').update({ probe_hold_until: null }).eq('id', parlayId).eq('probe_hold_until', untilIso);
+  } catch (_) { /* worker drops it after 30s anyway */ }
+}
+
+async function ownQuoteIds(client, parlayId, sinceIso) {
+  try {
+    const { data } = await client.from('combo_submissions').select('quote_id').eq('parlay_id', parlayId).gte('created_at', sinceIso);
+    return (data || []).map((r) => r && r.quote_id).filter(Boolean);
+  } catch (_) { return []; }
+}
+
+async function rfqCreator(rfqId, creds) {
+  try {
+    const r = await kalshi('GET', `/communications/rfqs/${encodeURIComponent(rfqId)}`, { creds });
+    return r.ok ? lib.rfqCreatorId(r.data) : null;
+  } catch (_) { return null; }
+}
+
+async function runLockProbe({ parlay, client, creds }) {
+  const filled = await (async () => {
+    try {
+      const { data } = await client.from('combo_fills').select('count').eq('parlay_id', parlay.id).eq('is_combo', true).eq('is_taker', false);
+      return (data || []).reduce((n, r) => n + (Number(r.count) || 0), 0);
+    } catch (_) { return 0; }
+  })();
+  const contracts = lib.lockProbeContracts(parlay, filled);
+  if (!contracts) return { ok: false, status: 400, error: 'This lock has no contracts left to check.' };
+  const legsRes = lib.normalizeLegs(parlay.legs);
+  if (!legsRes.ok) return { ok: false, status: 400, error: legsRes.error };
+  const requested = String(parlay.mve_collection || lib.COMBO_COLLECTION).trim() || lib.COMBO_COLLECTION;
+
+  const startedIso = new Date(deps.now()).toISOString();
+  const untilIso = new Date(deps.now() + lib.LOCK_PROBE_HOLD_MS).toISOString();
+  const held = await setHold(client, parlay.id, untilIso);
+  if (!held.ok) {
+    return { ok: false, status: 503, error: /probe_hold_until/.test(held.error)
+      ? 'Check market price on a lock needs a database update that has not been applied yet.'
+      : 'Could not pause this lock\'s quotes. Try again.' };
+  }
+  try {
+    await deps.sleep(lib.LOCK_PROBE_SETTLE_MS);
+    const picked = await pickCollection(legsRes.legs, requested);
+    if (!picked.ok) return picked;
+    const market = await ensureComboMarket(picked.legs, picked.collection, creds);
+    if (!market.ok) return { ...market, collection: picked.collection };
+    const fee = await makerRateForMarket(market.marketTicker);
+    const created = await createRfq(market.marketTicker, contracts, creds);
+    if (!created.ok) return { ...created, marketTicker: market.marketTicker };
+    let poll;
+    let creatorId = null;
+    try {
+      creatorId = await rfqCreator(created.rfqId, creds);
+      poll = await pollAllQuotes(created.rfqId, lib.LOCK_PROBE_WAIT_MS, creds);
+    } finally {
+      await deleteRfq(created.rfqId, creds);
+    }
+    const ownIds = await ownQuoteIds(client, parlay.id, new Date(deps.now() - 10 * 60 * 1000).toISOString());
+    const filtered = lib.excludeOwnQuotes(poll.quotes, { creatorId, ownQuoteIds: ownIds });
+    const best = lib.pickBestQuote(filtered.quotes, fee.makerRate);
+    return {
+      ok: true,
+      lockProbe: true,
+      parlayId: parlay.id,
+      collection: picked.collection,
+      marketTicker: market.marketTicker,
+      makerRate: fee.makerRate,
+      bestNoBid: best.bestNoBid,
+      bestAmerican: best.bestAmerican,
+      quoteCount: best.quoteCount,
+      usableQuoteCount: best.usableQuoteCount,
+      ownQuotesExcluded: filtered.excluded,
+      contracts,
+      waitedMs: poll.waitedMs,
+      listError: poll.listError || null,
+      fillAmerican: parlay.fill_american,
+      checkedAt: new Date(deps.now()).toISOString(),
+      startedAt: startedIso,
+    };
+  } finally {
+    await clearHold(client, parlay.id, untilIso);
+  }
+}
+
+// Lock probe: wait the full window (do not stop at the first quote) so the best of several shows.
+async function pollAllQuotes(rfqId, waitMs, creds) {
+  const start = deps.now();
+  const deadline = start + waitMs;
+  let quotes = [];
+  let lastErr = null;
+  while (true) {
+    const listed = await listQuotes(rfqId, creds);
+    if (listed.ok) { quotes = listed.quotes; lastErr = null; } else lastErr = listed.error;
+    const t = deps.now();
+    if (t >= deadline) break;
+    await deps.sleep(Math.min(700, Math.max(0, deadline - t)));
+    if (deps.now() >= deadline) {
+      const last = await listQuotes(rfqId, creds);
+      if (last.ok) { quotes = last.quotes; lastErr = null; }
+      break;
+    }
+  }
+  return { quotes, waitedMs: deps.now() - start, listError: lastErr };
+}
+
+async function handleLockProbe(req, res, auth, body) {
+  const parlayId = String(body.parlay_id || body.parlayId || '');
+  if (!/^[0-9a-f-]{36}$/i.test(parlayId)) return json(res, 400, { ok: false, error: 'parlay_id required' });
+  const client = deps.serviceClient();
+  if (!client) return json(res, 503, { ok: false, error: 'Server is not configured' });
+  const { data: parlay, error } = await client.from('combo_parlays').select('*').eq('id', parlayId).maybeSingle();
+  if (error) return json(res, 502, { ok: false, error: 'Could not load the lock' });
+  if (!parlay) return json(res, 404, { ok: false, error: 'Lock not found' });
+  const actorId = String((auth.user && auth.user.id) || '').toLowerCase();
+  if (!auth.isOwner && actorId !== String(parlay.user_id || '').toLowerCase()) {
+    return json(res, 403, { ok: false, error: 'You can only check your own locks.' });
+  }
+  if (parlay.active === false || parlay.archived_at) return json(res, 400, { ok: false, error: 'That lock is not pending.' });
+  if (lib.isPolyLock(parlay)) return json(res, 400, { ok: false, error: lib.POLY_NOT_AVAILABLE_ERROR, notAvailable: true });
+
+  const limiter = deps.rateLimiter || probeRate;
+  const rateKey = auth.user && (auth.user.id || auth.user.email);
+  const rate = limiter.check(rateKey, deps.now());
+  if (!rate.ok) return json(res, rate.status || 429, { ok: false, error: rate.error, retryAfterMs: rate.retryAfterMs || null });
+
+  const resolved = await lockCreds(parlay);
+  if (!resolved.ok) return json(res, resolved.status || 400, resolved.body);
+  // Count the attempt once we will touch the exchange or pause quotes.
+  limiter.mark(rateKey, deps.now());
+  try {
+    const out = await runLockProbe({ parlay, client, creds: resolved.creds });
+    if (!out.ok) {
+      return json(res, out.status || 502, { ok: false, error: out.error, outsideCollection: out.outsideCollection || null });
+    }
+    return json(res, 200, { ...out, credsSource: resolved.source });
+  } catch (e) {
+    return json(res, 502, { ok: false, error: String(e && e.message || e) });
+  }
+}
+
 async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
@@ -392,6 +558,12 @@ async function handler(req, res) {
   }
   if (auth.isOwner == null) {
     auth.isOwner = lib.isComboOwner(auth.user) || authFn === deps.requireOwner;
+  }
+
+  const preBody = lib.parseBody(req);
+  if (preBody && (preBody.parlay_id || preBody.parlayId)) {
+    await handleLockProbe(req, res, auth, preBody);
+    return;
   }
 
   const rate = (deps.rateLimiter || probeRate).check((auth.user && (auth.user.id || auth.user.email)), deps.now());
@@ -453,9 +625,9 @@ async function handler(req, res) {
   }
 }
 
-handler.config = { maxDuration: 20 };
+handler.config = { maxDuration: 30 };
 module.exports = handler;
-module.exports.config = { maxDuration: 20 };
+module.exports.config = { maxDuration: 30 };
 module.exports._helpers = lib;
 module.exports._sign = sign;
 module.exports._runProbe = runProbe;
@@ -465,3 +637,5 @@ module.exports._requireComboOwner = requireComboOwner;
 module.exports._requireProbeUser = requireProbeUser;
 module.exports._loadUserKalshiCreds = loadUserKalshiCreds;
 module.exports._resolveProbeCreds = resolveProbeCreds;
+module.exports._runLockProbe = runLockProbe;
+module.exports._lockCreds = lockCreds;

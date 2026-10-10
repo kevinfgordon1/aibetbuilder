@@ -437,6 +437,52 @@ function createProbeRateLimiter(cooldownMs = PROBE_COOLDOWN_MS) {
 
 const CONNECT_KALSHI_ERROR = 'Connect Kalshi to check price';
 
+// ── Check market price on a pending lock ──
+// The lock's own quotes are held off (combo_parlays.probe_hold_until) while
+// the owner's probe RFQ is out, so the worker does not answer it and our own
+// price never shows up as a competitor. The worker ignores a hold after 30s.
+const LOCK_PROBE_HOLD_MS = 20_000;     // hold we write; cleared as soon as the probe ends
+const LOCK_PROBE_SETTLE_MS = 3_000;    // worker polls holds every 2s, then cancels open quotes
+const LOCK_PROBE_WAIT_MS = 5_000;      // collect competing quotes
+const POLY_NOT_AVAILABLE_ERROR = 'Check market price is not available for Polymarket locks yet.';
+
+function isPolyLock(parlay) {
+  if (!parlay) return false;
+  const venue = String(parlay.venue || '').toLowerCase();
+  if (venue === 'polymarket' || venue === 'polymarket_us' || venue === 'poly') return true;
+  if (/^caoc-/i.test(String(parlay.combo_ticker || ''))) return true;
+  const legs = Array.isArray(parlay.legs) ? parlay.legs : [];
+  return legs.length > 0 && legs.every((l) => l && /^(caoc-|0x|pm[-_])/i.test(String(l.ticker || l.market_ticker || '')));
+}
+
+/** Probe contracts for a lock: the remaining cap (at least 1). */
+function lockProbeContracts(parlay, filled = 0) {
+  const cap = Math.round(Number(parlay && parlay.max_contracts));
+  if (!Number.isFinite(cap) || cap < 1) return null;
+  const left = cap - Math.max(0, Math.round(Number(filled) || 0));
+  return Math.min(1000000, Math.max(1, left));
+}
+
+/** Drop quotes that are ours: same Kalshi account as the RFQ, or one of the lock's quote ids. */
+function excludeOwnQuotes(quotes, { creatorId = null, ownQuoteIds = [] } = {}) {
+  const own = new Set((ownQuoteIds || []).filter(Boolean).map(String));
+  const me = creatorId ? String(creatorId) : null;
+  let excluded = 0;
+  const out = [];
+  for (const q of Array.isArray(quotes) ? quotes : []) {
+    const qid = q && (q.id || q.quote_id);
+    const qCreator = q && (q.creator_id || q.creator_user_id || q.user_id);
+    if ((qid && own.has(String(qid))) || (me && qCreator && String(qCreator) === me)) { excluded += 1; continue; }
+    out.push(q);
+  }
+  return { quotes: out, excluded };
+}
+
+function rfqCreatorId(data) {
+  const r = data && (data.rfq || data);
+  return (r && (r.creator_id || r.creator_user_id || r.user_id)) || null;
+}
+
 module.exports = {
   KFEE,
   FALLBACK_MAKER_RATE,
@@ -491,4 +537,12 @@ module.exports = {
   PROBE_COOLDOWN_MS,
   createProbeRateLimiter,
   CONNECT_KALSHI_ERROR,
+  LOCK_PROBE_HOLD_MS,
+  LOCK_PROBE_SETTLE_MS,
+  LOCK_PROBE_WAIT_MS,
+  POLY_NOT_AVAILABLE_ERROR,
+  isPolyLock,
+  lockProbeContracts,
+  excludeOwnQuotes,
+  rfqCreatorId,
 };

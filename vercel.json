@@ -43,7 +43,7 @@
       "maxDuration": 60
     },
     "api/combo-probe.js": {
-      "maxDuration": 20
+      "maxDuration": 30
     },
     "api/live-trading-desk.js": {
       "maxDuration": 15

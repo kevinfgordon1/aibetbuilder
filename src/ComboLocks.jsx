@@ -1368,6 +1368,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             onDone={reload}
             busyKey={orderBusyKey}
             setBusyKey={setOrderBusyKey}
+            probeAllowed={canSeeOwnerTools(user) || kalshiKeyConnected !== false}
           />
         </DetailBlock>
         <DetailBlock title="Quote history">

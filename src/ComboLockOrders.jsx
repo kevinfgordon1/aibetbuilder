@@ -12,6 +12,8 @@ import {
   allInFromExchange,
 } from "./comboLockEdit";
 import { fmtAmerican as fmtAm } from "./comboLockView";
+import { lockProbeView, CONNECT_KALSHI_LABEL } from "./comboProbe";
+import { isPolyComboTicker } from "./buyerOdds.js";
 
 async function postLockOrder(supabase, body) {
   const { data } = await supabase.auth.getSession();
@@ -38,6 +40,7 @@ export function OpenQuotesPanel({
   onDone,
   busyKey,
   setBusyKey,
+  probeAllowed = true,
 }) {
   const opens = openQuotesForLock(submissions, parlay.id);
   const [editId, setEditId] = useState(null);
@@ -83,6 +86,7 @@ export function OpenQuotesPanel({
         <div className="oq-title">Open quotes</div>
         <div className="oq-actions">
           <button type="button" className="btn mini" disabled={!!busy} onClick={() => startEdit(null)}>Edit fill odds</button>
+          <LockMarketCheck parlay={parlay} supabase={supabase} allowed={probeAllowed} disabled={!!busy} />
           {opens.length > 0 && (
             <button type="button" className="btn mini danger" disabled={!!busy} onClick={cancelAll}>Cancel all open</button>
           )}
@@ -129,6 +133,66 @@ export function OpenQuotesPanel({
         Cancels hit the exchange within a few seconds. New quotes use the updated fill odds within about 30s. Fills you already have keep their old price.
       </div>
     </div>
+  );
+}
+
+async function postLockProbe(supabase, parlayId) {
+  const { data } = await supabase.auth.getSession();
+  const token = data && data.session && data.session.access_token;
+  if (!token) return { ok: false, error: "Sign in required" };
+  const r = await fetch("/api/combo-probe", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ parlay_id: parlayId }),
+  });
+  let d = null;
+  try { d = await r.json(); } catch (_) { d = null; }
+  if (!d || typeof d !== "object") return { ok: false, error: `Check failed (${r.status})` };
+  return d;
+}
+
+// Check market price on a pending lock: pauses this lock's quotes for a few
+// seconds, asks Kalshi on the lock owner's key, then resumes automatically.
+export function LockMarketCheck({ parlay, supabase, allowed = true, disabled = false }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const poly = isPolyComboTicker(parlay && parlay.combo_ticker) || /poly/i.test(String((parlay && parlay.venue) || ""));
+  const run = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult(await postLockProbe(supabase, parlay.id));
+    } catch (e) {
+      setResult({ ok: false, error: e.message || "Couldn't check the market price. Try again." });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const view = result ? lockProbeView(result, { fillAmerican: parlay.fill_american, ticker: parlay.combo_ticker }) : null;
+  const label = !allowed ? CONNECT_KALSHI_LABEL : busy ? "Checking… (quotes paused)" : "Check market price";
+  return (
+    <>
+      <button
+        type="button"
+        className="btn mini"
+        data-testid="lock-check-market"
+        disabled={disabled || busy || !allowed || poly}
+        title={poly ? "Not available for Polymarket locks yet" : "Pauses this lock's quotes for ~10 seconds, asks the market on your Kalshi key, then resumes. Never buys anything."}
+        onClick={run}
+      >{poly ? "Check market price (Kalshi only)" : label}</button>
+      {view && (
+        <div className={"note " + (view.kind === "win" ? "ok" : "warn")} data-testid="lock-check-result" style={{ flexBasis: "100%", marginTop: 6 }}>
+          {view.ours != null || view.theirs != null ? (
+            <div className="num" style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+              {view.ours != null && <span><b>Yours:</b> {view.oursText}</span>}
+              <span><b>Best other seller:</b> {view.theirs != null ? view.theirsText : "none"}</span>
+            </div>
+          ) : null}
+          <div>{view.text}</div>
+          {view.checkedText ? <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{view.checkedText} · your quotes resumed</div> : null}
+        </div>
+      )}
+    </>
   );
 }
 

@@ -1,5 +1,6 @@
 // Combo Locks Probe — UI copy + fill-vs-market compare.
 // Server returns after-maker-fee Americans so they match the fill field.
+import { buyerSeesAfterFees, buyerSeesFromNoPrice } from "./buyerOdds.js";
 
 export function formatAmerican(a) {
   if (a == null || !Number.isFinite(Number(a))) return "—";
@@ -109,4 +110,41 @@ export function probeUiState({
     disabled,
     label: probing ? "Checking…" : "Check market price",
   };
+}
+
+// ── Check market price on a pending lock card ──
+
+function etTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
+}
+
+/**
+ * Card view of a lock probe: our buyer price vs the best competing buyer price
+ * (both after the buyer's fee), whether we'd win, and when it was checked.
+ */
+export function lockProbeView(result, { fillAmerican, ticker } = {}) {
+  if (!result) return null;
+  if (!result.ok) {
+    return { kind: result.notAvailable ? "na" : result.needKalshiKey ? "need-key" : "error", text: result.error || "Couldn't check the market price. Try again." };
+  }
+  const ours = buyerSeesAfterFees(fillAmerican != null ? fillAmerican : result.fillAmerican, { ticker: ticker || result.marketTicker });
+  const theirs = result.bestNoBid != null ? buyerSeesFromNoPrice(result.bestNoBid) : null;
+  const checked = etTime(result.checkedAt);
+  const n = Number(result.usableQuoteCount) || 0;
+  const base = {
+    ours: ours ? ours.american : null,
+    oursText: ours ? `Buyer sees ${ours.text} after fees` : "",
+    theirs: theirs ? theirs.american : null,
+    theirsText: theirs ? `Buyer sees ${theirs.text} after fees` : "",
+    checkedText: checked ? `Checked ${checked}` : "",
+    quotes: n,
+  };
+  if (result.listError && !n) return { ...base, kind: "error", verdict: null, text: "Couldn't read the market's quotes. Try again in a minute." };
+  if (!theirs) return { ...base, kind: "win", verdict: "alone", text: "No other seller quoted it, so your quote would be the only one." };
+  if (base.ours == null) return { ...base, kind: "warn", verdict: null, text: "Best competing quote shown; your own price couldn't be computed." };
+  if (base.ours > base.theirs) return { ...base, kind: "win", verdict: "win", text: `You'd win: your price beats the best other seller (${n} quote${n === 1 ? "" : "s"}).` };
+  if (base.ours === base.theirs) return { ...base, kind: "warn", verdict: "tie", text: "Tied with the best other seller. Raise your odds a little to win." };
+  return { ...base, kind: "lose", verdict: "lose", text: `You'd lose: another seller is offering the buyer a better price (${n} quote${n === 1 ? "" : "s"}). Raise your odds to win.` };
 }
