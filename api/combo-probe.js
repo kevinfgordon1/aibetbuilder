@@ -100,6 +100,42 @@ async function fetchCollectionEvents(collection) {
   }
 }
 
+// Pick the collection that actually contains every leg (requested one first, then the
+// other sports combo collections) and resolve each leg's real event_ticker from it.
+async function pickCollection(legs, requested) {
+  const order = [requested, ...lib.COMBO_COLLECTION_CANDIDATES.filter((c) => c !== requested)];
+  const tried = [];
+  let firstEvents = null;
+  for (const c of order) {
+    const events = await fetchCollectionEvents(c);
+    if (!events) continue;
+    tried.push(c);
+    if (!firstEvents) firstEvents = events;
+    const resolved = lib.legsInCollection(legs, events);
+    if (resolved) return { ok: true, collection: c, legs: resolved };
+  }
+  if (!tried.length) return { ok: true, collection: requested, legs, unverified: true };
+  // No collection holds all legs: name the legs missing from every one.
+  const bad = legs.filter((l) => !lib.resolveEventTicker(l.ticker, firstEvents));
+  return { ok: false, status: 400, error: lib.noCollectionError(bad.length ? bad : legs, tried),
+    outsideCollection: (bad.length ? bad : legs).map((l) => l.ticker) };
+}
+
+// Maker rate for the combo's series (Kalshi GET /series); unknown → 0.035, same as the worker.
+async function makerRateForMarket(marketTicker) {
+  const series = String(marketTicker || '').split('-')[0];
+  if (!series) return { series: null, makerRate: lib.FALLBACK_MAKER_RATE };
+  try {
+    const res = await deps.fetchImpl(`${apiBase()}/series/${encodeURIComponent(series)}`, { method: 'GET', headers: { accept: 'application/json' } });
+    if (res && res.ok) {
+      const { data } = await readJsonRes(res);
+      const st = data && data.series;
+      if (st && st.fee_type) return { series, makerRate: lib.makerRateFromSeries(st.fee_type, st.fee_multiplier), feeType: st.fee_type };
+    }
+  } catch (_) { /* fall through */ }
+  return { series, makerRate: lib.FALLBACK_MAKER_RATE };
+}
+
 async function ensureComboMarket(legs, collection, creds) {
   const selected_markets = lib.selectedMarkets(legs);
   const path = `/multivariate_event_collections/${encodeURIComponent(collection)}`;
@@ -214,9 +250,13 @@ async function pollQuotes(rfqId, waitMs, creds) {
   return { quotes, waitedMs: deps.now() - start, listError: lastErr };
 }
 
-async function runProbe({ legs, contracts, waitMs, collection, creds }) {
+async function runProbe({ legs: rawLegs, contracts, waitMs, collection: requested, creds }) {
+  const picked = await pickCollection(rawLegs, requested);
+  if (!picked.ok) return picked;
+  const { collection, legs } = picked;
   const market = await ensureComboMarket(legs, collection, creds);
-  if (!market.ok) return market;
+  if (!market.ok) return { ...market, collection };
+  const fee = await makerRateForMarket(market.marketTicker);
   const created = await createRfq(market.marketTicker, contracts, creds);
   if (!created.ok) return { ...created, marketTicker: market.marketTicker };
   let poll;
@@ -225,9 +265,12 @@ async function runProbe({ legs, contracts, waitMs, collection, creds }) {
   } finally {
     await deleteRfq(created.rfqId, creds);
   }
-  const best = lib.pickBestQuote(poll.quotes);
+  const best = lib.pickBestQuote(poll.quotes, fee.makerRate);
   return {
     ok: true,
+    collection,
+    feeSeries: fee.series,
+    makerRate: fee.makerRate,
     bestAmerican: best.bestAmerican,
     bestNoBid: best.bestNoBid,
     bestYesBid: best.bestYesBid,
@@ -292,6 +335,7 @@ async function handler(req, res) {
         upstreamError: result.upstreamError || null,
         outsideCollection: result.outsideCollection || null,
         marketTicker: result.marketTicker || null,
+        collection: result.collection || null,
       });
       return;
     }
