@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canSeeOwnerTools } from "./comboAccess";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
-  KALSHI_HOWTO, autoFundLine, fundMoveText, effectiveCap, parseCapInput,
+  KALSHI_HOWTO, autoFundLine, fundMoveText, effectiveCap, targetCap, parseCapInput,
 } from "./comboTesters";
 import {
   adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, pendingMovesCell, totalCashCell, usd,
@@ -103,7 +103,7 @@ function useOwnCap(supabase, userId, enabled) {
   return { ...state, save };
 }
 
-function CapEditor({ cap, daily }) {
+function CapEditor({ cap, daily, required = false }) {
   const [text, setText] = useState(cap.value == null ? "" : String(cap.value));
   const [msg, setMsg] = useState(null);
   useEffect(() => { setText(cap.value == null ? "" : String(cap.value)); }, [cap.value]);
@@ -119,7 +119,7 @@ function CapEditor({ cap, daily }) {
         <input id="tst-cap-in" inputMode="decimal" aria-label="Amount to keep for combos" placeholder={daily != null ? money(daily) : "$"} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }} />
         <button type="button" className="btn mini" onClick={onSave}>Save</button>
       </div>
-      <div className="tst-cap-hint">{msg || "The site keeps your combos cash topped up to this amount."}{!msg && daily != null ? ` Blank = ${money(daily)} daily limit · $0 = off.` : ""}</div>
+      <div className="tst-cap-hint">{msg || "The site keeps your combos cash topped up to this amount."}{!msg && daily != null ? ` Blank = ${money(daily)} daily limit · $0 = off.` : ""}{!msg && required ? " Blank or $0 = off (nothing trades)." : ""}</div>
     </div>
   );
 }
@@ -269,8 +269,8 @@ function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps =
     ? comboShortfall({ comboUsd: b.kalshiCombo.amount, parlays: needs.parlays, filledById: needs.filledById })
     : { short: false };
   const autoOn = !!(kalshiRow && kalshiRow.connected && kalshiRow.autoFund);
-  const showCap = !!(autoOn && cap && cap.ok && caps && caps.perDayUsd != null);
-  const capTarget = showCap ? effectiveCap(cap.value, caps.perDayUsd) : null;
+  const showCap = !!(autoOn && cap && cap.ok && caps && (caps.perDayUsd != null || caps.fundUnlimited));
+  const capTarget = showCap ? targetCap(cap.value, caps) : null;
   // Effective target is min(cap, total cash): worker never moves more than Default has.
   const shortCash = showCap && total && total.amount != null && capTarget != null && capTarget > 0 && total.amount < capTarget;
   const kalshiNote = !kalshi ? null
@@ -294,7 +294,7 @@ function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps =
               sub={pending && pending.state === "ok" && pending.amount > 0 ? "Auto-funding in transit" : null} />
             <div className="tst-bal-combo">
               <BalanceCell label="Cash available for combos" cell={b.kalshiCombo} hi now={now} />
-              {showCap && <CapEditor cap={cap} daily={effectiveCap(null, caps.perDayUsd)} />}
+              {showCap && <CapEditor cap={cap} daily={caps.fundUnlimited ? null : effectiveCap(null, caps.perDayUsd)} required={!!caps.fundUnlimited} />}
               {shortCash && (
                 <div className="tst-cap-hint" style={{ marginTop: 4 }}>
                   Keeping {usd(total.amount)} of your {usd(capTarget)} target (not enough cash).

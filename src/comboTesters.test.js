@@ -64,3 +64,13 @@ assert.equal(fundMoveText({ amount_usd: 12.5, status: "failed" }), "$12.50 Defau
 assert.equal(fundMoveText({ amount_usd: 60, status: "confirmed", from_shard: 1, to_shard: 0 }), "$60.00 Combos → Default · done");
 assert.ok(/Never share your exchange password/.test(CONNECT_COPY.never));
 console.log("comboTesters.test.js ok");
+
+{
+  const { targetCap: tc } = await import("./comboTesters.js");
+  const U = { perLockUsd: null, perDayUsd: null, fundUnlimited: true };
+  assert.equal(tc(5000, U), 5000, "unlimited: own amount only");
+  assert.equal(tc(null, U), null, "blank = off");
+  assert.equal(tc("", U), null);
+  assert.equal(tc(0, U), null);
+  assert.equal(tc(900, { perDayUsd: 250 }), 250, "regular testers unchanged");
+}

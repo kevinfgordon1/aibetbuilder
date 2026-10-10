@@ -56,7 +56,7 @@ function serviceClient() {
 
 async function loadStatus(client, userId) {
   const [liveQ, keysQ] = await Promise.all([
-    client.from('combo_live_users').select('user_id,is_owner,can_trade,paused,max_per_lock_usd,max_per_day_usd').eq('user_id', userId).maybeSingle(),
+    client.from('combo_live_users').select('user_id,is_owner,can_trade,paused,max_per_lock_usd,max_per_day_usd,fund_unlimited').eq('user_id', userId).maybeSingle(),
     client.from('combo_exchange_keys').select('venue,key_hint,scopes,scope_status,verified_at,updated_at').eq('user_id', userId),
   ]);
   if (liveQ.error) throw liveQ.error;
@@ -73,6 +73,7 @@ async function loadStatus(client, userId) {
     caps: live && !isKevin ? {
       perLockUsd: live.max_per_lock_usd == null ? null : Number(live.max_per_lock_usd),
       perDayUsd: live.max_per_day_usd == null ? null : Number(live.max_per_day_usd),
+      fundUnlimited: live.fund_unlimited === true,
     } : null,
     venues: {
       kalshi: keys.publicKeyRow(byVenue.kalshi && { ...byVenue.kalshi, venue: 'kalshi' }),

@@ -34,6 +34,7 @@ export const AUTOFUND_COPY = {
   off: "Auto-funding is off for this key. To have the site fill your Combos balance for you, reconnect with a key that has Transfers or Full access. Your trades keep working meanwhile.",
   review: "Auto-funding starts once the owner confirms this key's permissions.",
   noCap: "Auto-funding is waiting for a daily limit. The owner sets it.",
+  noOwnCap: "Set your Amount to keep for combos to start. Until then nothing trades or moves.",
   paused: "Auto-funding is paused (your cap is $0).",
 };
 
@@ -45,6 +46,17 @@ export function effectiveCap(ownCap, dailyLimit) {
   const own = Number(ownCap);
   if (!Number.isFinite(own) || own < 0) return daily;
   return Math.min(own, daily);
+}
+
+// Target the worker funds to. fundUnlimited testers (combo_live_users.fund_unlimited):
+// ONLY their own Amount to keep for combos; blank / 0 = nothing moves or trades.
+export function targetCap(ownCap, caps) {
+  if (caps && caps.fundUnlimited) {
+    if (ownCap == null || ownCap === "") return null;
+    const own = Number(ownCap);
+    return Number.isFinite(own) && own > 0 ? own : null;
+  }
+  return effectiveCap(ownCap, caps && caps.perDayUsd);
 }
 
 // "$120" / "120.50" -> 120.5; "" -> null (use the daily limit); bad -> NaN.
@@ -59,8 +71,8 @@ export function autoFundLine(row, caps, ownCap = null) {
   if (!row || !row.connected) return null;
   if (row.scopeStatus === "unverified") return { tone: "muted", text: AUTOFUND_COPY.review };
   if (!row.autoFund) return { tone: "warn", text: AUTOFUND_COPY.off };
-  const cap = effectiveCap(ownCap, caps && caps.perDayUsd);
-  if (cap == null) return { tone: "muted", text: AUTOFUND_COPY.noCap };
+  const cap = targetCap(ownCap, caps);
+  if (cap == null) return { tone: "muted", text: caps && caps.fundUnlimited ? AUTOFUND_COPY.noOwnCap : AUTOFUND_COPY.noCap };
   if (cap === 0) return { tone: "muted", text: AUTOFUND_COPY.paused };
   return { tone: "ok", text: `Auto-funding is on: we keep your Combos balance topped up to ${money(cap)}.` };
 }
