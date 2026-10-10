@@ -156,6 +156,7 @@ export function decideAtFill({
   rfqContracts,
   hedgeMode = "1x",
   kind,
+  feeRate = 0,
 } = {}) {
   const book = bookPnL({ stake: parlayStake, american: parlayAmerican, kind });
   if (!book || !fillAmerican) return { ok: false, reason: "bad_inputs" };
@@ -175,8 +176,9 @@ export function decideAtFill({
     return { ok: false, reason: "zero_cap", cap };
   }
   const s = impliedProb(fillAmerican);
-  const hit = book.bookHit + N * s - N;
-  const miss = book.bookMiss + N * s;
+  const fee = lockFeeUsd(N, fillAmerican, feeRate);
+  const hit = book.bookHit + N * s - N - fee;
+  const miss = book.bookMiss + N * s - fee;
   const worst = Math.min(hit, miss);
   return {
     ok: true,
@@ -191,6 +193,7 @@ export function decideAtFill({
     competitive: fairAmerican == null ? null : fillAmerican >= fairAmerican,
     fillAmerican,
     contracts: N,
+    feeUsd: fee,
   };
 }
 
@@ -322,7 +325,29 @@ export function currentStanding(unhedged, soFar) {
   };
 }
 
-export function targetHedge(parlay) {
+/**
+ * Combo Locks fee for fee users: feeRate x contracts x lay price, lay price =
+ * 1 - YES price at the fill odds (same formula the DB charges), to the cent.
+ */
+export function lockFeeUsd(contracts, fillAmerican, feeRate = 0) {
+  const n = toNum(contracts), a = toNum(fillAmerican);
+  if (!(feeRate > 0) || !(n > 0) || a == null) return 0;
+  const s = impliedProb(a);
+  if (!(s > 0 && s < 1)) return 0;
+  return r2(feeRate * n * (1 - s));
+}
+
+/** Subtract the fee from hit, miss and worst (fee is paid either way). */
+export function applyLockFee(result, fee) {
+  if (!result || !(fee > 0)) return result;
+  const hit = r2(result.hit - fee), miss = r2(result.miss - fee);
+  const worst = r2(Math.min(hit, miss));
+  const out = { ...result, hit, miss, worst, feeUsd: fee };
+  if ("locks" in result) out.locks = worst >= 0;
+  return out;
+}
+
+export function targetHedge(parlay, { feeRate = 0 } = {}) {
   if (!parlay) return null;
   const contracts = toNum(parlay.max_contracts);
   const fillAmerican = toNum(parlay.fill_american);
@@ -335,16 +360,18 @@ export function targetHedge(parlay) {
     kind: lockKind(parlay),
   });
   if (!pay) return null;
+  const fee = lockFeeUsd(contracts, fillAmerican, feeRate);
+  const net = applyLockFee(pay, fee);
   return {
-    ...pay,
-    locks: pay.worst >= 0,
+    ...net,
+    locks: net.worst >= 0,
     fairAmerican: toNum(parlay.fair_american),
   };
 }
 
-export function lockProfile(parlay, filled = 0) {
+export function lockProfile(parlay, filled = 0, { feeRate = 0 } = {}) {
   const unhedged = currentUnhedged(parlay);
-  const target = targetHedge(parlay);
+  const target = targetHedge(parlay, { feeRate });
   const filledN = Math.max(0, toNum(filled) || 0);
   const targetN = target ? target.contracts : null;
   const soFar = unhedged

@@ -316,7 +316,7 @@ function TargetTile({ target, sellAt }) {
       {target ? (
         <>
           <OutcomeRows o={target} />
-          <div className="s">{countText(target.contracts)} contracts{sellAt ? ` at ${sellAt}` : ""} · {target.locks ? "profit locked either way" : "doesn't fully lock"}</div>
+          <div className="s">{countText(target.contracts)} contracts{sellAt ? ` at ${sellAt}` : ""}{target.feeUsd > 0 ? ` · after ${"$" + Number(target.feeUsd).toFixed(2)} fee` : ""} · {target.locks ? "profit locked either way" : "doesn't fully lock"}</div>
         </>
       ) : (
         <>

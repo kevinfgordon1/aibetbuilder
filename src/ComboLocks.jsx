@@ -41,7 +41,7 @@ import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "
 import ComboTesters from "./ComboTesters";
 import { LowCashBanner } from "./LowCashAlerts";
 import ComboCredits from "./ComboCredits";
-import { allInFromExchange, exchangeFromAllIn, feeGateNote, feeStatusFromRow } from "./comboCredits";
+import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn, feeGateNote, feeStatusFromRow } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -258,8 +258,8 @@ function OutcomeChip({ out, filled }) {
     </span>
   );
 }
-function RiskProfile({ parlay, filled }) {
-  const profile = lockProfile(parlay, filled);
+function RiskProfile({ parlay, filled, feeRate = 0 }) {
+  const profile = lockProfile(parlay, filled, { feeRate });
   if (!profile.current) return null;
   const freeBet = profile.current.kind === "freebet";
   const missTone = profile.current.miss < 0 ? "neg" : "pos";
@@ -829,7 +829,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     const cap = hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: form.mode, kind });
     if (!(cap > 0) && !(kind === "freebet" && form.mode === "riskfree")) return null;
     const d = decideAtFill({ parlayStake: stake, parlayAmerican: boost, fillAmerican: fill,
-      fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode, kind });
+      fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode, kind, feeRate: feeOn ? COMBO_FEE_RATE : 0 });
     if (!d.ok) return null;
     return { cap, d, kind };
   }, [form.stake, form.boost, form.fill, form.fair, form.mode, form.kind, feeOn]);
@@ -1223,8 +1223,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         key={p.id}
         parlay={p}
         status={status}
-        profile={lockProfile(p, filledN)}
-        feeRate={feeOn ? 0.01 : 0}
+        profile={lockProfile(p, filledN, { feeRate: feeOn ? COMBO_FEE_RATE : 0 })}
+        feeRate={feeOn ? COMBO_FEE_RATE : 0}
         filled={filledN}
         ceiling={ceiling}
         overText={desk && desk.fill ? overFillText(desk.fill) : ""}
@@ -1234,7 +1234,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         controls={<PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />}
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
-        <DetailBlock title="Profit picture"><RiskProfile parlay={p} filled={filledN} /></DetailBlock>
+        <DetailBlock title="Profit picture"><RiskProfile parlay={p} filled={filledN} feeRate={feeOn ? COMBO_FEE_RATE : 0} /></DetailBlock>
         <DetailBlock title="Price and size">
           <div className="chips">
             {feeOn
@@ -1506,6 +1506,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                     <div className={preview.d.hit >= 0 ? "pos" : "neg"}>{money(preview.d.hit)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay hits</span></div>
                     <div className={preview.d.miss >= 0 ? "pos" : "neg"}>{money(preview.d.miss)} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>if the parlay misses</span></div>
                   </div>
+                  {preview.d.feeUsd > 0 && <div className="muted num" style={{ fontSize: 12 }}>after the {money(preview.d.feeUsd)} Combo Locks fee (1%)</div>}
                 </div>
                 <div className="tile"><div className="k">{preview.kind === "freebet" ? "Free bet kept" : "Worst case"}</div>
                   <div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>
