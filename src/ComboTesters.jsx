@@ -147,10 +147,9 @@ function VenueRow({ venue, row, caps, cap, busy, onConnect, onDisconnect }) {
   const help = VENUE_HELP[venue];
   const submit = async (e) => {
     e.preventDefault();
-    const payload = { venue, key_id: form.keyId, secret: form.secret };
-    setForm(emptyForm());
+    const payload = { venue, key_id: form.keyId.trim(), secret: form.secret };
     const ok = await onConnect(payload);
-    if (ok) setOpen(false);
+    if (ok) { setForm(emptyForm()); setOpen(false); }
   };
   return (
     <div className="tst-venue">
@@ -403,6 +402,9 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
       const warn = (r.body.warnings || []).filter((w) => !/^Auto-funding is off/.test(w)).join(" ");
       setMsg({ tone: warn ? "warn" : "ok", text: `${VENUE_LABEL[payload.venue]} connected.${warn ? " " + warn : ""}` });
       return true;
+    } catch (_) {
+      setMsg({ tone: "warn", text: "Couldn't reach aibetbuilder to save the key. Nothing was saved. Check your connection, turn off any ad or privacy blocker for this site, and try again." });
+      return false;
     } finally { setBusy(false); }
   };
   const disconnect = async (venue) => {
