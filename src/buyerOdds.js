@@ -30,7 +30,9 @@ export function makerRateFromSeries(feeType, multiplier) {
 }
 
 /** "KXMVECROSSCATEGORY0-S2026…-D44B…" → "KXMVECROSSCATEGORY0" */
+export const isPolyComboTicker = (ticker) => /^caoc-/i.test(String(ticker || "").trim());
 export function seriesOfTicker(ticker) {
+  if (isPolyComboTicker(ticker)) return null;
   const t = String(ticker || "").trim().toUpperCase();
   return t ? t.split("-")[0] || null : null;
 }
@@ -41,6 +43,7 @@ export function setSeriesFee(series, feeType, multiplier) {
   if (series) seriesRates.set(String(series).toUpperCase(), makerRateFromSeries(feeType, multiplier));
 }
 export function makerRateForTicker(ticker) {
+  if (isPolyComboTicker(ticker)) return 0; // Polymarket combo: no maker fee, no rebate
   const s = seriesOfTicker(ticker);
   return s && seriesRates.has(s) ? seriesRates.get(s) : FALLBACK_MAKER_RATE;
 }
