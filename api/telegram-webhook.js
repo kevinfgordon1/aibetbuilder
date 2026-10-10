@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { parseComboLinkToken, linkComboChat, unlinkComboChat } = require('../lib/combo-tg-link');
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -57,6 +58,17 @@ module.exports = async (req, res) => {
   const isAdmin = chatId === ADMIN_CHAT_ID;
 
   try {
+    const comboToken = parseComboLinkToken(text);
+    if (comboToken) {
+      // Combo Lock alerts opt-in: link this chat to the token's user only.
+      // Does not subscribe them to KayGo bet alerts (telegram_users).
+      const r = await linkComboChat(supabase, comboToken, chatId);
+      await sendTelegram(chatId, r.reply);
+      if (r.linked && !isAdmin) {
+        await sendTelegram(ADMIN_CHAT_ID, `Combo Lock alerts linked for ${displayName}${username ? ` (@${username})` : ''}`);
+      }
+      return res.status(200).json({ ok: true });
+    }
     if (text.startsWith('/start')) {
       // ── Subscribe / re-subscribe ─────────────────────────────────
       const { error } = await supabase
@@ -79,6 +91,7 @@ module.exports = async (req, res) => {
         `Reply STOP at any time to unsubscribe.`
       );
     } else if (/^\/?stop\b/i.test(text)) {
+      await unlinkComboChat(supabase, chatId);
       // ── Unsubscribe ─────────────────────────────────────────────
       const { error } = await supabase
         .from('telegram_users')
