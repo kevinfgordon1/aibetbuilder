@@ -67,3 +67,46 @@ export function formatProbeNote(result, fillAmerican) {
   }
   return out;
 }
+
+
+/** CONNECT_KALSHI copy — keep in sync with api CONNECT_KALSHI_ERROR. */
+export const CONNECT_KALSHI_LABEL = "Connect Kalshi to check price";
+
+/**
+ * Who sees the Check market price control, and what it says.
+ * Owner: always ready (server key). Tester: needs a connected Kalshi key.
+ */
+export function probeUiState({
+  canSeeCombo,
+  isOwner,
+  kalshiConnected,
+  probing,
+  legCount,
+  contracts,
+} = {}) {
+  if (!canSeeCombo) return { show: false, kind: "hidden", disabled: true, label: "" };
+  if (isOwner) {
+    const disabled = probeDisabled({ probing, legCount, contracts });
+    return {
+      show: true,
+      kind: "ready",
+      disabled,
+      label: probing ? "Checking…" : "Check market price",
+    };
+  }
+  if (!kalshiConnected) {
+    return {
+      show: true,
+      kind: "need-key",
+      disabled: true,
+      label: CONNECT_KALSHI_LABEL,
+    };
+  }
+  const disabled = probeDisabled({ probing, legCount, contracts });
+  return {
+    show: true,
+    kind: "ready",
+    disabled,
+    label: probing ? "Checking…" : "Check market price",
+  };
+}

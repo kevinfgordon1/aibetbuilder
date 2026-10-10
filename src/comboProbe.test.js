@@ -8,6 +8,8 @@ import {
   fillBeatsMarket,
   probeDisabled,
   formatProbeNote,
+  probeUiState,
+  CONNECT_KALSHI_LABEL,
 } from "./comboProbe.js";
 
 assert.equal(formatAmerican(1200), "+1200");
@@ -58,14 +60,35 @@ for (const r of [
   assert.doesNotMatch(t, /NO \$|¢|\$0\.|rfq|RFQ|request [0-9a-f]|f3df/);
 }
 
+
+// Testers see the button when Kalshi is connected; otherwise Connect Kalshi copy.
+{
+  const owner = probeUiState({ canSeeCombo: true, isOwner: true, kalshiConnected: false, probing: false, legCount: 2, contracts: 10 });
+  assert.equal(owner.show, true);
+  assert.equal(owner.kind, "ready");
+  assert.equal(owner.label, "Check market price");
+  const need = probeUiState({ canSeeCombo: true, isOwner: false, kalshiConnected: false, probing: false, legCount: 2, contracts: 10 });
+  assert.equal(need.kind, "need-key");
+  assert.equal(need.disabled, true);
+  assert.equal(need.label, CONNECT_KALSHI_LABEL);
+  assert.equal(CONNECT_KALSHI_LABEL, "Connect Kalshi to check price");
+  const ready = probeUiState({ canSeeCombo: true, isOwner: false, kalshiConnected: true, probing: false, legCount: 2, contracts: 10 });
+  assert.equal(ready.kind, "ready");
+  assert.equal(ready.label, "Check market price");
+  assert.equal(probeUiState({ canSeeCombo: false }).show, false);
+}
+
 {
   const src = fs.readFileSync(path.join(__dirname, "ComboLocks.jsx"), "utf8");
-  assert.match(src, /\{probing \? "Checking…" : "Check market price"\}/);
+  assert.match(src, /probeUiState/);
+  assert.match(src, /CONNECT_KALSHI_LABEL|Connect Kalshi to check price/);
+  assert.match(src, /data-testid="check-market-price"/);
   assert.match(src, /Ask the market for its best price on this parlay at this size/);
   assert.match(src, /shows the best price traders would pay for this parlay right now/);
   assert.match(src, /\/api\/combo-probe/);
   assert.match(src, /authorization: "Bearer "/);
   assert.match(src, /waitMs:\s*8000/);
+  assert.match(src, /\/api\/combo-keys/);
   assert.match(src, /\{formatProbeNote\(probeResult, form\.fill === "" \? null : \+form\.fill\)\}/);
   // Kevin removed these from the Add a lock form.
   assert.doesNotMatch(src, /Load example|loadExample|Test a request|See what it would do|const simulate|setSim\(/);
