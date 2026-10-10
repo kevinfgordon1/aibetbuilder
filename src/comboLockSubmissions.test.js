@@ -133,4 +133,20 @@ function mockClient() {
   );
 }
 
+{
+  const m = await import("./comboLockSubmissions.js");
+  const rows = Array.from({ length: 400 }, (_, i) => ({ id: i, parlay_id: "big", status: "unfilled", quote_id: "q" + i }))
+    .concat([{ id: "s", parlay_id: "small", status: "unfilled", quote_id: "x" }]);
+  assert.deepEqual(m.cappedLockIds(rows), ["big"]);
+  assert.equal(m.notFilledTotal({ shown: 420, loadedUnfilledQuotes: 400, countedUnfilledQuotes: 668 }), 688);
+  assert.equal(m.notFilledTotal({ shown: 10, loadedUnfilledQuotes: 10, countedUnfilledQuotes: 10 }), 10);
+  assert.equal(m.notFilledTotal({ shown: 10, loadedUnfilledQuotes: 10, countedUnfilledQuotes: null }), 10);
+  const calls = [];
+  const q = new Proxy({}, { get: (_, k) => (...a) => { calls.push([k, a]); return q; } });
+  m.lockUnfilledCountQuery({ from: () => q }, { userId: "u", parlayId: "p" });
+  assert.deepEqual(calls[0], ["select", ["id", { count: "exact", head: true }]]);
+  const view = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
+  assert.match(view, /showing newest/);
+}
+
 console.log("comboLockSubmissions.test.js ok");

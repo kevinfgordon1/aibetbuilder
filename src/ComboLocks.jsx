@@ -35,7 +35,7 @@ import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import ComboTesters from "./ComboTesters";
@@ -471,6 +471,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
   const submissionsRef = useRef([]);
+  const [unfilledCounts, setUnfilledCounts] = useState({}); // parlay_id -> real not-filled quote count (only for capped locks)
   const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
   const [originalBets, setOriginalBets] = useState([]);
   const [mergePrompt, setMergePrompt] = useState(null);
@@ -748,6 +749,17 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       const subRes = subSettled.map(comboSettledQuery);
       const livingSubsOk = subReqs.length === 0 || subRes.every(comboListQueryOk);
       const livingSubRows = subRes.flatMap((r) => (comboListQueryOk(r) ? r.data : []));
+      // Real Not filled totals for locks over the 400-row display window (head counts, no rows).
+      const capped = cappedLockIds(livingSubRows);
+      if (capped.length) {
+        Promise.allSettled(capped.map((id) => lockUnfilledCountQuery(supabase, { userId: user.id, parlayId: id })))
+          .then((res) => {
+            const next = {};
+            res.forEach((r, i) => { if (r.status === "fulfilled" && r.value && !r.value.error && r.value.count != null) next[capped[i]] = r.value.count; });
+            setUnfilledCounts((prev) => ({ ...prev, ...next }));
+          })
+          .catch(() => {});
+      }
       // One slow/failed per-lock read must not blank every card's Quote history:
       // keep the last known rows for just the locks whose reads failed.
       const failedIds = new Set();
@@ -1247,6 +1259,12 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     return `Matched ${n} request${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} would lock profit)` : ""}`;
   };
   // The request watcher can be parked; fills still come from combo_fills.
+  const withNotFilledTotal = (h, id) => {
+    if (!h || unfilledCounts[id] == null) return h;
+    const loaded = (submissionsByParlay[id] || []).filter((r) => isLockQuoteRow(r) && String(r.status || "").toLowerCase() !== "filled").length;
+    const total = notFilledTotal({ shown: h.notFilled.length, loadedUnfilledQuotes: loaded, countedUnfilledQuotes: unfilledCounts[id] });
+    return total > h.notFilled.length ? { ...h, notFilledTotal: total } : h;
+  };
   const watcherNote = (id) => (matchedRfqWatcherParked(matchesByParlay[id] || [], attemptsByParlay[id])
     ? "The request watcher is paused. Fills below still come straight from your account."
     : "");
@@ -1312,7 +1330,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
           />
         </DetailBlock>
         <DetailBlock title="Quote history">
-          <QuoteHistory history={quoteHistory(attemptsByParlay[p.id], { parlay: p })} note={watcherNote(p.id)} />
+          <QuoteHistory history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={watcherNote(p.id)} />
         </DetailBlock>
         <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
         <div className="actions">

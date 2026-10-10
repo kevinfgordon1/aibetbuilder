@@ -522,7 +522,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   // then not filled, built from the per-lock tape (submissions, fills,
   // outcomes, matches). Replaces the old Activity + Matched requests tables.
   const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
-  assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[p\.id\], \{ parlay: p \}\)\}/);
+  assert.match(locksSrc, /<QuoteHistory history=\{withNotFilledTotal\(quoteHistory\(attemptsByParlay\[p\.id\], \{ parlay: p \}\), p\.id\)\}/);
   assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
   assert.match(locksSrc, /<DetailBlock title="Quote history">/);
   assert.match(locksSrc, /<ComboHistory/);

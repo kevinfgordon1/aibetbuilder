@@ -89,3 +89,32 @@ export function lockSubmissionQueriesForParlays(client, { userId, living = [], a
   reqs.push(...archivedLockSubmissionQueries(client, { userId, parlayIds: archivedIds }));
   return reqs;
 }
+
+// Real "Not filled" total for a lock whose quote read hit LOCK_QUOTE_LIMIT.
+// head + count=exact (indexed on parlay_id, RLS applies): no rows come back.
+export function lockUnfilledCountQuery(client, { userId, parlayId }) {
+  return client.from("combo_submissions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId).eq("parlay_id", parlayId)
+    .neq("status", "shadow").neq("status", "filled")
+    .or(LOCK_QUOTE_OR);
+}
+
+// Locks whose quote read came back full (more rows exist than were loaded).
+export function cappedLockIds(rows, limit = LOCK_QUOTE_LIMIT) {
+  const n = new Map();
+  for (const r of rows || []) {
+    if (!r || !r.parlay_id || !isLockQuoteRow(r)) continue;
+    n.set(r.parlay_id, (n.get(r.parlay_id) || 0) + 1);
+  }
+  return [...n.entries()].filter(([, c]) => c >= limit).map(([id]) => id);
+}
+
+// Card count: shown rows plus the not-filled quote rows that were not loaded.
+export function notFilledTotal({ shown, loadedUnfilledQuotes, countedUnfilledQuotes }) {
+  const s = Number(shown) || 0;
+  const c = Number(countedUnfilledQuotes);
+  const l = Number(loadedUnfilledQuotes) || 0;
+  if (!Number.isFinite(c) || c <= l) return s;
+  return s + (c - l);
+}
