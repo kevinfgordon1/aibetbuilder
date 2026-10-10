@@ -426,6 +426,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [matchCounts, setMatchCounts] = useState({}); // parlay_id -> { n, locks_n, dollar_n, last_match }
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
+  const submissionsRef = useRef([]);
   const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
   const [originalBets, setOriginalBets] = useState([]);
   const [mergePrompt, setMergePrompt] = useState(null);
@@ -701,8 +702,22 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       const subRes = subSettled.map(comboSettledQuery);
       const livingSubsOk = subReqs.length === 0 || subRes.every(comboListQueryOk);
       const livingSubRows = subRes.flatMap((r) => (comboListQueryOk(r) ? r.data : []));
-      if (livingSubsOk) {
-        const subRows = mergeSubmissionRows(livingSubRows);
+      // One slow/failed per-lock read must not blank every card's Quote history:
+      // keep the last known rows for just the locks whose reads failed.
+      const failedIds = new Set();
+      let qi = 0;
+      for (const row of livingForSubs) {
+        if (!row || !row.id) continue;
+        if (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1])) failedIds.add(row.id);
+        qi += 2;
+      }
+      if (archivedIds.length && (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1]))) {
+        archivedIds.forEach((id) => failedIds.add(id));
+      }
+      if (livingSubsOk || livingSubRows.length || failedIds.size) {
+        const kept = (submissionsRef.current || []).filter((row) => row && failedIds.has(row.parlay_id));
+        const subRows = mergeSubmissionRows(livingSubRows, kept);
+        submissionsRef.current = subRows;
         setSubmissions(subRows);
         refreshSettlements({
           living: livingRows,
