@@ -100,10 +100,11 @@ function kalshiHeaders(keyId, key, method, signPath, ts = Date.now()) {
 // scope can move money off the tester's own account through the API.
 //   read + write::trade (no Transfers): still accepted and trades, but
 //   auto-funding is off and the tester sees a reconnect note.
-// Refused: missing Read or Trade; on granular keys write::block_trade_accept,
+// Refused: missing Read or Trade; on granular keys
 // write::fcm_risk or any other write::* (Full access already includes them, so
 // they are only redundant there); unknown scope strings; sub-account keys.
-const GRANULAR_OK = Object.freeze(['read', 'write::trade', 'write::transfer']);
+// write::block_trade_accept is accepted too: Kalshi can expand Full access into granular scopes.
+const GRANULAR_OK = Object.freeze(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']);
 
 function normScopes(list) {
   return (Array.isArray(list) ? list : [])

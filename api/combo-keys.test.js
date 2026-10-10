@@ -47,7 +47,8 @@ const KID = 'a1b2c3d4-e5f6-4711-8899-aabbccdd1234';
   assert.equal(bad(['write::trade', 'write::transfer']), 'missing_read');
   assert.equal(bad(['read', 'write::transfer']), 'missing_trade', 'Transfers without Trade');
   assert.equal(bad(['read::portfolio_balance', 'write::trade', 'write::transfer']), 'missing_read', 'granular read only, no Read all data');
-  assert.equal(bad(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']), 'extra_scope', 'Accept block trades on a granular key');
+  assert.equal(bad(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']), null, 'Full access expanded to granular scopes');
+  assert.equal(bad(['read', 'write']), null, 'broad Full access');
   assert.equal(bad(['read', 'write::trade', 'write::fcm_risk']), 'extra_scope');
   assert.equal(bad(['read', 'write::trade', 'write::something_new']), 'extra_scope', 'unknown write scope');
   assert.equal(bad(['read', 'write', 'admin']), 'extra_scope', 'unknown scope string even with Full access');
@@ -61,11 +62,9 @@ const KID = 'a1b2c3d4-e5f6-4711-8899-aabbccdd1234';
     assert.match(msg, /Trade is unchecked/);
     assert.match(msg, /Full access \(simplest\)/);
     assert.match(msg, /Read all data, Trade and Transfers/);
-    try { keys.assessKalshiKey({ api_key_id: KID, scopes: ['read', 'write::trade', 'write::block_trade_accept'] }, 9999999999, 1); } catch (e) { msg = e.message; }
-    assert.match(msg, /Accept block trades/);
   }
   assert.deepEqual(keys.classifyKalshiScopes(['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']),
-    { scopes: ['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], full: false, extra: ['write::block_trade_accept'], missing: [], autoFund: true });
+    { scopes: ['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], full: false, extra: [], missing: [], autoFund: true });
   assert.equal(keys.kalshiAutoFund(['read', 'write']), true);
   assert.equal(keys.kalshiAutoFund(['read', 'write::trade', 'write::transfer']), true);
   assert.equal(keys.kalshiAutoFund(['read', 'write::trade']), false);
@@ -273,7 +272,7 @@ function kalshiFetch(scopes, extra = {}) {
     s.restore();
   }
   // Sub-account key / block-trade scope refused; nothing stored; secret not in logs or reply.
-  for (const [scopes, extra, code] of [[['read', 'write'], { subaccount: 2 }, 'subaccount_key'], [['read', 'write::trade', 'write::transfer', 'write::block_trade_accept'], {}, 'extra_scope']]) {
+  for (const [scopes, extra, code] of [[['read', 'write'], { subaccount: 2 }, 'subaccount_key'], [['read', 'write::trade', 'write::fcm_risk'], {}, 'extra_scope']]) {
     const f = kalshiFetch(scopes, extra);
     const s = setup({ user: { id: T }, live: APPROVED, fetchImpl: f });
     const p = await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM });
@@ -282,6 +281,14 @@ function kalshiFetch(scopes, extra = {}) {
     assert.equal(s.rpcs.length, 0);
     assert.ok(!JSON.stringify(p.body).includes('PRIVATE KEY'));
     assert.ok(!s.logs.join('\n').includes('PRIVATE KEY'));
+    s.restore();
+  }
+  // Full access keys (broad write, or expanded granular with block_trade_accept) are stored.
+  for (const scopes of [['read', 'write'], ['read', 'write::trade', 'write::transfer', 'write::block_trade_accept']]) {
+    const s = setup({ user: { id: T }, live: APPROVED, fetchImpl: kalshiFetch(scopes) });
+    const p = await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM });
+    assert.equal(p.code, 200, JSON.stringify(p.body));
+    assert.equal(s.rpcs.length, 1);
     s.restore();
   }
   // Kalshi rejects the pair.
