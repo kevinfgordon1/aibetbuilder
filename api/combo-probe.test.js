@@ -241,8 +241,8 @@ function src() {
   assert.match(text, /never accept/i);
   assert.match(text, /quotesListPath|rfq_user_filter=self/);
   const vercel = require('../vercel.json');
-  assert.equal(vercel.functions['api/combo-probe.js'].maxDuration, 20);
-  assert.equal(handler.config.maxDuration, 20);
+  assert.equal(vercel.functions['api/combo-probe.js'].maxDuration, 30);
+  assert.equal(handler.config.maxDuration, 30);
 }
 
 (async () => {

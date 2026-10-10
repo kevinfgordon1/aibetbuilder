@@ -10,10 +10,12 @@
 'use strict';
 
 const lib = require('./combo-probe-lib');
+const lockCheck = require('./combo-lock-check-lib');
 const sign = require('./kalshi-sign');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const probeRate = lib.createProbeRateLimiter(lib.PROBE_COOLDOWN_MS);
+const lockCheckRate = lib.createProbeRateLimiter(lockCheck.LOCK_CHECK_COOLDOWN_MS);
 
 function defaultCreateClient(...args) {
   const { createClient } = require('@supabase/supabase-js');
@@ -30,6 +32,11 @@ const defaults = {
   loadUserKalshiCreds: loadUserKalshiCreds,
   createClient: defaultCreateClient,
   rateLimiter: probeRate,
+  lockCheckRateLimiter: lockCheckRate,
+  loadParlay: loadParlay,
+  setProbePause: setProbePause,
+  clearProbePause: clearProbePause,
+  liveQuoteIds: liveQuoteIds,
 };
 
 let deps = { ...defaults };
@@ -37,6 +44,7 @@ let deps = { ...defaults };
 function resetDeps() {
   deps = { ...defaults };
   if (deps.rateLimiter && deps.rateLimiter._reset) deps.rateLimiter._reset();
+  if (deps.lockCheckRateLimiter && deps.lockCheckRateLimiter._reset) deps.lockCheckRateLimiter._reset();
 }
 
 function setDeps(patch) {
@@ -376,6 +384,186 @@ async function runProbe({ legs: rawLegs, contracts, waitMs, collection: requeste
   };
 }
 
+// ── Pending-lock check (body.lockId) ─────────────────────────────────────────
+
+async function loadParlay(id) {
+  const client = serviceClient();
+  if (!client) return { ok: false, status: 503, error: 'Server is not configured' };
+  const { data, error } = await client.from('combo_parlays').select('*').eq('id', id).maybeSingle();
+  if (error) return { ok: false, status: 502, error: 'Could not load that lock' };
+  return { ok: true, parlay: data || null };
+}
+
+// Same signal family as the lock's Active toggle (combo-worker polls it every ~5s and cancels
+// open quotes), but a separate, self-expiring column so a check never touches the user's own
+// paused flag and the worker can drop a stale probe pause after 30s.
+async function setProbePause(id, nowMs) {
+  const client = serviceClient();
+  if (!client) return { ok: false, error: 'Server is not configured' };
+  const patch = lockCheck.probePausePatch(nowMs);
+  const { error } = await client.from('combo_parlays').update(patch).eq('id', id);
+  if (error) return { ok: false, error: error.message, missingColumn: lockCheck.isMissingProbePauseColumn(error) };
+  return { ok: true, pausedAt: patch.probe_paused_at };
+}
+
+async function clearProbePause(id, pausedAt) {
+  const client = serviceClient();
+  if (!client) return { ok: false };
+  let q = client.from('combo_parlays').update(lockCheck.PROBE_RESUME_PATCH).eq('id', id);
+  if (pausedAt) q = q.eq('probe_paused_at', pausedAt); // only clear our own pause
+  const { error } = await q;
+  return { ok: !error, error: error && error.message };
+}
+
+async function liveQuoteIds(parlayId) {
+  const client = serviceClient();
+  if (!client) return { ok: false, ids: [] };
+  const { data, error } = await client.from('combo_submissions').select('quote_id')
+    .eq('parlay_id', parlayId).eq('is_live', true);
+  if (error) return { ok: false, ids: [] };
+  return { ok: true, ids: (data || []).map((r) => r && r.quote_id).filter(Boolean) };
+}
+
+async function selfCommunicationsId(creds) {
+  try {
+    const res = await kalshi('GET', '/communications/id', { creds });
+    if (res.ok && res.data) return res.data.communications_id || res.data.id || null;
+  } catch (_) { /* best effort */ }
+  return null;
+}
+
+// Wait (≤ PAUSE_SETTLE_MAX_MS) for the worker to pull this lock's open quotes.
+async function waitForPauseSettle(parlayId) {
+  const start = deps.now();
+  const seen = new Set();
+  let live = 0;
+  while (true) {
+    const r = await deps.liveQuoteIds(parlayId);
+    live = r.ids.length;
+    r.ids.forEach((id) => seen.add(id));
+    if (!r.ok || live === 0) break;
+    if (deps.now() - start >= lockCheck.PAUSE_SETTLE_MAX_MS) break;
+    await deps.sleep(1000);
+  }
+  return { ownQuoteIds: [...seen], stillLive: live, waitedMs: deps.now() - start };
+}
+
+// Full-window collection: no early exit. Keep every quote seen open at any point.
+async function collectQuotes(rfqId, waitMs, creds) {
+  const start = deps.now();
+  const byId = new Map();
+  let lastErr = null;
+  while (true) {
+    const listed = await listQuotes(rfqId, creds);
+    if (listed.ok) {
+      lastErr = null;
+      listed.quotes.forEach((q, i) => {
+        const key = (q && q.id) || `idx-${i}`;
+        const prev = byId.get(key);
+        if (!prev || !/^(open|quoted|)$/i.test(String(prev.status || 'open'))) byId.set(key, q);
+      });
+    } else lastErr = listed.error;
+    const t = deps.now();
+    if (t - start >= waitMs) break;
+    await deps.sleep(Math.min(500, Math.max(0, start + waitMs - t)));
+  }
+  return { quotes: [...byId.values()], waitedMs: deps.now() - start, listError: lastErr };
+}
+
+async function runLockCheck({ parlay, creds }) {
+  const legsRes = lib.normalizeLegs(parlay.legs);
+  if (!legsRes.ok) return { ok: false, status: 400, error: legsRes.error };
+  const contracts = lockCheck.lockContracts(parlay);
+  if (!contracts) return { ok: false, status: 400, error: 'This lock has no contract size yet' };
+  const alreadyPaused = parlay.paused === true;
+  let pausedAt = null;
+  if (!alreadyPaused) {
+    const p = await deps.setProbePause(parlay.id, deps.now());
+    if (!p.ok) {
+      return { ok: false, status: p.missingColumn ? 503 : 502,
+        error: p.missingColumn ? 'Check market price needs a database update (sql/20261010_combo_probe_pause.sql)'
+          : 'Could not pause your quotes for the check' };
+    }
+    pausedAt = p.pausedAt;
+  }
+  let resumed = alreadyPaused;
+  try {
+    const settle = alreadyPaused ? { ownQuoteIds: [], stillLive: 0, waitedMs: 0 } : await waitForPauseSettle(parlay.id);
+    const picked = await pickCollection(legsRes.legs, String(parlay.mve_collection || lib.COMBO_COLLECTION));
+    if (!picked.ok) return picked;
+    const market = await ensureComboMarket(picked.legs, picked.collection, creds);
+    if (!market.ok) return { ...market, collection: picked.collection };
+    const [fee, selfId] = await Promise.all([makerRateForMarket(market.marketTicker), selfCommunicationsId(creds)]);
+    const created = await createRfq(market.marketTicker, contracts, creds);
+    if (!created.ok) return { ...created, marketTicker: market.marketTicker };
+    let poll;
+    try {
+      poll = await collectQuotes(created.rfqId, lockCheck.LOCK_CHECK_WAIT_MS, creds);
+    } finally {
+      await deleteRfq(created.rfqId, creds); // never accept / confirm
+    }
+    const competitors = lockCheck.competitorQuotes(poll.quotes, { selfCreatorId: selfId, ownQuoteIds: settle.ownQuoteIds });
+    const best = lib.pickBestQuote(competitors, fee.makerRate);
+    return {
+      ok: true,
+      lockId: parlay.id,
+      collection: picked.collection,
+      marketTicker: market.marketTicker,
+      feeSeries: fee.series,
+      makerRate: fee.makerRate,
+      bestNoBid: best.bestNoBid,
+      bestYesBid: best.bestYesBid,
+      bestAmerican: best.bestAmerican,
+      quoteCount: poll.quotes.length,
+      competitorCount: best.usableQuoteCount,
+      ownQuotesExcluded: poll.quotes.length - competitors.length,
+      contracts,
+      waitedMs: poll.waitedMs,
+      pauseSettleMs: settle.waitedMs,
+      ownQuotesStillLive: settle.stillLive,
+      alreadyPaused,
+      checkedAt: new Date(deps.now()).toISOString(),
+      listError: poll.listError || null,
+    };
+  } finally {
+    if (!alreadyPaused) {
+      const c = await deps.clearProbePause(parlay.id, pausedAt).catch(() => ({ ok: false }));
+      resumed = !!(c && c.ok);
+      if (!resumed) console.error('[combo-probe] lock check: resume failed; worker safety net expires it in 30s', parlay.id);
+    }
+  }
+}
+
+async function handleLockCheck(req, res, auth, body) {
+  const limiter = deps.lockCheckRateLimiter || lockCheckRate;
+  const uid = auth.user && auth.user.id;
+  const rate = limiter.check(uid, deps.now());
+  if (!rate.ok) { json(res, 429, { ok: false, error: rate.error, retryAfterMs: rate.retryAfterMs || null }); return; }
+  const loaded = await deps.loadParlay(String(body.lockId));
+  if (!loaded.ok) { json(res, loaded.status || 502, { ok: false, error: loaded.error }); return; }
+  const access = lockCheck.lockCheckAccess(loaded.parlay, auth.user);
+  if (!access.ok) {
+    json(res, access.status, { ok: false, error: access.error, polyNotAvailable: !!access.polyNotAvailable });
+    return;
+  }
+  const parlay = loaded.parlay;
+  // The lock owner's key: Kevin's lock → server key; a tester's lock → that tester's Vault key, never Kevin's.
+  const plan = lockCheck.credsPlanFor(parlay, lib.OWNER_USER_ID);
+  const resolved = await resolveProbeCreds({ user: { id: parlay.user_id }, isOwner: plan === 'owner-env' && auth.isOwner });
+  if (!resolved.ok) { json(res, resolved.status || 400, resolved.body); return; }
+  limiter.mark(uid, deps.now()); // a started check (pause + RFQ) counts, even if it errors
+  try {
+    const result = await runLockCheck({ parlay, creds: resolved.creds });
+    if (!result.ok) {
+      json(res, result.status || 502, { ok: false, error: result.error, outsideCollection: result.outsideCollection || null });
+      return;
+    }
+    json(res, 200, { ...result, credsSource: resolved.source });
+  } catch (e) {
+    json(res, 502, { ok: false, error: String(e && e.message || e) });
+  }
+}
+
 async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
@@ -392,6 +580,12 @@ async function handler(req, res) {
   }
   if (auth.isOwner == null) {
     auth.isOwner = lib.isComboOwner(auth.user) || authFn === deps.requireOwner;
+  }
+
+  const parsedBody = lib.parseBody(req);
+  if (parsedBody && parsedBody.lockId) {
+    await handleLockCheck(req, res, auth, parsedBody);
+    return;
   }
 
   const rate = (deps.rateLimiter || probeRate).check((auth.user && (auth.user.id || auth.user.email)), deps.now());
@@ -453,12 +647,14 @@ async function handler(req, res) {
   }
 }
 
-handler.config = { maxDuration: 20 };
+handler.config = { maxDuration: 30 };
 module.exports = handler;
-module.exports.config = { maxDuration: 20 };
+module.exports.config = { maxDuration: 30 };
 module.exports._helpers = lib;
 module.exports._sign = sign;
 module.exports._runProbe = runProbe;
+module.exports._runLockCheck = runLockCheck;
+module.exports._lockCheck = lockCheck;
 module.exports._setDeps = setDeps;
 module.exports._resetDeps = resetDeps;
 module.exports._requireComboOwner = requireComboOwner;
