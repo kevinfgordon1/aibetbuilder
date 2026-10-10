@@ -1,6 +1,7 @@
 // Edit fill odds + open-quote cancel helpers for Combo Locks.
 // Pure: no fetch, no supabase. Used by the UI and api/combo-lock-orders.
 
+import { buyerSeesAfterFees } from "./buyerOdds.js";
 import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn } from "./comboCredits.js";
 import { hedgeCap, lockKind } from "./comboLockProfile.js";
 import { etDateTime, fmtAmerican } from "./comboLockView.js";
@@ -74,7 +75,8 @@ export function openQuoteLabel(row) {
   const size = Number.isFinite(n) && n > 0 ? `${Math.round(n)} contracts` : "quote";
   const fill = Number(row.fill_american);
   const price = Number.isFinite(fill) && fill !== 0 ? ` @ ${fmtAmerican(fill)}` : "";
-  return `${venue} · ${size}${price}`;
+  const buyer = Number.isFinite(fill) && fill !== 0 ? buyerSeesAfterFees(fill, { venue: row.venue }) : null;
+  return `${venue} · ${size}${price}${buyer ? ` · buyer sees ${buyer.text} after fees` : ""}`;
 }
 
 /**

@@ -172,6 +172,6 @@ console.log("comboLockView.test.js ok");
 // Selling at tile: taker's odds after the 0.07·P·(1−P) taker fee.
 {
   const { takerOddsAfterFee: t } = await import("./comboLockView.js");
-  assert.equal(t(333).text, "+311");
+  assert.equal(t(1188).text, "+1089"); // Kenny's lock: same math as the worker quote
   assert.equal(t(null), null);
 }

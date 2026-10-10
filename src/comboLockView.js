@@ -7,7 +7,7 @@ import { parseSkipReason, skipReasonOf } from "./comboDesk.js";
 import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
-import { effectiveTakerPrice, VENUE_TAKER_FEE_RATE } from "./venueTakerFee.js";
+import { buyerSeesAfterFees, buyerSeesFromNoPrice } from "./buyerOdds.js";
 
 export const ET_ZONE = "America/New_York";
 
@@ -233,12 +233,8 @@ export function betSummary(parlay) {
  * rate, before Kalshi's round-up of the whole order fee to the cent.
  */
 export function takerOddsAfterFee(fillAmerican, venue = "kalshi") {
-  const dec = decimalFromAmerican(fillAmerican);
-  if (!dec) return null;
-  const rate = VENUE_TAKER_FEE_RATE[venue] ?? VENUE_TAKER_FEE_RATE.kalshi;
-  const eff = effectiveTakerPrice(1 / dec, rate);
-  const a = eff == null ? null : americanFromProb(eff);
-  return a == null ? null : { american: a, text: fmtAmerican(a) };
+  const b = buyerSeesAfterFees(fillAmerican, { venue });
+  return b ? { american: b.american, text: b.text } : null;
 }
 
 /** "NFL · Sun, Oct 12 · 1:00 PM ET · DraftKings · 30% boost" */
@@ -429,6 +425,17 @@ function skipWords(row) {
   return [code ? plainAttemptLabel(code) : "skipped", "skip"];
 }
 
+/** "Buyer sees" odds for a quote row: the quoted price plus the buyer's taker fee. */
+function quoteBuyerSees(row, offered) {
+  if (!offered) return null;
+  const s = row.submission || {};
+  const o = row.outcome || {};
+  const venue = row.venueKey || s.venue || row.venue || "kalshi";
+  const no = row.ourNo != null ? row.ourNo : (row.fill ? row.fill.no_price : null);
+  const b = no != null ? buyerSeesFromNoPrice(no, venue) : buyerSeesAfterFees(toNum(s.fill_american) || toNum(o.fill_american), { venue });
+  return b ? b.text : null;
+}
+
 function quotePrice(row, offered) {
   if (!offered) return "—";
   const s = row.submission || {};
@@ -505,6 +512,7 @@ export function quoteRow(row, { left = 0, ended = false } = {}) {
     at: row.at || null,
     time: etStamp(row.at),
     price: quotePrice(row, offered),
+    buyerSees: quoteBuyerSees(row, offered),
     size: size == null ? "—" : countText(size),
     venue: row.venue || "Kalshi",
     venueKey: row.venueKey || null,

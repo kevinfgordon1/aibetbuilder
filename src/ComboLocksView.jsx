@@ -1,6 +1,7 @@
 // Combo Locks presentation pieces: status pill, explainer, summary strip, lock
 // card shell, and the History table. Data and actions stay in ComboLocks.jsx;
 // everything here is display only. Copy is plain English with American odds.
+import { buyerSeesAfterFees, sellerKeeps, BUYER_SEES_TITLE } from "./buyerOdds.js";
 import React from "react";
 import {
   betSummary, countText, etDateTime, fmtAmerican, historyRow, historyTotals,
@@ -339,19 +340,18 @@ function TargetTile({ target, sellAt }) {
 /** Third tile: your original odds, what you're selling for (+ taker's odds after fees), fair odds. */
 function SellTile({ summary: s, feeRate = 0, parlay = null }) {
   const fair = s && s.fair;
-  const allIn = feeRate > 0 && parlay ? allInFromExchange(parlay.fill_american, feeRate) : null;
+  const keep = parlay ? sellerKeeps(parlay.fill_american, { feeRate }) : null;
+  const buyer = parlay ? buyerSeesAfterFees(parlay.fill_american) : null;
   return (
-    <div className="fact sell" title="Your sportsbook odds, the odds you're offering traders on Kalshi / Polymarket, and the fair odds.">
+    <div className="fact sell" title="Your sportsbook odds, what you keep when it sells, what the buyer on Kalshi / Polymarket sees after their fees, and the fair odds.">
       <div className="k">Selling at</div>
       <div className="sgrid">
         <span className="sl">Your original odds</span>
         <span className="sv">{s.odds || "—"}{s.book ? <span className="sx"> {s.book}</span> : null}</span>
-        {allIn != null && <>
-          <span className="sl">Your all-in price</span>
-          <span className="sv main" title="What you're selling for once the 1% Combo Locks fee on the amount at risk is counted.">{fmtAmerican(allIn)}<span className="sx"> incl. {Math.round(feeRate * 100)}% fee</span></span>
-        </>}
-        <span className="sl">{allIn != null ? "On the exchange" : "Selling for"}</span>
-        <span className={"sv" + (allIn != null ? "" : " main")}>{s.sellAt || "—"}{s.takerAt ? <span className="sx" title="Estimated odds the taker gets after the Kalshi / Polymarket taker fee (0.07 × P × (1−P) per contract)."> taker {s.takerAt.text} after fees</span> : null}</span>
+        <span className="sl">You keep</span>
+        <span className="sv main" data-testid="you-keep" title={feeRate > 0 ? `Your price after your ${Math.round(feeRate * 100)}% Combo Locks fee and your Kalshi maker fee.` : "Your price after your Kalshi maker fee."}>{keep ? keep.text : "—"}{feeRate > 0 && parlay ? <span className="sx"> after fees (exchange {s.sellAt})</span> : <span className="sx"> after fees</span>}</span>
+        <span className="sl">Buyer sees</span>
+        <span className="sv" data-testid="buyer-sees" title={BUYER_SEES_TITLE}>{buyer ? buyer.text : "—"}<span className="sx"> after their fees</span></span>
         <span className="sl">Fair odds</span>
         <span className="sv">{fair ? fair.text : "—"}{fair && fair.source === "legs" ? <span className="sx"> est.</span> : null}</span>
       </div>
@@ -595,7 +595,7 @@ function QuoteSection({ title, rows, sub, ok, empty, total = null }) {
             {shown.map((q) => (
               <tr key={q.id}>
                 <td className="q-time">{q.time}</td>
-                <td className="q-price">{q.price}</td>
+                <td className="q-price">{q.price !== "—" ? <span title="What you keep at this quote">You keep {q.price}</span> : q.price}{q.buyerSees ? <div className="q-det" title={BUYER_SEES_TITLE}>Buyer sees {q.buyerSees} after fees</div> : null}</td>
                 <td className="q-size">{q.size}</td>
                 <td className="q-venue"><VenueTag venue={q.venue} venueKey={q.venueKey} /></td>
                 <td className="q-res">
