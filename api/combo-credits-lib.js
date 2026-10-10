@@ -2,12 +2,15 @@
 // src/comboCredits.test.js.
 'use strict';
 
+/** Minimum credits purchase (Stripe and Coinbase). Bought credits never expire. */
+const MIN_PURCHASE_USD = 10;
 const CREDIT_PRESETS_USD = Object.freeze([10, 25, 50, 100]);
 /** Max checkouts one user may open per hour (spam guard). */
 const MAX_CHECKOUTS_PER_HOUR = 6;
 
 function isPresetAmount(n) {
-  return CREDIT_PRESETS_USD.includes(Number(n));
+  const v = Number(n);
+  return Number.isFinite(v) && v >= MIN_PURCHASE_USD && CREDIT_PRESETS_USD.includes(v);
 }
 
 /** Only redirect back to our own site (prod or a Vercel preview). */
@@ -20,4 +23,4 @@ function siteOrigin(req, env) {
   return configured || 'https://aibetbuilder.io';
 }
 
-module.exports = { CREDIT_PRESETS_USD, MAX_CHECKOUTS_PER_HOUR, isPresetAmount, siteOrigin };
+module.exports = { MIN_PURCHASE_USD, CREDIT_PRESETS_USD, MAX_CHECKOUTS_PER_HOUR, isPresetAmount, siteOrigin };
