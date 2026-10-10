@@ -416,6 +416,17 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [feesByUserId, setFeesByUserId] = useState({});
   const [orderBusyKey, setOrderBusyKey] = useState(null);
   const [submitToast, setSubmitToast] = useState(null);
+
+  // Preview/smoke: optional one-shot toast seed (sessionStorage), cleared after read.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("combo_smoke_submit_toast");
+      if (!raw) return;
+      sessionStorage.removeItem("combo_smoke_submit_toast");
+      const parsed = JSON.parse(raw);
+      if (parsed && (parsed.kind === "ok" || parsed.kind === "error")) setSubmitToast(parsed);
+    } catch (_) {}
+  }, []);
   const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
   const [deskReady, setDeskReady] = useState(false);
   const [deskError, setDeskError] = useState(null);
