@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { capsLine, venueStatusText, userTradingState, pnlByUser, signedMoney, emptyForm, CONNECT_COPY, VENUE_HELP, KALSHI_HOWTO, money, autoFundLine, fundMoveText, AUTOFUND_COPY, effectiveCap, parseCapInput } from "./comboTesters.js";
+import { capsLine, venueStatusText, userTradingState, pnlByUser, signedMoney, emptyForm, CONNECT_COPY, VENUE_HELP, KALSHI_HOWTO, money, autoFundLine, fundMoveText, AUTOFUND_COPY, keepSetting, keepTargetUsd, parsePctInput, DEFAULT_KEEP_PCT } from "./comboTesters.js";
 
 assert.equal(capsLine({ perLockUsd: 50, perDayUsd: 250 }), "$50 per lock · $250 per day");
 assert.equal(capsLine(null), "No limits");
@@ -36,7 +36,7 @@ assert.ok(/Full access/.test(VENUE_HELP.kalshi.where));
 assert.equal(KALSHI_HOWTO.steps.length, 6);
 assert.equal(KALSHI_HOWTO.steps[2], "Permissions: choose Full access (simplest), or check Read, Trade and Transfers. Leave the sub-account blank.");
 assert.ok(KALSHI_HOWTO.steps.some((s) => /Check & save key/.test(s)));
-assert.equal(KALSHI_HOWTO.steps[5], "The site moves money into your Combos balance for you, up to the cap you set. Nothing to do here.");
+assert.equal(KALSHI_HOWTO.steps[5], "The site keeps your Amount to keep for combos (90% of your Kalshi cash unless you change it) in your Combos balance for you. Nothing to do here.");
 assert.equal(KALSHI_HOWTO.safe, "The site only uses this key to place your Combo Locks trades and move money between your own Kalshi balances. It never withdraws money.");
 assert.equal(KALSHI_HOWTO.fallback, undefined, "no manual shard steps in the guide");
 const allGuide = KALSHI_HOWTO.steps.join(" ") + KALSHI_HOWTO.safe;
@@ -46,17 +46,23 @@ assert.equal(autoFundLine({ connected: false }, null), null);
 assert.equal(autoFundLine({ connected: true, scopeStatus: "ok", autoFund: false }, { perDayUsd: 250 }).text, AUTOFUND_COPY.off);
 assert.ok(/reconnect with a key that has Transfers or Full access/.test(AUTOFUND_COPY.off) && /trades keep working/.test(AUTOFUND_COPY.off));
 assert.equal(autoFundLine({ connected: true, scopeStatus: "ok", autoFund: true }, { perDayUsd: 250 }).tone, "ok");
-assert.ok(/topped up to \$250\./.test(autoFundLine({ connected: true, scopeStatus: "ok", autoFund: true }, { perDayUsd: 250 }).text));
-assert.ok(/topped up to \$120\./.test(autoFundLine({ connected: true, scopeStatus: "ok", autoFund: true }, { perDayUsd: 250 }, 120).text));
-assert.equal(autoFundLine({ connected: true, scopeStatus: "ok", autoFund: true }, { perDayUsd: 250 }, 0).text, AUTOFUND_COPY.paused);
-assert.equal(effectiveCap(null, 250), 250);
-assert.equal(effectiveCap(900, 250), 250, "never above the daily limit");
-assert.equal(effectiveCap(80, 250), 80);
-assert.equal(effectiveCap(80, null), null);
-assert.equal(parseCapInput(""), null);
-assert.equal(parseCapInput("$1,200.50"), 1200.5);
-assert.ok(Number.isNaN(parseCapInput("abc")));
-assert.ok(Number.isNaN(parseCapInput("-5")));
+const ON = { connected: true, scopeStatus: "ok", autoFund: true };
+assert.equal(DEFAULT_KEEP_PCT, 90);
+assert.equal(autoFundLine(ON, { perDayUsd: 250 }).text, "Auto-funding is on: we keep 90% of your Kalshi cash in your Combos balance.");
+assert.equal(autoFundLine(ON, { fundUnlimited: true }, keepSetting(50), 1000).text, "Auto-funding is on: we keep 50% of your Kalshi cash in your Combos balance (about $500 right now).");
+assert.equal(autoFundLine(ON, { fundUnlimited: true }, keepSetting(0)).text, AUTOFUND_COPY.paused);
+assert.deepEqual(keepSetting(null), { mode: "pct", pct: 90, defaulted: true });
+assert.deepEqual(keepSetting(null, 120), { mode: "usd", usd: 120 }, "legacy dollars kept");
+assert.deepEqual(keepSetting(60, 120), { mode: "pct", pct: 60 });
+assert.equal(keepTargetUsd(keepSetting(null), 1000, { fundUnlimited: true }), 900);
+assert.equal(keepTargetUsd(keepSetting(100), 1000, { fundUnlimited: true }), 1000);
+assert.equal(keepTargetUsd(keepSetting(null), 1000, { perDayUsd: 250 }), 250, "never above the daily limit");
+assert.equal(keepTargetUsd(keepSetting(null, 500), 200, { fundUnlimited: true }), 200, "never more than exists");
+assert.equal(keepTargetUsd(keepSetting(0), 1000, { fundUnlimited: true }), null);
+assert.equal(parsePctInput(""), null);
+assert.equal(parsePctInput("90%"), 90);
+assert.ok(Number.isNaN(parsePctInput("101")));
+assert.ok(Number.isNaN(parsePctInput("abc")));
 assert.equal(autoFundLine({ connected: true, scopeStatus: "ok", autoFund: true }, { perDayUsd: null }).text, AUTOFUND_COPY.noCap);
 assert.equal(autoFundLine({ connected: true, scopeStatus: "unverified", autoFund: false }, { perDayUsd: 250 }).text, AUTOFUND_COPY.review);
 assert.equal(fundMoveText({ amount_usd: "40", status: "confirmed" }), "$40.00 Default → Combos · done");
@@ -65,12 +71,3 @@ assert.equal(fundMoveText({ amount_usd: 60, status: "confirmed", from_shard: 1, 
 assert.ok(/Never share your exchange password/.test(CONNECT_COPY.never));
 console.log("comboTesters.test.js ok");
 
-{
-  const { targetCap: tc } = await import("./comboTesters.js");
-  const U = { perLockUsd: null, perDayUsd: null, fundUnlimited: true };
-  assert.equal(tc(5000, U), 5000, "unlimited: own amount only");
-  assert.equal(tc(null, U), null, "blank = off");
-  assert.equal(tc("", U), null);
-  assert.equal(tc(0, U), null);
-  assert.equal(tc(900, { perDayUsd: 250 }), 250, "regular testers unchanged");
-}

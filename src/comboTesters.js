@@ -24,7 +24,7 @@ export const KALSHI_HOWTO = {
     "Permissions: choose Full access (simplest), or check Read, Trade and Transfers. Leave the sub-account blank.",
     "Click Create. Copy the Key ID and download the private key file. Kalshi shows the private key only once.",
     "Back here, click Connect Kalshi. Paste the Key ID, then open the private key file and paste all of it, including the BEGIN and END lines. Click Check & save key.",
-    "The site moves money into your Combos balance for you, up to the cap you set. Nothing to do here.",
+    "The site keeps your Amount to keep for combos (90% of your Kalshi cash unless you change it) in your Combos balance for you. Nothing to do here.",
   ],
   safe: "The site only uses this key to place your Combo Locks trades and move money between your own Kalshi balances. It never withdraws money.",
 };
@@ -34,47 +34,62 @@ export const AUTOFUND_COPY = {
   off: "Auto-funding is off for this key. To have the site fill your Combos balance for you, reconnect with a key that has Transfers or Full access. Your trades keep working meanwhile.",
   review: "Auto-funding starts once the owner confirms this key's permissions.",
   noCap: "Auto-funding is waiting for a daily limit. The owner sets it.",
-  noOwnCap: "Set your Amount to keep for combos to start. Until then nothing trades or moves.",
-  paused: "Auto-funding is paused (your cap is $0).",
+  paused: "Auto-funding is off: your Amount to keep for combos is 0%, so nothing trades or moves.",
 };
 
-// The cap the worker uses: the tester's own cap, never above the daily limit.
-export function effectiveCap(ownCap, dailyLimit) {
-  const daily = Number(dailyLimit);
-  if (dailyLimit == null || !(daily > 0)) return null;
-  if (ownCap == null || ownCap === "") return daily;
-  const own = Number(ownCap);
-  if (!Number.isFinite(own) || own < 0) return daily;
-  return Math.min(own, daily);
-}
+// "Amount to keep for combos": a % of total Kalshi cash (Default + Combos),
+// recomputed by combo-worker every check (keep-pct.js there mirrors this).
+// combo_settings.autofund_pct: null = DEFAULT_KEEP_PCT, 0 = off.
+// Legacy combo_settings.autofund_cap_usd is used only when pct is null.
+export const DEFAULT_KEEP_PCT = 90;
 
-// Target the worker funds to. fundUnlimited testers (combo_live_users.fund_unlimited):
-// ONLY their own Amount to keep for combos; blank / 0 = nothing moves or trades.
-export function targetCap(ownCap, caps) {
-  if (caps && caps.fundUnlimited) {
-    if (ownCap == null || ownCap === "") return null;
-    const own = Number(ownCap);
-    return Number.isFinite(own) && own > 0 ? own : null;
+const numOrNull = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+
+export function keepSetting(pct, legacyUsd = null) {
+  const p = numOrNull(pct);
+  if (p != null) {
+    const c = Math.min(100, Math.max(0, p));
+    return c > 0 ? { mode: "pct", pct: c } : { mode: "off" };
   }
-  return effectiveCap(ownCap, caps && caps.perDayUsd);
+  const usd = numOrNull(legacyUsd);
+  if (usd != null) return usd > 0 ? { mode: "usd", usd } : { mode: "off" };
+  return { mode: "pct", pct: DEFAULT_KEEP_PCT, defaulted: true };
 }
 
-// "$120" / "120.50" -> 120.5; "" -> null (use the daily limit); bad -> NaN.
-export function parseCapInput(v) {
-  const t = String(v == null ? "" : v).replace(/[$,\s]/g, "");
+// Dollar target right now: never more than total cash; testers with a daily
+// limit are never targeted above it. null = off / unknown limit.
+export function keepTargetUsd(keep, totalUsd, caps = null) {
+  if (!keep || keep.mode === "off") return null;
+  const unlimited = !!(caps && caps.fundUnlimited);
+  const daily = numOrNull(caps && caps.perDayUsd);
+  if (!unlimited && !(daily > 0)) return null;
+  const total = numOrNull(totalUsd);
+  let t = keep.mode === "pct" ? (total == null ? null : Math.floor(total * keep.pct) / 100) : keep.usd;
+  if (t == null) return null;
+  if (total != null) t = Math.min(t, total);
+  if (!unlimited) t = Math.min(t, daily);
+  return Math.max(0, Math.round(t * 100) / 100);
+}
+
+// "90" / "90%" -> 90; "" -> null (= 90% default); bad / >100 -> NaN.
+export function parsePctInput(v) {
+  const t = String(v == null ? "" : v).replace(/[%\s]/g, "");
   if (t === "") return null;
   const n = Number(t);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) / 100 : NaN;
 }
 
-export function autoFundLine(row, caps, ownCap = null) {
+export function autoFundLine(row, caps, keep = null, totalUsd = null) {
   if (!row || !row.connected) return null;
   if (row.scopeStatus === "unverified") return { tone: "muted", text: AUTOFUND_COPY.review };
   if (!row.autoFund) return { tone: "warn", text: AUTOFUND_COPY.off };
-  const cap = targetCap(ownCap, caps);
-  if (cap == null) return { tone: "muted", text: caps && caps.fundUnlimited ? AUTOFUND_COPY.noOwnCap : AUTOFUND_COPY.noCap };
-  if (cap === 0) return { tone: "muted", text: AUTOFUND_COPY.paused };
-  return { tone: "ok", text: `Auto-funding is on: we keep your Combos balance topped up to ${money(cap)}.` };
+  const k = keep || keepSetting(null);
+  if (k.mode === "off") return { tone: "muted", text: AUTOFUND_COPY.paused };
+  if (!(caps && caps.fundUnlimited) && !(numOrNull(caps && caps.perDayUsd) > 0)) return { tone: "muted", text: AUTOFUND_COPY.noCap };
+  const t = keepTargetUsd(k, totalUsd, caps);
+  const about = t != null ? ` (about ${money(t)} right now)` : "";
+  const what = k.mode === "pct" ? `${k.pct}% of your Kalshi cash` : money(k.usd);
+  return { tone: "ok", text: `Auto-funding is on: we keep ${what} in your Combos balance${about}.` };
 }
 
 const FUND_STATUS = { sending: "sending", accepted: "processing", confirmed: "done", failed: "failed" };

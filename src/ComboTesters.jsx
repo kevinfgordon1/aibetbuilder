@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { canSeeOwnerTools } from "./comboAccess";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
-  KALSHI_HOWTO, autoFundLine, fundMoveText, effectiveCap, targetCap, parseCapInput,
+  KALSHI_HOWTO, autoFundLine, fundMoveText, keepSetting, keepTargetUsd, parsePctInput, DEFAULT_KEEP_PCT,
 } from "./comboTesters";
 import {
   adminBalanceText, balancesByUser, cellNote, cellText, comboShortfall, emptyBalances, etTime, filledByParlay, pendingMovesCell, totalCashCell, usd,
@@ -37,7 +37,9 @@ const TESTERS_CSS = `
 .cl .tst .tst-safe{font-size:12.5px;color:#34d399;margin-top:4px}
 .cl .tst .tst-cap{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px;font-size:12.5px;color:#b6bac2}
 .cl .tst .tst-cap .tst-cap-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.cl .tst .tst-cap input{width:90px;padding:5px 7px;box-sizing:border-box}
+.cl .tst .tst-cap input{width:56px;padding:5px 7px;box-sizing:border-box;text-align:right}
+.cl .tst .tst-cap .tst-pct{display:inline-flex;align-items:center;gap:3px}
+.cl .tst .tst-cap .tst-cap-about{color:#8a8f98;font-variant-numeric:tabular-nums}
 .cl .tst .tst-cap .tst-cap-hint{font-size:11px;color:#8a8f98;line-height:1.35}
 .cl .tst .tst-bal-combo{display:flex;flex-direction:column;gap:0;min-width:160px}
 .cl .tst .tst-bal-cell.wide{min-width:140px}
@@ -83,43 +85,58 @@ async function authedFetch(supabase, url, init = {}) {
   return { ok: r.ok && body && body.ok !== false, status: r.status, body: body || {} };
 }
 
-/** The tester's own auto-funding cap (combo_settings.autofund_cap_usd). ok=false hides the editor. */
+/** The tester's Amount to keep for combos (combo_settings.autofund_pct; legacy autofund_cap_usd). ok=false hides the editor. */
 function useOwnCap(supabase, userId, enabled) {
-  const [state, setState] = useState({ ok: false, value: null, loaded: false });
+  const [state, setState] = useState({ ok: false, pct: null, legacyUsd: null, loaded: false });
   useEffect(() => {
     if (!enabled || !userId) return undefined;
     let alive = true;
     (async () => {
-      const { data, error } = await supabase.from("combo_settings").select("autofund_cap_usd").eq("user_id", userId).maybeSingle();
-      if (alive) setState({ ok: !error, value: data && data.autofund_cap_usd != null ? Number(data.autofund_cap_usd) : null, loaded: true });
-    })().catch(() => { if (alive) setState({ ok: false, value: null, loaded: true }); });
+      const { data, error } = await supabase.from("combo_settings").select("autofund_pct,autofund_cap_usd").eq("user_id", userId).maybeSingle();
+      if (alive) setState({
+        ok: !error,
+        pct: data && data.autofund_pct != null ? Number(data.autofund_pct) : null,
+        legacyUsd: data && data.autofund_cap_usd != null ? Number(data.autofund_cap_usd) : null,
+        loaded: true,
+      });
+    })().catch(() => { if (alive) setState({ ok: false, pct: null, legacyUsd: null, loaded: true }); });
     return () => { alive = false; };
   }, [supabase, userId, enabled]);
-  const save = useCallback(async (value) => {
-    const { error } = await supabase.from("combo_settings").upsert({ user_id: userId, autofund_cap_usd: value }, { onConflict: "user_id" });
-    if (!error) setState((s) => ({ ...s, value }));
+  const save = useCallback(async (pct) => {
+    const { error } = await supabase.from("combo_settings").upsert({ user_id: userId, autofund_pct: pct }, { onConflict: "user_id" });
+    if (!error) setState((s) => ({ ...s, pct }));
     return !error;
   }, [supabase, userId]);
-  return { ...state, save };
+  const keep = keepSetting(state.pct, state.legacyUsd);
+  return { ...state, keep, save };
 }
 
-function CapEditor({ cap, daily, required = false }) {
-  const [text, setText] = useState(cap.value == null ? "" : String(cap.value));
+function CapEditor({ cap, caps, totalUsd }) {
+  const shown = cap.pct != null ? cap.pct : cap.legacyUsd != null ? null : DEFAULT_KEEP_PCT;
+  const [text, setText] = useState(shown == null ? "" : String(shown));
   const [msg, setMsg] = useState(null);
-  useEffect(() => { setText(cap.value == null ? "" : String(cap.value)); }, [cap.value]);
+  useEffect(() => { setText(shown == null ? "" : String(shown)); }, [shown]);
+  const draft = parsePctInput(text);
+  const keep = Number.isNaN(draft) ? cap.keep : keepSetting(draft, draft == null ? cap.legacyUsd : null);
+  const target = keepTargetUsd(keep, totalUsd, caps);
   const onSave = async () => {
-    const v = parseCapInput(text);
-    if (Number.isNaN(v)) { setMsg("Enter a dollar amount, like 100."); return; }
-    setMsg((await cap.save(v)) ? "Saved." : "Couldn't save. Try again.");
+    if (Number.isNaN(draft)) { setMsg("Enter a percentage from 0 to 100, like 90."); return; }
+    setMsg((await cap.save(draft)) ? "Saved." : "Couldn't save. Try again.");
   };
+  const legacy = cap.pct == null && cap.legacyUsd != null;
   return (
     <div className="tst-cap">
       <div className="tst-cap-row">
         <label htmlFor="tst-cap-in">Amount to keep for combos</label>
-        <input id="tst-cap-in" inputMode="decimal" aria-label="Amount to keep for combos" placeholder={daily != null ? money(daily) : "$"} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }} />
+        <span className="tst-pct"><input id="tst-cap-in" inputMode="decimal" aria-label="Amount to keep for combos, percent" placeholder={String(DEFAULT_KEEP_PCT)} value={text} onChange={(e) => { setText(e.target.value); setMsg(null); }} /><span>%</span></span>
+        <span className="tst-cap-about">{keep.mode === "off" ? "(off)" : target != null ? `(about ${money(target)} right now)` : ""}</span>
         <button type="button" className="btn mini" onClick={onSave}>Save</button>
       </div>
-      <div className="tst-cap-hint">{msg || "The site keeps your combos cash topped up to this amount."}{!msg && daily != null ? ` Blank = ${money(daily)} daily limit · $0 = off.` : ""}{!msg && required ? " Blank or $0 = off (nothing trades)." : ""}</div>
+      <div className="tst-cap-hint">
+        {msg || `The share of your Kalshi cash the site keeps in Combos. It follows your balance. Blank = ${DEFAULT_KEEP_PCT}% · 0% = off (nothing trades).`}
+        {!msg && !caps.fundUnlimited && caps.perDayUsd != null ? ` Never above your ${money(caps.perDayUsd)} daily limit.` : ""}
+        {!msg && legacy ? ` You saved ${money(cap.legacyUsd)} before; that stays until you save a percentage.` : ""}
+      </div>
     </div>
   );
 }
@@ -143,7 +160,7 @@ function VenueRow({ venue, row, caps, cap, busy, onConnect, onDisconnect }) {
           <div className="muted" style={{ fontSize: 12 }}>{venue === "kalshi" ? "Permissions not confirmed. The owner will review this key." : "Polymarket US keys have no permission settings."}</div>
         )}
         {venue === "kalshi" && row && row.connected && row.scopeStatus !== "unverified" && (() => {
-          const line = autoFundLine(row, caps, cap && cap.ok ? cap.value : null);
+          const line = autoFundLine(row, caps, cap && cap.ok ? cap.keep : null, null);
           return line ? <div className={"tst-fund " + line.tone}>{line.text}</div> : null;
         })()}
         {venue === "polymarket_us" && !(row && row.connected) && <div className="muted" style={{ fontSize: 12 }}>Optional</div>}
@@ -270,13 +287,14 @@ function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps =
     : { short: false };
   const autoOn = !!(kalshiRow && kalshiRow.connected && kalshiRow.autoFund);
   const showCap = !!(autoOn && cap && cap.ok && caps && (caps.perDayUsd != null || caps.fundUnlimited));
-  const capTarget = showCap ? targetCap(cap.value, caps) : null;
-  // Effective target is min(cap, total cash): worker never moves more than Default has.
+  // Target = pct x total cash (never more than exists), so cash can't fall
+  // short of a % target; only a legacy dollar amount can.
+  const capTarget = showCap && cap.keep.mode === "usd" ? cap.keep.usd : null;
   const shortCash = showCap && total && total.amount != null && capTarget != null && capTarget > 0 && total.amount < capTarget;
   const kalshiNote = !kalshi ? null
     : (kalshiRow && kalshiRow.connected && !kalshiRow.autoFund)
       ? "Move money to combos on Kalshi to trade."
-      : "Combo Locks trades from your combos cash. The site moves money there for you, up to your cap.";
+      : "Combo Locks trades from your combos cash. The site keeps your chosen share of your Kalshi cash there for you.";
   return (
     <div className="tst-bal" aria-label="Available to trade">
       <div className="tst-bal-head">
@@ -294,7 +312,7 @@ function BalanceBlock({ supabase, userId, kalshi, poly, kalshiRow = null, caps =
               sub={pending && pending.state === "ok" && pending.amount > 0 ? "Auto-funding in transit" : null} />
             <div className="tst-bal-combo">
               <BalanceCell label="Cash available for combos" cell={b.kalshiCombo} hi now={now} />
-              {showCap && <CapEditor cap={cap} daily={caps.fundUnlimited ? null : effectiveCap(null, caps.perDayUsd)} required={!!caps.fundUnlimited} />}
+              {showCap && <CapEditor cap={cap} caps={caps} totalUsd={total ? total.amount : null} />}
               {shortCash && (
                 <div className="tst-cap-hint" style={{ marginTop: 4 }}>
                   Keeping {usd(total.amount)} of your {usd(capTarget)} target (not enough cash).
