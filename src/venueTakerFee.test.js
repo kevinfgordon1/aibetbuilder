@@ -17,9 +17,9 @@ import {
   takerFeeRate,
 } from "./venueTakerFee.js";
 
-assert.equal(VENUE_TAKER_FEE_RATE.polymarket, 0.07);
+assert.equal(VENUE_TAKER_FEE_RATE.polymarket, 0.0695);
 assert.equal(VENUE_TAKER_FEE_RATE.kalshi, 0.07);
-assert.equal(takerFeeRate("polymarket"), 0.07);
+assert.equal(takerFeeRate("polymarket"), 0.0695);
 assert.equal(takerFeeRate("kalshi"), 0.07);
 assert.equal(takerFeeRate("underdog_predict"), null);
 // Novig has no static venue rate: only a live take is charged (0.03 default).
@@ -36,7 +36,7 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
   assert.ok(Math.abs(implied - 0.0695) < 0.0002, `fill implies ${implied}`);
   assert.equal(orderTakerFeeDollars(contracts, p, 0.0695), 3.98);
   const board = feeInclusiveAmerican(p, VENUE_TAKER_FEE_RATE.polymarket);
-  const eff = p + 0.07 * p * (1 - p);
+  const eff = p + 0.0695 * p * (1 - p);
   assert.equal(board.effectivePrice, eff);
   assert.equal(board.rawAmerican, impliedProbToAmerican(p));
   assert.equal(board.american, impliedProbToAmerican(eff));

@@ -7,9 +7,10 @@
 // fee up to the next cent (orderTakerFeeDollars). The cell has no order
 // size, so it shows the per-contract rate.
 //
-// Polymarket US: a 250-contract aggressor fill at 0.355 was charged $3.98,
-// which is 0.0695×P×(1−P) rounded up to the cent. Makers received small
-// rebates. The board uses the 0.07 schedule for both venues.
+// Polymarket US (docs.polymarket.us/fees, effective 2026-10-07): straight taker
+// fee 0.0695×C×P×(1−P), banker's-rounded to the cent (a 250-contract fill at
+// 0.355 was charged $3.98). Combos use a separate taker curve
+// C×P×[0.0695(1−P) + 0.06(1−P)^4] and pay NO maker rebate (polyComboTakerFeePerContract).
 //
 // Novig: live (in-game) straight trades only. Taker fee = c × P × (1−P) per
 // contract, added to the cost (help.novig: "added on top of the trade price").
@@ -23,7 +24,7 @@
 import { impliedProbToAmerican } from "./blendAskLadder.js";
 
 export const VENUE_TAKER_FEE_RATE = Object.freeze({
-  polymarket: 0.07,
+  polymarket: 0.0695,
   kalshi: 0.07,
 });
 
@@ -75,6 +76,14 @@ export function orderTakerFeeDollars(contracts, price, rate) {
   const raw = c * takerFeePerContract(price, rate);
   if (!(raw > 0)) return 0;
   return Math.ceil(raw * 100 - 1e-9) / 100;
+}
+
+// Polymarket US combo taker fee per contract (whole-combo price p).
+export function polyComboTakerFeePerContract(price) {
+  const p = Number(price);
+  if (!(p > 0 && p < 1)) return 0;
+  const q = 1 - p;
+  return p * (0.0695 * q + 0.06 * q ** 4);
 }
 
 export function effectiveTakerPrice(price, rate) {

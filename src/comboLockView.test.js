@@ -167,11 +167,25 @@ assert.equal(quoteRow({ bucket: "no_taker", reason: "cancelled", contracts: 10 }
 assert.equal(quoteRow({ bucket: "lost", outcome: { loss_reason: "expired" }, contracts: 10 }).result, "expired");
 assert.deepEqual(quoteHistory(null), { filled: [], notFilled: [], filledContracts: 0, addedText: "", afterKickoff: 0 });
 
+{
+  const { setSeriesFee } = await import("./buyerOdds.js");
+  setSeriesFee("KXMVECROSSCATEGORY0", "quadratic", 1); // Kenny's series: no maker fee
+  const ob = quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "outbid", tape_yes_price: 0.078, fill_american: 1188, venue: "kalshi" } }, { ticker: "KXMVECROSSCATEGORY0-S2026A0E24EEACD4-D44B4A1E301" });
+  assert.equal(ob.result, "Outbid by a better price");
+  assert.match(ob.detail, /winner gave the buyer \+1104 after fees/);
+  assert.equal(ob.buyerSees, "+1104");
+  // Series not loaded → conservative 0.035 maker fee.
+  assert.equal(quoteRow({ bucket: "no_taker", contracts: 12, submission: { fill_american: 1188 } }).buyerSees, "+1060");
+  assert.equal(quoteRow({ bucket: "skipped", contracts: 12, submission: { skip_reason: "outbid", fill_american: 1188 } }).detail.startsWith("another maker won it"), true);
+  assert.equal(quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "no_taker" } }).result, "Buyer walked away");
+  assert.equal(quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "rfq_closed_live" } }).result, "Request closed");
+  assert.equal(quoteRow({ bucket: "oversized", contracts: 126, submission: { skip_reason: "oversized" } }).result, "over limit");
+}
 console.log("comboLockView.test.js ok");
 
 // Selling at tile: taker's odds after the 0.07·P·(1−P) taker fee.
 {
   const { takerOddsAfterFee: t } = await import("./comboLockView.js");
-  assert.equal(t(333).text, "+311");
+  assert.equal(t(1188, "kalshi", "KXMVECROSSCATEGORY0-S2026A0E24EEACD4-D44B4A1E301").text, "+1104"); // Kenny's lock: 7.8¢ + taker fee
   assert.equal(t(null), null);
 }

@@ -7,7 +7,7 @@ import { parseSkipReason, skipReasonOf } from "./comboDesk.js";
 import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
-import { effectiveTakerPrice, VENUE_TAKER_FEE_RATE } from "./venueTakerFee.js";
+import { buyerSeesAfterFees, buyerSeesFromNoPrice, buyerSeesFromYes } from "./buyerOdds.js";
 
 export const ET_ZONE = "America/New_York";
 
@@ -217,7 +217,7 @@ export function betSummary(parlay) {
     freeBet,
     maxPayout,
     sellAt: fmtAmerican(parlay.fill_american),
-    takerAt: takerOddsAfterFee(parlay.fill_american),
+    takerAt: takerOddsAfterFee(parlay.fill_american, "kalshi", parlay.combo_ticker),
     book: String(parlay.sportsbook || "").trim(),
     fair: fairOdds(parlay),
     boostPct: boost > 0 ? boost : null,
@@ -232,13 +232,9 @@ export function betSummary(parlay) {
  * (venueTakerFee.js), so mixed-venue fills give the same estimate. Per-contract
  * rate, before Kalshi's round-up of the whole order fee to the cent.
  */
-export function takerOddsAfterFee(fillAmerican, venue = "kalshi") {
-  const dec = decimalFromAmerican(fillAmerican);
-  if (!dec) return null;
-  const rate = VENUE_TAKER_FEE_RATE[venue] ?? VENUE_TAKER_FEE_RATE.kalshi;
-  const eff = effectiveTakerPrice(1 / dec, rate);
-  const a = eff == null ? null : americanFromProb(eff);
-  return a == null ? null : { american: a, text: fmtAmerican(a) };
+export function takerOddsAfterFee(fillAmerican, venue = "kalshi", ticker = null) {
+  const b = buyerSeesAfterFees(fillAmerican, { venue, ticker });
+  return b ? { american: b.american, text: b.text } : null;
 }
 
 /** "NFL · Sun, Oct 12 · 1:00 PM ET · DraftKings · 30% boost" */
@@ -429,6 +425,17 @@ function skipWords(row) {
   return [code ? plainAttemptLabel(code) : "skipped", "skip"];
 }
 
+/** "Buyer sees" odds for a quote row: the quoted price plus the buyer's taker fee. */
+function quoteBuyerSees(row, offered, ticker) {
+  if (!offered) return null;
+  const s = row.submission || {};
+  const o = row.outcome || {};
+  const venue = row.venueKey || s.venue || row.venue || "kalshi";
+  const no = row.ourNo != null ? row.ourNo : (row.fill ? row.fill.no_price : null);
+  const b = no != null ? buyerSeesFromNoPrice(no, venue) : buyerSeesAfterFees(toNum(s.fill_american) || toNum(o.fill_american), { venue, ticker: s.market_ticker || ticker });
+  return b ? b.text : null;
+}
+
 function quotePrice(row, offered) {
   if (!offered) return "—";
   const s = row.submission || {};
@@ -445,7 +452,7 @@ function statusOf(row) {
 }
 
 /** One quote row: time (ET), price (American), size, venue, plain result. */
-export function quoteRow(row, { left = 0, ended = false } = {}) {
+export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
   if (!row) return null;
   const s = row.submission || {};
   const o = row.outcome || {};
@@ -456,7 +463,23 @@ export function quoteRow(row, { left = 0, ended = false } = {}) {
   let tone;
   let offered = true;
   const lossReason = String(o.loss_reason || "").toLowerCase();
-  if (row.bucket === "filled") {
+  // Worker-stamped close reasons (combo-worker skip-tape): our quote was live when the RFQ closed.
+  const closeCode = row.bucket === "filled" ? "" : String(s.skip_reason || "").trim().toLowerCase();
+  if (closeCode === "outbid") {
+    result = "Outbid by a better price";
+    tone = "lose";
+    const venue = row.venueKey || s.venue || row.venue || "kalshi";
+    const win = toNum(s.tape_yes_price) != null ? buyerSeesFromYes(toNum(s.tape_yes_price), venue) : null;
+    details.push(win ? `winner gave the buyer ${win.text} after fees` : "another maker won it");
+  } else if (closeCode === "no_taker") {
+    result = "Buyer walked away";
+    tone = "lose";
+    details.push("request cancelled, nobody filled");
+  } else if (closeCode === "rfq_closed_live") {
+    result = "Request closed";
+    tone = "wait";
+    details.push("checking who won");
+  } else if (row.bucket === "filled") {
     const partial = asked != null && size != null && size < asked;
     result = partial ? "partly filled" : "filled";
     tone = "win";
@@ -505,6 +528,7 @@ export function quoteRow(row, { left = 0, ended = false } = {}) {
     at: row.at || null,
     time: etStamp(row.at),
     price: quotePrice(row, offered),
+    buyerSees: quoteBuyerSees(row, offered, ticker),
     size: size == null ? "—" : countText(size),
     venue: row.venue || "Kalshi",
     venueKey: row.venueKey || null,
@@ -534,7 +558,7 @@ export function quoteHistory(attempts, { parlay, now = Date.now() } = {}) {
   const filled = [];
   const notFilled = [];
   for (const r of rows) {
-    const q = quoteRow(r, { left, ended });
+    const q = quoteRow(r, { left, ended, ticker: p && p.combo_ticker });
     if (!q) continue;
     (r.bucket === "filled" ? filled : notFilled).push(q);
   }

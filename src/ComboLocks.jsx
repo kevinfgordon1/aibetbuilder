@@ -45,6 +45,7 @@ import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn, feeGateNote, feeS
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { OpenQuotesPanel } from "./ComboLockOrders";
 import ComboLockSubmitted from "./ComboLockSubmitted";
+import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SEES_TITLE, FALLBACK_MAKER_RATE, makerRateForTicker, loadSeriesFees } from "./buyerOdds.js";
 import { buildLockSubmittedToast, buildLockSubmitError } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -68,20 +69,22 @@ export { OWNER_EMAIL };
 // The fill odds you enter are the odds you SELL at AFTER your maker fee — already baked in.
 // The lock math uses them directly (no separate fee term). Fees below only recover the nominal
 // exchange price and the taker's matched odds (they pay a 7% taker fee, 4× your 1.75% maker fee).
-const KFEE = 0.0175;
+// Maker fee is per Kalshi series (buyerOdds.js makerRateFromSeries: quadratic 0 / maker 0.0175×M /
+// combo 0.035×M); unknown series → conservative 0.035, same as the worker.
 const TAKER_FEE = 0.07;
 const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
 const americanFromProb = (p) => (!(p > 0 && p < 1) ? null : p < 0.5 ? Math.round((100 * (1 - p)) / p) : -Math.round((100 * p) / (1 - p)));
 // Floor to cents so we never quote a no_bid worse than the fill target (user buys NO).
 const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
-function nominalProbFromEff(sEff) {
-  const b = 1 - KFEE; // solve KFEE*sNom^2 + (1-KFEE)*sNom - sEff = 0
-  return (-b + Math.sqrt(b * b + 4 * KFEE * sEff)) / (2 * KFEE);
+function nominalProbFromEff(sEff, k = FALLBACK_MAKER_RATE) {
+  if (!(k > 0)) return sEff;
+  const b = 1 - k; // solve k*sNom^2 + (1-k)*sNom - sEff = 0
+  return (-b + Math.sqrt(b * b + 4 * k * sEff)) / (2 * k);
 }
 // Your fill is net of your maker fee. effTaker = the odds the taker is matched at (nominal + their fee).
-function fillView(fillAfterFeeAmerican) {
+function fillView(fillAfterFeeAmerican, makerRate = FALLBACK_MAKER_RATE) {
   const sEff = impliedProb(fillAfterFeeAmerican);
-  const sNom = nominalProbFromEff(sEff);
+  const sNom = nominalProbFromEff(sEff, makerRate);
   const takerProb = sNom + TAKER_FEE * sNom * (1 - sNom);
   return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: floor2(1 - sNom).toFixed(2) };
 }
@@ -90,7 +93,7 @@ function fillView(fillAfterFeeAmerican) {
 function decideAtFill(args) {
   const d = decideAtFillCore(args);
   if (!d.ok) return d;
-  const v = fillView(args.fillAmerican);
+  const v = fillView(args.fillAmerican, args.ticker ? makerRateForTicker(args.ticker) : FALLBACK_MAKER_RATE);
   return {
     ...d,
     competitive: args.fairAmerican == null ? null : args.fillAmerican >= args.fairAmerican,
@@ -159,10 +162,11 @@ function TakerFairChips({ parlay }) {
   const fill = Number(parlay.fill_american);
   const eff = parlay.fill_american != null && parlay.fill_american !== "" && Number.isFinite(fill) && fill !== 0 ? fillView(fill) : null;
   const fair = parlay.fair_american != null && parlay.fair_american !== "" && Number.isFinite(Number(parlay.fair_american)) ? Number(parlay.fair_american) : null;
-  const beatsFair = eff && eff.effTaker != null && fair != null && eff.effTaker >= fair;
+  const buyer = eff ? buyerSeesAfterFees(fill, { ticker: parlay.combo_ticker }) : null;
+  const beatsFair = buyer && fair != null && buyer.american >= fair;
   return (
     <>
-      {eff && eff.effTaker != null && <span className="chip num" title="What the taker is matched at after their 7% fee — this is what they shop on" style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>Buyer gets {fmtAm(eff.effTaker)} after their fee</span>}
+      {buyer && <span className="chip num" data-testid="chip-buyer-sees" title={BUYER_SEES_TITLE} style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>{buyerSeesLabel(buyer)}</span>}
       {fair != null && <span className="chip num" title="Your estimate of the fair price for this parlay.">Fair odds {fmtAm(fair)}</span>}
     </>
   );
@@ -410,6 +414,15 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [games, setGames] = useState(SAMPLE);
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
+  // Per-series Kalshi maker fee for quote / "Buyer sees" prices. Re-render once loaded.
+  const [, setFeeTick] = useState(0);
+  useEffect(() => {
+    const tickers = (parlays || []).map((p) => p && p.combo_ticker).filter(Boolean);
+    if (!tickers.length) return;
+    let live = true;
+    loadSeriesFees(tickers).then((changed) => { if (changed && live) setFeeTick((n) => n + 1); });
+    return () => { live = false; };
+  }, [parlays]);
   const [kill, setKill] = useState(false);
   // Per-user Combo Locks fees (combo_my_fee_status). null = fee-free (everyone but fee users).
   const [feeStatus, setFeeStatus] = useState(null);
@@ -1302,8 +1315,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         <DetailBlock title="Price and size">
           <div className="chips">
             {feeOn
-              ? <><span className="chip fill num">All-in {fmtAm(allInFromExchange(p.fill_american))} (incl. 1% fee)</span><span className="chip num">Exchange {fmtAm(p.fill_american)}</span></>
-              : <span className="chip fill num">Selling at {fmtAm(p.fill_american)}</span>}
+              ? <><span className="chip fill num" title="Your price after the 1% Combo Locks fee and your Kalshi maker fee.">{youKeepLabel(sellerKeeps(p.fill_american, { feeRate: COMBO_FEE_RATE }))}</span><span className="chip num">Exchange {fmtAm(p.fill_american)}</span></>
+              : <span className="chip fill num" title="Your price after your Kalshi maker fee.">{youKeepLabel(sellerKeeps(p.fill_american))}</span>}
             <TakerFairChips parlay={p} />
             <span className="chip">{MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"}</span>
             <span className="chip num">Up to {p.max_contracts} contracts</span>
@@ -1697,7 +1710,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                     : h.status;
                   const stClass = h.status === "filled" && !executed ? "unfilled" : h.status;
                   return (
-                  <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "Live" : "Test"}</span></td><td>{etStamp(h.created_at)}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
+                  <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "Live" : "Test"}</span></td><td>{etStamp(h.created_at)}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}{buyerSeesAfterFees(h.fill_american, { venue: h.venue, ticker: h.market_ticker }) ? <div className="muted" style={{ fontSize: 11 }}>{buyerSeesLabel(buyerSeesAfterFees(h.fill_american, { venue: h.venue, ticker: h.market_ticker }))}</div> : null}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
                     <td><span className={"st " + stClass} title={h.status === "filled" && !executed ? "Offer sent but not taken. No position held." : ""}>{dispStatus}</span></td></tr>
                 ); })}</tbody></table></div>
             )}

@@ -105,7 +105,7 @@ export function OpenQuotesPanel({
         <ul className="oq-list">
           {opens.map((sub) => (
             <li key={sub.id} className="oq-row">
-              <div className="oq-label num">{openQuoteLabel(sub)}</div>
+              <div className="oq-label num">{openQuoteLabel(sub, parlay.combo_ticker)}</div>
               <div className="oq-btns">
                 <button type="button" className="btn mini" disabled={!!busy} onClick={() => startEdit(sub)}>Edit odds</button>
                 <button type="button" className="btn mini danger" disabled={!!busy} onClick={() => cancelOne(sub)}>Cancel</button>
