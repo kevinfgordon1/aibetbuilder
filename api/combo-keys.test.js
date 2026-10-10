@@ -242,7 +242,7 @@ function kalshiFetch(scopes, extra = {}) {
     assert.equal(p.body.venues.kalshi.label, 'Kalshi connected ••••1234');
     assert.equal(p.body.venues.kalshi.autoFund, false);
     assert.match(p.body.warnings.join(' '), /Auto-funding is off/);
-    assert.deepEqual(p.body.caps, { perLockUsd: 50, perDayUsd: 250 });
+    assert.deepEqual(p.body.caps, { perLockUsd: 50, perDayUsd: 250, fundUnlimited: false });
     const out = JSON.stringify(p.body);
     assert.ok(!out.includes(KID) && !out.includes('PRIVATE KEY'), 'reply never echoes the key');
     // Disconnect.
