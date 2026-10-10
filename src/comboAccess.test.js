@@ -44,7 +44,7 @@ const KEVIN_ID = "79ae1610-097e-4b46-a622-1e952f18e936";
 const KEVIN_ALT = { id: "968efed8-54db-48a6-808b-194a7a03a4cb", email: "kevin.f.gordon1@gmail.com" };
 const GTESTER = { id: "dd23a3a8-cb45-4866-be11-df72b4767c26", email: "gmoneyvikes@gmail.com" };
 {
-  assert.equal(COMBO_LOCKS_ACCOUNTS.length, 4);
+  assert.equal(COMBO_LOCKS_ACCOUNTS.length, 5);
   const list = comboLocksAllowlist({ VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com, abc-uid" });
   assert.equal(list.has(OWNER_EMAIL), true);
   assert.equal(list.has(KEVIN_ID), true);
@@ -52,8 +52,8 @@ const GTESTER = { id: "dd23a3a8-cb45-4866-be11-df72b4767c26", email: "gmoneyvike
   assert.equal(list.has(GTESTER.email), true);
   assert.equal(list.has("tester@gmail.com"), false, "env allowlist is ignored");
   assert.equal(list.has("abc-uid"), false);
-  assert.equal(list.has(KENNETH_GUIDO_EMAIL), false, "Kenneth does not get Combo Locks");
-  assert.equal(list.size, 8);
+  assert.equal(list.has(KENNETH_GUIDO_EMAIL), true, "Kenneth has Combo Locks (Kevin approved 2026-10-09)");
+  assert.equal(list.size, 10);
 }
 
 const kevin = { id: KEVIN_ID, email: "Kev120909@gmail.com", user_metadata: { full_name: "Kevin Gordon" } };
@@ -72,7 +72,8 @@ assert.equal(canSeeComboLocks({ email: OWNER_EMAIL, id: "u-lookalike" }), false,
 assert.equal(canSeeComboLocks({ email: OWNER_EMAIL }), false, "uid required");
 assert.equal(canSeeComboLocks({ email: "someone@x.com", id: KEVIN_ID }), false, "uid alone is not enough");
 assert.equal(canSeeComboLocks({ email: GTESTER.email, id: KEVIN_ALT.id }), false, "pairs do not mix");
-assert.equal(canSeeComboLocks({ email: KENNETH_GUIDO_EMAIL, id: "42b5ee16-68d5-4b3b-a931-40aa17cd1a47" }), false);
+assert.equal(canSeeComboLocks({ email: KENNETH_GUIDO_EMAIL, id: "42b5ee16-68d5-4b3b-a931-40aa17cd1a47" }), true);
+assert.equal(canSeeComboLocks({ email: KENNETH_GUIDO_EMAIL, id: "uid-kenneth" }), false, "wrong uid");
 assert.equal(canSeeOwnerTools({ email: "stranger@gmail.com" }), false);
 assert.equal(canSeeOwnerTools(null), false);
 
