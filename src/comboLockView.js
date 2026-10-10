@@ -7,7 +7,7 @@ import { parseSkipReason, skipReasonOf } from "./comboDesk.js";
 import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
-import { buyerSeesAfterFees, buyerSeesFromNoPrice } from "./buyerOdds.js";
+import { buyerSeesAfterFees, buyerSeesFromNoPrice, buyerSeesFromYes } from "./buyerOdds.js";
 
 export const ET_ZONE = "America/New_York";
 
@@ -463,7 +463,23 @@ export function quoteRow(row, { left = 0, ended = false } = {}) {
   let tone;
   let offered = true;
   const lossReason = String(o.loss_reason || "").toLowerCase();
-  if (row.bucket === "filled") {
+  // Worker-stamped close reasons (combo-worker skip-tape): our quote was live when the RFQ closed.
+  const closeCode = row.bucket === "filled" ? "" : String(s.skip_reason || "").trim().toLowerCase();
+  if (closeCode === "outbid") {
+    result = "Outbid by a better price";
+    tone = "lose";
+    const venue = row.venueKey || s.venue || row.venue || "kalshi";
+    const win = toNum(s.tape_yes_price) != null ? buyerSeesFromYes(toNum(s.tape_yes_price), venue) : null;
+    details.push(win ? `winner gave the buyer ${win.text} after fees` : "another maker won it");
+  } else if (closeCode === "no_taker") {
+    result = "Buyer walked away";
+    tone = "lose";
+    details.push("request cancelled, nobody filled");
+  } else if (closeCode === "rfq_closed_live") {
+    result = "Request closed";
+    tone = "wait";
+    details.push("checking who won");
+  } else if (row.bucket === "filled") {
     const partial = asked != null && size != null && size < asked;
     result = partial ? "partly filled" : "filled";
     tone = "win";

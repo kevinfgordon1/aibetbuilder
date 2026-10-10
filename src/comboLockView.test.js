@@ -167,6 +167,16 @@ assert.equal(quoteRow({ bucket: "no_taker", reason: "cancelled", contracts: 10 }
 assert.equal(quoteRow({ bucket: "lost", outcome: { loss_reason: "expired" }, contracts: 10 }).result, "expired");
 assert.deepEqual(quoteHistory(null), { filled: [], notFilled: [], filledContracts: 0, addedText: "", afterKickoff: 0 });
 
+{
+  const ob = quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "outbid", tape_yes_price: 0.078, fill_american: 1188, venue: "kalshi" } });
+  assert.equal(ob.result, "Outbid by a better price");
+  assert.match(ob.detail, /winner gave the buyer \+1104 after fees/);
+  assert.equal(ob.buyerSees, "+1089");
+  assert.equal(quoteRow({ bucket: "skipped", contracts: 12, submission: { skip_reason: "outbid", fill_american: 1188 } }).detail.startsWith("another maker won it"), true);
+  assert.equal(quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "no_taker" } }).result, "Buyer walked away");
+  assert.equal(quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "rfq_closed_live" } }).result, "Request closed");
+  assert.equal(quoteRow({ bucket: "oversized", contracts: 126, submission: { skip_reason: "oversized" } }).result, "over limit");
+}
 console.log("comboLockView.test.js ok");
 
 // Selling at tile: taker's odds after the 0.07·P·(1−P) taker fee.
