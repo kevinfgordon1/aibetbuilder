@@ -151,7 +151,7 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   // Stake @ odds now lives in the shared LockCard ("Your original bet") and History rows.
   const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
   // First tile is where you stand now; the original bet is a small reminder line under the tiles.
-  assert.match(viewSrc, /<div className="lk-facts">\s*<StandTile now=\{tiles\.now\} \/>\s*<TargetTile target=\{tiles\.target\} sellAt=\{s\.sellAt\} \/>\s*<SellTile summary=\{s\} \/>/);
+  assert.match(viewSrc, /<div className="lk-facts">\s*<StandTile now=\{tiles\.now\} \/>\s*<TargetTile target=\{tiles\.target\} sellAt=\{s\.sellAt\} \/>\s*<SellTile summary=\{s\}[^>]*\/>/);
   assert.match(viewSrc, /<span className="lead">Your original bet:<\/span>\{" "\}\s*<span className="val">\{s\.betLine\}<\/span>/);
   assert.doesNotMatch(viewSrc, /Pays up to|Wins if it hits/);
   assert.match(viewSrc, /<th>Your original bet<\/th><th>Fair odds<\/th>/);
@@ -427,3 +427,26 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
 }
 
 console.log("comboLockProfile.test.js ok");
+
+// Fee users: At target fill + add-lock preview subtract 1% x contracts x lay price.
+{
+  const m = await import("./comboLockProfile.js");
+  // +1150 fill: YES 0.08, lay 0.92. 1000 contracts -> fee 0.01 x 1000 x 0.92 = $9.20.
+  assert.equal(m.lockFeeUsd(1000, 1150, 0.01), 9.2);
+  assert.equal(m.lockFeeUsd(1000, 1150, 0), 0);
+  const parlay = { parlay_stake: 50, parlay_american: 1950, fill_american: 1150, max_contracts: 1000 };
+  const free = m.targetHedge(parlay);
+  const paid = m.targetHedge(parlay, { feeRate: 0.01 });
+  assert.equal(paid.feeUsd, 9.2);
+  assert.equal(Math.round((free.hit - paid.hit) * 100), 920);
+  assert.equal(Math.round((free.miss - paid.miss) * 100), 920);
+  assert.equal(paid.locks, paid.worst >= 0);
+  assert.equal(m.lockProfile(parlay, 0, { feeRate: 0.01 }).target.hit, paid.hit);
+  assert.equal(m.lockProfile(parlay, 0).target.hit, free.hit, "fee-free users unchanged");
+  const a = m.decideAtFill({ parlayStake: 50, parlayAmerican: 1950, fillAmerican: 1150, rfqContracts: 1000, hedgeMode: "pure" });
+  const b = m.decideAtFill({ parlayStake: 50, parlayAmerican: 1950, fillAmerican: 1150, rfqContracts: 1000, hedgeMode: "pure", feeRate: 0.01 });
+  assert.equal(a.feeUsd, 0);
+  assert.equal(b.feeUsd, m.lockFeeUsd(b.contracts, 1150, 0.01));
+  assert.equal(Math.round((a.hit - b.hit) * 100), Math.round(b.feeUsd * 100));
+  assert.equal(Math.round((a.worst - b.worst) * 100), Math.round(b.feeUsd * 100));
+}

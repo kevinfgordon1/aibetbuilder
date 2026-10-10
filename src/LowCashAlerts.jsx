@@ -67,5 +67,5 @@ export function LowCashAdminList({ rows, nameFor, selfId = null }) {
 export function lowCashChip(alerts) {
   if (!alerts || !alerts.length) return null;
   const short = alerts.reduce((s, a) => s + (Number(a.shortfallUsd) || 0), 0);
-  return <span className="chip warn" style={{ marginTop: 3, display: "inline-block" }} title={lowCashText(alerts[0], { owner: true }).body}>Low cash{short > 0 ? ` · ~$${short.toFixed(2)} short` : ""}</span>;
+  return <span className="chip warn" style={{ marginTop: 3, display: "inline-block" }} title={lowCashText(alerts[0], { owner: true }).body}>{alerts.some((x) => x.kind === "no_credits") ? "Out of credits" : "Low cash"}{short > 0 ? ` · ~$${short.toFixed(2)} short` : ""}</span>;
 }

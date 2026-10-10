@@ -19,3 +19,13 @@ const row = (o) => ({ id: "a" + (n++), user_id: "u1", venue: "kalshi", parlay_id
 }
 assert.equal(lowCashText(normalizeUserAlert(row({ shortfall_usd: 18 })), { owner: true }).body, "Some of their Combo Locks quotes were skipped because their combos cash is too low. They're about $18.00 short. Add money on Kalshi or raise their Amount to keep for combos.");
 console.log("lowCashAlerts tests passed");
+
+// Out-of-credits alert (fee users) gets its own copy.
+{
+  const { lowCashText: t, openUserAlerts: o } = await import("./lowCashAlerts.js");
+  const a = { kind: "no_credits", venue: "kalshi" };
+  const x = t(a);
+  if (x.title !== "Add credits to keep quoting" || !/Add credits on Combo Locks/.test(x.body)) throw new Error("no_credits copy");
+  const rows = o([{ id: "1", user_id: "u", kind: "low_cash", created_at: "2026-10-09" }, { id: "2", user_id: "u", kind: "no_credits", created_at: "2026-10-09" }]);
+  if (rows.length !== 2) throw new Error("no_credits and low_cash both show");
+}

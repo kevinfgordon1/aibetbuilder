@@ -72,6 +72,13 @@ async function handler(req, res) {
   const body = parseBody(req) || {};
   const amount = Number(body.amount);
   if (!credits.isPresetAmount(amount)) return json(res, 400, { ok: false, error: 'Pick one of the listed amounts.' });
+  // Credits are only for users with Combo Locks fees turned on (combo_live_users.fees_enabled).
+  try {
+    const fq = await serviceClient().from('combo_live_users').select('fees_enabled').eq('user_id', auth.user.id).maybeSingle();
+    if (fq.error || !fq.data || fq.data.fees_enabled !== true) return json(res, 403, { ok: false, error: 'Credits are not needed on this account.' });
+  } catch (_) {
+    return json(res, 500, { ok: false, error: 'Could not start checkout. Please try again.' });
+  }
 
   const client = serviceClient();
   const userId = auth.user.id;

@@ -148,3 +148,81 @@ export function showUsdcCreditsEnabled() {
   if (raw == null) { try { if (typeof process !== "undefined" && process.env) raw = process.env.VITE_SHOW_USDC_CREDITS; } catch { /* ignore */ } }
   return showCreditsCardFromEnv(raw);
 }
+
+// ---------------------------------------------------------------------------
+// Per-user Combo Locks fees (combo_live_users.fees_enabled; SQL in
+// sql/20261010_combo_fees_per_user.sql). Everyone else stays fee-free.
+// Fee = 1% of the amount at risk on each filled lock:
+//   0.01 x contracts x lay price, lay price = 1 - YES price (the NO side).
+// Charged by the database as fills land: monthly allowance first (resets on
+// the 1st, ET, no rollover), then purchased credits.
+
+export const COMBO_FEE_RATE = 0.01;
+
+/** Fee in USD for one fill: 0.01 x contracts x (1 - yesPrice), to the cent. */
+export function lockFillFeeUsd(contracts, yesPrice, rate = COMBO_FEE_RATE) {
+  const c = Number(contracts), y = Number(yesPrice);
+  if (!(c > 0) || !(y > 0 && y < 1)) return 0;
+  return round2(rate * c * (1 - y));
+}
+
+const decOf = (am) => {
+  const a = Number(am);
+  if (!Number.isFinite(a) || a === 0 || (a > -100 && a < 100)) return null;
+  return a > 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a);
+};
+const amOfProfit = (r) => (r >= 1 ? r * 100 : -100 / r);
+
+/**
+ * All-in "Selling at" odds once the 1% fee is counted. Per contract you risk
+ * the lay price n and win 1 - n; the fee adds 1% to the risk, so in
+ * profit-multiple terms (decimal - 1) the all-in price is 1.01x the exchange
+ * price: +1150 on the exchange = +1162 all-in (lay -1150 -> -1162).
+ */
+export function allInFromExchange(exchangeAmerican, rate = COMBO_FEE_RATE) {
+  const d = decOf(exchangeAmerican);
+  if (!d) return null;
+  const a = amOfProfit((d - 1) * (1 + rate));
+  return a >= 0 ? Math.ceil(a - 1e-9) : -Math.floor(-a + 1e-9);
+}
+
+/**
+ * Work backward from the user's all-in price to the exchange price we quote.
+ * Rounded so the user never ends up worse than the all-in price they typed.
+ */
+export function exchangeFromAllIn(allInAmerican, rate = COMBO_FEE_RATE) {
+  const d = decOf(allInAmerican);
+  if (!d) return null;
+  const r = (d - 1) / (1 + rate);
+  let a = amOfProfit(r);
+  if (a > -100 && a < 100) a = a >= 0 ? 100 : -100;
+  return a >= 0 ? Math.floor(a + 1e-9) : -Math.ceil(-a - 1e-9);
+}
+
+/** Normalize a combo_my_fee_status() row. null = fee-free (everyone but fee users). */
+export function feeStatusFromRow(row) {
+  if (!row || !row.fees_enabled) return null;
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return {
+    feesEnabled: true,
+    allowanceUsd: n(row.monthly_allowance_usd),
+    allowanceUsedUsd: n(row.allowance_used_usd),
+    allowanceLeftUsd: n(row.allowance_left_usd),
+    creditsUsd: n(row.credits_usd),
+    canQuote: row.can_quote !== false,
+    monthEt: row.month_et || null,
+  };
+}
+
+/** Banner copy when a fee user is out of allowance and credits. */
+export function feeGateNote(status) {
+  if (!status || status.canQuote) return null;
+  return "Add credits to keep quoting. Your free monthly credits and purchased credits are used up, so new quotes are paused. Fills you already have stay as they are.";
+}
+
+/** "Resets Nov 1" for the allowance line. */
+export function allowanceResetText(now = new Date()) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "numeric" }).formatToParts(now).map((x) => [x.type, x.value]));
+  const next = new Date(Date.UTC(+p.year + (+p.month === 12 ? 1 : 0), (+p.month % 12), 1, 12));
+  return "Resets " + next.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+}
