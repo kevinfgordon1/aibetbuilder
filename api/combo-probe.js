@@ -1,5 +1,7 @@
-// POST /api/combo-probe — owner-only Combo Locks Probe (Kevin's Kalshi key, so
-// the Combo Locks allowlist is NOT enough: lib.isComboOwner, same as combo-bucket).
+// POST /api/combo-probe — Combo Locks "Check market price".
+// Owner (Kevin): uses the server Kalshi key (env), same as before.
+// Allowlisted testers: use THEIR OWN stored Kalshi key from Vault — never
+// Kevin's env key. Rate-limited per user. No key → "Connect Kalshi to check price".
 // Creates a real Kalshi RFQ at the lock's computed contract size, waits up to
 // ~8s for maker quotes (early-exit on a usable NO bid), returns the best
 // competing NO bid + implied American fill, then DELETE the RFQ. Never
@@ -11,23 +13,43 @@ const lib = require('./combo-probe-lib');
 const sign = require('./kalshi-sign');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const probeRate = lib.createProbeRateLimiter(lib.PROBE_COOLDOWN_MS);
+
+function defaultCreateClient(...args) {
+  const { createClient } = require('@supabase/supabase-js');
+  return createClient(...args);
+}
 
 const defaults = {
   fetchImpl: (...args) => fetch(...args),
   sleep,
   now: () => Date.now(),
-  requireOwner: requireComboOwner,
+  requireOwner: requireComboOwner, // kept for older tests; handler uses requireProbeUser
+  requireProbeUser: requireProbeUser,
   kalshiCreds: () => sign.readKalshiCreds(process.env),
+  loadUserKalshiCreds: loadUserKalshiCreds,
+  createClient: defaultCreateClient,
+  rateLimiter: probeRate,
 };
 
 let deps = { ...defaults };
 
 function resetDeps() {
   deps = { ...defaults };
+  if (deps.rateLimiter && deps.rateLimiter._reset) deps.rateLimiter._reset();
 }
 
 function setDeps(patch) {
   deps = { ...deps, ...patch };
+  // Older tests only stub requireOwner — wrap it as probe auth (owner path).
+  if (patch && patch.requireOwner && !patch.requireProbeUser) {
+    const stub = patch.requireOwner;
+    deps.requireProbeUser = async (req) => {
+      const r = await stub(req);
+      if (!r || !r.ok) return r;
+      return { ...r, isOwner: r.isOwner != null ? r.isOwner : true };
+    };
+  }
 }
 
 function json(res, status, body) {
@@ -49,7 +71,7 @@ async function requireComboOwner(req, createClientImpl) {
   if (!url || !anon) {
     return { ok: false, status: 503, error: 'Server auth is not configured (SUPABASE_URL + SUPABASE_ANON_KEY)' };
   }
-  const createClient = createClientImpl || require('@supabase/supabase-js').createClient;
+  const createClient = createClientImpl || deps.createClient || defaultCreateClient;
   const supabase = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await supabase.auth.getUser(token);
   const user = data && data.user;
@@ -57,7 +79,76 @@ async function requireComboOwner(req, createClientImpl) {
   if (!lib.isComboOwner(user)) {
     return { ok: false, status: 403, error: 'Not allowed' };
   }
-  return { ok: true, user };
+  return { ok: true, user, isOwner: true };
+}
+
+/** Owner or Combo Locks allowlisted tester (email+id pair). */
+async function requireProbeUser(req, createClientImpl) {
+  const token = lib.readBearer(req);
+  if (!token) return { ok: false, status: 401, error: 'Sign in required' };
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const anon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
+    return { ok: false, status: 503, error: 'Server auth is not configured (SUPABASE_URL + SUPABASE_ANON_KEY)' };
+  }
+  const createClient = createClientImpl || deps.createClient || defaultCreateClient;
+  const supabase = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data, error } = await supabase.auth.getUser(token);
+  const user = data && data.user;
+  if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
+  if (lib.isComboOwner(user)) return { ok: true, user, isOwner: true };
+  if (!lib.canSeeComboLocks(user)) return { ok: false, status: 403, error: 'Not allowed' };
+  return { ok: true, user, isOwner: false };
+}
+
+function serviceClient() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) return null;
+  return (deps.createClient || defaultCreateClient)(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+/** Tester's own Vault Kalshi key. Never falls back to Kevin's env key. */
+async function loadUserKalshiCreds(userId) {
+  const client = serviceClient();
+  if (!client) {
+    return { ok: false, status: 503, error: 'Server is not configured', missingKey: false };
+  }
+  const { data, error } = await client.rpc('combo_exchange_key_get', {
+    p_user: userId,
+    p_venue: 'kalshi',
+  });
+  if (error) {
+    return { ok: false, status: 502, error: 'Could not load your Kalshi key', missingKey: false };
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || !row.key_id || !row.secret) {
+    return { ok: false, status: 400, error: lib.CONNECT_KALSHI_ERROR, missingKey: true, needKalshiKey: true };
+  }
+  return { ok: true, keyId: String(row.key_id), pem: String(row.secret) };
+}
+
+async function resolveProbeCreds(auth) {
+  if (auth.isOwner) {
+    const creds = deps.kalshiCreds();
+    if (!creds.ok) {
+      return { ok: false, status: 503, body: lib.missingKalshiKeysError(creds.missing) };
+    }
+    return { ok: true, creds, source: 'owner-env' };
+  }
+  const loaded = await deps.loadUserKalshiCreds(auth.user.id);
+  if (!loaded.ok) {
+    return {
+      ok: false,
+      status: loaded.status || 400,
+      body: {
+        ok: false,
+        error: loaded.error || lib.CONNECT_KALSHI_ERROR,
+        needKalshiKey: !!loaded.needKalshiKey || !!loaded.missingKey,
+      },
+    };
+  }
+  return { ok: true, creds: { ok: true, keyId: loaded.keyId, pem: loaded.pem }, source: 'user-vault' };
 }
 
 function apiBase() {
@@ -293,17 +384,28 @@ async function handler(req, res) {
     return;
   }
 
-  const owner = await deps.requireOwner(req);
-  if (!owner.ok) {
-    json(res, owner.status || 401, { ok: false, error: owner.error || 'Unauthorized' });
+  const authFn = deps.requireProbeUser || deps.requireOwner;
+  const auth = await authFn(req);
+  if (!auth.ok) {
+    json(res, auth.status || 401, { ok: false, error: auth.error || 'Unauthorized' });
+    return;
+  }
+  if (auth.isOwner == null) {
+    auth.isOwner = lib.isComboOwner(auth.user) || authFn === deps.requireOwner;
+  }
+
+  const rate = (deps.rateLimiter || probeRate).check((auth.user && (auth.user.id || auth.user.email)), deps.now());
+  if (!rate.ok) {
+    json(res, rate.status || 429, { ok: false, error: rate.error, retryAfterMs: rate.retryAfterMs || null });
     return;
   }
 
-  const creds = deps.kalshiCreds();
-  if (!creds.ok) {
-    json(res, 503, lib.missingKalshiKeysError(creds.missing));
+  const resolved = await resolveProbeCreds(auth);
+  if (!resolved.ok) {
+    json(res, resolved.status || 400, resolved.body);
     return;
   }
+  const creds = resolved.creds;
 
   const body = lib.parseBody(req);
   const legsRes = lib.normalizeLegs(body.legs);
@@ -339,7 +441,8 @@ async function handler(req, res) {
       });
       return;
     }
-    json(res, 200, result);
+    (deps.rateLimiter || probeRate).mark((auth.user && (auth.user.id || auth.user.email)), deps.now());
+    json(res, 200, { ...result, credsSource: resolved.source });
   } catch (e) {
     const msg = String(e && e.message || e);
     if (/never accepts or confirms/i.test(msg)) {
@@ -359,3 +462,6 @@ module.exports._runProbe = runProbe;
 module.exports._setDeps = setDeps;
 module.exports._resetDeps = resetDeps;
 module.exports._requireComboOwner = requireComboOwner;
+module.exports._requireProbeUser = requireProbeUser;
+module.exports._loadUserKalshiCreds = loadUserKalshiCreds;
+module.exports._resolveProbeCreds = resolveProbeCreds;

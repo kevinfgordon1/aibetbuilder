@@ -403,6 +403,40 @@ function missingKalshiKeysError(missing) {
   };
 }
 
+
+// Probe rate limit: one successful auth'd attempt per user per cooldown.
+const PROBE_COOLDOWN_MS = 30_000;
+function createProbeRateLimiter(cooldownMs = PROBE_COOLDOWN_MS) {
+  const lastByUser = new Map();
+  return {
+    cooldownMs,
+    check(userId, now = Date.now()) {
+      const id = String(userId || '').trim();
+      if (!id) return { ok: true }; // no identity to key on (tests / edge); handler already authed
+      const last = lastByUser.get(id) || 0;
+      const wait = cooldownMs - (Number(now) - last);
+      if (wait > 0) {
+        const sec = Math.max(1, Math.ceil(wait / 1000));
+        return {
+          ok: false,
+          status: 429,
+          retryAfterMs: wait,
+          error: `Slow down — try Check market price again in ${sec} second${sec === 1 ? '' : 's'}.`,
+        };
+      }
+      return { ok: true };
+    },
+    mark(userId, now = Date.now()) {
+      const id = String(userId || '');
+      if (id) lastByUser.set(id, Number(now) || Date.now());
+    },
+    _reset() { lastByUser.clear(); },
+    _last(userId) { return lastByUser.get(String(userId || '')) || 0; },
+  };
+}
+
+const CONNECT_KALSHI_ERROR = 'Connect Kalshi to check price';
+
 module.exports = {
   KFEE,
   FALLBACK_MAKER_RATE,
@@ -454,4 +488,7 @@ module.exports = {
   quotesFromList,
   rfqIdFromCreate,
   missingKalshiKeysError,
+  PROBE_COOLDOWN_MS,
+  createProbeRateLimiter,
+  CONNECT_KALSHI_ERROR,
 };

@@ -48,7 +48,7 @@ import ComboLockSubmitted from "./ComboLockSubmitted";
 import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SEES_TITLE, FALLBACK_MAKER_RATE, makerRateForTicker, loadSeriesFees } from "./buyerOdds.js";
 import { buildLockSubmittedToast, buildLockSubmitError } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
-import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
+import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
 import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
@@ -497,6 +497,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [form, setForm] = useState(() => formFromPrefill(prefill));
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState(null);
+  const [kalshiKeyConnected, setKalshiKeyConnected] = useState(null); // null=unknown, bool after fetch
+
   const [gamesReady, setGamesReady] = useState(false);
   const [prefillWarning, setPrefillWarning] = useState(null);
   const createFormRef = useRef(null);
@@ -831,6 +833,28 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       if (reloadAgainRef.current) { reloadAgainRef.current = false; reload(); }
     }
   }, [loadDesk]);
+  useEffect(() => {
+    let alive = true;
+    if (!user || !canSeeComboLocks(user)) return undefined;
+    if (canSeeOwnerTools(user)) { setKalshiKeyConnected(true); return undefined; }
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session && session.access_token;
+        if (!token) { if (alive) setKalshiKeyConnected(false); return; }
+        const r = await fetch("/api/combo-keys", {
+          headers: { accept: "application/json", authorization: "Bearer " + token },
+        });
+        let d = null;
+        try { d = await r.json(); } catch (_) { d = null; }
+        if (!alive) return;
+        setKalshiKeyConnected(!!(d && d.venues && d.venues.kalshi && d.venues.kalshi.connected));
+      } catch (_) {
+        if (alive) setKalshiKeyConnected(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [user]);
   useEffect(() => { loadGames(); }, [loadGames]);
   useEffect(() => { reload(); }, [reload]);
   // Apply a Promo Builder prefill once live (or sample) games are in. Prefill is
@@ -1635,20 +1659,39 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             )}
             <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <button className="btn primary" onClick={() => addParlay()}>Add lock</button>
-              {/* Probe opens a real RFQ on Kevin's Kalshi key: owner only (api/combo-probe enforces it too). */}
-              {canSeeOwnerTools(user) && (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={probeDisabled({ probing, legCount: readLegs().length, contracts: preview && preview.cap })}
-                  title="Ask the market for its best price on this parlay at this size."
-                  onClick={runProbe}
-                >{probing ? "Checking…" : "Check market price"}</button>
-              )}
+              {/* Owner: server Kalshi key. Testers: their own connected key (api/combo-probe). */}
+              {(() => {
+                const probeUi = probeUiState({
+                  canSeeCombo: canSeeComboLocks(user),
+                  isOwner: canSeeOwnerTools(user),
+                  kalshiConnected: canSeeOwnerTools(user) ? true : !!kalshiKeyConnected,
+                  probing,
+                  legCount: readLegs().length,
+                  contracts: preview && preview.cap,
+                });
+                if (!probeUi.show) return null;
+                if (probeUi.kind === "need-key") {
+                  return (
+                    <button type="button" className="btn" disabled title="Connect your Kalshi key under Your exchange accounts, then try again.">
+                      {CONNECT_KALSHI_LABEL}
+                    </button>
+                  );
+                }
+                return (
+                  <button
+                    type="button"
+                    className="btn"
+                    data-testid="check-market-price"
+                    disabled={probeUi.disabled}
+                    title="Ask the market for its best price on this parlay at this size."
+                    onClick={runProbe}
+                  >{probeUi.label}</button>
+                );
+              })()}
             </div>
-            {canSeeOwnerTools(user) && (
+            {canSeeComboLocks(user) && (canSeeOwnerTools(user) || kalshiKeyConnected) && (
               <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>
-                "Check market price" shows the best price traders would pay for this parlay right now. It doesn't place anything.
+                "Check market price" shows the best price traders would pay for this parlay right now. It doesn't place anything{canSeeOwnerTools(user) ? "" : " — it uses your connected Kalshi key"}.
               </div>
             )}
             {probeResult && (

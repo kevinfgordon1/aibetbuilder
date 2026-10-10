@@ -154,7 +154,7 @@ assert.equal(lib.canSeeComboLocks({ email: 'tester@gmail.com', id: 't1' }, { VIT
 assert.equal(lib.canSeeComboLocks(null, {}), false);
 assert.equal(lib.comboLocksAllowlist({ VITE_COMBO_LOCKS_ALLOWLIST: 'x@y.com' }).has('x@y.com'), false);
 
-// ── Probe spends Kevin's Kalshi key: owner only, never the Combo Locks allowlist ──
+// ── Owner check still Kevin-only; probe auth separately allows Combo Locks testers ──
 const KEVIN_ID = '79ae1610-097e-4b46-a622-1e952f18e936';
 assert.equal(lib.OWNER_USER_ID, KEVIN_ID);
 assert.equal(lib.isComboOwner({ email: 'kev120909@gmail.com', id: KEVIN_ID }), true);
@@ -172,8 +172,12 @@ assert.equal(lib.isComboOwner(null), false);
 }
 {
   const src = require('fs').readFileSync(require('path').join(__dirname, 'combo-probe.js'), 'utf8');
-  assert.ok(/lib\.isComboOwner\(user\)/.test(src), 'combo-probe gates on isComboOwner');
-  assert.ok(!/canSeeComboLocks/.test(src), 'combo-probe no longer accepts the Combo Locks allowlist');
+  assert.ok(/lib\.isComboOwner\(user\)/.test(src), 'combo-probe still has isComboOwner');
+  assert.ok(/canSeeComboLocks/.test(src), 'combo-probe allows Combo Locks testers via canSeeComboLocks');
+  assert.ok(/loadUserKalshiCreds/.test(src), 'tester path loads user vault key');
+  assert.ok(/combo_exchange_key_get/.test(src), 'tester key via combo_exchange_key_get');
+  assert.ok(/pickCollection|COMBO_COLLECTION_CANDIDATES/.test(src), 'probe picks collection like owner path');
+  assert.ok(/makerRateForMarket/.test(src), 'probe prices with series maker fee');
   const bucket = require('fs').readFileSync(require('path').join(__dirname, 'combo-bucket.js'), 'utf8');
   assert.ok(/lib\.isComboOwner\(user\)/.test(bucket), 'combo-bucket uses the same owner check');
 }
@@ -274,9 +278,15 @@ function src() {
     const tester = { email: 'tester@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' };
     const req = { headers: { authorization: 'Bearer tok' } };
     assert.equal((await handler._requireComboOwner({ headers: {} }, fake(tester))).status, 401);
-    assert.equal((await handler._requireComboOwner(req, fake(tester))).status, 403);
+    assert.equal((await handler._requireComboOwner(req, fake(tester))).status, 403, 'owner gate still refuses tester');
     assert.equal((await handler._requireComboOwner(req, fake({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }))).ok, true);
     assert.equal((await handler._requireComboOwner(req, fake(null))).status, 401);
+    // Probe auth: allowlisted tester OK; stranger still 403.
+    const kenny = { email: 'kmguido97@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' };
+    assert.equal((await handler._requireProbeUser(req, fake(kenny))).ok, true);
+    assert.equal((await handler._requireProbeUser(req, fake(kenny))).isOwner, false);
+    assert.equal((await handler._requireProbeUser(req, fake({ email: 'stranger@x.com', id: 'x' }))).status, 403);
+    assert.equal((await handler._requireProbeUser(req, fake({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }))).isOwner, true);
     for (const k of ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'COMBO_LOCKS_ALLOWLIST']) {
       if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
     }
@@ -559,6 +569,7 @@ function src() {
   // not ...-INDDJONES17; resolve it from the collection, send the right event_ticker, and price with
   // the series' real maker fee (quadratic → 0).
   {
+    handler._resetDeps();
     const posted = [];
     let fakeNow2 = 5_000_000;
     handler._setDeps({
@@ -615,6 +626,7 @@ function src() {
 
   // Leg missing from the requested collection but present in KXMVECROSSCATEGORY-R → use that one.
   {
+    handler._resetDeps(); // clear per-user probe cooldown from the prior success
     const posted = [];
     handler._setDeps({
       requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
@@ -641,6 +653,196 @@ function src() {
   assert.equal(lib.resolveEventTicker('KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC-JAC', new Set(['KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC'])), 'KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC');
   assert.equal(lib.makerRateFromSeries('quadratic_with_combo_maker_fees', 1), 0.035);
   assert.equal(lib.noBidFromFillAmerican(1104, 0) != null, true);
+
+
+  // ── Tester probe uses THEIR key, never Kevin's env key (same collection + fee path) ──
+  {
+    handler._resetDeps();
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 1024 });
+    const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
+    const KENNY = { email: 'kmguido97@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' };
+    const TESTER_KEY = 'tester-kalshi-key-id-abc';
+    const KEVIN_ENV_KEY = 'KEVIN-ENV-KEY-MUST-NOT-APPEAR';
+    const calls = [];
+    let fakeNow = 3_000_000;
+    let loadHits = 0;
+    let envCredHits = 0;
+    handler._setDeps({
+      requireProbeUser: async () => ({ ok: true, user: KENNY, isOwner: false }),
+      kalshiCreds: () => {
+        envCredHits += 1;
+        return { ok: true, keyId: KEVIN_ENV_KEY, pem };
+      },
+      loadUserKalshiCreds: async (userId) => {
+        loadHits += 1;
+        assert.equal(String(userId), KENNY.id);
+        return { ok: true, keyId: TESTER_KEY, pem };
+      },
+      now: () => fakeNow,
+      sleep: async (ms) => { fakeNow += ms; },
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const path = new URL(url).pathname;
+        const headers = (opts && opts.headers) || {};
+        const keyHeader = headers['KALSHI-ACCESS-KEY'] || headers['kalshi-access-key'] || '';
+        calls.push({ method, path, keyHeader });
+        if (/\/accept|\/confirm/i.test(path)) throw new Error('MUST NOT accept/confirm');
+        const json = (status, body) => ({
+          status,
+          ok: status >= 200 && status < 300,
+          text: async () => JSON.stringify(body),
+          clone() { return this; },
+        });
+        // Collection lookup (unsigned) + series fee — same as owner probe.
+        if (method === 'GET' && path.includes('/multivariate_event_collections/')) {
+          return json(200, { multivariate_contract: { associated_events: [{ ticker: 'A' }, { ticker: 'B' }] } });
+        }
+        if (method === 'GET' && path.includes('/series/')) {
+          return json(200, { series: { fee_type: 'quadratic_with_maker_fees', fee_multiplier: 1 } });
+        }
+        if (method === 'POST' && path.includes('/multivariate_event_collections/')) {
+          return json(200, { market_ticker: 'KXMVESPORTSMULTIGAMEEXTENDED-S-TEST', event_ticker: 'KXMV-COMBO' });
+        }
+        if (method === 'POST' && path.endsWith('/communications/rfqs')) {
+          return json(201, { id: 'rfq-tester-1' });
+        }
+        if (method === 'GET' && path.endsWith('/communications/quotes')) {
+          return json(200, { quotes: [{ id: 'q1', no_bid_dollars: '0.90', yes_bid_dollars: '0.09', status: 'open' }] });
+        }
+        if (method === 'DELETE' && path.includes('/communications/rfqs/')) {
+          return json(204, {});
+        }
+        return json(404, { error: 'unexpected ' + method + ' ' + path });
+      },
+    });
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { legs: [{ ticker: 'A-1', side: 'yes' }, { ticker: 'B-1', side: 'yes' }], contracts: 100, waitMs: 2000 },
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.ok, true);
+    assert.equal(res.out.body.credsSource, 'user-vault');
+    assert.ok(res.out.body.collection, 'tester probe returns collection');
+    assert.ok(typeof res.out.body.makerRate === 'number', 'tester probe returns makerRate');
+    assert.equal(loadHits, 1, 'tester key loaded once');
+    assert.equal(envCredHits, 0, 'Kevin env kalshiCreds must never be called for a tester');
+    const signed = calls.filter((c) => c.keyHeader);
+    assert.ok(signed.length >= 3, 'kalshi signed calls happened');
+    for (const c of signed) {
+      assert.equal(c.keyHeader, TESTER_KEY, 'every Kalshi call must use tester key, got ' + c.keyHeader + ' on ' + c.method + ' ' + c.path);
+      assert.notEqual(c.keyHeader, KEVIN_ENV_KEY);
+    }
+  }
+
+  // Tester with no key → Connect Kalshi copy; never touches Kevin env key
+  {
+    handler._resetDeps();
+    let envCredHits = 0;
+    handler._setDeps({
+      requireProbeUser: async () => ({ ok: true, user: { email: 'kmguido97@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' }, isOwner: false }),
+      kalshiCreds: () => { envCredHits += 1; return { ok: true, keyId: 'KEVIN', pem: 'x' }; },
+      loadUserKalshiCreds: async () => ({ ok: false, status: 400, error: lib.CONNECT_KALSHI_ERROR, needKalshiKey: true, missingKey: true }),
+    });
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: { legs: [{ ticker: 'A-1', side: 'yes' }, { ticker: 'B-1', side: 'yes' }], contracts: 10 },
+    }, res);
+    assert.equal(res.out.statusCode, 400);
+    assert.match(res.out.body.error, /Connect Kalshi to check price/);
+    assert.equal(res.out.body.needKalshiKey, true);
+    assert.equal(envCredHits, 0);
+  }
+
+  // Rate limit per user
+  {
+    handler._resetDeps();
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 1024 });
+    const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
+    let fakeNow = 5_000_000;
+    const limiter = lib.createProbeRateLimiter(30_000);
+    handler._setDeps({
+      requireProbeUser: async () => ({ ok: true, user: { email: 'kmguido97@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' }, isOwner: false }),
+      loadUserKalshiCreds: async () => ({ ok: true, keyId: 't-key', pem }),
+      kalshiCreds: () => ({ ok: true, keyId: 'KEVIN', pem }),
+      rateLimiter: limiter,
+      now: () => fakeNow,
+      sleep: async (ms) => { fakeNow += ms; },
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const path = new URL(url).pathname;
+        const json = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body), clone() { return this; } });
+        if (method === 'GET' && path.includes('/multivariate_event_collections/')) {
+          return json(200, { multivariate_contract: { associated_events: [{ ticker: 'A' }, { ticker: 'B' }] } });
+        }
+        if (method === 'GET' && path.includes('/series/')) return json(200, { series: { fee_type: 'quadratic', fee_multiplier: 1 } });
+        if (method === 'POST' && path.includes('/multivariate_event_collections/')) return json(200, { market_ticker: 'M1' });
+        if (method === 'POST' && path.endsWith('/communications/rfqs')) return json(201, { id: 'r1' });
+        if (method === 'GET' && path.endsWith('/communications/quotes')) return json(200, { quotes: [] });
+        if (method === 'DELETE') return json(204, {});
+        return json(404, {});
+      },
+    });
+    const body = { legs: [{ ticker: 'A-1', side: 'yes' }, { ticker: 'B-1', side: 'yes' }], contracts: 10, waitMs: 2000 };
+    const r1 = mockRes();
+    await handler({ method: 'POST', headers: { authorization: 'Bearer t' }, body }, r1);
+    assert.equal(r1.out.statusCode, 200, JSON.stringify(r1.out.body));
+    const r2 = mockRes();
+    await handler({ method: 'POST', headers: { authorization: 'Bearer t' }, body }, r2);
+    assert.equal(r2.out.statusCode, 429);
+    assert.match(r2.out.body.error, /Slow down/);
+    fakeNow += 31_000;
+    const r3 = mockRes();
+    await handler({ method: 'POST', headers: { authorization: 'Bearer t' }, body }, r3);
+    assert.equal(r3.out.statusCode, 200);
+  }
+
+  // Owner path still uses env key (credsSource owner-env)
+  {
+    handler._resetDeps();
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 1024 });
+    const pem = privateKey.export({ type: 'pkcs1', format: 'pem' });
+    let loadHits = 0;
+    const calls = [];
+    let fakeNowOwner = 9_000_000;
+    handler._setDeps({
+      requireProbeUser: async () => ({ ok: true, user: { email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }, isOwner: true }),
+      kalshiCreds: () => ({ ok: true, keyId: 'OWNER-ENV-KEY', pem }),
+      loadUserKalshiCreds: async () => { loadHits += 1; return { ok: true, keyId: 'SHOULD-NOT', pem }; },
+      now: () => fakeNowOwner,
+      sleep: async (ms) => { fakeNowOwner += ms; },
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const path = new URL(url).pathname;
+        const headers = (opts && opts.headers) || {};
+        const keyHeader = headers['KALSHI-ACCESS-KEY'] || '';
+        if (keyHeader) calls.push(keyHeader);
+        const json = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body), clone() { return this; } });
+        if (method === 'GET' && path.includes('/multivariate_event_collections/')) {
+          return json(200, { multivariate_contract: { associated_events: [{ ticker: 'A' }, { ticker: 'B' }] } });
+        }
+        if (method === 'GET' && path.includes('/series/')) return json(200, { series: { fee_type: 'quadratic', fee_multiplier: 1 } });
+        if (method === 'POST' && path.includes('/multivariate_event_collections/')) return json(200, { market_ticker: 'M1' });
+        if (method === 'POST' && path.endsWith('/communications/rfqs')) return json(201, { id: 'r1' });
+        if (method === 'GET' && path.endsWith('/communications/quotes')) return json(200, { quotes: [] });
+        if (method === 'DELETE') return json(204, {});
+        return json(404, {});
+      },
+    });
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer t' },
+      body: { legs: [{ ticker: 'A-1', side: 'yes' }, { ticker: 'B-1', side: 'yes' }], contracts: 10, waitMs: 2000 },
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.credsSource, 'owner-env');
+    assert.equal(loadHits, 0, 'owner must not load vault user key');
+    assert.ok(calls.every((k) => k === 'OWNER-ENV-KEY'));
+  }
 
   handler._resetDeps();
   console.log('combo-probe api tests passed');
