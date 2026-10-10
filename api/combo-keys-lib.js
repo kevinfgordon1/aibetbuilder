@@ -59,9 +59,14 @@ function parseKalshiPem(raw) {
   try { key = crypto.createPrivateKey(pem); } catch (_) { key = null; }
   // Body pasted without BEGIN/END lines: normalizePem assumes RSA; an Ed25519
   // key is PKCS#8, so retry with the generic PRIVATE KEY armor.
-  if (!key && !s.trim().startsWith('-----BEGIN')) {
-    const alt = pkcs8Armor(s);
-    try { key = crypto.createPrivateKey(alt); pem = alt; } catch (_) { key = null; }
+  // Then rebuild from the base64 body for messy pastes (one line, indents,
+  // quotes, odd spaces, missing BEGIN or END): PKCS#8, then RSA PKCS#1.
+  if (!key) {
+    const body = String(s).replace(/\\n/g, '\n').replace(/-----[^-]*-----/g, '').replace(/[^A-Za-z0-9+/=]/g, '');
+    const wrap = (label) => `-----BEGIN ${label}-----\n${(body.match(/.{1,64}/g) || []).join('\n')}\n-----END ${label}-----\n`;
+    for (const alt of body ? [wrap('PRIVATE KEY'), wrap('RSA PRIVATE KEY')] : []) {
+      try { key = crypto.createPrivateKey(alt); pem = alt; break; } catch (_) { key = null; }
+    }
   }
   if (!key) {
     throw new KeyError('That private key could not be read. Paste the whole private key file Kalshi gave you, including the BEGIN/END lines.');

@@ -121,7 +121,12 @@ async function handler(req, res) {
       const verify = deps.verifyKey || keys.verifyKey;
       verified = await verify(venue, { keyId: body.key_id, secret: body.secret, env: deps.env || process.env, fetchImpl: deps.fetchImpl });
     } catch (e) {
-      if (e instanceof keys.KeyError) return json(res, e.status, { ok: false, error: e.message, code: e.code });
+      if (e instanceof keys.KeyError) {
+        // Reason code + paste shape only; never the key id or key material.
+        const sec = String(body.secret || '');
+        console.warn('[combo-keys] refused', venue, e.code, JSON.stringify({ msg: e.message.slice(0, 60), len: sec.length, lines: sec.split(/\r?\n/).length, crlf: /\r/.test(sec), begin: (sec.match(/-----BEGIN ([A-Z ]+)-----/) || [])[1] || null, end: /-----END/.test(sec), idLen: String(body.key_id || '').trim().length }));
+        return json(res, e.status, { ok: false, error: e.message, code: e.code });
+      }
       throw new Error('verify failed');
     }
     const { error } = await client.rpc('combo_exchange_key_put', {
