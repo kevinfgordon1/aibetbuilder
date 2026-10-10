@@ -44,6 +44,8 @@ import ComboCredits from "./ComboCredits";
 import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn, feeGateNote, feeStatusFromRow } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { OpenQuotesPanel } from "./ComboLockOrders";
+import ComboLockSubmitted from "./ComboLockSubmitted";
+import { buildLockSubmittedToast, buildLockSubmitError } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
@@ -413,6 +415,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [feeStatus, setFeeStatus] = useState(null);
   const [feesByUserId, setFeesByUserId] = useState({});
   const [orderBusyKey, setOrderBusyKey] = useState(null);
+  const [submitToast, setSubmitToast] = useState(null);
   const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
   const [deskReady, setDeskReady] = useState(false);
   const [deskError, setDeskError] = useState(null);
@@ -1035,7 +1038,11 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       starts_at: form.starts ? new Date(form.starts).toISOString() : null,
     };
     const error = await insertParlay(row);
-    if (error) return alert("Save failed: " + error.message);
+    if (error) {
+      setSubmitToast(buildLockSubmitError(error.message || "Save failed"));
+      return;
+    }
+    setSubmitToast(buildLockSubmittedToast(row, { feesEnabled: feeOn }));
     setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
     setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "", sportsbook: "", boostPct: "" }));
     setMergePrompt(null);
@@ -1423,6 +1430,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       <ComboTesters user={user} supabase={supabase} />
       {feeOn && feeGateNote(feeStatus) && <div className="note warn" role="status" style={{ marginBottom: 12 }}><b>Add credits to keep quoting.</b> {feeGateNote(feeStatus).replace(/^Add credits to keep quoting\. /, "")}</div>}
       {feeOn ? <ComboCredits user={user} supabase={supabase} feeStatus={feeStatus} /> : null}
+      <ComboLockSubmitted toast={submitToast} onClose={() => setSubmitToast(null)} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
