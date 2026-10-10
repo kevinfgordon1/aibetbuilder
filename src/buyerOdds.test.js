@@ -44,3 +44,8 @@ assert.equal(buyerSeesAfterFees(null), null);
 assert.equal(buyerSeesAfterFees(50), null);
 assert.equal(buyerSeesFromNoPrice(1), null);
 console.log("buyerOdds.test.js ok");
+
+test("caoc tickers are Polymarket: maker rate 0, no Kalshi series", () => {
+  assert.equal(seriesOfTicker("caoc-1b70a2b8e7c44c8f"), null);
+  assert.equal(makerRateForTicker("caoc-1b70a2b8e7c44c8f"), 0);
+});
