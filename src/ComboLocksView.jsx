@@ -578,14 +578,14 @@ function VenueTag({ venue, venueKey }) {
   return <span className={"venue " + key}>{venue || (key === "polymarket" ? "Polymarket" : "Kalshi")}</span>;
 }
 
-function QuoteSection({ title, rows, sub, ok, empty }) {
+function QuoteSection({ title, rows, sub, ok, empty, total = null }) {
   const [all, setAll] = React.useState(false);
   const shown = all ? rows : rows.slice(0, QUOTE_ROWS_SHOWN);
   const extra = rows.length - shown.length;
   return (
     <div className="qh-sec" data-quotes={ok ? "filled" : "not-filled"}>
       <div className={"qh-h" + (ok ? " ok" : "")}>
-        <span>{title}</span><span className="cnt num">{rows.length}</span>
+        <span>{title}</span><span className="cnt num">{total != null && total > rows.length ? `${countText(total)} (showing newest ${countText(rows.length)})` : rows.length}</span>
         {sub ? <span className="qh-s">{sub}</span> : null}
       </div>
       {rows.length === 0 ? <div className="empty">{empty}</div> : (
@@ -637,6 +637,7 @@ export function QuoteHistory({ history, note }) {
       <QuoteSection
         title="Not filled"
         rows={history.notFilled}
+        total={history.notFilledTotal}
         sub="outbid, too slow, not taken, expired or skipped"
         empty="Nothing here. Every request we answered filled."
       />
