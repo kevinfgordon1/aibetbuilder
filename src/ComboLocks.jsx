@@ -722,7 +722,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       // Per-lock attempts: quotes/fills and noisy skips are separate queries so
       // a game_started flood cannot hide midday Polymarket quote_id rows.
       const archivedIds = archivedForSubs.map((row) => row.id).filter(Boolean);
-      const livingForSubs = livingRows.slice(0, 20);
+      // Every living lock gets its own history read (was newest 20 only, so
+      // older locks showed "Not filled 0"). Reads are indexed on parlay_id.
+      const livingForSubs = livingRows.slice(0, 200);
       const subReqs = lockSubmissionQueriesForParlays(supabase, {
         userId: user.id,
         living: livingForSubs,
