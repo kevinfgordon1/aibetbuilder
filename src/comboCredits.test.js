@@ -108,3 +108,18 @@ console.log("comboCredits tests passed");
   assert.equal(m.allowanceResetText(new Date("2026-10-31T23:00:00-04:00")), "Resets Nov 1");
   assert.equal(m.allowanceResetText(new Date("2026-12-15T12:00:00Z")), "Resets Jan 1");
 }
+
+// $10 minimum purchase (UI + server), and bought credits never expire.
+{
+  const m = await import("./comboCredits.js");
+  assert.equal(m.MIN_PURCHASE_USD, 10);
+  assert.equal(serverLib.MIN_PURCHASE_USD, 10);
+  for (const v of [0, 5, 9.99, -10]) { assert.equal(m.isPresetAmount(v), false); assert.equal(serverLib.isPresetAmount(v), false); }
+  assert.equal(m.isPresetAmount(10), true); assert.equal(serverLib.isPresetAmount(10), true);
+  assert.ok(m.CREDIT_PRESETS_USD.every((v) => v >= 10));
+  const fs = await import("node:fs");
+  for (const f of ["src/comboCredits.js", "src/ComboCredits.jsx", "api/combo-credits.js", "api/stripe-checkout.js", "api/stripe-webhook.js", "api/coinbase-webhook.js", "sql/20261009_combo_credits.sql", "sql/20261010_combo_fees_per_user.sql"]) {
+    const src = fs.readFileSync(new URL("../" + f, import.meta.url), "utf8");
+    assert.ok(!/credits?[^\n]{0,40}expir|expir[^\n]{0,40}credit|valid_until|expires_at/i.test(src.replace(/never expire/gi, "").replace(/checkout\.payment\.expired|'EXPIRED'|endsWith\('expired'\)/g, "")), `no credit expiry logic in ${f}`);
+  }
+}

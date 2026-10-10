@@ -8,6 +8,9 @@
 // config only and stay disabled until Kevin approves pricing AND a lawyer
 // signs off. Nothing in the app debits credits today.
 
+/** Minimum credits purchase, enforced by /api/stripe-checkout and /api/combo-credits too.
+ * Bought credits never expire; only the free monthly allowance resets on the 1st (ET). */
+export const MIN_PURCHASE_USD = 10;
 export const CREDIT_PRESETS_USD = Object.freeze([10, 25, 50, 100]);
 export const DEFAULT_PRESET_USD = 25;
 
@@ -38,7 +41,8 @@ export function monthlyAllowanceUsd(pricing = CREDITS_PRICING) {
 }
 
 export function isPresetAmount(n) {
-  return CREDIT_PRESETS_USD.includes(Number(n));
+  const v = Number(n);
+  return Number.isFinite(v) && v >= MIN_PURCHASE_USD && CREDIT_PRESETS_USD.includes(v);
 }
 
 /** Balance from raw ledger rows (same math as the SQL view). */

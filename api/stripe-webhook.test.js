@@ -122,7 +122,8 @@ const balance = (db) => ledger(db).reduce((s, r) => s + Math.round(r.amount_usd 
     const g = await run(checkout, authed('GET'));
     assert.equal(g.statusCode, 200); assert.equal(g.body.configured, true);
     assert.ok(!JSON.stringify(g.body).includes('sk_test'));
-    assert.equal((await run(checkout, authed('POST', { amount: 7 }))).statusCode, 400);
+    { const lo = await run(checkout, authed('POST', { amount: 7 })); assert.equal(lo.statusCode, 400); assert.equal(lo.body.code, 'below_minimum'); }
+    assert.equal((await run(checkout, authed('POST', { amount: 15 }))).statusCode, 400);
     const r = await run(checkout, authed('POST', { amount: 25 }));
     assert.equal(r.statusCode, 200); assert.equal(r.body.url, 'https://checkout.stripe.com/c/pay/x');
     const row = db.tables.combo_credit_checkouts[0];

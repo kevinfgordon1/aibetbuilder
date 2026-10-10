@@ -5,7 +5,7 @@
 // only when the matching webhook confirms payment. No fees are charged yet.
 import { useCallback, useEffect, useState } from "react";
 import {
-  CREDIT_PRESETS_USD, COMBO_FEE_RATE, DEFAULT_PRESET_USD, addCreditsState, allowanceResetText, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
+  CREDIT_PRESETS_USD, COMBO_FEE_RATE, MIN_PURCHASE_USD, DEFAULT_PRESET_USD, addCreditsState, allowanceResetText, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
 } from "./comboCredits";
 
 const CREDITS_CSS = `
@@ -182,8 +182,9 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
         ? <p>Each filled lock costs 1% of the amount you put at risk (contracts × lay price). It comes out of your free credits first, then purchased credits. Your all-in price on each lock already includes it. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>
         : <p>Credits will pay for Combo Locks. Right now Combo Locks is free, so nothing is taken from your balance. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>}
       <p>{usdcOn ? "Pay with a debit or credit card on Stripe's secure checkout page, or add USDC, a digital dollar, from Coinbase or any crypto wallet." : "Pay with a debit or credit card on Stripe's secure checkout page."}</p>
+      <p className="crd-sub">Minimum purchase ${MIN_PURCHASE_USD}. Purchased credits never expire. Only the free monthly credits reset on the 1st.</p>
       <div className="crd-presets" role="group" aria-label="Amount to add">
-        {CREDIT_PRESETS_USD.map((v) => (
+        {CREDIT_PRESETS_USD.filter((v) => v >= MIN_PURCHASE_USD).map((v) => (
           <button key={v} type="button" className={"crd-preset" + (amount === v ? " on" : "")} aria-pressed={amount === v} disabled={state.disabled && !error} onClick={() => setAmount(v)}>${v}</button>
         ))}
       </div>

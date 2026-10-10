@@ -73,6 +73,7 @@ async function handler(req, res) {
   if (!configured) return json(res, 503, { ok: false, code: 'not_configured', error: 'Adding credits is coming soon.' });
   const body = parseBody(req) || {};
   const amount = Number(body.amount);
+  if (!(amount >= credits.MIN_PURCHASE_USD)) return json(res, 400, { ok: false, code: 'below_minimum', error: `The minimum purchase is $${credits.MIN_PURCHASE_USD}.` });
   if (!credits.isPresetAmount(amount)) return json(res, 400, { ok: false, error: 'Pick one of the listed amounts.' });
 
   const client = serviceClient();
