@@ -30,8 +30,14 @@ assert.equal(sellerKeeps(1188).text, "+1188");
 assert.equal(buyerSeesFromNoPrice(0.921).text, "+1089");
 // Penny grid fallback.
 assert.equal(quotedYesPrice(1188, { subcent: false, makerRate: 0.0175 }), 0.08);
-// Polymarket: no maker fee, only the taker schedule.
-assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us" }).text, "+280");
+// Polymarket combos: no maker fee/rebate; combo taker curve. Docs example: 1,000 @ $0.10 → $10.19 fee.
+{
+  const { polyComboTakerFeePerContract } = await import("./venueTakerFee.js");
+  assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.10) * 100) / 100, 10.19);
+  assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.50) * 100) / 100, 19.25);
+  // +300 lock → YES 0.25 → 0.25 + 0.25·(0.0695·0.75 + 0.06·0.75^4) ≈ 0.2678 → +273
+  assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us" }).text, "+273");
+}
 // Favorites and junk.
 assert.ok(buyerSeesAfterFees(-150).american < -150);
 assert.equal(buyerSeesAfterFees(null), null);

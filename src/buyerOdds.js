@@ -10,10 +10,10 @@
 //   3. no_bid = floor to the 0.001 grid (KALSHI_SUBCENT=1 in production; penny grid otherwise),
 //      never past the target; YES quoted = 1 − no_bid
 //   4. buyer pays YES + 0.07·YES·(1−YES) per contract (Kalshi taker fee, venueTakerFee.js)
-// Polymarket: makers pay no fee (small rebates), so the quoted YES is sEff; the buyer pays the
-// same 0.07·P·(1−P) taker schedule. Per-contract estimate, before Kalshi rounds the order fee
+// Polymarket US combos: maker fee 0 and no maker rebate, so the quoted YES is sEff; the buyer pays the
+// combo taker curve P·[0.0695(1−P) + 0.06(1−P)^4] (docs.polymarket.us/fees, effective 2026-10-07). Per-contract estimate, before Kalshi rounds the order fee
 // up to the cent, so a $1 order can land a few cents either way.
-import { VENUE_TAKER_FEE_RATE, effectiveTakerPrice } from "./venueTakerFee.js";
+import { VENUE_TAKER_FEE_RATE, effectiveTakerPrice, polyComboTakerFeePerContract } from "./venueTakerFee.js";
 import { allInFromExchange } from "./comboCredits.js";
 
 export const FALLBACK_MAKER_RATE = 0.035;
@@ -95,8 +95,14 @@ export function quotedYesPrice(fillAmerican, opts = {}) {
 
 /** Buyer's odds after their taker fee, from a YES price (0–1). */
 export function buyerSeesFromYes(yes, venue = "kalshi") {
-  const rate = VENUE_TAKER_FEE_RATE[venueKey(venue)];
-  const eff = effectiveTakerPrice(yes, rate);
+  const y = Number(yes);
+  let eff;
+  if (venueKey(venue) === "polymarket") {
+    eff = y > 0 && y < 1 ? y + polyComboTakerFeePerContract(y) : null;
+    if (!(eff > 0 && eff < 1)) eff = null;
+  } else {
+    eff = effectiveTakerPrice(y, VENUE_TAKER_FEE_RATE.kalshi);
+  }
   const american = eff == null ? null : americanFromProb(eff);
   return american == null ? null : { american, text: fmt(american), yes: Number(yes), allInPrice: eff };
 }
@@ -125,4 +131,4 @@ export function sellerKeeps(fillAmerican, { feeRate = 0 } = {}) {
 export const youKeepLabel = (k) => (k ? `You keep ${k.text}` : "");
 export const buyerSeesLabel = (b) => (b ? `Buyer sees ${b.text} after fees` : "");
 export const BUYER_SEES_TITLE =
-  "The odds a bettor buying this parlay on Kalshi/Polymarket actually gets: our quoted price plus their 7% taker fee (0.07 × price × (1 − price) per contract). Lower than what you keep because both sides pay fees.";
+  "The odds a bettor buying this parlay actually gets: our quoted price plus their taker fee (Kalshi 0.07 × price × (1 − price); Polymarket combos price × [0.0695(1 − price) + 0.06(1 − price)^4]). Lower than what you keep because the buyer pays a fee on top.";
