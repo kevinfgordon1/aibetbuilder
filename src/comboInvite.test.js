@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { shouldShowInviteBanner, cleanInviteInput, statusUpdate, INVITE_COPY } from "./comboInvite.js";
+assert.equal(shouldShowInviteBanner({ user: null, hasAccess: false, dismissed: false }), false);
+assert.equal(shouldShowInviteBanner({ user: { id: "u" }, hasAccess: true, dismissed: false }), false);
+assert.equal(shouldShowInviteBanner({ user: { id: "u" }, hasAccess: false, dismissed: true }), false);
+assert.equal(shouldShowInviteBanner({ user: { id: "u" }, hasAccess: false, dismissed: false }), true);
+assert.deepEqual(cleanInviteInput({ email: " a@b.c ", books: "", notes: undefined }), { email: "a@b.c", books: null, notes: null });
+assert.equal(statusUpdate("approved", new Date(0)).decided_at, "1970-01-01T00:00:00.000Z");
+assert.throws(() => statusUpdate("granted"));
+assert.ok(!/risk-free|guarantee(d)? profit/i.test(Object.values(INVITE_COPY).join(" ")));
+console.log("comboInvite ok");
