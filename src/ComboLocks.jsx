@@ -1004,7 +1004,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         setProbeResult({ ok: false, error: r.ok ? "Probe returned an empty response" : `Probe failed (${r.status})` });
         return;
       }
-      setProbeResult(d);
+      // Remember which legs this probe covered so lock save can reuse the collection it picked.
+      setProbeResult({ ...d, legKeys: legs.map((l) => `${l.ticker}:${l.side}`).sort().join("|") });
     } catch (err) {
       setProbeResult({ ok: false, error: String(err && err.message || err) });
     } finally {
@@ -1058,7 +1059,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       user_id: user.id,
       label: form.label.trim() || legs.map((l) => l.label).join(" + "),
       legs,
-      mve_collection: games.comboCollection,
+      // The collection the probe found holding every leg (player props etc.), else the board default.
+      mve_collection: (probeResult && probeResult.ok && probeResult.collection
+        && probeResult.legKeys === legs.map((l) => `${l.ticker}:${l.side}`).sort().join("|"))
+        ? probeResult.collection : games.comboCollection,
       leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
       parlay_stake: +form.stake,
       parlay_american: +form.boost,

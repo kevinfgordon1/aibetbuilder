@@ -4,13 +4,34 @@
 // the Add Parlay fill field. Never accept / confirm.
 'use strict';
 
-const KFEE = 0.0175; // ComboLocks fill field is net of maker fee
+const KFEE = 0.0175; // legacy default; probe now passes the combo series' real maker rate
+const FALLBACK_MAKER_RATE = 0.035; // unknown series (same as combo-worker / src/buyerOdds.js)
 const DEFAULT_WAIT_MS = 4000;
 const MIN_WAIT_MS = 2000;
 const MAX_WAIT_MS = 8000;
 const PRICE_TICK = 0.01;
 const OWNER_EMAIL = 'kev120909@gmail.com';
 const COMBO_COLLECTION = process.env.KALSHI_COMBO_COLLECTION || 'KXMVESPORTSMULTIGAMEEXTENDED-R';
+// Sports combo collections the probe may fall back to when a leg's event is not in the
+// requested one (first collection that contains EVERY leg wins).
+const COMBO_COLLECTION_CANDIDATES = ['KXMVESPORTSMULTIGAMEEXTENDED-R', 'KXMVECROSSCATEGORY-R'];
+
+/** Kalshi GET /series fee terms → maker rate (mirror of src/buyerOdds.js makerRateFromSeries). */
+function makerRateFromSeries(feeType, multiplier) {
+  const m = Number(multiplier);
+  const mult = Number.isFinite(m) && m >= 0 ? m : 1;
+  switch (String(feeType || '')) {
+    case 'quadratic': return 0;
+    case 'quadratic_with_maker_fees': return 0.0175 * mult;
+    case 'quadratic_with_combo_maker_fees': return 0.035 * mult;
+    default: return FALLBACK_MAKER_RATE;
+  }
+}
+
+function rateOf(k) {
+  const n = Number(k);
+  return Number.isFinite(n) && n >= 0 ? n : KFEE;
+}
 const KALSHI_API_BASE = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
 
 function clampWaitMs(waitMs) {
@@ -65,23 +86,25 @@ function americanFromNoBid(noBid) {
   return americanFromProb(impliedYesFromNo(noBid));
 }
 
-function fillProbFromNoBid(noBid) {
+function fillProbFromNoBid(noBid, makerRate) {
+  const KFEE_ = rateOf(makerRate);
   const no = parsePrice(noBid);
   if (no == null) return null;
   const sNom = 1 - no;
   if (!(sNom > 0 && sNom < 1)) return null;
-  return KFEE * sNom * sNom + (1 - KFEE) * sNom;
+  return KFEE_ * sNom * sNom + (1 - KFEE_) * sNom;
 }
 
-function fillAmericanFromNoBid(noBid) {
-  return americanFromProb(fillProbFromNoBid(noBid));
+function fillAmericanFromNoBid(noBid, makerRate) {
+  return americanFromProb(fillProbFromNoBid(noBid, makerRate));
 }
 
-function noBidFromFillAmerican(fillAmerican) {
+function noBidFromFillAmerican(fillAmerican, makerRate) {
   const sEff = impliedProb(fillAmerican);
   if (!(sEff > 0 && sEff < 1)) return null;
-  const b = 1 - KFEE;
-  const sNom = (-b + Math.sqrt(b * b + 4 * KFEE * sEff)) / (2 * KFEE);
+  const k = rateOf(makerRate);
+  const b = 1 - k;
+  const sNom = k === 0 ? sEff : (-b + Math.sqrt(b * b + 4 * k * sEff)) / (2 * k);
   if (!(sNom > 0 && sNom < 1)) return null;
   return Math.floor((1 - sNom) * 100 + 1e-9) / 100;
 }
@@ -110,7 +133,7 @@ function tickBetterNoBid(noBid) {
 }
 
 /** Highest competing maker NO bid. 0 / missing = declined that side. */
-function pickBestQuote(quotes) {
+function pickBestQuote(quotes, makerRate) {
   const list = Array.isArray(quotes) ? quotes : [];
   let best = null;
   let bestNo = null;
@@ -140,8 +163,8 @@ function pickBestQuote(quotes) {
   return {
     bestNoBid: bestNo,
     bestYesBid: quoteYesBid(best),
-    bestAmerican: fillAmericanFromNoBid(bestNo),
-    suggestFillAmerican: fillAmericanFromNoBid(suggestNo),
+    bestAmerican: fillAmericanFromNoBid(bestNo, makerRate),
+    suggestFillAmerican: fillAmericanFromNoBid(suggestNo, makerRate),
     quoteCount: list.length,
     usableQuoteCount,
     quoteId: best.id || null,
@@ -156,10 +179,45 @@ function fillBeatsMarket(fillAmerican, bestAmerican) {
   return fill > best;
 }
 
+// Kalshi event = SERIES-EVENT (two segments); the market adds 1+ more. Player props have two
+// extra (KXNFLTD-26OCT11INDPIT-INDDJONES17-1), so "drop the last segment" was wrong for them.
+// Prefer resolveEventTicker against the collection's event list (handles 3-part events like
+// KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC); this is the fallback.
 function eventTickerFromMarket(ticker) {
   const s = String(ticker || '').trim();
+  const parts = s.split('-');
+  if (parts.length >= 3) return parts.slice(0, 2).join('-');
   const i = s.lastIndexOf('-');
   return i > 0 ? s.slice(0, i) : s;
+}
+
+/** Longest proper dash-prefix of the market ticker that is an event in this collection. */
+function resolveEventTicker(ticker, eventTickers) {
+  if (!eventTickers) return null;
+  const parts = String(ticker || '').trim().toUpperCase().split('-');
+  for (let n = parts.length - 1; n >= 1; n--) {
+    const cand = parts.slice(0, n).join('-');
+    if (eventTickers.has(cand)) return cand;
+  }
+  return null;
+}
+
+/** Legs with event_ticker resolved against the collection, or null if any leg is missing. */
+function legsInCollection(legs, eventTickers) {
+  if (!eventTickers) return null;
+  const out = [];
+  for (const l of legs || []) {
+    const ev = resolveEventTicker(l.ticker, eventTickers);
+    if (!ev) return null;
+    out.push({ ...l, event_ticker: ev });
+  }
+  return out;
+}
+
+function noCollectionError(badLegs, tried) {
+  const names = badLegs.map((l) => (l.label ? `${l.label} (${l.ticker})` : l.ticker)).join(', ');
+  return `Kalshi doesn't offer this combo: ${names} ${badLegs.length === 1 ? "isn't" : "aren't"} in any Kalshi combo collection we checked (${tried.join(', ')}). `
+    + 'Try swapping that leg for the same game\'s moneyline, spread or total, a different player on a game Kalshi lists for combos, or remove it and Probe again.';
 }
 
 function normalizeSide(side) {
@@ -306,7 +364,8 @@ function collectionEventTickers(data) {
 /** Legs whose event is not part of the combo collection (Kalshi rejects those). */
 function legsOutsideCollection(legs, eventTickers) {
   if (!eventTickers) return [];
-  return (legs || []).filter((l) => !eventTickers.has(String(l.event_ticker || '').toUpperCase()));
+  return (legs || []).filter((l) => !eventTickers.has(String(l.event_ticker || '').toUpperCase())
+    && !resolveEventTicker(l.ticker, eventTickers));
 }
 
 function outsideCollectionError(badLegs, collection, upstream) {
@@ -346,6 +405,12 @@ function missingKalshiKeysError(missing) {
 
 module.exports = {
   KFEE,
+  FALLBACK_MAKER_RATE,
+  COMBO_COLLECTION_CANDIDATES,
+  makerRateFromSeries,
+  resolveEventTicker,
+  legsInCollection,
+  noCollectionError,
   DEFAULT_WAIT_MS,
   MIN_WAIT_MS,
   MAX_WAIT_MS,

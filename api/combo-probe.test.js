@@ -385,8 +385,10 @@ function src() {
     assert.equal(res.out.body.bestYesBid, 0.07);
     assert.equal(res.out.body.quoteCount, 2);
     assert.equal(res.out.body.usableQuoteCount, 2);
-    assert.equal(res.out.body.bestAmerican, lib.fillAmericanFromNoBid(0.92));
-    assert.equal(res.out.body.suggestFillAmerican, lib.fillAmericanFromNoBid(0.93));
+    // Series lookup unavailable → conservative 0.035 maker rate (same as the worker).
+    assert.equal(res.out.body.makerRate, lib.FALLBACK_MAKER_RATE);
+    assert.equal(res.out.body.bestAmerican, lib.fillAmericanFromNoBid(0.92, lib.FALLBACK_MAKER_RATE));
+    assert.equal(res.out.body.suggestFillAmerican, lib.fillAmericanFromNoBid(0.93, lib.FALLBACK_MAKER_RATE));
     assert.equal(res.out.body.contracts, 750);
     assert.ok(res.out.body.waitedMs < 4000, 'usable quote should early-exit');
     assert.ok(calls.some((c) => c.method === 'DELETE' && c.path.endsWith('/rfqs/rfq-probe-1')));
@@ -525,8 +527,10 @@ function src() {
     }, res);
     assert.equal(res.out.statusCode, 400);
     assert.equal(res.out.body.ok, false);
-    assert.match(res.out.body.error, /New York Y \(KXMLBGAME-26SEP251905BALNYY-NYY\)/);
-    assert.equal(res.out.body.upstreamError, 'invalid parameters');
+    assert.match(res.out.body.error, /New York Y \(KXMLBGAME-26SEP251905BALNYY-NYY\) isn't in any Kalshi combo collection/);
+    assert.match(res.out.body.error, /KXMVESPORTSMULTIGAMEEXTENDED-R, KXMVECROSSCATEGORY-R/);
+    assert.match(res.out.body.error, /Try swapping/);
+    assert.ok(callsBad.every((c) => c.method !== 'POST'), 'caught before creating the combo market');
     assert.deepEqual(res.out.body.outsideCollection, ['KXMLBGAME-26SEP251905BALNYY-NYY']);
     assert.ok(callsBad.every((c) => !c.path.endsWith('/communications/rfqs')), 'no RFQ on a rejected combo');
   }
@@ -550,6 +554,93 @@ function src() {
     assert.equal(res.out.statusCode, 400);
     assert.match(res.out.body.error, /Kalshi rejected the combo market: invalid parameters: bad leg/);
   }
+
+  // Player-prop TD legs (Kevin 2026-10-10): 4-part market tickers. The event is KXNFLTD-26OCT11INDPIT,
+  // not ...-INDDJONES17; resolve it from the collection, send the right event_ticker, and price with
+  // the series' real maker fee (quadratic → 0).
+  {
+    const posted = [];
+    let fakeNow2 = 5_000_000;
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      kalshiCreds: probeCreds,
+      now: () => fakeNow2,
+      sleep: async (ms) => { fakeNow2 += ms; },
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const path = new URL(url).pathname;
+        const json = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body), clone() { return this; } });
+        if (method === 'GET' && path.endsWith('/multivariate_event_collections/KXMVESPORTSMULTIGAMEEXTENDED-R')) {
+          return json(200, { multivariate_contract: { associated_events: [
+            { ticker: 'KXNFLTD-26OCT11INDPIT' }, { ticker: 'KXNFLTD-26OCT11PHIJAC' }, { ticker: 'KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC' },
+          ] } });
+        }
+        if (method === 'POST' && path.includes('/multivariate_event_collections/')) {
+          posted.push({ path, body: JSON.parse(opts.body) });
+          const evs = JSON.parse(opts.body).selected_markets.map((m) => m.event_ticker);
+          if (evs.some((e) => /JONES|SHIPLEY/.test(e))) return json(400, { error: { code: 'invalid_parameters', message: 'invalid parameters' } });
+          return json(200, { market_ticker: 'KXMVESPORTSMULTIGAMEEXTENDED-S2026TD-1' });
+        }
+        if (method === 'GET' && path.endsWith('/series/KXMVESPORTSMULTIGAMEEXTENDED')) {
+          return json(200, { series: { fee_type: 'quadratic', fee_multiplier: 1 } });
+        }
+        if (method === 'POST' && path.endsWith('/communications/rfqs')) return json(201, { id: 'rfq-td' });
+        if (method === 'GET' && path.endsWith('/communications/quotes')) {
+          return json(200, { quotes: [{ id: 'q', no_bid_dollars: '0.922', yes_bid_dollars: '0.07', status: 'open' }] });
+        }
+        if (method === 'DELETE') return json(204, null);
+        throw new Error(`unexpected ${method} ${path}`);
+      },
+    });
+    const res = mockRes();
+    await handler({
+      method: 'POST',
+      headers: { authorization: 'Bearer tok' },
+      body: {
+        legs: [
+          { ticker: 'KXNFLTD-26OCT11INDPIT-INDDJONES17-1', side: 'yes', label: 'Daniel Jones 1+ TD' },
+          { ticker: 'KXNFLTD-26OCT11PHIJAC-PHIWSHIPLEY28-1', side: 'yes', label: 'Will Shipley 1+ TD' },
+        ],
+        contracts: 100,
+        collection: 'KXMVESPORTSMULTIGAMEEXTENDED-R',
+      },
+    }, res);
+    assert.equal(res.out.statusCode, 200, JSON.stringify(res.out.body));
+    assert.equal(res.out.body.collection, 'KXMVESPORTSMULTIGAMEEXTENDED-R');
+    assert.deepEqual(posted[0].body.selected_markets.map((m) => m.event_ticker), ['KXNFLTD-26OCT11INDPIT', 'KXNFLTD-26OCT11PHIJAC']);
+    assert.equal(res.out.body.makerRate, 0);
+    assert.equal(res.out.body.bestAmerican, lib.fillAmericanFromNoBid(0.922, 0));
+    assert.equal(lib.fillAmericanFromNoBid(0.922, 0), lib.americanFromProb(1 - 0.922));
+  }
+
+  // Leg missing from the requested collection but present in KXMVECROSSCATEGORY-R → use that one.
+  {
+    const posted = [];
+    handler._setDeps({
+      requireOwner: async () => ({ ok: true, user: { email: 'kev120909@gmail.com' } }),
+      kalshiCreds: probeCreds,
+      fetchImpl: async (url, opts) => {
+        const method = (opts && opts.method) || 'GET';
+        const path = new URL(url).pathname;
+        const json = (status, body) => ({ status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body), clone() { return this; } });
+        if (method === 'GET' && path.endsWith('/KXMVESPORTSMULTIGAMEEXTENDED-R')) return json(200, { associated_event_tickers: ['KXNFLTD-26OCT11INDPIT'] });
+        if (method === 'GET' && path.endsWith('/KXMVECROSSCATEGORY-R')) return json(200, { associated_event_tickers: ['KXNFLTD-26OCT11INDPIT', 'KXNFLTD-26OCT11PHIJAC'] });
+        if (method === 'POST' && path.includes('/multivariate_event_collections/')) { posted.push(path); return json(400, { error: { code: 'x', message: 'stop here' } }); }
+        throw new Error(`unexpected ${method} ${path}`);
+      },
+    });
+    const res = mockRes();
+    await handler({ method: 'POST', headers: { authorization: 'Bearer tok' }, body: {
+      legs: [{ ticker: 'KXNFLTD-26OCT11INDPIT-INDDJONES17-1', side: 'yes' }, { ticker: 'KXNFLTD-26OCT11PHIJAC-PHIWSHIPLEY28-1', side: 'yes' }],
+      contracts: 10 } }, res);
+    assert.deepEqual(posted, ['/trade-api/v2/multivariate_event_collections/KXMVECROSSCATEGORY-R']);
+    assert.equal(res.out.body.collection, 'KXMVECROSSCATEGORY-R');
+  }
+
+  assert.equal(lib.eventTickerFromMarket('KXNFLTD-26OCT11INDPIT-INDDJONES17-1'), 'KXNFLTD-26OCT11INDPIT');
+  assert.equal(lib.resolveEventTicker('KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC-JAC', new Set(['KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC'])), 'KXNFLTEAMFIRSTTD-26OCT11PHIJAC-JAC');
+  assert.equal(lib.makerRateFromSeries('quadratic_with_combo_maker_fees', 1), 0.035);
+  assert.equal(lib.noBidFromFillAmerican(1104, 0) != null, true);
 
   handler._resetDeps();
   console.log('combo-probe api tests passed');
