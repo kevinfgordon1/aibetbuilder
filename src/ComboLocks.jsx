@@ -417,12 +417,12 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [orderBusyKey, setOrderBusyKey] = useState(null);
   const [submitToast, setSubmitToast] = useState(null);
 
-  // Preview/smoke: optional one-shot toast seed (sessionStorage), cleared after read.
+  // Preview/smoke: optional toast seed (sessionStorage). Keep until dismiss so
+  // React Strict Mode remount still shows it; cleared in onClose.
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("combo_smoke_submit_toast");
       if (!raw) return;
-      sessionStorage.removeItem("combo_smoke_submit_toast");
       const parsed = JSON.parse(raw);
       if (parsed && (parsed.kind === "ok" || parsed.kind === "error")) setSubmitToast(parsed);
     } catch (_) {}
@@ -1441,7 +1441,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       <ComboTesters user={user} supabase={supabase} />
       {feeOn && feeGateNote(feeStatus) && <div className="note warn" role="status" style={{ marginBottom: 12 }}><b>Add credits to keep quoting.</b> {feeGateNote(feeStatus).replace(/^Add credits to keep quoting\. /, "")}</div>}
       {feeOn ? <ComboCredits user={user} supabase={supabase} feeStatus={feeStatus} /> : null}
-      <ComboLockSubmitted toast={submitToast} onClose={() => setSubmitToast(null)} />
+      <ComboLockSubmitted toast={submitToast} onClose={() => {
+        try { sessionStorage.removeItem("combo_smoke_submit_toast"); } catch (_) {}
+        setSubmitToast(null);
+      }} />
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
