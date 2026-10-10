@@ -341,7 +341,7 @@ function TargetTile({ target, sellAt }) {
 function SellTile({ summary: s, feeRate = 0, parlay = null }) {
   const fair = s && s.fair;
   const keep = parlay ? sellerKeeps(parlay.fill_american, { feeRate }) : null;
-  const buyer = parlay ? buyerSeesAfterFees(parlay.fill_american) : null;
+  const buyer = parlay ? buyerSeesAfterFees(parlay.fill_american, { ticker: parlay.combo_ticker }) : null;
   return (
     <div className="fact sell" title="Your sportsbook odds, what you keep when it sells, what the buyer on Kalshi / Polymarket sees after their fees, and the fair odds.">
       <div className="k">Selling at</div>

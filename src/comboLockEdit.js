@@ -75,7 +75,7 @@ export function openQuoteLabel(row) {
   const size = Number.isFinite(n) && n > 0 ? `${Math.round(n)} contracts` : "quote";
   const fill = Number(row.fill_american);
   const price = Number.isFinite(fill) && fill !== 0 ? ` @ ${fmtAmerican(fill)}` : "";
-  const buyer = Number.isFinite(fill) && fill !== 0 ? buyerSeesAfterFees(fill, { venue: row.venue }) : null;
+  const buyer = Number.isFinite(fill) && fill !== 0 ? buyerSeesAfterFees(fill, { venue: row.venue, ticker: row.market_ticker }) : null;
   return `${venue} · ${size}${price}${buyer ? ` · buyer sees ${buyer.text} after fees` : ""}`;
 }
 

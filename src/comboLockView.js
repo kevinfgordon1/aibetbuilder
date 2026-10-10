@@ -217,7 +217,7 @@ export function betSummary(parlay) {
     freeBet,
     maxPayout,
     sellAt: fmtAmerican(parlay.fill_american),
-    takerAt: takerOddsAfterFee(parlay.fill_american),
+    takerAt: takerOddsAfterFee(parlay.fill_american, "kalshi", parlay.combo_ticker),
     book: String(parlay.sportsbook || "").trim(),
     fair: fairOdds(parlay),
     boostPct: boost > 0 ? boost : null,
@@ -232,8 +232,8 @@ export function betSummary(parlay) {
  * (venueTakerFee.js), so mixed-venue fills give the same estimate. Per-contract
  * rate, before Kalshi's round-up of the whole order fee to the cent.
  */
-export function takerOddsAfterFee(fillAmerican, venue = "kalshi") {
-  const b = buyerSeesAfterFees(fillAmerican, { venue });
+export function takerOddsAfterFee(fillAmerican, venue = "kalshi", ticker = null) {
+  const b = buyerSeesAfterFees(fillAmerican, { venue, ticker });
   return b ? { american: b.american, text: b.text } : null;
 }
 
@@ -426,13 +426,13 @@ function skipWords(row) {
 }
 
 /** "Buyer sees" odds for a quote row: the quoted price plus the buyer's taker fee. */
-function quoteBuyerSees(row, offered) {
+function quoteBuyerSees(row, offered, ticker) {
   if (!offered) return null;
   const s = row.submission || {};
   const o = row.outcome || {};
   const venue = row.venueKey || s.venue || row.venue || "kalshi";
   const no = row.ourNo != null ? row.ourNo : (row.fill ? row.fill.no_price : null);
-  const b = no != null ? buyerSeesFromNoPrice(no, venue) : buyerSeesAfterFees(toNum(s.fill_american) || toNum(o.fill_american), { venue });
+  const b = no != null ? buyerSeesFromNoPrice(no, venue) : buyerSeesAfterFees(toNum(s.fill_american) || toNum(o.fill_american), { venue, ticker: s.market_ticker || ticker });
   return b ? b.text : null;
 }
 
@@ -452,7 +452,7 @@ function statusOf(row) {
 }
 
 /** One quote row: time (ET), price (American), size, venue, plain result. */
-export function quoteRow(row, { left = 0, ended = false } = {}) {
+export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
   if (!row) return null;
   const s = row.submission || {};
   const o = row.outcome || {};
@@ -528,7 +528,7 @@ export function quoteRow(row, { left = 0, ended = false } = {}) {
     at: row.at || null,
     time: etStamp(row.at),
     price: quotePrice(row, offered),
-    buyerSees: quoteBuyerSees(row, offered),
+    buyerSees: quoteBuyerSees(row, offered, ticker),
     size: size == null ? "—" : countText(size),
     venue: row.venue || "Kalshi",
     venueKey: row.venueKey || null,
@@ -558,7 +558,7 @@ export function quoteHistory(attempts, { parlay, now = Date.now() } = {}) {
   const filled = [];
   const notFilled = [];
   for (const r of rows) {
-    const q = quoteRow(r, { left, ended });
+    const q = quoteRow(r, { left, ended, ticker: p && p.combo_ticker });
     if (!q) continue;
     (r.bucket === "filled" ? filled : notFilled).push(q);
   }
