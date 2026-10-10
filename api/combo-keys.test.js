@@ -178,7 +178,7 @@ function kalshiFetch(scopes, extra = {}) {
   }
   // Combo Locks is private: anyone outside COMBO_LOCKS_ACCOUNTS gets 403 on every
   // method, before any DB read, even if a combo_live_users row exists for them.
-  for (const user of [{ id: STRANGER, email: 'random@example.com' }, { id: STRANGER, email: 'gmoneyvikes@gmail.com' }, { id: T, email: 'random@example.com' }, { id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47', email: 'kmguido97@gmail.com' }]) {
+  for (const user of [{ id: STRANGER, email: 'random@example.com' }, { id: STRANGER, email: 'gmoneyvikes@gmail.com' }, { id: T, email: 'random@example.com' }, { id: STRANGER, email: 'kmguido97@gmail.com' }]) {
     const f = kalshiFetch(['read', 'write::trade']);
     const s = setup({ user, live: { ...APPROVED, user_id: user.id }, fetchImpl: f });
     assert.equal((await call('GET')).code, 403);

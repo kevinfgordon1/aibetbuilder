@@ -205,6 +205,7 @@ const COMBO_LOCKS_ACCOUNTS = Object.freeze([
   Object.freeze({ email: 'kevin.f.gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }),
   Object.freeze({ email: 'gmoneyvikes@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' }),
   Object.freeze({ email: 'c.w.higgins1@gmail.com', id: '721c1166-be0b-4856-8a88-6de3a8b047b9' }),
+  Object.freeze({ email: 'kmguido97@gmail.com', id: '42b5ee16-68d5-4b3b-a931-40aa17cd1a47' }),
 ]);
 
 // Kept for callers that list who is allowed; env is ignored on purpose.
