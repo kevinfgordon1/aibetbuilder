@@ -248,6 +248,10 @@ export function lockMetaLine(parlay) {
   const bits = [lockSports(parlay).join(" + "), etDateTime(parlay.starts_at), s.book];
   if (s.freeBet) bits.push("free bet");
   else if (s.boostPct) bits.push(`${s.boostPct}% boost`);
+  if (parlay.fill_edited_at) {
+    const when = etDateTime(parlay.fill_edited_at);
+    bits.push(when ? `fill edited ${when}` : "fill edited");
+  }
   return bits.filter(Boolean).join(" · ");
 }
 

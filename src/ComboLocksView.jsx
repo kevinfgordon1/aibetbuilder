@@ -104,6 +104,14 @@ export const COMBO_VIEW_CSS = `
   .cl .leglist .lg{font-size:12px;color:#6b7280;margin-left:auto}
   .cl .chips{display:flex;flex-wrap:wrap;gap:6px}
   .cl .actions{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 6px}
+  .cl .open-quotes{margin:2px 0 8px}
+  .cl .oq-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .cl .oq-title{font-size:13px;font-weight:700;color:#e8eaed}
+  .cl .oq-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .cl .oq-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+  .cl .oq-row{padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08)}
+  .cl .oq-label{font-size:13px;color:#d1d5db;margin-bottom:6px}
+  .cl .oq-btns{display:flex;gap:6px;flex-wrap:wrap}
   .cl .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .cl .hist-totals{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:10px;margin-bottom:14px}
   .cl .hist-totals .stat{cursor:default}

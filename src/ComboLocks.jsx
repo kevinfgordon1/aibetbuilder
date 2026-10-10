@@ -43,6 +43,7 @@ import { LowCashBanner } from "./LowCashAlerts";
 import ComboCredits from "./ComboCredits";
 import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn, feeGateNote, feeStatusFromRow } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
+import { OpenQuotesPanel } from "./ComboLockOrders";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
@@ -410,6 +411,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [kill, setKill] = useState(false);
   // Per-user Combo Locks fees (combo_my_fee_status). null = fee-free (everyone but fee users).
   const [feeStatus, setFeeStatus] = useState(null);
+  const [feesByUserId, setFeesByUserId] = useState({});
+  const [orderBusyKey, setOrderBusyKey] = useState(null);
   const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
   const [deskReady, setDeskReady] = useState(false);
   const [deskError, setDeskError] = useState(null);
@@ -429,6 +432,14 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         if (!alive) return;
         // Missing function / error = treat as fee-free (fees are opt-in per user).
         setFeeStatus(error ? null : feeStatusFromRow(Array.isArray(data) ? data[0] : data));
+        if (user.email && String(user.email).trim().toLowerCase() === OWNER_EMAIL.toLowerCase()) {
+          const fq = await supabase.from("combo_live_users").select("user_id,fees_enabled");
+          if (!fq.error && fq.data) {
+            const map = {};
+            for (const r of fq.data) map[r.user_id] = !!r.fees_enabled;
+            setFeesByUserId(map);
+          }
+        }
       } catch (_) { if (alive) setFeeStatus(null); }
     };
     load();
@@ -612,7 +623,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
         supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("user_id", user.id).eq("is_combo", true).eq("is_taker", false),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
-        supabase.from("combo_submissions").select("parlay_id,contracts,status,is_live,order_id,venue,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
+        supabase.from("combo_submissions").select("id,parlay_id,contracts,status,is_live,order_id,quote_id,venue,fill_american,cancel_requested_at,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
         // How many RFQs matched each parlay (from the read-only watcher).
         supabase.from("combo_match_counts").select("*"),
         // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
@@ -1268,6 +1279,17 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             <div className="note warn">We offered {desk.quoted.toLocaleString("en-US")} contracts and {desk.fill.filled.toLocaleString("en-US")} were confirmed filled. The rest weren't taken (or haven't gone through yet).</div>
           )}
           <DeskChips desk={desk} />
+        </DetailBlock>
+        <DetailBlock title="Open quotes & fill odds">
+          <OpenQuotesPanel
+            parlay={p}
+            submissions={submissions}
+            supabase={supabase}
+            feesEnabled={p.user_id === user.id ? feeOn : !!feesByUserId[p.user_id]}
+            onDone={reload}
+            busyKey={orderBusyKey}
+            setBusyKey={setOrderBusyKey}
+          />
         </DetailBlock>
         <DetailBlock title="Quote history">
           <QuoteHistory history={quoteHistory(attemptsByParlay[p.id], { parlay: p })} note={watcherNote(p.id)} />
