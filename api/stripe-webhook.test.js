@@ -7,11 +7,12 @@ const checkout = require('./stripe-checkout.js');
 
 const SECRET = 'whsec_test_only';
 const KEVIN = { id: '79ae1610-097e-4b46-a622-1e952f18e936', email: 'kev120909@gmail.com' };
+const NOFEE = { id: '00000000-0000-0000-0000-000000000002', email: 'kev120909@gmail.com' };
 const STRANGER = { id: '00000000-0000-0000-0000-000000000001', email: 'someone@example.com' };
 const SESSION_ID = 'cs_test_' + 'a'.repeat(58); // longer than 64 chars, like real ids
 // ---- In-memory Supabase ----
 function memoryDb() {
-  const tables = { combo_credit_ledger: [], combo_credit_checkouts: [] };
+  const tables = { combo_credit_ledger: [], combo_credit_checkouts: [], combo_live_users: [{ user_id: KEVIN.id, fees_enabled: true }, { user_id: NOFEE.id, fees_enabled: false }] };
   function from(name) {
     const st = { op: 'select', patch: null, filters: [], single: false };
     const run = () => {
@@ -111,6 +112,9 @@ const balance = (db) => ledger(db).reduce((s, r) => s + Math.round(r.amount_usd 
   // ---- checkout endpoint ----
   {
     setup({ user: STRANGER });
+    assert.equal((await run(checkout, authed('POST', { amount: 25 }))).statusCode, 403);
+    // Combo Locks user without fees_enabled: no card checkout.
+    setup({ user: NOFEE });
     assert.equal((await run(checkout, authed('POST', { amount: 25 }))).statusCode, 403);
     setup();
     assert.equal((await run(checkout, { method: 'POST', headers: {}, body: { amount: 25 } })).statusCode, 401);

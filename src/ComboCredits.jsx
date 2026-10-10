@@ -5,7 +5,7 @@
 // only when the matching webhook confirms payment. No fees are charged yet.
 import { useCallback, useEffect, useState } from "react";
 import {
-  CREDIT_PRESETS_USD, CREDITS_PRICING, DEFAULT_PRESET_USD, addCreditsState, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
+  CREDIT_PRESETS_USD, COMBO_FEE_RATE, DEFAULT_PRESET_USD, addCreditsState, allowanceResetText, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
 } from "./comboCredits";
 
 const CREDITS_CSS = `
@@ -30,6 +30,15 @@ const CREDITS_CSS = `
 .cl .crd .crd-hist summary{cursor:pointer;color:#93c5fd;font-weight:600}
 .cl .crd .crd-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
 .cl .crd .crd-row .pos{color:#6ee7b7}.cl .crd .crd-row .neg{color:#fca5a5}
+.cl .crd .crd-allow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.cl .crd .crd-box{border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 12px;background:rgba(255,255,255,0.02)}
+.cl .crd .crd-box .k{font-size:12px;color:#8a8f98}
+.cl .crd .crd-box .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.cl .crd .crd-box .s{font-size:12px;color:#9aa3b2}
+.cl .crd .crd-meter{height:6px;border-radius:4px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:6px}
+.cl .crd .crd-meter>i{display:block;height:100%;background:#60a5fa}
+.cl .crd .crd-gate{border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.08);color:#fde68a;border-radius:10px;padding:8px 10px;font-size:13px;margin:8px 0}
+@media (max-width:600px){.cl .crd .crd-allow{grid-template-columns:1fr}}
 @media (max-width:600px){.cl .crd .crd-preset{flex:1 1 calc(50% - 8px)}.cl .crd .crd-go{width:100%}}
 `;
 
@@ -49,13 +58,14 @@ const etDate = (iso) => {
   return d.toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
 };
 
-export default function ComboCredits({ supabase, user }) {
+export default function ComboCredits({ supabase, user, feeStatus = null, gateNote = null }) {
   const usdcOn = showUsdcCreditsEnabled();
   const [configured, setConfigured] = useState(false);
   const [cardConfigured, setCardConfigured] = useState(false);
   const [cfgLoading, setCfgLoading] = useState(true);
   const [balance, setBalance] = useState(null);
   const [rows, setRows] = useState([]);
+  const [fees, setFees] = useState([]);
   const [schemaMissing, setSchemaMissing] = useState(false);
   const [amount, setAmount] = useState(DEFAULT_PRESET_USD);
   const [busy, setBusy] = useState(false);
@@ -76,6 +86,10 @@ export default function ComboCredits({ supabase, user }) {
     setSchemaMissing(false);
     setBalance(balQ.data ? Number(balQ.data.balance_usd) : 0);
     setRows(rowsQ.data || []);
+    try {
+      const fq = await supabase.from("combo_fee_charges").select("id,fee_usd,from_allowance_usd,from_credits_usd,contracts,lay_price,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
+      setFees(fq.error ? [] : (fq.data || []));
+    } catch (_) { setFees([]); }
   }, [supabase, user]);
 
   useEffect(() => {
@@ -133,20 +147,40 @@ export default function ComboCredits({ supabase, user }) {
   };
 
   const state = addCreditsState({ configured: (configured || cardConfigured) && !schemaMissing, loading: cfgLoading, busy, error });
-  const feesOn = CREDITS_PRICING.feesEnabled;
+  const feesOn = !!(feeStatus && feeStatus.feesEnabled);
+  const allow = feesOn ? feeStatus : null;
+  const usedPct = allow && allow.allowanceUsd > 0 ? Math.min(100, Math.round((allow.allowanceUsedUsd / allow.allowanceUsd) * 100)) : 0;
 
   return (
     <div className="card crd" aria-label="Combo Locks credits">
       <style>{CREDITS_CSS}</style>
       <div className="crd-head">
         <div className="crd-title">Your credits</div>
-        <span className={"chip" + (feesOn ? "" : " ok")}>{feesOn ? `${Math.round(CREDITS_PRICING.feeRate * 100)}% fee on fills` : "Free for now · no fees"}</span>
+        <span className={"chip" + (feesOn ? "" : " ok")}>{feesOn ? `${Math.round(COMBO_FEE_RATE * 100)}% fee on fills` : "Free for now · no fees"}</span>
       </div>
-      <div className="crd-bal">
+      {gateNote && <div className="crd-gate" role="status">{gateNote}</div>}
+      {allow && (
+        <div className="crd-allow">
+          <div className="crd-box">
+            <div className="k">Free credits this month</div>
+            <div className="v">{creditsText(allow.allowanceLeftUsd)} <span className="crd-sub">left of {creditsText(allow.allowanceUsd)}</span></div>
+            <div className="crd-meter" aria-hidden="true"><i style={{ width: usedPct + "%" }} /></div>
+            <div className="s">{creditsText(allow.allowanceUsedUsd)} used · {allowanceResetText()} · unused credits don't carry over</div>
+          </div>
+          <div className="crd-box">
+            <div className="k">Purchased credits</div>
+            <div className="v">{balance == null ? "—" : creditsText(balance)}</div>
+            <div className="s">Used after your free credits run out</div>
+          </div>
+        </div>
+      )}
+      {!allow && <div className="crd-bal">
         <span className="crd-amt">{balance == null ? "—" : creditsText(balance)}</span>
         <span className="crd-sub">{schemaMissing ? "Credits aren't set up yet." : "1 credit = $1"}</span>
-      </div>
-      <p>Credits will pay for Combo Locks. Right now Combo Locks is free, so nothing is taken from your balance. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>
+      </div>}
+      {allow
+        ? <p>Each filled lock costs 1% of the amount you put at risk (contracts × lay price). It comes out of your free credits first, then purchased credits. Your all-in price on each lock already includes it. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>
+        : <p>Credits will pay for Combo Locks. Right now Combo Locks is free, so nothing is taken from your balance. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>}
       <p>{usdcOn ? "Pay with a debit or credit card on Stripe's secure checkout page, or add USDC, a digital dollar, from Coinbase or any crypto wallet." : "Pay with a debit or credit card on Stripe's secure checkout page."}</p>
       <div className="crd-presets" role="group" aria-label="Amount to add">
         {CREDIT_PRESETS_USD.map((v) => (
@@ -159,6 +193,17 @@ export default function ComboCredits({ supabase, user }) {
       </div>
       {state.note && <div className="crd-note">{state.note}</div>}
       {back && <div className={"crd-note" + (back.kind === "ok" ? " ok" : "")}>{back.text}</div>}
+      {allow && fees.length > 0 && (
+        <details className="crd-hist" open>
+          <summary>Recent fees</summary>
+          {fees.map((f) => (
+            <div className="crd-row" key={"f" + f.id}>
+              <span>{Number(f.contracts).toLocaleString("en-US")} contracts × {Number(f.lay_price).toFixed(2)} × 1% <span className="muted">· {etDate(f.created_at)} · {Number(f.from_credits_usd) > 0 ? (Number(f.from_allowance_usd) > 0 ? "free + purchased" : "purchased") : "free credits"}</span></span>
+              <span className="neg">−{creditsText(Number(f.fee_usd))}</span>
+            </div>
+          ))}
+        </details>
+      )}
       {rows.length > 0 && (
         <details className="crd-hist">
           <summary>Recent activity</summary>

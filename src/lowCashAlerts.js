@@ -41,6 +41,13 @@ export function lowCashText(a, { owner = false } = {}) {
   // owner=true: Kevin reading someone else's alert in All users.
   const your = owner ? "their" : "your";
   const you = owner ? "They're" : "You're";
+  if (a.kind === "no_credits") {
+    return {
+      title: "Add credits to keep quoting",
+      body: `${owner ? "Their" : "Your"} free monthly Combo Locks credits and purchased credits are used up, so new quotes are paused. ` +
+        (owner ? "They can add credits on Combo Locks." : "Add credits on Combo Locks to keep quoting.") + " Existing fills stay as they are.",
+    };
+  }
   if (a.venue === "polymarket") {
     return {
       title: "Some Combo Locks quotes were skipped: not enough Polymarket cash",
@@ -65,7 +72,7 @@ export function openUserAlerts(rows, { includeRead = false } = {}) {
     .filter((a) => a && !a.resolvedAt && (includeRead || !a.readAt))
     .sort((x, y) => String(y.createdAt || "").localeCompare(String(x.createdAt || "")))
     .filter((a) => {
-      const k = `${a.userId}|${a.venue}|${a.parlayId || ""}`;
+      const k = `${a.userId}|${a.kind}|${a.venue}|${a.parlayId || ""}`;
       if (seen.has(k)) return false;
       seen.add(k);
       return true;

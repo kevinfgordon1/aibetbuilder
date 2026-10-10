@@ -9,6 +9,7 @@ import {
 import { STATEMENT_DATE_FILTERS } from "./comboStatement";
 import { shouldToggleFromCard } from "./comboCardToggle.js";
 import { formatAmerican, formatDollars, sortOriginalBets } from "./comboMerge";
+import { allInFromExchange } from "./comboCredits";
 
 export const COMBO_VIEW_CSS = `
   .cl .cl-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
@@ -328,16 +329,21 @@ function TargetTile({ target, sellAt }) {
 }
 
 /** Third tile: your original odds, what you're selling for (+ taker's odds after fees), fair odds. */
-function SellTile({ summary: s }) {
+function SellTile({ summary: s, feeRate = 0, parlay = null }) {
   const fair = s && s.fair;
+  const allIn = feeRate > 0 && parlay ? allInFromExchange(parlay.fill_american, feeRate) : null;
   return (
     <div className="fact sell" title="Your sportsbook odds, the odds you're offering traders on Kalshi / Polymarket, and the fair odds.">
       <div className="k">Selling at</div>
       <div className="sgrid">
         <span className="sl">Your original odds</span>
         <span className="sv">{s.odds || "—"}{s.book ? <span className="sx"> {s.book}</span> : null}</span>
-        <span className="sl">Selling for</span>
-        <span className="sv main">{s.sellAt || "—"}{s.takerAt ? <span className="sx" title="Estimated odds the taker gets after the Kalshi / Polymarket taker fee (0.07 × P × (1−P) per contract)."> taker {s.takerAt.text} after fees</span> : null}</span>
+        {allIn != null && <>
+          <span className="sl">Your all-in price</span>
+          <span className="sv main" title="What you're selling for once the 1% Combo Locks fee on the amount at risk is counted.">{fmtAmerican(allIn)}<span className="sx"> incl. {Math.round(feeRate * 100)}% fee</span></span>
+        </>}
+        <span className="sl">{allIn != null ? "On the exchange" : "Selling for"}</span>
+        <span className={"sv" + (allIn != null ? "" : " main")}>{s.sellAt || "—"}{s.takerAt ? <span className="sx" title="Estimated odds the taker gets after the Kalshi / Polymarket taker fee (0.07 × P × (1−P) per contract)."> taker {s.takerAt.text} after fees</span> : null}</span>
         <span className="sl">Fair odds</span>
         <span className="sv">{fair ? fair.text : "—"}{fair && fair.source === "legs" ? <span className="sx"> est.</span> : null}</span>
       </div>
@@ -410,7 +416,7 @@ export function MergedTag({ bets }) {
  * sell price and how much is hedged, then a small "Your original bet" reminder.
  * Everything else lives behind Details (children).
  */
-export function LockCard({ parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
+export function LockCard({ feeRate = 0, parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
   const s = betSummary(parlay) || {};
   const cap = Number(ceiling) > 0 ? Number(ceiling) : Number(parlay && parlay.max_contracts) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((Number(filled || 0) / cap) * 100)) : 0;
@@ -446,7 +452,7 @@ export function LockCard({ parlay, status, profile, filled = 0, ceiling, overTex
       <div className="lk-facts">
         <StandTile now={tiles.now} />
         <TargetTile target={tiles.target} sellAt={s.sellAt} />
-        <SellTile summary={s} />
+        <SellTile summary={s} feeRate={feeRate} parlay={parlay} />
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>

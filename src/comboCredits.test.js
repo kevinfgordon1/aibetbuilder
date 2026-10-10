@@ -82,3 +82,29 @@ console.log("comboCredits tests passed");
   assert.equal(showUsdcCreditsEnabled(), false);
   process.env.VITE_SHOW_USDC_CREDITS = "1"; assert.equal(showUsdcCreditsEnabled(), true);
   if (prev === undefined) delete process.env.VITE_SHOW_USDC_CREDITS; else process.env.VITE_SHOW_USDC_CREDITS = prev; }
+
+// Per-user fees: 1% of amount at risk, all-in <-> exchange price.
+{
+  const m = await import("./comboCredits.js");
+  assert.equal(m.lockFillFeeUsd(23.47, 0.08), 0.22); // 0.01 x 23.47 x 0.92 = 0.2159
+  assert.equal(m.lockFillFeeUsd(100, 0.5), 0.5);
+  assert.equal(m.lockFillFeeUsd(0, 0.5), 0);
+  assert.equal(m.allInFromExchange(1150), 1162); // fee analysis: lay -1150 -> -1162 with fee
+  assert.equal(m.exchangeFromAllIn(1162), 1150);
+  assert.equal(m.exchangeFromAllIn(404), 400);
+  assert.equal(m.allInFromExchange(-150), -148);
+  assert.equal(m.exchangeFromAllIn(-149), -151);
+  for (const a of [150, 400, 999, 1150, 2500, -120, -200]) {
+    const back = m.exchangeFromAllIn(m.allInFromExchange(a));
+    const dec = (x) => (x > 0 ? x / 100 : 100 / -x);
+    assert.ok(dec(back) <= dec(a) + 1e-9, `round trip never quotes above ${a}: ${back}`);
+  }
+  assert.equal(m.feeStatusFromRow(null), null);
+  assert.equal(m.feeStatusFromRow({ fees_enabled: false }), null);
+  const st = m.feeStatusFromRow({ fees_enabled: true, monthly_allowance_usd: "100", allowance_used_usd: "100", allowance_left_usd: "0", credits_usd: "0", can_quote: false });
+  assert.equal(st.canQuote, false);
+  assert.match(m.feeGateNote(st), /^Add credits to keep quoting/);
+  assert.equal(m.feeGateNote({ ...st, canQuote: true }), null);
+  assert.equal(m.allowanceResetText(new Date("2026-10-31T23:00:00-04:00")), "Resets Nov 1");
+  assert.equal(m.allowanceResetText(new Date("2026-12-15T12:00:00Z")), "Resets Jan 1");
+}

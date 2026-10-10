@@ -41,7 +41,7 @@ import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "
 import ComboTesters from "./ComboTesters";
 import { LowCashBanner } from "./LowCashAlerts";
 import ComboCredits from "./ComboCredits";
-import { showCreditsCardEnabled } from "./comboCredits";
+import { allInFromExchange, exchangeFromAllIn, feeGateNote, feeStatusFromRow } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled } from "./comboProbe";
@@ -408,6 +408,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
   const [kill, setKill] = useState(false);
+  // Per-user Combo Locks fees (combo_my_fee_status). null = fee-free (everyone but fee users).
+  const [feeStatus, setFeeStatus] = useState(null);
   const [deskLoading, setDeskLoading] = useState(true); // first settings+parlays fetch
   const [deskReady, setDeskReady] = useState(false);
   const [deskError, setDeskError] = useState(null);
@@ -418,6 +420,23 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   const parlaysReadyRef = useRef(false);
   const settingsReadyRef = useRef(false);
   const [history, setHistory] = useState([]);
+  useEffect(() => {
+    if (!user || !user.id) return undefined;
+    let alive = true;
+    const load = async () => {
+      try {
+        const { data, error } = await supabase.rpc("combo_my_fee_status");
+        if (!alive) return;
+        // Missing function / error = treat as fee-free (fees are opt-in per user).
+        setFeeStatus(error ? null : feeStatusFromRow(Array.isArray(data) ? data[0] : data));
+      } catch (_) { if (alive) setFeeStatus(null); }
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
+  // Fee users type their all-in price (fee included); the site quotes the exchange price.
+  const feeOn = !!feeStatus;
   const [archived, setArchived] = useState([]);
   const [realFills, setRealFills] = useState({}); // parlay_id -> real contracts filled (from Kalshi account)
   const filledSubsRef = useRef([]); // last confirmed-fill submissions (kept if a poll's query fails)
@@ -804,7 +823,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
   // live preview: auto contracts cap for the chosen mode + the outcome if filled to that cap
   const preview = useMemo(() => {
-    const stake = +form.stake, boost = +form.boost, fill = +form.fill;
+    const stake = +form.stake, boost = +form.boost, fill = feeOn ? (exchangeFromAllIn(+form.fill) || 0) : +form.fill;
     const kind = lockKind(form);
     if (!(stake > 0) || !boost || !fill) return null;
     const cap = hedgeCap({ stake, boostAmerican: boost, fillAmerican: fill, mode: form.mode, kind });
@@ -813,7 +832,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode, kind });
     if (!d.ok) return null;
     return { cap, d, kind };
-  }, [form.stake, form.boost, form.fill, form.fair, form.mode, form.kind]);
+  }, [form.stake, form.boost, form.fill, form.fair, form.mode, form.kind, feeOn]);
 
   // Lifecycle split (derived, so nothing can disappear):
   //   waiting  = living parlay with NO confirmed real fill yet  → "Active — waiting to be filled"
@@ -943,7 +962,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     bet_type: formBetType(form),
     sportsbook: String(form.sportsbook || "").trim(),
     boostPct: form.boostPct === "" ? null : +form.boostPct,
-    fill: +form.fill,
+    fill: feeOn ? (exchangeFromAllIn(+form.fill) || 0) : +form.fill,
     fair: form.fair === "" ? null : +form.fair,
     mode: form.mode,
     label: form.label.trim(),
@@ -966,7 +985,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   };
   const saveSeparateParlay = async (legs) => {
     const kind = lockKind(form);
-    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: +form.fill, mode: form.mode, kind });
+    const exFill = feeOn ? (exchangeFromAllIn(+form.fill) || 0) : +form.fill;
+    const cap = hedgeCap({ stake: +form.stake, boostAmerican: +form.boost, fillAmerican: exFill, mode: form.mode, kind });
     const row = {
       user_id: user.id,
       label: form.label.trim() || legs.map((l) => l.label).join(" + "),
@@ -975,7 +995,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       leg_keys: legs.map((l) => `${l.ticker}:${l.side}`).sort(),
       parlay_stake: +form.stake,
       parlay_american: +form.boost,
-      fill_american: +form.fill,
+      fill_american: exFill,
       fair_american: form.fair === "" ? null : +form.fair,
       hedge_mode: form.mode,
       max_contracts: cap,
@@ -1204,6 +1224,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         parlay={p}
         status={status}
         profile={lockProfile(p, filledN)}
+        feeRate={feeOn ? 0.01 : 0}
         filled={filledN}
         ceiling={ceiling}
         overText={desk && desk.fill ? overFillText(desk.fill) : ""}
@@ -1216,7 +1237,9 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         <DetailBlock title="Profit picture"><RiskProfile parlay={p} filled={filledN} /></DetailBlock>
         <DetailBlock title="Price and size">
           <div className="chips">
-            <span className="chip fill num">Selling at {fmtAm(p.fill_american)}</span>
+            {feeOn
+              ? <><span className="chip fill num">All-in {fmtAm(allInFromExchange(p.fill_american))} (incl. 1% fee)</span><span className="chip num">Exchange {fmtAm(p.fill_american)}</span></>
+              : <span className="chip fill num">Selling at {fmtAm(p.fill_american)}</span>}
             <TakerFairChips parlay={p} />
             <span className="chip">{MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"}</span>
             <span className="chip num">Up to {p.max_contracts} contracts</span>
@@ -1359,7 +1382,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       )}
       <LowCashBanner supabase={supabase} user={user} />
       <ComboTesters user={user} supabase={supabase} />
-      {showCreditsCardEnabled() ? <ComboCredits user={user} supabase={supabase} /> : null}
+      {feeOn && feeGateNote(feeStatus) && <div className="note warn" role="status" style={{ marginBottom: 12 }}><b>Add credits to keep quoting.</b> {feeGateNote(feeStatus).replace(/^Add credits to keep quoting\. /, "")}</div>}
+      {feeOn ? <ComboCredits user={user} supabase={supabase} feeStatus={feeStatus} /> : null}
       {deskHealth.show
         ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
         : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
@@ -1456,9 +1480,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             <div className="row c3" style={{ marginTop: 14 }}>
               <div><label>{lockKind(form) === "freebet" ? "Free bet amount ($)" : "Your stake ($)"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
               <div><label>{lockKind(form) === "freebet" ? "Your parlay odds at the book" : "Your odds at the book (boosted)"}</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
-              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>Sell at (odds you offer, after fees)
+              <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>{feeOn ? "Your all-in price (includes 1% fee)" : "Sell at (odds you offer, after fees)"}
                 {+form.fill ? <span className="info" tabIndex={0} data-tip={`The buyer gets ${fmtAm(fillView(+form.fill).effTaker)}, a bit worse than your ${fmtAm(+form.fill)}, because their fee (7%) is bigger than yours. That's the price they shop on.`}>i</span> : null}
-              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter sell odds" : undefined} /></div>
+              </label><input className="num" type="number" value={form.fill} onChange={(e) => setForm({ ...form, fill: e.target.value })} placeholder={prefill ? "enter sell odds" : undefined} />
+                {feeOn && +form.fill ? <div className="muted num" style={{ fontSize: 12, marginTop: 4 }}>Quotes on the exchange at {fmtAm(exchangeFromAllIn(+form.fill))}. The 1% fee on the amount at risk makes it {fmtAm(+form.fill)} all-in.</div> : null}</div>
             </div>
             <div className="row c2">
               <div><label>Fair odds (optional)</label><input className="num" type="number" value={form.fair} onChange={(e) => setForm({ ...form, fair: e.target.value })} /></div>
