@@ -26,7 +26,7 @@ import { AppAlertsBanner, AppAlertsBell, AppAlertsBoundary, useAppAlerts } from 
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
 import { shouldShowKennethOddsBoardAlert, kennethOddsBoardAnnouncement, KENNETH_ODDS_BOARD_ALERT_ID } from "./targetedAlerts";
 import { buildPromoComboPrefill } from "./comboPrefill";
-import { promoLegIdentity, filterExcludedLegs } from "./promoLegExclude";
+import { promoLegIdentity, filterExcludedLegs, loadSessionExcludedLegs, saveSessionExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
 import { bookLogo } from "./bookLogos.js";
 import {
@@ -1665,7 +1665,8 @@ export default function App() {
   const [targetedAlertSessionDismissed, setTargetedAlertSessionDismissed] = useState(false);
   const appAlerts = useAppAlerts(supabase, user);
   const [appAlertsOpen, setAppAlertsOpen] = useState(false);
-  const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => new Set());
+  const [excludedPromoLegs, setExcludedPromoLegs] = useState(() => loadSessionExcludedLegs());
+  useEffect(() => { saveSessionExcludedLegs(excludedPromoLegs); }, [excludedPromoLegs]);
   const [oddsSource, setOddsSource] = useState({ featured: [], events: [] });
   const [matchingBookKeys, setMatchingBookKeys] = useState(() => loadMatchingBookKeys(TRUSTED_BOOK_KEYS));
   const [evScan, setEvScan] = useState(null);
@@ -1886,7 +1887,6 @@ export default function App() {
   const loadPromoBoard = async ({ background = false } = {}) => {
     const gen = ++promoFetchGen.current;
     if (!background) {
-      setExcludedPromoLegs(new Set());
       setPromoLoading(true);
     }
     const plan = buildOddsQueryPlan({
@@ -2109,11 +2109,8 @@ export default function App() {
     setPromoPage(5);
     setExpandedPromo(null);
     setExpandedFreeBet(null);
-    // Remount starts with no exclusions. Filter tweaks must too — leftover
-    // X's otherwise hide the best plays until a full refresh.
-    // Team / odds text use the debounced scan* values so typing does not
-    // reset the list on every keystroke.
-    setExcludedPromoLegs(new Set());
+    // X'd legs stay hidden for the session across filter, book, boost and
+    // Optimize! changes; "N hidden · Restore" clears them.
   }, [scanPromoBook, scanPromoSports, scanPromoDateRange, promoType, creditConversionPct, refundPct, scanNumLegs, scanMinFinalOdds, scanMaxFinalOdds, scanMinLegOdds, scanMaxLegOdds, scanMarketScope, hideLowLiquidity, scanMatchingBookKeys, scanTeamInclude, scanTeamExclude]);
 
   const promoOddsData = useMemo(() => {
@@ -2563,7 +2560,6 @@ export default function App() {
     const gen = ++optimizeGen.current;
     pendingOptimize.current = true;
     pendingOptimizeTarget.current = null;
-    setExcludedPromoLegs(new Set());
     setOptimizeBusy(true);
     window.gtag?.("event", "promo_optimize", {
       promo_type: promoType,
@@ -3281,6 +3277,15 @@ export default function App() {
                         opacity: optimizeBusy ? 0.75 : 1,
                       }}
                     >{optimizeBusy ? "Optimizing…" : "Optimize!"}</button>
+                    {excludedPromoLegs.size > 0 && (
+                      <button
+                        type="button"
+                        data-testid="promo-hidden-restore"
+                        onClick={() => setExcludedPromoLegs(new Set())}
+                        title="Bring back the legs you X'd out"
+                        style={{ marginLeft: 8, padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#9ca3af", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}
+                      >{excludedPromoLegs.size} hidden · <span style={{ color: "#60a5fa", fontWeight: 700 }}>Restore</span></button>
+                    )}
                   </>)}
                 </div>
                 <div style={{ display: "flex", flexDirection: promoFiltersOpen ? "row" : "column", alignItems: promoFiltersOpen ? "center" : undefined, gap: promoFiltersOpen ? 8 : 12, flexWrap: "wrap" }}>

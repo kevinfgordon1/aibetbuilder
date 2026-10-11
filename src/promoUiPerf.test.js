@@ -91,7 +91,7 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
   assert.doesNotMatch(app, /forceBookmaker/);
   assert.match(app, /loadPromoBoard\(\{ background: true \}\)/);
   assert.match(app, /await loadPromoBoard\(\)/);
-  assert.match(app, /if \(!background\) \{\s*setExcludedPromoLegs\(new Set\(\)\);\s*setPromoLoading\(true\);/);
+  assert.match(app, /if \(!background\) \{\s*setPromoLoading\(true\);/);
   assert.doesNotMatch(app, /fetchBookmakerSnapshot\(\{/);
 }
 
