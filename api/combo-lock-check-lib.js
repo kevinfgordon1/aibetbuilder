@@ -5,8 +5,9 @@
 
 const LOCK_CHECK_WAIT_MS = 10_000;        // Kevin: collect for 10s "to be safe"
 const LOCK_CHECK_COOLDOWN_MS = 60_000;    // per user
-// The worker ignores a probe pause older than this (safety net), so a lock is never
-// left dark by a crashed / timed-out check. Server clears it itself well before.
+// Hold written on the lock (settle ≤6s + market + 10s collect + delete ≈ 19s fits).
+const PROBE_PAUSE_HOLD_MS = 25_000;
+// combo-worker's hard backstop: it ignores a probe pause older than this.
 const PROBE_PAUSE_MAX_MS = 30_000;
 // How long the server waits for the worker to cancel the lock's open quotes (poll 5s + cancel).
 const PAUSE_SETTLE_MAX_MS = 6_000;
@@ -45,7 +46,7 @@ function lockContracts(parlay) {
 function probePausePatch(nowMs) {
   return {
     probe_paused_at: new Date(nowMs).toISOString(),
-    probe_pause_until: new Date(nowMs + PROBE_PAUSE_MAX_MS).toISOString(),
+    probe_pause_until: new Date(nowMs + PROBE_PAUSE_HOLD_MS).toISOString(),
   };
 }
 const PROBE_RESUME_PATCH = Object.freeze({ probe_paused_at: null, probe_pause_until: null });
@@ -77,6 +78,7 @@ module.exports = {
   LOCK_CHECK_WAIT_MS,
   LOCK_CHECK_COOLDOWN_MS,
   PROBE_PAUSE_MAX_MS,
+  PROBE_PAUSE_HOLD_MS,
   PAUSE_SETTLE_MAX_MS,
   POLY_NOT_AVAILABLE,
   PAUSED_ALREADY_NOTE,

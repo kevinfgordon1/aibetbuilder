@@ -27,6 +27,10 @@ const lock = (over = {}) => ({
 // ── pure helpers ──
 assert.equal(lc.LOCK_CHECK_WAIT_MS, 10_000);
 assert.equal(lc.PROBE_PAUSE_MAX_MS, 30_000);
+assert.equal(lc.PROBE_PAUSE_HOLD_MS, 25_000);
+assert.ok(lc.PROBE_PAUSE_HOLD_MS < lc.PROBE_PAUSE_MAX_MS, 'hold inside the worker backstop');
+assert.ok(lc.PAUSE_SETTLE_MAX_MS + lc.LOCK_CHECK_WAIT_MS + 3000 < lc.PROBE_PAUSE_HOLD_MS, 'settle + 10s collect fit in the hold');
+assert.ok(handler.config.maxDuration >= 30);
 assert.equal(lc.lockCheckAccess(lock(), HIGGINS).ok, true);
 assert.equal(lc.lockCheckAccess(lock(), KENNY).status, 403, 'not your lock');
 assert.equal(lc.lockCheckAccess(lock(), KEVIN).status, 403, 'owner does not run checks on a tester lock (would need the tester key)');
@@ -38,7 +42,7 @@ assert.equal(lc.lockCheckAccess(null, HIGGINS).status, 404);
 assert.equal(lc.credsPlanFor(lock({ user_id: KEVIN.id }), lib.OWNER_USER_ID), 'owner-env');
 assert.equal(lc.credsPlanFor(lock(), lib.OWNER_USER_ID), 'user-vault');
 assert.deepEqual(lc.probePausePatch(Date.parse('2026-10-10T23:00:00Z')), {
-  probe_paused_at: '2026-10-10T23:00:00.000Z', probe_pause_until: '2026-10-10T23:00:30.000Z',
+  probe_paused_at: '2026-10-10T23:00:00.000Z', probe_pause_until: '2026-10-10T23:00:25.000Z',
 });
 assert.equal(lc.isMissingProbePauseColumn({ message: "Could not find the 'probe_paused_at' column of 'combo_parlays' in the schema cache" }), true);
 assert.equal(lc.isMissingProbePauseColumn({ message: 'permission denied' }), false);
