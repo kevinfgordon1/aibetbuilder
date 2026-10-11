@@ -6,6 +6,8 @@ import {
   promoLegIdentity,
   filterExcludedLegs,
   filterParlaysByExcluded,
+  loadSessionExcludedLegs,
+  saveSessionExcludedLegs,
 } from "./promoLegExclude.js";
 
 const sox = { name: "White Sox ML", market: "ML", game: "White Sox @ Yankees", bookKey: "draftkings" };
@@ -55,6 +57,31 @@ const tot = { name: "White Sox/Yankees o8.5", market: "TOT", game: "White Sox @ 
   assert.doesNotMatch(combo, /excludedPromoLegs|promoLegIdentity|ExcludeLegButton/);
   const worker = fs.readFileSync(path.join(dir, "../worker/ev-parlay-alerts.js"), "utf8");
   assert.doesNotMatch(worker, /excludedPromoLegs|promoLegExclude|ExcludeLegButton/);
+}
+
+{
+  const mem = new Map();
+  const st = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+  assert.equal(loadSessionExcludedLegs(st).size, 0);
+  saveSessionExcludedLegs(new Set([promoLegIdentity(sox)]), st);
+  assert.ok(loadSessionExcludedLegs(st).has(promoLegIdentity(soxFd)));
+  saveSessionExcludedLegs(new Set(), st);
+  assert.equal(loadSessionExcludedLegs(st).size, 0);
+  mem.set("promoExcludedLegs", "{bad");
+  assert.equal(loadSessionExcludedLegs(st).size, 0);
+  assert.equal(loadSessionExcludedLegs(null).size, 0);
+}
+
+{
+  // Optimize!, filter changes and odds refresh must not clear X'd legs.
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
+  const opt = app.slice(app.indexOf("const onOptimizePromo"), app.indexOf("findBestAcrossLegCounts(parlayLegPool"));
+  assert.doesNotMatch(opt, /setExcludedPromoLegs/);
+  const load = app.slice(app.indexOf("const loadPromoBoard"), app.indexOf("const plan = buildOddsQueryPlan", app.indexOf("const loadPromoBoard")));
+  assert.doesNotMatch(load, /setExcludedPromoLegs/);
+  assert.equal((app.match(/setExcludedPromoLegs\(new Set\(\)\)/g) || []).length, 1);
+  assert.match(app, /hidden · <span[^>]*>Restore<\/span>/);
 }
 
 console.log("promoLegExclude.test.js: ok");
