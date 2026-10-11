@@ -3,12 +3,14 @@ import { lockCheckAvailable, lockCheckView, LOCK_CHECK_SECONDS } from "./comboLo
 import { buyerSeesFromNoPrice, quotedYesPrice } from "./buyerOdds.js";
 
 const me = { id: "u1" };
-const lock = { id: "L", user_id: "u1", active: true, fill_american: 302, combo_ticker: "KXMVESPORTSMULTIGAMEEXTENDED-S1-X" };
+const lock = { id: "L", user_id: "u1", active: true, fill_american: 302, combo_ticker: "KXMVESPORTSMULTIGAMEEXTENDED-S1-X", legs: [{ ticker: "KXNFLGAME-26OCT11LVNYG-LV" }, { ticker: "KXNFLGAME-26OCT11CHIX-CHI" }] };
 assert.equal(LOCK_CHECK_SECONDS, 10);
 assert.deepEqual(lockCheckAvailable(lock, me), { show: true, disabled: false });
 assert.equal(lockCheckAvailable(lock, { id: "other" }).show, false, "only on your own locks");
-assert.equal(lockCheckAvailable({ ...lock, combo_ticker: "caoc-1" }, me).disabled, true);
-assert.match(lockCheckAvailable({ ...lock, combo_ticker: "caoc-1" }, me).reason, /Polymarket/);
+assert.deepEqual(lockCheckAvailable({ ...lock, combo_ticker: "caoc-1" }, me), { show: true, disabled: false }, "caoc ticker + Kalshi legs is checkable");
+const polyOnly = { ...lock, combo_ticker: "caoc-1", legs: [{ ticker: "pm-a" }, { ticker: "pm-b" }] };
+assert.equal(lockCheckAvailable(polyOnly, me).disabled, true);
+assert.match(lockCheckAvailable(polyOnly, me).reason, /Polymarket/);
 
 const ourYes = quotedYesPrice(302, { makerRate: 0 });
 // Competitor cheaper for the buyer → we lose.

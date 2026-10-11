@@ -7,7 +7,13 @@ export const LOCK_CHECK_BUSY_LABEL = `Checking… your quotes are off for ~25s`;
 export const LOCK_CHECK_TITLE =
   `Pauses this lock's quotes, asks Kalshi for quotes on your own key for ${LOCK_CHECK_SECONDS} seconds, then cancels the request (never buys) and turns your quotes back on.`;
 
-const isPoly = (p) => /^caoc-/i.test(String((p && p.combo_ticker) || "")) || String((p && p.venue) || "").toLowerCase().includes("poly");
+// Checkable when every leg is a Kalshi market (the Kalshi side can be built), even if the
+// saved combo_ticker is Polymarket's caoc-. Only Polymarket-only locks are gated.
+export const hasKalshiSide = (p) => {
+  const legs = Array.isArray(p && p.legs) ? p.legs : [];
+  return legs.length > 0 && legs.every((l) => /^KX[A-Z0-9]/i.test(String((l && l.ticker) || "").trim()));
+};
+const isPoly = (p) => !hasKalshiSide(p);
 
 export function lockCheckAvailable(parlay, user) {
   if (!parlay || !user || parlay.user_id !== user.id) return { show: false };
@@ -21,7 +27,7 @@ export function lockCheckView(result, parlay) {
   if (!result) return null;
   if (!result.ok) return { kind: "error", text: result.error || "Check failed" };
   const at = result.checkedAt ? etStamp(result.checkedAt) : "";
-  const opts = { ticker: result.marketTicker || (parlay && parlay.combo_ticker), makerRate: result.makerRate };
+  const opts = { ticker: result.marketTicker, makerRate: result.makerRate };
   const ours = buyerSeesAfterFees(parlay && parlay.fill_american, opts);
   const ourYes = quotedYesPrice(parlay && parlay.fill_american, opts);
   if (result.bestNoBid == null) {
