@@ -49,6 +49,7 @@ import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SE
 import { buildLockSubmittedToast, buildLockSubmitError } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
+import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
 import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
@@ -111,6 +112,54 @@ const MODE_LABEL = {
 };
 // Per-lock pause: off = the worker stops quoting this lock (Kalshi + Polymarket) and cancels its
 // open quotes. Independent of the kill switch. Fills/history are kept.
+// Pending-lock "Check market price": pauses this lock ~15s, RFQs on the owner's own key for 10s.
+function LockMarketCheck({ parlay, user, supabase }) {
+  const avail = lockCheckAvailable(parlay, user);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  if (!avail.show) return null;
+  const run = async (e) => {
+    if (e) e.stopPropagation();
+    if (busy || avail.disabled) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session && session.access_token;
+      if (!token) { setResult({ ok: false, error: "Sign in required" }); return; }
+      const r = await fetch("/api/combo-probe", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify({ lockId: parlay.id }),
+      });
+      let d = null;
+      try { d = await r.json(); } catch (_) { d = null; }
+      setResult(d && typeof d === "object" ? d : { ok: false, error: `Check failed (${r.status})` });
+    } catch (err) {
+      setResult({ ok: false, error: String(err && err.message || err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const v = lockCheckView(result, parlay);
+  const tone = v && (v.kind === "win" ? "#6ee7b7" : v.kind === "lose" ? "#fca5a5" : v.kind === "error" ? "#fca5a5" : "#c3c6cc");
+  return (
+    <div className="lock-check" data-testid="lock-market-check">
+      <button className="btn mini" disabled={busy || avail.disabled} title={avail.disabled ? avail.reason : LOCK_CHECK_TITLE} onClick={run}>
+        {busy ? LOCK_CHECK_BUSY_LABEL : "Check market price"}
+      </button>
+      {avail.disabled && <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{avail.reason}</span>}
+      {v && v.kind !== "error" && (
+        <div className="chips" style={{ marginTop: 8 }}>
+          {v.theirs && <span className="chip num" data-testid="lock-check-best">Best other seller: Buyer sees {v.theirs.text} after fees</span>}
+          {v.ours && <span className="chip num">Yours: Buyer sees {v.ours.text} after fees</span>}
+        </div>
+      )}
+      {v && <div className="note" data-testid="lock-check-note" style={{ marginTop: 6, color: tone }}>{v.text}</div>}
+    </div>
+  );
+}
+
 function PauseToggle({ parlay, onToggle, busy }) {
   const paused = isLockPaused(parlay);
   return (
@@ -1358,6 +1407,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             <div className="note warn">We offered {desk.quoted.toLocaleString("en-US")} contracts and {desk.fill.filled.toLocaleString("en-US")} were confirmed filled. The rest weren't taken (or haven't gone through yet).</div>
           )}
           <DeskChips desk={desk} />
+          {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} />}
         </DetailBlock>
         <DetailBlock title="Open quotes & fill odds">
           <OpenQuotesPanel
