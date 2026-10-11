@@ -3,7 +3,7 @@ import { buyerSeesAfterFees, buyerSeesFromNoPrice, quotedYesPrice } from "./buye
 import { etStamp } from "./comboLockView.js";
 
 export const LOCK_CHECK_SECONDS = 10;
-export const LOCK_CHECK_BUSY_LABEL = `Checking… your quotes are off for ~${LOCK_CHECK_SECONDS + 5}s`;
+export const LOCK_CHECK_BUSY_LABEL = `Checking… your quotes are off for ~25s`;
 export const LOCK_CHECK_TITLE =
   `Pauses this lock's quotes, asks Kalshi for quotes on your own key for ${LOCK_CHECK_SECONDS} seconds, then cancels the request (never buys) and turns your quotes back on.`;
 

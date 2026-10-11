@@ -37,4 +37,6 @@ assert.equal(lockCheckView({ ok: true, bestNoBid: 1 - ourYes, competitorCount: 1
 }
 assert.equal(lockCheckView({ ok: false, error: "boom" }, lock).text, "boom");
 assert.equal(lockCheckView(null, lock), null);
+import { LOCK_CHECK_BUSY_LABEL } from "./comboLockCheck.js";
+assert.equal(LOCK_CHECK_BUSY_LABEL, "Checking… your quotes are off for ~25s");
 console.log("comboLockCheck.test.js ok");
