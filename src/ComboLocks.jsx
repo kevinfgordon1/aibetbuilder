@@ -699,8 +699,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
         supabase.from("combo_submissions").select("*").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
-        // REAL fills, straight from the account (via the read-only fills reader), maker + combo only.
-        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("user_id", user.id).eq("is_combo", true).eq("is_taker", false),
+        // REAL combo fills (maker + taker). deskFillCounts sums maker/lock fills only;
+        // taker rows are fetched so their order_ids claim filled submissions and cannot
+        // inflate "Hedged so far" with quoted contracts.
+        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("user_id", user.id).eq("is_combo", true),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
         supabase.from("combo_submissions").select("id,parlay_id,contracts,status,is_live,order_id,quote_id,venue,fill_american,cancel_requested_at,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
         // How many RFQs matched each parlay (from the read-only watcher).

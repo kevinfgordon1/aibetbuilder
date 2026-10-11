@@ -40,6 +40,7 @@ import {
   sumAttributedFills,
   mergeSubmissionFillCounts,
   deskFillCounts,
+  isLockCapFill,
   skipTapeSource,
   skipFillState,
   formatSkipReason,
@@ -810,6 +811,46 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   // The same twin cannot be claimed twice.
   const two = [filledPoly, { ...filledPoly, order_id: "ORIG-ORDER-2" }];
   assert.equal(round(deskFillCounts([poly[5]], two).byParlay[pid]), round(91.61 + 101), "one twin claimed, one real");
+}
+
+
+// Kenny Raiders+Packers+Saints (799f71e3): maker hedge 165.38 of 171. A manual
+// taker YES buy (12.85) shared an order_id with a filled submission (quoted 13).
+// Filtering is_taker=false then merging submissions used to add those 13 → 178.38.
+{
+  const pid = "799f71e3-e7d7-49e9-a88c-9a7926eb714c";
+  const taker = {
+    fill_id: "0725b830-a5d9-85fe-039d-16ae0c727673",
+    order_id: "01a127f0-2138-79a0-9f63-b1ff141faad3",
+    parlay_id: pid,
+    count: 12.85,
+    is_taker: true,
+    yes_price: 0.073,
+    no_price: 0.927,
+  };
+  const makers = [
+    { fill_id: "07258baa", order_id: "01a128dd", parlay_id: pid, count: 128.53, is_taker: false },
+    { fill_id: "07258ddc", order_id: "01a12939", parlay_id: pid, count: 12.85, is_taker: false },
+    { fill_id: "0725813a", order_id: "01a12af2", parlay_id: pid, count: 13, is_taker: false },
+    { fill_id: "072587c9", order_id: "01a12b3d", parlay_id: pid, count: 11, is_taker: false },
+  ];
+  const subs = [
+    { parlay_id: pid, order_id: taker.order_id, status: "filled", contracts: 13 },
+    { parlay_id: pid, order_id: "01a128dd", status: "filled", contracts: 136 },
+    { parlay_id: pid, order_id: "01a12939", status: "filled", contracts: 13 },
+    { parlay_id: pid, order_id: "01a12af2", status: "filled", contracts: 17 },
+    { parlay_id: pid, order_id: "01a12b3d", status: "filled", contracts: 13 },
+  ];
+  const round = (n) => Math.round(n * 100) / 100;
+  assert.equal(isLockCapFill(taker), false);
+  assert.equal(isLockCapFill(makers[0]), true);
+  // Legacy UI path: maker-only fill rows + filled submissions → must NOT add 13.
+  assert.equal(round(deskFillCounts(makers, subs).byParlay[pid]), 165.38);
+  // With taker row present for claim: still 165.38 (taker never counts).
+  assert.equal(round(deskFillCounts([...makers, taker], subs).byParlay[pid]), 165.38);
+  // Maker-only without the taker claim used to inflate — document the old bug figure.
+  const inflated = round(165.38 + 13);
+  assert.equal(inflated, 178.38);
 }
 
 // Bears+LAR+DET (parlay a87432ad…): 4 Kalshi trades each booked twice.

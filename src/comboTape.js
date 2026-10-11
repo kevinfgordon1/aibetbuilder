@@ -450,12 +450,20 @@ function polyTwinClaims(submissions, fills, attributedOrders) {
   return claimed;
 }
 
+// True lock hedge fills only (maker / non-taker). Manual taker buys on the
+// same market must not move the hedged bar or the remaining cap.
+export function isLockCapFill(f) {
+  return !!f && f.is_taker !== true;
+}
+
 export function mergeSubmissionFillCounts(byParlay, submissions = [], fills = []) {
   const attributedOrders = new Set();
   const unattrByOrder = new Map();
   (fills || []).forEach((f) => {
     if (!f || !f.order_id) return;
-    if (f.parlay_id) attributedOrders.add(f.order_id);
+    // Taker rows (even with parlay_id) claim the order so a filled submission
+    // for that trade cannot add quoted contracts on top of maker fills.
+    if (f.parlay_id || f.is_taker === true) attributedOrders.add(f.order_id);
     else unattrByOrder.set(f.order_id, f);
   });
   const polyClaimed = polyTwinClaims(submissions, fills, attributedOrders);
@@ -465,21 +473,40 @@ export function mergeSubmissionFillCounts(byParlay, submissions = [], fills = []
     if (!s.order_id || !s.parlay_id || attributedOrders.has(s.order_id) || polyClaimed.has(s.order_id)) return;
     attributedOrders.add(s.order_id);
     const twin = unattrByOrder.get(s.order_id);
-    const c = Math.max(0, toNum(twin ? twin.count : s.contracts) || 0);
+    if (!twin) {
+      // No fill row for this order. Kalshi: book quoted contracts only while
+      // the lock still has zero combo_fills (reader lag). Once any lock fill
+      // exists, bare Kalshi submissions must not invent size — a taker/manual
+      // trade marked filled on combo_submissions used to add its quoted 13 on
+      // top of makers. Polymarket filled submissions still count without a
+      // poly-act twin (original order id ≠ trade id).
+      const hasLockFills = (Number(byParlay && byParlay[s.parlay_id]) || 0) > 0
+        || (next[s.parlay_id] || 0) > 0;
+      if (!isPolySubmission(s) && hasLockFills) return;
+      const c = Math.max(0, toNum(s.contracts) || 0);
+      next[s.parlay_id] = (next[s.parlay_id] || 0) + c;
+      return;
+    }
+    const c = Math.max(0, toNum(twin.count) || 0);
     next[s.parlay_id] = (next[s.parlay_id] || 0) + c;
   });
   return next;
 }
 
 export function deskFillCounts(fills = [], submissions = []) {
-  const summed = sumAttributedFills(fills);
+  // Sum only maker/lock fills. Pass every fill into merge so taker order_ids
+  // still claim matching filled submissions (Kenny 799f71e3: filtering
+  // is_taker=false left a filled submission for a 12.85 taker YES buy, and
+  // its quoted 13 contracts pushed "Hedged so far" to 178.38 on a 171 cap).
+  const lockFills = (fills || []).filter(isLockCapFill);
+  const summed = sumAttributedFills(lockFills);
   const byParlay = mergeSubmissionFillCounts(summed.byParlay, submissions, fills);
   const assigned = new Set();
   (submissions || []).forEach((s) => {
     if (isConfirmedFillSubmission(s) && s.order_id && s.parlay_id) assigned.add(s.order_id);
   });
   let unattributed = 0;
-  dedupeFillsByOrder(fills).forEach((f) => {
+  dedupeFillsByOrder(lockFills).forEach((f) => {
     if (f.parlay_id) return;
     if (f.order_id && assigned.has(f.order_id)) return;
     unattributed += Math.max(0, toNum(f.count) || 0);
