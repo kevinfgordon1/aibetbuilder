@@ -26,6 +26,7 @@ import { AppAlertsBanner, AppAlertsBell, AppAlertsBoundary, useAppAlerts } from 
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
 import { shouldShowKennethOddsBoardAlert, kennethOddsBoardAnnouncement, KENNETH_ODDS_BOARD_ALERT_ID } from "./targetedAlerts";
 import { buildPromoComboPrefill } from "./comboPrefill";
+import { promoLegStageCounts, promoEmptyReasons } from "./promoEmptyWhy.js";
 import { promoLegIdentity, filterExcludedLegs, loadSessionExcludedLegs, saveSessionExcludedLegs } from "./promoLegExclude";
 import { transformOddsData as transformOddsDataForBooks, transformEventOddsData as transformEventOddsDataForBooks } from "./oddsTransform.js";
 import { bookLogo } from "./bookLogos.js";
@@ -2249,8 +2250,8 @@ export default function App() {
   // Drop thin PM legs from the scan pool ($500 profit walk, stake-independent
   // for 1-leg and multi-leg). rankPromoPicks also drops incomplete $500 walks.
   const dropThinPoolLegs = scanHideLowLiquidity;
-  const promoLegs = useMemo(() => {
-    if (waitForSoccerPm) return [];
+  const promoLegBuild = useMemo(() => {
+    if (waitForSoccerPm) return { legs: [], stages: null };
     const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, {
       underdogCash: true,
       matchingBooks: promoMatchingPartial ? scanMatchingBookKeys : null,
@@ -2258,17 +2259,29 @@ export default function App() {
     const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
-    const promoLegsLiquid = preBlendStoredLadderLegs(
-      filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs }),
-      { promoType, numLegs: scanNumLegs },
-    );
+    const promoLegsLiquidRaw = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
+    const promoLegsLiquid = preBlendStoredLadderLegs(promoLegsLiquidRaw, { promoType, numLegs: scanNumLegs });
+    const stages = promoLegStageCounts({ scoped: promoLegsScoped, afterHidden: promoLegsNamed, afterLiquidity: promoLegsLiquidRaw });
     // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
     // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
     if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
-      return filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens);
+      return { legs: filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens), stages };
     }
-    return promoLegsLiquid;
+    return { legs: promoLegsLiquid, stages };
   }, [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, scanMarketScope, excludedPromoLegs, dropThinPoolLegs, promoType, scanNumLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys]);
+
+  const promoLegs = promoLegBuild.legs;
+  const promoEmptyWhy = promoEmptyReasons(promoLegBuild.stages, {
+    numLegs: isParlayPromoType(promoType) ? scanNumLegs : 1,
+    bookLabel: (ALL_BOOKS.find((b) => b.key === scanPromoBook) || {}).label || "This book",
+    hiddenCount: excludedPromoLegs.size,
+    hideLowLiquidity: dropThinPoolLegs,
+  });
+  const promoEmptyWhyEl = promoEmptyWhy.length > 0 && (
+    <div data-testid="promo-empty-why" style={{ fontSize: 13, color: "#d1d5db", marginTop: 10, maxWidth: 480, marginLeft: "auto", marginRight: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+      {promoEmptyWhy.map((t) => <div key={t}>{t}</div>)}
+    </div>
+  );
 
   // Player Props empty-state counts: legs removed by a partial Matching
   // books selection, and by Hide low liquidity. Only built on Player Props.
@@ -3420,6 +3433,7 @@ export default function App() {
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
                       {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
+                      {promoEmptyWhyEl}
                     </div>
                   )}
                   {boostLikeEmptyState === "scanning" && (
@@ -3567,6 +3581,7 @@ export default function App() {
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters.</div>
                       {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
+                      {promoEmptyWhyEl}
                     </div>
                   )}
                   {noSweatEmptyState === "scanning" && (
@@ -3719,6 +3734,7 @@ export default function App() {
                       <div style={{ fontSize: 16, fontWeight: 700, color: "#f59e0b", marginBottom: 8 }}>No Results Found</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Try adjusting your filters or selecting a different sportsbook.</div>
                       {soccerEmptyDetail && <div style={{ fontSize: 13, color: "#9ca3af", marginTop: 8, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>{soccerEmptyDetail}</div>}
+                      {promoEmptyWhyEl}
                     </div>
                   )}
                   {freeBetEmptyState === "scanning" && (
