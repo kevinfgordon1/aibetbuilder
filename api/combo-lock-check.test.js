@@ -35,8 +35,10 @@ assert.equal(lc.lockCheckAccess(lock(), HIGGINS).ok, true);
 assert.equal(lc.lockCheckAccess(lock(), KENNY).status, 403, 'not your lock');
 assert.equal(lc.lockCheckAccess(lock(), KEVIN).status, 403, 'owner does not run checks on a tester lock (would need the tester key)');
 assert.equal(lc.lockCheckAccess(null, HIGGINS).status, 404);
+// Dual-venue lock saved with a Polymarket caoc- ticker but Kalshi legs → checkable on Kalshi.
+assert.equal(lc.lockCheckAccess(lock({ combo_ticker: 'caoc-abc' }), HIGGINS).ok, true);
 {
-  const r = lc.lockCheckAccess(lock({ combo_ticker: 'caoc-abc' }), HIGGINS);
+  const r = lc.lockCheckAccess(lock({ combo_ticker: 'caoc-abc', legs: [{ ticker: 'pm-raiders', side: 'yes' }, { ticker: 'pm-giants', side: 'yes' }] }), HIGGINS);
   assert.equal(r.ok, false); assert.equal(r.polyNotAvailable, true); assert.match(r.error, /Polymarket/);
 }
 assert.equal(lc.credsPlanFor(lock({ user_id: KEVIN.id }), lib.OWNER_USER_ID), 'owner-env');
@@ -136,11 +138,19 @@ const call = async (body = { lockId: 'lock-1' }) => { const res = mockRes(); awa
   }
   // Polymarket lock → clear not-available, nothing paused.
   {
-    const s = setup({ parlay: lock({ combo_ticker: 'caoc-xyz' }) });
+    const s = setup({ parlay: lock({ combo_ticker: 'caoc-xyz', legs: [{ ticker: 'pm-a', side: 'yes' }, { ticker: 'pm-b', side: 'yes' }] }) });
     const out = await call();
     assert.equal(out.statusCode, 400);
     assert.equal(out.body.polyNotAvailable, true);
     assert.equal(s.db.length, 0);
+  }
+  // caoc- ticker + Kalshi legs (Raiders + Giants + Bears case) → runs on Kalshi.
+  {
+    const s = setup({ parlay: lock({ combo_ticker: 'caoc-raiders-giants-bears' }) });
+    const out = await call();
+    assert.equal(out.statusCode, 200, JSON.stringify(out.body));
+    assert.equal(out.body.marketTicker, 'KXMVE-COMBO-1');
+    void s;
   }
   // Someone else's lock → 403, nothing paused.
   {

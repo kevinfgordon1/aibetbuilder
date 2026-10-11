@@ -16,10 +16,15 @@ const POLY_NOT_AVAILABLE =
   'Check market price is not available for Polymarket locks yet. It only works on Kalshi combos for now.';
 const PAUSED_ALREADY_NOTE = 'Lock is already paused, so there were no quotes of yours to pull.';
 
+// A lock can be checked whenever its legs can be built into a Kalshi combo (every leg a
+// Kalshi KX… market), even if its saved combo_ticker is the Polymarket caoc- one: most
+// locks quote both venues. Only truly Polymarket-only locks are gated.
+function hasKalshiSide(parlay) {
+  const legs = Array.isArray(parlay && parlay.legs) ? parlay.legs : [];
+  return legs.length > 0 && legs.every((l) => /^KX[A-Z0-9]/i.test(String((l && l.ticker) || '').trim()));
+}
 function isPolyLock(parlay) {
-  const t = String((parlay && parlay.combo_ticker) || '').trim();
-  const v = String((parlay && parlay.venue) || '').toLowerCase();
-  return /^caoc-/i.test(t) || v.includes('poly');
+  return !hasKalshiSide(parlay);
 }
 
 /** Can this user run a check on this lock? Only the lock's owner, on their own lock. */
@@ -83,6 +88,7 @@ module.exports = {
   POLY_NOT_AVAILABLE,
   PAUSED_ALREADY_NOTE,
   isPolyLock,
+  hasKalshiSide,
   lockCheckAccess,
   credsPlanFor,
   lockContracts,
