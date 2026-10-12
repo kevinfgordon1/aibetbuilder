@@ -47,7 +47,7 @@ import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAU
 import { OpenQuotesPanel } from "./ComboLockOrders";
 import ComboLockSubmitted from "./ComboLockSubmitted";
 import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SEES_TITLE, FALLBACK_MAKER_RATE, makerRateForTicker, loadSeriesFees } from "./buyerOdds.js";
-import { buildLockSubmittedToast, buildLockSubmitError } from "./comboLockSubmitted";
+import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
 import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
@@ -1181,7 +1181,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     }
     return payload;
   };
-  const addParlay = async ({ separate = false } = {}) => {
+  const addParlay = async ({ separate = false, singleOk = false } = {}) => {
     const legs = readLegs();
     const legErr = lockLegsError(legs);
     if (legErr) return alert(legErr);
@@ -1189,6 +1189,15 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
       return alert(lockKind(form) === "freebet"
         ? "Enter free-bet amount, book parlay odds, and fill odds."
         : "Enter stake, boosted odds, and fill odds.");
+    }
+    // 1-leg lock: everyone sees the two-venue / fee heads-up before it saves.
+    if (legs.length === 1 && !singleOk) {
+      const exFill = feeOn ? (exchangeFromAllIn(+form.fill) || 0) : +form.fill;
+      setSubmitToast(buildSingleLegConfirm(legs, exFill, {
+        feesEnabled: feeOn,
+        onConfirm: () => { addParlay({ separate, singleOk: true }); },
+      }));
+      return;
     }
     if (!separate) {
       const target = findMergeTarget(parlays, { legs }, Date.now());
@@ -1708,7 +1717,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
                 <div style={{ fontSize: 12, marginTop: 6 }}>The combined lock keeps this lock's sell odds. The original bets stay listed on the card.</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                   <button type="button" className="btn mini primary" disabled={mergeBusy} onClick={confirmMerge}>Combine</button>
-                  <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => addParlay({ separate: true })}>Keep separate</button>
+                  <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => addParlay({ separate: true, singleOk: true })}>Keep separate</button>
                 </div>
                 {mergeError && <div style={{ marginTop: 8 }}>{mergeError}</div>}
               </div>

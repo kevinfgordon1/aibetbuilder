@@ -27,3 +27,21 @@ const rows = venueRows([
 assert.deepEqual(rows.map((r) => [r.venue, r.state, r.filled, r.resting]), [["Kalshi", "Filled 30", 30, 0], ["Polymarket", "Resting 70 @ 49¢", 0, 70]]);
 assert.deepEqual(venueRows([]), []);
 console.log("comboLegRules tests passed");
+
+// Single-leg heads-up popup (shown before save, owner + testers).
+import { buildSingleLegConfirm, singleLegWarningLines } from "./comboLockSubmitted.js";
+{
+  const c = buildSingleLegConfirm([{ ...wild, label: "Minnesota Wild ML" }], 120, { feesEnabled: true, onConfirm: () => {} });
+  assert.equal(c.kind, "confirm");
+  assert.equal(c.autoMs, 0);
+  assert.deepEqual(c.legs, ["Minnesota Wild ML"]);
+  const text = c.warnings.join(" ");
+  assert.match(text, /both Kalshi and Polymarket/);
+  assert.match(text, /1\.5 seconds/);
+  assert.match(text, /over-hedged/);
+  assert.match(text, /maker fee/);
+  assert.match(text, /Polymarket charges \$0/);
+  assert.match(text, /1%/);
+  assert.match(singleLegWarningLines({ feesEnabled: false }).join(" "), /Our 1% fee applies only/);
+  console.log("single-leg confirm tests passed");
+}

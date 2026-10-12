@@ -5,6 +5,7 @@ export default function ComboLockSubmitted({ toast, onClose }) {
   const dialogRef = useRef(null);
   const ok = toast && toast.kind === "ok";
   const err = toast && toast.kind === "error";
+  const confirm = toast && toast.kind === "confirm";
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -65,16 +66,31 @@ export default function ComboLockSubmitted({ toast, onClose }) {
       `}</style>
       <div
         ref={dialogRef}
-        className={"cls-card " + (ok ? "ok" : "err")}
+        className={"cls-card " + (ok || confirm ? "ok" : "err")}
         role={err ? "alertdialog" : "dialog"}
         aria-modal="true"
         aria-labelledby="cls-title"
-        aria-describedby={ok ? "cls-note" : "cls-err"}
+        aria-describedby={ok ? "cls-note" : confirm ? "cls-warn" : "cls-err"}
       >
         <button type="button" className="cls-x" aria-label="Close" onClick={onClose}>×</button>
-        <div className="cls-kicker">{ok ? "You're set" : "Error"}</div>
+        <div className="cls-kicker">{ok ? "You're set" : confirm ? "Before you save" : "Error"}</div>
         <h2 id="cls-title">{toast.title}</h2>
-        {ok ? (
+        {confirm ? (
+          <>
+            {toast.legs && toast.legs.length > 0 && (
+              <ul className="cls-legs">{toast.legs.map((line, i) => <li key={i}>{line}</li>)}</ul>
+            )}
+            {toast.fillText ? (
+              <div className="cls-fill">
+                <span className="k">{toast.fillLabel || "Your sell price"}</span>
+                <span className="v num">{toast.fillText}</span>
+              </div>
+            ) : null}
+            <ul className="cls-note" id="cls-warn" data-testid="single-leg-warning" style={{ paddingLeft: 18 }}>
+              {(toast.warnings || []).map((w, i) => <li key={i} style={{ marginBottom: 6 }}>{w}</li>)}
+            </ul>
+          </>
+        ) : ok ? (
           <>
             {toast.legs && toast.legs.length > 0 && (
               <ul className="cls-legs">
@@ -92,10 +108,19 @@ export default function ComboLockSubmitted({ toast, onClose }) {
         ) : (
           <p className="cls-err-msg" id="cls-err">{toast.message}</p>
         )}
-        <div className="cls-actions">
-          <button type="button" className="cls-ok" data-primary="true" onClick={onClose}>
-            {ok ? "Got it" : "OK"}
-          </button>
+        <div className="cls-actions" style={{ gap: 8 }}>
+          {confirm ? (
+            <>
+              <button type="button" className="cls-ok" style={{ background: "transparent", borderColor: "rgba(255,255,255,.2)" }} onClick={onClose}>Go back</button>
+              <button type="button" className="cls-ok" data-primary="true" onClick={() => { const go = toast.onConfirm; if (onClose) onClose(); if (go) go(); }}>
+                Sounds good, save it
+              </button>
+            </>
+          ) : (
+            <button type="button" className="cls-ok" data-primary="true" onClick={onClose}>
+              {ok ? "Got it" : "OK"}
+            </button>
+          )}
         </div>
       </div>
     </div>
