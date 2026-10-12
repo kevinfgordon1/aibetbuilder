@@ -1036,7 +1036,7 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(both.rows[0].gameKey, "26OCT05PITPHI");
 
   // Sport chip / dropdown plumbing.
-  assert.deepEqual(COMBO_SPORT_ORDER, ["mlb", "nfl", "ncaaf", "nhl"]);
+  assert.deepEqual(COMBO_SPORT_ORDER, ["mlb", "nfl", "ncaaf", "nhl", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl"]);
   const flat = flattenComboGames(sports);
   assert.equal(flat.length, 3);
   assert.ok(flat.every((g) => g.sportLabel === "NHL"));
