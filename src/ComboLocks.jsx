@@ -29,7 +29,8 @@ import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGa
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
-import { resolveComboTicker, marketSettlement, historyOutcome } from "./comboSettlement";
+import { resolveComboTicker, marketSettlement, historyOutcome, lockResultFromMarket, singleLegOf } from "./comboSettlement";
+import { SingleLegVenues } from "./SingleLegVenues";
 import { lockProfile, signedMoney, moneyAbs, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
@@ -51,6 +52,7 @@ import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
 import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
+import { lockLegsError } from "./comboLegRules";
 import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
   buildMergePlan,
@@ -622,7 +624,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
             const official = marketSettlement(m);
             if (!official) continue;
             const next = rowPatch[row.id] || {};
-            next.kalshi_result = official.result;
+            next.kalshi_result = lockResultFromMarket(row, official.result);
             next.kalshi_status = m.status || null;
             next.settled_at = new Date().toISOString();
             rowPatch[row.id] = next;
@@ -916,7 +918,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
     if (appliedNonceRef.current === nonce) return;
     appliedNonceRef.current = nonce;
     const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports);
-    const n = Math.max(rows.length, prefill.legs?.length || 0, 2);
+    const n = Math.max(rows.length, prefill.legs?.length || 0, 1);
     const next = [];
     for (let i = 0; i < n; i++) {
       const r = rows[i] || { gameKey: "", marketVal: "" };
@@ -1181,7 +1183,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   };
   const addParlay = async ({ separate = false } = {}) => {
     const legs = readLegs();
-    if (legs.length < 2) return alert("Pick at least 2 legs (game + market each).");
+    const legErr = lockLegsError(legs);
+    if (legErr) return alert(legErr);
     if (!(+form.stake > 0) || !+form.boost || !+form.fill) {
       return alert(lockKind(form) === "freebet"
         ? "Enter free-bet amount, book parlay odds, and fill odds."
@@ -1390,6 +1393,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         controls={<PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />}
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
+        {singleLegOf(p) ? <DetailBlock title="Resting hedge (single leg)"><SingleLegVenues parlayId={p.id} supabase={supabase} /></DetailBlock> : null}
         <DetailBlock title="Profit picture"><RiskProfile parlay={p} filled={filledN} feeRate={feeOn ? COMBO_FEE_RATE : 0} /></DetailBlock>
         <DetailBlock title="Price and size">
           <div className="chips">
