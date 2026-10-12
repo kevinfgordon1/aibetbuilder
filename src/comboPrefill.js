@@ -6,14 +6,75 @@
 
 export const encVal = (t, s) => `${t}|${s}`;
 
-export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl"];
-export const COMBO_SPORT_LABEL = { mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL" };
+export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl"];
+export const COMBO_SPORT_LABEL = {
+  mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL",
+  mls: "MLS", epl: "EPL", laliga: "La Liga", seriea: "Serie A", bundesliga: "Bundesliga", ligue1: "Ligue 1", ucl: "UCL",
+};
+// Soccer moneyline is 3-way and settles on 90' + stoppage: "Team ML" = that team
+// wins in regulation (draw and loss both lose) = Kalshi KX<LEAGUE>GAME-…-<TEAM> yes.
+export const SOCCER_COMBO_SPORTS = new Set(["mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl"]);
 const PROMO_TO_SPORT = {
   baseball_mlb: "mlb",
   americanfootball_nfl: "nfl",
   americanfootball_ncaaf: "ncaaf",
   icehockey_nhl: "nhl",
+  soccer_usa_mls: "mls",
+  soccer_epl: "epl",
+  soccer_spain_la_liga: "laliga",
+  soccer_italy_serie_a: "seriea",
+  soccer_germany_bundesliga: "bundesliga",
+  soccer_france_ligue_one: "ligue1",
+  soccer_uefa_champs_league: "ucl",
 };
+
+// ── Soccer team names ── Kalshi labels are short ("Houston", "Los Angeles G",
+// "New York RB", "Saint Louis"); books use full names ("Houston Dynamo FC",
+// "LA Galaxy", "New York Red Bulls", "St. Louis City SC").
+const SOCCER_FILLER = new Set(["fc", "cf", "sc", "afc", "ac", "club", "de", "the", "ml", "moneyline"]);
+function soccerTokens(raw) {
+  return normalize(raw)
+    .replace(/^la /, "los angeles ").replace(/^ny /, "new york ").replace(/\bst /g, "saint ")
+    .split(" ").filter(Boolean);
+}
+export function soccerNameMatches(bookName, kalshiLabel) {
+  const b = soccerTokens(bookName);
+  const k = soccerTokens(kalshiLabel);
+  if (!b.length || !k.length) return false;
+  const bCore = b.filter((t) => !SOCCER_FILLER.has(t));
+  const kCore = k.filter((t) => !SOCCER_FILLER.has(t));
+  if (!bCore.length || !kCore.length) return false;
+  if (bCore.join(" ") === kCore.join(" ")) return true;
+  // "Los Angeles G" / "New York RB": trailing initials of the club name.
+  const last = k[k.length - 1];
+  if (k.length >= 2 && last.length <= 2) {
+    const city = k.slice(0, -1);
+    if (city.every((t, i) => b[i] === t)) {
+      const initials = b.slice(city.length).map((t) => t[0]).join("");
+      return initials === last;
+    }
+    return false;
+  }
+  // Every Kalshi word appears as a whole word in the book name ("Houston" ⊂ "Houston Dynamo").
+  const bs = new Set(b);
+  if (kCore.every((t) => bs.has(t))) return true;
+  const ks = new Set(k);
+  return bCore.every((t) => ks.has(t));
+}
+const isDrawName = (raw) => /^(draw|tie)( ml| moneyline)?$/.test(normalize(raw));
+// The one team side (never Draw) on a soccer game that matches this name, else null.
+function soccerSideFor(name, game) {
+  const sides = (game.markets?.side || []).filter((m) => !/-TIE$/i.test(m.ticker || ""));
+  const hits = sides.filter((m) => soccerNameMatches(name, m.label));
+  return hits.length === 1 ? hits[0] : null;
+}
+function soccerTeamsMatch(promoGame, game) {
+  const [away, home] = splitAt(promoGame);
+  if (!away || !home) return false;
+  const a = soccerSideFor(away, game);
+  const h = soccerSideFor(home, game);
+  return !!(a && h && a.ticker !== h.ticker);
+}
 
 const MINUS = /[+\-\u2212]/;
 
@@ -259,6 +320,7 @@ function ncaafTeamsMatch(promoGame, kalshiGame) {
 }
 
 function teamsMatchGame(promoGame, kalshiGame, sport = "mlb") {
+  if (SOCCER_COMBO_SPORTS.has(sport)) return soccerTeamsMatch(promoGame, kalshiGame);
   if (sport === "ncaaf") return ncaafTeamsMatch(promoGame, kalshiGame);
   const [away, home] = splitAt(promoGame);
   const promoIds = [identifyTeam(away, sport), identifyTeam(home, sport)].filter(Boolean);
@@ -296,6 +358,12 @@ function sameTeamsCandidates(promoLeg, games) {
 // occurrence time and flags it startExact, so NHL games are time-gated.
 const TIMED_KEY = /^\d{2}[A-Z]{3}\d{2}\d{4}[A-Z]/;
 function startGapMs(g, t) {
+  // Soccer keys are the ET match day; same-day only (startTime = that day's midnight ET).
+  if (SOCCER_COMBO_SPORTS.has(g.sport)) {
+    const day = new Date(g.startTime).getTime();
+    if (!Number.isFinite(day) || !Number.isFinite(t)) return NaN;
+    return t >= day && t < day + 24 * 3600 * 1000 ? 0 : SAME_GAME_MAX_GAP_MS + Math.abs(t - day);
+  }
   if (!TIMED_KEY.test(g.key || "") && g.startExact !== true) return NaN;
   const gt = new Date(g.startTime).getTime();
   return Number.isFinite(gt) && Number.isFinite(t) ? Math.abs(gt - t) : NaN;
@@ -630,6 +698,10 @@ function matchMarket(promoLeg, game, sport = "mlb") {
   if (market === "HR" || market === "TD" || market === "GOAL") return matchPropMarket(promoLeg, game, sport);
   if (market === "ML") {
     const sides = game.markets?.side || [];
+    if (SOCCER_COMBO_SPORTS.has(sport)) {
+      if (isDrawName(promoLeg.name)) return { market: sides.find((m) => /-TIE$/i.test(m.ticker || "")) || null };
+      return { market: soccerSideFor(String(promoLeg.name || "").replace(/\s+(ml|moneyline)\s*$/i, ""), game) };
+    }
     if (sport === "ncaaf") {
       const hit = sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
       return { market: hit };
@@ -719,7 +791,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
   for (const leg of promoLegs || []) {
     const sport = promoSportOf(leg);
     if (!sport) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines (plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props)"));
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }

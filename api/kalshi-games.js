@@ -41,7 +41,17 @@ const MARKET_SERIES = {
   nfl: { side: 'KXNFLGAME', spread: 'KXNFLSPREAD', total: 'KXNFLTOTAL' },
   ncaaf: { side: 'KXNCAAFGAME', spread: 'KXNCAAFSPREAD', total: 'KXNCAAFTOTAL' },
   nhl: { side: 'KXNHLGAME', spread: 'KXNHLSPREAD', total: 'KXNHLTOTAL' },
+  // Soccer: 3-way regulation result (90' + stoppage; no extra time/penalties).
+  // Moneyline only — each event lists <TEAM A>, <TEAM B> and TIE (shown as "Draw").
+  mls: { side: 'KXMLSGAME' },
+  epl: { side: 'KXEPLGAME' },
+  laliga: { side: 'KXLALIGAGAME' },
+  seriea: { side: 'KXSERIEAGAME' },
+  bundesliga: { side: 'KXBUNDESLIGAGAME' },
+  ligue1: { side: 'KXLIGUE1GAME' },
+  ucl: { side: 'KXUCLGAME' },
 };
+const SOCCER_SPORTS = new Set(['mls', 'epl', 'laliga', 'seriea', 'bundesliga', 'ligue1', 'ucl']);
 // Player props ride on the same game key (KXMLBHR-26OCT031600ATLLAD,
 // KXNFLTD-26OCT05ATLNO, KXNHLGOAL-26OCT06FLALA) and only ever attach to a game
 // that already has its moneyline pair. Only the 1+ rung of a named player is
@@ -316,7 +326,9 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
     const exactOcc = occOffset > 0 && Number.isFinite(g.occurrenceMs) && !Number.isFinite(firstPitchUtcMs(g.key));
     if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) continue;
     const timed = firstPitchUtcMs(g.key);
+    // Soccer occurrence_datetime is settlement (hours after full time), so use the ET day.
     const startMs = Number.isFinite(timed) ? timed
+      : (opts && opts.dateOnlyStart) ? dateOnlyUtcMs(g.key)
       : exactOcc ? g.occurrenceMs - occOffset
         : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
     if (!Number.isFinite(startMs)) continue;
@@ -324,7 +336,7 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       key: g.key, title: g.title, date: g.date, startTime: new Date(startMs).toISOString(),
       ...(exactOcc ? { startExact: true } : {}),
       markets: {
-        side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })),
+        side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: /-TIE$/i.test(m.ticker) ? 'Draw' : m.label })),
         spread: expandSpreads(g.raw.spread || [], g.raw.side),
         total: expandTotals(g.raw.total || []),
         ...(opts && opts.propKind ? { prop: expandProps(g.raw.prop || [], opts.propKind) } : {}),
@@ -378,6 +390,7 @@ async function handler(req, res) {
       const propSpec = PROP_SERIES[sport];
       const games = await fetchSportGames(propSpec ? { ...seriesByType, prop: propSpec.series } : seriesByType, {
         occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0,
+        ...(SOCCER_SPORTS.has(sport) ? { dateOnlyStart: true } : {}),
         ...(propSpec ? { propKind: propSpec.kind } : {}),
       });
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
@@ -391,6 +404,7 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.MARKET_SERIES = MARKET_SERIES;
 module.exports.PROP_SERIES = PROP_SERIES;
+module.exports.SOCCER_SPORTS = SOCCER_SPORTS;
 module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports._helpers = {
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
