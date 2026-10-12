@@ -104,9 +104,25 @@ function rfqsAndQuotes({ parlay, fills = [], matches = [], submissions = [] } = 
   return { rfqs, quotes };
 }
 
+// The one leg of a single-leg lock (null for combos).
+export function singleLegOf(parlay) {
+  const legs = Array.isArray(parlay && parlay.legs) ? parlay.legs.filter((l) => l && l.ticker) : [];
+  return legs.length === 1 ? { ticker: String(legs[0].ticker), side: String(legs[0].side || "yes").toLowerCase() === "no" ? "no" : "yes" } : null;
+}
+
+// kalshi_result is "did the user's bet win" (yes). A single "no" leg flips the market result.
+export function lockResultFromMarket(parlay, result) {
+  const single = singleLegOf(parlay);
+  if (!single || single.side === "yes" || (result !== "yes" && result !== "no")) return result;
+  return result === "yes" ? "no" : "yes";
+}
+
 export function resolveComboTicker({ parlay, fills = [], outcomes = [], matches = [], submissions = [] } = {}) {
   if (!parlay) return null;
   if (parlay.combo_ticker) return String(parlay.combo_ticker);
+  // Single-leg lock: the hedge rests on the leg's own market (no combo ticker).
+  const single = singleLegOf(parlay);
+  if (single) return single.ticker;
   const fromFills = (fills || [])
     .filter((f) => f && f.parlay_id === parlay.id)
     .map(tickerFromRecord)

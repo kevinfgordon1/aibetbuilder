@@ -177,7 +177,9 @@ assert.equal(resolveComboTicker({
     matches: [{ parlay_id: "p1", rfq_id: "r1" }],
     submissions: [],
   });
-  assert.equal(dash.kind, "none");
+  // A 1-leg lock (single-leg lock) settles on its own leg market.
+  assert.equal(dash.kind, "awaiting");
+  assert.equal(dash.ticker, "KXMLBGAME-26AUG12-MIA");
 }
 {
   const underlying = historyOutcome({

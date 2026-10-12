@@ -60,3 +60,31 @@ export function buildLockSubmitError(message) {
     autoMs: 0, // errors stay until dismissed
   };
 }
+
+export const SINGLE_LEG_CONFIRM_TITLE = "Quick heads-up on single-leg locks";
+
+/** Warning lines shown before a 1-leg lock is saved (owner + testers). */
+export function singleLegWarningLines({ feesEnabled = false } = {}) {
+  return [
+    "Your hedge rests on both Kalshi and Polymarket at the same time, so you get filled faster on whichever one a buyer picks.",
+    "As soon as one side fills, we shrink or cancel the other. If both fill within about 1.5 seconds of each other, you could be over-hedged for a moment until we trim the extra. We alert you right away if that happens.",
+    feesEnabled
+      ? "Fees: Kalshi charges a small maker fee on some series, Polymarket charges $0, and our fee is 1% after your free $100 monthly allowance."
+      : "Fees: Kalshi charges a small maker fee on some series, and Polymarket charges $0. Our 1% fee applies only to accounts with fees turned on.",
+  ];
+}
+
+/** Pre-save confirmation for a 1-leg lock. onConfirm saves it. */
+export function buildSingleLegConfirm(legs, fillAmerican, { feesEnabled = false, onConfirm } = {}) {
+  const fill = submittedFillDisplay(fillAmerican, { feesEnabled });
+  return {
+    kind: "confirm",
+    title: SINGLE_LEG_CONFIRM_TITLE,
+    legs: submittedLegLines(legs),
+    fillText: fill ? fill.text : null,
+    fillLabel: feesEnabled ? "Your all-in price" : "Your sell price",
+    warnings: singleLegWarningLines({ feesEnabled }),
+    autoMs: 0,
+    onConfirm,
+  };
+}
