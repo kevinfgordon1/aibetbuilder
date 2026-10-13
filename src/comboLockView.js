@@ -478,7 +478,7 @@ export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
   } else if (closeCode === "no_print") {
     result = "Not taken";
     tone = "lose";
-    details.push("no trade printed, so no other maker won it");
+    details.push("no trade printed");
   } else if (closeCode === "no_taker") {
     result = "Buyer walked away";
     tone = "lose";
