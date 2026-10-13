@@ -23,7 +23,7 @@
 // Probe (Add Parlay) opens a real Kalshi RFQ at max_contracts, waits up to ~8s
 // (early-exit on a usable quote), shows best maker NO / implied fill, then
 // deletes the RFQ. Never accept/confirm.
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
@@ -39,6 +39,7 @@ import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
+import { createViewAsClient, installViewAsFetch, viewAsBanner, viewAsSender } from "./comboViewAs";
 import ComboTesters from "./ComboTesters";
 import { LowCashBanner } from "./LowCashAlerts";
 import ComboCredits from "./ComboCredits";
@@ -65,7 +66,7 @@ import {
   undoStatus,
 } from "./comboMerge";
 
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+const realSupabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 export { OWNER_EMAIL };
 
 /* ── engine (mirrors worker engine.js exactly) ── */
@@ -461,7 +462,71 @@ const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 const HISTORY_BUFFER_HOURS = 6;
 const historyMoveAt = (startsAtIso) => (startsAtIso ? new Date(new Date(startsAtIso).getTime() + HISTORY_BUFFER_HOURS * 3600 * 1000) : null);
 
+// Owner-only "View as": Kevin picks a tester and sees their page read-only.
 export default function ComboLocks({ user, prefill = null, focusLockId = null }) {
+  const isOwner = canSeeOwnerTools(user);
+  const [viewUsers, setViewUsers] = useState([]);
+  const [viewId, setViewId] = useState("");
+  useEffect(() => {
+    if (!isOwner) return undefined;
+    let alive = true;
+    (async () => {
+      try {
+        const { data } = await realSupabase.auth.getSession();
+        const token = data && data.session && data.session.access_token;
+        if (!token) return;
+        const r = await fetch("/api/combo-view-as", { headers: { accept: "application/json", authorization: "Bearer " + token } });
+        const body = await r.json().catch(() => null);
+        if (alive && body && body.ok && Array.isArray(body.users)) setViewUsers(body.users);
+      } catch (_) {}
+    })();
+    return () => { alive = false; };
+  }, [isOwner]);
+  const target = isOwner && viewId ? viewUsers.find((u) => u.id === viewId) : null;
+  const viewing = !!(target && user && target.id !== user.id);
+  const client = useMemo(
+    () => (viewing ? createViewAsClient({ realClient: realSupabase, targetId: target.id, send: viewAsSender(realSupabase) }) : realSupabase),
+    [viewing, target && target.id],
+  );
+  // Layout effect: installed before the page's own effects fire their first requests.
+  useLayoutEffect(() => (viewing ? installViewAsFetch(target.id) : undefined), [viewing, target && target.id]);
+  const viewedUser = useMemo(() => (viewing ? { id: target.id, email: target.email } : null), [viewing, target && target.id, target && target.email]);
+  const page = (
+    <ComboLocksPage
+      key={viewing ? target.id : "self"}
+      user={viewing ? viewedUser : user}
+      supabase={client}
+      readOnly={viewing}
+      prefill={viewing ? null : prefill}
+      focusLockId={viewing ? null : focusLockId}
+    />
+  );
+  if (!isOwner || !viewUsers.length) return page;
+  return (
+    <div>
+      <div className="cl-viewas" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "0 0 12px" }}>
+        <label htmlFor="cl-viewas-sel" style={{ fontSize: 13, fontWeight: 700, color: "#c3c6cc" }}>View as</label>
+        <select id="cl-viewas-sel" data-testid="combo-view-as" value={viewing ? target.id : ""} onChange={(e) => setViewId(e.target.value)}
+          style={{ background: "#1b1e25", color: "#e8eaed", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "6px 10px", fontSize: 14 }}>
+          <option value="">Kevin (you)</option>
+          {viewUsers.filter((u) => !user || u.id !== user.id).filter((u) => !u.owner).map((u) => (
+            <option key={u.id} value={u.id}>{u.label}{u.email && u.label !== u.email ? ` (${u.email})` : ""}</option>
+          ))}
+        </select>
+      </div>
+      {viewing && (
+        <div role="status" data-testid="combo-view-as-banner" style={{ border: "1px solid rgba(251,191,36,.5)", background: "rgba(251,191,36,.1)", color: "#fde68a", borderRadius: 10, padding: "10px 12px", margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>
+          {viewAsBanner(target.label)}
+        </div>
+      )}
+      {viewing
+        ? <fieldset disabled data-testid="combo-view-as-readonly" style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>{page}</fieldset>
+        : page}
+    </div>
+  );
+}
+
+function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = realSupabase, readOnly = false }) {
   const [games, setGames] = useState(SAMPLE);
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
@@ -559,7 +624,8 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
 
   const gameList = useMemo(() => flattenComboGames(games.sports), [games]);
   const gameIdx = useMemo(() => indexComboGames(games.sports), [games]);
-  const owner = canSeeComboLocks(user);
+  // View-as: the owner already passed the gate server-side; the viewed tester may not be hardcoded.
+  const owner = readOnly || canSeeComboLocks(user);
 
   const loadGames = useCallback(async () => {
     try { const r = await fetch("/api/kalshi-games", { headers: { accept: "application/json" } });
@@ -888,7 +954,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   }, [loadDesk]);
   useEffect(() => {
     let alive = true;
-    if (!user || !canSeeComboLocks(user)) return undefined;
+    if (!user || !(readOnly || canSeeComboLocks(user))) return undefined;
     if (canSeeOwnerTools(user)) { setKalshiKeyConnected(true); return undefined; }
     (async () => {
       try {
