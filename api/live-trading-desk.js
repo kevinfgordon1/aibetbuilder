@@ -503,9 +503,14 @@ async function snapshot(client, slug, store) {
   const positionRows = positions
     ? withFillNotes(decoratePositions(positions, markets), await improvedRows(store, slugs))
     : null;
-  const orderRows = ordersRaw
+  let orderRows = ordersRaw
     ? withProtect(price.mapOpenOrders(ordersRaw, markets), await armedRows(store))
     : null;
+  if (orderRows && orderRows.length) {
+    const booked = await withOrderBooks(client, orderRows, markets, market, slug, { allowFetch: !rate.rateLimited });
+    orderRows = booked.rows;
+    rate = absorbRate(rate, booked.error);
+  }
   const activity = activityErr ? null : price.mapActivities({ activities: recent }, markets);
   const fills = activityErr
     ? null
@@ -535,6 +540,41 @@ async function snapshot(client, slug, store) {
     retryAfter,
     ...(limited ? { error: rateLimitMessage(retryAfter) } : {}),
   };
+}
+
+// Live top of book for every open-order market, read on each snapshot so the
+// Taker gets / Best tags on the Open orders card stay current.
+async function withOrderBooks(client, rows, markets, selected, selectedSlug, { allowFetch } = {}) {
+  const books = {};
+  if (selected && selectedSlug && selected.bestBid != null) {
+    books[selectedSlug] = { bestBid: selected.bestBid, bestAsk: selected.bestAsk };
+  }
+  const need = [...new Set(rows.map((r) => r && r.marketSlug).filter((s) => s && !books[s]))].slice(0, 12);
+  let error = null;
+  if (allowFetch !== false) {
+    await mapPool(need, MARKET_LOOKUP_CONCURRENCY, async (s) => {
+      if (error) return;
+      try {
+        const b = price.readYesBbo(await client.getMarketBbo(s));
+        books[s] = { bestBid: b.bestBid, bestAsk: b.bestAsk };
+      } catch (err) {
+        if (isRateLimitError(err)) error = err;
+      }
+    });
+  }
+  const out = rows.map((row) => {
+    if (!row) return row;
+    const book = books[row.marketSlug];
+    const sides = markets[row.marketSlug];
+    const otherName = sides ? (row.outcome === 'short' ? sides.longName : sides.shortName) : '';
+    return {
+      ...row,
+      otherName: otherName || '',
+      tick: sides && sides.tick ? sides.tick : null,
+      book: book ? { bestBid: book.bestBid, bestAsk: book.bestAsk, at: new Date(nowMs()).toISOString() } : null,
+    };
+  });
+  return { rows: out, error };
 }
 
 async function withBook(client, slug, market) {
