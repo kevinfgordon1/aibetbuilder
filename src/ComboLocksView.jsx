@@ -486,9 +486,14 @@ const KIND_CHIPS = [
 ];
 
 /** History: totals on top, simple filters, then one clean row per lock. */
+export const HISTORY_ROWS_STEP = 100;
+
 export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, renderDetail, onExportCsv, emptyText }) {
   const filtered = view.filtered;
   const lines = (filtered && filtered.lines) || [];
+  // Totals always cover every loaded lock; only the table rows page.
+  const [rowsShown, setRowsShown] = React.useState(HISTORY_ROWS_STEP);
+  const shownLines = lines.slice(0, rowsShown);
   const t = historyTotals(lines);
   const all = (statement && statement.lines) || [];
   if (!all.length) return <div className="empty">{emptyText}</div>;
@@ -502,8 +507,8 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
         </div>
         <div className="stat">
           <div className="k">Record</div>
-          <div className="v">{t.wins}–{t.losses}</div>
-          <div className="s">profitable – losing locks</div>
+          <div className="v">{t.wins}–{t.losses}–{t.even}</div>
+          <div className="s">profitable – losing – even</div>
         </div>
         <div className="stat">
           <div className="k">Hedged locks</div>
@@ -532,7 +537,7 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
         <table className="htable">
           <thead><tr><th>Date (ET)</th><th>Parlay</th><th>Your original bet</th><th>Fair odds</th><th>Sold at</th><th>Result</th><th className="r">P/L</th><th aria-hidden="true"></th></tr></thead>
           <tbody>
-            {lines.map((line) => {
+            {shownLines.map((line) => {
               const r = historyRow(line, archivedById[line.id]);
               const open = !!isOpen(line.id);
               const toggle = () => onToggle(line.id);
@@ -569,6 +574,13 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
           </tbody>
         </table>
       )}
+      {lines.length > shownLines.length ? (
+        <div className="hist-more">
+          <button type="button" className="btn mini" onClick={() => setRowsShown((n) => n + HISTORY_ROWS_STEP)}>
+            Show more ({shownLines.length} of {lines.length})
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

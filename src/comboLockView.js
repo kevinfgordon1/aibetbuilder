@@ -360,7 +360,7 @@ export function historyResult(line) {
 }
 
 export function historyTotals(lines) {
-  const t = { net: 0, wins: 0, losses: 0, settled: 0, pending: 0, hedgedPnl: 0, hedgedN: 0, openPnl: 0, openN: 0 };
+  const t = { net: 0, wins: 0, losses: 0, even: 0, settled: 0, pending: 0, hedgedPnl: 0, hedgedN: 0, openPnl: 0, openN: 0 };
   for (const line of lines || []) {
     const pnl = toNum(line && line.pnl);
     if (!(line && line.settled) || pnl == null) { t.pending += 1; continue; }
@@ -368,6 +368,7 @@ export function historyTotals(lines) {
     t.net += pnl;
     if (pnl > 0.004) t.wins += 1;
     else if (pnl < -0.004) t.losses += 1;
+    else t.even += 1;
     if ((toNum(line.filled) || 0) > 0) { t.hedgedPnl += pnl; t.hedgedN += 1; } else { t.openPnl += pnl; t.openN += 1; }
   }
   const r2 = (x) => Math.round(x * 100) / 100;

@@ -9,6 +9,7 @@ export const LOCK_QUOTE_LIMIT = 400;
 export const LOCK_SKIP_LIMIT = 40;
 export const LOCK_ARCHIVED_QUOTE_LIMIT = 400;
 export const LOCK_ARCHIVED_SKIP_LIMIT = 80;
+export const ARCHIVED_ID_CHUNK = 100;
 
 // Posted quotes persist as unfilled (worker maps quoted → unfilled) + quote_id.
 export const LOCK_QUOTE_OR =
@@ -86,7 +87,11 @@ export function lockSubmissionQueriesForParlays(client, { userId, living = [], a
     if (!row || !row.id) continue;
     reqs.push(...livingLockSubmissionQueries(client, { userId, parlayId: row.id }));
   }
-  reqs.push(...archivedLockSubmissionQueries(client, { userId, parlayIds: archivedIds }));
+  // Chunk archived ids so .in() URLs stay short now that History loads every lock.
+  const ids = (archivedIds || []).filter(Boolean);
+  for (let i = 0; i < ids.length; i += ARCHIVED_ID_CHUNK) {
+    reqs.push(...archivedLockSubmissionQueries(client, { userId, parlayIds: ids.slice(i, i + ARCHIVED_ID_CHUNK) }));
+  }
   return reqs;
 }
 

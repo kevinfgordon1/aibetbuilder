@@ -36,7 +36,7 @@ import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions";
 import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import ComboTesters from "./ComboTesters";
@@ -51,6 +51,7 @@ import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } 
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
 import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
+import { fetchAllRows } from "./comboPaging";
 import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
 import { lockLegsError } from "./comboLegRules";
 import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, SectionHead, SummaryStrip } from "./ComboLocksView";
@@ -700,11 +701,12 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
         supabase.from("combo_settings").select("kill_switch").eq("user_id", user.id).maybeSingle(),
         supabase.from("combo_submissions").select("*").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
-        supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
+        // EVERY archived lock (paged), stable newest-first order, so History totals cover all of them.
+        fetchAllRows(() => supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).order("created_at", { ascending: false }).order("id", { ascending: false })),
         // REAL combo fills (maker + taker). deskFillCounts sums maker/lock fills only;
         // taker rows are fetched so their order_ids claim filled submissions and cannot
         // inflate "Hedged so far" with quoted contracts.
-        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price").eq("user_id", user.id).eq("is_combo", true),
+        fetchAllRows(() => supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee").eq("user_id", user.id).eq("is_combo", true).order("recorded_at", { ascending: true }).order("id", { ascending: true })),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
         supabase.from("combo_submissions").select("id,parlay_id,contracts,status,is_live,order_id,quote_id,venue,fill_american,cancel_requested_at,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }),
         // How many RFQs matched each parlay (from the read-only watcher).
@@ -837,8 +839,10 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
         if (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1])) failedIds.add(row.id);
         qi += 2;
       }
-      if (archivedIds.length && (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1]))) {
-        archivedIds.forEach((id) => failedIds.add(id));
+      for (let ci = 0; ci * ARCHIVED_ID_CHUNK < archivedIds.length; ci += 1, qi += 2) {
+        if (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1])) {
+          archivedIds.slice(ci * ARCHIVED_ID_CHUNK, (ci + 1) * ARCHIVED_ID_CHUNK).forEach((id) => failedIds.add(id));
+        }
       }
       if (livingSubsOk || livingSubRows.length || failedIds.size) {
         const kept = (submissionsRef.current || []).filter((row) => row && failedIds.has(row.parlay_id));

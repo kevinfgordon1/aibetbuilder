@@ -228,11 +228,18 @@ export function statementDateCopy(line) {
   return created ? `${created} · still open` : "still open";
 }
 
+// Newest first, stable: settled/created time, then created time, then id.
 export function sortStatementLines(lines) {
   return (lines || []).slice().sort((a, b) => {
     const ta = tsMs(a && a.sortAt) || 0;
     const tb = tsMs(b && b.sortAt) || 0;
-    return tb - ta;
+    if (tb !== ta) return tb - ta;
+    const ca = tsMs(a && a.createdAt) || 0;
+    const cb = tsMs(b && b.createdAt) || 0;
+    if (cb !== ca) return cb - ca;
+    const ia = String((a && a.id) || "");
+    const ib = String((b && b.id) || "");
+    return ia < ib ? 1 : ia > ib ? -1 : 0;
   });
 }
 
@@ -348,6 +355,113 @@ function payoffsForLine(profile, filled) {
   return profile.current;
 }
 
+function aDec(a) {
+  const n = toNum(a);
+  if (n == null || n === 0) return null;
+  return n > 0 ? 1 + n / 100 : 1 + 100 / Math.abs(n);
+}
+
+function aProb(a) {
+  const d = aDec(a);
+  return d ? 1 / d : null;
+}
+
+// Real fill prices for one lock. Maker combo fills with a stored YES price
+// (what the buyer paid us per contract) are used as-is; contracts without a
+// price (Polymarket rows today) fall back to the lock's fill_american.
+export function lockFillReceipt(parlay, fills = [], filled = 0) {
+  const n = Math.max(0, toNum(filled) || 0);
+  const s = aProb(parlay && parlay.fill_american);
+  let pricedN = 0;
+  let received = 0;
+  let fees = 0;
+  for (const f of fills || []) {
+    if (!f || !parlay || f.parlay_id !== parlay.id) continue;
+    if (f.is_taker === true || f.is_combo === false) continue;
+    const c = toNum(f.count);
+    let y = toNum(f.yes_price);
+    if (y == null && toNum(f.no_price) != null) y = 1 - toNum(f.no_price);
+    if (y != null && y > 1) y = y / 100;
+    if (!(c > 0) || y == null || !(y > 0 && y < 1)) continue;
+    const take = Math.min(c, Math.max(0, n - pricedN));
+    if (!(take > 0)) break;
+    pricedN += take;
+    received += take * y;
+    const fee = toNum(f.fee);
+    if (fee != null && fee > 0) fees += fee * (take / c);
+  }
+  const rest = Math.max(0, n - pricedN);
+  const estimated = rest > 0 && s != null ? rest * s : 0;
+  return {
+    contracts: n,
+    pricedContracts: r2(pricedN),
+    received: received + estimated - fees,
+    fees: r2(fees),
+    estimatedContracts: s != null ? r2(rest) : 0,
+    ok: pricedN > 0 || (rest > 0 && s != null) || n === 0,
+  };
+}
+
+// Combo YES value per contract after a tie: each tied leg settles at $0.50
+// on Kalshi / Polymarket, so a 3-leg parlay with one tie and two wins pays $0.50.
+export function pushHedgeValue(pushLegs) {
+  const k = Math.max(0, Math.round(toNum(pushLegs) || 0));
+  return Math.pow(0.5, k);
+}
+
+function legCount(parlay) {
+  const legs = (parlay && parlay.legs) || [];
+  return Array.isArray(legs) ? legs.length : 0;
+}
+
+function pushLegCount(parlay) {
+  const rs = (parlay && parlay.leg_results) || [];
+  if (!Array.isArray(rs)) return 0;
+  return rs.filter((r) => r && /push|tie|void/i.test(String(r.status || r.result || ""))).length;
+}
+
+// Sportsbook tie rule: a tied leg is dropped and the parlay pays at the
+// reduced-leg price. Per-leg book odds are not stored, so each leg's share of
+// the price is split evenly: dropping k of n legs scales decimal odds by
+// D^((n-k)/n). All legs tied -> stake back.
+export function reducedParlayDecimal(parlay, pushLegs) {
+  const D = aDec(parlay && parlay.parlay_american);
+  const n = legCount(parlay);
+  const k = Math.max(0, Math.round(toNum(pushLegs) || 0));
+  if (!D) return null;
+  if (!(n > 0) || !(k > 0)) return D;
+  if (k >= n) return 1;
+  return Math.pow(D, (n - k) / n);
+}
+
+// P/L when the parlay pushes (tied leg, the rest won).
+export function pushLockPnl(parlay, { filled = 0, fills = [] } = {}) {
+  if (!parlay) return null;
+  const stake = toNum(parlay.parlay_stake);
+  if (!(stake > 0)) return null;
+  const k = Math.max(1, pushLegCount(parlay));
+  const dRed = reducedParlayDecimal(parlay, k);
+  if (!dRed) return null;
+  // Free bet keeps profit only; cash gets profit on top of stake back.
+  const book = stake * (dRed - 1);
+  const rec = lockFillReceipt(parlay, fills, filled);
+  if (!rec.ok) return null;
+  const hedge = rec.received - rec.contracts * pushHedgeValue(k);
+  return r2(book + hedge);
+}
+
+// Real-price hedge payoffs: same shape as profile.soFar.
+function realPayoffs(parlay, pay, filled, fills) {
+  if (!pay || !(filled > 0)) return pay;
+  const rec = lockFillReceipt(parlay, fills, filled);
+  const s = aProb(parlay.fill_american);
+  if (s == null || !rec.ok || !(rec.pricedContracts > 0)) return pay;
+  // pay already includes n*s at fill_american; swap that for the real receipt.
+  const assumed = filled * s;
+  const diff = rec.received - assumed;
+  return { ...pay, hit: r2(pay.hit + diff), miss: r2(pay.miss + diff) };
+}
+
 function pnlFromPayoffs(pay, side) {
   if (!pay) return null;
   if (side === "hit") return r2(pay.hit);
@@ -421,7 +535,10 @@ export function lockStatementLine({
     resultLabel = filledN > 0 ? "open lock" : "open";
   }
 
-  const pnl = side ? pnlFromPayoffs(pay, side) : null;
+  const realPay = filledN > 0 ? realPayoffs(parlay, pay, filledN, fills) : pay;
+  const pnl = !side ? null
+    : side === "push" ? pushLockPnl(parlay, { filled: filledN, fills })
+      : pnlFromPayoffs(realPay, side);
   const settled = pnl != null && (resultKind === "official" || resultKind === "underlying");
   const kind = !settled ? "open" : filledN > 0 ? "locked_fill" : "unfilled";
   const bucket = kind === "open" ? "pending" : kind;
