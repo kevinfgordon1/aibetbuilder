@@ -110,6 +110,15 @@ export function buyerSeesFromYes(yes, venue = "kalshi") {
   return american == null ? null : { american, text: fmt(american), yes: Number(yes), allInPrice: eff };
 }
 
+/** What a maker who sold at this YES price keeps, net of their maker fee (same basis as fill_american / "You keep"). */
+export function makerKeepsFromYes(yes, opts = {}) {
+  const y = Number(yes);
+  if (!(y > 0 && y < 1)) return null;
+  const k = venueKey(opts.venue) === "polymarket" ? 0 : makerRateOf(opts);
+  const american = americanFromProb(y - k * y * (1 - y));
+  return american == null ? null : { american, text: fmt(american) };
+}
+
 /** Buyer's odds after all fees for a lock / quote at fill_american. */
 export function buyerSeesAfterFees(fillAmerican, opts = {}) {
   const yes = quotedYesPrice(fillAmerican, opts);
