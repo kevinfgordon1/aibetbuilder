@@ -123,6 +123,7 @@ import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOf
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import BetstampProOddsBoard from "./BetstampProOddsBoard.jsx";
+import { holdDepthRankWhilePending } from "./promoListRank.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
 import { activePromoList, bestPromoCardId, promoPickCardId, resolveOptimizeFocusId } from "./promoOptimize.js";
@@ -2464,6 +2465,7 @@ export default function App() {
     : promoType === "freebet" ? topFreeBetsWithLock
       : promoType === "nopromo" ? topNoPromoWithHedge
         : topParlaysWithHedge;
+  const lastDepthRankRef = useRef(null);
   const pageLadders = usePromoPageLadders(activePromoBase, promoPage);
   const promoDepthRank = useMemo(() => {
     const ctx = promoType === "nosweat"
@@ -2476,9 +2478,13 @@ export default function App() {
       : promoType === "freebet"
         ? (p) => attachFreeBetLock(p, stake)
         : (p) => attachBoostLockToPick(p, stake);
-    return visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
+    const next = visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
       rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders));
-  }, [activePromoBase, promoPage, pageLadders, promoType, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens, boostPct]);
+    const filtersKey = [promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, boostPct, hideLowLiquidity, includeTeamTokens.join(","), excludeTeamTokens.join(","), promoPage].join("|");
+    const held = holdDepthRankWhilePending(next, pageLadders, lastDepthRankRef.current, filtersKey);
+    if (pageLadders != null) lastDepthRankRef.current = { filtersKey, result: next };
+    return held;
+  }, [activePromoBase, promoPage, pageLadders, promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens, boostPct]);
   const promoRankedCount = promoDepthRank.visible.length + promoDepthRank.rest.length;
 
   const promoBusyForEmpty = promoLoading || waitForSoccerPm;
