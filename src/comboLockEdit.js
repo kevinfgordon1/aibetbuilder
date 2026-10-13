@@ -49,21 +49,31 @@ export function fillEditedNote(parlay) {
   return when ? `Fill odds edited ${when}` : "Fill odds edited";
 }
 
+// Kalshi / Polymarket RFQ quotes the worker does not get accepted are pulled
+// after ~20s (RESERVE_TTL_MS). Anything older than this is not resting.
+export const OPEN_QUOTE_MAX_AGE_MS = 2 * 60 * 1000;
+const CLOSED_QUOTE_STATUSES = new Set(["filled", "declined", "cancelled", "canceled", "expired", "executed", "limitreached"]);
+
 /**
- * Open / pending unfilled quotes for a lock. Matched fills (is_live false, or
- * real order with executed fill) are excluded. Prefer is_live rows.
+ * Truly live quotes for a lock. The worker leaves is_live=true on rows it
+ * filled (and on some quotes that expired), so is_live alone is not "open":
+ * filled / closed statuses, cancelled rows, rows past the quote TTL, and any
+ * quote on a lock that has settled are excluded.
  */
-export function openQuotesForLock(submissions, parlayId) {
+export function openQuotesForLock(submissions, parlayId, { now = Date.now(), parlay = null } = {}) {
   const pid = parlayId;
+  if (parlay && (parlay.settled_at || parlay.archived_at || parlay.underlying_result === "lost" || parlay.underlying_result === "won")) return [];
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
   const rows = (Array.isArray(submissions) ? submissions : []).filter((r) => {
     if (!r || r.parlay_id !== pid) return false;
     if (r.cancel_requested_at) return false;
     if (!(r.quote_id || r.order_id)) return false;
-    // Live resting / awaiting quotes.
-    if (r.is_live === true) return true;
-    // Pending quoted status without a fill reconcile yet.
     const st = String(r.status || "").toLowerCase();
-    return st === "quoted" || (st === "unfilled" && r.is_live === true);
+    if (CLOSED_QUOTE_STATUSES.has(st)) return false;
+    if (!(r.is_live === true || st === "quoted")) return false;
+    const t = Date.parse(r.created_at || "");
+    if (!Number.isFinite(t) || nowMs - t > OPEN_QUOTE_MAX_AGE_MS) return false;
+    return true;
   });
   return rows.sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
 }

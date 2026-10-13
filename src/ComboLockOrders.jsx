@@ -39,7 +39,7 @@ export function OpenQuotesPanel({
   busyKey,
   setBusyKey,
 }) {
-  const opens = openQuotesForLock(submissions, parlay.id);
+  const opens = openQuotesForLock(submissions, parlay.id, { parlay });
   const [editId, setEditId] = useState(null);
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState("");
