@@ -174,7 +174,7 @@ assert.deepEqual(quoteHistory(null), { filled: [], notFilled: [], filledContract
   assert.equal(ob.result, "Outbid by a better price");
   assert.equal(ob.detail, "another maker won it at +1182 (buyer saw +1104 after fees)");
   assert.doesNotMatch(quoteRow({ bucket: "no_taker", contracts: 12, submission: { skip_reason: "outbid", worst_lock: -49.22, fill_american: 1183 } }).detail, /worst case/);
-  assert.equal(quoteRow({ bucket: "no_taker", contracts: 10, submission: { skip_reason: "no_print", worst_lock: -49.22, fill_american: 1183 } }).detail, "no trade printed, so no other maker won it");
+  assert.equal(quoteRow({ bucket: "no_taker", contracts: 10, submission: { skip_reason: "no_print", worst_lock: -49.22, fill_american: 1183 } }).detail, "no trade printed");
   assert.equal(ob.buyerSees, "+1104");
   // Series not loaded → conservative 0.035 maker fee.
   assert.equal(quoteRow({ bucket: "no_taker", contracts: 12, submission: { fill_american: 1188 } }).buyerSees, "+1060");
