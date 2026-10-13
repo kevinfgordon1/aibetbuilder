@@ -965,8 +965,8 @@ const goodCreds = () => ({
     }, byDefault);
     assert.equal(byDefault.out.statusCode, 200, JSON.stringify(byDefault.out.body));
     assert.equal(byDefault.out.body.snap.protect.on, true, 'omitted flag arms Bet Protect by default');
-    assert.equal(byDefault.out.body.snap.protect.xCents, 3);
-    assert.equal(byDefault.out.body.snap.protect.yCents, 1);
+    assert.equal(byDefault.out.body.snap.protect.xCents, 2);
+    assert.equal(byDefault.out.body.snap.protect.yCents, 0.5);
     assert.equal((await store.get(byDefault.out.body.orderId)).status, 'armed');
 
     const plainBody = { ...defaultBody, protect: false };
@@ -989,14 +989,14 @@ const goodCreds = () => ({
     }, armed);
     assert.equal(armed.out.statusCode, 200, JSON.stringify(armed.out.body));
     assert.equal(armed.out.body.snap.protect.on, true);
-    assert.equal(armed.out.body.snap.protect.xCents, 3);
-    assert.equal(armed.out.body.snap.protect.yCents, 1);
+    assert.equal(armed.out.body.snap.protect.xCents, 2);
+    assert.equal(armed.out.body.snap.protect.yCents, 0.5);
     assert.equal(armed.out.body.snap.americanLabel, '-150');
     const saved = await store.get(armed.out.body.orderId);
     assert.equal(saved.status, 'armed');
     assert.equal(saved.owner_email, 'kev120909@gmail.com');
-    assert.equal(saved.x_cents, 3);
-    assert.equal(saved.y_cents, 1);
+    assert.equal(saved.x_cents, 2);
+    assert.equal(saved.y_cents, 0.5);
     assert.equal(saved.submitted_outcome_micro, saved.outcome_micro);
     assert.equal(saved.submitted_outcome_micro, 600000);
     assert.ok(saved.contracts <= 1000 / 0.6 + 1e-6);

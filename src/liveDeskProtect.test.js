@@ -21,16 +21,16 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-assert.equal(DEFAULT_PROTECT_X_CENTS, 3);
-assert.equal(DEFAULT_PROTECT_Y_CENTS, 1);
+assert.equal(DEFAULT_PROTECT_X_CENTS, 2);
+assert.equal(DEFAULT_PROTECT_Y_CENTS, 0.5);
 assert.equal(MAX_PROTECTS_PER_LINEAGE, 8);
 assert.equal(centsToMicro(3), 30_000);
 assert.equal(centsToMicro(1), 10_000);
 assert.equal(centsToMicro(0.5), 5_000);
 
 assert.equal(readProtectRequest({}).on, true, "Bet Protect is on when the flag is omitted");
-assert.equal(readProtectRequest({}).xCents, 3);
-assert.equal(readProtectRequest({}).yCents, 1);
+assert.equal(readProtectRequest({}).xCents, 2);
+assert.equal(readProtectRequest({}).yCents, 0.5);
 assert.equal(readProtectRequest({}).defaulted, true);
 assert.equal(readProtectRequest({ protect: true }).defaulted, false);
 assert.equal(readProtectRequest({ protect: null }).on, true);
@@ -52,8 +52,8 @@ assert.equal(readProtectRequest({}, { riskDollars: 500 }).on, true, "a $500 orde
   assert.equal(overExplicit.overCap, true);
   assert.equal(readProtectRequest({ protect: false }, { riskDollars: 1500 }).overCap, undefined);
 }
-assert.equal(readProtectRequest({ protect: true }).xCents, 3);
-assert.equal(readProtectRequest({ protect: true }).yCents, 1);
+assert.equal(readProtectRequest({ protect: true }).xCents, 2);
+assert.equal(readProtectRequest({ protect: true }).yCents, 0.5);
 assert.equal(readProtectRequest({ protect: true, protectXCents: 0 }).ok, false);
 assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
 
@@ -193,6 +193,62 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
   assert.equal(sell.outcomeMicro, 585_000);
   assert.ok(sell.outcomeMicro >= 583_000);
   assert.equal(sell.outcomeMicro % 5_000, 0);
+}
+
+{
+  // New defaults: 2¢ through / 0.5¢ re-rest on Polymarket US 0.25¢ ticks.
+  const exact2 = evaluateProtect({ action: "buy", restingOutcomeMicro: 600_000, midOutcomeMicro: 580_000, xCents: 2 });
+  assert.equal(exact2.fire, false);
+  assert.equal(exact2.reason, "inside");
+  const hit2 = evaluateProtect({ action: "buy", restingOutcomeMicro: 600_000, midOutcomeMicro: 577_500, xCents: 2 });
+  assert.equal(hit2.fire, true);
+  assert.equal(hit2.reason, "through");
+  assert.equal(hit2.gapMicro, 22_500);
+
+  // mid 41¢, Y=0.5¢ → target 40.5¢, already on a 0.25¢ tick.
+  const buyHalf = improveFromMid({
+    outcome: "long",
+    action: "buy",
+    midOutcomeMicro: 410_000,
+    yCents: 0.5,
+    tick: 0.0025,
+    restingOutcomeMicro: 452_500,
+    xCents: 2,
+  });
+  assert.equal(buyHalf.ok, true);
+  assert.equal(buyHalf.outcomeMicro, 405_000);
+  assert.equal(buyHalf.yesPriceValue, "0.4050");
+  assert.ok(buyHalf.outcomeMicro < 452_500);
+  assert.equal(buyHalf.outcomeMicro % 2_500, 0);
+
+  // Off-tick mid still floors buys / ceils sells onto 0.25¢ in his favor.
+  const buyOff = improveFromMid({
+    outcome: "long",
+    action: "buy",
+    midOutcomeMicro: 411_000,
+    yCents: 0.5,
+    tick: 0.0025,
+    restingOutcomeMicro: 452_500,
+    xCents: 2,
+  });
+  assert.equal(buyOff.ok, true);
+  assert.equal(buyOff.outcomeMicro, 405_000);
+  assert.ok(buyOff.outcomeMicro <= 406_000);
+  assert.ok(buyOff.outcomeMicro < 452_500);
+
+  const sellHalf = improveFromMid({
+    outcome: "long",
+    action: "sell",
+    midOutcomeMicro: 410_000,
+    yCents: 0.5,
+    tick: 0.0025,
+    restingOutcomeMicro: 360_000,
+    xCents: 2,
+  });
+  assert.equal(sellHalf.ok, true);
+  assert.equal(sellHalf.outcomeMicro, 415_000);
+  assert.ok(sellHalf.outcomeMicro > 360_000);
+  assert.equal(sellHalf.outcomeMicro % 2_500, 0);
 }
 
 {
@@ -347,6 +403,7 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
   assert.ok(submitFn.indexOf("Order was not accepted") < submitFn.indexOf("clearRestForm()"));
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_X_CENTS\)\)/);
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_Y_CENTS\)\)/);
+  assert.match(ui, /step="0\.5"/);
   assert.match(ui, /protectXCents/);
   assert.match(ui, /protectFill/);
   assert.doesNotMatch(ui, /canSeeComboLocks/);
