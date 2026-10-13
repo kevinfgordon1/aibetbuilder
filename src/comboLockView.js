@@ -7,7 +7,7 @@ import { parseSkipReason, skipReasonOf } from "./comboDesk.js";
 import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
-import { buyerSeesAfterFees, buyerSeesFromNoPrice, buyerSeesFromYes } from "./buyerOdds.js";
+import { buyerSeesAfterFees, buyerSeesFromNoPrice, buyerSeesFromYes, makerKeepsFromYes } from "./buyerOdds.js";
 
 export const ET_ZONE = "America/New_York";
 
@@ -469,8 +469,16 @@ export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
     result = "Outbid by a better price";
     tone = "lose";
     const venue = row.venueKey || s.venue || row.venue || "kalshi";
-    const win = toNum(s.tape_yes_price) != null ? buyerSeesFromYes(toNum(s.tape_yes_price), venue) : null;
-    details.push(win ? `winner gave the buyer ${win.text} after fees` : "another maker won it");
+    const y = toNum(s.tape_yes_price);
+    const keep = y != null ? makerKeepsFromYes(y, { venue, ticker: s.market_ticker || ticker }) : null;
+    const win = y != null ? buyerSeesFromYes(y, venue) : null;
+    if (keep && win) details.push(`another maker won it at ${keep.text} (buyer saw ${win.text} after fees)`);
+    else if (keep) details.push(`another maker won it at ${keep.text}`);
+    else details.push("another maker won it");
+  } else if (closeCode === "no_print") {
+    result = "Not taken";
+    tone = "lose";
+    details.push("no trade printed, so no other maker won it");
   } else if (closeCode === "no_taker") {
     result = "Buyer walked away";
     tone = "lose";
@@ -521,8 +529,9 @@ export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
   if (offered && o.responded_ms != null && row.bucket !== "filled") {
     details.push(`answered in ${(Number(o.responded_ms) / 1000).toFixed(1)}s`);
   }
+  // Worst case is shown on filled rows only; not-filled rows show what the competition got instead.
   const worst = toNum(s.worst_lock);
-  if (offered && worst != null && worst !== 0) details.push(`worst case ${signedDollars(worst)}`);
+  if (offered && row.bucket === "filled" && worst != null && worst !== 0) details.push(`worst case ${signedDollars(worst)}`);
   return {
     id: row.rfqId || row.fillId || `${row.at || ""}-${row.contracts ?? ""}-${row.bucket}`,
     at: row.at || null,
