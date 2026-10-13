@@ -258,15 +258,9 @@ assert.equal(soccerPromoEmptyDetail({ soccerSelected: false, soccerMlLegCount: 0
     },
   ];
   const homeNo = bestSoccerBinaryNo(bookmakers, "Arsenal", { sizeOf: (o) => o.bet_limit });
-  assert.equal(homeNo.bestBook, "betfair_ex_eu");
-  assert.equal(homeNo.best, -138, "exchange lay +138 is No −138");
-  assert.equal(homeNo.bestSize, 14);
-  assert.equal(homeNo.count, 2);
-  const awayYes = { best: 260, bestBook: "kalshi" };
-  const picked = preferSoccerBinaryNo(homeNo, awayYes);
-  assert.equal(picked.kind, "same_binary_no");
-  assert.equal(picked.best, -138);
-  assert.notEqual(picked.best, awayYes.best);
+  assert.equal(homeNo.bestBook, null, "Betfair/Matchbook lays are never a best-opp source");
+  assert.equal(homeNo.best, null);
+  assert.equal(homeNo.count, 0);
 
   const withKalshiNo = bestSoccerBinaryNo([
     ...bookmakers,
@@ -288,7 +282,7 @@ assert.equal(soccerPromoEmptyDetail({ soccerSelected: false, soccerMlLegCount: 0
     sizeOf: (o) => o.bet_limit,
     trustedBookKeys: new Set(["draftkings", "fanduel"]),
   });
-  assert.equal(kalshiExcluded.bestBook, "betfair_ex_eu", "matching-books can drop PM No; exchange lay still used");
+  assert.equal(kalshiExcluded.bestBook, null, "matching-books can drop PM No; no exchange-lay fallback");
 }
 
 assert.deepEqual([...cjs.SOCCER_EXCHANGE_LAY_BOOK_KEYS].sort(), [...SOCCER_EXCHANGE_LAY_BOOK_KEYS].sort());
@@ -296,7 +290,7 @@ assert.equal(cjs.soccerLayPriceToNo("betfair_ex_eu", 138), -138);
 assert.equal(cjs.bestSoccerBinaryNo([{
   key: "matchbook",
   markets: [{ key: "h2h_lay", outcomes: [{ name: "Arsenal", price: 140 }] }],
-}], "Arsenal").best, -140);
+}], "Arsenal").best, null);
 
 {
   const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -379,13 +373,8 @@ assert.equal(cjs.bestSoccerBinaryNo([{
     ],
   }];
   const data = transformOddsData(games, "soccer_epl", TRUSTED_BOOK_KEYS, ALL_BOOKS);
-  assert.equal(data.moneylines[0].best_home_no, -138);
-  assert.equal(data.moneylines[0].best_home_no_book, "betfair_ex_eu");
-  const dkLegs = buildAllLegsForBook(data, "draftkings");
-  const home = dkLegs.find((l) => l.name === "Arsenal ML");
-  assert.equal(home.bestOpp, -138);
-  assert.equal(home.bestOppBook, "betfair_ex_eu");
-  assert.equal(home.bestOppName, "Arsenal ML No");
+  assert.equal(data.moneylines[0].best_home_no, null, "no Betfair lay fallback");
+  assert.ok(!buildAllLegsForBook(data, "draftkings").some((l) => l.bestOppBook === "betfair_ex_eu"));
 
   const overlaid = overlaySoccerPmNos(data, {
     [soccerPmGameKey(data.moneylines[0])]: {
