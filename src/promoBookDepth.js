@@ -7,6 +7,11 @@ export const DEPTH_VENUES = new Set(["kalshi", "polymarket", "prophetx", "novig"
 const TTL_MS = 45 * 1000;
 const cache = new Map();
 const inflight = new Map();
+// Last non-empty ladder per key. A venue that answers with no levels for a
+// market it had depth on moments ago is treated as "unknown", not "thin", so
+// Hide low liquidity does not flip picks in and out on each refresh.
+const STICKY_MS = 3 * 60 * 1000;
+const lastGood = new Map();
 
 export function depthCacheKey(leg) {
   if (!leg) return "";
@@ -69,8 +74,14 @@ async function fetchDepthChunk(missing, fetchImpl) {
   const out = {};
   for (const row of results) {
     const key = row && row.key;
-    const levels = Array.isArray(row && row.levels) ? row.levels : [];
+    let levels = Array.isArray(row && row.levels) ? row.levels : [];
     if (!key) continue;
+    if (levels.length) {
+      lastGood.set(key, { at: Date.now(), levels });
+    } else {
+      const prev = lastGood.get(key);
+      if (prev && Date.now() - prev.at <= STICKY_MS) levels = prev.levels;
+    }
     cache.set(key, { at: Date.now(), levels });
     out[key] = levels;
   }
@@ -100,6 +111,7 @@ export async function fetchPromoBookDepth(legs, { fetchImpl } = {}) {
 export function _resetPromoBookDepthCache() {
   cache.clear();
   inflight.clear();
+  lastGood.clear();
 }
 
 // Overlay bestOpp from a real ladder or top-of-book size. Never invents books.

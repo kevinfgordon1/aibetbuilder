@@ -64,3 +64,13 @@ export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage)
   const visible = rankPage(head, laddersByKey);
   return { visible: Array.isArray(visible) ? visible : [], rest };
 }
+
+// Stale-while-revalidate for the depth-ranked page. While a new page's
+// ladders are still loading (laddersByKey == null), keep showing the last
+// depth-checked result for the same filters instead of the raw top-of-book
+// list. Otherwise picks the depth walk will hide pop up, then vanish, on
+// every odds refresh.
+export function holdDepthRankWhilePending(next, laddersByKey, prev, filtersKey) {
+  if (laddersByKey == null && prev && prev.filtersKey === filtersKey) return prev.result;
+  return next;
+}
