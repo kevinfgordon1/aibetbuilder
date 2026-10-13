@@ -24,7 +24,7 @@ assert.equal(buyerSeesLabel(b), "Buyer sees +1104 after fees");
 assert.equal(quotedYesPrice(1188, { makerRate: 0.0175 }), 0.079);
 assert.equal(buyerSeesAfterFees(1188, { makerRate: 0.0175 }).text, "+1089");
 assert.ok(quotedYesPrice(1188, { ticker: "KXMVECROSSCATEGORY-A-B" }) > 0.079);
-assert.equal(youKeepLabel(sellerKeeps(1188, { feeRate: 0.01 })), "You keep +1200");
+assert.equal(youKeepLabel(sellerKeeps(1188, { feeRate: 0.01 })), "Your sale price +1200");
 assert.equal(sellerKeeps(1188).text, "+1188");
 // Same price from the NO bid on a quote row.
 assert.equal(buyerSeesFromNoPrice(0.921).text, "+1089");

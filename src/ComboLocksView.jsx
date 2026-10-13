@@ -343,12 +343,12 @@ function SellTile({ summary: s, feeRate = 0, parlay = null }) {
   const keep = parlay ? sellerKeeps(parlay.fill_american, { feeRate }) : null;
   const buyer = parlay ? buyerSeesAfterFees(parlay.fill_american, { ticker: parlay.combo_ticker }) : null;
   return (
-    <div className="fact sell" title="Your sportsbook odds, what you keep when it sells, what the buyer on Kalshi / Polymarket sees after their fees, and the fair odds.">
+    <div className="fact sell" title="Your sportsbook odds, your sale price when it sells, what the buyer on Kalshi / Polymarket sees after their fees, and the fair odds.">
       <div className="k">Selling at</div>
       <div className="sgrid">
         <span className="sl">Your original odds</span>
         <span className="sv">{s.odds || "—"}{s.book ? <span className="sx"> {s.book}</span> : null}</span>
-        <span className="sl">You keep</span>
+        <span className="sl">Your sale price</span>
         <span className="sv main" data-testid="you-keep" title={feeRate > 0 ? `Your price after your ${Math.round(feeRate * 100)}% Combo Locks fee and your Kalshi maker fee.` : "Your price after your Kalshi maker fee."}>{keep ? keep.text : "—"}{feeRate > 0 && parlay ? <span className="sx"> after fees (exchange {s.sellAt})</span> : <span className="sx"> after fees</span>}</span>
         <span className="sl">Buyer sees</span>
         <span className="sv" data-testid="buyer-sees" title={BUYER_SEES_TITLE}>{buyer ? buyer.text : "—"}<span className="sx"> after their fees</span></span>
@@ -595,7 +595,7 @@ function QuoteSection({ title, rows, sub, ok, empty, total = null }) {
             {shown.map((q) => (
               <tr key={q.id}>
                 <td className="q-time">{q.time}</td>
-                <td className="q-price">{q.price !== "—" ? <span title="What you keep at this quote">You keep {q.price}</span> : q.price}{q.buyerSees ? <div className="q-det" title={BUYER_SEES_TITLE}>Buyer sees {q.buyerSees} after fees</div> : null}</td>
+                <td className="q-price">{q.price !== "—" ? <span title="Your sale price at this quote">Your sale price {q.price}</span> : q.price}{q.buyerSees ? <div className="q-det" title={BUYER_SEES_TITLE}>Buyer sees {q.buyerSees} after fees</div> : null}</td>
                 <td className="q-size">{q.size}</td>
                 <td className="q-venue"><VenueTag venue={q.venue} venueKey={q.venueKey} /></td>
                 <td className="q-res">
