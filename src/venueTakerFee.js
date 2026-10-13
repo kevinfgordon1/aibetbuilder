@@ -23,8 +23,12 @@
 
 import { impliedProbToAmerican } from "./blendAskLadder.js";
 
+import polyUsFee from "../lib/polymarket-us-fee.json" with { type: "json" };
+// One shared Polymarket US taker coefficient (also used by lib/odds-shared.js).
+export const POLYMARKET_US_TAKER_FEE = polyUsFee.takerFeeCoefficient;
+
 export const VENUE_TAKER_FEE_RATE = Object.freeze({
-  polymarket: 0.0695,
+  polymarket: POLYMARKET_US_TAKER_FEE,
   kalshi: 0.07,
 });
 

@@ -1,16 +1,16 @@
 // Open-order tags on the Live Trading Desk (Polymarket US).
 // "Taker gets": what a taker receives by filling this order, after the
-// Polymarket US taker fee 0.05 × P × (1 − P), the same coefficient as
-// lib/odds-shared.js (effective = p × (1 + 0.05 × (1 − p))).
+// Polymarket US taker fee θ × P × (1 − P), θ = 0.0695 from the shared
+// lib/polymarket-us-fee.json (docs.polymarket.us/fees, gateway feeCoefficient).
 //   Buy X at p  → taker buys the other side at 1 − p.
 //   Sell X at p → taker buys X at p.
 // "Best"/"Behind": compare that taker price to the best taker price on the
 // same side of the live book (best ask on the taker's outcome), also after fees.
 import { americanFromProb, formatAmerican } from "./liveDeskPrice.js";
-import { effectiveTakerPrice } from "./venueTakerFee.js";
+import { POLYMARKET_US_TAKER_FEE, effectiveTakerPrice } from "./venueTakerFee.js";
 
 const EPS = 1e-9;
-export const DESK_TAKER_FEE_RATE = 0.05;
+export const DESK_TAKER_FEE_RATE = POLYMARKET_US_TAKER_FEE;
 const RATE = DESK_TAKER_FEE_RATE;
 
 function am(p) {

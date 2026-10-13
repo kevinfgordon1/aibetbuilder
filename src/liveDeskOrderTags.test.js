@@ -7,7 +7,7 @@ assert.deepEqual(outcomeBook("short", 0.4, 0.6).bid.toFixed(2), "0.40");
 
 // Rams buy at 45.25¢: taker gets Bills at 54.75¢ + fee ≈ -126 after fee.
 let t = orderTags({ action: "buy", outcome: "long", price: 0.4525, yesBid: 0.44, yesAsk: 0.47, takerName: "Bills" });
-assert.ok(Math.abs(t.takerEff - (0.5475 + 0.05 * 0.5475 * 0.4525)) < 1e-9);
+assert.ok(Math.abs(t.takerEff - (0.5475 + 0.0695 * 0.5475 * 0.4525)) < 1e-9);
 assert.equal(t.status, "best");
 assert.ok(orderTagLine(t, "buy").includes("Best price: market"));
 
@@ -33,10 +33,11 @@ assert.ok(orderTagLine(t, "sell").includes("sell at"));
 t = orderTags({ action: "buy", outcome: "long", price: 0.45 });
 assert.equal(t.status, "unknown");
 assert.ok(orderTagLine(t, "buy").startsWith("Taker gets"));
+// Fee is θ = 0.0695 (docs + gateway feeCoefficient).
 // Kevin's live case: Rams buy 45.25¢ → Bills -121 before / -127 after; best Bills ask 53.5¢ → -115 / -121.
 t = orderTags({ action: "buy", outcome: "long", price: 0.4525, yesBid: 0.465, yesAsk: 0.47, tick: 0.0025, takerName: "Bills" });
-assert.equal(t.takerRawAmerican, "-121"); assert.equal(t.takerAmerican, "-127");
-assert.equal(t.marketRawAmerican, "-115"); assert.equal(t.marketAmerican, "-121");
+assert.equal(t.takerRawAmerican, "-121"); assert.equal(t.takerAmerican, "-130");
+assert.equal(t.marketRawAmerican, "-115"); assert.equal(t.marketAmerican, "-123");
 assert.equal(t.status, "behind");
 console.log(orderTagLine(t, "buy"));
 console.log("liveDeskOrderTags ok");
