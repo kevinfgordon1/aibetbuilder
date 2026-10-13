@@ -106,7 +106,10 @@ assert.equal(historyResult({ settled: false, resultKind: "pending" }).text, "Wai
 const totals = historyTotals([
   { settled: true, pnl: 10, filled: 5 }, { settled: true, pnl: -4, filled: 5 }, { settled: true, pnl: 30, filled: 0 }, { settled: false, pnl: null },
 ]);
-assert.deepEqual(totals, { net: 36, wins: 2, losses: 1, settled: 3, pending: 1, hedgedPnl: 6, hedgedN: 2, openPnl: 30, openN: 1 });
+assert.deepEqual(totals, { net: 36, wins: 2, losses: 1, even: 0, settled: 3, pending: 1, hedgedPnl: 6, hedgedN: 2, openPnl: 30, openN: 1 });
+// Even = $0 net (missed free bet with no hedge, push): its own column in the record.
+const evenTotals = historyTotals([{ settled: true, pnl: 0, filled: 0 }, { settled: true, pnl: 5, filled: 0 }, { settled: true, pnl: -2, filled: 3 }]);
+assert.equal(evenTotals.wins, 1); assert.equal(evenTotals.losses, 1); assert.equal(evenTotals.even, 1); assert.equal(evenTotals.settled, 3);
 const row = historyRow({ id: "x", settled: true, side: "miss", pnl: 14.2, filled: 600, createdAt: "2026-10-04T13:00:00Z" }, { ...bet, starts_at: "2026-10-05T20:25:00Z", label: auto.label });
 assert.equal(row.date, "Oct 5");
 assert.equal(row.title, "Kansas City −3.5 + Over 45.5 + Buffalo to win");
