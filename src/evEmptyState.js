@@ -1,11 +1,12 @@
 // Plain-English empty state for the +EV Bets list. When the date window is
-// short (Today / Next 24h), offer a one-tap jump to the next 7 days instead
+// short (Today / Next 48h), offer a one-tap jump to the next 7 days instead
 // of a dead "No bets" line. With a single-book filter on a wide window,
 // offer "Show all books" instead.
 
 const WINDOW_PHRASE = {
   today: "for the rest of today",
   "24h": "in the next 24 hours",
+  "48h": "in the next 48 hours",
   "7d": "in the next 7 days",
 };
 
@@ -16,7 +17,7 @@ export function evEmptyState({ dateRange, bookFilter = "all", bookLabel = "" } =
   const message = phrase
     ? `No ${who} ${phrase} right now.`
     : `No ${who} right now.`;
-  if (dateRange === "today" || dateRange === "24h") {
+  if (dateRange === "today" || dateRange === "24h" || dateRange === "48h") {
     return {
       message,
       hint: "Games later this week already have odds.",
