@@ -74,13 +74,23 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   // AND: every token must be covered by some leg.
   const includeAnd = filterPicksByTeamName([oneLeg, twoLeg, noLions, commandOnly], ["lions", "chiefs"], []);
   assert.deepEqual(includeAnd.map((p) => p.ev), [20]);
-  assert.equal(pickMatchesTeamInclude(oneLeg, ["lions", "packers"]), true, "one leg's game can cover both tokens");
+  assert.equal(pickMatchesTeamInclude(oneLeg, ["packers"]), false, "Lions ML is not a Packers leg (game text ignored)");
+  assert.equal(pickMatchesTeamInclude(oneLeg, ["lions", "packers"]), false);
   assert.equal(pickMatchesTeamInclude({ legs: [totLions] }, ["lions", "packers"]), true, "game total covers both");
   assert.equal(pickMatchesTeamInclude(twoLeg, ["lions", "commanders"]), false);
   assert.equal(pickMatchesTeamInclude({ legs: [lions, commanders] }, ["lions", "commanders"]), true);
   assert.equal(pickMatchesTeamInclude({ legs: [chiefs] }, ["chiefs", "commanders"]), false, "fewer legs than tokens can't match unless one leg covers both");
   assert.equal(pickMatchesTeamInclude({ legs: [] }, ["lions"]), false);
-  assert.deepEqual(filterLegsByTeamInclude([lions, chiefs, totLions], ["lions", "packers"]).length, 2);
+  assert.deepEqual(filterLegsByTeamInclude([lions, chiefs, totLions], ["lions", "packers"]), [totLions]);
+  // Exclude still uses game text.
+  assert.equal(pickPassesTeamExclude(oneLeg, ["packers"]), false);
+  // Player props: player name + own team, never the opponent.
+  const gibbs = { name: "Jahmyr Gibbs Anytime TD", market: "TD", playerTd: true, playerTeam: "Detroit Lions", game: "Detroit Lions @ Green Bay Packers" };
+  const noTeam = { name: "Jahmyr Gibbs Anytime TD", market: "TD", playerTd: true, game: "Detroit Lions @ Green Bay Packers" };
+  assert.equal(pickMatchesTeamInclude({ legs: [gibbs] }, ["gibbs"]), true);
+  assert.equal(pickMatchesTeamInclude({ legs: [gibbs] }, ["lions"]), true);
+  assert.equal(pickMatchesTeamInclude({ legs: [gibbs] }, ["packers"]), false);
+  assert.equal(pickMatchesTeamInclude({ legs: [noTeam] }, ["lions"]), false, "unknown team: player name only");
   assert.deepEqual(filterLegsByTeamInclude([lions, chiefs], ["lions", "chiefs"]), []);
 
   assert.equal(pickMatchesTeamInclude(oneLeg, ["lions"]), true);

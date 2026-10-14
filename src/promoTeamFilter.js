@@ -5,7 +5,9 @@
 // Multiple tokens: comma-separated.
 // Include: AND — every include token must be matched by at least one leg
 // ("Lions, Packers" needs a Lions leg and a Packers leg; one leg such as a
-// Lions/Packers game total can cover both).
+// Lions/Packers game total can cover both). Include matches the bet selection
+// (leg name / player + player's team), not the game text. Exclude still uses
+// the full card text (name, game, title).
 // Exclude: drop pick if any leg contains any exclude token.
 // Per-leg X hide stays in promoLegExclude.js (identity). This is the text filter.
 
@@ -35,6 +37,29 @@ export function promoLegSearchText(leg) {
     .toLowerCase();
 }
 
+// Include matches the selection actually bet, not the matchup: "Detroit Lions
+// ML" is a Lions leg, not a Packers leg. Game totals name both teams, so they
+// count for both. Player props match the player and the player's own team
+// (leg.playerTeam) when known, never the opponent.
+export function promoLegIncludeText(leg) {
+  if (leg == null) return "";
+  if (typeof leg === "string") return leg.trim().toLowerCase();
+  const title = formatPromoLegTitle(leg);
+  return [leg.name, leg.label, title, leg.playerTeam]
+    .filter((s) => s != null && String(s).trim())
+    .join(" ")
+    .toLowerCase();
+}
+
+function textHasToken(hay, token) {
+  const needle = String(token || "").trim().toLowerCase();
+  return !!needle && !!hay && hay.includes(needle);
+}
+
+export function legMatchesIncludeToken(leg, token) {
+  return textHasToken(promoLegIncludeText(leg), token);
+}
+
 export function legMatchesTeamTokens(leg, tokens) {
   const list = Array.isArray(tokens) ? tokens : [];
   if (!list.length) return false;
@@ -57,17 +82,17 @@ export function pickMatchesTeamInclude(pickOrLegs, includeTokens) {
   if (!tokens.length) return true;
   const legs = pickLegs(pickOrLegs);
   if (!legs.length) return false;
-  const hays = legs.map(promoLegSearchText);
+  const hays = legs.map(promoLegIncludeText);
   return tokens.every((token) => {
-    const needle = String(token || "").trim().toLowerCase();
-    return !needle || hays.some((hay) => hay && hay.includes(needle));
+    if (!String(token || "").trim()) return true;
+    return hays.some((hay) => textHasToken(hay, token));
   });
 }
 
 export function legMatchesAllTeamTokens(leg, tokens) {
   const list = Array.isArray(tokens) ? tokens : [];
   if (!list.length) return false;
-  return list.every((token) => legMatchesTeamTokens(leg, [token]));
+  return list.every((token) => legMatchesIncludeToken(leg, token));
 }
 
 // Exclude rule: drop if any leg contains any exclude token.
@@ -120,7 +145,7 @@ export function pinTeamIncludeLegs(legs, includeTokens, cap) {
   const rest = [];
   for (const leg of list) {
     if (tokens.length > 1 && legMatchesAllTeamTokens(leg, tokens)) { all.push(leg); continue; }
-    const idx = tokens.findIndex((t) => legMatchesTeamTokens(leg, [t]));
+    const idx = tokens.findIndex((t) => legMatchesIncludeToken(leg, t));
     if (idx >= 0) perToken[idx].push(leg); else rest.push(leg);
   }
   const interleaved = [];
