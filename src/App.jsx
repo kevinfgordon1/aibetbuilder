@@ -2263,8 +2263,9 @@ export default function App() {
     const promoLegsLiquidRaw = filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
     const promoLegsLiquid = preBlendStoredLadderLegs(promoLegsLiquidRaw, { promoType, numLegs: scanNumLegs });
     const stages = promoLegStageCounts({ scoped: promoLegsScoped, afterHidden: promoLegsNamed, afterLiquidity: promoLegsLiquidRaw });
-    // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
-    // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
+    // 1-leg include = that leg matches every token. Multi-leg keeps companions
+    // so a Lions leg can sit next to non-Lions legs; the scan acceptCombo
+    // enforces AND (every include token covered by some leg).
     if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
       return { legs: filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens), stages };
     }

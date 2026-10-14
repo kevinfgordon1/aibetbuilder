@@ -71,8 +71,17 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   const both = filterPicksByTeamName([oneLeg, twoLeg, noLions, commandOnly], ["lions"], ["commanders"]);
   assert.deepEqual(both.map((p) => p.ev), [28, 20]);
 
-  const includeOr = filterPicksByTeamName([oneLeg, noLions, commandOnly], ["lions", "chiefs"], []);
-  assert.deepEqual(includeOr.map((p) => p.ev), [28, 15]);
+  // AND: every token must be covered by some leg.
+  const includeAnd = filterPicksByTeamName([oneLeg, twoLeg, noLions, commandOnly], ["lions", "chiefs"], []);
+  assert.deepEqual(includeAnd.map((p) => p.ev), [20]);
+  assert.equal(pickMatchesTeamInclude(oneLeg, ["lions", "packers"]), true, "one leg's game can cover both tokens");
+  assert.equal(pickMatchesTeamInclude({ legs: [totLions] }, ["lions", "packers"]), true, "game total covers both");
+  assert.equal(pickMatchesTeamInclude(twoLeg, ["lions", "commanders"]), false);
+  assert.equal(pickMatchesTeamInclude({ legs: [lions, commanders] }, ["lions", "commanders"]), true);
+  assert.equal(pickMatchesTeamInclude({ legs: [chiefs] }, ["chiefs", "commanders"]), false, "fewer legs than tokens can't match unless one leg covers both");
+  assert.equal(pickMatchesTeamInclude({ legs: [] }, ["lions"]), false);
+  assert.deepEqual(filterLegsByTeamInclude([lions, chiefs, totLions], ["lions", "packers"]).length, 2);
+  assert.deepEqual(filterLegsByTeamInclude([lions, chiefs], ["lions", "chiefs"]), []);
 
   assert.equal(pickMatchesTeamInclude(oneLeg, ["lions"]), true);
   assert.equal(pickMatchesTeamInclude(noLions, ["lions"]), false);
@@ -100,6 +109,11 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   const pinned = pinTeamIncludeLegs([...highOthers, lowEvLions], ["lions"], 5);
   assert.equal(pinned.length, 5);
   assert.ok(pinned.some((l) => l.name === "Detroit Lions ML"), "include legs survive the scan cap");
+  // Multi-token: both tokens keep legs inside the cap even when one token has many.
+  const manyLions = Array.from({ length: 6 }, (_, i) => ({ name: `Lions prop ${i}`, game: "Detroit Lions @ Bears" }));
+  const pinned2 = pinTeamIncludeLegs([...highOthers, ...manyLions, commanders], ["lions", "commanders"], 4);
+  assert.ok(pinned2.some((l) => l === commanders), "second token survives the cap");
+  assert.ok(pinned2.some((l) => /Lions/.test(l.name)));
   assert.deepEqual(pinTeamIncludeLegs(highOthers, [], 3).map((l) => l.name), ["Other 0 ML", "Other 1 ML", "Other 2 ML"]);
 }
 
@@ -136,6 +150,14 @@ const soccer = { name: "Manchester City ML", market: "ML", game: "Manchester Cit
   assert.ok(parlays.length > 0);
   assert.ok(parlays.every((p) => p.legs.some((l) => /lions/i.test(l.name + l.game))));
   assert.ok(parlays.every((p) => !p.legs.some((l) => /commanders/i.test(l.name + l.game))));
+
+  const andParlays = await findTopParlaysChunked(
+    [cheap, other, lionLeg, cmd],
+    2,
+    calc,
+    { maxResults: 10, yieldMs: 0, acceptCombo: (legs) => pickMatchesTeamInclude(legs, ["lions", "commanders"]) },
+  );
+  assert.equal(andParlays.length, 1, "AND include keeps only the Lions+Commanders combo");
 
   const keyBase = {
     promoType: "boost", numLegs: 1, scanBoostPct: 50,
