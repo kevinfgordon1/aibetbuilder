@@ -153,6 +153,7 @@ async function cancelQuote(client, actor, body, isOwner) {
 
 async function handler(req, res) {
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'POST only' });
+  if (require('./combo-view-as-lib').blockViewAsWrite(req, res)) return;
   const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   if (!lib.canSeeComboLocks(auth.user)) return json(res, 403, { ok: false, error: 'Not allowed' });

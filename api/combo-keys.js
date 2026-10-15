@@ -16,6 +16,7 @@
 
 const lib = require('./combo-probe-lib');
 const keys = require('./combo-keys-lib');
+const viewAsLib = require('./combo-view-as-lib');
 
 function defaultCreateClient(...args) {
   const { createClient } = require('@supabase/supabase-js');
@@ -90,6 +91,7 @@ function parseBody(req) {
 
 async function handler(req, res) {
   if (!['GET', 'POST', 'DELETE'].includes(req.method)) return json(res, 405, { ok: false, error: 'GET, POST or DELETE' });
+  if (req.method !== 'GET' && viewAsLib.blockViewAsWrite(req, res)) return;
   const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   if (!lib.canSeeComboLocks(auth.user)) return json(res, 403, { ok: false, error: 'Not allowed' });
@@ -97,7 +99,18 @@ async function handler(req, res) {
   if (!client) return json(res, 503, { ok: false, error: 'Server is not configured' });
   const userId = auth.user.id;
   try {
-    if (req.method === 'GET') return json(res, 200, await loadStatus(client, userId));
+    if (req.method === 'GET') {
+      // Owner "View as": masked status of the viewed tester (never secrets).
+      const target = viewAsLib.readViewAs(req);
+      if (target) {
+        const live = await client.from('combo_live_users').select('user_id');
+        if (live.error) throw live.error;
+        const gate = viewAsLib.authorizeViewAs(auth.user, target, (live.data || []).map((r) => r.user_id));
+        if (!gate.ok) return json(res, gate.status, { ok: false, error: gate.error });
+        return json(res, 200, await loadStatus(client, gate.targetId));
+      }
+      return json(res, 200, await loadStatus(client, userId));
+    }
 
     const status = await loadStatus(client, userId);
     if (status.owner) return json(res, 403, { ok: false, error: 'Your desk trades with the server keys; nothing to connect here.' });

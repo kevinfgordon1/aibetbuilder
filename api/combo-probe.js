@@ -572,6 +572,7 @@ async function handler(req, res) {
     return;
   }
 
+  if (require('./combo-view-as-lib').blockViewAsWrite(req, res)) return;
   const authFn = deps.requireProbeUser || deps.requireOwner;
   const auth = await authFn(req);
   if (!auth.ok) {

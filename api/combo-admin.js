@@ -179,6 +179,7 @@ async function act(client, owner, body) {
 
 async function handler(req, res) {
   if (!['GET', 'POST'].includes(req.method)) return json(res, 405, { ok: false, error: 'GET or POST' });
+  if (require('./combo-view-as-lib').blockViewAsWrite(req, res)) return;
   const auth = await requireOwner(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   const client = serviceClient();
