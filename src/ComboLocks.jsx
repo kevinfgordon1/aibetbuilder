@@ -31,7 +31,7 @@ import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { resolveComboTicker, marketSettlement, historyOutcome, lockResultFromMarket, singleLegOf } from "./comboSettlement";
 import { SingleLegVenues } from "./SingleLegVenues";
-import { lockProfile, signedMoney, moneyAbs, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
+import { lockProfitWarning, lockProfile, signedMoney, moneyAbs, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked } from "./comboLockHistory";
@@ -1696,7 +1696,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             {lockKind(form) === "freebet" && (
               <div className="note ok">Free bet: if the parlay misses you lose nothing, and if it hits you keep the winnings. A 1× hedge makes both outcomes pay the same cash.</div>
             )}
-            {preview && !preview.d.locks && (
+            {preview && lockProfitWarning(preview.d) && (
               <div className="note warn">⚠ This won't fully lock in profit: your {lockKind(form) === "freebet" ? "parlay" : "boosted"} odds and sell odds are too close. Widen the gap ({lockKind(form) === "freebet" ? "longer parlay odds" : "a bigger boost"}, or sell at shorter odds).</div>
             )}
             <label>Name (filled in from your legs; edit if you like)</label>
