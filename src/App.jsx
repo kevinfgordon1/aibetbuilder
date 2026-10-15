@@ -111,6 +111,7 @@ import {
 } from "./promoUnderdogFreshness.js";
 import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { isWithinDateRange, upcomingInRange } from "./dateRange.js";
+import { capLegsMonotonic } from "./promoLegCap.js";
 import * as playerTd from "../lib/player-td.mjs";
 import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
@@ -2308,8 +2309,12 @@ export default function App() {
     if (!isParlayPromo) return promoLegs;
     const sorted = [...promoLegs]
       .sort((a, b) => (ourTrueProb(b.bestOpp) - impliedProb(b.dk)) - (ourTrueProb(a.bestOpp) - impliedProb(a.dk)));
-    return pinTeamIncludeLegs(sorted, includeTeamTokens, PARLAY_LEG_CAP);
-  }, [promoLegs, isParlayPromo, includeTeamTokens]);
+    const capped = capLegsMonotonic(sorted, scanPromoDateRange, PARLAY_LEG_CAP);
+    if (!includeTeamTokens.length) return capped;
+    const pinned = pinTeamIncludeLegs(sorted, includeTeamTokens, PARLAY_LEG_CAP);
+    const seen = new Set(pinned);
+    return pinned.concat(capped.filter((l) => !seen.has(l)));
+  }, [promoLegs, isParlayPromo, includeTeamTokens, scanPromoDateRange]);
 
   const currentPromoScanKey = useMemo(
     () => promoScanInputKey({
