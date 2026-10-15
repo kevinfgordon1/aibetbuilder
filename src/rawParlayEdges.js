@@ -147,3 +147,29 @@ export function summarizeByDay(edges) {
   }
   return [...m.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
 }
+
+/** Client-side rank sorts for Combo Sniper. Keys: margin | ev | size. Always descending. */
+export const SORT_KEYS = Object.freeze({ margin: "margin", ev: "ev", size: "size" });
+export const DEFAULT_SORT = SORT_KEYS.margin;
+const sizeOf = (e) => {
+  const c = Number(e && e.contracts);
+  if (Number.isFinite(c) && c > 0) return c;
+  const r = Number(e && e.requestedCost);
+  return Number.isFinite(r) ? r : 0;
+};
+const metric = (e, key) => {
+  if (key === SORT_KEYS.ev) return Number(e && e.ev) || 0;
+  if (key === SORT_KEYS.size) return sizeOf(e);
+  return Number(e && e.evPer100) || 0; // margin default
+};
+export function sortRawEdges(edges, key = DEFAULT_SORT) {
+  const k = SORT_KEYS[key] || DEFAULT_SORT;
+  return [...(edges || [])].sort((a, b) => {
+    const d = metric(b, k) - metric(a, k);
+    if (d !== 0) return d;
+    // stable-ish tie-break: higher EV, then newer ts
+    const ev = (Number(b.ev) || 0) - (Number(a.ev) || 0);
+    if (ev !== 0) return ev;
+    return String(b.ts || "").localeCompare(String(a.ts || ""));
+  });
+}

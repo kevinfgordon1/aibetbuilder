@@ -2919,7 +2919,7 @@ export default function App() {
           <>
             <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
             <a href={tabHash("unhedged")} style={tabStyle("unhedged")} onClick={onNavTabClick("unhedged")}>Unhedged RFQs</a>
-            <a href={tabHash("rawEdges")} style={tabStyle("rawEdges")} onClick={onNavTabClick("rawEdges")}>Raw parlay edges</a>
+            <a href={tabHash("rawEdges")} style={tabStyle("rawEdges")} onClick={onNavTabClick("rawEdges")}>Combo Sniper</a>
             <a href={tabHash("liveDesk")} style={tabStyle("liveDesk")} onClick={onNavTabClick("liveDesk")}>Live Trading Desk</a>
           </>
         )}

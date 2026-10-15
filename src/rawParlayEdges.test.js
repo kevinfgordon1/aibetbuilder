@@ -50,4 +50,22 @@ assert.match(app, /canSeeOwnerTools\(user\) && <RawParlayEdges/);
 const ui = fs.readFileSync(new URL("./RawParlayEdges.jsx", import.meta.url), "utf8");
 assert.match(ui, /disabled title=\{OFFER_TITLE\}/);
 assert.doesNotMatch(ui, /method:\s*"POST"/);
+assert.match(ui, /Combo Sniper/);
+assert.doesNotMatch(ui, /Raw parlay edges/);
+assert.match(app, />Combo Sniper</);
+assert.doesNotMatch(app, /Raw parlay edges/);
+assert.match(ui, /Sort by/);
+assert.match(ui, /className=\"rank\"/);
+assert.equal(E.DEFAULT_SORT, "margin");
+
+// ranked list sorts: Profit margin default, Total EV, Size — all descending
+const rows = [
+  { rfq_id: "a", ev: 10, evPer100: 5, contracts: 100, ts: "2026-10-15T12:00:00Z" },
+  { rfq_id: "b", ev: 50, evPer100: 2, contracts: 10, ts: "2026-10-15T13:00:00Z" },
+  { rfq_id: "c", ev: 20, evPer100: 8, contracts: 200, ts: "2026-10-15T11:00:00Z" },
+];
+assert.deepEqual(E.sortRawEdges(rows).map((r) => r.rfq_id), ["c", "a", "b"]); // margin
+assert.deepEqual(E.sortRawEdges(rows, "ev").map((r) => r.rfq_id), ["b", "c", "a"]);
+assert.deepEqual(E.sortRawEdges(rows, "size").map((r) => r.rfq_id), ["c", "a", "b"]);
+assert.deepEqual(E.sortRawEdges(rows, "margin").map((r) => r.rfq_id), ["c", "a", "b"]);
 console.log("rawParlayEdges tests passed");
