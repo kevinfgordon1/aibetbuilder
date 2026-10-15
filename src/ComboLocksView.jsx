@@ -343,12 +343,12 @@ function SellTile({ summary: s, feeRate = 0, parlay = null }) {
   const keep = parlay ? sellerKeeps(parlay.fill_american, { feeRate }) : null;
   const buyer = parlay ? buyerSeesAfterFees(parlay.fill_american, { ticker: parlay.combo_ticker }) : null;
   return (
-    <div className="fact sell" title="Your sportsbook odds, what you keep when it sells, what the buyer on Kalshi / Polymarket sees after their fees, and the fair odds.">
+    <div className="fact sell" title="Your sportsbook odds, your sale price when it sells, what the buyer on Kalshi / Polymarket sees after their fees, and the fair odds.">
       <div className="k">Selling at</div>
       <div className="sgrid">
         <span className="sl">Your original odds</span>
         <span className="sv">{s.odds || "—"}{s.book ? <span className="sx"> {s.book}</span> : null}</span>
-        <span className="sl">You keep</span>
+        <span className="sl">Your sale price</span>
         <span className="sv main" data-testid="you-keep" title={feeRate > 0 ? `Your price after your ${Math.round(feeRate * 100)}% Combo Locks fee and your Kalshi maker fee.` : "Your price after your Kalshi maker fee."}>{keep ? keep.text : "—"}{feeRate > 0 && parlay ? <span className="sx"> after fees (exchange {s.sellAt})</span> : <span className="sx"> after fees</span>}</span>
         <span className="sl">Buyer sees</span>
         <span className="sv" data-testid="buyer-sees" title={BUYER_SEES_TITLE}>{buyer ? buyer.text : "—"}<span className="sx"> after their fees</span></span>
@@ -486,9 +486,14 @@ const KIND_CHIPS = [
 ];
 
 /** History: totals on top, simple filters, then one clean row per lock. */
+export const HISTORY_ROWS_STEP = 100;
+
 export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, renderDetail, onExportCsv, emptyText }) {
   const filtered = view.filtered;
   const lines = (filtered && filtered.lines) || [];
+  // Totals always cover every loaded lock; only the table rows page.
+  const [rowsShown, setRowsShown] = React.useState(HISTORY_ROWS_STEP);
+  const shownLines = lines.slice(0, rowsShown);
   const t = historyTotals(lines);
   const all = (statement && statement.lines) || [];
   if (!all.length) return <div className="empty">{emptyText}</div>;
@@ -502,8 +507,8 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
         </div>
         <div className="stat">
           <div className="k">Record</div>
-          <div className="v">{t.wins}–{t.losses}</div>
-          <div className="s">profitable – losing locks</div>
+          <div className="v">{t.wins}–{t.losses}–{t.even}</div>
+          <div className="s">profitable – losing – even</div>
         </div>
         <div className="stat">
           <div className="k">Hedged locks</div>
@@ -532,7 +537,7 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
         <table className="htable">
           <thead><tr><th>Date (ET)</th><th>Parlay</th><th>Your original bet</th><th>Fair odds</th><th>Sold at</th><th>Result</th><th className="r">P/L</th><th aria-hidden="true"></th></tr></thead>
           <tbody>
-            {lines.map((line) => {
+            {shownLines.map((line) => {
               const r = historyRow(line, archivedById[line.id]);
               const open = !!isOpen(line.id);
               const toggle = () => onToggle(line.id);
@@ -569,6 +574,13 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
           </tbody>
         </table>
       )}
+      {lines.length > shownLines.length ? (
+        <div className="hist-more">
+          <button type="button" className="btn mini" onClick={() => setRowsShown((n) => n + HISTORY_ROWS_STEP)}>
+            Show more ({shownLines.length} of {lines.length})
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -595,7 +607,7 @@ function QuoteSection({ title, rows, sub, ok, empty, total = null }) {
             {shown.map((q) => (
               <tr key={q.id}>
                 <td className="q-time">{q.time}</td>
-                <td className="q-price">{q.price !== "—" ? <span title="What you keep at this quote">You keep {q.price}</span> : q.price}{q.buyerSees ? <div className="q-det" title={BUYER_SEES_TITLE}>Buyer sees {q.buyerSees} after fees</div> : null}</td>
+                <td className="q-price">{q.price !== "—" ? <span title="Your sale price at this quote">Your sale price {q.price}</span> : q.price}{q.buyerSees ? <div className="q-det" title={BUYER_SEES_TITLE}>Buyer sees {q.buyerSees} after fees</div> : null}</td>
                 <td className="q-size">{q.size}</td>
                 <td className="q-venue"><VenueTag venue={q.venue} venueKey={q.venueKey} /></td>
                 <td className="q-res">

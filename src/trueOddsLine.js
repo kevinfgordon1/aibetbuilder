@@ -92,6 +92,14 @@ export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: 
     ? blendIn
     : (Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null);
   const shownOdds = blend?.american ?? odds;
+  // Always show $ behind the best opp when any depth is known: fall back to
+  // the top price band of the ladder when the venue sent no top size.
+  if (!(Number(size) > 0) && Array.isArray(levels) && levels.length) {
+    const top = Number(levels[0] && levels[0].american);
+    const band = levels.filter((l) => Number(l && l.american) === top)
+      .reduce((sum, l) => sum + (Number(l.size) > 0 ? Number(l.size) : 0), 0);
+    if (band > 0) size = band;
+  }
   // Complete fill on the top level alone is not a blend — no flag, no "top …" subline.
   const displayAsBlend = !!(blend && (!blend.complete || blendDidWalk(blend, odds)));
   const flag = displayAsBlend
@@ -112,6 +120,9 @@ export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: 
     const dollars = formatAvailableDollars(size);
     if (dollars) bits.push(`${dollars} currently available`);
     secondary = bits.join(" · ");
+  }
+  if (!secondary && !formatAvailableDollars(size) && !displayAsBlend && blendIn === null && levels !== undefined && !(Array.isArray(levels) && levels.length)) {
+    secondary = "size not available from venue";
   }
   return {
     text,

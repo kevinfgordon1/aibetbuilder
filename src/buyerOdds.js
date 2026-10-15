@@ -110,6 +110,15 @@ export function buyerSeesFromYes(yes, venue = "kalshi") {
   return american == null ? null : { american, text: fmt(american), yes: Number(yes), allInPrice: eff };
 }
 
+/** What a maker who sold at this YES price keeps, net of their maker fee (same basis as fill_american / "You keep"). */
+export function makerKeepsFromYes(yes, opts = {}) {
+  const y = Number(yes);
+  if (!(y > 0 && y < 1)) return null;
+  const k = venueKey(opts.venue) === "polymarket" ? 0 : makerRateOf(opts);
+  const american = americanFromProb(y - k * y * (1 - y));
+  return american == null ? null : { american, text: fmt(american) };
+}
+
 /** Buyer's odds after all fees for a lock / quote at fill_american. */
 export function buyerSeesAfterFees(fillAmerican, opts = {}) {
   const yes = quotedYesPrice(fillAmerican, opts);
@@ -123,7 +132,7 @@ export function buyerSeesFromNoPrice(noPrice, venue = "kalshi") {
   return buyerSeesFromYes(Math.round((1 - n) * 10000) / 10000, venue);
 }
 
-/** What the seller keeps: all-in after the 1% Combo Locks fee when fees are on, else the exchange price. */
+/** Seller sale price: all-in after the 1% Combo Locks fee when fees are on, else the exchange price. */
 export function sellerKeeps(fillAmerican, { feeRate = 0 } = {}) {
   const a = num(fillAmerican);
   if (!Number.isFinite(a) || a === 0) return null;
@@ -131,7 +140,7 @@ export function sellerKeeps(fillAmerican, { feeRate = 0 } = {}) {
   return keep == null ? null : { american: keep, text: fmt(keep) };
 }
 
-export const youKeepLabel = (k) => (k ? `You keep ${k.text}` : "");
+export const youKeepLabel = (k) => (k ? `Your sale price ${k.text}` : "");
 export const buyerSeesLabel = (b) => (b ? `Buyer sees ${b.text} after fees` : "");
 export const BUYER_SEES_TITLE =
-  "The odds a bettor buying this parlay actually gets: our quoted price plus their taker fee (Kalshi 0.07 × price × (1 − price); Polymarket combos price × [0.0695(1 − price) + 0.06(1 − price)^4]). Lower than what you keep because the buyer pays a fee on top.";
+  "The odds a bettor buying this parlay actually gets: our quoted price plus their taker fee (Kalshi 0.07 × price × (1 − price); Polymarket combos price × [0.0695(1 − price) + 0.06(1 − price)^4]). Lower than your sale price because the buyer pays a fee on top.";
