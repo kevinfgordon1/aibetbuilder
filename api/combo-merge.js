@@ -310,6 +310,7 @@ async function handler(req, res) {
   cors(res);
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'POST only' });
+  if (require('./combo-view-as-lib').blockViewAsWrite(req, res)) return;
   const auth = await requireOwner(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   const client = serviceClient();
