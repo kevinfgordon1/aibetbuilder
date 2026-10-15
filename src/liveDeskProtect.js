@@ -19,8 +19,8 @@ import {
   normalizeOutcome,
 } from "./liveDeskPrice.js";
 
-export const DEFAULT_PROTECT_X_CENTS = 3;
-export const DEFAULT_PROTECT_Y_CENTS = 1;
+export const DEFAULT_PROTECT_X_CENTS = 2;
+export const DEFAULT_PROTECT_Y_CENTS = 0.5;
 export const MAX_PROTECTS_PER_LINEAGE = 8;
 export const PROTECT_COOLDOWN_MS = 1000;
 export const PROTECT_STALE_SWEEP_MS = 15000;

@@ -36,7 +36,7 @@ assert.equal(toast.kind, "ok");
 assert.equal(toast.title, LOCK_SUBMITTED_TITLE);
 assert.deepEqual(toast.legs, ["A ML", "B ML"]);
 assert.equal(toast.fillText, "+900");
-assert.equal(toast.fillLabel, "Your sell price");
+assert.equal(toast.fillLabel, "Your sale price");
 assert.equal(toast.note, LOCK_SUBMITTED_NOTE);
 assert.equal(toast.autoMs, LOCK_SUBMITTED_AUTO_MS);
 

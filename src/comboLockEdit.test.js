@@ -59,10 +59,19 @@ const opens = openQuotesForLock([
   { id: "s2", parlay_id: "p1", is_live: false, status: "filled", quote_id: "q2", order_id: "o2", contracts: 50, created_at: "2026-10-10T03:00:00Z" },
   { id: "s3", parlay_id: "p1", is_live: true, quote_id: "q3", cancel_requested_at: "2026-10-10T04:30:00Z", created_at: "2026-10-10T04:10:00Z" },
   { id: "s4", parlay_id: "other", is_live: true, quote_id: "q4", created_at: "2026-10-10T04:20:00Z" },
-], "p1");
+], "p1", { now: Date.parse("2026-10-10T04:01:00Z") });
 assert.equal(opens.length, 1);
 assert.equal(opens[0].id, "s1");
 assert.match(openQuoteLabel(opens[0]), /Kalshi/);
+// is_live filled rows, stale quotes, and settled locks are not open.
+const T = Date.parse("2026-10-12T22:07:20Z");
+const live = [
+  { id: "f1", parlay_id: "p9", is_live: true, status: "filled", quote_id: "a", order_id: "o", created_at: "2026-10-12T22:07:10Z" },
+  { id: "u1", parlay_id: "p9", is_live: true, status: "unfilled", quote_id: "b", created_at: "2026-10-12T20:42:40Z" },
+  { id: "q1", parlay_id: "p9", is_live: true, status: "unfilled", quote_id: "c", created_at: "2026-10-12T22:07:15Z" },
+];
+assert.deepEqual(openQuotesForLock(live, "p9", { now: T }).map((r) => r.id), ["q1"]);
+assert.equal(openQuotesForLock(live, "p9", { now: T, parlay: { settled_at: "2026-10-13T03:14:05Z" } }).length, 0);
 
 assert.equal(canManageLock({ id: "u1" }, parlay), true);
 assert.equal(canManageLock({ id: "u2" }, parlay), false);

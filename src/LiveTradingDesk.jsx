@@ -895,7 +895,7 @@ function LiveTradingDeskView({ user }) {
                       type="number"
                       min="0.1"
                       max="25"
-                      step="0.1"
+                      step="0.5"
                       value={protectX}
                       onChange={(e) => setProtectX(e.target.value)}
                       style={{ ...field, fontSize: 16 }}
@@ -908,7 +908,7 @@ function LiveTradingDeskView({ user }) {
                       type="number"
                       min="0"
                       max="25"
-                      step="0.1"
+                      step="0.5"
                       value={protectY}
                       onChange={(e) => setProtectY(e.target.value)}
                       style={{ ...field, fontSize: 16 }}

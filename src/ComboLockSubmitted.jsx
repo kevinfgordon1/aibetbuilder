@@ -82,7 +82,7 @@ export default function ComboLockSubmitted({ toast, onClose }) {
             )}
             {toast.fillText ? (
               <div className="cls-fill">
-                <span className="k">{toast.fillLabel || "Your sell price"}</span>
+                <span className="k">{toast.fillLabel || "Your sale price"}</span>
                 <span className="v num">{toast.fillText}</span>
               </div>
             ) : null}
@@ -99,7 +99,7 @@ export default function ComboLockSubmitted({ toast, onClose }) {
             )}
             {toast.fillText ? (
               <div className="cls-fill">
-                <span className="k">{toast.fillLabel || "Your sell price"}</span>
+                <span className="k">{toast.fillLabel || "Your sale price"}</span>
                 <span className="v num">{toast.fillText}</span>
               </div>
             ) : null}
