@@ -247,7 +247,7 @@ const FUTURES_KEYS = FUTURES.map(f => f.key);
 
 const DATE_RANGES = [
   { val: "today", label: "Today" },
-  { val: "24h", label: "Next 24h" },
+  { val: "48h", label: "Next 48h" },
   { val: "7d", label: "7 Days" },
   { val: "any", label: "Any" },
 ];
