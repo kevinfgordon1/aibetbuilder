@@ -1647,7 +1647,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       <div className="add-lock" ref={createFormRef} style={{ marginTop: 4, marginBottom: 16 }}>
           <div className="sec-h">
             <h2>Add a lock</h2>
-            {canSeeOwnerTools(user) ? <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }} title={srcLive ? "Game list is live from Kalshi." : "Couldn't load live games, showing sample games."}>{srcLive ? "Live games" : "Sample games"}</span> : (!srcLive && <span className="chip" style={{ background: "rgba(245,158,11,.15)", color: "#fcd34d" }}>Couldn't load games</span>)}
+            {gamesReady && !srcLive && <span className="chip" style={{ background: "rgba(245,158,11,.15)", color: "#fcd34d" }}>Couldn't load games</span>}
             <div className="sec-sub">Already placed the parlay at your sportsbook? Enter it here.</div>
           </div>
           <div className="card">
