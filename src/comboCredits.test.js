@@ -123,3 +123,11 @@ console.log("comboCredits tests passed");
     assert.ok(!/credits?[^\n]{0,40}expir|expir[^\n]{0,40}credit|valid_until|expires_at/i.test(src.replace(/never expire/gi, "").replace(/checkout\.payment\.expired|'EXPIRED'|endsWith\('expired'\)/g, "")), `no credit expiry logic in ${f}`);
   }
 }
+
+// Collapsed credits line says the free credits reset monthly (only when there's an allowance).
+{
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(new URL("./ComboCredits.jsx", import.meta.url), "utf8");
+  if (!/resets to \$\{creditsText\(allow\.allowanceUsd\)\} on /.test(src)) throw new Error("credits line missing reset text");
+  if (!/allow\.allowanceUsd > 0 \?/.test(src)) throw new Error("reset text must be gated on allowance");
+}

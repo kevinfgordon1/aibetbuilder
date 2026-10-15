@@ -169,7 +169,7 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
       <button type="button" className="crd-head crd-toggle" aria-expanded={showBody} onClick={() => setOpen((o) => !o)}>
         <span className="crd-title">Your credits</span>
         <span className="crd-line">{allow
-          ? `${creditsText(allow.allowanceLeftUsd)} free left of ${creditsText(allow.allowanceUsd)} · ${balance == null ? "—" : creditsText(balance)} purchased`
+          ? `${creditsText(allow.allowanceLeftUsd)} free left of ${creditsText(allow.allowanceUsd)}${allow.allowanceUsd > 0 ? ` · ${allowanceResetText().replace(/^Resets /, `resets to ${creditsText(allow.allowanceUsd)} on `)}` : ""} · ${balance == null ? "—" : creditsText(balance)} purchased`
           : `${balance == null ? "—" : creditsText(balance)} · Free for now, no fees`}</span>
         <span className="btn mini">{showBody ? "Hide" : "Add credits"}</span>
       </button>
@@ -194,7 +194,7 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
         <span className="crd-amt">{balance == null ? "—" : creditsText(balance)}</span>
         <span className="crd-sub">{schemaMissing ? "Credits aren't set up yet." : "1 credit = $1"}</span>
       </div>}
-      <p>{allow ? "Each filled lock costs 1% of the amount at risk (already in your all-in price), taken from free credits first" : "Combo Locks is free for now"}; buy more {usdcOn ? "by card or USDC" : "by card"} (${MIN_PURCHASE_USD} minimum, never expire, not a betting balance).</p>
+      <p>{allow ? `Each filled lock costs 1% of the amount at risk (already in your all-in price), taken from free credits first${allow.allowanceUsd > 0 ? `, which reset to ${creditsText(allow.allowanceUsd)} on the 1st of every month` : ""}` : "Combo Locks is free for now"}; buy more {usdcOn ? "by card or USDC" : "by card"} (${MIN_PURCHASE_USD} minimum, never expire, not a betting balance).</p>
       <div className="crd-presets" role="group" aria-label="Amount to add">
         {CREDIT_PRESETS_USD.filter((v) => v >= MIN_PURCHASE_USD).map((v) => (
           <button key={v} type="button" className={"crd-preset" + (amount === v ? " on" : "")} aria-pressed={amount === v} disabled={state.disabled && !error} onClick={() => setAmount(v)}>${v}</button>
