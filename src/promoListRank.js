@@ -55,14 +55,39 @@ export function collectPromoDepthLegs(picks) {
 // laddersByKey == null → page is still the top-of-book order (depth not in yet).
 // An object (including {}) re-ranks only that page; picks below stay in place
 // until Show more brings them into the blend window.
-export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage) {
+// windowSize (>= pageSize) is how many top-of-book picks get depth-checked.
+// Hide low liquidity can drop most of the page once ladders load; backfill the
+// visible page from the rest of the checked window so the page never shows
+// "Show more (N remaining)" with zero cards. `hidden` = checked picks the
+// depth walk removed; `needsWiderWindow` asks the caller to check more.
+export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage, windowSize) {
   const list = Array.isArray(ranked) ? ranked : [];
-  const n = Math.min(list.length, Math.max(0, pageSize | 0));
-  const head = list.slice(0, n);
-  const rest = list.slice(n);
-  if (laddersByKey == null) return { visible: head, rest };
-  const visible = rankPage(head, laddersByKey);
-  return { visible: Array.isArray(visible) ? visible : [], rest };
+  const size = Math.max(0, pageSize | 0);
+  const win = Math.min(list.length, Math.max(size, windowSize | 0));
+  if (laddersByKey == null) {
+    const n = Math.min(list.length, size);
+    return { visible: list.slice(0, n), rest: list.slice(n), hidden: 0, pending: true, needsWiderWindow: false };
+  }
+  const head = list.slice(0, win);
+  const unchecked = list.slice(win);
+  const passed = rankPage(head, laddersByKey);
+  const ok = Array.isArray(passed) ? passed : [];
+  const visible = ok.slice(0, size);
+  const rest = ok.slice(size).concat(unchecked);
+  return {
+    visible,
+    rest,
+    hidden: Math.max(0, head.length - ok.length),
+    pending: false,
+    needsWiderWindow: visible.length < size && unchecked.length > 0,
+  };
+}
+
+// Next depth window when the checked window could not fill the page.
+export const PROMO_DEPTH_WINDOW_MAX = 60;
+export function nextPromoDepthWindow(current, pageSize, total) {
+  const cur = Math.max(current | 0, pageSize | 0);
+  return Math.min(Math.max(0, total | 0), PROMO_DEPTH_WINDOW_MAX, cur + 15);
 }
 
 // Stale-while-revalidate for the depth-ranked page. While a new page's
@@ -73,4 +98,11 @@ export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage)
 export function holdDepthRankWhilePending(next, laddersByKey, prev, filtersKey) {
   if (laddersByKey == null && prev && prev.filtersKey === filtersKey) return prev.result;
   return next;
+}
+
+// First load with Hide low liquidity on: raw top-of-book picks would show,
+// then most vanish when ladders land. Show nothing (pending) instead.
+export function maskUncheckedWhileHidingThin(rank, hideLowLiquidity) {
+  if (!rank || !rank.pending || !hideLowLiquidity) return rank;
+  return { ...rank, visible: [], rest: [], checking: true };
 }

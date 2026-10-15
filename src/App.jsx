@@ -123,7 +123,7 @@ import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOf
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
 import BetstampProOddsBoard from "./BetstampProOddsBoard.jsx";
-import { holdDepthRankWhilePending } from "./promoListRank.js";
+import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
 import { activePromoList, bestPromoCardId, promoPickCardId, resolveOptimizeFocusId } from "./promoOptimize.js";
@@ -2466,7 +2466,11 @@ export default function App() {
       : promoType === "nopromo" ? topNoPromoWithHedge
         : topParlaysWithHedge;
   const lastDepthRankRef = useRef(null);
-  const pageLadders = usePromoPageLadders(activePromoBase, promoPage);
+  const promoBaseLen = Array.isArray(activePromoBase) ? activePromoBase.length : 0;
+  const depthFiltersKey = [promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, boostPct, hideLowLiquidity, includeTeamTokens.join(","), excludeTeamTokens.join(",")].join("|");
+  const [depthWindowState, setDepthWindowState] = useState({ key: "", size: 0 });
+  const depthWindow = depthWindowState.key === depthFiltersKey ? Math.max(promoPage, depthWindowState.size) : promoPage;
+  const pageLadders = usePromoPageLadders(activePromoBase, depthWindow);
   const promoDepthRank = useMemo(() => {
     const ctx = promoType === "nosweat"
       ? { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens }
@@ -2479,13 +2483,31 @@ export default function App() {
         ? (p) => attachFreeBetLock(p, stake)
         : (p) => attachBoostLockToPick(p, stake);
     const next = visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
-      rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders));
-    const filtersKey = [promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, boostPct, hideLowLiquidity, includeTeamTokens.join(","), excludeTeamTokens.join(","), promoPage].join("|");
+      rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders), depthWindow);
+    // Window growth is not part of the key: a wider check keeps showing the
+    // last good page until its ladders land.
+    const filtersKey = depthFiltersKey + "|" + promoPage;
     const held = holdDepthRankWhilePending(next, pageLadders, lastDepthRankRef.current, filtersKey);
     if (pageLadders != null) lastDepthRankRef.current = { filtersKey, result: next };
-    return held;
-  }, [activePromoBase, promoPage, pageLadders, promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens, boostPct]);
-  const promoRankedCount = promoDepthRank.visible.length + promoDepthRank.rest.length;
+    return maskUncheckedWhileHidingThin(held, hideLowLiquidity);
+  }, [activePromoBase, promoPage, depthWindow, depthFiltersKey, pageLadders, promoType, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, includeTeamTokens, excludeTeamTokens, boostPct]);
+  useEffect(() => {
+    if (!promoDepthRank.needsWiderWindow || promoDepthRank.pending) return;
+    const size = nextPromoDepthWindow(depthWindow, promoPage, promoBaseLen);
+    if (size > depthWindow) setDepthWindowState({ key: depthFiltersKey, size });
+  }, [promoDepthRank, depthWindow, promoPage, promoBaseLen, depthFiltersKey]);
+  const promoDepthHiddenAll = !promoDepthRank.pending && promoDepthRank.visible.length === 0 && (promoDepthRank.hidden || 0) > 0
+    && (!promoDepthRank.needsWiderWindow || depthWindow >= Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX));
+  const promoDepthNotice = promoDepthRank.checking ? (
+    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Checking market depth…</div>
+  ) : promoDepthHiddenAll ? (
+    <div style={{ background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b", marginBottom: 6 }}>{promoDepthRank.hidden} pick{promoDepthRank.hidden === 1 ? "" : "s"} hidden by Hide low liquidity</div>
+      <div style={{ fontSize: 13, color: "#9ca3af" }}>The hedge markets on the top picks are too thin right now. Set Liquidity to All to see them{promoDepthRank.rest.length > 0 ? ", or tap Show more to check more picks" : ""}.</div>
+    </div>
+  ) : null;
+  const promoRankedCount = promoDepthRank.checking ? promoBaseLen
+    : promoDepthRank.visible.length + promoDepthRank.rest.length + (promoDepthRank.hidden || 0);
 
   const promoBusyForEmpty = promoLoading || waitForSoccerPm;
   const boostEmptyState = promoScanEmptyState({
@@ -3448,6 +3470,7 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
+                  {promoDepthNotice}
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const shownBoostPct = effectiveBoostPct(promoType, boostPct);
@@ -3596,6 +3619,7 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
+                  {promoDepthNotice}
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
@@ -3749,6 +3773,7 @@ export default function App() {
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking free-bet parlays — Free Bet $ stays usable.</div>
                     </div>
                   )}
+                  {promoDepthNotice}
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs?.length === 1;
                     const showLock = isSingle && !!p.lock?.valid;
