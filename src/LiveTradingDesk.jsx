@@ -9,6 +9,7 @@ import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, pr
 import LiveDeskFilledOrders from "./LiveDeskFilledOrders";
 import LiveDeskPositionFills from "./LiveDeskPositionFills";
 import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLimit, mergeDeskBoard } from "./liveDeskRefresh";
+import { orderTags, orderTagLine } from "./liveDeskOrderTags";
 import { NOVIG_VENUE, isNovigMarketId, quoteNovigRest } from "./liveDeskNovig";
 
 let supabaseClient = null;
@@ -1001,6 +1002,20 @@ function LiveTradingDeskView({ user }) {
                     {order.action === "sell" ? "Sell" : "Buy"} {plain(order.outcomeName, "")} {plain(order.americanLabel, "")}
                     {typeof order.quantity === "number" || typeof order.quantity === "string" ? " · " + order.quantity : ""}
                   </div>
+                  {(() => {
+                    const tags = orderTags({
+                      action: order.action,
+                      outcome: order.outcome,
+                      price: typeof order.outcomeMicro === "number" ? order.outcomeMicro / 1e6 : null,
+                      yesBid: order.book ? order.book.bestBid : null,
+                      yesAsk: order.book ? order.book.bestAsk : null,
+                      tick: order.tick,
+                      takerName: order.action === "sell" ? order.outcomeName : order.otherName,
+                    });
+                    if (!tags) return null;
+                    const color = tags.status === "behind" ? "#fcd34d" : tags.status === "unknown" ? "#9ca3af" : "#86efac";
+                    return <div className="desk-order-tags" style={{ fontSize: 12, color, marginTop: 4, fontWeight: 700 }}>{orderTagLine(tags, order.action)}</div>;
+                  })()}
                   {order.protect && order.protect.on && (
                     <div style={{ fontSize: 11, color: "#93c5fd", marginTop: 4 }}>
                       Bet Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
