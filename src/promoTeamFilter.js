@@ -3,7 +3,11 @@
 //
 // Contains / substring, case-insensitive, against card fields (name, game, title).
 // Multiple tokens: comma-separated.
-// Include: OR — pick kept if at least one leg contains any include token.
+// Include: AND — every include token must be matched by at least one leg
+// ("Lions, Packers" needs a Lions leg and a Packers leg; one leg such as a
+// Lions/Packers game total can cover both). Include matches the bet selection
+// (leg name / player + player's team), not the game text. Exclude still uses
+// the full card text (name, game, title).
 // Exclude: drop pick if any leg contains any exclude token.
 // Per-leg X hide stays in promoLegExclude.js (identity). This is the text filter.
 
@@ -33,6 +37,29 @@ export function promoLegSearchText(leg) {
     .toLowerCase();
 }
 
+// Include matches the selection actually bet, not the matchup: "Detroit Lions
+// ML" is a Lions leg, not a Packers leg. Game totals name both teams, so they
+// count for both. Player props match the player and the player's own team
+// (leg.playerTeam) when known, never the opponent.
+export function promoLegIncludeText(leg) {
+  if (leg == null) return "";
+  if (typeof leg === "string") return leg.trim().toLowerCase();
+  const title = formatPromoLegTitle(leg);
+  return [leg.name, leg.label, title, leg.playerTeam]
+    .filter((s) => s != null && String(s).trim())
+    .join(" ")
+    .toLowerCase();
+}
+
+function textHasToken(hay, token) {
+  const needle = String(token || "").trim().toLowerCase();
+  return !!needle && !!hay && hay.includes(needle);
+}
+
+export function legMatchesIncludeToken(leg, token) {
+  return textHasToken(promoLegIncludeText(leg), token);
+}
+
 export function legMatchesTeamTokens(leg, tokens) {
   const list = Array.isArray(tokens) ? tokens : [];
   if (!list.length) return false;
@@ -49,11 +76,23 @@ function pickLegs(pickOrLegs) {
   return (pickOrLegs && pickOrLegs.legs) || [];
 }
 
-// Include rule: at least one leg contains any include token (OR).
+// Include rule (AND): every include token is matched by at least one leg.
 export function pickMatchesTeamInclude(pickOrLegs, includeTokens) {
   const tokens = Array.isArray(includeTokens) ? includeTokens : [];
   if (!tokens.length) return true;
-  return pickLegs(pickOrLegs).some((leg) => legMatchesTeamTokens(leg, tokens));
+  const legs = pickLegs(pickOrLegs);
+  if (!legs.length) return false;
+  const hays = legs.map(promoLegIncludeText);
+  return tokens.every((token) => {
+    if (!String(token || "").trim()) return true;
+    return hays.some((hay) => textHasToken(hay, token));
+  });
+}
+
+export function legMatchesAllTeamTokens(leg, tokens) {
+  const list = Array.isArray(tokens) ? tokens : [];
+  if (!list.length) return false;
+  return list.every((token) => legMatchesIncludeToken(leg, token));
 }
 
 // Exclude rule: drop if any leg contains any exclude token.
@@ -79,7 +118,8 @@ export function filterLegsByTeamInclude(legs, includeTokens) {
   const list = Array.isArray(legs) ? legs : [];
   const tokens = Array.isArray(includeTokens) ? includeTokens : [];
   if (!tokens.length) return list;
-  return list.filter((leg) => legMatchesTeamTokens(leg, tokens));
+  // Used for 1-leg scans: the single leg must cover every token.
+  return list.filter((leg) => legMatchesAllTeamTokens(leg, tokens));
 }
 
 export function filterPicksByTeamName(picks, includeTokens, excludeTokens) {
@@ -91,20 +131,30 @@ export function filterPicksByTeamName(picks, includeTokens, excludeTokens) {
 }
 
 // Keep include-matching legs inside the 200-leg scan cap so "lions" is not
-// sliced off when those legs are not in the top-EV slice.
+// sliced off when those legs are not in the top-EV slice. With several tokens
+// the pinned legs are interleaved per token (legs matching all tokens first)
+// so every token keeps legs inside the cap and AND combos stay findable.
 export function pinTeamIncludeLegs(legs, includeTokens, cap) {
   const list = Array.isArray(legs) ? legs : [];
   const limit = Number(cap);
-  const sliced = Number.isFinite(limit) && limit >= 0 ? list.slice(0, limit) : list.slice();
+  const capped = Number.isFinite(limit) && limit >= 0;
   const tokens = Array.isArray(includeTokens) ? includeTokens : [];
-  if (!tokens.length) return sliced;
-  const matched = [];
+  if (!tokens.length) return capped ? list.slice(0, limit) : list.slice();
+  const all = [];
+  const perToken = tokens.map(() => []);
   const rest = [];
   for (const leg of list) {
-    (legMatchesTeamTokens(leg, tokens) ? matched : rest).push(leg);
+    if (tokens.length > 1 && legMatchesAllTeamTokens(leg, tokens)) { all.push(leg); continue; }
+    const idx = tokens.findIndex((t) => legMatchesIncludeToken(leg, t));
+    if (idx >= 0) perToken[idx].push(leg); else rest.push(leg);
   }
-  const pinned = matched.concat(rest);
-  return Number.isFinite(limit) && limit >= 0 ? pinned.slice(0, limit) : pinned;
+  const interleaved = [];
+  const maxLen = Math.max(0, ...perToken.map((a) => a.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const arr of perToken) if (i < arr.length) interleaved.push(arr[i]);
+  }
+  const pinned = all.concat(interleaved, rest);
+  return capped ? pinned.slice(0, limit) : pinned;
 }
 
 export function teamFilterSummary(includeTokens, excludeTokens) {
