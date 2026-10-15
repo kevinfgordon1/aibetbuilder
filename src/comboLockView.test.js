@@ -63,6 +63,11 @@ assert.equal(s.betLine, "$50 at +1950");
 assert.equal(s.maxPayout, 1025);
 assert.equal(s.sellAt, "+1300");
 assert.equal(lockMetaLine(bet), "NFL · Mon, Oct 12 · 1:00 PM ET · DraftKings · 30% boost");
+{
+  const m = lockMetaLine(bet, { withBet: true });
+  assert.equal((m.match(/DraftKings/g) || []).length, 1);
+  assert.match(m, /^NFL · Mon, Oct 12 · 1:00 PM ET · .+ · 30% boost · DraftKings$/);
+}
 const fb = betSummary({ ...bet, is_free_bet: true, parlay_stake: 25, parlay_american: 1600 });
 assert.equal(fb.maxPayout, 400); // free bet pays profit only
 assert.equal(fb.betLine, "Free bet $25 at +1600");

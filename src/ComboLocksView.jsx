@@ -248,6 +248,10 @@ export const COMBO_VIEW_CSS = `
   .cl .qh-fold > summary::before{content:"▸ "}
   .cl .qh-fold[open] > summary::before{content:"▾ "}
   .cl .qtable{font-size:12px}
+  .cl .lk-ctl{flex-wrap:wrap}
+  .cl .lk-ctl .lock-check{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .cl .lk-ctl-pop{flex-basis:100%;background:#12141a;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px;cursor:default}
+  .cl .lk-hnote{font-size:11px;color:#fcd34d;text-align:right;margin-top:2px}
   .cl .leglist li.leg1{display:block;padding:2px 0;font-size:12.5px;line-height:1.35;border:0;background:none}
   .cl .leglist li.leg1 .lp{font-weight:600;color:#e8eaed}
   .cl .leglist li.leg1 .lg{color:#8a8f98;display:inline;margin:0}
@@ -452,7 +456,7 @@ export function MergedTag({ bets }) {
  * sell price and how much is hedged, then a small "Your original bet" reminder.
  * Everything else lives behind Details (children).
  */
-export function LockCard({ feeRate = 0, parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
+export function LockCard({ hedgeNote = "", feeRate = 0, parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
   const s = betSummary(parlay) || {};
   const cap = Number(ceiling) > 0 ? Number(ceiling) : Number(parlay && parlay.max_contracts) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((Number(filled || 0) / cap) * 100)) : 0;
@@ -484,7 +488,7 @@ export function LockCard({ feeRate = 0, parlay, status, profile, filled = 0, cei
           </button>
         </div>
       </div>
-      <div className="lk-meta">{lockMetaLine(parlay)}{s.betLine ? <> · <span className="lk-bet">Bet: {s.betLine}{s.book ? ` · ${s.book}` : ""}</span></> : null}</div>
+      <div className="lk-meta lk-bet">{lockMetaLine(parlay, { withBet: true })}</div>
       <div className="lk-facts">
         <StandTile now={tiles.now} />
         <TargetTile target={tiles.target} sellAt={s.sellAt} />
@@ -492,6 +496,7 @@ export function LockCard({ feeRate = 0, parlay, status, profile, filled = 0, cei
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
+      {hedgeNote ? <div className="lk-hnote" title="The rest weren't taken, or haven't gone through yet.">{hedgeNote}</div> : null}
       <div className="lk-hint">{status.hint}</div>
       </div>
       {open ? <div className="lk-details">{children}</div> : null}

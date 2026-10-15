@@ -45,7 +45,7 @@ import { LowCashBanner } from "./LowCashAlerts";
 import ComboCredits from "./ComboCredits";
 import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn, feeGateNote, feeStatusFromRow } from "./comboCredits";
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
-import { OpenQuotesPanel } from "./ComboLockOrders";
+import { ChangePriceButton } from "./ComboLockOrders";
 import ComboLockSubmitted from "./ComboLockSubmitted";
 import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SEES_TITLE, FALLBACK_MAKER_RATE, makerRateForTicker, loadSeriesFees } from "./buyerOdds.js";
 import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } from "./comboLockSubmitted";
@@ -1455,28 +1455,17 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         open={open}
         onToggle={toggle}
         bets={betsByParlay[p.id]}
-        controls={<PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />}
+        hedgeNote={desk && desk.quoted > desk.fill.filled ? `Offered ${desk.quoted.toLocaleString("en-US")}, ${desk.fill.filled.toLocaleString("en-US")} confirmed filled` : ""}
+        controls={<>
+          <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
+          {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} />}
+          {p.active !== false && <ChangePriceButton parlay={p} supabase={supabase} feesEnabled={p.user_id === user.id ? feeOn : !!feesByUserId[p.user_id]} onDone={reload} />}
+        </>}
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
-        <DetailBlock title="Price & quotes">
-          {out && out.kind !== "pending" && <div className="chips"><OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} /></div>}
-          {desk && desk.quoted > desk.fill.filled && (
-            <div className="note warn">We offered {desk.quoted.toLocaleString("en-US")} contracts and {desk.fill.filled.toLocaleString("en-US")} were confirmed filled. The rest weren't taken (or haven't gone through yet).</div>
-          )}
-          <DeskChips desk={desk} />
-          {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} />}
-          {singleLegOf(p) ? <SingleLegVenues parlayId={p.id} supabase={supabase} /> : null}
-          <OpenQuotesPanel
-            parlay={p}
-            submissions={submissions}
-            supabase={supabase}
-            feesEnabled={p.user_id === user.id ? feeOn : !!feesByUserId[p.user_id]}
-            onDone={reload}
-            busyKey={orderBusyKey}
-            setBusyKey={setOrderBusyKey}
-          />
-        </DetailBlock>
-        <QuoteHistoryFold history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={watcherNote(p.id)} />
+        {singleLegOf(p) ? <DetailBlock title="Resting hedge"><SingleLegVenues parlayId={p.id} supabase={supabase} /></DetailBlock> : null}
+        {out && out.kind !== "pending" && <div className="chips" style={{ marginBottom: 8 }}><OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} /></div>}
+        <QuoteHistory history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={canSeeOwnerTools(user) ? watcherNote(p.id) : ""} />
         <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
         <div className="actions">
           <CopyLockLink lockId={p.id} />
