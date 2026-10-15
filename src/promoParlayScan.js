@@ -454,3 +454,27 @@ export function rescaleFreeBetConversions(list, fromAmount, toAmount) {
     guaranteedCash: x.guaranteedCash * scale,
   }));
 }
+
+// Scan EV is top-of-book; the live depth walk can only lower it. With a wide
+// date window, a few shiny-but-thin legs can fill every kept slot with their
+// combos and crowd out the combo that is best after depth. Keep a deep pool
+// sorted by EV, then cap how many kept combos any one leg appears in.
+export const SCAN_DEEP_RESULTS = 1000;
+export const SCAN_KEEP_RESULTS = 150;
+export const SCAN_MAX_PER_LEG = 12;
+export function diversifyTopParlays(parlays, keep = SCAN_KEEP_RESULTS, maxPerLeg = SCAN_MAX_PER_LEG) {
+  const list = (parlays || []).slice().sort((a, b) => b.ev - a.ev);
+  if ((list[0] && list[0].legs || []).length <= 1) return list.slice(0, keep);
+  const uses = new Map();
+  const out = [];
+  const spill = [];
+  for (const p of list) {
+    if (out.length >= keep) break;
+    const keys = (p.legs || []).map((l) => `${l.game}\0${l.name}`);
+    if (keys.some((k) => (uses.get(k) || 0) >= maxPerLeg)) { spill.push(p); continue; }
+    for (const k of keys) uses.set(k, (uses.get(k) || 0) + 1);
+    out.push(p);
+  }
+  for (const p of spill) { if (out.length >= keep) break; out.push(p); }
+  return out.sort((a, b) => b.ev - a.ev);
+}

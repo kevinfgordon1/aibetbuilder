@@ -116,7 +116,7 @@ import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
-import { rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
+import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
@@ -2361,14 +2361,15 @@ export default function App() {
     const scanKey = currentPromoScanKey;
     setPromoScanBusy(true);
     findTopParlaysChunked(parlayLegPool, scanNumLegs, calc, {
-      maxResults: 50,
+      maxResults: SCAN_DEEP_RESULTS,
       minFinalOdds: parsedMinFinal,
       maxFinalOdds: parsedMaxFinal,
       signal: ac.signal,
       acceptCombo: includeTeamTokens.length
         ? (comboLegs) => pickMatchesTeamInclude(comboLegs, includeTeamTokens)
         : null,
-    }).then((parlays) => {
+    }).then((deep) => {
+      const parlays = diversifyTopParlays(deep);
       if (!shouldCommitPromoScan({
         requestGen: gen,
         latestGen: promoScanGen.current,
@@ -2469,7 +2470,11 @@ export default function App() {
   const promoBaseLen = Array.isArray(activePromoBase) ? activePromoBase.length : 0;
   const depthFiltersKey = [promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, boostPct, hideLowLiquidity, includeTeamTokens.join(","), excludeTeamTokens.join(",")].join("|");
   const [depthWindowState, setDepthWindowState] = useState({ key: "", size: 0 });
-  const depthWindow = depthWindowState.key === depthFiltersKey ? Math.max(promoPage, depthWindowState.size) : promoPage;
+  // Depth-check every scanned candidate, not just the first page: the scan
+  // ranks by top-of-book EV, so a combo whose live-depth EV is best can sit
+  // below the page when a wider date window adds many thin-but-shiny combos.
+  const depthWindow = Math.max(promoPage, Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX),
+    depthWindowState.key === depthFiltersKey ? depthWindowState.size : 0);
   const pageLadders = usePromoPageLadders(activePromoBase, depthWindow);
   const promoDepthRank = useMemo(() => {
     const ctx = promoType === "nosweat"
