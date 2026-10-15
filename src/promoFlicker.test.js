@@ -26,3 +26,28 @@ test("transient empty ladder keeps last known depth", async () => {
     assert.equal(second[key].length, 1);
   } finally { Date.now = realNow; }
 });
+
+import { visiblePromoAfterDepth, nextPromoDepthWindow, maskUncheckedWhileHidingThin } from "./promoListRank.js";
+
+test("depth filter dropping the whole page backfills from a wider window", () => {
+  const base = Array.from({ length: 50 }, (_, i) => ({ id: i }));
+  const rank = (head) => head.filter((p) => p.id >= 7); // first 7 are thin
+  const page = visiblePromoAfterDepth(base, 5, {}, rank, 5);
+  assert.equal(page.visible.length, 0);
+  assert.equal(page.hidden, 5);
+  assert.equal(page.needsWiderWindow, true);
+  const w = nextPromoDepthWindow(5, 5, 50);
+  assert.equal(w, 20);
+  const wide = visiblePromoAfterDepth(base, 5, {}, rank, w);
+  assert.deepEqual(wide.visible.map((p) => p.id), [7, 8, 9, 10, 11]);
+  assert.equal(wide.rest.length, 50 - 7 - 5);
+  assert.equal(wide.hidden, 7);
+  assert.equal(wide.needsWiderWindow, false);
+});
+
+test("first load with Hide low liquidity shows checking, not raw picks", () => {
+  const pending = visiblePromoAfterDepth([{ id: 1 }], 5, null, (h) => h, 5);
+  assert.equal(maskUncheckedWhileHidingThin(pending, true).visible.length, 0);
+  assert.equal(maskUncheckedWhileHidingThin(pending, true).checking, true);
+  assert.equal(maskUncheckedWhileHidingThin(pending, false).visible.length, 1);
+});
