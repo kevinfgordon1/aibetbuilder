@@ -152,7 +152,7 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
   // First tile is where you stand now; the original bet is a small reminder line under the tiles.
   assert.match(viewSrc, /<div className="lk-facts">\s*<StandTile now=\{tiles\.now\} \/>\s*<TargetTile target=\{tiles\.target\} sellAt=\{s\.sellAt\} \/>\s*<SellTile summary=\{s\}[^>]*\/>/);
-  assert.match(viewSrc, /<span className="lk-bet">Bet: \{s\.betLine\}/);
+  assert.match(viewSrc, /lockMetaLine\(parlay, \{ withBet: true \}\)/);
   assert.doesNotMatch(viewSrc, /Pays up to|Wins if it hits/);
   assert.match(viewSrc, /<th>Your original bet<\/th><th>Fair odds<\/th>/);
   assert.doesNotMatch(viewSrc + locksSrc, /Your bet\b/);

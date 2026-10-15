@@ -238,12 +238,15 @@ export function takerOddsAfterFee(fillAmerican, venue = "kalshi", ticker = null)
 }
 
 /** "NFL · Sun, Oct 12 · 1:00 PM ET · DraftKings · 30% boost" */
-export function lockMetaLine(parlay) {
+export function lockMetaLine(parlay, { withBet = false } = {}) {
   if (!parlay) return "";
   const s = betSummary(parlay);
-  const bits = [lockSports(parlay).join(" + "), etDateTime(parlay.starts_at), s.book];
-  if (s.freeBet) bits.push("free bet");
+  const bet = withBet && s.betLine && s.betLine !== "—" ? s.betLine : "";
+  // withBet: "NFL · Sun, Oct 18 · 9:30 AM ET · Free bet $20 at +2265 · DraftKings" (book + bet type once).
+  const bits = bet ? [lockSports(parlay).join(" + "), etDateTime(parlay.starts_at), bet] : [lockSports(parlay).join(" + "), etDateTime(parlay.starts_at), s.book];
+  if (s.freeBet) { if (!bet) bits.push("free bet"); }
   else if (s.boostPct) bits.push(`${s.boostPct}% boost`);
+  if (bet && s.book) bits.push(s.book);
   if (parlay.fill_edited_at) {
     const when = etDateTime(parlay.fill_edited_at);
     bits.push(when ? `fill edited ${when}` : "fill edited");

@@ -159,4 +159,37 @@ function EditFillForm({ feesEnabled, draft, setDraft, busy, onCancel, onSave }) 
   );
 }
 
+/** Header "Change price" button: edits the lock's fill odds (same edit_fill call as before). */
+export function ChangePriceButton({ parlay, supabase, feesEnabled, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async () => {
+    setErr("");
+    const v = validateFillAmerican(draft);
+    if (!v.ok) { setErr(v.error); return; }
+    setBusy(true);
+    try {
+      await postLockOrder(supabase, { action: "edit_fill", parlay_id: parlay.id, fill: v.american });
+      setOpen(false);
+      if (onDone) await onDone();
+    } catch (e) {
+      setErr(e.message || "Something went wrong");
+    } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button type="button" className="btn mini" disabled={busy} onClick={(e) => { e.stopPropagation(); setErr(""); setDraft(displayFillForEdit(parlay, { feesEnabled })); setOpen((o) => !o); }}>Change price</button>
+      {open && (
+        <div className="lk-ctl-pop" data-no-toggle="">
+          <EditFillForm feesEnabled={feesEnabled} draft={draft} setDraft={setDraft} busy={busy} onCancel={() => setOpen(false)} onSave={save} />
+          {fillEditedNote(parlay) ? <div className="muted" style={{ fontSize: 12 }}>{fillEditedNote(parlay)}</div> : null}
+          {err ? <div className="note warn" role="alert">{err}</div> : null}
+        </div>
+      )}
+    </>
+  );
+}
+
 export { postLockOrder };
