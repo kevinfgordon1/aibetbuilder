@@ -53,9 +53,9 @@ import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
 import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
 import { fetchAllRows } from "./comboPaging";
-import { americanFromNoPrice, etDateTime, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
+import { americanFromNoPrice, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
 import { lockLegsError } from "./comboLegRules";
-import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, SectionHead, SummaryStrip } from "./ComboLocksView";
+import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, QuoteHistoryFold, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
   buildMergePlan,
   findDuplicateGroups,
@@ -211,19 +211,6 @@ function CopyLockLink({ lockId }) {
 
 // "taker gets" + "fair" header chips. Shared by the Active (0 fills) and Filled (≥1 fill) lock headers so
 // a partially-filled lock keeps them — both come from the saved lock (fill_american / fair_american).
-function TakerFairChips({ parlay }) {
-  const fill = Number(parlay.fill_american);
-  const eff = parlay.fill_american != null && parlay.fill_american !== "" && Number.isFinite(fill) && fill !== 0 ? fillView(fill) : null;
-  const fair = parlay.fair_american != null && parlay.fair_american !== "" && Number.isFinite(Number(parlay.fair_american)) ? Number(parlay.fair_american) : null;
-  const buyer = eff ? buyerSeesAfterFees(fill, { ticker: parlay.combo_ticker }) : null;
-  const beatsFair = buyer && fair != null && buyer.american >= fair;
-  return (
-    <>
-      {buyer && <span className="chip num" data-testid="chip-buyer-sees" title={BUYER_SEES_TITLE} style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>{buyerSeesLabel(buyer)}</span>}
-      {fair != null && <span className="chip num" title="Your estimate of the fair price for this parlay.">Fair odds {fmtAm(fair)}</span>}
-    </>
-  );
-}
 const BET_TYPE_LABEL = { cash: "cash", boost: "boost", free: "free" };
 function formBetType(form) {
   if (lockKind(form) === "freebet") return "free";
@@ -461,7 +448,6 @@ const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 // only an archive heuristic. Settlement copy on filled/history cards comes from
 // the official Kalshi combo market result, not this clock.
 const HISTORY_BUFFER_HOURS = 6;
-const historyMoveAt = (startsAtIso) => (startsAtIso ? new Date(new Date(startsAtIso).getTime() + HISTORY_BUFFER_HOURS * 3600 * 1000) : null);
 
 // Owner-only "View as": Kevin picks a tester and sees their page read-only.
 export default function ComboLocks({ user, prefill = null, focusLockId = null }) {
@@ -1472,29 +1458,14 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         controls={<PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />}
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
-        {singleLegOf(p) ? <DetailBlock title="Resting hedge (single leg)"><SingleLegVenues parlayId={p.id} supabase={supabase} /></DetailBlock> : null}
-        <DetailBlock title="Profit picture"><RiskProfile parlay={p} filled={filledN} feeRate={feeOn ? COMBO_FEE_RATE : 0} /></DetailBlock>
-        <DetailBlock title="Price and size">
-          <div className="chips">
-            {feeOn
-              ? <><span className="chip fill num" title="Your price after the 1% Combo Locks fee and your Kalshi maker fee.">{youKeepLabel(sellerKeeps(p.fill_american, { feeRate: COMBO_FEE_RATE }))}</span><span className="chip num">Exchange {fmtAm(p.fill_american)}</span></>
-              : <span className="chip fill num" title="Your price after your Kalshi maker fee.">{youKeepLabel(sellerKeeps(p.fill_american))}</span>}
-            <TakerFairChips parlay={p} />
-            <span className="chip">{MODE_LABEL[p.hedge_mode] || p.hedge_mode || "1× pure hedge"}</span>
-            <span className="chip num">Up to {p.max_contracts} contracts</span>
-            {matched && <span className="chip num">{matched}</span>}
-            {p.starts_at
-              ? <span className="chip">Moves to History {etDateTime(historyMoveAt(p.starts_at))}</span>
-              : <span className="chip">Move to History by hand when the games end</span>}
-            {out && out.kind !== "pending" && <OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} />}
-          </div>
+        <DetailBlock title="Price & quotes">
+          {out && out.kind !== "pending" && <div className="chips"><OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} /></div>}
           {desk && desk.quoted > desk.fill.filled && (
             <div className="note warn">We offered {desk.quoted.toLocaleString("en-US")} contracts and {desk.fill.filled.toLocaleString("en-US")} were confirmed filled. The rest weren't taken (or haven't gone through yet).</div>
           )}
           <DeskChips desk={desk} />
           {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} />}
-        </DetailBlock>
-        <DetailBlock title="Open quotes & fill odds">
+          {singleLegOf(p) ? <SingleLegVenues parlayId={p.id} supabase={supabase} /> : null}
           <OpenQuotesPanel
             parlay={p}
             submissions={submissions}
@@ -1505,9 +1476,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             setBusyKey={setOrderBusyKey}
           />
         </DetailBlock>
-        <DetailBlock title="Quote history">
-          <QuoteHistory history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={watcherNote(p.id)} />
-        </DetailBlock>
+        <QuoteHistoryFold history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={watcherNote(p.id)} />
         <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
         <div className="actions">
           <CopyLockLink lockId={p.id} />
@@ -1623,26 +1592,24 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
           <button type="button" className={"switch" + (deskChrome.killSwitchOn ? " on" : "")} onClick={toggleKill} disabled={deskChrome.killSwitchDisabled} role="switch" aria-checked={!!deskChrome.killSwitchOn} aria-label="Stop all quoting" aria-busy={deskLoading || !deskReady || undefined} title={!deskReady ? "Loading…" : (kill ? "Everything is stopped. Turn off to start offering again." : "Turn on to stop offering every lock at once.")}><span className="knob" /></button>
         </div>
       </div>
-      {(deskLoading || (!deskLoading && deskError)) && (
-        <div className="chips" style={{ marginBottom: 10 }}>
-          {deskLoading && <span className="chip">Loading your locks…</span>}
-          {!deskLoading && deskError && (deskChrome.sourceUnhealthy
-            ? <DataSourceChip status={deskHealth} label="Supabase flaky" />
-            : <span className="chip">Refresh failed. Retrying…</span>)}
-        </div>
-      )}
+      {(() => {
+        // One status banner at a time, most serious first.
+        const gate = feeOn ? feeGateNote(feeStatus) : null;
+        if (deskChrome.showKillBanner) return <div className="note warn" style={{ marginBottom: 12 }}>⛔ All quoting is stopped, so nothing is being offered. You can still add locks.</div>;
+        if (deskHealth.show) return <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />;
+        if (deskChrome.deskError) return <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>;
+        if (gate) return <div className="note warn" role="status" style={{ marginBottom: 12 }}><b>Add credits to keep quoting.</b> {gate.replace(/^Add credits to keep quoting\. /, "")}</div>;
+        if (!deskLoading && deskError) return <div className="chips" style={{ marginBottom: 10 }}>{deskChrome.sourceUnhealthy ? <DataSourceChip status={deskHealth} label="Data delayed" /> : <span className="chip">Refresh failed. Retrying…</span>}</div>;
+        if (deskLoading) return <div className="chips" style={{ marginBottom: 10 }}><span className="chip">Loading your locks…</span></div>;
+        return null;
+      })()}
       <LowCashBanner supabase={supabase} user={user} />
       <ComboTesters user={user} supabase={supabase} />
-      {feeOn && feeGateNote(feeStatus) && <div className="note warn" role="status" style={{ marginBottom: 12 }}><b>Add credits to keep quoting.</b> {feeGateNote(feeStatus).replace(/^Add credits to keep quoting\. /, "")}</div>}
       {feeOn ? <ComboCredits user={user} supabase={supabase} feeStatus={feeStatus} /> : null}
       <ComboLockSubmitted toast={submitToast} onClose={() => {
         try { sessionStorage.removeItem("combo_smoke_submit_toast"); } catch (_) {}
         setSubmitToast(null);
       }} />
-      {deskHealth.show
-        ? <DataSourceBanner status={deskHealth} style={{ margin: "0 0 12px" }} />
-        : deskChrome.deskError && <div className="note warn" style={{ marginBottom: 12 }}>{deskChrome.deskError}</div>}
-      {deskChrome.showKillBanner && <div className="note warn" style={{ marginBottom: 12 }}>⛔ All quoting is stopped, so nothing is being offered. You can still add locks and run test requests below.</div>}
 
       <HowItWorks />
       <SummaryStrip
@@ -1653,45 +1620,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         onJump={(id) => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }}
       />
 
-      <SectionHead id="cl-waiting" title="Waiting for a match" count={waitingKind === "rows" ? waiting.length : null} sub="Offered on Kalshi and Polymarket at your price. Nothing is hedged yet." />
-      {dupGroups.filter((group) => !dismissedDupes[group.signature]).map((group) => {
-        const plan = buildMergePlan({
-          survivor: group.survivor,
-          absorb: group.others,
-          existingBets: originalBets,
-          fills: comboFills,
-          now: new Date(),
-        });
-        return (
-          <div className="note warn" key={group.signature} style={{ marginBottom: 10 }}>
-            <div>{group.warning}</div>
-            <MergeFigures plan={plan} />
-            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-              <button type="button" className="btn mini primary" disabled={mergeBusy || !plan.ok} onClick={() => mergeExistingGroup(group)}>Combine</button>
-              <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => setDismissedDupes((prev) => ({ ...prev, [group.signature]: true }))}>Keep separate</button>
-            </div>
-          </div>
-        );
-      })}
-      {mergeError && <div className="note warn" style={{ marginBottom: 10 }}>{mergeError}</div>}
-      <div aria-busy={deskLoading || !deskReady || undefined}>
-        {waitingKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
-          : waitingKind === "empty" ? <div className="card empty">No locks waiting. Add a parlay below and it shows up here while we look for a buyer.</div>
-          : waiting.map((p) => renderLock(p, { filledSection: false }))}
-      </div>
-
-      <SectionHead id="cl-filled" title="Filled" count={filledKind === "rows" ? filledParlays.length : null} sub="At least part of these is hedged. They move to History after the games end." />
-      <div aria-busy={deskLoading || !deskReady || undefined}>
-        {filledKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
-          : filledKind === "empty" ? <div className="card empty">Nothing filled yet. A lock moves here once a trader actually takes your offer (a quote nobody took doesn't count).</div>
-          : filledParlays.map((p) => renderLock(p, { filledSection: true }))}
-        {realUnattr > 0 && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>{realUnattr} filled contract{realUnattr === 1 ? "" : "s"} couldn't be matched to a specific lock. They're counted, just not shown on a card.</div>}
-      </div>
-
-      <div className="add-lock" ref={createFormRef} style={{ marginTop: 16 }}>
+      <div className="add-lock" ref={createFormRef} style={{ marginTop: 4, marginBottom: 16 }}>
           <div className="sec-h">
             <h2>Add a lock</h2>
-            <span className="chip" style={{ background: srcLive ? "rgba(16,185,129,.15)" : "rgba(255,255,255,.06)", color: srcLive ? "#6ee7b7" : "#9aa3b2" }} title={srcLive ? "Game list is live from Kalshi." : "Couldn't load live games, showing sample games."}>{srcLive ? "Live games" : "Sample games"}</span>
+            {gamesReady && !srcLive && <span className="chip" style={{ background: "rgba(245,158,11,.15)", color: "#fcd34d" }}>Couldn't load games</span>}
             <div className="sec-sub">Already placed the parlay at your sportsbook? Enter it here.</div>
           </div>
           <div className="card">
@@ -1837,6 +1769,41 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
           </div>
         </div>
 
+      <SectionHead id="cl-waiting" title="Waiting for a match" count={waitingKind === "rows" ? waiting.length : null} sub="Offered on Kalshi and Polymarket at your price. Nothing is hedged yet." />
+      {dupGroups.filter((group) => !dismissedDupes[group.signature]).map((group) => {
+        const plan = buildMergePlan({
+          survivor: group.survivor,
+          absorb: group.others,
+          existingBets: originalBets,
+          fills: comboFills,
+          now: new Date(),
+        });
+        return (
+          <div className="note warn" key={group.signature} style={{ marginBottom: 10 }}>
+            <div>{group.warning}</div>
+            <MergeFigures plan={plan} />
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              <button type="button" className="btn mini primary" disabled={mergeBusy || !plan.ok} onClick={() => mergeExistingGroup(group)}>Combine</button>
+              <button type="button" className="btn mini" disabled={mergeBusy} onClick={() => setDismissedDupes((prev) => ({ ...prev, [group.signature]: true }))}>Keep separate</button>
+            </div>
+          </div>
+        );
+      })}
+      {mergeError && <div className="note warn" style={{ marginBottom: 10 }}>{mergeError}</div>}
+      <div aria-busy={deskLoading || !deskReady || undefined}>
+        {waitingKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
+          : waitingKind === "empty" ? <div className="card empty">No locks waiting. Add a parlay above and it shows up here while we look for a buyer.</div>
+          : waiting.map((p) => renderLock(p, { filledSection: false }))}
+      </div>
+
+      <SectionHead id="cl-filled" title="Filled" count={filledKind === "rows" ? filledParlays.length : null} sub="At least part of these is hedged. They move to History after the games end." />
+      <div aria-busy={deskLoading || !deskReady || undefined}>
+        {filledKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
+          : filledKind === "empty" ? <div className="card empty">Nothing filled yet. A lock moves here once a trader actually takes your offer (a quote nobody took doesn't count).</div>
+          : filledParlays.map((p) => renderLock(p, { filledSection: true }))}
+        {realUnattr > 0 && canSeeOwnerTools(user) && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>{realUnattr} filled contract{realUnattr === 1 ? "" : "s"} couldn't be matched to a specific lock. They're counted, just not shown on a card.</div>}
+      </div>
+
       <SectionHead id="cl-history" title="History" count={archivedKind === "rows" ? historyStatement.lines.length : null} sub="Locks whose games are over, newest first. Tap a row for the details." />
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading history…</div> : archivedKind === "empty" ? <div className="empty">{historyEmptyText}</div> : (
@@ -1873,7 +1840,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         )}
       </div>
 
-      <details className="adv">
+      {canSeeOwnerTools(user) && <details className="adv">
         <summary>Advanced logs: every offer the worker sent</summary>
         <div className="adv-body">
           <h3>Offers sent</h3>
@@ -1934,7 +1901,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             )}
           </div>
         </div>
-      </details>
+      </details>}
     </div>
   );
 }

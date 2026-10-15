@@ -367,7 +367,7 @@ assert.equal(lastSkip({ matches: [{ rfq_id: "q", matched_at: "2026-08-13T12:00:0
   assert.match(page, /comboDeskCatchNote/);
   assert.match(page, /DataSourceBanner/);
   assert.match(page, /sourceUnhealthy/);
-  assert.match(page, /Supabase flaky/);
+  assert.match(page, /Data delayed/);
   assert.match(page, /waitingKind === "loading"/);
   assert.match(page, /waitingKind === "empty"/);
   assert.match(page, /Loading locks/);

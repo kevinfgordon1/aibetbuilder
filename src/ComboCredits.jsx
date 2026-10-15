@@ -5,11 +5,13 @@
 // only when the matching webhook confirms payment. No fees are charged yet.
 import { useCallback, useEffect, useState } from "react";
 import {
-  CREDIT_PRESETS_USD, COMBO_FEE_RATE, MIN_PURCHASE_USD, DEFAULT_PRESET_USD, addCreditsState, allowanceResetText, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
+  CREDIT_PRESETS_USD, MIN_PURCHASE_USD, DEFAULT_PRESET_USD, addCreditsState, allowanceResetText, creditsText, isMissingCreditsSchema, ledgerLabel, returnNote, showUsdcCreditsEnabled,
 } from "./comboCredits";
 
 const CREDITS_CSS = `
 .cl .crd{margin:0 0 14px}
+.cl .crd .crd-toggle{width:100%;background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0;text-align:left}
+.cl .crd .crd-line{flex:1;color:#c3c6cc;font-size:13px}
 .cl .crd .crd-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .cl .crd .crd-title{font-weight:700;font-size:14px}
 .cl .crd .crd-bal{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:8px 0 4px}
@@ -70,6 +72,7 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
   const [amount, setAmount] = useState(DEFAULT_PRESET_USD);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [open, setOpen] = useState(false);
   const [back] = useState(() => (typeof window !== "undefined" ? returnNote(window.location.search) : null));
 
   const loadBalance = useCallback(async () => {
@@ -87,8 +90,15 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
     setBalance(balQ.data ? Number(balQ.data.balance_usd) : 0);
     setRows(rowsQ.data || []);
     try {
-      const fq = await supabase.from("combo_fee_charges").select("id,fee_usd,from_allowance_usd,from_credits_usd,contracts,lay_price,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
-      setFees(fq.error ? [] : (fq.data || []));
+      const fq = await supabase.from("combo_fee_charges").select("id,fee_usd,from_allowance_usd,from_credits_usd,parlay_id,created_at").eq("user_id", user.id).order("created_at", { ascending: false }).limit(5);
+      const list = fq.error ? [] : (fq.data || []);
+      const ids = [...new Set(list.map((f) => f.parlay_id).filter(Boolean))];
+      let names = {};
+      if (ids.length) {
+        const pq = await supabase.from("combo_parlays").select("id,label").in("id", ids);
+        if (!pq.error) names = Object.fromEntries((pq.data || []).map((x) => [x.id, x.label]));
+      }
+      setFees(list.map((f) => ({ ...f, lockName: names[f.parlay_id] || null })));
     } catch (_) { setFees([]); }
   }, [supabase, user]);
 
@@ -149,15 +159,21 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
   const state = addCreditsState({ configured: (configured || cardConfigured) && !schemaMissing, loading: cfgLoading, busy, error });
   const feesOn = !!(feeStatus && feeStatus.feesEnabled);
   const allow = feesOn ? feeStatus : null;
+  // Stay open after a checkout return so the result note is visible.
+  const showBody = open || !!back;
   const usedPct = allow && allow.allowanceUsd > 0 ? Math.min(100, Math.round((allow.allowanceUsedUsd / allow.allowanceUsd) * 100)) : 0;
 
   return (
     <div className="card crd" aria-label="Combo Locks credits">
       <style>{CREDITS_CSS}</style>
-      <div className="crd-head">
-        <div className="crd-title">Your credits</div>
-        <span className={"chip" + (feesOn ? "" : " ok")}>{feesOn ? `${Math.round(COMBO_FEE_RATE * 100)}% fee on fills` : "Free for now · no fees"}</span>
-      </div>
+      <button type="button" className="crd-head crd-toggle" aria-expanded={showBody} onClick={() => setOpen((o) => !o)}>
+        <span className="crd-title">Your credits</span>
+        <span className="crd-line">{allow
+          ? `${creditsText(allow.allowanceLeftUsd)} free left of ${creditsText(allow.allowanceUsd)} · ${balance == null ? "—" : creditsText(balance)} purchased`
+          : `${balance == null ? "—" : creditsText(balance)} · Free for now, no fees`}</span>
+        <span className="btn mini">{showBody ? "Hide" : "Add credits"}</span>
+      </button>
+      {showBody && <>
       {gateNote && <div className="crd-gate" role="status">{gateNote}</div>}
       {allow && (
         <div className="crd-allow">
@@ -178,11 +194,7 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
         <span className="crd-amt">{balance == null ? "—" : creditsText(balance)}</span>
         <span className="crd-sub">{schemaMissing ? "Credits aren't set up yet." : "1 credit = $1"}</span>
       </div>}
-      {allow
-        ? <p>Each filled lock costs 1% of the amount you put at risk (contracts × lay price). It comes out of your free credits first, then purchased credits. Your all-in price on each lock already includes it. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>
-        : <p>Credits will pay for Combo Locks. Right now Combo Locks is free, so nothing is taken from your balance. Credits are only for using the tool. They aren't a betting balance and can't be wagered.</p>}
-      <p>{usdcOn ? "Pay with a debit or credit card on Stripe's secure checkout page, or add USDC, a digital dollar, from Coinbase or any crypto wallet." : "Pay with a debit or credit card on Stripe's secure checkout page."}</p>
-      <p className="crd-sub">Minimum purchase ${MIN_PURCHASE_USD}. Purchased credits never expire. Only the free monthly credits reset on the 1st.</p>
+      <p>{allow ? "Each filled lock costs 1% of the amount at risk (already in your all-in price), taken from free credits first" : "Combo Locks is free for now"}; buy more {usdcOn ? "by card or USDC" : "by card"} (${MIN_PURCHASE_USD} minimum, never expire, not a betting balance).</p>
       <div className="crd-presets" role="group" aria-label="Amount to add">
         {CREDIT_PRESETS_USD.filter((v) => v >= MIN_PURCHASE_USD).map((v) => (
           <button key={v} type="button" className={"crd-preset" + (amount === v ? " on" : "")} aria-pressed={amount === v} disabled={state.disabled && !error} onClick={() => setAmount(v)}>${v}</button>
@@ -195,12 +207,11 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
       {state.note && <div className="crd-note">{state.note}</div>}
       {back && <div className={"crd-note" + (back.kind === "ok" ? " ok" : "")}>{back.text}</div>}
       {allow && fees.length > 0 && (
-        <details className="crd-hist" open>
+        <details className="crd-hist">
           <summary>Recent fees</summary>
           {fees.map((f) => (
             <div className="crd-row" key={"f" + f.id}>
-              <span>{Number(f.contracts).toLocaleString("en-US")} contracts × {Number(f.lay_price).toFixed(2)} × 1% <span className="muted">· {etDate(f.created_at)} · {Number(f.from_credits_usd) > 0 ? (Number(f.from_allowance_usd) > 0 ? "free + purchased" : "purchased") : "free credits"}</span></span>
-              <span className="neg">−{creditsText(Number(f.fee_usd))}</span>
+              <span><span className="neg">−{creditsText(Number(f.fee_usd))}</span> · {f.lockName || "Lock"} <span className="muted">· {etDate(f.created_at)}</span></span>
             </div>
           ))}
         </details>
@@ -219,6 +230,7 @@ export default function ComboCredits({ supabase, user, feeStatus = null, gateNot
           })}
         </details>
       )}
+      </>}
     </div>
   );
 }
