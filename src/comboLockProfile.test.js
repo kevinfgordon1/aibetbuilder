@@ -451,3 +451,13 @@ console.log("comboLockProfile.test.js ok");
   assert.equal(Math.round((a.hit - b.hit) * 100), Math.round(b.feeUsd * 100));
   assert.equal(Math.round((a.worst - b.worst) * 100), Math.round(b.feeUsd * 100));
 }
+
+{
+  const { lockProfitWarning } = await import("./comboLockProfile.js");
+  const a = (await import("node:assert/strict")).default;
+  a.equal(lockProfitWarning({ hit: 0, miss: 20, worst: 0 }), false);
+  a.equal(lockProfitWarning({ hit: 0, miss: 20, worst: -0.001 }), false);
+  a.equal(lockProfitWarning({ hit: 5, miss: -1, worst: -1 }), true);
+  a.equal(lockProfitWarning({ hit: 0, miss: 0, worst: 0 }), true);
+  a.equal(lockProfitWarning({ hit: 3, miss: 3, worst: 3 }), false);
+}

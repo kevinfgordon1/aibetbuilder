@@ -410,3 +410,13 @@ export function formatFillProgress(profile) {
   if (profile.targetTbd) return "target TBD";
   return `${profile.filled} of ${profile.targetContracts} toward target`;
 }
+
+// "Won't lock in profit" warning: only for a real loss on some outcome, or no
+// profit on any outcome. Rounded to cents so -$0.00 float noise is ignored.
+export function lockProfitWarning(d) {
+  if (!d) return false;
+  const c = (v) => Math.round((Number(v) || 0) * 100);
+  const hit = c(d.hit), miss = c(d.miss);
+  const worst = d.worst != null ? c(d.worst) : Math.min(hit, miss);
+  return worst < 0 || Math.max(hit, miss) <= 0;
+}
