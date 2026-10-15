@@ -181,7 +181,7 @@ function timeoutErr(label = "odds_cache") {
   assert.match(combo, /dataSourceStatus/);
   assert.match(combo, /comboDeskCatchNote/);
   assert.match(combo, /sourceUnhealthy/);
-  assert.match(combo, /Supabase flaky/);
+  assert.match(combo, /Data delayed/);
 
   const uh = fs.readFileSync(path.join(dir, "UnhedgedTape.jsx"), "utf8");
   assert.match(uh, /DataSourceBanner/);

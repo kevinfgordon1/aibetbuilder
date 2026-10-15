@@ -369,8 +369,8 @@ function FundMoves({ supabase, userId, enabled, title = "Auto-funding moves", li
   const { rows, now } = useFundMoves(supabase, userId, enabled, limit);
   if (!enabled || !Array.isArray(rows)) return null;
   return (
-    <div className="tst-moves" aria-label={title}>
-      <div className="tst-moves-head"><span>{title}</span><span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>Kalshi Default ↔ Combos</span></div>
+    <details className="tst-moves" aria-label={title}>
+      <summary className="tst-moves-head"><span>{title}</span><span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>Moves between your Kalshi accounts</span></summary>
       {rows.length === 0
         ? <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>No moves yet. When your Combos balance runs low, the next move shows up here.</div>
         : (
@@ -383,7 +383,7 @@ function FundMoves({ supabase, userId, enabled, title = "Auto-funding moves", li
             ))}
           </ul>
         )}
-    </div>
+    </details>
   );
 }
 
@@ -392,6 +392,15 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
   const kalshiRow = status.venues && status.venues.kalshi;
   const cap = useOwnCap(supabase, userId, !!(kalshiRow && kalshiRow.connected && kalshiRow.autoFund));
   const [msg, setMsg] = useState(null);
+  const [manage, setManage] = useState(false);
+  const kalshiOn = !!(kalshiRow && kalshiRow.connected);
+  const balQ = useBalances(supabase, userId, kalshiOn);
+  const kalshiCash = (() => {
+    if (!kalshiOn || !balQ.rows) return null;
+    const b = balancesByUser(balQ.rows, balQ.now)[userId];
+    const t = b ? totalCashCell(b.kalshiMain, b.kalshiCombo) : null;
+    return t && t.amount != null ? t.amount : null;
+  })();
   const connect = async (payload) => {
     setBusy(true); setMsg(null);
     try {
@@ -419,9 +428,19 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
   };
   return (
     <div className="card tst">
+      {kalshiOn && !manage ? (
+        <div className="tst-head">
+          <div className="tst-title">Kalshi connected{kalshiCash != null ? ` · $${kalshiCash.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} balance` : ""}</div>
+          {status.paused && <span className="chip loss">Paused by owner</span>}
+          <button type="button" className="btn mini" onClick={() => setManage(true)}>Manage</button>
+        </div>
+      ) : null}
+      {kalshiOn && !manage && msg && <div className={"note " + msg.tone} style={{ margin: "8px 0 0" }}>{msg.text}</div>}
+      {kalshiOn && !manage ? null : (<>
       <div className="tst-head">
         <div className="tst-title">{CONNECT_COPY.title}</div>
         <span className={"chip" + (status.paused ? " loss" : "")}>{status.paused ? "Paused by owner" : `Your limits: ${capsLine(status.caps)}`}</span>
+        {kalshiOn && <button type="button" className="btn mini" onClick={() => setManage(false)}>Hide</button>}
       </div>
       <p>{CONNECT_COPY.intro}</p>
       <p>{CONNECT_COPY.keyAdvice}</p>
@@ -439,6 +458,7 @@ function ConnectPanel({ supabase, userId, status, setStatus }) {
         cap={cap} />
       <FundMoves supabase={supabase} userId={userId}
         enabled={!!(status.venues && status.venues.kalshi && status.venues.kalshi.connected && status.venues.kalshi.autoFund)} />
+      </>)}
     </div>
   );
 }

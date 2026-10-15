@@ -82,7 +82,7 @@ export function OpenQuotesPanel({
       <div className="oq-head">
         <div className="oq-title">Open quotes</div>
         <div className="oq-actions">
-          <button type="button" className="btn mini" disabled={!!busy} onClick={() => startEdit(null)}>Edit fill odds</button>
+          <button type="button" className="btn mini" disabled={!!busy} onClick={() => startEdit(null)}>Change price</button>
           {opens.length > 0 && (
             <button type="button" className="btn mini danger" disabled={!!busy} onClick={cancelAll}>Cancel all open</button>
           )}
@@ -107,7 +107,7 @@ export function OpenQuotesPanel({
             <li key={sub.id} className="oq-row">
               <div className="oq-label num">{openQuoteLabel(sub, parlay.combo_ticker)}</div>
               <div className="oq-btns">
-                <button type="button" className="btn mini" disabled={!!busy} onClick={() => startEdit(sub)}>Edit odds</button>
+                <button type="button" className="btn mini" disabled={!!busy} onClick={() => startEdit(sub)}>Change price</button>
                 <button type="button" className="btn mini danger" disabled={!!busy} onClick={() => cancelOne(sub)}>Cancel</button>
               </div>
               {editId === sub.id && (
