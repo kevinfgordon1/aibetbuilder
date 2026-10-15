@@ -1,0 +1,126 @@
+// /api/raw-parlay-edges — Kevin only (combo-probe-lib isComboOwner: owner email AND owner id).
+// PREVIEW, read-only. Reads combo-worker's noboost paper RFQ log (public.noboost_paper_rfqs,
+// RLS on with no client policies, so only this service-key route can read it) and returns the
+// Kalshi parlay RFQs where the best price traders paid was well worse than fair.
+// Never quotes, confirms, or trades anything.
+//
+// GET ?days=1..7&edge=<American X>&minCost=<$>  →
+//   { ok, makerRate, series, edges: [...top 200 by EV], days: [{ day, count, ev, maxLoss }], scanned }
+'use strict';
+
+const lib = require('./combo-probe-lib');
+const seriesFee = require('./kalshi-series-fee');
+
+let edgesMod = null;
+let buyerOdds = null;
+async function mods() {
+  // src/*.js are ESM; dynamic import from this CommonJS route (static require throws on Vercel).
+  if (!edgesMod) edgesMod = await import('../src/rawParlayEdges.js');
+  if (!buyerOdds) buyerOdds = await import('../src/buyerOdds.js');
+  return { edgesMod, buyerOdds };
+}
+
+function defaultCreateClient(...args) {
+  const { createClient } = require('@supabase/supabase-js');
+  return createClient(...args);
+}
+const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now() });
+let deps = freshDeps();
+const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
+const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,traded_yes,traded_contracts,outcome';
+const PAGE = 1000;
+const MAX_ROWS = 60000;
+const MAX_RETURN = 200;
+
+function json(res, status, body) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(status).json(body);
+}
+
+async function requireOwner(req) {
+  const token = lib.readBearer(req);
+  if (!token) return { ok: false, status: 401, error: 'Sign in required' };
+  const env = deps.env || process.env;
+  const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
+  const anon = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anon) return { ok: false, status: 503, error: 'Server auth is not configured' };
+  const { data, error } = await deps.createClient(url, anon, clientOpts).auth.getUser(token);
+  const user = data && data.user;
+  if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
+  if (!lib.isComboOwner(user)) return { ok: false, status: 403, error: 'Not allowed' };
+  return { ok: true, user };
+}
+
+function parseOpts(q) {
+  const num = (v, d) => (v == null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
+  const days = Math.min(7, Math.max(1, Math.round(num(q.days, 1))));
+  const edge = Math.min(100000, Math.max(0, num(q.edge, 500)));
+  const minCost = Math.max(0, num(q.minCost, 0));
+  return { days, edge, minCost };
+}
+
+/** Start of the ET day `days-1` days ago, as ISO. */
+function sinceIso(nowMs, days) {
+  const etNow = new Date(new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const offsetMs = Math.round((new Date(nowMs).getTime() - etNow.getTime()) / 60000) * 60000;
+  const start = new Date(etNow.getFullYear(), etNow.getMonth(), etNow.getDate() - (days - 1));
+  return new Date(start.getTime() + offsetMs).toISOString();
+}
+
+async function fetchRows(client, since, minCost) {
+  const out = [];
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    let q = client.from('noboost_paper_rfqs').select(COLS)
+      .eq('outcome', 'traded')
+      .not('fair_mid_american', 'is', null)
+      .gte('rfq_created_ts', since);
+    if (minCost > 0) q = q.gte('rfq_target_cost', minCost);
+    const { data, error } = await q.order('rfq_created_ts', { ascending: false }).range(from, from + PAGE - 1);
+    if (error) throw error;
+    out.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+async function handler(req, res) {
+  if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
+  const auth = await requireOwner(req);
+  if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
+  const env = deps.env || process.env;
+  const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
+  const key = env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) return json(res, 503, { ok: false, error: 'Server is not configured' });
+  try {
+    const { edgesMod: E, buyerOdds: B } = await mods();
+    const opts = parseOpts(req.query || {});
+    const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost);
+    // Exact maker rate per series (Kalshi GET /series fee_type × multiplier).
+    const seriesList = [...new Set(rows.map((r) => B.seriesOfTicker(r.market_ticker)).filter(Boolean))];
+    const rates = {};
+    await Promise.all(seriesList.map(async (s) => {
+      let v = null;
+      try { v = await deps.lookupSeries(s); } catch (_) { v = null; }
+      rates[s] = { rate: v ? B.makerRateFromSeries(v.fee_type, v.fee_multiplier) : B.FALLBACK_MAKER_RATE, fee_type: v ? v.fee_type : null, known: !!v };
+    }));
+    const edges = [];
+    for (const r of rows) {
+      const s = B.seriesOfTicker(r.market_ticker);
+      const makerRate = s && rates[s] ? rates[s].rate : B.FALLBACK_MAKER_RATE;
+      const e = E.scoreRawEdge(r, { edgeAmerican: opts.edge, makerRate });
+      if (e && e.flagged) edges.push(e);
+    }
+    const days = E.summarizeByDay(edges);
+    edges.sort((a, b) => b.ev - a.ev);
+    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, truncated: rows.length >= MAX_ROWS, days, edges: edges.slice(0, MAX_RETURN), total: edges.length });
+  } catch (e) {
+    console.error('[raw-parlay-edges]', String((e && e.message) || e).slice(0, 200));
+    return json(res, 500, { ok: false, error: 'Something went wrong' });
+  }
+}
+
+module.exports = handler;
+module.exports.config = { maxDuration: 60 };
+module.exports._setDeps = (patch) => { deps = { ...deps, ...patch }; };
+module.exports._resetDeps = () => { deps = freshDeps(); };
+module.exports._helpers = { parseOpts, sinceIso };
