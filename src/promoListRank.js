@@ -84,7 +84,7 @@ export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage,
 }
 
 // Next depth window when the checked window could not fill the page.
-export const PROMO_DEPTH_WINDOW_MAX = 60;
+export const PROMO_DEPTH_WINDOW_MAX = 150;
 export function nextPromoDepthWindow(current, pageSize, total) {
   const cur = Math.max(current | 0, pageSize | 0);
   return Math.min(Math.max(0, total | 0), PROMO_DEPTH_WINDOW_MAX, cur + 15);
