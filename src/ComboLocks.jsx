@@ -55,7 +55,7 @@ import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TI
 import { fetchAllRows } from "./comboPaging";
 import { americanFromNoPrice, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
 import { lockLegsError } from "./comboLegRules";
-import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, SectionHead, SummaryStrip } from "./ComboLocksView";
+import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, QuoteHistoryFold, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
   buildMergePlan,
   findDuplicateGroups,
@@ -211,19 +211,6 @@ function CopyLockLink({ lockId }) {
 
 // "taker gets" + "fair" header chips. Shared by the Active (0 fills) and Filled (≥1 fill) lock headers so
 // a partially-filled lock keeps them — both come from the saved lock (fill_american / fair_american).
-function TakerFairChips({ parlay }) {
-  const fill = Number(parlay.fill_american);
-  const eff = parlay.fill_american != null && parlay.fill_american !== "" && Number.isFinite(fill) && fill !== 0 ? fillView(fill) : null;
-  const fair = parlay.fair_american != null && parlay.fair_american !== "" && Number.isFinite(Number(parlay.fair_american)) ? Number(parlay.fair_american) : null;
-  const buyer = eff ? buyerSeesAfterFees(fill, { ticker: parlay.combo_ticker }) : null;
-  const beatsFair = buyer && fair != null && buyer.american >= fair;
-  return (
-    <>
-      {buyer && <span className="chip num" data-testid="chip-buyer-sees" title={BUYER_SEES_TITLE} style={{ background: beatsFair ? "rgba(16,185,129,.15)" : "rgba(255,255,255,0.06)", color: beatsFair ? "#6ee7b7" : "#c3c6cc" }}>{buyerSeesLabel(buyer)}</span>}
-      {fair != null && <span className="chip num" title="Your estimate of the fair price for this parlay.">Fair odds {fmtAm(fair)}</span>}
-    </>
-  );
-}
 const BET_TYPE_LABEL = { cash: "cash", boost: "boost", free: "free" };
 function formBetType(form) {
   if (lockKind(form) === "freebet") return "free";
@@ -1472,15 +1459,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
         <DetailBlock title="Price & quotes">
-          <div className="chips">
-            {feeOn
-              ? <><span className="chip fill num" title="Your price after the 1% Combo Locks fee and your Kalshi maker fee.">{youKeepLabel(sellerKeeps(p.fill_american, { feeRate: COMBO_FEE_RATE }))}</span><span className="chip num">Exchange {fmtAm(p.fill_american)}</span></>
-              : <span className="chip fill num" title="Your price after your Kalshi maker fee.">{youKeepLabel(sellerKeeps(p.fill_american))}</span>}
-            <TakerFairChips parlay={p} />
-            {matched && <span className="chip num">{matched}</span>}
-            {!p.starts_at && <span className="chip">Move to History by hand when the games end</span>}
-            {out && out.kind !== "pending" && <OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} />}
-          </div>
+          {out && out.kind !== "pending" && <div className="chips"><OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} /></div>}
           {desk && desk.quoted > desk.fill.filled && (
             <div className="note warn">We offered {desk.quoted.toLocaleString("en-US")} contracts and {desk.fill.filled.toLocaleString("en-US")} were confirmed filled. The rest weren't taken (or haven't gone through yet).</div>
           )}
@@ -1496,12 +1475,9 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             busyKey={orderBusyKey}
             setBusyKey={setOrderBusyKey}
           />
-          <RiskProfile parlay={p} filled={filledN} feeRate={feeOn ? COMBO_FEE_RATE : 0} />
         </DetailBlock>
-        <DetailBlock title="History">
-          <QuoteHistory history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={watcherNote(p.id)} />
-          <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
-        </DetailBlock>
+        <QuoteHistoryFold history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={watcherNote(p.id)} />
+        <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
         <div className="actions">
           <CopyLockLink lockId={p.id} />
           {p.active === false && (!filledSection || (desk && desk.fill.left > 0)) && <button className="btn mini" onClick={() => reactivateParlay(p.id)} title="Start offering this lock again">Reactivate</button>}

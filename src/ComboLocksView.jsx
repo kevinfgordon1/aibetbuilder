@@ -223,6 +223,34 @@ export const COMBO_VIEW_CSS = `
     .cl .htable>tbody>tr.hdetail>td{display:block;padding:8px 4px 14px}
     .cl .hist-filters input[type=search]{max-width:none;flex-basis:100%}
   }
+  /* compact lock card */
+  .cl .lk{padding:10px 12px}
+  .cl .lk-title{font-size:14.5px}
+  .cl .lk-meta{font-size:12px;margin-top:2px}
+  .cl .lk-facts{gap:6px;margin:8px 0 6px}
+  .cl .fact{padding:6px 8px;border-radius:8px}
+  .cl .fact .k{font-size:10px}
+  .cl .fact .v{font-size:14px}
+  .cl .fact.out .sv{font-size:14px}
+  .cl .fact.tgt .sv{font-size:13px}
+  .cl .fact.out .sl,.cl .fact.sell .sl{font-size:11px}
+  .cl .fact.sell .sv{font-size:12px}
+  .cl .fact.sell .sv.main{font-size:14px}
+  .cl .lk-hint{font-size:11.5px;margin-top:2px}
+  .cl .lk-details{margin-top:8px;padding-top:8px}
+  .cl .lk-details .dblock{margin-bottom:8px}
+  .cl .lk-details .dt{font-size:10.5px;margin-bottom:4px}
+  .cl .lk-details .chips{gap:4px}
+  .cl .lk-details .oq-row{padding:6px 8px}
+  .cl .lk-details .oq-label{font-size:12px;margin-bottom:4px}
+  .cl .qh-fold > summary{cursor:pointer;list-style:none;color:#93c5fd}
+  .cl .qh-fold > summary::-webkit-details-marker{display:none}
+  .cl .qh-fold > summary::before{content:"▸ "}
+  .cl .qh-fold[open] > summary::before{content:"▾ "}
+  .cl .qtable{font-size:12px}
+  .cl .leglist li.leg1{display:block;padding:2px 0;font-size:12.5px;line-height:1.35;border:0;background:none}
+  .cl .leglist li.leg1 .lp{font-weight:600;color:#e8eaed}
+  .cl .leglist li.leg1 .lg{color:#8a8f98;display:inline;margin:0}
 `;
 
 export function StatusPill({ status }) {
@@ -347,7 +375,7 @@ function SellTile({ summary: s, feeRate = 0, parlay = null }) {
       <div className="k">Selling at</div>
       <div className="sgrid">
         <span className="sl">Your original odds</span>
-        <span className="sv">{s.odds || "—"}{s.book ? <span className="sx"> {s.book}</span> : null}</span>
+        <span className="sv">{s.odds || "—"}</span>
         <span className="sl">Your sale price</span>
         <span className="sv main" data-testid="you-keep" title={feeRate > 0 ? `Your price after your ${Math.round(feeRate * 100)}% Combo Locks fee and your Kalshi maker fee.` : "Your price after your Kalshi maker fee."}>{keep ? keep.text : "—"}{feeRate > 0 && parlay ? <span className="sx"> after fees (exchange {s.sellAt})</span> : <span className="sx"> after fees</span>}</span>
         <span className="sl">Buyer sees</span>
@@ -377,10 +405,10 @@ export function LegList({ legs }) {
       {rows.map((leg, i) => {
         const p = plainLeg(leg);
         return (
-          <li key={i}>
-            <span className="lt">{p.typeWord || "Leg"}</span>
-            <span>{p.text}</span>
-            {p.game ? <span className="lg">{p.game}</span> : null}
+          <li key={i} className="leg1">
+            <span className="lp">{p.text}</span>
+            {p.game ? <span className="lg"> · {p.game}</span> : null}
+            {leg.starts_at ? <span className="lg"> · {etDateTime(leg.starts_at)}</span> : null}
           </li>
         );
       })}
@@ -456,7 +484,7 @@ export function LockCard({ feeRate = 0, parlay, status, profile, filled = 0, cei
           </button>
         </div>
       </div>
-      <div className="lk-meta">{lockMetaLine(parlay)}</div>
+      <div className="lk-meta">{lockMetaLine(parlay)}{s.betLine ? <> · <span className="lk-bet">Bet: {s.betLine}{s.book ? ` · ${s.book}` : ""}</span></> : null}</div>
       <div className="lk-facts">
         <StandTile now={tiles.now} />
         <TargetTile target={tiles.target} sellAt={s.sellAt} />
@@ -464,13 +492,6 @@ export function LockCard({ feeRate = 0, parlay, status, profile, filled = 0, cei
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
-      {s.betLine ? (
-        <div className="lk-orig">
-          <span className="lead">Your original bet:</span>{" "}
-          <span className="val">{s.betLine}</span>
-          <OrigSub summary={s} />
-        </div>
-      ) : null}
       <div className="lk-hint">{status.hint}</div>
       </div>
       {open ? <div className="lk-details">{children}</div> : null}
@@ -655,6 +676,18 @@ export function QuoteHistory({ history, note }) {
       />
       {history.addedText ? <div className="qh-foot">Lock added {history.addedText}{history.afterKickoff ? ` · ${history.afterKickoff} request${history.afterKickoff === 1 ? "" : "s"} after the game started not shown` : ""}</div> : null}
     </div>
+  );
+}
+
+/** Quote history collapsed by default; the summary line carries the counts. */
+export function QuoteHistoryFold({ history, note }) {
+  if (!history) return null;
+  const nf = history.notFilledTotal != null ? history.notFilledTotal : history.notFilled.length;
+  return (
+    <details className="dblock qh-fold">
+      <summary className="dt">Quote history · Filled {countText(history.filled.length)} · Not filled {countText(nf)}</summary>
+      <QuoteHistory history={history} note={note} />
+    </details>
   );
 }
 

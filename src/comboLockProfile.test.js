@@ -152,7 +152,7 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   const viewSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
   // First tile is where you stand now; the original bet is a small reminder line under the tiles.
   assert.match(viewSrc, /<div className="lk-facts">\s*<StandTile now=\{tiles\.now\} \/>\s*<TargetTile target=\{tiles\.target\} sellAt=\{s\.sellAt\} \/>\s*<SellTile summary=\{s\}[^>]*\/>/);
-  assert.match(viewSrc, /<span className="lead">Your original bet:<\/span>\{" "\}\s*<span className="val">\{s\.betLine\}<\/span>/);
+  assert.match(viewSrc, /<span className="lk-bet">Bet: \{s\.betLine\}/);
   assert.doesNotMatch(viewSrc, /Pays up to|Wins if it hits/);
   assert.match(viewSrc, /<th>Your original bet<\/th><th>Fair odds<\/th>/);
   assert.doesNotMatch(viewSrc + locksSrc, /Your bet\b/);
@@ -415,13 +415,14 @@ assert.equal(hedgePayoffs({ stake: 100, american: 650, fillAmerican: 610, contra
   }), 2000);
 }
 
-// Partial-fill locks (Filled section) keep the "taker gets" + "fair" header chips, same as 0-fill locks.
+// Buyer sees + fair odds show once, in the Selling at tile, on the one shared card for both sections.
 {
-  const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
-  // One shared renderLock() card for both sections, so both keep the chips.
-  assert.equal((locksSrc.match(/<TakerFairChips parlay=\{p\} \/>/g) || []).length, 1);
-  assert.match(locksSrc, /function TakerFairChips\(\{ parlay \}\)/);
-  assert.match(locksSrc, /parlay\.fair_american/);
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const locksSrc = fs.readFileSync(path.join(dir, "ComboLocks.jsx"), "utf8");
+  const viewSrc = fs.readFileSync(path.join(dir, "ComboLocksView.jsx"), "utf8");
+  assert.doesNotMatch(locksSrc, /<TakerFairChips/);
+  assert.match(viewSrc, /data-testid="buyer-sees"/);
+  assert.match(viewSrc, /<span className="sl">Fair odds<\/span>/);
   assert.match(locksSrc, /waiting\.map\(\(p\) => renderLock\(p, \{ filledSection: false \}\)\)/);
   assert.match(locksSrc, /filledParlays\.map\(\(p\) => renderLock\(p, \{ filledSection: true \}\)\)/);
 }
