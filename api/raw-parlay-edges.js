@@ -4,7 +4,7 @@
 // Kalshi parlay RFQs where the best price traders paid was well worse than fair.
 // Never quotes, confirms, or trades anything.
 //
-// GET ?days=1..7&edge=<American X>&minCost=<$>&market=all|ml|td&fair=promo|kalshi  →
+// GET ?days=1..7&edge=<American X>&minCost=<$>&market=all|ml|td&fair=pm|promo|kalshi  →
 //   fair=promo (default): moneyline legs use the Promo / boost inverse-bet fair the noboost logger
 //   stores (fair_promo_best_american: Π (1 − implied(best guarded opposing price across trusted
 //   books + exchanges)), from odds_cache). Rows whose sportsbook data is older than
@@ -33,7 +33,7 @@ function defaultCreateClient(...args) {
 const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now() });
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
-const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,fair_promo_best_american,promo_max_age_ms,traded_yes,traded_contracts,outcome';
+const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,fair_promo_best_american,promo_max_age_ms,fair_pm_inverse_american,traded_yes,traded_contracts,outcome';
 const PAGE = 1000;
 const MAX_ROWS = 60000;
 const MAX_RETURN = 200;
@@ -65,7 +65,7 @@ function parseOpts(q) {
   const edge = Math.min(100000, Math.max(0, num(q.edge, 500)));
   const minCost = Math.max(0, num(q.minCost, 0));
   const market = ['all', 'ml', 'td'].includes(String(q.market || '')) ? String(q.market) : 'all';
-  const fair = String(q.fair || '') === 'kalshi' ? 'kalshi' : 'promo';
+  const fair = ['kalshi', 'promo', 'pm'].includes(String(q.fair || '')) ? String(q.fair) : 'pm';
   return { days, edge, minCost, market, fair };
 }
 
@@ -97,6 +97,11 @@ async function fetchRows(client, since, minCost) {
 function fairRow(r, fair, E) {
   if (fair === 'kalshi') return r;
   if (E.marketOf(r.legs) === 'td') return r; // TD legs: $500 Yes/No devig (no sportsbook TD fair in the logger yet)
+  if (fair === 'pm') {
+    // PM live inverse: Kalshi / Polymarket US / Novig / ProphetX live books, $500 depth, every source <15s (logger-enforced)
+    if (r.fair_pm_inverse_american == null) return null;
+    return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_pm_inverse_american };
+  }
   if (r.fair_promo_best_american == null) return null;
   if (!(Number(r.promo_max_age_ms) <= PROMO_MAX_AGE_MS)) return null;
   return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_promo_best_american };

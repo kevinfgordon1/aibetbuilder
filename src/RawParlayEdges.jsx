@@ -39,7 +39,7 @@ const SORT_OPTS = [
 ];
 
 const TIP = {
-  fair: "Fair odds, legs multiplied together. Moneyline legs (Promo fair, default): the same inverse-bet true odds as the Promo / boost calculator: 1 minus the implied chance of the best opposing price across the trusted sportsbooks and exchanges in our odds feed, which refreshes about every 5 minutes. Rows whose sportsbook data is over 6 minutes old are skipped. Kalshi fair: the Kalshi bid/ask midpoint only. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included).",
+  fair: "Fair odds, legs multiplied together. Moneyline legs, PM live inverse (default): 1 minus the implied chance of the best opposing price, $500 deep, fees included, from the live Kalshi, Polymarket US, Novig and ProphetX books; any source older than 15 seconds is dropped. Promo: the same inverse-bet true odds as the Promo / boost calculator: 1 minus the implied chance of the best opposing price across the trusted sportsbooks and exchanges in our odds feed, which refreshes about every 5 minutes. Rows whose sportsbook data is over 6 minutes old are skipped. Kalshi fair: the Kalshi bid/ask midpoint only. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included).",
   mm: "The price the winning market maker quoted, before the taker's Kalshi fee.",
   got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order).",
   sell: "The price we'd actually receive selling YES on Kalshi's price grid, after our maker fee for this series (currently $0) and Kalshi's rounding. EV is computed from this price.",
@@ -84,7 +84,7 @@ export default function RawParlayEdges({ user }) {
   const [edge, setEdge] = useState(String(DEFAULT_EDGE_AMERICAN));
   const [minCost, setMinCost] = useState("0");
   const [market, setMarket] = useState("all");
-  const [fairSrc, setFairSrc] = useState("promo");
+  const [fairSrc, setFairSrc] = useState("pm");
   const [sortKey, setSortKey] = useState(DEFAULT_SORT);
   const [state, setState] = useState({ loading: false, error: null, data: null });
 
@@ -165,8 +165,9 @@ export default function RawParlayEdges({ user }) {
         ))}
         <label title={TIP.fair}>Fair{" "}
           <select aria-label="Fair source" value={fairSrc} onChange={(e) => setFairSrc(e.target.value)}>
-            <option value="promo">Promo (inverse bet)</option>
-            <option value="kalshi">Kalshi only</option>
+            <option value="pm">PM live inverse</option>
+            <option value="promo">Promo (odds feed, 5 min)</option>
+            <option value="kalshi">Kalshi mid</option>
           </select>
         </label>
         <label>Offer = fair minus <input aria-label="Edge in American odds" inputMode="numeric" value={edge} onChange={(e) => setEdge(e.target.value)} /></label>
