@@ -190,7 +190,7 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports.config = { maxDuration: 60 };
+module.exports.config = { maxDuration: 300 };
 module.exports._setDeps = (patch) => { deps = { ...deps, ...patch }; };
 module.exports._resetDeps = () => { deps = freshDeps(); };
 module.exports._helpers = { parseOpts, sinceIso };
