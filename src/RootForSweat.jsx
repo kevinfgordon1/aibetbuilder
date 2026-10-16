@@ -15,7 +15,7 @@ export default function SweatMeter({ d }) {
   const hi = Math.max(d.hist ? quantileOf(d.hist, 0.95) : center + 1, center + 1, now + 1);
   const f = started && base != null ? gaugeFrac(now, lo, base, hi) : 0.5;
   const diff = started && base != null ? now - base : 0;
-  const mood = !started ? "NFL games haven't started yet" : base == null ? "No pregame number saved this week" : diff >= 0 ? "Cruising" : "Sweating";
+  const mood = s.error ? "Pregame number unavailable" : !started ? "No games have started yet" : base == null ? "Pregame number unavailable" : diff >= 0 ? "Cruising" : "Sweating";
   const W = 260, cx = 130, cy = 120, r = 100; const [nx, ny] = pt(cx, cy, r - 18, f);
   const segs = 24;
   return (
@@ -34,9 +34,9 @@ export default function SweatMeter({ d }) {
         <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>Sweat meter</div>
         <div style={{ fontSize: 20, fontWeight: 700, color: !started || base == null ? "#e5e7eb" : diff >= 0 ? "#6ee7b7" : "#fca5a5" }}>{mood}</div>
         <div>Now <b>{money(now)}</b> expected</div>
-        {base != null && <div className="sub">{started ? `Started at ${money(base)}` : `Starting point ${money(base)} (locks in at the first NFL kickoff)`}</div>}
-        {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> since the first NFL kickoff</div>}
-        {s.error && <div className="sub">{s.error}</div>}
+        {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
+        {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> from games played</div>}
+        
       </div>
     </div>
   );

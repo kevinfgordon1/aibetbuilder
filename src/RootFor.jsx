@@ -45,7 +45,6 @@ function conditioned(model, picks) {
 function Simple({ d, nightmare }) {
   const range = typicalRange(d.hist);
   const worstAm = d.worst && americanFromP(d.worst.p);
-  const bestP = d.best && d.best.p;
   return (
     <div>
       <div className="lead">{summarySentence(d)}</div>
@@ -68,13 +67,6 @@ function Simple({ d, nightmare }) {
               <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
               <div className="bt"><div className="bf negb" style={{ width: `${(-k.drop / mx) * 100}%` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)}</span></div>
             </div>)); })()}
-        </div>
-      </div>
-      <div className="two">
-        <div className="box good">
-          <h5>Best case &amp; chance of profit</h5>
-          <div>Everything hits: <span className="big pos">{sMoney(d.best && d.best.pnl)}</span> <span className="sub">({bestP > 0 ? chanceWords(bestP) : "very unlikely"})</span></div>
-          <div style={{ marginTop: 8 }}>Chance you finish ahead: <b>{chanceWords(d.pProfit)}</b> <span className="sub">· odds {fmtAmerican(americanFromP(d.pProfit))} ({pct(d.pProfit, 0)})</span></div>
         </div>
       </div>
       <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />

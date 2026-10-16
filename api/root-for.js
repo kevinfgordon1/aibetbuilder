@@ -88,18 +88,20 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
 
-// Sweat meter baseline (see src/rootForSweat.js). Never fails the request: a missing table just means no baseline.
+// Sweat meter (see src/rootForSweat.js): each game locked at its own kickoff. Never fails the request.
 async function sweatBaseline(client, out, now) {
   try {
     const S = await import('../src/rootForSweat.js');
     const key = S.slateKey(now);
-    const { data, error } = await client.from('root_for_baselines').select('slate_key,ev,first_kickoff,captured_at').eq('slate_key', key).maybeSingle();
+    const starts = {}; for (const e of out.perEvent || []) if (e && e.event && e.start) starts[e.event] = e.start;
+    const { data, error } = await client.from('root_for_pregame_probs').select('event,sig,probs').eq('slate_key', key);
     if (error) throw error;
-    const r = S.decideBaseline(data || null, { now, ev: Number(out.ev), kickoff: S.firstKickoff(out.perEvent), key });
-    if (r.write) { const { error: e2 } = await client.from('root_for_baselines').upsert(r.write, { onConflict: 'slate_key' }); if (e2) throw e2; }
-    return { ...r.sweat, slateKey: key };
+    const r = S.pregameBaseline({ model: out.model, starts, now, key, rows: data || [] });
+    if (r.overwrite.length) { const { error: e1 } = await client.from('root_for_pregame_probs').upsert(r.overwrite, { onConflict: 'slate_key,event,sig' }); if (e1) throw e1; }
+    if (r.insertOnce.length) { const { error: e2 } = await client.from('root_for_pregame_probs').upsert(r.insertOnce, { onConflict: 'slate_key,event,sig', ignoreDuplicates: true }); if (e2) throw e2; }
+    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key };
   } catch (e) {
-    return { started: null, baseline: null, now: Number(out.ev), error: 'Baseline unavailable' };
+    return { started: null, baseline: null, now: Number(out.ev), error: 'Pregame number unavailable' };
   }
 }
 
