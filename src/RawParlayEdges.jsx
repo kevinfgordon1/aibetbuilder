@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
+import SniperRowDetail from "./SniperRowDetail.jsx";
 import {
   DEFAULT_EDGE_AMERICAN,
   DEFAULT_SORT,
@@ -86,6 +87,7 @@ export default function RawParlayEdges({ user }) {
   const [minCost, setMinCost] = useState("0");
   const [market, setMarket] = useState("all");
   const fairSrc = "pm";
+  const [openRow, setOpenRow] = useState(null);
   const [venue, setVenue] = useState("all");
   const [sortKey, setSortKey] = useState(DEFAULT_SORT);
   const [state, setState] = useState({ loading: false, error: null, data: null });
@@ -147,6 +149,15 @@ export default function RawParlayEdges({ user }) {
         .raw-edges .pos{color:#4ade80}.raw-edges .neg{color:#f87171}.raw-edges .fair{color:#93c5fd}
         .raw-edges .legs div{white-space:nowrap}
         .raw-edges .legs div.td{color:#fbbf24}
+        .raw-edges tr.clickable{cursor:pointer}.raw-edges tr.clickable:hover td{background:rgba(16,185,129,.08)}
+        .snd-back{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:32px 12px}
+        .snd{position:relative;background:#111827;border:1px solid #374151;border-radius:12px;max-width:820px;width:100%;padding:20px 22px;color:#e5e7eb;font-size:13px}
+        .snd h3{margin:0 0 4px;font-size:17px}.snd h4{margin:16px 0 6px;font-size:13px;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em}
+        .snd-sub{color:#9ca3af}.snd-x{position:absolute;top:10px;right:14px;background:none;border:0;color:#9ca3af;font-size:22px;cursor:pointer}
+        .snd-t{width:100%;border-collapse:collapse}.snd-t th,.snd-t td{padding:5px 6px;border-bottom:1px solid #1f2937;text-align:left}.snd-t .num{text-align:right;font-variant-numeric:tabular-nums}
+        .snd-t .fair{color:#6ee7b7}.snd-tot td{font-weight:700;border-top:1px solid #4b5563}
+        .snd-g{display:grid;grid-template-columns:200px 1fr;gap:4px 12px;margin:0}.snd-g dt{color:#9ca3af}.snd-g dd{margin:0}.snd-g dd span{color:#9ca3af}
+        .snd .pos{color:#6ee7b7}.snd .neg{color:#fca5a5}
         .raw-edges .vtag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;margin-bottom:2px}
         .raw-edges .vtag.kalshi{background:rgba(16,185,129,.15);color:#6ee7b7}.raw-edges .vtag.polymarket{background:rgba(59,130,246,.18);color:#93c5fd}
         .raw-edges .tiles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
@@ -222,7 +233,7 @@ export default function RawParlayEdges({ user }) {
             </thead>
             <tbody>
               {ranked.map((e, i) => (
-                <tr key={e.rfq_id}>
+                <tr key={e.rfq_id} className={e.evPer100 >= 3 ? "clickable" : undefined} onClick={e.evPer100 >= 3 ? () => setOpenRow(e) : undefined} title={e.evPer100 >= 3 ? "Click for the leg-by-leg math" : undefined}>
                   <td className="rank">{i + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{etTime(e.ts)}</td>
                   <td className="legs"><span className={"vtag " + (e.venue || "kalshi")}>{e.venue === "polymarket" ? "Polymarket" : "Kalshi"}</span>{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</td>
@@ -235,11 +246,12 @@ export default function RawParlayEdges({ user }) {
                   <td className="num pos">{usd(e.ev)}</td>
                   <td className="num neg">{usd(e.maxLoss)}</td>
                   <td className="num">{Math.round(e.contracts).toLocaleString()} ct{e.requestedCost != null ? ` · ${usd(e.requestedCost)} req` : ""}</td>
-                  <td><button type="button" className="chip" disabled title={OFFER_TITLE} style={{ opacity: 0.5, cursor: "not-allowed" }}>Offer this</button></td>
+                  <td><button type="button" className="chip" disabled title={OFFER_TITLE} onClick={(ev) => ev.stopPropagation()} style={{ opacity: 0.5, cursor: "not-allowed" }}>Offer this</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {openRow && <SniperRowDetail e={openRow} onClose={() => setOpenRow(null)} />}
         </>
       )}
     </div>
