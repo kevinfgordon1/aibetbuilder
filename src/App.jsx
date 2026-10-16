@@ -90,6 +90,7 @@ import {
   queryOddsCaches,
   shouldFetchFullBoard,
   shouldFetchPromoOdds,
+  newestFetchedAt,
   shouldRunEvScan,
   featuredRowsUsable,
   preferExistingPromoBoard,
@@ -1646,6 +1647,8 @@ export default function App() {
   });
   const [fullBoardLoaded, setFullBoardLoaded] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
   const [focusLockId, setFocusLockId] = useState(null);
   const [focusCardId, setFocusCardId] = useState(null);
@@ -1944,7 +1947,7 @@ export default function App() {
       setPromoBoardData((prev) => preferExistingPromoBoard(prev, nextBoard));
       if (boardHasPromoGames(nextBoard)) {
         setPromoLoadedSports(new Set(plan.eventSports));
-        setFetchedAt(featuredRows[0]?.fetched_at);
+        setFetchedAt(newestFetchedAt(featuredRows));
       }
       setPromoLoaded(true);
       setOddsLoadCause(null);
@@ -1992,7 +1995,7 @@ export default function App() {
       // payload freezes Chrome. Promo still loads events with a 30-min lookback.
       setAllOddsData(applyTransformed(featuredRows, []));
       setFuturesData((futures.error ? [] : (futures.data || [])).map(row => transformFuturesData(row.data, row.sport)));
-      setFetchedAt(featuredRows[0]?.fetched_at);
+      setFetchedAt(newestFetchedAt(featuredRows));
       setFullBoardLoaded(true);
       setOddsLoadCause(null);
       setOddsLoadError(null);
@@ -2008,6 +2011,21 @@ export default function App() {
 
   const fetchOdds = async ({ forceRefresh = true } = {}) => {
     const tab = activeTab;
+    if (forceRefresh) setManualRefreshing(true);
+    const started = Date.now();
+    try {
+      await fetchOddsInner({ tab, forceRefresh });
+    } finally {
+      if (forceRefresh) {
+        // Cache reads finish in ~200ms; keep the spinner visible so the click
+        // registers, then show when we last checked.
+        const wait = Math.max(0, 700 - (Date.now() - started));
+        setTimeout(() => { setManualRefreshing(false); setLastCheckedAt(Date.now()); }, wait);
+      }
+    }
+  };
+
+  const fetchOddsInner = async ({ tab, forceRefresh }) => {
     if (shouldFetchFullBoard({ tab, fullBoardLoaded, forceRefresh })) {
       await loadFullBoard();
       return;
@@ -2192,9 +2210,9 @@ export default function App() {
   const allEvLegs = evScanView?.allEvLegs ?? [];
   const evBets = evScanView?.evBets ?? [];
   const positiveEV = evScanView?.positiveEV ?? [];
-  const refreshBusy = activeTab === "ev" || activeTab === "odds"
+  const refreshBusy = (activeTab === "ev" || activeTab === "odds"
     ? fullBoardLoading
-    : activeTab === "promo" ? promoLoading : false;
+    : activeTab === "promo" ? promoLoading : false) || manualRefreshing;
   const showFullPageSpinner =
     ((activeTab === "ev" || activeTab === "odds") && fullBoardLoading && !oddsLoadError) ||
     (activeTab === "promo" && promoLoading && !promoLoaded && !oddsLoadError);
@@ -2856,6 +2874,11 @@ export default function App() {
           {(fetchedAt || activeTab === "oddsBetstamp") && (
             <div className="app-freshness" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {fetchedAt && <OddsUpdatedStamp freshness={cacheFreshness} />}
+              {lastCheckedAt && activeTab !== "oddsBetstamp" && (
+                <span title="Last time Refresh re-read the odds cache. The cache itself updates every 5 min." style={{ fontSize: 10, color: "#6b7280" }}>
+                  checked {new Date(lastCheckedAt).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", second: "2-digit" })}
+                </span>
+              )}
               <button
                 onClick={() => {
                   if (activeTab === "oddsBetstamp") {
@@ -2869,7 +2892,7 @@ export default function App() {
                 disabled={activeTab === "oddsBetstamp" ? false : refreshBusy}
                 title={activeTab === "oddsBetstamp"
                   ? "Re-pull Polymarket, Kalshi, and Underdog for New Odds Board."
-                  : "Re-read the odds cache. Does not call The Odds API."}
+                  : "Re-read the odds cache (updated every 5 min). Does not call The Odds API."}
                 style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: (activeTab !== "oddsBetstamp" && refreshBusy) ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: (activeTab !== "oddsBetstamp" && refreshBusy) ? 0.6 : 1, transition: "all 0.2s" }}
                 onMouseEnter={e => { if (activeTab === "oddsBetstamp" || !refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
