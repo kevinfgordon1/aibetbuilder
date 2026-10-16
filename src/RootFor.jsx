@@ -165,23 +165,6 @@ export default function RootFor({ user, initialData = null }) {
           <h4>P&L distribution{whatIf ? " (what-if)" : ""}</h4>
           <Hist hist={d.hist} />
           <div className="note">Red = loss, green = profit (simulated slates, {d.hist ? d.hist.samples.toLocaleString() : "—"}). {d.hist && d.hist.tailP > 0 ? `${pct(d.hist.tailP, 2)} of slates land above ${usd(d.hist.tailFrom)} (folded into the last bar).` : ""}</div>
-          {!whatIf && base.hedges && base.hedges.length > 0 && (<>
-            <h4>Hedge ideas (read-only, nothing is placed)</h4>
-            {base.hedges.every((h) => h.cuts !== "worst") && <div className="note">No single bet cuts the worst case ({sUsd(base.worst && base.worst.pnl)}): it is every lock missing, which can happen whichever way any one game goes, so any bet adds its stake to it. These instead shrink the swing (SD) on the games that drive it.</div>}
-            <table>
-              <thead><tr><th>Bet</th><th className="hide-sm">Game</th><th>Venue</th><th className="num">Price</th><th className="num">Size</th><th className="num">Worst case</th><th className="num">SD</th><th className="num">EV cost</th></tr></thead>
-              <tbody>
-                {base.hedges.map((h) => (
-                  <tr key={h.event}>
-                    <td><b>{h.name}</b> to win</td><td className="hide-sm">{h.game}</td><td>{VENUE[h.venue] || h.venue}</td><td className="num">{am(h.american)}</td>
-                    <td className="num">{usd(h.usd)}<div className="sub">{h.contracts.toLocaleString()} ct</div></td>
-                    <td className={"num " + (h.worstCut > 0 ? "pos" : "neg")}>{sUsd(h.worstCut)}<div className="sub">→ {usd(h.newWorst)}</div></td>
-                    <td className="num pos">−{usd(h.sdCut)}</td><td className="num">{usd(-h.evCost)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </>)}
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
             <thead><tr><th>Game</th><th className="hide-sm">Start</th><th>Root for</th><th className="num">Chance now</th><th className="num">Swing</th><th>What-if</th></tr></thead>

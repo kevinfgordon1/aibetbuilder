@@ -1,6 +1,6 @@
 // Glue: locks + live venue data → "What to root for" summary (pure; the API does the fetching).
 import { legEvent, rootFor, NEITHER } from "./rootForEngine.js";
-import { legFair, buyQuote, american } from "./rootForPrices.js";
+import { legFair, american } from "./rootForPrices.js";
 import { lockPositions } from "./rootForLocks.js";
 
 const SPREAD_RE = /^(KX[A-Z]+)SPREAD-(\d{2}[A-Z]{3}\d{2}[A-Z]+)-([A-Z]+?)(\d+)$/;
@@ -36,7 +36,7 @@ export function timeSlot(iso) {
   return { key: "4-other", label: "Other days" };
 }
 
-export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, hedges = true }) {
+export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {} }) {
   const positions = []; const skipped = []; let resting = 0;
   for (const p of parlays) {
     const r = lockPositions(p, fills, singles);
@@ -152,47 +152,10 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiB
   }
   const teamNames = {}; for (const [ev, g] of Object.entries(groups)) for (const t of Object.keys(g)) teamNames[`${ev}:${t}`] = evKind[ev] === "game" ? gameName(ev, t) : nameOf(ev, t);
 
-  // ---- 4. hedge suggestions: buy the outcome that hurts most, sized to cut the worst case
-  const hedgeList = [];
-  if (hedges && res.worst) {
-    const base = rootFor(priced, probs, { ...opts, fast: true });
-    const cand = perEvent.filter((e) => evKind[e.event] === "game" && e.swing != null).slice(0, 4);
-    for (const e of cand) {
-      const g = groups[e.event]; if (!g) continue;
-      // team whose win leaves us worst off
-      let badTeam = null, badEv = Infinity;
-      for (const [t, outs] of Object.entries(g)) {
-        const rows = e.outcomes.filter((o) => outs.includes(o.outcome) && o.ifHit != null);
-        const pT = rows.reduce((a, o) => a + o.p, 0); if (!(pT > 0)) continue;
-        const ifT = rows.reduce((a, o) => a + o.p * o.ifHit, 0) / pT;
-        if (ifT < badEv) { badEv = ifT; badTeam = t; }
-      }
-      if (!badTeam) continue;
-      const teams = Object.keys(g);
-      const pT = g[badTeam].reduce((a, o) => a + (probs[e.event][o] || 0), 0);
-      let bestS = null, bestSd = null;
-      for (const usd of [250, 500, 1000, 2000, 4000]) {
-        const q = buyQuote(e.event, "game", badTeam, { ...px, teams, usd });
-        if (!q) continue;
-        const n = usd / q.cost;
-        const leg = { event: e.event, kind: "game", outcomes: evOutcomes[e.event], allowed: g[badTeam] };
-        const r = rootFor([...priced, { id: "hedge", legs: [leg], hit: n - usd, miss: -usd }], probs, { ...opts, fast: true });
-        const gainW = r.worst.pnl - base.worst.pnl;
-        const evCost = n * pT - usd;
-        const row = { usd, contracts: Math.floor(n), price: q.cost, american: q.american, venue: q.venue, via: q.via, worstCut: gainW, newWorst: r.worst.pnl, evCost, newEv: r.ev, newSd: r.sd, sdCut: base.sd - r.sd };
-        if (gainW > 0.5 && (!bestS || gainW > bestS.worstCut + 1e-6)) bestS = row;
-        if (usd <= 1000 && row.sdCut > 0.5 && (!bestSd || row.sdCut > bestSd.sdCut + 1e-6)) bestSd = row;
-      }
-      const pick = bestS || bestSd;
-      if (pick) hedgeList.push({ event: e.event, game: games[e.event] || e.event, team: badTeam, name: teamNames[`${e.event}:${badTeam}`], pTeam: pT, cuts: bestS ? "worst" : "spread", ...pick });
-    }
-    hedgeList.sort((a, b) => (b.cuts === "worst") - (a.cuts === "worst") || b.worstCut - a.worstCut || b.sdCut - a.sdCut);
-  }
-
   return {
     ...res, perEvent,
     top: res.top.map(decorate),
-    hedges: hedgeList, baseWorst: res.worst,
+    baseWorst: res.worst,
     legs: Object.entries(legInfo).map(([k, f]) => ({ key: k, p: f.p, american: f.american, best: f.best, oppAmerican: f.oppAmerican })),
     locksPriced: priced.filter((x) => !x.single).length, locksTotal: parlays.length, unpriced, skipped, resting,
     spreadGames: Object.keys(spreadOf), spreadClamps: clamps, notes,
