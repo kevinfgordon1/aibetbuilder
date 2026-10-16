@@ -50,6 +50,8 @@ const MARKET_SERIES = {
   bundesliga: { side: 'KXBUNDESLIGAGAME' },
   ligue1: { side: 'KXLIGUE1GAME' },
   ucl: { side: 'KXUCLGAME' },
+  // UFC: one event per fight, two markets (one per fighter). Moneyline only.
+  ufc: { side: 'KXUFCFIGHT' },
 };
 const SOCCER_SPORTS = new Set(['mls', 'epl', 'laliga', 'seriea', 'bundesliga', 'ligue1', 'ucl']);
 // Player props ride on the same game key (KXMLBHR-26OCT031600ATLLAD,
@@ -67,7 +69,9 @@ const PROP_SERIES = {
 // puck drop + 3h (checked against ESPN's scoreboard: 46 of 47 listed games), so the
 // real start is occurrence - 3h. Used for the pre-game cutoff so a 7:30 PM game
 // drops at puck drop instead of lingering until midnight ET.
-const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000 };
+// UFC occurrence_datetime sits ~3.5-4h after the fight's walkout (checked against
+// Odds API commence times, Oct 17 2026 card), so 4h back is the start estimate.
+const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, ufc: 4 * 3600 * 1000 };
 
 async function fetchJson(url) {
   const ctrl = new AbortController();
