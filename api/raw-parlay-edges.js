@@ -40,6 +40,49 @@ const MAX_ROWS = 400000;
 const SNIPER_TABLE = 'combo_sniper_traded';
 const PASS_COL = { kalshi: 'pass_kalshi', pm: 'pass_pm', promo: 'pass_promo' };
 const MAX_RETURN = 200;
+const DETAIL_MIN_EV_PER_100 = 3; // rows with EV >= 3% get a clickable per-leg breakdown
+const DETAIL_TABLE = 'noboost_paper_rfqs';
+
+/** Per-leg inverse breakdown from the logger's pm_inverse_legs (+ leg_fairs for TD VWAPs). */
+function legDetail(l, lf) {
+  if (!l) return null;
+  const used = (l.sources || []).filter((x) => x && x.used && x.venue === l.best);
+  const best = used.length ? used.reduce((a, b) => (Number(b.costAmerican) > Number(a.costAmerican) ? b : a)) : null;
+  const td = l.kind === 'td';
+  const p = l.p != null ? Number(l.p) : (lf && lf.inverseLive != null ? Number(lf.inverseLive) : null);
+  return {
+    kind: td ? 'td' : 'ml',
+    id: l.id || null, team: l.team || null, gameId: l.gameId || null, side: l.side || 'yes',
+    oppSource: l.best || null,
+    oppAmerican: best && best.costAmerican != null ? Number(best.costAmerican) : null,
+    oppVwap: lf && lf.oppVwap != null ? Number(lf.oppVwap) : null,
+    depthChecked: 500, // logger only prices a leg when the opposing book fills $500 (fee-included VWAP)
+    ageMs: best && best.ageMs != null ? best.ageMs : null,
+    p, fairAmerican: l.fairAmerican != null ? Number(l.fairAmerican) : null,
+  };
+}
+
+async function attachDetails(client, edges) {
+  const want = edges.filter((e) => e.evPer100 != null && e.evPer100 >= DETAIL_MIN_EV_PER_100);
+  if (!want.length) return;
+  const byId = new Map();
+  try {
+    for (let i = 0; i < want.length; i += 100) {
+      const ids = want.slice(i, i + 100).map((e) => e.rfq_id);
+      const { data, error } = await client.from(DETAIL_TABLE).select('rfq_id,pm_inverse_legs,leg_fairs,fair_pm_inverse_american').in('rfq_id', ids);
+      if (error) throw error;
+      for (const d of data || []) byId.set(d.rfq_id, d);
+    }
+  } catch (_) { return; } // detail is optional; the table still renders
+  for (const e of want) {
+    const d = byId.get(e.rfq_id);
+    if (!d || !Array.isArray(d.pm_inverse_legs)) continue;
+    const lfs = Array.isArray(d.leg_fairs) ? d.leg_fairs : [];
+    const legs = d.pm_inverse_legs.map((l, i) => legDetail(l, lfs[i]));
+    const prod = legs.every((l) => l && l.p > 0) ? legs.reduce((a, l) => a * l.p, 1) : null;
+    e.detail = { legs, parlayP: prod, storedFairAmerican: d.fair_pm_inverse_american };
+  }
+}
 // odds_cache is refreshed by a 5-minute cron; allow one missed tick of slack.
 const PROMO_MAX_AGE_MS = 6 * 60 * 1000;
 
@@ -200,7 +243,9 @@ async function handler(req, res) {
     const total = edges.length ? R.portfolioRisk(E.toRiskPositions(edges), { eventProbs: merged }) : null;
     if (total) delete total.worstOutcome;
     edges.sort((a, b) => b.ev - a.ev);
-    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, staleSkipped, fairSource: opts.fair, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: edges.slice(0, MAX_RETURN).map(({ legsRaw, ...e }) => e), total: edges.length });
+    const top = edges.slice(0, MAX_RETURN);
+    await attachDetails(deps.createClient(url, key, clientOpts), top);
+    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, staleSkipped, fairSource: opts.fair, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: top.map(({ legsRaw, ...e }) => e), total: edges.length });
   } catch (e) {
     console.error('[raw-parlay-edges]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: publicError(e) });
@@ -211,4 +256,4 @@ module.exports = handler;
 module.exports.config = { maxDuration: 300 };
 module.exports._setDeps = (patch) => { deps = { ...deps, ...patch }; };
 module.exports._resetDeps = () => { deps = freshDeps(); };
-module.exports._helpers = { parseOpts, sinceIso };
+module.exports._helpers = { parseOpts, sinceIso, legDetail, DETAIL_MIN_EV_PER_100 };
