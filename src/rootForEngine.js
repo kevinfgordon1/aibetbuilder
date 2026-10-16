@@ -18,6 +18,8 @@ export const NEITHER = "__neither";
 
 /** Kalshi game leg → { event, outcomes, allowed }. Non-game tickers → binary yes/no event. */
 export function legEvent(leg) {
+  // pre-resolved restriction (spread legs nested into their game's moneyline event)
+  if (leg && leg.event && Array.isArray(leg.allowed)) return { event: leg.event, kind: leg.kind || "game", outcomes: leg.outcomes || leg.allowed, allowed: leg.allowed };
   const ticker = String((leg && leg.ticker) || "").toUpperCase();
   const side = String((leg && leg.side) || "yes").toLowerCase() === "no" ? "no" : "yes";
   const parts = ticker.split("-");
@@ -65,7 +67,7 @@ export function eventProbs(events, legP) {
  *  EV, SD and every swing are exact in closed form (joint hit probabilities under the event model).
  *  Best / worst case and P(profit), P(worst) are exact by pruned depth-first search over events;
  *  past the node budget those fall back to Monte Carlo (method says which). */
-export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamples = MC_SAMPLES, rng = Math.random } = {}) {
+export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamples = MC_SAMPLES, rng = Math.random, fast = false, histBins = 0 } = {}) {
   const evMap = new Map();
   const L = [];
   for (const lk of locks || []) {
@@ -178,9 +180,10 @@ export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamp
   const probAtMost = (T) => search(() => 0, (x, pos, neg, mass) => (x + pos <= T ? mass : x + neg > T ? 0 : null), (a, b) => a + b, () => 0);
   let method = "exact";
   let best = bestR != null ? { pnl: bestR } : null, worst = worstR != null ? { pnl: worstR } : null;
-  let pProfit = probAbove(eps);
-  if (best) best.p = probAbove(best.pnl - eps);
+  let pProfit = fast ? 0 : probAbove(eps);
+  if (best) best.p = fast ? 0 : probAbove(best.pnl - eps);
   if (worst) worst.p = probAtMost(worst.pnl + eps);
+  if (fast) return { ev, sd, best, worst, fast: true };
   const exactFlags = { best: !!(best && best.p != null), worst: !!(worst && worst.p != null), pProfit: pProfit != null };
   let mcNote = null;
   if (best == null || worst == null || pProfit == null || best.p == null || worst.p == null) {
@@ -202,6 +205,23 @@ export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamp
     mcNote = `Too many game combinations to search exactly (${nE} games): ${which} sampled from ${mcSamples.toLocaleString()} simulated slates (Monte Carlo). Everything else is exact.`;
   }
 
+  let hist = null;
+  if (histBins > 0) {
+    const n = Math.min(mcSamples, 100_000); const xs = new Float64Array(n); const draw = new Int32Array(nE);
+    for (let s2 = 0; s2 < n; s2++) {
+      for (let e = 0; e < nE; e++) { let u = rng(), o = 0; while (o < P[e].length - 1 && u >= P[e][o]) { u -= P[e][o]; o++; } draw[e] = o; }
+      let x = missSum;
+      for (let i = 0; i < L.length; i++) { if (!gain[i]) continue; let hit = true; for (const [e, set] of lockReq[i]) if (!set.has(evs[e].outcomes[draw[e]])) { hit = false; break; } if (hit) x += gain[i]; }
+      xs[s2] = x;
+    }
+    const sorted = Float64Array.from(xs).sort();
+    const q = (f) => sorted[Math.min(n - 1, Math.floor(f * n))];
+    const lo = worst ? worst.pnl : sorted[0]; const hi = Math.max(q(0.995), lo + 1);
+    const w = (hi - lo) / histBins; const bins = Array.from({ length: histBins }, (_, i) => ({ from: lo + i * w, to: lo + (i + 1) * w, p: 0 }));
+    let tail = 0;
+    for (const x of xs) { if (x > hi) { tail++; continue; } bins[Math.min(histBins - 1, Math.max(0, Math.floor((x - lo) / w)))].p += 1 / n; }
+    hist = { bins, tailP: tail / n, tailFrom: hi, samples: n };
+  }
   const swings = []; const perEvent = [];
   evs.forEach((e, k) => {
     const rows = e.outcomes.map((o, oi) => {
@@ -219,5 +239,5 @@ export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamp
   const seen = new Set();
   const top = swings.filter((r) => r.swing > 0).sort((a, b) => b.swing - a.swing).filter((r) => (seen.has(r.event) ? false : (seen.add(r.event), true))).slice(0, 5);
   perEvent.sort((a, b) => (b.swing || 0) - (a.swing || 0));
-  return { method, exact: exactFlags, note: mcNote, nodeBudget, samples: method === "monte_carlo" ? mcSamples : null, events: nE, locks: L.length, ev, sd, lo2: ev - 2 * sd, hi2: ev + 2 * sd, pProfit, best, worst, top, perEvent };
+  return { method, hist, exact: exactFlags, note: mcNote, nodeBudget, samples: method === "monte_carlo" ? mcSamples : null, events: nE, locks: L.length, ev, sd, lo2: ev - 2 * sd, hi2: ev + 2 * sd, pProfit, best, worst, top, perEvent };
 }

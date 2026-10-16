@@ -64,7 +64,7 @@ export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novi
   const out = {};
   const put = (venue, list) => {
     for (const q of list || []) {
-      if (!q || q.bet_type !== "moneyline" || q.is_alt || q.is_live) continue;
+      if (!q || q.bet_type !== "moneyline" || q.is_alt) continue; // in-game quotes allowed (same 15s / $500 rules)
       if (venue === "polymarket" && q.feed !== "polymarket-us") continue;
       const odds = Number(q.odds);
       if (Number.isFinite(odds) && !(odds > SETTLED && odds < 1 - SETTLED)) continue;
@@ -87,13 +87,13 @@ export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novi
 }
 
 /** Fair for one leg { ticker, side }. kalshiBooks: { [ticker]: {yes:[...], no:[...]} } (fetched now). */
-export function legFair(leg, { kalshiBooks = {}, relay = {}, now = Date.now(), kalshiAt = now } = {}) {
+export function legFair(leg, { kalshiBooks = {}, relay = {}, now = Date.now(), kalshiAt = now, usd = DEPTH_USD } = {}) {
   const r = legEvent(leg);
   const sources = [];
   const tryV = (venue, levels, at, via) => {
     if (!levels) return;
     const age = now - at;
-    const w = walk(levels, venue);
+    const w = walk(levels, venue, usd);
     const s = { venue, via, ageMs: Math.round(age), topAmerican: w.top != null ? american(w.top) : null };
     if (age > STALE_MS) sources.push({ ...s, used: false, reason: "stale" });
     else if (w.fail) sources.push({ ...s, used: false, reason: w.fail });
@@ -119,4 +119,18 @@ export function legFair(leg, { kalshiBooks = {}, relay = {}, now = Date.now(), k
   const best = used.reduce((a, b) => (b.cost < a.cost ? b : a));
   const p = 1 - best.cost;
   return { p, american: american(p), best: best.venue, oppAmerican: best.costAmerican, sources };
+}
+
+/** Price to BUY outcome `team` of a game (or side of a binary market) with $usd: the best fee-included
+ *  VWAP across the same inverse-bet sources. Buying team T = "opponent loses" = legFair(opponent). */
+export function buyQuote(event, kind, outcome, opts = {}) {
+  if (kind === "game") {
+    const teams = opts.teams || [];
+    const opp = teams.find((t) => t !== outcome);
+    if (!opp) return null;
+    const f = legFair({ ticker: `${event}-${opp}`, side: "yes" }, opts);
+    return f.p == null ? null : { cost: 1 - f.p, american: american(1 - f.p), venue: f.best, via: (f.sources.find((x) => x.used && x.venue === f.best && Math.abs(x.cost - (1 - f.p)) < 1e-12) || {}).via || null };
+  }
+  const f = legFair({ ticker: event, side: outcome === "yes" ? "no" : "yes" }, opts);
+  return f.p == null ? null : { cost: 1 - f.p, american: american(1 - f.p), venue: f.best, via: outcome === "yes" ? "Yes" : "No" };
 }

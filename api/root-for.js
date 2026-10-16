@@ -67,7 +67,7 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   }));
   const kalshiAt = now();
   const base = String(env.ODDS_RELAY_URL || env.VITE_ODDS_RELAY_URL || RELAY_FALLBACK).replace(/\/+$/, '');
-  let relay = {}; const relayNote = [];
+  let relay = {}; const relayNote = []; const starts = {};
   try {
     const h = await getJ(`${base}/health`);
     const polledAt = now();
@@ -77,9 +77,15 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
     await Promise.all(['NFL', 'NCAAF'].flatMap((lg) => Object.keys(boards).map(async (v) => {
       try { const j = await getJ(`${base}/board?venue=${v}&league=${lg}`); boards[v].push(...(j.quotes || [])); } catch (e) { relayNote.push(`${v} ${lg}: ${String(e.message).slice(0, 60)}`); }
     })));
+    for (const q of boards.kalshi) { if (!q || !q.ticker || !q.start) continue; const ev = String(q.ticker).toUpperCase().split('-').slice(0, 2).join('-'); if (!starts[ev]) starts[ev] = q.start; }
     relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive, polledAt });
   } catch (e) { relayNote.push(`relay: ${String(e.message).slice(0, 80)}`); }
-  return { kalshiBooks, kalshiAt, relay, relayNote, tickers: tickers.length };
+  // start times for games the relay doesn't carry (e.g. NHL): Kalshi market close/expected times
+  const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !starts[ev]);
+  await Promise.all(missing.slice(0, 40).map(async (ev) => {
+    try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
+  }));
+  return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
 
 async function handler(req, res) {
@@ -94,7 +100,7 @@ async function handler(req, res) {
     const M = await loadMods();
     const { parlays, fills, singles } = await loadLocks(deps.createClient(url, key, clientOpts), auth.user.id);
     const mk = await loadMarkets(M, parlays, env);
-    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, now: deps.now(), kalshiAt: mk.kalshiAt });
+    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now: deps.now(), kalshiAt: mk.kalshiAt });
     return json(res, 200, { ok: true, asOf: new Date(deps.now()).toISOString(), relayNote: mk.relayNote, ...out });
   } catch (e) {
     console.error('[root-for]', String((e && e.message) || e).slice(0, 200));
