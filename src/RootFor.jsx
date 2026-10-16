@@ -26,7 +26,7 @@ const oneIn = (p) => (p > 0 ? `about 1 in ${Math.round(1 / p).toLocaleString("en
 const am = (a) => (a == null ? "—" : (a > 0 ? "+" : "") + Math.round(a));
 const amFromP = (p) => (!(p > 0 && p < 1) ? null : p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p);
 const etStamp = (iso) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
-const REFRESH_MS = 3 * 60 * 1000;
+const REFRESH_MS = 10 * 60 * 1000;
 const tStart = (iso) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }) + " ET" : "");
 
 // condition one game on a team winning (keep its outcomes) or losing (drop them), renormalized
@@ -106,7 +106,7 @@ export default function RootFor({ user, initialData = null }) {
     } catch (e) { setSt((s) => ({ loading: false, error: String((e && e.message) || e), data: s.data })); }
   }, []);
   useEffect(() => { if (canSeeOwnerTools(user) && !initialData) load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // live: reprice every 3 minutes while the tab is visible (in-game prices included). No alerts.
+  // live: reprice every 10 minutes while the tab is visible (in-game prices included). No alerts.
   useEffect(() => {
     if (!canSeeOwnerTools(user) || initialData) return undefined;
     const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") load(); }, REFRESH_MS);
@@ -180,7 +180,7 @@ export default function RootFor({ user, initialData = null }) {
       `}</style>
       <h3>
         What to root for <span className="tag">Owner</span>
-        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 3 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
+        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 10 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           <span className="seg" role="group" aria-label="View">
             <button type="button" className={view === "simple" ? "on" : ""} aria-pressed={view === "simple"} onClick={() => setView("simple")}>Simple</button>

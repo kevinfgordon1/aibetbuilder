@@ -2,9 +2,9 @@
 //
 // Baseline storage (public.root_for_baselines, one row per slate week):
 //  - The slate key is the ET date of the Tuesday that starts the NFL week, so Thu–Mon games share one row.
-//  - Every /api/root-for call BEFORE the slate's first kickoff overwrites the row with the latest expected
+//  - Every /api/root-for call BEFORE the week's first NFL kickoff overwrites the row with the latest expected
 //    profit, so the baseline is the last pregame number (not a stale morning one).
-//  - Once the first kickoff passes, the row is frozen and becomes "Started at".
+//  - Once the week's first NFL kickoff passes (college games don't count), the row is frozen and becomes "Started at".
 //  - Server-side, so it is the same on every device and survives reloads; if the table is missing or no
 //    pregame snapshot was taken this week, the meter says so instead of guessing.
 
@@ -17,9 +17,12 @@ export function slateKey(nowMs) {
   return d.toISOString().slice(0, 10);
 }
 
+// First NFL kickoff of the slate (college/NHL/etc. games don't lock the baseline; they still move the needle).
+export const isNflEvent = (ev) => /^KXNFL/i.test(String(ev || ""));
 export function firstKickoff(perEvent = []) {
   let best = null;
-  for (const e of perEvent) { const t = e && e.start ? Date.parse(e.start) : NaN; if (Number.isFinite(t) && (best == null || t < best)) best = t; }
+  for (const e of perEvent) {
+    if (!e || !isNflEvent(e.event)) continue; const t = e && e.start ? Date.parse(e.start) : NaN; if (Number.isFinite(t) && (best == null || t < best)) best = t; }
   return best;
 }
 

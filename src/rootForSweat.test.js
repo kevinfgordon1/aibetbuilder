@@ -3,7 +3,8 @@ import { slateKey, firstKickoff, decideBaseline, gaugeFrac } from "./rootForSwea
 assert.equal(slateKey(Date.parse("2026-10-16T23:00:00Z")), "2026-10-13"); // Fri → Tue
 assert.equal(slateKey(Date.parse("2026-10-20T02:00:00Z")), "2026-10-13"); // Mon night ET still same week
 assert.equal(slateKey(Date.parse("2026-10-20T16:00:00Z")), "2026-10-20"); // Tue → new week
-assert.equal(firstKickoff([{ start: "2026-10-18T17:00Z" }, { start: "2026-10-18T13:00Z" }, {}]), Date.parse("2026-10-18T13:00Z"));
+assert.equal(firstKickoff([{ event: "KXNFLGAME-A", start: "2026-10-18T17:00Z" }, { event: "KXNFLGAME-B", start: "2026-10-18T13:00Z" }, { event: "KXNCAAFGAME-C", start: "2026-10-17T00:00Z" }, {}]), Date.parse("2026-10-18T13:00Z"), "NFL only");
+assert.equal(firstKickoff([{ event: "KXNCAAFGAME-C", start: "2026-10-17T00:00Z" }]), null);
 const key = "2026-10-13", kickoff = Date.parse("2026-10-18T17:00Z");
 let r = decideBaseline(null, { now: kickoff - 1000, ev: 2600.123, kickoff, key });
 assert.equal(r.write.ev, 2600.12); assert.equal(r.sweat.started, false);
