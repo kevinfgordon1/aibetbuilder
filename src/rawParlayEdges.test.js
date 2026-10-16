@@ -115,3 +115,17 @@ console.log("rawParlayEdges tests passed");
   assert.equal(E.matchesMarket({ market: "td" }, "all"), true);
 }
 console.log("rawParlayEdges TD ok");
+
+// Polymarket US combo math (docs.polymarket.us/fees combo table: 100-lot at $0.10 pays $1.02 fee)
+{
+  const E = await import("./rawParlayEdges.js");
+  const near = (a, b, t) => { if (Math.abs(a - b) > t) throw new Error(`${a} != ${b}`); };
+  near(100 * E.polyFeePerContract(0.1), 1.02, 0.006);
+  near(E.polyAllIn(E.polyYesForAllIn(0.3)), 0.3, 1e-9);
+  if (E.polyLegToKalshi("aec-nfl-kc-lv-2026-10-18:yes") !== "KXNFLGAME-26OCT18KCLV-KC:yes") throw new Error("poly leg map");
+  const s = E.scoreRawEdge({ venue: "polymarket", outcome: "traded", fair_mid_american: 2000, traded_yes: 0.12, traded_contracts: 100, legs: ["aec-nfl-kc-lv-2026-10-18:yes", "aec-nfl-buf-mia-2026-10-18:no"], poly_tick_size: 0.001 }, { edgeAmerican: 900, makerRate: 0.0175 });
+  if (!s.flagged || s.makerFee !== 0 || s.venue !== "polymarket") throw new Error("poly score");
+  if (Math.abs(s.weSellYes * 1000 - Math.round(s.weSellYes * 1000)) > 1e-6) throw new Error("poly tick");
+  if (!(s.takerGetsCost / s.contracts <= E.probFromAmerican(1100) + 1e-12)) throw new Error("taker gets <= fair-X");
+  console.log("rawParlayEdges polymarket ok");
+}

@@ -7,7 +7,7 @@ function mkRes() { const r = { headers: {}, setHeader(k, v) { r.headers[k] = v; 
 const OWNER = { id: require('./combo-probe-lib').OWNER_USER_ID, email: 'kev120909@gmail.com' };
 const rows = [{ rfq_id: 'a', rfq_created_ts: new Date().toISOString(), market_ticker: 'KXMVECROSSCATEGORY0-S1-X', n_legs: 2, legs: ['KXNFLGAME-26OCT18LACKC-LAC:yes'], contracts: 100, rfq_target_cost: 1, fair_mid_american: 7708, traded_yes: 0.0168, traded_contracts: 100, outcome: 'traded' }];
 function client(user) {
-  const q = { calls: [], select() { return q; }, eq(...a) { q.calls.push(['eq', ...a]); return q; }, not() { return q; }, gte() { return q; }, order() { return q; }, range() { return Promise.resolve({ data: rows, error: null }); } };
+  const q = { calls: [], select() { return q; }, eq(...a) { q.calls.push(['eq', ...a]); return q; }, not() { return q; }, or() { return q; }, gte() { return q; }, order() { return q; }, range() { return Promise.resolve({ data: rows, error: null }); } };
   return { auth: { getUser: async () => ({ data: { user }, error: null }) }, from(t) { assert.equal(t, 'noboost_paper_rfqs'); return q; } };
 }
 (async () => {
@@ -34,11 +34,23 @@ function client(user) {
   rows[0].promo_max_age_ms = 400000;
   const r4 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'promo' } }, r4);
   assert.equal(r4.body.edges.length, 0); // older than 6 min
-  const r5 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r5);
+  const r5d = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r5d);
+  assert.equal(r5d.body.fairSource, 'kalshi'); // default fair unchanged: Kalshi mid
+  const r5 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'pm' } }, r5);
   assert.equal(r5.body.fairSource, 'pm'); assert.equal(r5.body.edges.length, 0);
   rows[0].fair_pm_inverse_american = 7708;
-  const r6 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r6);
+  const r6 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'pm' } }, r6);
   assert.equal(r6.body.edges.length, 1); assert.equal(r6.body.edges[0].fairAmerican, 7708);
+  // Polymarket row: venue tag, Poly fee math (no maker fee), venue filter
+  rows.push({ rfq_id: 'p', venue: 'polymarket', rfq_created_ts: new Date().toISOString(), market_ticker: 'caoc-x', n_legs: 2, legs: ['aec-nfl-lac-kc-2026-10-18:yes', 'aec-nfl-buf-mia-2026-10-18:no'], legs_kalshi: null, poly_tick_size: 0.001, contracts: 100, fair_mid_american: 2000, traded_yes: 0.12, traded_contracts: 100, outcome: 'traded' });
+  rows[0].fair_mid_american = 7708;
+  const r7 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r7);
+  assert.equal(r7.body.edges.length, 2);
+  const pe = r7.body.edges.find((e) => e.venue === 'polymarket');
+  assert.ok(pe); assert.equal(pe.makerFee, 0); assert.deepEqual(pe.legs.map((l) => l.split(' ')[0]), ['LAC', 'MIA']);
+  assert.equal(r7.body.edges.find((e) => e.rfq_id === 'a').venue, 'kalshi');
+  const r8 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', venue: 'polymarket' } }, r8);
+  assert.equal(r8.body.edges.length, 1); assert.equal(r8.body.edges[0].venue, 'polymarket');
   const post = mkRes(); await h({ method: 'POST', headers: { authorization: 'Bearer t' } }, post); assert.equal(post.code, 405);
   const src = fs.readFileSync(__dirname + '/raw-parlay-edges.js', 'utf8');
   assert.doesNotMatch(src, /\.(insert|update|upsert|delete)\(/);

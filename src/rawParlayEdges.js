@@ -155,6 +155,48 @@ export function buyCostMicros(contracts, y, rate, precision = "cent") {
 }
 const dollars = (m) => Number(m) / 1e6;
 
+// ── Polymarket US combos (venue = 'polymarket' rows) ──
+// Combo taker fee = C·p·[0.0695·(1−p) + 0.06·(1−p)^4], charged on top of the execution price; combo makers
+// pay $0 and get no rebate (docs.polymarket.us/fees → Combo Taker Fees). Price grid = the RFQ's tickSize.
+export const VENUES = Object.freeze({ all: "all", kalshi: "kalshi", polymarket: "polymarket" });
+export const venueOf = (row) => (row && row.venue === VENUES.polymarket ? VENUES.polymarket : VENUES.kalshi);
+export function matchesVenue(edge, venue = VENUES.all) {
+  if (!venue || venue === VENUES.all) return true;
+  return (edge && edge.venue) === venue;
+}
+export const POLY_COMBO_TAKER = 0.0695;
+export const POLY_COMBO_TAKER_TAIL = 0.06;
+export const POLY_DEFAULT_TICK = 0.001;
+export const polyFeePerContract = (p) => (p > 0 && p < 1 ? p * (POLY_COMBO_TAKER * (1 - p) + POLY_COMBO_TAKER_TAIL * (1 - p) ** 4) : 0);
+export const polyAllIn = (p) => p + polyFeePerContract(p);
+/** Whole-order taker cost: C·p + fee, rounded up to the cent (conservative; Polymarket's exact fee rounding is not documented). */
+export function polyTakerCost(C, p) { return Math.ceil(Math.round((C * polyAllIn(p)) * 1e6) / 1e4 - 1e-9) / 100; }
+/** Inverse of polyAllIn (monotone on (0,1)): bisection. */
+export function polyYesForAllIn(q) {
+  if (!(q > 0 && q < 1)) return null;
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (polyAllIn(m) > q) hi = m; else lo = m; }
+  return lo;
+}
+const KMON = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+/** "aec-nfl-buf-mia-2026-10-18:no" → "KXNFLGAME-26OCT18BUFMIA-MIA:yes" (team that must win). Fallback when the
+ *  worker could not map the leg onto a live Kalshi market (legs_kalshi null); Kalshi's own away/home order may differ. */
+export function polyLegToKalshi(raw) {
+  const [sym, sideRaw] = String(raw || "").split(":");
+  const m = /^aec-nfl-([a-z]+)-([a-z]+)-(\d{4})-(\d{2})-(\d{2})$/.exec(String(sym || "").toLowerCase());
+  if (!m) return String(raw || "");
+  const a = m[1].toUpperCase(), b = m[2].toUpperCase();
+  const team = (sideRaw || "yes").toLowerCase() === "no" ? b : a;
+  return `KXNFLGAME-${m[3].slice(2)}${KMON[Number(m[4]) - 1]}${m[5]}${a}${b}-${team}:yes`;
+}
+/** Kalshi-style legs for labels and the worst-case engine (Polymarket rows → mapped Kalshi tickers). */
+export function canonicalLegs(row) {
+  const legs = Array.isArray(row && row.legs) ? row.legs : [];
+  if (venueOf(row) !== VENUES.polymarket) return legs;
+  if (Array.isArray(row.legs_kalshi) && row.legs_kalshi.length === legs.length) return row.legs_kalshi;
+  return legs.map(polyLegToKalshi);
+}
+
 /** Score one noboost_paper_rfqs row. Returns null when it cannot be priced.
  *  We are the maker SELLING YES at y (= buying NO at 1−y); the trader takes YES at y and pays the
  *  taker fee on top. Every $ figure is the exact rounded Kalshi order amount. */
@@ -166,33 +208,43 @@ export function scoreRawEdge(row, { edgeAmerican = DEFAULT_EDGE_AMERICAN, makerR
   const contracts = Number(row.traded_contracts) > 0 ? Number(row.traded_contracts) : Number(row.contracts) || 0;
   if (!(contracts > 0)) return null;
   const C = Math.round(contracts * 100) / 100;
-  const takerPays = (y) => dollars(buyCostMicros(C, y, takerRate, precision));
+  const venue = venueOf(row);
+  const poly = venue === VENUES.polymarket;
+  const polyTick = Number(row.poly_tick_size) > 0 ? Number(row.poly_tick_size) : POLY_DEFAULT_TICK;
+  // Kalshi: series taker fee with exact order rounding. Polymarket US: combo taker fee curve on top of the
+  // printed price (docs.polymarket.us/fees), whole order rounded up to the cent; combo maker pays $0.
+  const takerPays = poly ? (y) => polyTakerCost(C, y) : (y) => dollars(buyCostMicros(C, y, takerRate, precision));
   const q = probFromAmerican(americanMinus(row.fair_mid_american, edgeAmerican)); // taker all-in target
   if (q == null) return null;
-  const yRaw = yesForAllIn(q, takerRate);
+  const yRaw = poly ? polyYesForAllIn(q) : yesForAllIn(q, takerRate);
   if (yRaw == null) return null;
-  let y = floorToTick(yRaw, priceStructure);
-  // after Kalshi's round-up the taker must still get at least fair−X
-  while (y > 0 && takerPays(y) / C > q + 1e-12) y = tickBelow(y, priceStructure);
+  const floorY = (v) => (poly ? Math.round(Math.floor(v / polyTick + 1e-9) * polyTick * 1e6) / 1e6 : floorToTick(v, priceStructure));
+  const below = (v) => (poly ? Math.round((v - polyTick) * 1e6) / 1e6 : tickBelow(v, priceStructure));
+  let y = floorY(yRaw);
+  // after rounding the taker must still get at least fair−X
+  while (y > 0 && takerPays(y) / C > q + 1e-12) y = below(y);
   if (!(y > 0)) return null;
   const takerGotCost = takerPays(yT);
   const takerGetsCost = takerPays(y);
-  // our side: buy NO at 1−y, maker fee (series rate) on the same C·P·(1−P) base
-  const ourCost = dollars(buyCostMicros(C, 1 - y, makerRate, precision)); // = max loss
+  // our side: buy NO at 1−y; Kalshi maker fee (series rate) on the same C·P·(1−P) base, Polymarket combo maker $0
+  const ourCost = poly ? Math.ceil(Math.round(C * (1 - y) * 1e6) / 1e4) / 100 : dollars(buyCostMicros(C, 1 - y, makerRate, precision)); // = max loss
   const keep = Math.round((C - ourCost) * 1e6) / 1e6; // what we actually receive for the YES we sell
-  const makerFee = dollars(feeMicros(C, y, makerRate));
+  const makerFee = poly ? 0 : dollars(feeMicros(C, y, makerRate));
+  if (poly) makerRate = 0;
   const ev = (1 - P) * C - ourCost; // EV from the exact rounded amount we put up
+  const legsRaw = canonicalLegs(row);
   return {
     rfq_id: row.rfq_id,
     ts: row.rfq_created_ts || row.created_at,
     day: etDayKey(row.rfq_created_ts || row.created_at),
     ticker: row.market_ticker,
-    legs: (Array.isArray(row.legs) ? row.legs : []).map(legLabel),
-    legsRaw: Array.isArray(row.legs) ? row.legs : [],
+    venue,
+    legs: legsRaw.map(legLabel),
+    legsRaw,
     handle: takerGetsCost, // taker's all-in stake we'd accept
-    legIsTd: (Array.isArray(row.legs) ? row.legs : []).map(isTdLeg),
-    market: marketOf(row.legs),
-    nLegs: row.n_legs || (Array.isArray(row.legs) ? row.legs.length : null),
+    legIsTd: legsRaw.map(isTdLeg),
+    market: marketOf(legsRaw),
+    nLegs: row.n_legs || legsRaw.length || null,
     fairAmerican: Number(row.fair_mid_american),
     winningMmAmerican: americanFromProb(yT), // maker's quote, before the taker's fee
     winningMmYes: yT,
