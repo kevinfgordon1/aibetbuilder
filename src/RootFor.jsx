@@ -62,27 +62,26 @@ function Simple({ d, nightmare }) {
     <div>
       <div className="lead">{summarySentence(d)}</div>
       {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
-      <h4>Root for these 5</h4>
-      <div className="cards">
-        {d.top.slice(0, 5).map((t, i) => (
-          <div className="card" key={t.event + t.outcome}>
-            <div className="rk">#{i + 1}</div>
-            <div className="tm">{t.name}</div>
-            <div className="gm">{t.game}{t.start ? ` · ${tStart(t.start)}` : ""}</div>
-            <div className="od">Odds: <b>{am(t.american)}</b></div>
-            <div className="sw">Worth <b className="pos">{sMoney(t.swing)}</b> to you if they win</div>
-          </div>
-        ))}
+      <div className="pair">
+        <div className="panel good">
+          <h5>Root for these 5 <span className="sub">· $ worth to you if they win</span></h5>
+          {(() => { const top = d.top.slice(0, 5); const mx = Math.max(...top.map((t) => Math.abs(t.swing) || 0), 1); return top.map((t) => (
+            <div className="bar" key={t.event + t.outcome} title={t.game}>
+              <div className="bl"><b>{t.name}</b> <span className="sub">{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
+              <div className="bt"><div className="bf pos" style={{ width: `${(Math.abs(t.swing) / mx) * 100}%` }} /><span className="bv pos">{sMoney(t.swing)}</span></div>
+            </div>)); })()}
+        </div>
+        <div className="panel bad">
+          <h5>Your nightmare: <span className="neg">{sMoney(d.worst && d.worst.pnl)}</span> {worstAm != null && <span className="sub">· odds {fmtAmerican(worstAm)} ({chanceWords(d.worst.p)})</span>}</h5>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>Mostly happens if these go against you · locks each one sinks</div>
+          {(() => { const mx = Math.max(...nightmare.map((k) => k.kills), 1); return nightmare.map((k) => (
+            <div className="bar" key={k.event}>
+              <div className="bl"><b>{k.label}</b> <span className="sub">{fmtAmerican(k.american)}</span></div>
+              <div className="bt"><div className="bf negb" style={{ width: `${(k.kills / mx) * 100}%` }} /><span className="bv neg">{k.kills} lock{k.kills === 1 ? "" : "s"}</span></div>
+            </div>)); })()}
+        </div>
       </div>
       <div className="two">
-        <div className="box bad">
-          <h5>Your nightmare</h5>
-          <div><span className="big neg">{sMoney(d.worst && d.worst.pnl)}</span> {worstAm != null && <span className="sub">· odds {fmtAmerican(worstAm)} ({chanceWords(d.worst.p)})</span>}</div>
-          {nightmare.length > 0 && <>
-            <div className="sub" style={{ marginTop: 6 }}>Mostly happens if these go against you:</div>
-            <ol>{nightmare.map((k) => <li key={k.event}><b>{k.label}</b> <span className="sub">({fmtAmerican(k.american)}) · sinks {k.kills} lock{k.kills === 1 ? "" : "s"}</span></li>)}</ol>
-          </>}
-        </div>
         <div className="box good">
           <h5>Best case &amp; chance of profit</h5>
           <div>Everything hits: <span className="big pos">{sMoney(d.best && d.best.pnl)}</span> <span className="sub">({bestP > 0 ? chanceWords(bestP) : "very unlikely"})</span></div>
@@ -180,6 +179,13 @@ export default function RootFor({ user, initialData = null }) {
         .rootfor .box h5{margin:0 0 6px;font-size:14px}.rootfor .box ol{margin:6px 0 0 18px;padding:0}.rootfor .box li{margin:3px 0}
         .rootfor .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
         .rootfor .big{font-size:20px;font-weight:700}
+        .rootfor .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0 12px}
+        .rootfor .panel{border-radius:10px;padding:12px 14px;background:#111827;border:1px solid #1f2937}.rootfor .panel.good{border-color:#065f46}.rootfor .panel.bad{border-color:#7f1d1d}
+        .rootfor .panel h5{margin:0 0 8px;font-size:15px}
+        .rootfor .bar{margin:8px 0}.rootfor .bl{font-size:13px;margin-bottom:3px}
+        .rootfor .bt{display:flex;align-items:center;gap:8px}.rootfor .bf{height:14px;border-radius:4px;min-width:4px;flex:0 0 auto;max-width:calc(100% - 80px)}
+        .rootfor .bf.pos{background:#34d399}.rootfor .bf.negb{background:#f87171}.rootfor .bv{font-weight:700;font-size:13px;white-space:nowrap}
+        @media (max-width:700px){.rootfor .pair{grid-template-columns:1fr}}
         @media (max-width:600px){.rootfor .hide-sm{display:none}}
       `}</style>
       <h3>
