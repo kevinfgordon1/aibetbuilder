@@ -147,3 +147,17 @@ export function curveModel(hist, { worst = null, cap = 0.99, points = 160 } = {}
   const ys = xs.map((x) => bins.reduce((a, b) => { const c = (b.from + b.to) / 2; const z = (x - c) / sig; return a + b.p * Math.exp(-0.5 * z * z); }, 0) / (sig * Math.sqrt(2 * Math.PI)));
   return { xs, ys, xMin, xMax, spike, beyond: Math.max(0, 1 - cdfAt(hist, xMax)) };
 }
+
+// Empirical chance in each ±1/±2 SD zone around expected profit (from the simulated histogram, not a normal curve).
+export function sdZones(hist, ev, sd, worst = null) {
+  if (!hist || !hist.bins || !hist.bins.length || !(sd > 0)) return [];
+  const lo = worst && Number.isFinite(worst.pnl) ? worst.pnl : hist.bins[0].from;
+  const cuts = [-Infinity, ev - 2 * sd, ev - sd, ev, ev + sd, ev + 2 * sd, Infinity];
+  const names = ["Below −2 SD", "−2 SD to −1 SD", "−1 SD to average", "Average to +1 SD", "+1 SD to +2 SD", "Above +2 SD"];
+  const c = (v) => (v === -Infinity ? 0 : v === Infinity ? 1 : cdfAt(hist, v));
+  return names.map((name, i) => {
+    const a = cuts[i], b = cuts[i + 1];
+    const p = Math.max(0, c(b) - c(a));
+    return { name, from: a, to: b, p, belowWorst: b < lo - 0.5, holdsWorst: a <= lo && b > lo };
+  });
+}

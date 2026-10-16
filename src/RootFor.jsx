@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
+import SdZones from "./RootForZones";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -75,7 +76,7 @@ function Simple({ d, nightmare }) {
         </div>
       </div>
       <h4>How the weekend could go</h4>
-      <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
+      <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} inset={<SdZones compact hist={d.hist} ev={d.ev} sd={d.sd} worst={d.worst} />} />
       <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
     </div>
   );
@@ -220,7 +221,7 @@ export default function RootFor({ user, initialData = null }) {
           </div>
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
           <h4>P&L distribution{whatIf ? " (what-if)" : ""}</h4>
-          <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
+          <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} inset={<SdZones compact hist={d.hist} ev={d.ev} sd={d.sd} worst={d.worst} />} />
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
             <thead><tr><th>Game</th><th className="hide-sm">Start</th><th>Root for</th><th className="num">Chance now</th><th className="num">Swing</th><th>What-if</th></tr></thead>

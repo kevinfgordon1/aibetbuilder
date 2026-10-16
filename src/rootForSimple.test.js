@@ -45,3 +45,13 @@ console.log("rootForSimple tests ok");
   assert.equal(S.shortMoney(-4148), "−$4.1k"); assert.equal(S.shortMoney(12000), "+$12k");
   console.log("curve ok");
 }
+{
+  const S = await import("./rootForSimple.js");
+  const h = { bins: [{ from: -100, to: 0, p: 0.5 }, { from: 0, to: 100, p: 0.5 }] };
+  const z = S.sdZones(h, 0, 40, { pnl: -100 });
+  assert.equal(z.length, 6); assert.ok(Math.abs(z.reduce((a, x) => a + x.p, 0) - 1) < 1e-9);
+  assert.equal(z[0].p, 0.1); assert.equal(z[2].p, 0.2);
+  const z2 = S.sdZones(h, 50, 200, { pnl: -100 });
+  assert.ok(z2[0].belowWorst && z2[1].belowWorst && z2[0].p === 0);
+  console.log("sdZones ok");
+}
