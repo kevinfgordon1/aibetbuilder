@@ -74,8 +74,15 @@ function parseOpts(q) {
   return { days, edge, minCost, market, fair, venue };
 }
 
-/** Start of the ET day `days-1` days ago, as ISO. */
+// Kevin (Oct 16): only show requests logged at/after the inverse-bet-everywhere go-live (3:22 PM ET).
+// Older rows stay in the database, hidden. Applies to every window, the risk card and the counts.
+const INVERSE_LIVE_ISO = '2026-10-16T19:22:00.000Z';
+/** Start of the ET day `days-1` days ago (never before INVERSE_LIVE_ISO), as ISO. */
 function sinceIso(nowMs, days) {
+  const iso = sinceIsoRaw(nowMs, days);
+  return iso < INVERSE_LIVE_ISO ? INVERSE_LIVE_ISO : iso;
+}
+function sinceIsoRaw(nowMs, days) {
   const etNow = new Date(new Date(nowMs).toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const offsetMs = Math.round((new Date(nowMs).getTime() - etNow.getTime()) / 60000) * 60000;
   const start = new Date(etNow.getFullYear(), etNow.getMonth(), etNow.getDate() - (days - 1));
