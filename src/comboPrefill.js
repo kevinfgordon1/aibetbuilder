@@ -6,10 +6,11 @@
 
 export const encVal = (t, s) => `${t}|${s}`;
 
-export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl"];
+export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"];
 export const COMBO_SPORT_LABEL = {
   mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL",
   mls: "MLS", epl: "EPL", laliga: "La Liga", seriea: "Serie A", bundesliga: "Bundesliga", ligue1: "Ligue 1", ucl: "UCL",
+  ufc: "UFC",
 };
 // Soccer moneyline is 3-way and settles on 90' + stoppage: "Team ML" = that team
 // wins in regulation (draw and loss both lose) = Kalshi KX<LEAGUE>GAME-…-<TEAM> yes.
@@ -26,7 +27,60 @@ const PROMO_TO_SPORT = {
   soccer_germany_bundesliga: "bundesliga",
   soccer_france_ligue_one: "ligue1",
   soccer_uefa_champs_league: "ucl",
+  mma_mixed_martial_arts: "ufc",
 };
+
+// ── UFC fighter names ── Kalshi labels are full names ("Katlyn Cerminara",
+// "Soyoung You"); books can differ ("Katlyn Chookagian" = married name,
+// "Su Young You", "Cassio Barao" vs "Cássio Barão"). A fighter matches on the
+// same surname, or the same name with spaces removed. A first-name-only match
+// (name change) counts only when the OPPONENT in that fight matched on surname.
+// The fight must also be within 1.5 days (startGapMs).
+function ufcTokens(raw) {
+  return String(raw || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/\s+(ml|moneyline)\s*$/, "").replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+}
+function ufcStrongMatch(a, b) {
+  const x = ufcTokens(a); const y = ufcTokens(b);
+  if (!x.length || !y.length) return false;
+  if (x.join("") === y.join("")) return true;
+  const xl = x[x.length - 1]; const yl = y[y.length - 1];
+  return xl.length >= 3 && xl === yl;
+}
+function ufcFirstMatch(a, b) {
+  const x = ufcTokens(a); const y = ufcTokens(b);
+  return x.length >= 2 && y.length >= 2 && x[0].length >= 3 && x[0] === y[0];
+}
+// -> { [name]: market } for both fighters of a UFC fight, else null.
+function ufcPairFor(away, home, game) {
+  const sides = game.markets?.side || [];
+  if (sides.length !== 2 || !away || !home) return null;
+  const [m1, m2] = sides;
+  const tryOrder = (a, b) => {
+    const sa = ufcStrongMatch(away, a.label); const sh = ufcStrongMatch(home, b.label);
+    if (sa && sh) return true;
+    if (sa && ufcFirstMatch(home, b.label)) return true;
+    if (sh && ufcFirstMatch(away, a.label)) return true;
+    return false;
+  };
+  const fwd = tryOrder(m1, m2); const rev = tryOrder(m2, m1);
+  if (fwd === rev) return null; // none, or ambiguous
+  return fwd ? { away: m1, home: m2 } : { away: m2, home: m1 };
+}
+function ufcTeamsMatch(promoGame, game) {
+  const [away, home] = splitAt(promoGame);
+  return !!ufcPairFor(away, home, game);
+}
+function ufcSideFor(promoLeg, game) {
+  const [away, home] = splitAt(promoLeg.game);
+  const pair = ufcPairFor(away, home, game);
+  if (!pair) return null;
+  const name = ufcTokens(promoLeg.name).join(" ");
+  if (name === ufcTokens(away).join(" ")) return pair.away;
+  if (name === ufcTokens(home).join(" ")) return pair.home;
+  return null;
+}
+const UFC_MAX_GAP_MS = 1.5 * 24 * 3600 * 1000;
 
 // ── Soccer team names ── Kalshi labels are short ("Houston", "Los Angeles G",
 // "New York RB", "Saint Louis"); books use full names ("Houston Dynamo FC",
@@ -320,6 +374,7 @@ function ncaafTeamsMatch(promoGame, kalshiGame) {
 }
 
 function teamsMatchGame(promoGame, kalshiGame, sport = "mlb") {
+  if (sport === "ufc") return ufcTeamsMatch(promoGame, kalshiGame);
   if (SOCCER_COMBO_SPORTS.has(sport)) return soccerTeamsMatch(promoGame, kalshiGame);
   if (sport === "ncaaf") return ncaafTeamsMatch(promoGame, kalshiGame);
   const [away, home] = splitAt(promoGame);
@@ -358,6 +413,13 @@ function sameTeamsCandidates(promoLeg, games) {
 // occurrence time and flags it startExact, so NHL games are time-gated.
 const TIMED_KEY = /^\d{2}[A-Z]{3}\d{2}\d{4}[A-Z]/;
 function startGapMs(g, t) {
+  // UFC: same fight only if the Kalshi fight is within 1.5 days of the book's start.
+  if (g.sport === "ufc") {
+    const gt = new Date(g.startTime).getTime();
+    if (!Number.isFinite(gt) || !Number.isFinite(t)) return NaN;
+    const gap = Math.abs(gt - t);
+    return gap <= UFC_MAX_GAP_MS ? 0 : SAME_GAME_MAX_GAP_MS + gap;
+  }
   // Soccer keys are the ET match day; same-day only (startTime = that day's midnight ET).
   if (SOCCER_COMBO_SPORTS.has(g.sport)) {
     const day = new Date(g.startTime).getTime();
@@ -698,6 +760,7 @@ function matchMarket(promoLeg, game, sport = "mlb") {
   if (market === "HR" || market === "TD" || market === "GOAL") return matchPropMarket(promoLeg, game, sport);
   if (market === "ML") {
     const sides = game.markets?.side || [];
+    if (sport === "ufc") return { market: ufcSideFor(promoLeg, game) };
     if (SOCCER_COMBO_SPORTS.has(sport)) {
       if (isDrawName(promoLeg.name)) return { market: sides.find((m) => /-TIE$/i.test(m.ticker || "")) || null };
       return { market: soccerSideFor(String(promoLeg.name || "").replace(/\s+(ml|moneyline)\s*$/i, ""), game) };
@@ -791,7 +854,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
   for (const leg of promoLegs || []) {
     const sport = promoSportOf(leg);
     if (!sport) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
