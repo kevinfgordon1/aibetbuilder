@@ -13,7 +13,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
   }, []);
   const m = curveModel(hist, { worst });
   if (!m) return null;
-  const small = W < 520; const H = small ? 284 : 294; const top = 44, bot = 98, padL = 24, padR = 10;
+  const small = W < 520; const H = small ? 266 : 276; const top = 26, bot = 98, padL = 24, padR = 10;
   const plotH = H - top - bot; const x = (v) => padL + ((v - m.xMin) / (m.xMax - m.xMin)) * (W - padL - padR);
   const yMax = Math.max(...m.ys) || 1; const y = (d) => top + plotH - (d / yMax) * plotH * 0.92;
   const line = m.xs.map((v, i) => `${i ? "L" : "M"}${x(v).toFixed(1)},${y(m.ys[i]).toFixed(1)}`).join("");
@@ -54,13 +54,12 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         </g>}
         {m.xMin < 0 && m.xMax > 0 && <g>
           <line x1={z} x2={z} y1={top - 2} y2={top + plotH} stroke="#e5e7eb" strokeDasharray="3 3" />
-          <text x={z - 4} y={32} fill="#e5e7eb" fontSize="11" textAnchor="end">{small && z < 100 ? "$0" : "Break-even $0"}</text>
+          <text x={z - 4} y={16} fill="#e5e7eb" fontSize="11" textAnchor="end">{small && z < 100 ? "$0" : "Break-even $0"}</text>
         </g>}
         {evIn && <g>
           <line x1={x(ev)} x2={x(ev)} y1={top - 2} y2={top + plotH} stroke="#f59e0b" strokeWidth="1.5" />
-          <text x={x(ev) + 4} y={32} fill="#fbbf24" fontSize="11" fontWeight="700">Expected {money(ev)}</text>
+          <text x={x(ev) + 4} y={16} fill="#fbbf24" fontSize="11" fontWeight="700">Expected {money(ev)}</text>
         </g>}
-        <text x={padL} y={14} fill="#fca5a5" fontSize="12" fontWeight="700">Lose money: {pc(pLoss)}</text>
         <line x1={padL} x2={W - padR} y1={top + plotH} y2={top + plotH} stroke="#374151" />
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}
         {sp && <g>
