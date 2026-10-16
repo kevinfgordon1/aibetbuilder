@@ -35,7 +35,7 @@ function client(user) {
   const r4 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'promo' } }, r4);
   assert.equal(r4.body.edges.length, 0); // older than 6 min
   const r5d = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r5d);
-  assert.equal(r5d.body.fairSource, 'kalshi'); // default fair unchanged: Kalshi mid
+  assert.equal(r5d.body.fairSource, 'pm'); // default fair: inverse bet (live)
   const r5 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'pm' } }, r5);
   assert.equal(r5.body.fairSource, 'pm'); assert.equal(r5.body.edges.length, 0);
   rows[0].fair_pm_inverse_american = 7708;
@@ -44,12 +44,12 @@ function client(user) {
   // Polymarket row: venue tag, Poly fee math (no maker fee), venue filter
   rows.push({ rfq_id: 'p', venue: 'polymarket', rfq_created_ts: new Date().toISOString(), market_ticker: 'caoc-x', n_legs: 2, legs: ['aec-nfl-lac-kc-2026-10-18:yes', 'aec-nfl-buf-mia-2026-10-18:no'], legs_kalshi: null, poly_tick_size: 0.001, contracts: 100, fair_mid_american: 2000, traded_yes: 0.12, traded_contracts: 100, outcome: 'traded' });
   rows[0].fair_mid_american = 7708;
-  const r7 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r7);
+  const r7 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'kalshi' } }, r7);
   assert.equal(r7.body.edges.length, 2);
   const pe = r7.body.edges.find((e) => e.venue === 'polymarket');
   assert.ok(pe); assert.equal(pe.makerFee, 0); assert.deepEqual(pe.legs.map((l) => l.split(' ')[0]), ['LAC', 'MIA']);
   assert.equal(r7.body.edges.find((e) => e.rfq_id === 'a').venue, 'kalshi');
-  const r8 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', venue: 'polymarket' } }, r8);
+  const r8 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'kalshi', venue: 'polymarket' } }, r8);
   assert.equal(r8.body.edges.length, 1); assert.equal(r8.body.edges[0].venue, 'polymarket');
   const post = mkRes(); await h({ method: 'POST', headers: { authorization: 'Bearer t' } }, post); assert.equal(post.code, 405);
   const src = fs.readFileSync(__dirname + '/raw-parlay-edges.js', 'utf8');

@@ -40,7 +40,7 @@ const SORT_OPTS = [
 ];
 
 const TIP = {
-  fair: "Fair odds, legs multiplied together. Moneyline legs, Kalshi mid (default): the Kalshi bid/ask midpoint only. PM live inverse: 1 minus the implied chance of the best opposing price, $500 deep, fees included, from the live Kalshi, Polymarket US, Novig and ProphetX books; any source older than 15 seconds is dropped. Promo: the same inverse-bet true odds as the Promo / boost calculator: 1 minus the implied chance of the best opposing price across the trusted sportsbooks and exchanges in our odds feed, which refreshes about every 5 minutes. Rows whose sportsbook data is over 6 minutes old are skipped. Polymarket requests use the same fairs, with each leg mapped to the same NFL game. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included).",
+  fair: "Fair odds, legs multiplied together. Moneyline legs, Inverse bet (live, default): 1 minus the implied chance of the best opposing price, $500 deep, fees included, from the live Kalshi, Polymarket US, Novig and ProphetX books; any source older than 15 seconds is dropped. Kalshi mid: the Kalshi bid/ask midpoint only. Promo: the same inverse-bet true odds as the Promo / boost calculator: 1 minus the implied chance of the best opposing price across the trusted sportsbooks and exchanges in our odds feed, which refreshes about every 5 minutes. Rows whose sportsbook data is over 6 minutes old are skipped. Polymarket requests use the same fairs, with each leg mapped to the same NFL game. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included).",
   mm: "The price the winning market maker quoted, before the taker's fee. Polymarket: the anonymous RFQ trade print matched to this request.",
   got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order). Polymarket: combo taker fee contracts × price × (0.0695 × (1 − price) + 0.06 × (1 − price)^4), rounded up to the cent.",
   sell: "The price we'd actually receive selling YES on the venue's price grid, after our maker fee (Kalshi: series rate, currently $0; Polymarket combos: $0) and rounding. EV is computed from this price.",
@@ -85,7 +85,7 @@ export default function RawParlayEdges({ user }) {
   const [edge, setEdge] = useState(String(DEFAULT_EDGE_AMERICAN));
   const [minCost, setMinCost] = useState("0");
   const [market, setMarket] = useState("all");
-  const [fairSrc, setFairSrc] = useState("kalshi");
+  const [fairSrc, setFairSrc] = useState("pm");
   const [venue, setVenue] = useState("all");
   const [sortKey, setSortKey] = useState(DEFAULT_SORT);
   const [state, setState] = useState({ loading: false, error: null, data: null });
@@ -173,8 +173,8 @@ export default function RawParlayEdges({ user }) {
         ))}
         <label title={TIP.fair}>Fair{" "}
           <select aria-label="Fair source" value={fairSrc} onChange={(e) => setFairSrc(e.target.value)}>
+            <option value="pm">Inverse bet (live)</option>
             <option value="kalshi">Kalshi mid</option>
-            <option value="pm">PM live inverse</option>
             <option value="promo">Promo (odds feed, 5 min)</option>
           </select>
         </label>
