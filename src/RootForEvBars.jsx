@@ -21,10 +21,10 @@ export default function EvBars({ hist, ev, pProfit, worst }) {
         <svg viewBox={`0 0 ${W} ${H}`} style={{ flex: "1 1 280px", maxWidth: 520, display: "block" }} role="img" aria-label={title}>
           <rect x={pad} y={base} width={wL} height={hL} rx={4} fill="#dc2626"><title>{`Lose ${P(s.pLoss)} of the time, avg ${money(s.avgLoss)}`}</title></rect>
           <rect x={pad + wL + 6} y={base - hW} width={wW} height={hW} rx={4} fill="#10b981"><title>{`Win ${P(s.pWin)} of the time, avg ${money(s.avgWin)}`}</title></rect>
-          <text x={pad + wL / 2} y={base + hL / 2 + 6} fill="#fff" fontSize="17" fontWeight="700" textAnchor="middle">Lose {P(s.pLoss)} · {money(s.avgLoss)}</text>
-          <text x={pad + wL + 6 + wW / 2} y={base - hW / 2 + 6} fill="#052e1f" fontSize="17" fontWeight="700" textAnchor="middle">Win {P(s.pWin)} · {money(s.avgWin)}</text>
+          <text x={pad + wL / 2} y={base + hL / 2 + 8} fill="#fff" fontSize="22" fontWeight="700" textAnchor="middle">Lose {P(s.pLoss)} · {money(s.avgLoss)}</text>
+          <text x={pad + wL + 6 + wW / 2} y={base - hW / 2 + 8} fill="#052e1f" fontSize="22" fontWeight="700" textAnchor="middle">Win {P(s.pWin)} · {money(s.avgWin)}</text>
           <line x1={pad} x2={W - pad} y1={base} y2={base} stroke="#e5e7eb" strokeDasharray="3 3" />
-          <text x={W - pad} y={base - 4} fill="#9ca3af" fontSize="14" textAnchor="end">$0</text>
+          <text x={pad} y={base - 6} fill="#9ca3af" fontSize="14">$0</text>
         </svg>
         <div style={{ flex: "1 1 220px", fontSize: 14, lineHeight: 1.6 }}>
           <div><span style={{ display: "inline-block", width: 10, height: 10, background: "#dc2626", borderRadius: 2, marginRight: 6 }} />Lose <b className="neg">{P(s.pLoss)}</b> of the time · avg <b className="neg">{money(s.avgLoss)}</b></div>
