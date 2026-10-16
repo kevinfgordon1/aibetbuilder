@@ -20,11 +20,20 @@ function client(user) {
   }
   h._setDeps({ env, createClient: () => client(OWNER), lookupSeries: async () => ({ fee_type: 'quadratic', fee_multiplier: 1 }) });
   const res = mkRes();
-  await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, res);
+  await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900', fair: 'kalshi' } }, res);
   assert.equal(res.code, 200, JSON.stringify(res.body));
   assert.equal(res.body.edges.length, 1);
   assert.equal(res.body.series.KXMVECROSSCATEGORY0.rate, 0);
   assert.equal(res.body.days[0].count, 1);
+  // default fair=promo: row without a Promo fair is skipped; a fresh one is scored on it
+  const r2 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r2);
+  assert.equal(r2.body.edges.length, 0); assert.equal(r2.body.staleSkipped, 1);
+  rows[0].fair_promo_best_american = 7708; rows[0].promo_max_age_ms = 200000; rows[0].fair_mid_american = 6000;
+  const r3 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r3);
+  assert.equal(r3.body.edges.length, 1); assert.equal(r3.body.edges[0].fairAmerican, 7708); assert.equal(r3.body.edges[0].kalshiFairAmerican, 6000);
+  rows[0].promo_max_age_ms = 400000;
+  const r4 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { edge: '900' } }, r4);
+  assert.equal(r4.body.edges.length, 0); // older than 6 min
   const post = mkRes(); await h({ method: 'POST', headers: { authorization: 'Bearer t' } }, post); assert.equal(post.code, 405);
   const src = fs.readFileSync(__dirname + '/raw-parlay-edges.js', 'utf8');
   assert.doesNotMatch(src, /\.(insert|update|upsert|delete)\(/);
