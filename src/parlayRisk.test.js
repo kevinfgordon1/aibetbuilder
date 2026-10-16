@@ -68,3 +68,16 @@ assert.equal(capped.exact, false); assert.equal(capped.worstCase, null); assert.
 const tdr = legToRestriction("KXNFLTD-26OCT18PITTB-PITKWETJEN10-1:no");
 assert.equal(tdr.event, "KXNFLTD-26OCT18PITTB-PITKWETJEN10-1"); assert.deepEqual(tdr.allowed, ["no"]);
 console.log("parlayRisk tests ok");
+
+// TD props plug into the generic event model as binary events (one per player ticker)
+{
+  const R = await import("./parlayRisk.js");
+  const td = R.legToRestriction("KXNFLTD-26OCT18BALCLE-BALDHENRY22-1:yes");
+  if (td.event !== "KXNFLTD-26OCT18BALCLE-BALDHENRY22-1" || td.allowed[0] !== "yes" || td.outcomes.length !== 2) throw new Error("td event");
+  const tdNo = R.legToRestriction("KXNFLTD-26OCT18BALCLE-BALDHENRY22-1:no");
+  if (tdNo.allowed[0] !== "no") throw new Error("td no");
+  // Henry TD yes and Henry TD no can never both hit
+  const m = R.buildModel([{ legs: ["KXNFLTD-26OCT18BALCLE-BALDHENRY22-1:yes", "KXNFLTD-26OCT18BALCLE-BALDHENRY22-1:no"], contracts: 10, keep: 1 }]);
+  if (!m.positions[0].impossible) throw new Error("td yes+no impossible");
+  console.log("parlayRisk TD events ok");
+}

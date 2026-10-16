@@ -4,7 +4,7 @@
 // Kalshi parlay RFQs where the best price traders paid was well worse than fair.
 // Never quotes, confirms, or trades anything.
 //
-// GET ?days=1..7&edge=<American X>&minCost=<$>  →
+// GET ?days=1..7&edge=<American X>&minCost=<$>&market=all|ml|td  →
 //   { ok, makerRate, series, edges: [...top 200 by EV], days: [{ day, count, ev, maxLoss }], scanned }
 'use strict';
 
@@ -58,7 +58,8 @@ function parseOpts(q) {
   const days = Math.min(7, Math.max(1, Math.round(num(q.days, 1))));
   const edge = Math.min(100000, Math.max(0, num(q.edge, 500)));
   const minCost = Math.max(0, num(q.minCost, 0));
-  return { days, edge, minCost };
+  const market = ['all', 'ml', 'td'].includes(String(q.market || '')) ? String(q.market) : 'all';
+  return { days, edge, minCost, market };
 }
 
 /** Start of the ET day `days-1` days ago, as ISO. */
@@ -110,7 +111,7 @@ async function handler(req, res) {
       const s = B.seriesOfTicker(r.market_ticker);
       const makerRate = s && rates[s] ? rates[s].rate : B.FALLBACK_MAKER_RATE;
       const e = E.scoreRawEdge(r, { edgeAmerican: opts.edge, makerRate });
-      if (e && e.flagged) edges.push(e);
+      if (e && e.flagged && E.matchesMarket(e, opts.market)) edges.push(e);
     }
     const days = E.summarizeByDay(edges);
     // Portfolio risk if we'd filled every flagged row: exact worst/best case across shared legs and

@@ -71,7 +71,30 @@ export function parseLeg(raw) {
   }
   return out;
 }
+/** "KXNFLTD-26OCT18PITTB-PITKWETJEN10-1:yes" → { player:"K. Wetjen", team:"PIT", matchup:"PIT @ TB", date:"Oct 18", side } */
+const TD_RE = /^KXNFLTD-(\d{2})([A-Z]{3})(\d{2})([A-Z]+)-([A-Z0-9]+)-1$/;
+export const isTdLeg = (raw) => TD_RE.test(String(raw || "").split(":")[0]);
+export function parseTdLeg(raw) {
+  const [ticker, sideRaw] = String(raw || "").split(":");
+  const m = TD_RE.exec(ticker || "");
+  if (!m) return null;
+  const pair = m[4], code = m[5];
+  let team = null, matchup = pair;
+  for (const n of [3, 2, 4]) {
+    const t = code.slice(0, n);
+    if (pair.startsWith(t) && pair.length > n) { team = t; matchup = `${t} @ ${pair.slice(n)}`; break; }
+    if (pair.endsWith(t) && pair.length > n) { team = t; matchup = `${pair.slice(0, pair.length - n)} @ ${t}`; break; }
+  }
+  const name = (team ? code.slice(team.length) : code).replace(/\d+$/, "");
+  const player = name.length > 1 ? `${name[0]}. ${name[1]}${name.slice(2).toLowerCase()}` : name;
+  return { player, team, matchup, date: `${MONTHS[m[2]] || m[2]} ${Number(m[3])}`, side: (sideRaw || "yes").toLowerCase() };
+}
 export function legLabel(raw) {
+  const td = parseTdLeg(raw);
+  if (td) {
+    const pick = td.side === "no" ? `TD · ${td.player} NO anytime TD` : `TD · ${td.player} anytime TD`;
+    return [pick, `(${[td.team, td.matchup].filter(Boolean).join(", ")})`, td.date].join(" ");
+  }
   const l = parseLeg(raw);
   if (!l.team) return l.raw;
   const pick = l.side === "no" ? `${l.team} NOT to win` : `${l.team} ML`;
@@ -167,6 +190,8 @@ export function scoreRawEdge(row, { edgeAmerican = DEFAULT_EDGE_AMERICAN, makerR
     legs: (Array.isArray(row.legs) ? row.legs : []).map(legLabel),
     legsRaw: Array.isArray(row.legs) ? row.legs : [],
     handle: takerGetsCost, // taker's all-in stake we'd accept
+    legIsTd: (Array.isArray(row.legs) ? row.legs : []).map(isTdLeg),
+    market: marketOf(row.legs),
     nLegs: row.n_legs || (Array.isArray(row.legs) ? row.legs.length : null),
     fairAmerican: Number(row.fair_mid_american),
     winningMmAmerican: americanFromProb(yT), // maker's quote, before the taker's fee
@@ -191,6 +216,16 @@ export function scoreRawEdge(row, { edgeAmerican = DEFAULT_EDGE_AMERICAN, makerR
     maxLoss: ourCost,
     flagged: takerGetsCost < takerGotCost && y < yT && ev > 0,
   };
+}
+
+/** Market filter for Combo Sniper: "td" when any leg is an NFL anytime-TD prop, else "ml". */
+export const MARKETS = Object.freeze({ all: "all", ml: "ml", td: "td" });
+export function marketOf(legs) {
+  return (Array.isArray(legs) ? legs : []).some(isTdLeg) ? MARKETS.td : MARKETS.ml;
+}
+export function matchesMarket(edge, market = MARKETS.all) {
+  if (!market || market === MARKETS.all) return true;
+  return (edge && edge.market) === market;
 }
 
 export function scanRawEdges(rows, opts = {}) {
