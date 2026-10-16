@@ -540,3 +540,13 @@ function createPartialHangClient(hangTable) {
 }
 
 console.log("oddsLoad.test.js: ok");
+
+{
+  const { newestFetchedAt } = await import("./oddsLoad.js");
+  assert.equal(newestFetchedAt([
+    { fetched_at: "2026-10-16T14:53:00Z" },
+    { fetched_at: "2026-10-16T15:05:47Z" },
+    { fetched_at: null },
+  ]), "2026-10-16T15:05:47Z");
+  assert.equal(newestFetchedAt([]), null);
+}

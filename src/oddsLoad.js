@@ -245,3 +245,17 @@ export async function queryOddsCaches(client, plan, { timeoutMs = ODDS_QUERY_TIM
   };
 }
 
+
+// Header "Updated" stamp: newest fetched_at across cache rows. PostgREST row
+// order is arbitrary, so rows[0] could be a sport the cron skipped (empty
+// Odds API pull keeps its old fetched_at) and pin the stamp to an old time
+// even after Refresh read fresh rows.
+export function newestFetchedAt(rows) {
+  let best = null;
+  let bestMs = -Infinity;
+  for (const row of rows || []) {
+    const ms = Date.parse(row?.fetched_at);
+    if (Number.isFinite(ms) && ms > bestMs) { bestMs = ms; best = row.fetched_at; }
+  }
+  return best;
+}
