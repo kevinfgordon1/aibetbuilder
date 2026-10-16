@@ -98,3 +98,16 @@ export function topByGain(d, n = 5) {
     .filter((o) => o.gain > 0.5)
     .sort((a, b) => b.gain - a.gain).slice(0, n);
 }
+
+// Most damaging results: E[P | result] − E[P] (most negative first), at most one per game, from the joint engine.
+export function topByDrop(d, n = 5) {
+  if (!d) return [];
+  const ev = Number(d.ev) || 0; const seen = new Set();
+  return (d.perEvent || []).flatMap((e) => e.outcomes || [])
+    .filter((o) => o && Number.isFinite(o.ifHit) && o.name)
+    .map((o) => ({ ...o, drop: o.ifHit - ev, label: /\bby\b/.test(o.name) ? `${o.name.replace(/^(\S+\s+\S+)\s+by/, "$1 win by")}` : `${o.name} win` }))
+    .filter((o) => o.drop < -0.5)
+    .sort((a, b) => a.drop - b.drop)
+    .filter((o) => (seen.has(o.event) ? false : (seen.add(o.event), true)))
+    .slice(0, n);
+}

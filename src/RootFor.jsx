@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
+import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
 const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
@@ -73,11 +73,11 @@ function Simple({ d, nightmare }) {
         </div>
         <div className="panel bad">
           <h5>Your nightmare: <span className="neg">{sMoney(d.worst && d.worst.pnl)}</span> {worstAm != null && <span className="sub">· odds {fmtAmerican(worstAm)} ({chanceWords(d.worst.p)})</span>}</h5>
-          <div className="sub" style={{ margin: "-2px 0 6px" }}>Mostly happens if these go against you · locks each one sinks</div>
-          {(() => { const mx = Math.max(...nightmare.map((k) => k.kills), 1); return nightmare.map((k) => (
-            <div className="bar" key={k.event}>
-              <div className="bl"><b>{k.label}</b> <span className="sub">{fmtAmerican(k.american)}</span></div>
-              <div className="bt"><div className="bf negb" style={{ width: `${(k.kills / mx) * 100}%` }} /><span className="bv neg">{k.kills} lock{k.kills === 1 ? "" : "s"}</span></div>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>Results that hurt most · cuts this from your expected profit if it happens</div>
+          {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
+            <div className="bar" key={k.event + k.outcome}>
+              <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
+              <div className="bt"><div className="bf negb" style={{ width: `${(-k.drop / mx) * 100}%` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)}</span></div>
             </div>)); })()}
         </div>
       </div>

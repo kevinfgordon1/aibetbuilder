@@ -28,3 +28,9 @@ console.log("rootForSimple tests ok");
   assert.deepEqual(t.map((x) => [x.name, x.gain]), [["C", 300], ["A", 50]]);
   console.log("topByGain ok");
 }
+{
+  const { topByDrop } = await import("./rootForSimple.js");
+  const t = topByDrop({ ev: 100, perEvent: [{ outcomes: [{ event: "G", name: "PIT Steelers by 3+", ifHit: 0 }, { event: "G", name: "PIT Steelers by under 3", ifHit: 10 }] }, { outcomes: [{ event: "H", name: "KC Chiefs", ifHit: 50 }, { event: "H", name: "LA Chargers", ifHit: 300 }] }] });
+  assert.deepEqual(t.map((x) => [x.label, x.drop]), [["PIT Steelers win by 3+", -100], ["KC Chiefs win", -50]]);
+  console.log("topByDrop ok");
+}
