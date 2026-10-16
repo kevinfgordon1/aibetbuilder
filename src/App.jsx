@@ -231,6 +231,7 @@ const SPORTS = [
   { key: "icehockey_nhl", label: "NHL" },
   { key: "soccer_epl", label: "EPL" },
   { key: "soccer_usa_mls", label: "MLS" },
+  { key: "mma_mixed_martial_arts", label: "UFC" },
 ];
 const SPORT_KEYS = SPORTS.map(s => s.key);
 // Promo / Odds Board / Profile chips. Soccer is one chip → both Odds API keys.
@@ -995,7 +996,7 @@ function EVBadge({ ev }) {
 
 function SportBadge({ sport }) {
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { baseball_mlb: "#3b82f6", americanfootball_nfl: "#8b5cf6", americanfootball_ncaaf: "#a78bfa", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16" };
+  const colors = { baseball_mlb: "#3b82f6", americanfootball_nfl: "#8b5cf6", americanfootball_ncaaf: "#a78bfa", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
       {s?.label || sport}
