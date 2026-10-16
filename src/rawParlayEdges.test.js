@@ -101,3 +101,17 @@ console.log("rawParlayEdges tests passed");
   assert.equal(E.buyCostMicros(100, 0.5, 0.07) - 50000000n, 1750000n); // 100 @ 50¢ → $1.75
   assert.equal(E.buyCostMicros(1, 0.5, 0.07, "centicent"), 517500n);
 }
+
+// NFL anytime-TD legs (Combo Sniper market filter)
+{
+  const td = "KXNFLTD-26OCT18PITTB-PITKWETJEN10-1:yes";
+  assert.equal(E.isTdLeg(td), true);
+  assert.equal(E.isTdLeg("KXNFLTD-26OCT18PITTB-PITKWETJEN10-2:yes"), false);
+  assert.equal(E.legLabel(td), "TD · K. Wetjen anytime TD (PIT, PIT @ TB) Oct 18");
+  assert.equal(E.parseTdLeg("KXNFLTD-26OCT18NYJNE-NERSTEVENSON38-1:yes").matchup, "NYJ @ NE");
+  assert.equal(E.marketOf([td, "KXNFLGAME-26OCT18NYJNE-NE:yes"]), "td");
+  assert.equal(E.marketOf(["KXNFLGAME-26OCT18NYJNE-NE:yes"]), "ml");
+  assert.equal(E.matchesMarket({ market: "td" }, "ml"), false);
+  assert.equal(E.matchesMarket({ market: "td" }, "all"), true);
+}
+console.log("rawParlayEdges TD ok");
