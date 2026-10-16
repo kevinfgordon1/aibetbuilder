@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
+import SweatMeter from "./RootForSweat";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -49,6 +50,7 @@ function Simple({ d, nightmare }) {
     <div>
       <div className="lead">{summarySentence(d)}</div>
       {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      <SweatMeter d={d} />
       <div className="pair">
         <div className="panel good">
           <h5>Root for these 5 <span className="sub">· adds this to your expected profit if they win</span></h5>
@@ -192,6 +194,7 @@ export default function RootFor({ user, initialData = null }) {
       {open && d && view === "simple" && <Simple d={base} nightmare={nightmare} />}
       {open && d && view === "detailed" && (
         <>
+          <SweatMeter d={base} />
           {Object.keys(picks).length > 0 && (
             <div className="banner">
               <b>What-if:</b> {Object.entries(picks).map(([ev, pk]) => `${(base.model.teamNames || {})[`${ev}:${pk.team}`] || pk.team} ${pk.won ? "won" : "lost"}`).join(" · ")}

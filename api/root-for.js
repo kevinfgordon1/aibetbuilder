@@ -88,6 +88,21 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
 
+// Sweat meter baseline (see src/rootForSweat.js). Never fails the request: a missing table just means no baseline.
+async function sweatBaseline(client, out, now) {
+  try {
+    const S = await import('../src/rootForSweat.js');
+    const key = S.slateKey(now);
+    const { data, error } = await client.from('root_for_baselines').select('slate_key,ev,first_kickoff,captured_at').eq('slate_key', key).maybeSingle();
+    if (error) throw error;
+    const r = S.decideBaseline(data || null, { now, ev: Number(out.ev), kickoff: S.firstKickoff(out.perEvent), key });
+    if (r.write) { const { error: e2 } = await client.from('root_for_baselines').upsert(r.write, { onConflict: 'slate_key' }); if (e2) throw e2; }
+    return { ...r.sweat, slateKey: key };
+  } catch (e) {
+    return { started: null, baseline: null, now: Number(out.ev), error: 'Baseline unavailable' };
+  }
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
   const auth = await requireOwner(req);
@@ -100,8 +115,10 @@ async function handler(req, res) {
     const M = await loadMods();
     const { parlays, fills, singles } = await loadLocks(deps.createClient(url, key, clientOpts), auth.user.id);
     const mk = await loadMarkets(M, parlays, env);
-    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now: deps.now(), kalshiAt: mk.kalshiAt });
-    return json(res, 200, { ok: true, asOf: new Date(deps.now()).toISOString(), relayNote: mk.relayNote, ...out });
+    const now = deps.now();
+    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
+    const sweat = await sweatBaseline(deps.createClient(url, key, clientOpts), out, now);
+    return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, sweat });
   } catch (e) {
     console.error('[root-for]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not compute right now' });
