@@ -21,14 +21,14 @@ assert.equal(e.flagged, true);
 assert.equal(e.bestTraderAmerican, 5782);
 assert.ok(e.offerAmerican >= 6808 && e.offerAmerican < 7708, "offer at fair−X (tick floor favours trader), still under fair");
 assert.ok(e.ev > 0 && e.evPer100 > 0);
-assert.ok(Math.abs(e.maxLoss - 1000 * (1 - e.offerYes)) < 1e-9);
+assert.ok(Math.abs(e.maxLoss - Math.ceil(1000 * (1 - e.offerYes) * 100 - 1e-6) / 100) < 1e-9);
 assert.deepEqual(e.legs, ["LAC ML (LAC @ KC) Oct 18", "TB ML (TB @ CAR) Oct 25"]);
 assert.equal(e.day, "2026-10-15");
 // maker fee lowers EV exactly by k·y(1−y)·n
 const e2 = E.scoreRawEdge(row, { edgeAmerican: 900, makerRate: 0.035 });
-assert.ok(Math.abs((e.ev - e2.ev) - 1000 * 0.035 * e.offerYes * (1 - e.offerYes)) < 1e-9);
+assert.ok(Math.abs((e.ev - e2.ev) - Math.ceil(1000 * 0.035 * e.offerYes * (1 - e.offerYes) * 100 - 1e-6) / 100) < 0.011);
 // not flagged when offer doesn't beat the trader's price
-assert.equal(E.scoreRawEdge({ ...row, traded_yes: E.yesForAllIn(E.probFromAmerican(7000)) }, { edgeAmerican: 900 }).flagged, false);
+assert.equal(E.scoreRawEdge({ ...row, traded_yes: 0.0125 }, { edgeAmerican: 900 }).flagged, false);
 // not flagged when trader got better than fair
 assert.equal(E.scoreRawEdge({ ...row, traded_yes: 0.011 }, { edgeAmerican: 0 }).flagged, false);
 // non-traded / unpriced rows skipped
@@ -69,3 +69,35 @@ assert.deepEqual(E.sortRawEdges(rows, "ev").map((r) => r.rfq_id), ["b", "c", "a"
 assert.deepEqual(E.sortRawEdges(rows, "size").map((r) => r.rfq_id), ["c", "a", "b"]);
 assert.deepEqual(E.sortRawEdges(rows, "margin").map((r) => r.rfq_id), ["c", "a", "b"]);
 console.log("rawParlayEdges tests passed");
+
+// ── Worked example: Oct 16 12:10 AM ET, KXMVECROSSCATEGORY0 (fee_type quadratic → maker fee 0) ──
+// fair +3104, winning MM sold YES at $0.036, 649.35 contracts, offer = fair − 500.
+{
+  const w = E.scoreRawEdge({ outcome: "traded", rfq_id: "0854ba0c", rfq_created_ts: "2026-10-16T04:10:14.458Z",
+    fair_mid_american: 3104, traded_yes: "0.036", traded_contracts: "649.35", contracts: "675.67" }, { edgeAmerican: 500, makerRate: 0 });
+  // taker got: 649.35×0.036 = $23.3766 + fee ceil6(0.07×649.35×0.036×0.964) = $1.577446 → $24.954046 → round up to $24.96
+  assert.equal(w.winningMmAmerican, 2678);
+  assert.equal(w.takerGotCost, 24.96);
+  assert.equal(w.takerGotAmerican, 2502);
+  // target +2604 → YES 0.03459… → Kalshi grid 0.001 → $0.034
+  assert.equal(w.weSellYes, 0.034);
+  // taker gets: $22.0779 + fee $1.492906 = $23.570806 → $23.58 → +2654
+  assert.equal(w.takerGetsCost, 23.58);
+  assert.equal(w.takerGetsAmerican, 2654);
+  // we buy NO: 649.35×0.966 = $627.2721 → $627.28 put up (max loss); receive 649.35 − 627.28 = $22.07 → +2842
+  assert.equal(w.makerFee, 0);
+  assert.equal(w.maxLoss, 627.28);
+  assert.equal(w.weReceive, 22.07);
+  assert.equal(w.weSellAmerican, 2842);
+  // EV = (3104/3204)×649.35 − 627.28 = $1.80 ; per $100 risked = $0.29
+  assert.ok(Math.abs(w.ev - ((3104 / 3204) * 649.35 - 627.28)) < 1e-9);
+  assert.equal(Math.round(w.ev * 100) / 100, 1.80);
+  assert.equal(Math.round(w.evPer100 * 100) / 100, 0.29);
+  assert.equal(w.flagged, true);
+  // grid + rounding helpers
+  assert.equal(E.floorToTick(0.03459), 0.034);
+  assert.equal(E.floorToTick(0.00567), 0.0056);
+  assert.equal(E.buyCostMicros(1, 0.5, 0.07), 520000n); // fee table: 1 @ 50¢ → $0.02
+  assert.equal(E.buyCostMicros(100, 0.5, 0.07) - 50000000n, 1750000n); // 100 @ 50¢ → $1.75
+  assert.equal(E.buyCostMicros(1, 0.5, 0.07, "centicent"), 517500n);
+}

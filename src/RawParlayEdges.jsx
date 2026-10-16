@@ -37,6 +37,17 @@ const SORT_OPTS = [
   { key: SORT_KEYS.size, label: "Size" },
 ];
 
+const TIP = {
+  fair: "Fair odds: each leg's no-vig midpoint across Kalshi and Polymarket, multiplied together.",
+  mm: "The price the winning market maker quoted, before the taker's Kalshi fee.",
+  got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order).",
+  sell: "The price we'd actually receive selling YES on Kalshi's price grid, after our maker fee for this series (currently $0) and Kalshi's rounding. EV is computed from this price.",
+  gets: "What the taker would pay all-in at our quote, after their Kalshi fee and rounding. Must beat 'Taker got' to win the request.",
+  margin: "EV per $100 we put up, from the 'We sell at' price.",
+  ev: "Expected profit on the whole order: chance every leg loses × contracts − what we put up.",
+  loss: "What we put up (exact, rounded): lost if every leg wins.",
+};
+
 export default function RawParlayEdges({ user }) {
   const [days, setDays] = useState(1);
   const [edge, setEdge] = useState(String(DEFAULT_EDGE_AMERICAN));
@@ -67,11 +78,11 @@ export default function RawParlayEdges({ user }) {
 
   if (!canSeeOwnerTools(user)) return null;
   const d = state.data;
-  const thSort = (key, label, className) => (
+  const thSort = (key, label, className, tip) => (
     <th
       className={(className || "") + " sortable" + (sortKey === key ? " on" : "")}
       onClick={() => setSortKey(key)}
-      title={`Sort by ${label} (highest first)`}
+      title={(tip ? tip + " " : "") + `Click to sort by ${label} (highest first).`}
       role="columnheader"
       aria-sort={sortKey === key ? "descending" : "none"}
     >
@@ -107,7 +118,7 @@ export default function RawParlayEdges({ user }) {
       <h2>Combo Sniper <span style={{ fontSize: 12, color: "#fbbf24" }}>Preview · only you</span></h2>
       <div className="sub">
         Ranked Kalshi parlay requests we could have filled +EV — traders paid well worse than fair. Selling raw at the
-        suggested offer is +EV with no promo, but unhedged: you carry the full max loss if every leg wins. Read-only, nothing is quoted.
+        "We sell at" price is +EV with no promo, but unhedged: you carry the full max loss if every leg wins. Read-only, nothing is quoted.
       </div>
       <div className="bar">
         {DAY_CHIPS.map((c) => (
@@ -143,11 +154,13 @@ export default function RawParlayEdges({ user }) {
             <thead>
               <tr>
                 <th className="rank">#</th>
-                <th>Time (ET)</th><th>Legs</th><th className="num">Fair</th><th className="num">Best trader price</th>
-                <th className="num">Suggested offer</th>
-                {thSort(SORT_KEYS.margin, "EV / $100 risked", "num")}
-                {thSort(SORT_KEYS.ev, "EV", "num")}
-                <th className="num">Max loss</th>
+                <th>Time (ET)</th><th>Legs</th><th className="num" title={TIP.fair}>Fair</th><th className="num" title={TIP.mm}>Winning MM quote</th>
+                <th className="num" title={TIP.got}>Taker got (after fee)</th>
+                <th className="num" title={TIP.sell}>We sell at</th>
+                <th className="num" title={TIP.gets}>Taker gets</th>
+                {thSort(SORT_KEYS.margin, "EV / $100 risked", "num", TIP.margin)}
+                {thSort(SORT_KEYS.ev, "EV", "num", TIP.ev)}
+                <th className="num" title={TIP.loss}>Max loss</th>
                 {thSort(SORT_KEYS.size, "Size", "num")}
                 <th></th>
               </tr>
@@ -159,8 +172,10 @@ export default function RawParlayEdges({ user }) {
                   <td style={{ whiteSpace: "nowrap" }}>{etTime(e.ts)}</td>
                   <td className="legs">{e.legs.map((l, j) => <div key={j}>{l}</div>)}</td>
                   <td className="num fair">{fmtAmerican(e.fairAmerican)}</td>
-                  <td className="num">{fmtAmerican(e.bestTraderAmerican)}</td>
-                  <td className="num">{fmtAmerican(e.offerAmerican)}</td>
+                  <td className="num" title={`Maker sold YES at $${e.winningMmYes}`}>{fmtAmerican(e.winningMmAmerican)}</td>
+                  <td className="num" title={`Taker paid ${usd(e.takerGotCost)} for ${e.contracts} contracts, fee included`}>{fmtAmerican(e.takerGotAmerican)}</td>
+                  <td className="num pos" title={`We sell YES at $${e.weSellYes}: receive ${usd(e.weReceive)}, put up ${usd(e.maxLoss)}${e.makerFee ? `, maker fee ${usd(e.makerFee)}` : ", no maker fee"}`}>{fmtAmerican(e.weSellAmerican)}</td>
+                  <td className="num" title={`Taker would pay ${usd(e.takerGetsCost)} for ${e.contracts} contracts, fee included`}>{fmtAmerican(e.takerGetsAmerican)}</td>
                   <td className="num pos">{usd(e.evPer100)}</td>
                   <td className="num pos">{usd(e.ev)}</td>
                   <td className="num neg">{usd(e.maxLoss)}</td>
