@@ -46,12 +46,15 @@ console.log("rootForSimple tests ok");
   console.log("curve ok");
 }
 {
-  const S = await import("./rootForSimple.js");
-  const h = { bins: [{ from: -100, to: 0, p: 0.5 }, { from: 0, to: 100, p: 0.5 }] };
-  const z = S.sdZones(h, 0, 40, { pnl: -100 });
-  assert.equal(z.length, 6); assert.ok(Math.abs(z.reduce((a, x) => a + x.p, 0) - 1) < 1e-9);
-  assert.equal(z[0].p, 0.1); assert.equal(z[2].p, 0.2);
-  const z2 = S.sdZones(h, 50, 200, { pnl: -100 });
-  assert.ok(z2[0].belowWorst && z2[1].belowWorst && z2[0].p === 0);
-  console.log("sdZones ok");
+  const { curveCaption } = await import("./rootForSimple.js");
+  assert.equal(curveCaption(0.54, 2600), "You'll lose a little more often than not, but the big wins more than make up for it.");
+  assert.match(curveCaption(0.4, 100), /win more often than not/);
+  assert.match(curveCaption(0.6, -100), /^Expect to lose on average/);
+  console.log("caption ok");
+}
+{
+  const { lossWinSplit } = await import("./rootForSimple.js");
+  const s = lossWinSplit({ bins: [{ from: -100, to: 0, p: 0.5 }, { from: 0, to: 100, p: 0.5 }] }, 10, 0.5);
+  assert.equal(s.avgLoss, -50); assert.equal(s.avgWin, 70); assert.ok(Math.abs(s.lossArea + s.winArea - 10) < 1e-9);
+  console.log("split ok");
 }

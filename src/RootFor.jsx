@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
+import EvBars from "./RootForEvBars";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -74,7 +75,8 @@ function Simple({ d, nightmare }) {
           <div style={{ marginTop: 8 }}>Chance you finish ahead: <b>{chanceWords(d.pProfit)}</b> <span className="sub">· odds {fmtAmerican(americanFromP(d.pProfit))} ({pct(d.pProfit, 0)})</span></div>
         </div>
       </div>
-      <h4>How the weekend could go</h4>
+      <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
+      <h4>How likely each result is</h4>
       <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
       <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
     </div>
@@ -219,7 +221,8 @@ export default function RootFor({ user, initialData = null }) {
             <div className="tile"><span>Chance of a profit</span><b>{pct(d.pProfit, 1)}</b><span>{d.exact && d.exact.pProfit === false ? "simulated" : "exact"}</span></div>
           </div>
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
-          <h4>P&L distribution{whatIf ? " (what-if)" : ""}</h4>
+          <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
+          <h4>How likely each result is{whatIf ? " (what-if)" : ""}</h4>
           <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>

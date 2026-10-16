@@ -148,16 +148,30 @@ export function curveModel(hist, { worst = null, cap = 0.99, points = 160 } = {}
   return { xs, ys, xMin, xMax, spike, beyond: Math.max(0, 1 - cdfAt(hist, xMax)) };
 }
 
-// Empirical chance in each ±1/±2 SD zone around expected profit (from the simulated histogram, not a normal curve).
-export function sdZones(hist, ev, sd, worst = null) {
-  if (!hist || !hist.bins || !hist.bins.length || !(sd > 0)) return [];
-  const lo = worst && Number.isFinite(worst.pnl) ? worst.pnl : hist.bins[0].from;
-  const cuts = [-Infinity, ev - 2 * sd, ev - sd, ev, ev + sd, ev + 2 * sd, Infinity];
-  const names = ["Below −2 SD", "−2 SD to −1 SD", "−1 SD to average", "Average to +1 SD", "+1 SD to +2 SD", "Above +2 SD"];
-  const c = (v) => (v === -Infinity ? 0 : v === Infinity ? 1 : cdfAt(hist, v));
-  return names.map((name, i) => {
-    const a = cuts[i], b = cuts[i + 1];
-    const p = Math.max(0, c(b) - c(a));
-    return { name, from: a, to: b, p, belowWorst: b < lo - 0.5, holdsWorst: a <= lo && b > lo };
-  });
+// One plain sentence describing the shape of the weekend.
+export function curveCaption(pLoss, ev) {
+  if (!Number.isFinite(pLoss) || !Number.isFinite(ev)) return "";
+  if (ev < 0) return pLoss > 0.5 ? "Expect to lose on average: losing weekends are more common, and the wins don't make up for them." : "You'll win more often than not, but the losses are bigger, so you expect to lose on average.";
+  if (pLoss > 0.5) return "You'll lose a little more often than not, but the big wins more than make up for it.";
+  return "You'll win more often than not, and you expect to come out ahead.";
+}
+
+// Average loss when you lose and average win when you win (from the sim). The win average is backed out of
+// the exact expected profit so that pLoss·avgLoss + pWin·avgWin = EV exactly (the histogram folds its far tail).
+export function lossWinSplit(hist, ev, pLoss, worst = null) {
+  if (!hist || !hist.bins || !hist.bins.length || !Number.isFinite(ev)) return null;
+  let mass = 0, sum = 0;
+  const bins = hist.bins.map((b) => ({ ...b }));
+  if (worst && worst.p > 0 && worst.pnl < 0 && worst.pnl >= bins[0].from - 1 && worst.pnl <= bins[0].to) {
+    const p = Math.min(worst.p, bins[0].p); mass += p; sum += p * worst.pnl; bins[0].p -= p;
+  }
+  for (const b of bins) {
+    if (b.from >= 0 || !(b.p > 0)) continue;
+    const hi = Math.min(0, b.to); const f = (hi - b.from) / (b.to - b.from || 1);
+    mass += b.p * f; sum += b.p * f * (b.from + hi) / 2;
+  }
+  const pL = Number.isFinite(pLoss) ? pLoss : mass; const pW = 1 - pL;
+  const avgLoss = mass > 0 ? sum / mass : 0;
+  const avgWin = pW > 0 ? (ev - pL * avgLoss) / pW : 0;
+  return { pLoss: pL, pWin: pW, avgLoss, avgWin, lossArea: pL * avgLoss, winArea: pW * avgWin };
 }
