@@ -61,7 +61,6 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
           <line x1={x(ev)} x2={x(ev)} y1={top - 2} y2={top + plotH} stroke="#f59e0b" strokeWidth="1.5" />
           <text x={x(ev) + 4} y={32} fill="#fbbf24" fontSize="11" fontWeight="700">Expected {money(ev)}</text>
         </g>}
-        <text x={W - padR} y={14} fill="#6ee7b7" fontSize="12" fontWeight="700" textAnchor="end">Make money: {pc(1 - pLoss)}</text>
         <text x={padL} y={14} fill="#fca5a5" fontSize="12" fontWeight="700">Lose money: {pc(pLoss)}</text>
         <line x1={padL} x2={W - padR} y1={top + plotH} y2={top + plotH} stroke="#374151" />
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}
