@@ -4,7 +4,12 @@
 // Kalshi parlay RFQs where the best price traders paid was well worse than fair.
 // Never quotes, confirms, or trades anything.
 //
-// GET ?days=1..7&edge=<American X>&minCost=<$>&market=all|ml|td  →
+// GET ?days=1..7&edge=<American X>&minCost=<$>&market=all|ml|td&fair=kalshi|pm|promo&venue=all|kalshi|polymarket  →
+//   venue: Kalshi and Polymarket US parlay RFQs (venue column; Polymarket rows use the Poly combo fee / tick math).
+//   fair=kalshi (default): Kalshi mid. fair=promo: moneyline legs use the Promo / boost inverse-bet fair the noboost logger
+//   stores (fair_promo_best_american: Π (1 − implied(best guarded opposing price across trusted
+//   books + exchanges)), from odds_cache). Rows whose sportsbook data is older than
+//   PROMO_MAX_AGE_MS are skipped. TD legs keep their $500 Yes/No devig fair. fair=kalshi: old Kalshi mid.
 //   { ok, makerRate, series, edges: [...top 200 by EV], days: [{ day, count, ev, maxLoss }], scanned }
 'use strict';
 
@@ -29,10 +34,12 @@ function defaultCreateClient(...args) {
 const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now() });
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
-const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,traded_yes,traded_contracts,outcome';
+const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,fair_promo_best_american,promo_max_age_ms,fair_pm_inverse_american,traded_yes,traded_contracts,outcome,venue,legs_kalshi,poly_tick_size';
 const PAGE = 1000;
 const MAX_ROWS = 60000;
 const MAX_RETURN = 200;
+// odds_cache is refreshed by a 5-minute cron; allow one missed tick of slack.
+const PROMO_MAX_AGE_MS = 6 * 60 * 1000;
 
 function json(res, status, body) {
   res.setHeader('Cache-Control', 'no-store');
@@ -59,7 +66,10 @@ function parseOpts(q) {
   const edge = Math.min(100000, Math.max(0, num(q.edge, 500)));
   const minCost = Math.max(0, num(q.minCost, 0));
   const market = ['all', 'ml', 'td'].includes(String(q.market || '')) ? String(q.market) : 'all';
-  return { days, edge, minCost, market };
+  // Default stays the Kalshi mid fair (what prod showed before); PM live inverse / Promo are opt-in.
+  const fair = ['kalshi', 'promo', 'pm'].includes(String(q.fair || '')) ? String(q.fair) : 'kalshi';
+  const venue = ['all', 'kalshi', 'polymarket'].includes(String(q.venue || '')) ? String(q.venue) : 'all';
+  return { days, edge, minCost, market, fair, venue };
 }
 
 /** Start of the ET day `days-1` days ago, as ISO. */
@@ -70,13 +80,17 @@ function sinceIso(nowMs, days) {
   return new Date(start.getTime() + offsetMs).toISOString();
 }
 
-async function fetchRows(client, since, minCost) {
+const FAIR_COL = { kalshi: 'fair_mid_american', promo: 'fair_promo_best_american', pm: 'fair_pm_inverse_american' };
+async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all' } = {}) {
   const out = [];
   for (let from = 0; from < MAX_ROWS; from += PAGE) {
     let q = client.from('noboost_paper_rfqs').select(COLS)
       .eq('outcome', 'traded')
-      .not('fair_mid_american', 'is', null)
       .gte('rfq_created_ts', since);
+    // Kalshi-mid fair needs fair_mid_american; other fairs are checked per row (TD legs fall back to the mid devig).
+    if (fair === 'kalshi') q = q.not(FAIR_COL.kalshi, 'is', null);
+    else q = q.or(`${FAIR_COL[fair]}.not.is.null,fair_mid_american.not.is.null`);
+    if (venue !== 'all') q = q.eq('venue', venue);
     if (minCost > 0) q = q.gte('rfq_target_cost', minCost);
     const { data, error } = await q.order('rfq_created_ts', { ascending: false }).range(from, from + PAGE - 1);
     if (error) throw error;
@@ -84,6 +98,20 @@ async function fetchRows(client, since, minCost) {
     if (!data || data.length < PAGE) break;
   }
   return out;
+}
+
+/** Row with fair_mid_american set to the chosen fair source, or null if that fair is missing/stale. */
+function fairRow(r, fair, E) {
+  if (fair === 'kalshi') return r;
+  if (E.marketOf(E.canonicalLegs(r)) === 'td') return r; // TD legs: $500 Yes/No devig (no sportsbook TD fair in the logger yet)
+  if (fair === 'pm') {
+    // PM live inverse: Kalshi / Polymarket US / Novig / ProphetX live books, $500 depth, every source <15s (logger-enforced)
+    if (r.fair_pm_inverse_american == null) return null;
+    return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_pm_inverse_american };
+  }
+  if (r.fair_promo_best_american == null) return null;
+  if (!(Number(r.promo_max_age_ms) <= PROMO_MAX_AGE_MS)) return null;
+  return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_promo_best_american };
 }
 
 async function handler(req, res) {
@@ -97,9 +125,9 @@ async function handler(req, res) {
   try {
     const { edgesMod: E, buyerOdds: B, riskMod: R } = await mods();
     const opts = parseOpts(req.query || {});
-    const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost);
+    const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost, opts);
     // Exact maker rate per series (Kalshi GET /series fee_type × multiplier).
-    const seriesList = [...new Set(rows.map((r) => B.seriesOfTicker(r.market_ticker)).filter(Boolean))];
+    const seriesList = [...new Set(rows.filter((r) => r.venue !== 'polymarket').map((r) => B.seriesOfTicker(r.market_ticker)).filter(Boolean))];
     const rates = {};
     await Promise.all(seriesList.map(async (s) => {
       let v = null;
@@ -107,17 +135,23 @@ async function handler(req, res) {
       rates[s] = { rate: v ? B.makerRateFromSeries(v.fee_type, v.fee_multiplier) : B.FALLBACK_MAKER_RATE, fee_type: v ? v.fee_type : null, known: !!v };
     }));
     const edges = [];
-    for (const r of rows) {
-      const s = B.seriesOfTicker(r.market_ticker);
-      const makerRate = s && rates[s] ? rates[s].rate : B.FALLBACK_MAKER_RATE;
+    let staleSkipped = 0;
+    const priced = [];
+    for (const r0 of rows) {
+      const r = fairRow(r0, opts.fair, E);
+      if (!r) { staleSkipped += 1; continue; }
+      priced.push(r);
+      const s = r.venue === 'polymarket' ? null : B.seriesOfTicker(r.market_ticker);
+      const makerRate = r.venue === 'polymarket' ? 0 : (s && rates[s] ? rates[s].rate : B.FALLBACK_MAKER_RATE);
       const e = E.scoreRawEdge(r, { edgeAmerican: opts.edge, makerRate });
-      if (e && e.flagged && E.matchesMarket(e, opts.market)) edges.push(e);
+      if (e) e.kalshiFairAmerican = r.fair_kalshi_american != null ? Number(r.fair_kalshi_american) : null;
+      if (e && e.flagged && E.matchesMarket(e, opts.market) && E.matchesVenue(e, opts.venue)) edges.push(e);
     }
     const days = E.summarizeByDay(edges);
     // Portfolio risk if we'd filled every flagged row: exact worst/best case across shared legs and
     // opposite sides of one game. Per-game fair probs fitted from that day's parlay fairs.
     const rowsByDay = new Map();
-    for (const r of rows) { const k = E.etDayKey(r.rfq_created_ts); if (!rowsByDay.has(k)) rowsByDay.set(k, []); rowsByDay.get(k).push({ legs: r.legs, fairProb: E.probFromAmerican(r.fair_mid_american) }); }
+    for (const r of priced) { const k = E.etDayKey(r.rfq_created_ts); if (!rowsByDay.has(k)) rowsByDay.set(k, []); rowsByDay.get(k).push({ legs: E.canonicalLegs(r), fairProb: E.probFromAmerican(r.fair_mid_american) }); }
     const merged = {};
     for (const d of [...days].reverse()) { // oldest → newest, so newest fit wins in `merged`
       const probs = R.fitEventProbs(rowsByDay.get(d.day) || []);
@@ -128,7 +162,7 @@ async function handler(req, res) {
     const total = edges.length ? R.portfolioRisk(E.toRiskPositions(edges), { eventProbs: merged }) : null;
     if (total) delete total.worstOutcome;
     edges.sort((a, b) => b.ev - a.ev);
-    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: edges.slice(0, MAX_RETURN).map(({ legsRaw, ...e }) => e), total: edges.length });
+    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, staleSkipped, fairSource: opts.fair, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: edges.slice(0, MAX_RETURN).map(({ legsRaw, ...e }) => e), total: edges.length });
   } catch (e) {
     console.error('[raw-parlay-edges]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Something went wrong' });

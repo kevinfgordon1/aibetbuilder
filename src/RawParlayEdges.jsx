@@ -25,6 +25,7 @@ function supabase() {
 }
 
 const usd = (n) => (n == null || !Number.isFinite(Number(n)) ? "—" : (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const VENUE_CHIPS = [{ v: "all", label: "All venues" }, { v: "kalshi", label: "Kalshi" }, { v: "polymarket", label: "Polymarket" }];
 const MARKET_CHIPS = [{ v: "all", label: "All" }, { v: "ml", label: "Moneylines" }, { v: "td", label: "Player TDs" }];
 const DAY_CHIPS = [{ v: 1, label: "Today" }, { v: 3, label: "3 days" }, { v: 7, label: "7 days" }];
 const dayLabel = (k) => {
@@ -39,11 +40,11 @@ const SORT_OPTS = [
 ];
 
 const TIP = {
-  fair: "Fair odds, legs multiplied together. Moneyline legs: no-vig midpoint across Kalshi and Polymarket. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included); a leg without $500 of depth or a fresh book is skipped.",
-  mm: "The price the winning market maker quoted, before the taker's Kalshi fee.",
-  got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order).",
-  sell: "The price we'd actually receive selling YES on Kalshi's price grid, after our maker fee for this series (currently $0) and Kalshi's rounding. EV is computed from this price.",
-  gets: "What the taker would pay all-in at our quote, after their Kalshi fee and rounding. Must beat 'Taker got' to win the request.",
+  fair: "Fair odds, legs multiplied together. Moneyline legs, Kalshi mid (default): the Kalshi bid/ask midpoint only. PM live inverse: 1 minus the implied chance of the best opposing price, $500 deep, fees included, from the live Kalshi, Polymarket US, Novig and ProphetX books; any source older than 15 seconds is dropped. Promo: the same inverse-bet true odds as the Promo / boost calculator: 1 minus the implied chance of the best opposing price across the trusted sportsbooks and exchanges in our odds feed, which refreshes about every 5 minutes. Rows whose sportsbook data is over 6 minutes old are skipped. Polymarket requests use the same fairs, with each leg mapped to the same NFL game. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included).",
+  mm: "The price the winning market maker quoted, before the taker's fee. Polymarket: the anonymous RFQ trade print matched to this request.",
+  got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order). Polymarket: combo taker fee contracts × price × (0.0695 × (1 − price) + 0.06 × (1 − price)^4), rounded up to the cent.",
+  sell: "The price we'd actually receive selling YES on the venue's price grid, after our maker fee (Kalshi: series rate, currently $0; Polymarket combos: $0) and rounding. EV is computed from this price.",
+  gets: "What the taker would pay all-in at our quote, after their Kalshi or Polymarket fee and rounding. Must beat 'Taker got' to win the request.",
   margin: "EV per $100 we put up, from the 'We sell at' price.",
   ev: "Expected profit on the whole order: chance every leg loses × contracts − what we put up.",
   loss: "What we put up (exact, rounded): lost if every leg wins.",
@@ -84,6 +85,8 @@ export default function RawParlayEdges({ user }) {
   const [edge, setEdge] = useState(String(DEFAULT_EDGE_AMERICAN));
   const [minCost, setMinCost] = useState("0");
   const [market, setMarket] = useState("all");
+  const [fairSrc, setFairSrc] = useState("kalshi");
+  const [venue, setVenue] = useState("all");
   const [sortKey, setSortKey] = useState(DEFAULT_SORT);
   const [state, setState] = useState({ loading: false, error: null, data: null });
 
@@ -94,7 +97,7 @@ export default function RawParlayEdges({ user }) {
     try {
       const { data: { session } } = await c.auth.getSession();
       if (!session) throw new Error("Sign in required");
-      const qs = new URLSearchParams({ days: String(days), edge: String(Number(edge) || 0), minCost: String(Number(minCost) || 0), market });
+      const qs = new URLSearchParams({ days: String(days), edge: String(Number(edge) || 0), minCost: String(Number(minCost) || 0), market, fair: fairSrc, venue });
       const r = await fetch("/api/raw-parlay-edges?" + qs, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && typeof j.error === "string" && j.error) || `Request failed (${r.status})`);
@@ -102,9 +105,9 @@ export default function RawParlayEdges({ user }) {
     } catch (e) {
       setState({ loading: false, error: String((e && e.message) || e), data: null });
     }
-  }, [days, edge, minCost, market]);
+  }, [days, edge, minCost, market, fairSrc, venue]);
 
-  useEffect(() => { if (canSeeOwnerTools(user)) load(); }, [days, market]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (canSeeOwnerTools(user)) load(); }, [days, market, fairSrc, venue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ranked = useMemo(() => sortRawEdges(state.data && state.data.edges, sortKey), [state.data, sortKey]);
 
@@ -144,6 +147,8 @@ export default function RawParlayEdges({ user }) {
         .raw-edges .pos{color:#4ade80}.raw-edges .neg{color:#f87171}.raw-edges .fair{color:#93c5fd}
         .raw-edges .legs div{white-space:nowrap}
         .raw-edges .legs div.td{color:#fbbf24}
+        .raw-edges .vtag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;margin-bottom:2px}
+        .raw-edges .vtag.kalshi{background:rgba(16,185,129,.15);color:#6ee7b7}.raw-edges .vtag.polymarket{background:rgba(59,130,246,.18);color:#93c5fd}
         .raw-edges .tiles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
         .raw-edges .tile{border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 12px;min-width:150px}
         .raw-edges .tile b{display:block;font-size:15px}
@@ -151,7 +156,7 @@ export default function RawParlayEdges({ user }) {
       `}</style>
       <h2>Combo Sniper <span style={{ fontSize: 12, color: "#fbbf24" }}>Preview · only you</span></h2>
       <div className="sub">
-        Ranked Kalshi parlay requests we could have filled +EV — traders paid well worse than fair. Selling raw at the
+        Ranked Kalshi and Polymarket parlay requests we could have filled +EV — traders paid well worse than fair. Selling raw at the
         "We sell at" price is +EV with no promo, but unhedged: you carry the full max loss if every leg wins. Read-only, nothing is quoted.
       </div>
       <div className="bar">
@@ -162,6 +167,17 @@ export default function RawParlayEdges({ user }) {
         {MARKET_CHIPS.map((c) => (
           <button key={c.v} type="button" className={"chip" + (market === c.v ? " on" : "")} onClick={() => setMarket(c.v)}>{c.label}</button>
         ))}
+        <span style={{ width: 8 }} />
+        {VENUE_CHIPS.map((c) => (
+          <button key={c.v} type="button" className={"chip" + (venue === c.v ? " on" : "")} onClick={() => setVenue(c.v)}>{c.label}</button>
+        ))}
+        <label title={TIP.fair}>Fair{" "}
+          <select aria-label="Fair source" value={fairSrc} onChange={(e) => setFairSrc(e.target.value)}>
+            <option value="kalshi">Kalshi mid</option>
+            <option value="pm">PM live inverse</option>
+            <option value="promo">Promo (odds feed, 5 min)</option>
+          </select>
+        </label>
         <label>Offer = fair minus <input aria-label="Edge in American odds" inputMode="numeric" value={edge} onChange={(e) => setEdge(e.target.value)} /></label>
         <label>Min request $ <input aria-label="Minimum request size" inputMode="decimal" value={minCost} onChange={(e) => setMinCost(e.target.value)} /></label>
         <label>Sort by{" "}
@@ -215,8 +231,8 @@ export default function RawParlayEdges({ user }) {
                 <tr key={e.rfq_id}>
                   <td className="rank">{i + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{etTime(e.ts)}</td>
-                  <td className="legs">{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</td>
-                  <td className="num fair">{fmtAmerican(e.fairAmerican)}</td>
+                  <td className="legs"><span className={"vtag " + (e.venue || "kalshi")}>{e.venue === "polymarket" ? "Polymarket" : "Kalshi"}</span>{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</td>
+                  <td className="num fair" title={e.kalshiFairAmerican != null ? `Kalshi-only fair ${fmtAmerican(e.kalshiFairAmerican)}` : undefined}>{fmtAmerican(e.fairAmerican)}</td>
                   <td className="num" title={`Maker sold YES at $${e.winningMmYes}`}>{fmtAmerican(e.winningMmAmerican)}</td>
                   <td className="num" title={`Taker paid ${usd(e.takerGotCost)} for ${e.contracts} contracts, fee included`}>{fmtAmerican(e.takerGotAmerican)}</td>
                   <td className="num pos" title={`We sell YES at $${e.weSellYes}: receive ${usd(e.weReceive)}, put up ${usd(e.maxLoss)}${e.makerFee ? `, maker fee ${usd(e.makerFee)}` : ", no maker fee"}`}>{fmtAmerican(e.weSellAmerican)}</td>
