@@ -6,7 +6,7 @@
 //
 // GET ?days=1..7&edge=<American X>&minCost=<$>&market=all|ml|td&fair=kalshi|pm|promo&venue=all|kalshi|polymarket  →
 //   venue: Kalshi and Polymarket US parlay RFQs (venue column; Polymarket rows use the Poly combo fee / tick math).
-//   fair=kalshi (default): Kalshi mid. fair=promo: moneyline legs use the Promo / boost inverse-bet fair the noboost logger
+//   fair=pm (default): inverse bet (live). fair=kalshi: Kalshi mid. fair=promo: moneyline legs use the Promo / boost inverse-bet fair the noboost logger
 //   stores (fair_promo_best_american: Π (1 − implied(best guarded opposing price across trusted
 //   books + exchanges)), from odds_cache). Rows whose sportsbook data is older than
 //   PROMO_MAX_AGE_MS are skipped. TD legs keep their $500 Yes/No devig fair. fair=kalshi: old Kalshi mid.
@@ -66,8 +66,8 @@ function parseOpts(q) {
   const edge = Math.min(100000, Math.max(0, num(q.edge, 500)));
   const minCost = Math.max(0, num(q.minCost, 0));
   const market = ['all', 'ml', 'td'].includes(String(q.market || '')) ? String(q.market) : 'all';
-  // Default stays the Kalshi mid fair (what prod showed before); PM live inverse / Promo are opt-in.
-  const fair = ['kalshi', 'promo', 'pm'].includes(String(q.fair || '')) ? String(q.fair) : 'kalshi';
+  // Default = Kevin's inverse bet method, live (PM live inverse); Kalshi mid / Promo are options.
+  const fair = ['kalshi', 'promo', 'pm'].includes(String(q.fair || '')) ? String(q.fair) : 'pm';
   const venue = ['all', 'kalshi', 'polymarket'].includes(String(q.venue || '')) ? String(q.venue) : 'all';
   return { days, edge, minCost, market, fair, venue };
 }
