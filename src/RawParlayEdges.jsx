@@ -47,6 +47,36 @@ const TIP = {
   ev: "Expected profit on the whole order: chance every leg loses × contracts − what we put up.",
   loss: "What we put up (exact, rounded): lost if every leg wins.",
 };
+const ASSUME = "Assumes we'd have filled every flagged row in this set.";
+const RISK_TIP = {
+  handle: "Handle: total the takers would stake with us (their all-in cost at our price). " + ASSUME,
+  sum: "Sum of max losses: each parlay's max loss added up, as if every one could hit at once. Overstates risk when parlays share games. " + ASSUME,
+  worst: "True worst case: our net P&L in the single worst combination of game results — we lose payout minus premium on parlays that hit and keep the premium on the ones that miss. Opposite teams in one game can't both win; shared legs counted once. Solved exactly (not sampled). Ties ignored. Chance uses fair per-game win probabilities fitted from that day's parlay fairs, independent across games. " + ASSUME,
+  best: "Best case: our P&L in the most favorable combination of results (usually: every parlay misses, keep all premium). " + ASSUME,
+  ev: "EV doesn't change with correlation — it's just the sum of each row's EV. ± is the exact standard deviation of the day's P&L, including correlation from shared games. P&L is very skewed for long-shot parlays (many small wins, rare big losses), so the 2 SD range is not symmetric in likelihood. " + ASSUME,
+};
+const pct = (p) => {
+  if (p == null || !Number.isFinite(p)) return "—";
+  const v = p * 100;
+  if (v === 0) return "0%";
+  if (v < 0.01) return "<0.01%";
+  return (v < 1 ? v.toFixed(2) : v < 10 ? v.toFixed(1) : v.toFixed(0)) + "%";
+};
+function RiskLines({ r, ev }) {
+  if (!r) return null;
+  const sd = r.sd;
+  return (
+    <div className="risk">
+      <div title={RISK_TIP.handle}>Handle {usd(r.handle)}</div>
+      <div title={RISK_TIP.sum}>Sum of max losses <span className="neg">{usd(-r.sumMaxLoss)}</span></div>
+      <div title={RISK_TIP.worst}>True worst case {r.worstCase != null ? <span className="neg">{usd(r.worstCase)}</span> : "—"}
+        {r.pWorst != null && ` (${pct(r.pWorst)} chance)`}{r.pLoss != null && ` · Chance of losing day: ${pct(r.pLoss)}`}</div>
+      <div title={RISK_TIP.best}>Best case {r.bestCase != null ? <span className="pos">{usd(r.bestCase)}</span> : "—"}</div>
+      <div title={RISK_TIP.ev}><span className={ev >= 0 ? "pos" : "neg"}>EV {usd(ev)}</span>{sd != null && ` ± ${usd(sd)} (2 SD range: ${usd(ev - 2 * sd)} to ${usd(ev + 2 * sd)})`}</div>
+      {r.note && <div className="note">{r.note}</div>}
+    </div>
+  );
+}
 
 export default function RawParlayEdges({ user }) {
   const [days, setDays] = useState(1);
@@ -114,6 +144,7 @@ export default function RawParlayEdges({ user }) {
         .raw-edges .tiles{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
         .raw-edges .tile{border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 12px;min-width:150px}
         .raw-edges .tile b{display:block;font-size:15px}
+        .raw-edges .risk div{white-space:nowrap;cursor:help}.raw-edges .risk .note{color:#fbbf24;white-space:normal;max-width:320px}
       `}</style>
       <h2>Combo Sniper <span style={{ fontSize: 12, color: "#fbbf24" }}>Preview · only you</span></h2>
       <div className="sub">
@@ -141,9 +172,16 @@ export default function RawParlayEdges({ user }) {
               <div className="tile" key={x.day}>
                 <span style={{ color: "#9ca3af" }}>{dayLabel(x.day)}</span>
                 <b>{x.count.toLocaleString()} edges</b>
-                <span className={x.ev >= 0 ? "pos" : "neg"}>EV {usd(x.ev)}</span> · max loss {usd(x.maxLoss)}
+                {x.risk ? <RiskLines r={x.risk} ev={x.ev} /> : <><span className={x.ev >= 0 ? "pos" : "neg"}>EV {usd(x.ev)}</span> · sum of max losses {usd(x.maxLoss)}</>}
               </div>
             ))}
+            {d.risk && d.days.length > 1 && (
+              <div className="tile" key="all">
+                <span style={{ color: "#9ca3af" }}>All shown ({DAY_CHIPS.find((c) => c.v === days)?.label || ""})</span>
+                <b>{d.total.toLocaleString()} edges</b>
+                <RiskLines r={d.risk} ev={d.risk.ev} />
+              </div>
+            )}
             {!d.days.length && <div className="tile">No edges in this window</div>}
           </div>
           <div className="sub">

@@ -13,11 +13,13 @@ const seriesFee = require('./kalshi-series-fee');
 
 let edgesMod = null;
 let buyerOdds = null;
+let riskMod = null;
 async function mods() {
   // src/*.js are ESM; dynamic import from this CommonJS route (static require throws on Vercel).
   if (!edgesMod) edgesMod = await import('../src/rawParlayEdges.js');
   if (!buyerOdds) buyerOdds = await import('../src/buyerOdds.js');
-  return { edgesMod, buyerOdds };
+  if (!riskMod) riskMod = await import('../src/parlayRisk.js');
+  return { edgesMod, buyerOdds, riskMod };
 }
 
 function defaultCreateClient(...args) {
@@ -92,7 +94,7 @@ async function handler(req, res) {
   const key = env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return json(res, 503, { ok: false, error: 'Server is not configured' });
   try {
-    const { edgesMod: E, buyerOdds: B } = await mods();
+    const { edgesMod: E, buyerOdds: B, riskMod: R } = await mods();
     const opts = parseOpts(req.query || {});
     const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost);
     // Exact maker rate per series (Kalshi GET /series fee_type × multiplier).
@@ -111,8 +113,21 @@ async function handler(req, res) {
       if (e && e.flagged) edges.push(e);
     }
     const days = E.summarizeByDay(edges);
+    // Portfolio risk if we'd filled every flagged row: exact worst/best case across shared legs and
+    // opposite sides of one game. Per-game fair probs fitted from that day's parlay fairs.
+    const rowsByDay = new Map();
+    for (const r of rows) { const k = E.etDayKey(r.rfq_created_ts); if (!rowsByDay.has(k)) rowsByDay.set(k, []); rowsByDay.get(k).push({ legs: r.legs, fairProb: E.probFromAmerican(r.fair_mid_american) }); }
+    const merged = {};
+    for (const d of [...days].reverse()) { // oldest → newest, so newest fit wins in `merged`
+      const probs = R.fitEventProbs(rowsByDay.get(d.day) || []);
+      Object.assign(merged, probs);
+      d.risk = R.portfolioRisk(E.toRiskPositions(edges.filter((e) => e.day === d.day)), { eventProbs: probs });
+      delete d.risk.worstOutcome;
+    }
+    const total = edges.length ? R.portfolioRisk(E.toRiskPositions(edges), { eventProbs: merged }) : null;
+    if (total) delete total.worstOutcome;
     edges.sort((a, b) => b.ev - a.ev);
-    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, truncated: rows.length >= MAX_ROWS, days, edges: edges.slice(0, MAX_RETURN), total: edges.length });
+    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: edges.slice(0, MAX_RETURN).map(({ legsRaw, ...e }) => e), total: edges.length });
   } catch (e) {
     console.error('[raw-parlay-edges]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Something went wrong' });

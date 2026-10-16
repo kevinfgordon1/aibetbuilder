@@ -165,6 +165,8 @@ export function scoreRawEdge(row, { edgeAmerican = DEFAULT_EDGE_AMERICAN, makerR
     day: etDayKey(row.rfq_created_ts || row.created_at),
     ticker: row.market_ticker,
     legs: (Array.isArray(row.legs) ? row.legs : []).map(legLabel),
+    legsRaw: Array.isArray(row.legs) ? row.legs : [],
+    handle: takerGetsCost, // taker's all-in stake we'd accept
     nLegs: row.n_legs || (Array.isArray(row.legs) ? row.legs.length : null),
     fairAmerican: Number(row.fair_mid_american),
     winningMmAmerican: americanFromProb(yT), // maker's quote, before the taker's fee
@@ -204,8 +206,8 @@ export function summarizeByDay(edges) {
   const m = new Map();
   for (const e of edges || []) {
     const k = e.day || "unknown";
-    const d = m.get(k) || { day: k, count: 0, ev: 0, maxLoss: 0 };
-    d.count += 1; d.ev += e.ev; d.maxLoss += e.maxLoss;
+    const d = m.get(k) || { day: k, count: 0, ev: 0, maxLoss: 0, handle: 0 };
+    d.count += 1; d.ev += e.ev; d.maxLoss += e.maxLoss; d.handle += Number(e.handle) || 0;
     m.set(k, d);
   }
   return [...m.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
@@ -236,3 +238,6 @@ export function sortRawEdges(edges, key = DEFAULT_SORT) {
     return String(b.ts || "").localeCompare(String(a.ts || ""));
   });
 }
+
+/** Positions for parlayRisk from scored edges. */
+export const toRiskPositions = (edges) => (edges || []).map((e) => ({ legs: e.legsRaw || [], contracts: e.contracts, keep: e.weReceive, handle: e.handle, ev: e.ev }));
