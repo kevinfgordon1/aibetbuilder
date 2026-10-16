@@ -36,7 +36,9 @@ let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
 const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,fair_promo_best_american,promo_max_age_ms,fair_pm_inverse_american,traded_yes,traded_contracts,outcome,venue,legs_kalshi,poly_tick_size';
 const PAGE = 1000;
-const MAX_ROWS = 60000;
+const MAX_ROWS = 400000;
+const SNIPER_TABLE = 'combo_sniper_traded';
+const PASS_COL = { kalshi: 'pass_kalshi', pm: 'pass_pm', promo: 'pass_promo' };
 const MAX_RETURN = 200;
 // odds_cache is refreshed by a 5-minute cron; allow one missed tick of slack.
 const PROMO_MAX_AGE_MS = 6 * 60 * 1000;
@@ -81,21 +83,21 @@ function sinceIso(nowMs, days) {
 }
 
 const FAIR_COL = { kalshi: 'fair_mid_american', promo: 'fair_promo_best_american', pm: 'fair_pm_inverse_american' };
-// Keyset paging on rfq_created_ts (not OFFSET): each page is an index range scan on
-// noboost_paper_rfqs_traded_created_idx (partial, outcome='traded'). OFFSET paging re-scanned every
-// earlier page and hit Postgres' statement timeout once Polymarket volume grew the table.
-async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all' } = {}) {
+// Reads combo_sniper_traded: a trigger-synced narrow copy of traded noboost_paper_rfqs rows with a per-fair
+// prefilter flag (pass_kalshi / pass_pm / pass_promo = traded_yes > P(fair) − 0.001). A row can only be flagged
+// when traded_yes > P(fair) (flag needs y < traded_yes and ev > 0 ⇒ y > P), so the prefilter drops nothing that
+// scoreRawEdge would flag. The window is split into time slices fetched in parallel, each keyset-paged.
+const SLICES = 12;
+const SLICE_CONCURRENCY = 6;
+async function fetchSlice(client, lo, hi, minCost, { fair, venue }) {
   const out = [];
   const seen = new Set();
   let before = null;
-  while (out.length < MAX_ROWS) {
-    let q = client.from('noboost_paper_rfqs').select(COLS)
-      .eq('outcome', 'traded')
-      .gte('rfq_created_ts', since);
-    if (before) q = q.lte('rfq_created_ts', before);
-    // Kalshi-mid fair needs fair_mid_american; other fairs are checked per row (TD legs fall back to the mid devig).
-    if (fair === 'kalshi') q = q.not(FAIR_COL.kalshi, 'is', null);
-    else q = q.or(`${FAIR_COL[fair]}.not.is.null,fair_mid_american.not.is.null`);
+  for (;;) {
+    let q = client.from(SNIPER_TABLE).select(COLS)
+      .eq(PASS_COL[fair] || PASS_COL.kalshi, true)
+      .gte('rfq_created_ts', lo);
+    q = before ? q.lte('rfq_created_ts', before) : q.lt('rfq_created_ts', hi);
     if (venue !== 'all') q = q.eq('venue', venue);
     if (minCost > 0) q = q.gte('rfq_target_cost', minCost);
     const { data, error } = await q.order('rfq_created_ts', { ascending: false }).limit(PAGE);
@@ -104,6 +106,7 @@ async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all
     let added = 0;
     for (const r of rows) {
       if (r == null || seen.has(r.rfq_id)) continue;
+      if (before && !(r.rfq_created_ts < hi)) continue;
       seen.add(r.rfq_id); out.push(r); added++;
     }
     if (rows.length < PAGE || added === 0) break;
@@ -111,6 +114,20 @@ async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all
     if (!last || last === before) break;
     before = last; // lte + rfq_id dedupe keeps rows that share the boundary timestamp
   }
+  return out;
+}
+async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all' } = {}, nowMs = Date.now()) {
+  const t0 = Date.parse(since), t1 = nowMs + 60000;
+  const step = Math.max(1, Math.ceil((t1 - t0) / SLICES));
+  const bounds = [];
+  for (let t = t0; t < t1; t += step) bounds.push([new Date(t).toISOString(), new Date(Math.min(t + step, t1)).toISOString()]);
+  const results = new Array(bounds.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(SLICE_CONCURRENCY, bounds.length) }, async () => {
+    while (next < bounds.length) { const i = next++; results[i] = await fetchSlice(client, bounds[i][0], bounds[i][1], minCost, { fair, venue }); }
+  }));
+  const out = [];
+  for (let i = results.length - 1; i >= 0; i--) out.push(...results[i]); // newest slice first
   return out.slice(0, MAX_ROWS);
 }
 
@@ -145,7 +162,7 @@ async function handler(req, res) {
   try {
     const { edgesMod: E, buyerOdds: B, riskMod: R } = await mods();
     const opts = parseOpts(req.query || {});
-    const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost, opts);
+    const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost, opts, deps.now());
     // Exact maker rate per series (Kalshi GET /series fee_type × multiplier).
     const seriesList = [...new Set(rows.filter((r) => r.venue !== 'polymarket').map((r) => B.seriesOfTicker(r.market_ticker)).filter(Boolean))];
     const rates = {};
