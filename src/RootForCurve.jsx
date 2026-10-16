@@ -1,6 +1,6 @@
 // Smoothed P&L curve for "What to root for": red below $0, green above, worst-case lump, markers, hover.
 import React, { useEffect, useRef, useState } from "react";
-import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney, americanFromP, fmtAmerican } from "./rootForSimple";
+import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney } from "./rootForSimple";
 
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const pc = (p) => (p * 100 < 1 && p > 0 ? "<1%" : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`);
@@ -51,7 +51,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         <path d={line} fill="none" stroke="#e5e7eb" strokeOpacity=".55" strokeWidth="1.5" />
         {sp && <g>
           <rect x={spX} y={top} width={7} height={plotH} rx={2} fill="#991b1b"><title>{`Worst case ${money(sp.x)}: ${pc(sp.p)} chance`}</title></rect>
-          <text x={spX} y={49} fill="#fca5a5" fontSize="11"><tspan fontWeight="700">▌Worst case {money(sp.x)}</tspan> · {pc(sp.p)} chance ({fmtAmerican(americanFromP(sp.p))})</text>
+          <text x={spX} y={49} fill="#fca5a5" fontSize="11"><tspan fontWeight="700">▌Worst case {money(sp.x)}</tspan> · {pc(sp.p)} chance</text>
         </g>}
         {m.xMin < 0 && m.xMax > 0 && <g>
           <line x1={z} x2={z} y1={top - 2} y2={top + plotH} stroke="#e5e7eb" strokeDasharray="3 3" />
@@ -61,8 +61,8 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
           <line x1={x(ev)} x2={x(ev)} y1={top - 2} y2={top + plotH} stroke="#f59e0b" strokeWidth="1.5" />
           <text x={x(ev) + 4} y={32} fill="#fbbf24" fontSize="11" fontWeight="700">Expected {money(ev)}</text>
         </g>}
-        <text x={W - padR} y={14} fill="#6ee7b7" fontSize="12" fontWeight="700" textAnchor="end">Make money: {pc(1 - pLoss)} ({fmtAmerican(americanFromP(1 - pLoss))})</text>
-        <text x={padL} y={14} fill="#fca5a5" fontSize="12" fontWeight="700">Lose money: {pc(pLoss)} ({fmtAmerican(americanFromP(pLoss))})</text>
+        <text x={W - padR} y={14} fill="#6ee7b7" fontSize="12" fontWeight="700" textAnchor="end">Make money: {pc(1 - pLoss)}</text>
+        <text x={padL} y={14} fill="#fca5a5" fontSize="12" fontWeight="700">Lose money: {pc(pLoss)}</text>
         <line x1={padL} x2={W - padR} y1={top + plotH} y2={top + plotH} stroke="#374151" />
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}
         {hx != null && <line x1={x(hx)} x2={x(hx)} y1={top} y2={top + plotH} stroke="#fff" strokeOpacity=".7" />}
