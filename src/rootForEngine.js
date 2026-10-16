@@ -13,6 +13,8 @@
 
 export const DEFAULT_NODE_BUDGET = 4_000_000;
 export const MC_SAMPLES = 200_000;
+/** Residual outcome for a game held on both sides (raw inverse chances sum to under 100%). */
+export const NEITHER = "__neither";
 
 /** Kalshi game leg → { event, outcomes, allowed }. Non-game tickers → binary yes/no event. */
 export function legEvent(leg) {
@@ -42,12 +44,15 @@ export function eventProbs(events, legP) {
     if (e.kind === "game") {
       const [a, b] = e.outcomes;
       const pa = legP[`${e.event}-${a}:yes`]; const pb = legP[`${e.event}-${b}:yes`];
-      if (pa != null && pb != null) { const s = pa + pb; out[e.event] = { [a]: pa / s, [b]: pb / s }; notes.push(e.event); }
+      // Both sides held: raw inverse chances, no scaling. Whatever is left (1 − pa − pb, the gap the
+      // two opposite-side prices leave) becomes a third "neither" outcome on which both teams' legs
+      // lose, so A and B stay mutually exclusive and the shown chances are exactly the raw ones.
+      if (pa != null && pb != null) { out[e.event] = { [a]: pa, [b]: pb, [NEITHER]: Math.max(0, 1 - pa - pb) }; notes.push(e.event); }
       else if (pa != null) out[e.event] = { [a]: pa, [b]: 1 - pa };
       else if (pb != null) out[e.event] = { [a]: 1 - pb, [b]: pb };
     } else {
       const py = legP[`${e.event}:yes`]; const pn = legP[`${e.event}:no`];
-      if (py != null && pn != null) { const s = py + pn; out[e.event] = { yes: py / s, no: pn / s }; notes.push(e.event); }
+      if (py != null && pn != null) { out[e.event] = { yes: py, no: pn, [NEITHER]: Math.max(0, 1 - py - pn) }; notes.push(e.event); }
       else if (py != null) out[e.event] = { yes: py, no: 1 - py };
       else if (pn != null) out[e.event] = { yes: 1 - pn, no: pn };
     }
@@ -76,13 +81,16 @@ export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamp
     for (const k of req.keys()) evMap.get(k).touch += 1;
     L.push({ id: lk.id, label: lk.label, hit: Number(lk.hit) || 0, miss: Number(lk.miss) || 0, req, impossible });
   }
+  // extra outcomes carried by the probabilities (the "neither" residual)
+  for (const e of evMap.values()) for (const o of Object.keys((probs && probs[e.id]) || {})) if (!e.outcomes.includes(o)) e.outcomes.push(o);
   const evs = [...evMap.values()].sort((a, b) => b.touch - a.touch);
   const nE = evs.length;
   const idx = new Map(evs.map((e, i) => [e.id, i]));
   const P = evs.map((e) => {
     const row = e.outcomes.map((o) => Math.max(0, Number(probs && probs[e.id] && probs[e.id][o]) || 0));
     const s = row.reduce((a, b) => a + b, 0);
-    return s > 0 ? row.map((x) => x / s) : row.map(() => 1 / row.length);
+    // raw chances; only rescale if they somehow add to more than 100% (can't happen with inverse prices)
+    return s > 1 + 1e-9 ? row.map((x) => x / s) : s > 0 ? row : row.map(() => 1 / row.length);
   });
   const lockReq = L.map((l) => [...l.req.entries()].map(([k, set]) => [idx.get(k), set]).sort((a, b) => a[0] - b[0]));
   const missSum = L.reduce((a, l) => a + l.miss, 0);
@@ -200,8 +208,10 @@ export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamp
       const p = P[k][oi];
       const ifHit = p > 0 ? condEv(k, oi) : null;
       const ifMiss = p < 1 ? (ev - p * (ifHit || 0)) / (1 - p) : null;
+      if (o === NEITHER) return null;
       return { event: e.id, kind: e.kind, outcome: o, p, ifHit, ifMiss, swing: ifHit != null && ifMiss != null ? ifHit - ifMiss : null, locks: byEvent[k].filter(([, s]) => s.has(o)).length };
     });
+    rows.splice(0, rows.length, ...rows.filter(Boolean));
     for (const r of rows) if (r.swing != null && (e.kind === "game" || r.locks > 0)) swings.push(r);
     const pick = rows.filter((r) => r.ifHit != null).sort((a, b) => b.ifHit - a.ifHit)[0];
     perEvent.push({ event: e.id, kind: e.kind, rootFor: pick ? pick.outcome : null, p: pick ? pick.p : null, swing: pick && pick.swing != null ? pick.swing : null, locks: e.touch, outcomes: rows });

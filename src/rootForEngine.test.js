@@ -17,3 +17,14 @@ assert.equal(ex.method, "exact"); assert.equal(mc.method, "monte_carlo");
 assert.ok(Math.abs(ex.ev - mc.ev) < 3, ex.ev + " " + mc.ev);
 assert.ok(Math.abs(ex.ev - (0.12 * 900 - 0.88 * 100 + 0.3 * -300 + 0.7 * 100)) < 1e-9);
 console.log("engine ok", ex.ev, ex.sd, ex.worst, ex.top.map((t) => t.outcome + " " + t.swing.toFixed(1)));
+// raw inverse, both sides held: no scaling, residual "neither" keeps A/B exclusive
+import { eventProbs } from "./rootForEngine.js";
+{
+  const ev = "KXNFLGAME-26OCT18LACKC";
+  const { probs } = eventProbs([{ event: ev, kind: "game", outcomes: ["LAC", "KC"] }], { [ev + "-LAC:yes"]: 0.45, [ev + "-KC:yes"]: 0.5 });
+  assert.equal(probs[ev].LAC, 0.45); assert.equal(probs[ev].KC, 0.5);
+  const r = rootFor([{ id: 1, legs: [{ ticker: ev + "-LAC" }], hit: 100, miss: 0 }, { id: 2, legs: [{ ticker: ev + "-KC" }], hit: 100, miss: 0 }], probs);
+  assert.ok(Math.abs(r.ev - 95) < 1e-9); assert.equal(r.best.pnl, 100); assert.equal(r.worst.pnl, 0); assert.ok(Math.abs(r.worst.p - 0.05) < 1e-9);
+  const lac = r.perEvent[0].outcomes.find((o) => o.outcome === "LAC"); assert.equal(lac.p, 0.45);
+  console.log("raw inverse ok");
+}
