@@ -1648,7 +1648,6 @@ export default function App() {
   const [fullBoardLoaded, setFullBoardLoaded] = useState(false);
   const [fetchedAt, setFetchedAt] = useState(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
-  const [lastCheckedAt, setLastCheckedAt] = useState(null);
   const [comboPrefill, setComboPrefill] = useState(null);
   const [focusLockId, setFocusLockId] = useState(null);
   const [focusCardId, setFocusCardId] = useState(null);
@@ -2018,9 +2017,9 @@ export default function App() {
     } finally {
       if (forceRefresh) {
         // Cache reads finish in ~200ms; keep the spinner visible so the click
-        // registers, then show when we last checked.
+        // registers, then return to Refresh.
         const wait = Math.max(0, 700 - (Date.now() - started));
-        setTimeout(() => { setManualRefreshing(false); setLastCheckedAt(Date.now()); }, wait);
+        setTimeout(() => setManualRefreshing(false), wait);
       }
     }
   };
@@ -2874,11 +2873,6 @@ export default function App() {
           {(fetchedAt || activeTab === "oddsBetstamp") && (
             <div className="app-freshness" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               {fetchedAt && <OddsUpdatedStamp freshness={cacheFreshness} />}
-              {lastCheckedAt && activeTab !== "oddsBetstamp" && (
-                <span title="Last time Refresh re-read the odds cache. The cache itself updates every 5 min." style={{ fontSize: 10, color: "#6b7280" }}>
-                  checked {new Date(lastCheckedAt).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", second: "2-digit" })}
-                </span>
-              )}
               <button
                 onClick={() => {
                   if (activeTab === "oddsBetstamp") {
