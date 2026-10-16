@@ -4,6 +4,7 @@ import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
 import UnhedgedTape from "./UnhedgedTape";
 import RawParlayEdges from "./RawParlayEdges";
+import RootFor from "./RootFor";
 import LiveTradingDesk from "./LiveTradingDesk";
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
@@ -3015,6 +3016,7 @@ export default function App() {
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
+          {activeTab === "combo" && canSeeComboLocks(user) && canSeeOwnerTools(user) && <RootFor user={user} />}
           {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} />}
 
           {activeTab === "missTape" && canSeeOwnerTools(user) && <ComboTape user={user} />}
