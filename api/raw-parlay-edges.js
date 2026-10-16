@@ -9,7 +9,7 @@
 //   fair=pm (default): inverse bet (live). fair=kalshi: Kalshi mid. fair=promo: moneyline legs use the Promo / boost inverse-bet fair the noboost logger
 //   stores (fair_promo_best_american: Π (1 − implied(best guarded opposing price across trusted
 //   books + exchanges)), from odds_cache). Rows whose sportsbook data is older than
-//   PROMO_MAX_AGE_MS are skipped. TD legs keep their $500 Yes/No devig fair. fair=kalshi: old Kalshi mid.
+//   PROMO_MAX_AGE_MS are skipped. (Superseded Oct 16: inverse bet live only, ML + TD.)
 //   { ok, makerRate, series, edges: [...top 200 by EV], days: [{ day, count, ev, maxLoss }], scanned }
 'use strict';
 
@@ -68,8 +68,8 @@ function parseOpts(q) {
   const edge = Math.min(100000, Math.max(0, num(q.edge, 500)));
   const minCost = Math.max(0, num(q.minCost, 0));
   const market = ['all', 'ml', 'td'].includes(String(q.market || '')) ? String(q.market) : 'all';
-  // Default = Kevin's inverse bet method, live (PM live inverse); Kalshi mid / Promo are options.
-  const fair = ['kalshi', 'promo', 'pm'].includes(String(q.fair || '')) ? String(q.fair) : 'pm';
+  // Kevin (Oct 16): EVERYTHING on Combo Sniper uses the inverse bet method (live). No other fair.
+  const fair = 'pm';
   const venue = ['all', 'kalshi', 'polymarket'].includes(String(q.venue || '')) ? String(q.venue) : 'all';
   return { days, edge, minCost, market, fair, venue };
 }
@@ -137,18 +137,12 @@ function publicError(e) {
   return 'Server error: ' + msg.slice(0, 160);
 }
 
-/** Row with fair_mid_american set to the chosen fair source, or null if that fair is missing/stale. */
-function fairRow(r, fair, E) {
-  if (fair === 'kalshi') return r;
-  if (E.marketOf(E.canonicalLegs(r)) === 'td') return r; // TD legs: $500 Yes/No devig (no sportsbook TD fair in the logger yet)
-  if (fair === 'pm') {
-    // PM live inverse: Kalshi / Polymarket US / Novig / ProphetX live books, $500 depth, every source <15s (logger-enforced)
-    if (r.fair_pm_inverse_american == null) return null;
-    return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_pm_inverse_american };
-  }
-  if (r.fair_promo_best_american == null) return null;
-  if (!(Number(r.promo_max_age_ms) <= PROMO_MAX_AGE_MS)) return null;
-  return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_promo_best_american };
+/** Row with fair_mid_american set to the live inverse-bet fair, or null if it is missing/stale.
+ *  ML legs: 1 − best opposing $500 price across Kalshi / Polymarket US / Novig / ProphetX (<15s).
+ *  TD legs: 1 − opposite-side $500 Kalshi VWAP. Parlay = product (noboost-paper logger). */
+function fairRow(r) {
+  if (r.fair_pm_inverse_american == null) return null;
+  return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_pm_inverse_american };
 }
 
 async function handler(req, res) {
@@ -175,7 +169,7 @@ async function handler(req, res) {
     let staleSkipped = 0;
     const priced = [];
     for (const r0 of rows) {
-      const r = fairRow(r0, opts.fair, E);
+      const r = fairRow(r0);
       if (!r) { staleSkipped += 1; continue; }
       priced.push(r);
       const s = r.venue === 'polymarket' ? null : B.seriesOfTicker(r.market_ticker);
