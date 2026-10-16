@@ -7,7 +7,7 @@ function mkRes() { const r = { headers: {}, setHeader(k, v) { r.headers[k] = v; 
 const OWNER = { id: require('./combo-probe-lib').OWNER_USER_ID, email: 'kev120909@gmail.com' };
 const rows = [{ rfq_id: 'a', rfq_created_ts: new Date().toISOString(), market_ticker: 'KXMVECROSSCATEGORY0-S1-X', n_legs: 2, legs: ['KXNFLGAME-26OCT18LACKC-LAC:yes'], contracts: 100, rfq_target_cost: 1, fair_mid_american: 7708, traded_yes: 0.0168, traded_contracts: 100, outcome: 'traded' }];
 function client(user) {
-  const q = { calls: [], select() { return q; }, eq(...a) { q.calls.push(['eq', ...a]); return q; }, not() { return q; }, or() { return q; }, gte() { return q; }, order() { return q; }, range() { return Promise.resolve({ data: rows, error: null }); } };
+  const q = { calls: [], select() { return q; }, eq(...a) { q.calls.push(['eq', ...a]); return q; }, not() { return q; }, or() { return q; }, gte() { return q; }, order() { return q; }, lte() { return q; }, limit() { return Promise.resolve({ data: rows, error: null }); }, range() { return Promise.resolve({ data: rows, error: null }); } };
   return { auth: { getUser: async () => ({ data: { user }, error: null }) }, from(t) { assert.equal(t, 'noboost_paper_rfqs'); return q; } };
 }
 (async () => {
@@ -55,6 +55,18 @@ function client(user) {
   const src = fs.readFileSync(__dirname + '/raw-parlay-edges.js', 'utf8');
   assert.doesNotMatch(src, /\.(insert|update|upsert|delete)\(/);
   assert.equal(h._helpers.parseOpts({ days: '30' }).days, 7);
+  // DB statement timeout surfaces a real message (not 'Something went wrong')
+  const tq = { select() { return tq; }, eq() { return tq; }, not() { return tq; }, or() { return tq; }, gte() { return tq; }, lte() { return tq; }, order() { return tq; }, limit() { return Promise.resolve({ data: null, error: { message: 'canceling statement due to statement timeout' } }); } };
+  h._setDeps({ env, createClient: () => ({ auth: { getUser: async () => ({ data: { user: OWNER }, error: null }) }, from: () => tq }) });
+  const rt = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: {} }, rt);
+  assert.equal(rt.code, 500); assert.match(rt.body.error, /timed out/);
+  // keyset paging: a full page then a short page, overlapping boundary row deduped
+  const T0 = Date.now(); const ts = (i) => new Date(T0 - i * 1000).toISOString();
+  const big = Array.from({ length: 1000 }, (_, i) => ({ ...rows[0], rfq_id: 'k' + i, rfq_created_ts: ts(i) }));
+  let calls = 0; const kq = { select() { return kq; }, eq() { return kq; }, not() { return kq; }, or() { return kq; }, gte() { return kq; }, lte(c, v) { kq.lteV = v; return kq; }, order() { return kq; }, limit() { calls++; return Promise.resolve({ data: calls === 1 ? big : [big[999], { ...rows[0], rfq_id: 'z', rfq_created_ts: ts(1001) }], error: null }); } };
+  h._setDeps({ env, createClient: () => ({ auth: { getUser: async () => ({ data: { user: OWNER }, error: null }) }, from: () => kq }), lookupSeries: async () => ({ fee_type: 'quadratic', fee_multiplier: 1 }) });
+  const rk = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { fair: 'kalshi' } }, rk);
+  assert.equal(rk.code, 200, JSON.stringify(rk.body)); assert.equal(rk.body.scanned, 1001); assert.equal(calls, 2); assert.equal(kq.lteV, ts(999));
   h._resetDeps();
   console.log('raw-parlay-edges api tests passed');
 })().catch((e) => { console.error(e); process.exit(1); });
