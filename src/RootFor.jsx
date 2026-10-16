@@ -3,6 +3,10 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
+import { nightmareKeys, summarySentence, chanceWords, typicalRange, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
+
+const VIEW_KEY = "rootfor.view";
+const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
 
 let client = null;
 function supabase() {
@@ -50,10 +54,54 @@ function Hist({ hist, zero = 0 }) {
   );
 }
 
+function Simple({ d, nightmare }) {
+  const range = typicalRange(d.hist);
+  const worstAm = d.worst && americanFromP(d.worst.p);
+  const bestP = d.best && d.best.p;
+  return (
+    <div>
+      <div className="lead">{summarySentence(d)}</div>
+      {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      <h4>Root for these 5</h4>
+      <div className="cards">
+        {d.top.slice(0, 5).map((t, i) => (
+          <div className="card" key={t.event + t.outcome}>
+            <div className="rk">#{i + 1}</div>
+            <div className="tm">{t.name}</div>
+            <div className="gm">{t.game}{t.start ? ` · ${tStart(t.start)}` : ""}</div>
+            <div className="od">Odds: <b>{am(t.american)}</b></div>
+            <div className="sw">Worth <b className="pos">{sMoney(t.swing)}</b> to you if they win</div>
+          </div>
+        ))}
+      </div>
+      <div className="two">
+        <div className="box bad">
+          <h5>Your nightmare</h5>
+          <div><span className="big neg">{sMoney(d.worst && d.worst.pnl)}</span> {worstAm != null && <span className="sub">· odds {fmtAmerican(worstAm)} ({chanceWords(d.worst.p)})</span>}</div>
+          {nightmare.length > 0 && <>
+            <div className="sub" style={{ marginTop: 6 }}>Mostly happens if these go against you:</div>
+            <ol>{nightmare.map((k) => <li key={k.event}><b>{k.label}</b> <span className="sub">({fmtAmerican(k.american)}) · sinks {k.kills} lock{k.kills === 1 ? "" : "s"}</span></li>)}</ol>
+          </>}
+        </div>
+        <div className="box good">
+          <h5>Best case &amp; chance of profit</h5>
+          <div>Everything hits: <span className="big pos">{sMoney(d.best && d.best.pnl)}</span> <span className="sub">({bestP > 0 ? chanceWords(bestP) : "very unlikely"})</span></div>
+          <div style={{ marginTop: 8 }}>Chance you finish ahead: <b>{chanceWords(d.pProfit)}</b> <span className="sub">· odds {fmtAmerican(americanFromP(d.pProfit))} ({pct(d.pProfit, 0)})</span></div>
+        </div>
+      </div>
+      <h4>How the weekend could go</h4>
+      <Hist hist={d.hist} />
+      <div className="note">Red = you lose money, green = you make money. Taller bar = more likely. Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
+    </div>
+  );
+}
+
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
 
 export default function RootFor({ user, initialData = null }) {
   const [open, setOpen] = useState(true);
+  const [view, setViewState] = useState(readView);
+  const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ } };
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
   const load = useCallback(async () => {
     const c = supabase();
@@ -91,6 +139,7 @@ export default function RootFor({ user, initialData = null }) {
     else delete n[ev];
     return n;
   });
+  const nightmare = useMemo(() => (base && base.model ? nightmareKeys(base.model) : []), [base]);
   if (!canSeeOwnerTools(user)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
@@ -121,18 +170,33 @@ export default function RootFor({ user, initialData = null }) {
         .rootfor .wi{padding:2px 7px;margin-right:4px;font-size:11px}.rootfor .wi.won{background:#065f46;border-color:#10b981}.rootfor .wi.lost{background:#7f1d1d;border-color:#ef4444}
         .rootfor .banner{background:#1e293b;border:1px solid #f59e0b;border-radius:8px;padding:6px 10px;margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
         .rootfor .slot td{background:#111827;color:#93c5fd;font-weight:600;font-size:12px}
+        .rootfor .seg{display:inline-flex;border:1px solid #374151;border-radius:8px;overflow:hidden}.rootfor .seg button{border:0;border-radius:0;background:transparent;color:#9ca3af}.rootfor .seg button.on{background:#f59e0b;color:#111827;font-weight:600}
+        .rootfor .lead{font-size:18px;font-weight:600;line-height:1.35;margin:12px 0 2px}.rootfor .lead2{color:#cbd5e1;font-size:14px;margin:0 0 12px}
+        .rootfor .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:6px 0 14px}
+        .rootfor .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:10px 12px}
+        .rootfor .card .rk{color:#f59e0b;font-weight:700;font-size:12px}.rootfor .card .tm{font-size:16px;font-weight:700;margin:2px 0}.rootfor .card .gm{color:#9ca3af;font-size:12px}
+        .rootfor .card .od{font-size:14px;margin-top:6px}.rootfor .card .sw{font-size:14px;margin-top:4px}
+        .rootfor .box{border-radius:10px;padding:12px 14px;margin:0 0 12px}.rootfor .box.bad{background:rgba(127,29,29,.25);border:1px solid #7f1d1d}.rootfor .box.good{background:rgba(6,95,70,.22);border:1px solid #065f46}
+        .rootfor .box h5{margin:0 0 6px;font-size:14px}.rootfor .box ol{margin:6px 0 0 18px;padding:0}.rootfor .box li{margin:3px 0}
+        .rootfor .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+        .rootfor .big{font-size:20px;font-weight:700}
         @media (max-width:600px){.rootfor .hide-sm{display:none}}
       `}</style>
       <h3>
         What to root for <span className="tag">Owner</span>
         <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 3 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          <span className="seg" role="group" aria-label="View">
+            <button type="button" className={view === "simple" ? "on" : ""} aria-pressed={view === "simple"} onClick={() => setView("simple")}>Simple</button>
+            <button type="button" className={view === "detailed" ? "on" : ""} aria-pressed={view === "detailed"} onClick={() => setView("detailed")}>Detailed</button>
+          </span>
           <button type="button" onClick={load} disabled={st.loading}>{st.loading ? "Updating…" : "Refresh"}</button>
           <button type="button" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Show"}</button>
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
-      {open && d && (
+      {open && d && view === "simple" && <Simple d={base} nightmare={nightmare} />}
+      {open && d && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">
