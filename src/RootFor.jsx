@@ -1,6 +1,7 @@
 // "What to root for" — owner-only cheat sheet across ALL open Combo Locks (live inverse bet fairs).
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
+import PnlCurve from "./RootForCurve";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -38,21 +39,6 @@ function conditioned(model, picks) {
   return probs;
 }
 
-function Hist({ hist, zero = 0 }) {
-  if (!hist || !hist.bins || !hist.bins.length) return null;
-  const W = 640, H = 150, pad = 26; const bins = hist.bins;
-  const lo = bins[0].from, hi = bins[bins.length - 1].to; const x = (v) => pad + ((v - lo) / (hi - lo || 1)) * (W - 2 * pad);
-  const maxP = Math.max(...bins.map((b) => b.p)) || 1;
-  return (
-    <svg viewBox={`0 0 ${W} ${H + 22}`} style={{ width: "100%", maxWidth: 760, display: "block" }} role="img" aria-label="P&L distribution">
-      {bins.map((b, i) => { const h = (b.p / maxP) * H; return <rect key={i} x={x(b.from) + 0.5} y={H - h} width={Math.max(1, x(b.to) - x(b.from) - 1)} height={h} fill={b.to <= zero ? "#f87171" : b.from >= zero ? "#34d399" : "#fbbf24"}><title>{`${usd(b.from)} to ${usd(b.to)}: ${pct(b.p, 2)}`}</title></rect>; })}
-      {zero > lo && zero < hi && <line x1={x(zero)} x2={x(zero)} y1={0} y2={H} stroke="#e5e7eb" strokeDasharray="3 3" />}
-      <text x={pad} y={H + 15} fill="#9ca3af" fontSize="11">{usd(lo)}</text>
-      {zero > lo && zero < hi && <text x={x(zero)} y={H + 15} fill="#e5e7eb" fontSize="11" textAnchor="middle">$0</text>}
-      <text x={W - pad} y={H + 15} fill="#9ca3af" fontSize="11" textAnchor="end">{usd(hi)}{hist.tailP > 0 ? "+" : ""}</text>
-    </svg>
-  );
-}
 
 function Simple({ d, nightmare }) {
   const range = typicalRange(d.hist);
@@ -89,8 +75,8 @@ function Simple({ d, nightmare }) {
         </div>
       </div>
       <h4>How the weekend could go</h4>
-      <Hist hist={d.hist} />
-      <div className="note">Red = you lose money, green = you make money. Taller bar = more likely. Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
+      <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
+      <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
     </div>
   );
 }
@@ -234,8 +220,7 @@ export default function RootFor({ user, initialData = null }) {
           </div>
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
           <h4>P&L distribution{whatIf ? " (what-if)" : ""}</h4>
-          <Hist hist={d.hist} />
-          <div className="note">Red = loss, green = profit (simulated slates, {d.hist ? d.hist.samples.toLocaleString() : "—"}). {d.hist && d.hist.tailP > 0 ? `${pct(d.hist.tailP, 2)} of slates land above ${usd(d.hist.tailFrom)} (folded into the last bar).` : ""}</div>
+          <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
             <thead><tr><th>Game</th><th className="hide-sm">Start</th><th>Root for</th><th className="num">Chance now</th><th className="num">Swing</th><th>What-if</th></tr></thead>

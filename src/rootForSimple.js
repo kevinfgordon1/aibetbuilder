@@ -111,3 +111,39 @@ export function topByDrop(d, n = 5) {
     .filter((o) => (seen.has(o.event) ? false : (seen.add(o.event), true)))
     .slice(0, n);
 }
+
+// ---- P&L curve helpers ----
+export function cdfAt(hist, x) {
+  if (!hist || !hist.bins) return 0; let c = 0;
+  for (const b of hist.bins) { if (x >= b.to) c += b.p; else if (x > b.from) c += b.p * ((x - b.from) / (b.to - b.from || 1)); }
+  return Math.min(1, c);
+}
+export function quantileOf(hist, t) {
+  if (!hist || !hist.bins || !hist.bins.length) return 0; let c = 0;
+  for (const b of hist.bins) { if (c + b.p >= t) return b.from + (b.to - b.from) * ((t - c) / (b.p || 1)); c += b.p; }
+  return hist.bins[hist.bins.length - 1].to;
+}
+export function niceTicks(lo, hi, target = 5) {
+  const span = hi - lo; if (!(span > 0)) return [lo];
+  const raw = span / target; const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || 10 * mag;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(Math.round(v) || 0);
+  return out;
+}
+export const shortMoney = (n) => { const a = Math.abs(n); const s = a >= 1000 ? `$${(a / 1000).toFixed(a >= 10000 || a % 1000 === 0 ? 0 : 1)}k` : `$${Math.round(a)}`; return (n < 0 ? "−" : n > 0 ? "+" : "") + s; };
+
+// Smooth density from histogram masses (Gaussian kernel on bin centers). The all-lose worst case is a
+// discrete lump, so it is pulled out as a spike instead of being smeared into the curve.
+export function curveModel(hist, { worst = null, cap = 0.99, points = 160 } = {}) {
+  if (!hist || !hist.bins || !hist.bins.length) return null;
+  const bins = hist.bins.map((b) => ({ ...b }));
+  let spike = null;
+  if (worst && worst.p > 0.005 && worst.pnl >= bins[0].from - 1 && worst.pnl <= bins[0].to) {
+    const p = Math.min(worst.p, bins[0].p); spike = { x: worst.pnl, p }; bins[0].p -= p;
+  }
+  const xMin = hist.bins[0].from; const xMax = Math.max(quantileOf(hist, cap), xMin + 1);
+  const w = (bins[0].to - bins[0].from) || 1; const sig = w * 0.9;
+  const xs = Array.from({ length: points }, (_, i) => xMin + (i / (points - 1)) * (xMax - xMin));
+  const ys = xs.map((x) => bins.reduce((a, b) => { const c = (b.from + b.to) / 2; const z = (x - c) / sig; return a + b.p * Math.exp(-0.5 * z * z); }, 0) / (sig * Math.sqrt(2 * Math.PI)));
+  return { xs, ys, xMin, xMax, spike, beyond: Math.max(0, 1 - cdfAt(hist, xMax)) };
+}

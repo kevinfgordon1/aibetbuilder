@@ -34,3 +34,14 @@ console.log("rootForSimple tests ok");
   assert.deepEqual(t.map((x) => [x.label, x.drop]), [["PIT Steelers win by 3+", -100], ["KC Chiefs win", -50]]);
   console.log("topByDrop ok");
 }
+{
+  const S = await import("./rootForSimple.js");
+  const h = { bins: [{ from: -100, to: 0, p: 0.5 }, { from: 0, to: 100, p: 0.4 }, { from: 100, to: 1000, p: 0.1 }] };
+  assert.equal(S.cdfAt(h, 0), 0.5);
+  assert.equal(Math.round(S.quantileOf(h, 0.5)), 0);
+  assert.deepEqual(S.niceTicks(-4100, 15000), [0, 5000, 10000, 15000]);
+  const m = S.curveModel(h, { worst: { pnl: -100, p: 0.3 } });
+  assert.equal(m.spike.p, 0.3); assert.ok(m.ys.every((y) => y >= 0)); assert.ok(m.xMax < 1000);
+  assert.equal(S.shortMoney(-4148), "−$4.1k"); assert.equal(S.shortMoney(12000), "+$12k");
+  console.log("curve ok");
+}
