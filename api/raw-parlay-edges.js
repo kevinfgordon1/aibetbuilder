@@ -81,23 +81,43 @@ function sinceIso(nowMs, days) {
 }
 
 const FAIR_COL = { kalshi: 'fair_mid_american', promo: 'fair_promo_best_american', pm: 'fair_pm_inverse_american' };
+// Keyset paging on rfq_created_ts (not OFFSET): each page is an index range scan on
+// noboost_paper_rfqs_traded_created_idx (partial, outcome='traded'). OFFSET paging re-scanned every
+// earlier page and hit Postgres' statement timeout once Polymarket volume grew the table.
 async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all' } = {}) {
   const out = [];
-  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+  const seen = new Set();
+  let before = null;
+  while (out.length < MAX_ROWS) {
     let q = client.from('noboost_paper_rfqs').select(COLS)
       .eq('outcome', 'traded')
       .gte('rfq_created_ts', since);
+    if (before) q = q.lte('rfq_created_ts', before);
     // Kalshi-mid fair needs fair_mid_american; other fairs are checked per row (TD legs fall back to the mid devig).
     if (fair === 'kalshi') q = q.not(FAIR_COL.kalshi, 'is', null);
     else q = q.or(`${FAIR_COL[fair]}.not.is.null,fair_mid_american.not.is.null`);
     if (venue !== 'all') q = q.eq('venue', venue);
     if (minCost > 0) q = q.gte('rfq_target_cost', minCost);
-    const { data, error } = await q.order('rfq_created_ts', { ascending: false }).range(from, from + PAGE - 1);
+    const { data, error } = await q.order('rfq_created_ts', { ascending: false }).limit(PAGE);
     if (error) throw error;
-    out.push(...(data || []));
-    if (!data || data.length < PAGE) break;
+    const rows = data || [];
+    let added = 0;
+    for (const r of rows) {
+      if (r == null || seen.has(r.rfq_id)) continue;
+      seen.add(r.rfq_id); out.push(r); added++;
+    }
+    if (rows.length < PAGE || added === 0) break;
+    const last = rows[rows.length - 1] && rows[rows.length - 1].rfq_created_ts;
+    if (!last || last === before) break;
+    before = last; // lte + rfq_id dedupe keeps rows that share the boundary timestamp
   }
-  return out;
+  return out.slice(0, MAX_ROWS);
+}
+
+function publicError(e) {
+  const msg = String((e && e.message) || e || 'Unknown error');
+  if (/statement timeout/i.test(msg)) return 'Database query timed out — try a shorter range or a higher Min $ filter.';
+  return 'Server error: ' + msg.slice(0, 160);
 }
 
 /** Row with fair_mid_american set to the chosen fair source, or null if that fair is missing/stale. */
@@ -165,7 +185,7 @@ async function handler(req, res) {
     return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, staleSkipped, fairSource: opts.fair, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: edges.slice(0, MAX_RETURN).map(({ legsRaw, ...e }) => e), total: edges.length });
   } catch (e) {
     console.error('[raw-parlay-edges]', String((e && e.message) || e).slice(0, 200));
-    return json(res, 500, { ok: false, error: 'Something went wrong' });
+    return json(res, 500, { ok: false, error: publicError(e) });
   }
 }
 
