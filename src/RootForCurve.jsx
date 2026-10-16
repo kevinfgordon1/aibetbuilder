@@ -13,7 +13,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
   }, []);
   const m = curveModel(hist, { worst });
   if (!m) return null;
-  const small = W < 520; const H = small ? 284 : 294; const top = 58, bot = 84, padL = 24, padR = 10;
+  const small = W < 520; const H = small ? 284 : 294; const top = 44, bot = 98, padL = 24, padR = 10;
   const plotH = H - top - bot; const x = (v) => padL + ((v - m.xMin) / (m.xMax - m.xMin)) * (W - padL - padR);
   const yMax = Math.max(...m.ys) || 1; const y = (d) => top + plotH - (d / yMax) * plotH * 0.92;
   const line = m.xs.map((v, i) => `${i ? "L" : "M"}${x(v).toFixed(1)},${y(m.ys[i]).toFixed(1)}`).join("");
@@ -45,13 +45,12 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
           </linearGradient>
         </defs>
         <rect x={x(p10)} y={top} width={Math.max(0, x(p90) - x(p10))} height={plotH} fill="#93c5fd" opacity=".07" />
-        <g opacity=".9"><path d={`M${x(p10)},${top + plotH + 44}v6H${x(p90)}v-6`} fill="none" stroke="#93c5fd" />
-          <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 63} fill="#93c5fd" fontSize="11" textAnchor="middle">Most weekends: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
+        <g opacity=".9"><path d={`M${x(p10)},${top + plotH + 58}v6H${x(p90)}v-6`} fill="none" stroke="#93c5fd" />
+          <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 77} fill="#93c5fd" fontSize="11" textAnchor="middle">Most weekends: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
         <path d={area} fill="url(#rf-h)" />
         <path d={line} fill="none" stroke="#e5e7eb" strokeOpacity=".55" strokeWidth="1.5" />
         {sp && <g>
           <rect x={spX} y={top} width={7} height={plotH} rx={2} fill="#991b1b"><title>{`Worst case ${money(sp.x)}: ${pc(sp.p)} chance`}</title></rect>
-          <text x={spX} y={49} fill="#fca5a5" fontSize="11"><tspan fontWeight="700">▌Worst case</tspan> · {pc(sp.p)} chance</text>
         </g>}
         {m.xMin < 0 && m.xMax > 0 && <g>
           <line x1={z} x2={z} y1={top - 2} y2={top + plotH} stroke="#e5e7eb" strokeDasharray="3 3" />
@@ -67,6 +66,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         {sp && <g>
           <line x1={spX + 3.5} x2={spX + 3.5} y1={top + plotH} y2={top + plotH + 24} stroke="#ef4444" strokeWidth="1.5" />
           <text x={spX} y={top + plotH + 35} fill="#fca5a5" fontSize="11" fontWeight="700">{money(sp.x)} worst case</text>
+          <text x={spX} y={top + plotH + 49} fill="#fca5a5" fontSize="11">{pc(sp.p)} chance</text>
         </g>}
         <text x={(padL + W - padR) / 2} y={H - 4} fill="#cbd5e1" fontSize="12" textAnchor="middle">Your result ($)</text>
         <text transform={`translate(13,${top + plotH / 2}) rotate(-90)`} fill="#cbd5e1" fontSize="12" textAnchor="middle">More likely →</text>
