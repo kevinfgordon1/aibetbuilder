@@ -22,3 +22,9 @@ assert.equal(chanceWords(0.46), "about a coin flip");
 const r = typicalRange({ bins: [{ from: 0, to: 10, p: 0.5 }, { from: 10, to: 20, p: 0.5 }] });
 assert.equal(Math.round(r.lo), 2); assert.equal(Math.round(r.hi), 18);
 console.log("rootForSimple tests ok");
+{
+  const { topByGain } = await import("./rootForSimple.js");
+  const t = topByGain({ ev: 100, perEvent: [{ outcomes: [{ name: "A", ifHit: 150, p: 0.5 }, { name: "B", ifHit: 50, p: 0.5 }] }, { outcomes: [{ name: "C", ifHit: 400, p: 0.1 }] }] });
+  assert.deepEqual(t.map((x) => [x.name, x.gain]), [["C", 300], ["A", 50]]);
+  console.log("topByGain ok");
+}

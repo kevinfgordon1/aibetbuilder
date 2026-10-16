@@ -73,7 +73,7 @@ export function chanceWords(p) {
 // One-sentence headline.
 export function summarySentence(d) {
   if (!d) return "";
-  const top = d.top && d.top[0];
+  const top = topByGain(d, 1)[0] || (d.top && d.top[0]);
   const ev = Number(d.ev);
   const head = ev >= 0 ? `You're expected to make about ${sMoney(ev)}.` : `You're expected to lose about ${money0(ev)}.`;
   return top ? `${head} Biggest game: ${top.game} (root for ${top.name}).` : head;
@@ -84,4 +84,17 @@ export function typicalRange(hist) {
   if (!hist || !hist.bins || !hist.bins.length) return null;
   const q = (t) => { let c = 0; for (const b of hist.bins) { if (c + b.p >= t) return b.from + (b.to - b.from) * ((t - c) / (b.p || 1)); c += b.p; } return hist.bins[hist.bins.length - 1].to; };
   return { lo: q(0.1), hi: q(0.9) };
+}
+
+// Rank outcomes by how much a win ADDS to expected profit: E[P | wins] − E[P].
+// ifHit comes from the joint (correlated) engine, so this equals swing × (1 − p) without assuming independence.
+export function topByGain(d, n = 5) {
+  if (!d) return [];
+  const ev = Number(d.ev) || 0;
+  const all = (d.perEvent || []).flatMap((e) => e.outcomes || []);
+  const src = all.length ? all : d.top || [];
+  return src.filter((o) => o && Number.isFinite(o.ifHit) && o.name)
+    .map((o) => ({ ...o, gain: o.ifHit - ev }))
+    .filter((o) => o.gain > 0.5)
+    .sort((a, b) => b.gain - a.gain).slice(0, n);
 }

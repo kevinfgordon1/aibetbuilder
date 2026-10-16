@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
-import { nightmareKeys, summarySentence, chanceWords, typicalRange, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
+import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
 const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
@@ -64,11 +64,11 @@ function Simple({ d, nightmare }) {
       {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       <div className="pair">
         <div className="panel good">
-          <h5>Root for these 5 <span className="sub">· $ worth to you if they win</span></h5>
-          {(() => { const top = d.top.slice(0, 5); const mx = Math.max(...top.map((t) => Math.abs(t.swing) || 0), 1); return top.map((t) => (
+          <h5>Root for these 5 <span className="sub">· adds this to your expected profit if they win</span></h5>
+          {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf pos" style={{ width: `${(Math.abs(t.swing) / mx) * 100}%` }} /><span className="bv pos">{sMoney(t.swing)}</span></div>
+              <div className="bt"><div className="bf pos" style={{ width: `${(t.gain / mx) * 100}%` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>{sMoney(t.gain)}</span></div>
             </div>)); })()}
         </div>
         <div className="panel bad">
@@ -211,15 +211,16 @@ export default function RootFor({ user, initialData = null }) {
               <button type="button" onClick={() => setPicks({})} style={{ marginLeft: "auto" }}>Reset</button>
             </div>
           )}
-          <h4>Top 5 to root for (biggest swing in total P&L)</h4>
+          <h4>Top 5 to root for (biggest boost to expected profit if they win)</h4>
           <table>
-            <thead><tr><th>#</th><th>Root for</th><th className="hide-sm">Game</th><th className="num">Chance now</th><th className="num">Fair</th><th className="num">Swing</th><th className="num hide-sm">If it hits / misses</th></tr></thead>
+            <thead><tr><th>#</th><th>Root for</th><th className="hide-sm">Game</th><th className="num">Chance now</th><th className="num">Fair</th><th className="num">Adds to exp. profit</th><th className="num">Swing</th><th className="num hide-sm">If it hits / misses</th></tr></thead>
             <tbody>
-              {d.top.map((t, i) => (
+              {topByGain(base).map((t, i) => (
                 <tr key={t.event}>
                   <td>{i + 1}</td><td><b>{t.name}</b></td><td className="hide-sm">{t.game}</td>
                   <td className="num">{pct(t.p)}</td><td className="num">{am(t.american)}</td>
-                  <td className="num pos">{usd(t.swing)}</td>
+                  <td className="num pos">{sUsd(t.gain)}</td>
+                  <td className="num">{usd(t.swing)}</td>
                   <td className="num hide-sm">{sUsd(t.ifHit)} / {sUsd(t.ifMiss)}</td>
                 </tr>
               ))}
