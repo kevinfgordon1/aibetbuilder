@@ -37,8 +37,9 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
 }
 
 {
+  // Quoted top is the ladder's best (+200); VWAP +125 is worse → "blended".
   const blended = formatTrueOddsWithBlend({
-    odds: 104,
+    odds: 200,
     bookLabel: "Kalshi",
     size: 54,
     levels: [
@@ -48,7 +49,9 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
   });
   assert.equal(blended.odds, 125);
   assert.match(blended.text, /blended to \$500 payout/);
-  assert.notEqual(blended.odds, 104, "true odds ≠ thin top when VWAP differs");
+  assert.notEqual(blended.odds, 200, "true odds ≠ top when VWAP differs");
+  const better = formatTrueOddsWithBlend({ odds: 104, bookLabel: "Kalshi", size: 54, levels: [{ american: 200, size: 100 }, { american: 100, size: 400 }] });
+  assert.doesNotMatch(better.text, /blended/, "VWAP better than top is never labeled blended");
   const none = applyBlendToLegs([pxLeg], {});
   assert.equal(none.displayLegs[0].bestOpp, 104, "no ladder → keep top");
   const over = applyBlendToLegs([pxLeg], {

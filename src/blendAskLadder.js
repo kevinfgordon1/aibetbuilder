@@ -96,11 +96,13 @@ export function payoutTargetLabel(target = TARGET_PAYOUT_USD) {
 // A single deep top that already fills the $500-profit target is not a blend.
 export function blendDidWalk(blend, topAmerican) {
   if (!blend) return false;
-  if (Number(blend.levelsUsed) > 1) return true;
-  if (topAmerican != null && Number.isFinite(Number(topAmerican)) && blend.american != null) {
-    return Number(blend.american) !== Number(topAmerican);
+  // A blend can only be worse than the top. VWAP better than (or equal to)
+  // the quoted top is not a walk — never label it "blended".
+  if (topAmerican != null && Number.isFinite(Number(topAmerican)) && Number(topAmerican) !== 0
+    && blend.american != null && Number.isFinite(Number(blend.american))) {
+    return Number(blend.american) < Number(topAmerican);
   }
-  return false;
+  return Number(blend.levelsUsed) > 1;
 }
 
 export function formatBlendedPayoutFlag(blend, topAmerican) {

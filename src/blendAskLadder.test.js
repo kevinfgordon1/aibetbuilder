@@ -515,3 +515,13 @@ assert.equal(blendAskLadderToStake([], { targetStake: 333 }), null);
 }
 
 console.log("blendAskLadder.test.js ok");
+
+// Blend better than the quoted top (wrong-ladder +245 vs top -104) is never "blended".
+{
+  const better = { american: 245, complete: true, levelsUsed: 1, targetPayout: 500 };
+  assert.equal(blendDidWalk(better, -104), false);
+  assert.equal(formatBlendedPayoutFlag(better, -104), "");
+  const worse = { american: -110, complete: true, levelsUsed: 2, targetPayout: 500 };
+  assert.equal(blendDidWalk(worse, -104), true);
+  assert.equal(formatBlendedPayoutFlag(worse, -104), "blended to $500 payout");
+}
