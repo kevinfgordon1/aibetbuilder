@@ -2,7 +2,7 @@
 //
 // Source rows: combo-worker noboost paper log (public.noboost_paper_rfqs). For every
 // Kalshi KXMVE parlay RFQ the worker records:
-//   fair_mid_american  — combo fair = Π per-leg no-vig mid of the Kalshi + Polymarket
+//   fair_mid_american  — combo fair = Π per-leg no-vig mid of the KALSHI (only) NFL game
 //                        moneyline books (own-side vs opposite-side mid, devigged),
 //                        legs in different games, priced from a <15s-fresh book.
 //   traded_yes         — the YES price the trader actually got from the best maker

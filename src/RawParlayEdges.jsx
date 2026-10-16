@@ -39,7 +39,7 @@ const SORT_OPTS = [
 ];
 
 const TIP = {
-  fair: "Fair odds, legs multiplied together. Moneyline legs: no-vig midpoint across Kalshi and Polymarket. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included); a leg without $500 of depth or a fresh book is skipped.",
+  fair: "Fair odds, legs multiplied together. Moneyline legs (Promo fair, default): the same inverse-bet true odds as the Promo / boost calculator: 1 minus the implied chance of the best opposing price across the trusted sportsbooks and exchanges in our odds feed, which refreshes about every 5 minutes. Rows whose sportsbook data is over 6 minutes old are skipped. Kalshi fair: the Kalshi bid/ask midpoint only. Player TD legs: Kalshi Yes vs No devigged at $500 of depth on each side (fee included).",
   mm: "The price the winning market maker quoted, before the taker's Kalshi fee.",
   got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order).",
   sell: "The price we'd actually receive selling YES on Kalshi's price grid, after our maker fee for this series (currently $0) and Kalshi's rounding. EV is computed from this price.",
@@ -84,6 +84,7 @@ export default function RawParlayEdges({ user }) {
   const [edge, setEdge] = useState(String(DEFAULT_EDGE_AMERICAN));
   const [minCost, setMinCost] = useState("0");
   const [market, setMarket] = useState("all");
+  const [fairSrc, setFairSrc] = useState("promo");
   const [sortKey, setSortKey] = useState(DEFAULT_SORT);
   const [state, setState] = useState({ loading: false, error: null, data: null });
 
@@ -94,7 +95,7 @@ export default function RawParlayEdges({ user }) {
     try {
       const { data: { session } } = await c.auth.getSession();
       if (!session) throw new Error("Sign in required");
-      const qs = new URLSearchParams({ days: String(days), edge: String(Number(edge) || 0), minCost: String(Number(minCost) || 0), market });
+      const qs = new URLSearchParams({ days: String(days), edge: String(Number(edge) || 0), minCost: String(Number(minCost) || 0), market, fair: fairSrc });
       const r = await fetch("/api/raw-parlay-edges?" + qs, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && typeof j.error === "string" && j.error) || `Request failed (${r.status})`);
@@ -102,9 +103,9 @@ export default function RawParlayEdges({ user }) {
     } catch (e) {
       setState({ loading: false, error: String((e && e.message) || e), data: null });
     }
-  }, [days, edge, minCost, market]);
+  }, [days, edge, minCost, market, fairSrc]);
 
-  useEffect(() => { if (canSeeOwnerTools(user)) load(); }, [days, market]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (canSeeOwnerTools(user)) load(); }, [days, market, fairSrc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ranked = useMemo(() => sortRawEdges(state.data && state.data.edges, sortKey), [state.data, sortKey]);
 
@@ -162,6 +163,12 @@ export default function RawParlayEdges({ user }) {
         {MARKET_CHIPS.map((c) => (
           <button key={c.v} type="button" className={"chip" + (market === c.v ? " on" : "")} onClick={() => setMarket(c.v)}>{c.label}</button>
         ))}
+        <label title={TIP.fair}>Fair{" "}
+          <select aria-label="Fair source" value={fairSrc} onChange={(e) => setFairSrc(e.target.value)}>
+            <option value="promo">Promo (inverse bet)</option>
+            <option value="kalshi">Kalshi only</option>
+          </select>
+        </label>
         <label>Offer = fair minus <input aria-label="Edge in American odds" inputMode="numeric" value={edge} onChange={(e) => setEdge(e.target.value)} /></label>
         <label>Min request $ <input aria-label="Minimum request size" inputMode="decimal" value={minCost} onChange={(e) => setMinCost(e.target.value)} /></label>
         <label>Sort by{" "}
@@ -216,7 +223,7 @@ export default function RawParlayEdges({ user }) {
                   <td className="rank">{i + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{etTime(e.ts)}</td>
                   <td className="legs">{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</td>
-                  <td className="num fair">{fmtAmerican(e.fairAmerican)}</td>
+                  <td className="num fair" title={e.kalshiFairAmerican != null ? `Kalshi-only fair ${fmtAmerican(e.kalshiFairAmerican)}` : undefined}>{fmtAmerican(e.fairAmerican)}</td>
                   <td className="num" title={`Maker sold YES at $${e.winningMmYes}`}>{fmtAmerican(e.winningMmAmerican)}</td>
                   <td className="num" title={`Taker paid ${usd(e.takerGotCost)} for ${e.contracts} contracts, fee included`}>{fmtAmerican(e.takerGotAmerican)}</td>
                   <td className="num pos" title={`We sell YES at $${e.weSellYes}: receive ${usd(e.weReceive)}, put up ${usd(e.maxLoss)}${e.makerFee ? `, maker fee ${usd(e.makerFee)}` : ", no maker fee"}`}>{fmtAmerican(e.weSellAmerican)}</td>
