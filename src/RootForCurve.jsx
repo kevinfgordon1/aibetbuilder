@@ -5,7 +5,7 @@ import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney } from "./rootForS
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const pc = (p) => (p * 100 < 1 && p > 0 ? "<1%" : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`);
 
-export default function PnlCurve({ hist, worst, ev, pProfit, best, inset = null }) {
+export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
   const wrap = useRef(null); const [W, setW] = useState(720); const [hx, setHx] = useState(null);
   useEffect(() => {
     const el = wrap.current; if (!el || typeof ResizeObserver === "undefined") return undefined;
@@ -13,7 +13,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, inset = null 
   }, []);
   const m = curveModel(hist, { worst });
   if (!m) return null;
-  const small = W < 520; const H = small ? 250 : inset ? 300 : 260; const top = 58, bot = 50, padL = 10, padR = 10;
+  const small = W < 520; const H = small ? 250 : 260; const top = 58, bot = 50, padL = 10, padR = 10;
   const plotH = H - top - bot; const x = (v) => padL + ((v - m.xMin) / (m.xMax - m.xMin)) * (W - padL - padR);
   const yMax = Math.max(...m.ys) || 1; const y = (d) => top + plotH - (d / yMax) * plotH * 0.92;
   const line = m.xs.map((v, i) => `${i ? "L" : "M"}${x(v).toFixed(1)},${y(m.ys[i]).toFixed(1)}`).join("");
@@ -68,8 +68,13 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, inset = null 
         {hx != null && <line x1={x(hx)} x2={x(hx)} y1={top} y2={top + plotH} stroke="#fff" strokeOpacity=".7" />}
         <rect x={0} y={0} width={W} height={H} fill="transparent" onMouseMove={onMove} onTouchStart={onMove} onTouchMove={onMove} onMouseLeave={() => setHx(null)} />
       </svg>
-      {inset && W >= 640 && <div style={{ position: "absolute", right: 10, top: top + 2, width: Math.min(340, W * 0.42), pointerEvents: "none" }}>{inset}</div>}
-      {inset && W < 640 && <div style={{ margin: "6px 0" }}>{inset}</div>}
+      {(() => { const L = Math.round(pLoss * 100), O = Math.round(Math.max(0, 1 - cdfAt(hist, 10000)) * 100), U = Math.max(0, 100 - L - O); const l = L / 100, u = U / 100, o = O / 100; const P = (p) => `${Math.round(p * 100)}%`; return (
+        <div className="outs" style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "8px 0 2px" }}>
+          {[["Lose money", l, "#dc2626"], ["Make up to $10k", u, "#34d399"], ["Make more than $10k", o, "#059669"]].map(([t, p, c]) => (
+            <div key={t} style={{ flex: "1 1 150px", background: "#111827", border: `1px solid ${c}`, borderLeft: `6px solid ${c}`, borderRadius: 8, padding: "6px 10px", fontSize: 14 }}>
+              {t}: <b style={{ color: c === "#dc2626" ? "#fca5a5" : "#6ee7b7", fontSize: 16 }}>{P(p)}</b>
+            </div>))}
+        </div>); })()}
       {hx != null && (
         <div className="tip" style={{ position: "absolute", left: Math.min(Math.max(x(hx) - 90, 0), W - 180), top: top + 34, width: 180, background: "#0f172a", border: "1px solid #374151", borderRadius: 8, padding: "6px 8px", fontSize: 12, pointerEvents: "none" }}>
           <b>{money(hx)}</b><br />
