@@ -19,6 +19,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
   const line = m.xs.map((v, i) => `${i ? "L" : "M"}${x(v).toFixed(1)},${y(m.ys[i]).toFixed(1)}`).join("");
   const area = `${line}L${x(m.xMax).toFixed(1)},${top + plotH}L${x(m.xMin).toFixed(1)},${top + plotH}Z`;
   const z = Math.min(Math.max(x(0), padL), W - padR);
+  const zOff = Math.min(1, Math.max(0, (0 - m.xMin) / (m.xMax - m.xMin)));
   const p10 = quantileOf(hist, 0.1), p90 = Math.min(quantileOf(hist, 0.9), m.xMax);
   const pLoss = pProfit != null ? 1 - pProfit : cdfAt(hist, 0);
   const ticks = niceTicks(m.xMin, m.xMax, small ? 4 : 6);
@@ -34,19 +35,22 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
     <div ref={wrap} className="pnlcurve" style={{ width: "100%", maxWidth: 900, position: "relative" }}>
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="How the weekend could go" style={{ display: "block", touchAction: "pan-y" }}>
         <defs>
-          <clipPath id="rf-loss"><rect x={0} y={0} width={z} height={H} /></clipPath>
-          <clipPath id="rf-win"><rect x={z} y={0} width={W - z} height={H} /></clipPath>
-          <linearGradient id="rf-g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#34d399" stopOpacity=".75" /><stop offset="1" stopColor="#34d399" stopOpacity=".12" /></linearGradient>
-          <linearGradient id="rf-r" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#f87171" stopOpacity=".8" /><stop offset="1" stopColor="#f87171" stopOpacity=".15" /></linearGradient>
+          <linearGradient id="rf-h" gradientUnits="userSpaceOnUse" x1={x(m.xMin)} x2={x(m.xMax)} y1="0" y2="0">
+            <stop offset="0" stopColor="#991b1b" stopOpacity="1" />
+            <stop offset={zOff * 0.45} stopColor="#ef4444" stopOpacity=".75" />
+            <stop offset={Math.max(0.001, zOff - 0.002)} stopColor="#fecaca" stopOpacity=".3" />
+            <stop offset={Math.min(0.999, zOff + 0.002)} stopColor="#d1fae5" stopOpacity=".3" />
+            <stop offset={zOff + (1 - zOff) * 0.3} stopColor="#34d399" stopOpacity=".7" />
+            <stop offset="1" stopColor="#059669" stopOpacity="1" />
+          </linearGradient>
         </defs>
         <rect x={x(p10)} y={top} width={Math.max(0, x(p90) - x(p10))} height={plotH} fill="#93c5fd" opacity=".07" />
         <g opacity=".9"><path d={`M${x(p10)},${top + plotH + 26}v6H${x(p90)}v-6`} fill="none" stroke="#93c5fd" />
           <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 45} fill="#93c5fd" fontSize="11" textAnchor="middle">Most weekends: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
-        <path d={area} fill="url(#rf-r)" clipPath="url(#rf-loss)" />
-        <path d={area} fill="url(#rf-g)" clipPath="url(#rf-win)" />
+        <path d={area} fill="url(#rf-h)" />
         <path d={line} fill="none" stroke="#e5e7eb" strokeOpacity=".55" strokeWidth="1.5" />
         {sp && <g>
-          <rect x={spX} y={top} width={7} height={plotH} rx={2} fill="#ef4444"><title>{`Worst case ${money(sp.x)}: ${pc(sp.p)} chance`}</title></rect>
+          <rect x={spX} y={top} width={7} height={plotH} rx={2} fill="#991b1b"><title>{`Worst case ${money(sp.x)}: ${pc(sp.p)} chance`}</title></rect>
           <text x={spX} y={49} fill="#fca5a5" fontSize="11"><tspan fontWeight="700">▌Worst case {money(sp.x)}</tspan> · {pc(sp.p)} chance ({fmtAmerican(americanFromP(sp.p))})</text>
         </g>}
         {m.xMin < 0 && m.xMax > 0 && <g>
@@ -72,7 +76,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         </div>
       )}
       <div className="note">
-        Smoothed from {hist.samples ? hist.samples.toLocaleString("en-US") : "simulated"} simulated weekends. Red = lose money, green = make money; hover or tap for the chance of finishing below any amount.
+        Smoothed from {hist.samples ? hist.samples.toLocaleString("en-US") : "simulated"} simulated weekends. Deeper red = bigger loss, deeper green = bigger win; hover or tap for the chance of finishing below any amount.
         {m.beyond > 0 ? ` Chart stops at ${shortMoney(m.xMax)}: ${pc(m.beyond)} of weekends go higher (rare big wins${best && best.pnl ? `, up to ${money(best.pnl)}` : ""}).` : ""}
       </div>
     </div>
