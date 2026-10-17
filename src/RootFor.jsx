@@ -173,8 +173,8 @@ export default function RootFor({ user, initialData = null }) {
     return n;
   });
   const tv = useMemo(() => todayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now()), [base]);
-  const [scopeSel, setScope] = useState(null); // null = default: Today when there are games today (ET), else All
-  const scope = scopeSel || (tv ? "today" : "all");
+  const [scopeSel, setScope] = useState("all"); // always defaults to All
+  const scope = scopeSel;
   if (!can || (base && base.empty)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
