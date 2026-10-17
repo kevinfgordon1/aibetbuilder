@@ -64,7 +64,7 @@ function Simple({ d, today }) {
           <h5>Root against these</h5>
           <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
           {d.worst && today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst day today leaves your EV at <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
-          {d.worst && !today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>If every lock misses: <span className="neg">{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
+          {d.worst && !today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst case scenario: <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
           {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
