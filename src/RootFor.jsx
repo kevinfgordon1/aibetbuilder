@@ -1,8 +1,15 @@
 // "What to root for" — owner-only cheat sheet across ALL open Combo Locks (live inverse bet fairs).
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
+import PnlCurve from "./RootForCurve";
+import EvBars from "./RootForEvBars";
+import SweatMeter from "./RootForSweat";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
+import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
+
+const VIEW_KEY = "rootfor.view";
+const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
 
 let client = null;
 function supabase() {
@@ -19,7 +26,7 @@ const oneIn = (p) => (p > 0 ? `about 1 in ${Math.round(1 / p).toLocaleString("en
 const am = (a) => (a == null ? "—" : (a > 0 ? "+" : "") + Math.round(a));
 const amFromP = (p) => (!(p > 0 && p < 1) ? null : p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p);
 const etStamp = (iso) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
-const REFRESH_MS = 3 * 60 * 1000;
+const REFRESH_MS = 10 * 60 * 1000;
 const tStart = (iso) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }) + " ET" : "");
 
 // condition one game on a team winning (keep its outcomes) or losing (drop them), renormalized
@@ -34,19 +41,40 @@ function conditioned(model, picks) {
   return probs;
 }
 
-function Hist({ hist, zero = 0 }) {
-  if (!hist || !hist.bins || !hist.bins.length) return null;
-  const W = 640, H = 150, pad = 26; const bins = hist.bins;
-  const lo = bins[0].from, hi = bins[bins.length - 1].to; const x = (v) => pad + ((v - lo) / (hi - lo || 1)) * (W - 2 * pad);
-  const maxP = Math.max(...bins.map((b) => b.p)) || 1;
+
+function Simple({ d, nightmare }) {
+  const range = typicalRange(d.hist);
   return (
-    <svg viewBox={`0 0 ${W} ${H + 22}`} style={{ width: "100%", maxWidth: 760, display: "block" }} role="img" aria-label="P&L distribution">
-      {bins.map((b, i) => { const h = (b.p / maxP) * H; return <rect key={i} x={x(b.from) + 0.5} y={H - h} width={Math.max(1, x(b.to) - x(b.from) - 1)} height={h} fill={b.to <= zero ? "#f87171" : b.from >= zero ? "#34d399" : "#fbbf24"}><title>{`${usd(b.from)} to ${usd(b.to)}: ${pct(b.p, 2)}`}</title></rect>; })}
-      {zero > lo && zero < hi && <line x1={x(zero)} x2={x(zero)} y1={0} y2={H} stroke="#e5e7eb" strokeDasharray="3 3" />}
-      <text x={pad} y={H + 15} fill="#9ca3af" fontSize="11">{usd(lo)}</text>
-      {zero > lo && zero < hi && <text x={x(zero)} y={H + 15} fill="#e5e7eb" fontSize="11" textAnchor="middle">$0</text>}
-      <text x={W - pad} y={H + 15} fill="#9ca3af" fontSize="11" textAnchor="end">{usd(hi)}{hist.tailP > 0 ? "+" : ""}</text>
-    </svg>
+    <div>
+      <div className="lead">{summarySentence(d)}</div>
+      {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      <SweatMeter d={d} />
+      <div className="pair">
+        <div className="panel good">
+          <h5>Root for these teams</h5>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit (EV now {sMoney(d.ev)})</div>
+          {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
+            <div className="bar" key={t.event + t.outcome} title={t.game}>
+              <div className="bl"><b>{t.name}</b> <span className="sub">{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
+              <div className="bt"><div className="bf pos" style={{ width: `calc((100% - 100px) * ${(t.gain / mx).toFixed(4)})` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>{sMoney(t.gain)} EV</span></div>
+            </div>)); })()}
+        </div>
+        <div className="panel bad">
+          <h5>Root against these</h5>
+          <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
+          {d.worst && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>If every lock misses: <span className="neg">{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${chanceWords(d.worst.p)})` : ""}</div>}
+          {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
+            <div className="bar" key={k.event + k.outcome}>
+              <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
+              <div className="bt"><div className="bf negb" style={{ width: `calc((100% - 100px) * ${(-k.drop / mx).toFixed(4)})` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)} EV</span></div>
+            </div>)); })()}
+        </div>
+      </div>
+      <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
+      <h4>How likely each result is</h4>
+      <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
+      <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
+    </div>
   );
 }
 
@@ -54,6 +82,8 @@ const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prop
 
 export default function RootFor({ user, initialData = null }) {
   const [open, setOpen] = useState(true);
+  const [view, setViewState] = useState(readView);
+  const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ } };
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
   const load = useCallback(async () => {
     const c = supabase();
@@ -69,7 +99,7 @@ export default function RootFor({ user, initialData = null }) {
     } catch (e) { setSt((s) => ({ loading: false, error: String((e && e.message) || e), data: s.data })); }
   }, []);
   useEffect(() => { if (canSeeOwnerTools(user) && !initialData) load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // live: reprice every 3 minutes while the tab is visible (in-game prices included). No alerts.
+  // live: reprice every 10 minutes while the tab is visible (in-game prices included). No alerts.
   useEffect(() => {
     if (!canSeeOwnerTools(user) || initialData) return undefined;
     const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") load(); }, REFRESH_MS);
@@ -91,6 +121,7 @@ export default function RootFor({ user, initialData = null }) {
     else delete n[ev];
     return n;
   });
+  const nightmare = useMemo(() => (base && base.model ? nightmareKeys(base.model) : []), [base]);
   if (!canSeeOwnerTools(user)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
@@ -121,19 +152,42 @@ export default function RootFor({ user, initialData = null }) {
         .rootfor .wi{padding:2px 7px;margin-right:4px;font-size:11px}.rootfor .wi.won{background:#065f46;border-color:#10b981}.rootfor .wi.lost{background:#7f1d1d;border-color:#ef4444}
         .rootfor .banner{background:#1e293b;border:1px solid #f59e0b;border-radius:8px;padding:6px 10px;margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
         .rootfor .slot td{background:#111827;color:#93c5fd;font-weight:600;font-size:12px}
+        .rootfor .seg{display:inline-flex;border:1px solid #374151;border-radius:8px;overflow:hidden}.rootfor .seg button{border:0;border-radius:0;background:transparent;color:#9ca3af}.rootfor .seg button.on{background:#f59e0b;color:#111827;font-weight:600}
+        .rootfor .lead{font-size:18px;font-weight:600;line-height:1.35;margin:12px 0 2px}.rootfor .lead2{color:#cbd5e1;font-size:14px;margin:0 0 12px}
+        .rootfor .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:6px 0 14px}
+        .rootfor .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:10px 12px}
+        .rootfor .card .rk{color:#f59e0b;font-weight:700;font-size:12px}.rootfor .card .tm{font-size:16px;font-weight:700;margin:2px 0}.rootfor .card .gm{color:#9ca3af;font-size:12px}
+        .rootfor .card .od{font-size:14px;margin-top:6px}.rootfor .card .sw{font-size:14px;margin-top:4px}
+        .rootfor .box{border-radius:10px;padding:12px 14px;margin:0 0 12px}.rootfor .box.bad{background:rgba(127,29,29,.25);border:1px solid #7f1d1d}.rootfor .box.good{background:rgba(6,95,70,.22);border:1px solid #065f46}
+        .rootfor .box h5{margin:0 0 6px;font-size:14px}.rootfor .box ol{margin:6px 0 0 18px;padding:0}.rootfor .box li{margin:3px 0}
+        .rootfor .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+        .rootfor .big{font-size:20px;font-weight:700}
+        .rootfor .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0 12px}
+        .rootfor .panel{border-radius:10px;padding:12px 14px;background:#111827;border:1px solid #1f2937}.rootfor .panel.good{border-color:#065f46}.rootfor .panel.bad{border-color:#7f1d1d}
+        .rootfor .panel h5{margin:0 0 8px;font-size:15px}
+        .rootfor .bar{margin:8px 0}.rootfor .bl{font-size:13px;margin-bottom:3px}
+        .rootfor .bt{display:flex;align-items:center;gap:8px}.rootfor .bf{height:14px;border-radius:4px;min-width:4px;flex:0 0 auto}
+        .rootfor .bf.pos{background:#34d399}.rootfor .bf.negb{background:#f87171}.rootfor .bv{font-weight:700;font-size:13px;white-space:nowrap}
+        @media (max-width:700px){.rootfor .pair{grid-template-columns:1fr}}
         @media (max-width:600px){.rootfor .hide-sm{display:none}}
       `}</style>
       <h3>
         What to root for <span className="tag">Owner</span>
-        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 3 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 10 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          <span className="seg" role="group" aria-label="View">
+            <button type="button" className={view === "simple" ? "on" : ""} aria-pressed={view === "simple"} onClick={() => setView("simple")}>Simple</button>
+            <button type="button" className={view === "detailed" ? "on" : ""} aria-pressed={view === "detailed"} onClick={() => setView("detailed")}>Detailed</button>
+          </span>
           <button type="button" onClick={load} disabled={st.loading}>{st.loading ? "Updating…" : "Refresh"}</button>
           <button type="button" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Show"}</button>
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
-      {open && d && (
+      {open && d && view === "simple" && <Simple d={base} nightmare={nightmare} />}
+      {open && d && view === "detailed" && (
         <>
+          <SweatMeter d={base} />
           {Object.keys(picks).length > 0 && (
             <div className="banner">
               <b>What-if:</b> {Object.entries(picks).map(([ev, pk]) => `${(base.model.teamNames || {})[`${ev}:${pk.team}`] || pk.team} ${pk.won ? "won" : "lost"}`).join(" · ")}
@@ -141,15 +195,16 @@ export default function RootFor({ user, initialData = null }) {
               <button type="button" onClick={() => setPicks({})} style={{ marginLeft: "auto" }}>Reset</button>
             </div>
           )}
-          <h4>Top 5 to root for (biggest swing in total P&L)</h4>
+          <h4>Top 5 to root for (biggest boost to expected profit if they win)</h4>
           <table>
-            <thead><tr><th>#</th><th>Root for</th><th className="hide-sm">Game</th><th className="num">Chance now</th><th className="num">Fair</th><th className="num">Swing</th><th className="num hide-sm">If it hits / misses</th></tr></thead>
+            <thead><tr><th>#</th><th>Root for</th><th className="hide-sm">Game</th><th className="num">Chance now</th><th className="num">Fair</th><th className="num">Adds to exp. profit</th><th className="num">Swing</th><th className="num hide-sm">If it hits / misses</th></tr></thead>
             <tbody>
-              {d.top.map((t, i) => (
+              {topByGain(base).map((t, i) => (
                 <tr key={t.event}>
                   <td>{i + 1}</td><td><b>{t.name}</b></td><td className="hide-sm">{t.game}</td>
                   <td className="num">{pct(t.p)}</td><td className="num">{am(t.american)}</td>
-                  <td className="num pos">{usd(t.swing)}</td>
+                  <td className="num pos">{sUsd(t.gain)}</td>
+                  <td className="num">{usd(t.swing)}</td>
                   <td className="num hide-sm">{sUsd(t.ifHit)} / {sUsd(t.ifMiss)}</td>
                 </tr>
               ))}
@@ -162,9 +217,9 @@ export default function RootFor({ user, initialData = null }) {
             <div className="tile"><span>Chance of a profit</span><b>{pct(d.pProfit, 1)}</b><span>{d.exact && d.exact.pProfit === false ? "simulated" : "exact"}</span></div>
           </div>
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
-          <h4>P&L distribution{whatIf ? " (what-if)" : ""}</h4>
-          <Hist hist={d.hist} />
-          <div className="note">Red = loss, green = profit (simulated slates, {d.hist ? d.hist.samples.toLocaleString() : "—"}). {d.hist && d.hist.tailP > 0 ? `${pct(d.hist.tailP, 2)} of slates land above ${usd(d.hist.tailFrom)} (folded into the last bar).` : ""}</div>
+          <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
+          <h4>How likely each result is{whatIf ? " (what-if)" : ""}</h4>
+          <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
             <thead><tr><th>Game</th><th className="hide-sm">Start</th><th>Root for</th><th className="num">Chance now</th><th className="num">Swing</th><th>What-if</th></tr></thead>

@@ -88,6 +88,23 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
 
+// Sweat meter (see src/rootForSweat.js): each game locked at its own kickoff. Never fails the request.
+async function sweatBaseline(client, out, now) {
+  try {
+    const S = await import('../src/rootForSweat.js');
+    const key = S.slateKey(now);
+    const starts = {}; for (const e of out.perEvent || []) if (e && e.event && e.start) starts[e.event] = e.start;
+    const { data, error } = await client.from('root_for_pregame_probs').select('event,sig,probs').eq('slate_key', key);
+    if (error) throw error;
+    const r = S.pregameBaseline({ model: out.model, starts, now, key, rows: data || [] });
+    if (r.overwrite.length) { const { error: e1 } = await client.from('root_for_pregame_probs').upsert(r.overwrite, { onConflict: 'slate_key,event,sig' }); if (e1) throw e1; }
+    if (r.insertOnce.length) { const { error: e2 } = await client.from('root_for_pregame_probs').upsert(r.insertOnce, { onConflict: 'slate_key,event,sig', ignoreDuplicates: true }); if (e2) throw e2; }
+    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key };
+  } catch (e) {
+    return { started: null, baseline: null, now: Number(out.ev), error: 'Pregame number unavailable' };
+  }
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
   const auth = await requireOwner(req);
@@ -100,8 +117,10 @@ async function handler(req, res) {
     const M = await loadMods();
     const { parlays, fills, singles } = await loadLocks(deps.createClient(url, key, clientOpts), auth.user.id);
     const mk = await loadMarkets(M, parlays, env);
-    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now: deps.now(), kalshiAt: mk.kalshiAt });
-    return json(res, 200, { ok: true, asOf: new Date(deps.now()).toISOString(), relayNote: mk.relayNote, ...out });
+    const now = deps.now();
+    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
+    const sweat = await sweatBaseline(deps.createClient(url, key, clientOpts), out, now);
+    return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, sweat });
   } catch (e) {
     console.error('[root-for]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not compute right now' });
