@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fetchAllRows, chunkIds } from "./comboPaging.js";
-import { lockSubmissionQueriesForParlays, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions.js";
+import { lockSubmissionQueriesForParlays, ARCHIVED_ID_CHUNK, ARCHIVED_SUBS_TTL_MS } from "./comboLockSubmissions.js";
 import {
   buildComboStatement, sortStatementLines, lockFillReceipt, pushHedgeValue,
   reducedParlayDecimal, pushLockPnl,
@@ -83,3 +83,20 @@ assert.notEqual(pkLine.pnl, 0);
 assert.equal(reducedParlayDecimal({ parlay_american: 500, legs: [{}] }, 1), 1);
 
 console.log("comboHistoryAll.test.js ok");
+
+// Load speed: the lists draw as soon as the fast core reads land (locks, kill switch, archived
+// locks, fills); the slow reads (booked contracts, match counts, per-lock attempts) no longer
+// hold Waiting / Filled / History behind "Loading…".
+{
+  const page = readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
+  const core = page.indexOf("const coreP = Promise.allSettled([");
+  const extra = page.indexOf("const extraP = Promise.allSettled([");
+  const ready = page.indexOf("setDeskLoading(false);\n\n      const [historyRes");
+  const awaitExtra = page.indexOf("(await extraP)");
+  assert.ok(core > 0 && extra > core, "core and secondary reads start together");
+  assert.ok(ready > 0 && ready < awaitExtra, "lists stop loading before the slow reads are awaited");
+  const coreBlock = page.slice(core, extra);
+  assert.doesNotMatch(coreBlock, /is_live\.eq\.true|combo_match_counts|combo_parlay_bets/, "slow reads stay out of the core");
+  assert.match(page, /archFresh \? \[\] : allArchivedIds/, "archived per-lock reads are cached between polls");
+}
+assert.equal(ARCHIVED_SUBS_TTL_MS, 10 * 60 * 1000);

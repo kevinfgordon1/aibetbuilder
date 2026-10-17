@@ -10,6 +10,9 @@ export const LOCK_SKIP_LIMIT = 40;
 export const LOCK_ARCHIVED_QUOTE_LIMIT = 400;
 export const LOCK_ARCHIVED_SKIP_LIMIT = 80;
 export const ARCHIVED_ID_CHUNK = 100;
+// Archived locks are finished, so their per-lock history is re-read at most this often
+// (or when a lock moves to History). These .in() reads were the slowest calls on the page.
+export const ARCHIVED_SUBS_TTL_MS = 10 * 60 * 1000;
 
 // Posted quotes persist as unfilled (worker maps quoted → unfilled) + quote_id.
 export const LOCK_QUOTE_OR =
