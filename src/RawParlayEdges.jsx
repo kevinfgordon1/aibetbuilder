@@ -5,6 +5,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
+import { formatAmericanOdds, formatAvailableSizeClause } from "./trueOddsLine.js";
+import { venueLabel } from "./sniperLegs.js";
 import {
   DEFAULT_EDGE_AMERICAN,
   DEFAULT_SORT,
@@ -134,6 +136,73 @@ function SkippedNote({ d }) {
   return <div className="skipped">{parts.reduce((a, p, i) => (i ? [...a, <span key={"sep" + i} className="sep">·</span>, p] : [p]), [])}</div>;
 }
 
+// Expanded legs: compact Combo Locks leg table (LEG · TRUE WIN PROB (BEST OPP)). Loaded on expand from
+// /api/raw-parlay-edges?legs=<rfq_id>; until it arrives (or if it fails) the plain leg lines show.
+const legCache = new Map();
+async function fetchLegs(rfqId) {
+  if (legCache.has(rfqId)) return legCache.get(rfqId);
+  const p = (async () => {
+    const c = supabase();
+    if (!c) throw new Error("Not configured");
+    const { data: { session } } = await c.auth.getSession();
+    if (!session) throw new Error("Sign in required");
+    const r = await fetch("/api/raw-parlay-edges?legs=" + encodeURIComponent(rfqId), { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || !j.ok) throw new Error((j && typeof j.error === "string" && j.error) || `Request failed (${r.status})`);
+    return j.legs || [];
+  })();
+  legCache.set(rfqId, p);
+  p.catch(() => legCache.delete(rfqId));
+  return p;
+}
+const LEG_TIP = "Fair = 1 minus the implied chance of the best opposing price ($500 of depth, fees included), logged when the request came in. Inverse bet method.";
+function SniperLegs({ e }) {
+  const [st, setSt] = useState({ legs: null, error: null });
+  useEffect(() => {
+    let live = true;
+    fetchLegs(e.rfq_id).then((legs) => live && setSt({ legs, error: null }), (err) => live && setSt({ legs: null, error: String((err && err.message) || err) }));
+    return () => { live = false; };
+  }, [e.rfq_id]);
+  if (!st.legs) {
+    return (
+      <div className="legs">
+        {e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}
+        <div className="legmeta">{st.error ? `Leg detail unavailable: ${st.error}` : "Loading leg detail…"}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="ltab">
+      <div className="lhead"><div>Leg</div><div title={LEG_TIP}>True win prob (best opp)</div></div>
+      {st.legs.map((l, j) => (
+        <div key={j} className="lrow">
+          <div>
+            <div className="ltitle">{l.kind === "td" && <span className="ltd">TD</span>}{l.title}</div>
+            {l.subtitle && <div className="lsub">{l.subtitle}</div>}
+            {l.when && <div className="lwhen">{l.when}</div>}
+          </div>
+          <div>
+            {l.fairAmerican != null
+              ? <div className="lfair">{formatAmericanOdds(l.fairAmerican)}{l.winPct != null && ` (${l.winPct.toFixed(1)}%)`}</div>
+              : <div className="lsub">No fair logged for this leg</div>}
+            {l.bestOpp && (
+              <div className="lopp">Best opp: {formatAmericanOdds(l.bestOpp.american)} on {venueLabel(l.bestOpp.venue)}{l.bestOpp.side ? ` · ${l.bestOpp.side}` : ""}{l.bestOpp.afterKalshiFee ? " · after Kalshi fee" : ""}</div>
+            )}
+            {(l.depth || (l.others && l.others.length > 0)) && (
+              <div className="lmeta">
+                {l.depth && <span>top {formatAmericanOdds(l.depth.top)} · {formatAmericanOdds(l.depth.at500)} at $500</span>}
+                {l.depth && l.others.length > 0 && " · "}
+                {l.others.length > 0 && <span>also {l.others.map((o) => `${venueLabel(o.venue)} ${formatAmericanOdds(o.american)}`).join(", ")}</span>}
+              </div>
+            )}
+            {l.now && <div className="lmeta">Now on {venueLabel(l.now.venue)}: {formatAmericanOdds(l.now.american)}{formatAvailableSizeClause(l.now.size)}</div>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function RawParlayEdges({ user }) {
   const [days, setDays] = useState(1);
   const [edge, setEdge] = useState(String(DEFAULT_EDGE_AMERICAN));
@@ -225,7 +294,7 @@ export default function RawParlayEdges({ user }) {
         </tr>
         {open && (
           <tr className="legrow"><td></td><td colSpan={COLS - 1}>
-            <div className="legs">{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</div>
+            <SniperLegs e={e} />
             <div className="legmeta">Winning MM quote {fmtAmerican(e.winningMmAmerican)} · we receive {usd(e.weReceive)} · {e.ticker}{" "}
               <button type="button" className="chip" disabled title={OFFER_TITLE} style={{ opacity: 0.5, cursor: "not-allowed", marginLeft: 8 }}>Offer this</button></div>
           </td></tr>
@@ -270,6 +339,19 @@ export default function RawParlayEdges({ user }) {
         .raw-edges .legs div{white-space:nowrap;padding:1px 0}
         .raw-edges .legs div.td{color:#fbbf24}
         .raw-edges .legmeta{color:#6b7280;font-size:11px;margin-top:4px}
+        .raw-edges .ltab{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:8px;overflow:hidden;margin-top:2px}
+        .raw-edges .lhead,.raw-edges .lrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:12px;padding:5px 10px}
+        .raw-edges .lhead{font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid rgba(255,255,255,.06)}
+        .raw-edges .lrow{border-bottom:1px solid rgba(255,255,255,.04);font-size:11px;line-height:1.35}
+        .raw-edges .lrow:last-child{border-bottom:none}
+        .raw-edges .lrow:nth-child(odd){background:rgba(255,255,255,.012)}
+        .raw-edges .ltitle{font-size:12px;font-weight:600;color:#e8eaed;white-space:normal}
+        .raw-edges .ltd{font-size:9px;font-weight:700;color:#fbbf24;border:1px solid rgba(251,191,36,.4);border-radius:4px;padding:0 3px;margin-right:5px;vertical-align:1px}
+        .raw-edges .lsub{color:#6b7280}
+        .raw-edges .lwhen{color:#4b5563}
+        .raw-edges .lfair{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;font-weight:600;color:#f59e0b}
+        .raw-edges .lopp{color:#9ca3af}
+        .raw-edges .lmeta{color:#4b5563}
         .raw-edges .vtag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;min-width:58px;text-align:center}
         .raw-edges .vtag.kalshi{background:rgba(16,185,129,.15);color:#6ee7b7}.raw-edges .vtag.polymarket{background:rgba(59,130,246,.18);color:#93c5fd}
         .raw-edges .strip{border:1px solid rgba(255,255,255,.08);border-radius:8px;margin-bottom:8px}

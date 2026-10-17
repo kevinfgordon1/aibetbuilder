@@ -20,19 +20,22 @@ const seriesFee = require('./kalshi-series-fee');
 let edgesMod = null;
 let buyerOdds = null;
 let riskMod = null;
+let legsMod = null;
 async function mods() {
+  if (!legsMod) legsMod = await import('../src/sniperLegs.js');
   // src/*.js are ESM; dynamic import from this CommonJS route (static require throws on Vercel).
   if (!edgesMod) edgesMod = await import('../src/rawParlayEdges.js');
   if (!buyerOdds) buyerOdds = await import('../src/buyerOdds.js');
   if (!riskMod) riskMod = await import('../src/parlayRisk.js');
-  return { edgesMod, buyerOdds, riskMod };
+  return { edgesMod, buyerOdds, riskMod, legsMod };
 }
 
 function defaultCreateClient(...args) {
   const { createClient } = require('@supabase/supabase-js');
   return createClient(...args);
 }
-const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now() });
+const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now(), fetch: (...a) => fetch(...a) });
+const RELAY_FALLBACK = 'https://odds-relay-production-34da.up.railway.app';
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
 const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,fair_promo_best_american,promo_max_age_ms,fair_pm_inverse_american,traded_yes,traded_contracts,outcome,venue,legs_kalshi,poly_tick_size';
@@ -199,6 +202,31 @@ function fairRow(r) {
   return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_pm_inverse_american };
 }
 
+// GET ?legs=<rfq_id> → { ok, legs: [...] }: one compact Combo Locks-style row per leg for an expanded Sniper row.
+// Fair + best opp come from the inverse-bet leg detail logged at request time (pm_inverse_legs); live relay boards only
+// add kickoff times and a "now" price/size. Board failures never fail the request.
+async function legDetail(svc, rfqId, L, E) {
+  const { data, error } = await svc.from('noboost_paper_rfqs').select('rfq_id,venue,legs,legs_kalshi,pm_inverse_legs').eq('rfq_id', rfqId).limit(1);
+  if (error) throw error;
+  const row = data && data[0];
+  if (!row) return { ok: false, status: 404, error: 'Request not found' };
+  const env = deps.env || process.env;
+  const base = String(env.ODDS_RELAY_URL || env.VITE_ODDS_RELAY_URL || RELAY_FALLBACK).replace(/\/+$/, '');
+  const boards = { kalshi: [], polymarket: [], novig: [] };
+  const legsRaw = E.canonicalLegs(row);
+  const leagues = [...new Set(legsRaw.map((l) => (/^KXNCAAF/.test(l) ? 'NCAAF' : 'NFL')))];
+  await Promise.all(leagues.flatMap((lg) => Object.keys(boards).map(async (v) => {
+    try {
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const t = ctl ? setTimeout(() => ctl.abort(), 4000) : null;
+      const r = await deps.fetch(`${base}/board?venue=${v}&league=${lg}`, { headers: { accept: 'application/json' }, signal: ctl ? ctl.signal : undefined });
+      if (t) clearTimeout(t);
+      if (r && r.ok) { const j = await r.json(); boards[v].push(...((j && j.quotes) || [])); }
+    } catch (_) { /* kickoff / now are optional */ }
+  })));
+  return { ok: true, legs: L.buildLegRows(legsRaw, row.pm_inverse_legs, L.indexBoards(boards)) };
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
   const auth = await requireOwner(req);
@@ -208,9 +236,15 @@ async function handler(req, res) {
   const key = env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return json(res, 503, { ok: false, error: 'Server is not configured' });
   try {
-    const { edgesMod: E, buyerOdds: B, riskMod: R } = await mods();
-    const opts = parseOpts(req.query || {});
+    const { edgesMod: E, buyerOdds: B, riskMod: R, legsMod: L } = await mods();
     const svc = deps.createClient(url, key, clientOpts);
+    const legsFor = req.query && typeof req.query.legs === 'string' ? req.query.legs.trim() : '';
+    if (legsFor) {
+      if (!/^[A-Za-z0-9_-]{1,80}$/.test(legsFor)) return json(res, 400, { ok: false, error: 'Bad request id' });
+      const out = await legDetail(svc, legsFor, L, E);
+      return out.ok ? json(res, 200, out) : json(res, out.status, { ok: false, error: out.error });
+    }
+    const opts = parseOpts(req.query || {});
     const windowStart = sinceIso(deps.now(), opts.days);
     const [rows, skipped] = await Promise.all([
       fetchRows(svc, windowStart, opts.minCost, opts, deps.now()),
