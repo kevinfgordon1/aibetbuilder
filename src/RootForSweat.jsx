@@ -1,6 +1,7 @@
 // Sweat meter: semicircle gauge, center = pregame expected profit, needle = live expected profit now.
 import React from "react";
-import { gaugeFrac } from "./rootForSweat";
+import { gaugeFrac, liveLegMoves } from "./rootForSweat";
+import { american } from "./rootForPrices";
 import { quantileOf } from "./rootForSimple";
 
 const etTime = (iso) => new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
@@ -8,7 +9,34 @@ const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs
 const pt = (cx, cy, r, f) => { const a = Math.PI * (1 - f); return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
 const arc = (cx, cy, r, f0, f1) => { const [x0, y0] = pt(cx, cy, r, f0); const [x1, y1] = pt(cx, cy, r, f1); return `M${x0},${y0}A${r},${r} 0 0 1 ${x1},${y1}`; };
 
-export default function SweatMeter({ d }) {
+// Preview: in-play legs moving the needle (signed $ share of now − pregame), one shared scale.
+function LiveLegs({ d }) {
+  const s = d.sweat || {}; const model = d.model || {};
+  const positions = d.livePos || model.positions || [];
+  const starts = {}; const meta = {}; for (const e of d.perEvent || []) { starts[e.event] = e.start; meta[e.event] = e; }
+  const { legs, settled } = liveLegMoves(positions, model.probs || {}, s.frozen || {}, starts);
+  const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
+  const mx = Math.max(...shown.map((l) => Math.abs(l.move)), 1);
+  return (
+    <div className="livelegs" data-noclick style={{ flex: "1 1 300px", minWidth: 0, borderLeft: "1px solid #1f2937", paddingLeft: 14 }}>
+      <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
+      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Live legs moving the needle</div>
+      {!shown.length ? <div className="sub" style={{ fontSize: 13, padding: "10px 0" }}>No legs are live right now. Once a game you're in kicks off, its push on the needle shows up here.</div>
+        : shown.map((l) => { const e = meta[l.event] || {}; const pk = e.rootFor; const p = pk && model.probs[l.event] ? model.probs[l.event][pk] : null; const am = american(p); const pos = l.move >= 0;
+          return (
+            <div key={l.event} style={{ margin: "6px 0" }}>
+              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{e.rootForName || e.game || l.event}</b> <span className="sub">{e.game && e.rootForName ? `${e.game} · ` : ""}{am != null ? `live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
+                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)}</span>
+              </div>
+            </div>); })}
+      {shown.length > 0 && Math.abs(settled) >= 0.5 && <div className="sub" style={{ fontSize: 11.5, marginTop: 4 }}>Finished games: <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> (not shown)</div>}
+    </div>
+  );
+}
+
+export default function SweatMeter({ d, legs = true }) {
   const s = d && d.sweat; if (!s) return null;
   const now = Number.isFinite(Number(s.now)) ? Number(s.now) : Number(d.ev); const started = s.started === true; const base = Number.isFinite(s.baseline) ? s.baseline : null;
   const center = started && base != null ? base : now;
@@ -41,6 +69,7 @@ export default function SweatMeter({ d }) {
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}
         
       </div>
+      {legs && started && base != null && <LiveLegs d={d} />}
     </div>
   );
 }

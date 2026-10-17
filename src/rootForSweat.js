@@ -58,3 +58,22 @@ export function gaugeFrac(v, lo, base, hi) {
   if (v <= base) return base > lo ? 0.5 * Math.max(0, (v - lo) / (base - lo)) : 0.5;
   return hi > base ? 0.5 + 0.5 * Math.min(1, (v - base) / (hi - base)) : 0.5;
 }
+
+// Live meter leg chart: each in-play game's signed share of the needle's move from pregame.
+// Telescoping in kickoff order (earlier games first): a game's share = EV with it at live chances minus EV
+// just before, so the shares of every started game add up exactly to (now − pregame). Games already decided
+// (some outcome ≥ 98%) are not "live"; their combined share comes back as `settled`.
+export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {}) {
+  const held = new Set(positions.flatMap((p) => p.legs.map((l) => l.event)));
+  const evs = Object.keys(frozen).filter((ev) => held.has(ev) && probs[ev] && frozen[ev])
+    .sort((a, b) => (Date.parse(starts[a] || "") || 0) - (Date.parse(starts[b] || "") || 0) || a.localeCompare(b));
+  let cur = { ...probs }; for (const ev of evs) cur[ev] = frozen[ev];
+  const pregame = expectedProfit(positions, cur); let prev = pregame;
+  const legs = []; let settled = 0;
+  for (const ev of evs) {
+    cur = { ...cur, [ev]: probs[ev] }; const v = expectedProfit(positions, cur); const move = v - prev; prev = v;
+    if (Math.max(...Object.values(probs[ev])) >= 0.98) settled += move; else legs.push({ event: ev, move });
+  }
+  legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
+  return { legs, settled, total: prev - pregame };
+}
