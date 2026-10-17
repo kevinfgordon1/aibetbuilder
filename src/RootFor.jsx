@@ -55,6 +55,9 @@ function todaySentence(d) {
 
 function Simple({ d, today }) {
   const range = typicalRange(d.hist);
+  // One shared scale for both columns so a +$498 bar and a -$136 bar are drawn in proportion.
+  const top = topByGain(d); const bad = topByDrop(d);
+  const mx = Math.max(...top.map((t) => Math.abs(t.gain)), ...bad.map((k) => Math.abs(k.drop)), 1);
   return (
     <div>
       <div className="lead">{today ? todaySentence(d) : summarySentence(d)}</div>
@@ -66,21 +69,21 @@ function Simple({ d, today }) {
         <div className="panel good">
           <h5>Root for these teams</h5>
           <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit ({today ? "EV on today\u2019s locks" : "EV now"} {sMoney(d.ev)})</div>
-          {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
+          {top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{t.game ? `${matchup(t)} · ` : ""}{t.american != null ? `fair ${am(t.american)}` : ""}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf pos" style={{ width: `calc((100% - 100px) * ${(t.gain / mx).toFixed(4)})` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>{sMoney(t.gain)} EV</span></div>
-            </div>)); })()}
+              <div className="bt"><div className="bf pos" style={{ width: `calc((100% - 100px) * ${(Math.abs(t.gain) / mx).toFixed(4)})` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>{sMoney(t.gain)} EV</span></div>
+            </div>))}
         </div>
         <div className="panel bad">
           <h5>Root against these</h5>
           <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
           {d.worst && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst case scenario: <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${worstChance(d.worst.p)})` : ""}</div>}
-          {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
+          {bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{k.game ? `${matchup(k)} · ` : ""}{k.american != null ? `fair ${am(k.american)}` : ""}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf negb" style={{ width: `calc((100% - 100px) * ${(-k.drop / mx).toFixed(4)})` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)} EV</span></div>
-            </div>)); })()}
+              <div className="bt"><div className="bf negb" style={{ width: `calc((100% - 100px) * ${(Math.abs(k.drop) / mx).toFixed(4)})` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)} EV</span></div>
+            </div>))}
         </div>
       </div>
       <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
