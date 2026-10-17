@@ -53,15 +53,21 @@ export function mergeSubmissionRows(...lists) {
   });
 }
 
+// History's .in(parlay_id, ids) reads skip the user_id filter: the ids are already this user's locks
+// (every submission row carries its lock's user_id; RLS still applies), and with user_id in the
+// query Postgres walks the user's whole 1M+ row (user_id, created_at) index instead of the
+// per-lock partial indexes (combo_submissions_parlay_quote_idx / _skip_idx): ~5s → ~0.1s.
+const scopeUser = (q, { userId, parlayIds }) => (parlayIds && parlayIds.length ? q : q.eq("user_id", userId));
+
 function applyQuoteFilters(q, { userId, parlayId, parlayIds, limit }) {
-  let next = q.select("*").eq("user_id", userId).neq("status", "shadow");
+  let next = scopeUser(q.select("*"), { userId, parlayIds }).neq("status", "shadow");
   if (parlayId) next = next.eq("parlay_id", parlayId);
   if (parlayIds && parlayIds.length) next = next.in("parlay_id", parlayIds);
   return next.or(LOCK_QUOTE_OR).order("created_at", { ascending: false }).limit(limit);
 }
 
 function applySkipFilters(q, { userId, parlayId, parlayIds, limit }) {
-  let next = q.select("*").eq("user_id", userId).eq("status", "declined").is("quote_id", null);
+  let next = scopeUser(q.select("*"), { userId, parlayIds }).eq("status", "declined").is("quote_id", null);
   if (parlayId) next = next.eq("parlay_id", parlayId);
   if (parlayIds && parlayIds.length) next = next.in("parlay_id", parlayIds);
   return next.or(LOCK_SKIP_OR).order("created_at", { ascending: false }).limit(limit);

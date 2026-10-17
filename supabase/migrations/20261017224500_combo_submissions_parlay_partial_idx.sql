@@ -1,8 +1,6 @@
--- PROPOSED (NOT APPLIED): per-lock attempt reads on Combo Locks.
--- History's .in(parlay_id, <100 ids>) reads take 0.4–3.7s each today (p50 4.3s in prod) because the
--- (parlay_id, created_at) index has to filter through ~1M skip/shadow rows. These partial indexes
--- hold only the rows each read returns. Both are built CONCURRENTLY (no write lock).
--- ~196k rows / ~654k rows; small extra cost on combo-worker inserts.
+-- Combo Locks per-lock attempt reads (open-lock cards + History details).
+-- ALREADY APPLIED to prod (xuolkiadmumtbksbyjzc) on 2026-10-17 with CREATE INDEX CONCURRENTLY,
+-- one at a time; both indisvalid = true (quote ~7.8 MB, skip ~25 MB).
 create index concurrently if not exists combo_submissions_parlay_quote_idx
   on public.combo_submissions (parlay_id, created_at desc)
   where status <> 'shadow' and (quote_id is not null or order_id is not null or status in ('filled','unfilled','quoted'));
