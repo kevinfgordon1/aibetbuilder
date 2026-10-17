@@ -69,6 +69,14 @@ async function loadLocks(client, userId) {
   return { parlays: parlays || [], fills, singles };
 }
 
+/** Normalized "away|home" for matching the same game across venues ("Michigan St." == "Michigan State"). */
+function matchKey(away, home) {
+  const n = (x) => String(x || '').toLowerCase().replace(/\bst\.?(?=\s|$)/g, 'state').replace(/[^a-z0-9]+/g, ' ').trim();
+  const a = n(away), h = n(home); return a && h ? `${a}|${h}` : '';
+}
+/** Kalshi date-only placeholder kickoff: exactly 03:00:00 or 04:00:00 UTC (11 PM / midnight ET). */
+function isPlaceholderStart(t) { return /T0[34]:00:00(\.000)?Z$/.test(String(t || '')); }
+
 /** Live books: Kalshi orderbooks for every needed ticker + relay boards (NFL, NCAAF). */
 async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   const tickers = M.tickersNeeded(parlays);
@@ -90,13 +98,23 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
     await Promise.all(['NFL', 'NCAAF'].flatMap((lg) => Object.keys(boards).map(async (v) => {
       try { const j = await getJ(`${base}/board?venue=${v}&league=${lg}`); boards[v].push(...(j.quotes || [])); } catch (e) { relayNote.push(`${v} ${lg}: ${String(e.message).slice(0, 60)}`); }
     })));
-    for (const q of boards.kalshi) { if (!q || !q.ticker || !q.start) continue; const ev = String(q.ticker).toUpperCase().split('-').slice(0, 2).join('-'); if (!starts[ev]) starts[ev] = q.start; }
+    // Kalshi's board start is often a date-only placeholder (e.g. 03:00Z = 11 PM ET on the ticker date, even for
+    // Saturday games). Prefer the real kickoff from Polymarket / Novig for the same matchup; a Kalshi-only placeholder
+    // time is treated as unknown (no time shown, not counted as Today).
+    const real = {};
+    for (const q of [...boards.polymarket, ...boards.novig]) { if (!q || !q.start) continue; const k = matchKey(q.away, q.home); if (k && !real[k]) real[k] = new Date(Date.parse(q.start)).toISOString(); }
+    for (const q of boards.kalshi) {
+      if (!q || !q.ticker) continue;
+      const ev = String(q.ticker).toUpperCase().split('-').slice(0, 2).join('-'); if (ev in starts) continue;
+      const r = real[matchKey(q.away, q.home)];
+      starts[ev] = r || (q.start && !isPlaceholderStart(q.start) ? q.start : null);
+    }
     relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive, polledAt });
   } catch (e) { relayNote.push(`relay: ${String(e.message).slice(0, 80)}`); }
   // start times for games the relay doesn't carry (e.g. NHL): Kalshi market close/expected times
-  const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !starts[ev]);
+  const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !(ev in starts));
   await Promise.all(missing.slice(0, 40).map(async (ev) => {
-    try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
+    try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (t && /FOOTBALL|NFL|NCAAF/i.test(ev) && isPlaceholderStart(t)) { starts[ev] = null; return; } if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
   }));
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
@@ -160,4 +178,4 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods };
+module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods, matchKey, isPlaceholderStart };
