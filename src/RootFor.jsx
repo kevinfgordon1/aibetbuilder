@@ -195,7 +195,12 @@ export default function RootFor({ user, initialData = null }) {
       </button>); });
   };
   return (
-    <div className="rootfor">
+    <div className="rootfor" style={{ cursor: "pointer" }} title={open ? undefined : "Click to show"} onClick={(e) => {
+      // Click anywhere on the card toggles it (like Promo Builder cards), except on controls / charts / text selection.
+      if (e.target.closest && e.target.closest("button,a,input,select,textarea,label,summary,details,svg,table,[role=button],[role=group],[data-noclick]")) return;
+      if (typeof window !== "undefined" && String(window.getSelection && window.getSelection()).length) return;
+      setOpen((o) => !o);
+    }}>
       <style>{`
         .rootfor{border:1px solid #374151;border-radius:12px;padding:14px 16px;margin:0 0 16px;background:#0b1220;color:#e5e7eb;font-size:13px}
         .rootfor h3{margin:0;font-size:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
