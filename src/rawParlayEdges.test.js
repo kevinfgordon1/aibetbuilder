@@ -129,3 +129,25 @@ console.log("rawParlayEdges TD ok");
   if (!(s.takerGetsCost / s.contracts <= E.probFromAmerican(1100) + 1e-12)) throw new Error("taker gets <= fair-X");
   console.log("rawParlayEdges polymarket ok");
 }
+
+// Leg summary, leg-count / league filters, and the sort-independent server cut (Polymarket row vanishing in All venues)
+{
+  const s = E.legSummary(["KXNFLGAME-26OCT25CINBAL-BAL:yes", "KXNFLGAME-26OCT25DENARI-DEN:yes", "KXNFLGAME-26OCT26KCSEA-KC:yes"]);
+  assert.equal(s.text, "3 legs · NFL ML · Oct 25–Oct 26");
+  assert.deepEqual(s.leagues, ["NFL"]);
+  const t = E.legSummary(["KXNFLGAME-26OCT18LACKC-LAC:yes", "KXNFLTD-26OCT18PITTB-PITKWETJEN10-1:yes"]);
+  assert.equal(t.text, "2 legs · NFL ML + TD · Oct 18");
+  assert.equal(E.matchesLegBucket({ nLegs: 5 }, "4-5"), true);
+  assert.equal(E.matchesLegBucket({ nLegs: 6 }, "4-5"), false);
+  assert.equal(E.matchesLegBucket({ nLegs: 7 }, "6+"), true);
+  assert.equal(E.matchesLeague({ summary: { leagues: ["NCAAF"] } }, "NFL"), false);
+  // 300 high-EV low-margin rows + 1 high-margin small-EV row: the old top-200-by-EV cut dropped it
+  const big = Array.from({ length: 300 }, (_, i) => ({ rfq_id: "k" + i, ev: 10 + i, evPer100: 1, contracts: 100 }));
+  const small = { rfq_id: "poly", ev: 1.3, evPer100: 3.44, contracts: 42 };
+  const cut = E.topForEverySort([...big, small], 200);
+  assert.equal(cut.complete, false);
+  assert.equal(E.sortRawEdges(cut.edges, "margin")[0].rfq_id, "poly");
+  assert.equal(E.sortRawEdges(cut.edges, "ev")[0].rfq_id, "k299");
+  assert.equal(E.topForEverySort([small], 200).complete, true);
+}
+console.log("legSummary / filters / topForEverySort tests passed");
