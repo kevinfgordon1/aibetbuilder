@@ -15,6 +15,8 @@ async function loadMods() {
 function defaultCreateClient(...args) { const { createClient } = require('@supabase/supabase-js'); return createClient(...args); }
 const KALSHI = 'https://api.elections.kalshi.com/trade-api/v2';
 const RELAY_FALLBACK = 'https://odds-relay-production-34da.up.railway.app';
+// Sweat meter is off for now (UI removed). Set ROOT_FOR_SWEAT=on to resume saving pregame probabilities.
+const SWEAT_ENABLED = () => String((deps.env || process.env).ROOT_FOR_SWEAT || '').toLowerCase() === 'on';
 const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, fetch: (...a) => fetch(...a), now: () => Date.now() });
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
@@ -119,8 +121,8 @@ async function handler(req, res) {
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
     const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
-    const sweat = await sweatBaseline(deps.createClient(url, key, clientOpts), out, now);
-    return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, sweat });
+    const sweat = SWEAT_ENABLED() ? await sweatBaseline(deps.createClient(url, key, clientOpts), out, now) : undefined;
+    return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, ...(sweat ? { sweat } : {}) });
   } catch (e) {
     console.error('[root-for]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not compute right now' });

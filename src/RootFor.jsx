@@ -3,7 +3,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
-import SweatMeter from "./RootForSweat";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -48,7 +47,6 @@ function Simple({ d, nightmare }) {
     <div>
       <div className="lead">{summarySentence(d)}</div>
       {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
-      <SweatMeter d={d} />
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
@@ -81,7 +79,10 @@ function Simple({ d, nightmare }) {
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
 
 export default function RootFor({ user, initialData = null }) {
-  const [open, setOpen] = useState(true);
+  // Hidden by default; an explicit Show is remembered per browser. New key = everyone starts hidden again.
+  const OPEN_KEY = "rootfor.open.v2";
+  const [open, setOpenState] = useState(() => { try { return typeof localStorage !== "undefined" && localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; } });
+  const setOpen = (f) => setOpenState((o) => { const n = typeof f === "function" ? f(o) : f; try { localStorage.setItem(OPEN_KEY, n ? "1" : "0"); } catch { /* private mode */ } return n; });
   const [view, setViewState] = useState(readView);
   const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ } };
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
@@ -98,13 +99,14 @@ export default function RootFor({ user, initialData = null }) {
       setSt({ loading: false, error: null, data: j });
     } catch (e) { setSt((s) => ({ loading: false, error: String((e && e.message) || e), data: s.data })); }
   }, []);
-  useEffect(() => { if (canSeeOwnerTools(user) && !initialData) load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // fetch only once the sheet is shown
+  useEffect(() => { if (open && canSeeOwnerTools(user) && !initialData && !st.data && !st.loading) load(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   // live: reprice every 10 minutes while the tab is visible (in-game prices included). No alerts.
   useEffect(() => {
-    if (!canSeeOwnerTools(user) || initialData) return undefined;
+    if (!open || !canSeeOwnerTools(user) || initialData) return undefined;
     const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") load(); }, REFRESH_MS);
     return () => clearInterval(id);
-  }, [user, initialData, load]);
+  }, [open, user, initialData, load]);
   const [picks, setPicks] = useState({});
   const base = st.data;
   const whatIf = useMemo(() => {
@@ -187,7 +189,6 @@ export default function RootFor({ user, initialData = null }) {
       {open && d && view === "simple" && <Simple d={base} nightmare={nightmare} />}
       {open && d && view === "detailed" && (
         <>
-          <SweatMeter d={base} />
           {Object.keys(picks).length > 0 && (
             <div className="banner">
               <b>What-if:</b> {Object.entries(picks).map(([ev, pk]) => `${(base.model.teamNames || {})[`${ev}:${pk.team}`] || pk.team} ${pk.won ? "won" : "lost"}`).join(" · ")}
