@@ -45,18 +45,23 @@ function conditioned(model, picks) {
 }
 
 
+function todaySentence(d, range) {
+  const top = topByGain(d, 1)[0];
+  const head = range ? <>Today's games will most likely move your EV between <b className={range.lo < 0 ? "neg" : "pos"}>{sMoney(range.lo)}</b> and <b className={range.hi < 0 ? "neg" : "pos"}>{sMoney(range.hi)}</b>.</> : "Today's games can move your EV.";
+  return <>{head}{top ? ` Biggest game: ${top.game} (root for ${top.name}).` : ""}</>;
+}
+
 function Simple({ d, today }) {
   const range = typicalRange(d.hist);
   return (
     <div>
-      <div className="lead">{summarySentence(d)}</div>
+      <div className="lead">{today ? todaySentence(d, range) : summarySentence(d)}</div>
       {range && !today && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
-      {range && today && <div className="lead2">After today's games, your expected profit will most likely sit between <b className={range.lo < 0 ? "neg" : "pos"}>{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
-          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit (EV now {sMoney(d.ev)})</div>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit{today ? "" : ` (EV now ${sMoney(d.ev)})`}</div>
           {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{t.game ? `${matchup(t)} · ` : ""}{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
@@ -84,7 +89,7 @@ function Simple({ d, today }) {
 
 function Curve({ d, today }) {
   return today
-    ? <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} xLabel="Your expected profit after today's games ($)" worstWord="worst day" unit="days" />
+    ? <PnlCurve hist={d.hist} worst={d.worst} ev={0} pProfit={d.pProfit} best={d.best} xLabel="Change in your expected profit from today's games ($)" worstWord="worst day" unit="days" evLabel="No change" />
     : <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />;
 }
 
@@ -97,11 +102,11 @@ function TouchedLocks({ today }) {
   );
 }
 
-// Today = games kicking off today (ET). Lists keep the full-engine E[P | result] − E[P]; chart = EV after today.
+// Today = games kicking off today (ET). Lists keep the full-engine E[P | result] − E[P]; chart = CHANGE in EV from today's games (EV after today − EV now, mean ≈ $0).
 function todayView(base, nowMs) {
   if (!base || !base.model) return null;
   const evs = todayEvents(base.perEvent, nowMs); if (!evs.size) return null;
-  const dist = todayDistribution(base.model, evs); if (!dist) return null;
+  const dist = todayDistribution(base.model, evs, { offset: Number(base.ev) || 0 }); if (!dist) return null;
   const labels = base.lockLabels || {};
   const locks = touchedLocks(base.model, evs).map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   return {
