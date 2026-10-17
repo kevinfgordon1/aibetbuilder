@@ -4,7 +4,7 @@
 // Never recomputes or changes the fair: each leg's fair is exactly the logged fairAmerican
 // (1 − implied chance of the best opposing price, $500 depth, fees included).
 // Live relay boards (Polymarket US / Novig / Kalshi) only add the kickoff time and a "now" price + size.
-import { parseLeg, parseTdLeg, probFromAmerican, americanFromProb } from "./rawParlayEdges.js";
+import { parseLeg, parseTdLeg, probFromAmerican, americanFromProb, takerAllIn } from "./rawParlayEdges.js";
 
 const NFL = {
   ARI: "Arizona Cardinals", ATL: "Atlanta Falcons", BAL: "Baltimore Ravens", BUF: "Buffalo Bills", CAR: "Carolina Panthers",
@@ -93,7 +93,7 @@ const sourcePrices = (leg) => {
     const c = Number(s.costAmerican);
     if (!Number.isFinite(c)) continue;
     const v = String(s.venue || "").toLowerCase();
-    if (!by[v] || probFromAmerican(c) < probFromAmerican(by[v].cost)) by[v] = { venue: v, cost: c, top: Number.isFinite(Number(s.topAmerican)) ? Number(s.topAmerican) : null };
+    if (!by[v] || probFromAmerican(c) < probFromAmerican(by[v].cost)) by[v] = { venue: v, cost: c, via: s.via || null, top: Number.isFinite(Number(s.topAmerican)) ? Number(s.topAmerican) : null };
   }
   return Object.values(by);
 };
@@ -112,12 +112,14 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
     const date = tickerDateKey(raw);
     const td = parseTdLeg(raw);
     const row = { raw, kind: td ? "td" : "ml", title: null, subtitle: null, when: null, kickoff: null, fairAmerican: null, winPct: null, bestOpp: null, depth: null, others: [], now: null };
-    let own = null, opp = null, away = null, home = null;
+    let own = null, opp = null, away = null, home = null, lside = "yes";
+    const legTicker = String(raw).split(":")[0];
     if (td) {
       const teams = pairTeams(raw, td.team);
       [away, home] = teams || [null, null];
       row.title = td.side === "no" ? `${td.player} NO anytime TD` : `${td.player} anytime TD`;
       row.oppSide = td.side === "no" ? `${td.player} anytime TD` : `${td.player} NO anytime TD`;
+      lside = td.side;
     } else {
       const l = parseLeg(raw);
       const teams = pairTeams(raw, l.team);
@@ -130,6 +132,7 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
       row.oppSide = l.side === "no" ? `${nm(own)} ML` : opp ? `${nm(opp)} ML` : null;
       if (l.league !== "NFL" && ke && ke.away && ke.home) row.subtitle = `${ke.away} @ ${ke.home}`;
       row.oppAbbr = l.side === "no" ? own : opp;
+      lside = l.side;
     }
     if (!row.subtitle && away && home) row.subtitle = `${nflName(away) || away} @ ${nflName(home) || home}`;
     const g = B.games[gameKey(date, away, home)];
@@ -147,7 +150,14 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
         row.bestOpp = { american: best.cost, venue: best.venue, side: row.oppSide, afterKalshiFee: best.venue === "kalshi" };
         if (best.top != null && best.top !== best.cost) row.depth = { top: best.top, at500: best.cost };
         row.others = prices.filter((x) => x !== best).map((x) => ({ venue: x.venue, american: x.cost }));
-        if (row.kind === "ml" && row.oppAbbr) {
+        if (best.venue === "kalshi") {
+          // The Kalshi contract behind the best opp: TD → the other side of the player market; ML → YES on the other
+          // team (via yes_opp) or NO on this team (via no_own). Live top-of-book size is filled in by applyKalshiLive.
+          const ev = legTicker.split("-").slice(0, 2).join("-");
+          if (lside === "no") row.kalshiLive = { ticker: legTicker, side: "yes" };
+          else if (row.kind === "ml" && best.via === "yes_opp" && row.oppAbbr) row.kalshiLive = { ticker: `${ev}-${row.oppAbbr}`, side: "yes" };
+          else row.kalshiLive = { ticker: legTicker, side: "no" };
+        } else if (row.kind === "ml" && row.oppAbbr) {
           const qk = `${best.venue}|${gameKey(date, away, home)}|${canon(row.oppAbbr)}`;
           const q = B.quotes[qk];
           if (q && q.american != null) row.now = { venue: best.venue, american: q.american, size: q.size };
@@ -162,3 +172,45 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
 /** Kevin (Oct 17): the detailed leg table (and its price lookups) only for rows at 1% EV or better (EV/$100 risked ≥ $1.00). */
 export const DETAIL_MIN_EV_PER_100 = 1;
 export const wantsLegDetail = (e) => Number(e && e.evPer100) >= DETAIL_MIN_EV_PER_100;
+
+/** True once the leg's game has started (kickoff known and past) or its ticker date is before today (ET). */
+export function legStarted(row, nowMs = Date.now()) {
+  if (row && row.kickoff && Date.parse(row.kickoff) <= nowMs) return true;
+  const d = tickerDateKey(row && row.raw);
+  return !!(d && d < etDateKey(new Date(nowMs).toISOString()));
+}
+/** Best ask for buying `side` on a Kalshi orderbook (orderbook_fp): { px, contracts } at the top price only. */
+export function kalshiTopAsk(ob, side) {
+  const b = (ob && (ob.orderbook_fp || ob.orderbook)) || {};
+  const bids = side === "yes" ? b.no_dollars : b.yes_dollars; // buying YES lifts NO bids, and vice versa
+  let best = null;
+  for (const r of Array.isArray(bids) ? bids : []) {
+    const px = Number(Array.isArray(r) ? r[0] : r && r.price), q = Number(Array.isArray(r) ? r[1] : r && r.count);
+    if (!(px > 0 && px < 1) || !(q > 0)) continue;
+    if (!best || px > best.bid) best = { bid: px, q };
+  }
+  return best ? { px: Math.round((1 - best.bid) * 1e4) / 1e4, contracts: best.q } : null;
+}
+/**
+ * Live liquidity for every leg (same convention as Combo Locks: $ = stake at the top ask, price × contracts).
+ * Kalshi legs: live orderbook, price shown after the Kalshi taker fee. Polymarket / Novig: relay top quote (set by buildLegRows).
+ * Nothing live once the game has started or the Kalshi market is no longer active.
+ * When the live price equals the logged best-opp price the $ moves onto the Best opp line.
+ */
+export function applyLive(rows, { kalshiBooks = {}, kalshiStatus = {}, nowMs = Date.now() } = {}) {
+  return (rows || []).map((row) => {
+    const out = { ...row };
+    const kl = out.kalshiLive; delete out.kalshiLive;
+    if (legStarted(out, nowMs)) { out.now = null; return out; }
+    if (kl) {
+      const st = kalshiStatus[kl.ticker];
+      const top = st === "active" || st === "open" ? kalshiTopAsk(kalshiBooks[kl.ticker], kl.side) : null;
+      out.now = top ? { venue: "kalshi", american: americanFromProb(takerAllIn(top.px)), size: top.px * top.contracts, afterKalshiFee: true } : null;
+    }
+    if (out.now && out.bestOpp && out.now.venue === out.bestOpp.venue && out.now.american === out.bestOpp.american && out.now.size > 0) {
+      out.bestOpp = { ...out.bestOpp, size: out.now.size };
+      out.now = null;
+    }
+    return out;
+  });
+}
