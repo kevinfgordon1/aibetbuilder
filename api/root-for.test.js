@@ -10,8 +10,10 @@ const tables = {
     { id: 'pa1', user_id: 'user-a', label: 'A lock', legs: [], ...open },
     { id: 'pa2', user_id: 'user-a', label: 'A lock 2', legs: [], ...open },
     { id: 'pb1', user_id: 'user-b', label: 'B lock', legs: [], ...open },
+    { id: 'ph1', user_id: '721c1166-be0b-4856-8a88-6de3a8b047b9', label: 'Chris lock', legs: [], ...open },
     { id: 'pb2', user_id: 'user-b', label: 'B settled', legs: [], ...open, settled_at: '2026-10-01' },
   ],
+  combo_live_users: [],
   combo_fills: [{ parlay_id: 'pa1', count: 5 }, { parlay_id: 'pb1', count: 7 }],
   combo_single_orders: [{ id: 'o1', parlay_id: 'pa2' }, { id: 'o2', parlay_id: 'pb1' }],
 };
@@ -35,10 +37,10 @@ handler._setDeps({
   fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
   now: () => Date.parse('2026-10-16T22:34:00Z'),
 });
-function call(token, query = {}) {
+function call(token, query = {}, headers = {}) {
   return new Promise((resolve) => {
     const res = { headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
-    handler({ method: 'GET', headers: token ? { authorization: 'Bearer ' + token } : {}, query }, res);
+    handler({ method: 'GET', headers: { ...(token ? { authorization: 'Bearer ' + token } : {}), ...headers }, query }, res);
   });
 }
 
@@ -62,5 +64,16 @@ function call(token, query = {}) {
   // a user with no open locks gets an empty payload (no market fetches, nothing from other users)
   tokens['tok-c'] = { id: 'user-c', email: 'c@example.com' };
   assert.deepEqual((await call('tok-c')).body, { ok: true, empty: true, locksTotal: 0 });
+  // View as: only the owner may read another Combo Locks user's sheet
+  const CHRIS = '721c1166-be0b-4856-8a88-6de3a8b047b9';
+  tokens['tok-owner'] = { id: '79ae1610-097e-4b46-a622-1e952f18e936', email: 'kev120909@gmail.com' };
+  assert.deepEqual((await call('tok-owner', { check: '1' }, { 'x-view-as': CHRIS })).body, { ok: true, locks: 1 });
+  assert.deepEqual((await call('tok-owner', { check: '1', view_as: CHRIS })).body, { ok: true, locks: 1 });
+  // non-owner asking to view as someone → 403, never their data
+  const deny = await call('tok-a', { check: '1' }, { 'x-view-as': CHRIS });
+  assert.equal(deny.code, 403); assert.equal(deny.body.locks, undefined);
+  assert.equal((await call('tok-a', { check: '1', view_as: CHRIS })).code, 403);
+  // owner can't view a non-Combo-Locks id
+  assert.equal((await call('tok-owner', { check: '1' }, { 'x-view-as': '00000000-0000-4000-8000-000000000000' })).code, 404);
   console.log('root-for api scoping tests ok');
 })().catch((e) => { console.error(e); process.exit(1); });
