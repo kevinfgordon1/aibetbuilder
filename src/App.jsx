@@ -7,7 +7,7 @@ import RawParlayEdges from "./RawParlayEdges";
 import RootFor from "./RootFor";
 import LiveTradingDesk from "./LiveTradingDesk";
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeBetstampOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
@@ -126,7 +126,6 @@ import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
 import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
-import BetstampProOddsBoard from "./BetstampProOddsBoard.jsx";
 import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
@@ -1865,9 +1864,6 @@ export default function App() {
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) {
       setActiveTab("promo");
     }
-    if (activeTab === "betstampBoard" && !canSeeBetstampOddsBoard(user)) {
-      setActiveTab("promo");
-    }
   }, [activeTab, user, authLoading]);
 
   useEffect(() => {
@@ -1876,7 +1872,6 @@ export default function App() {
     if (activeTab === "profile" && !user) return;
     if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "rawEdges" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
-    if (activeTab === "betstampBoard" && !canSeeBetstampOddsBoard(user)) return;
     const desired = serializeAppHash({
       tab: activeTab || "promo",
       lockId: activeTab === "combo" ? focusLockId : null,
@@ -2932,9 +2927,6 @@ export default function App() {
         {canSeeNewOddsBoard(user) && (
           <a href={tabHash("oddsBetstamp")} style={tabStyle("oddsBetstamp")} onClick={onNavTabClick("oddsBetstamp", "odds_betstamp")}>New Odds Board</a>
         )}
-        {canSeeBetstampOddsBoard(user) && (
-          <a data-tab="betstampBoard" href={tabHash("betstampBoard")} style={tabStyle("betstampBoard")} onClick={onNavTabClick("betstampBoard", "betstamp_odds_board")}>Betstamp Odds Board</a>
-        )}
         {canSeeOwnerTools(user) && (
           <>
             <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
@@ -2970,11 +2962,11 @@ export default function App() {
         </div>
       )}
 
-      {showOddsHealthBanner && activeTab !== "oddsBetstamp" && activeTab !== "betstampBoard" && (
+      {showOddsHealthBanner && activeTab !== "oddsBetstamp" && (
         <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
       )}
 
-      {showFullPageSpinner && activeTab !== "liveDesk" && activeTab !== "betstampBoard" && (
+      {showFullPageSpinner && activeTab !== "liveDesk" && (
         <div style={{ padding: "60px 32px", textAlign: "center", color: "#4b5563" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⏳</div>
           <div style={{ fontSize: 14 }}>Loading live odds...</div>
@@ -3000,19 +2992,13 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === "betstampBoard" && canSeeBetstampOddsBoard(user) && (
-        <div style={{ padding: "20px 32px" }}>
-          <BetstampProOddsBoard user={user} />
-        </div>
-      )}
-
       {activeTab === "liveDesk" && canSeeOwnerTools(user) && (
         <div style={{ padding: "20px 32px" }}>
           <LiveTradingDesk user={user} />
         </div>
       )}
 
-      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && activeTab !== "betstampBoard" && activeTab !== "liveDesk" && (
+      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && activeTab !== "liveDesk" && (
         <div className="app-body" style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}

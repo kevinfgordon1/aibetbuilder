@@ -2508,7 +2508,7 @@ function assertCreatedAtOnlyBeforeLimit(call) {
   assert.match(app, /href=\{tabHash\("missTape"\)\}/);
   assert.match(app, /tabStyle\("missTape"\)/);
   assert.match(app, />Miss tape<\/a>/);
-  assert.match(app, /activeTab === "combo" && canSeeComboLocks\(user\) && <ComboLocks user=\{user\} prefill=\{comboPrefill\} focusLockId=\{focusLockId\} \/>/);
+  assert.match(app, /activeTab === "combo" && canSeeComboLocks\(user\) && <ComboLocks user=\{user\} prefill=\{comboPrefill\} focusLockId=\{focusLockId\}( onViewAsChange=\{setComboViewAs\})? \/>/);
   assert.match(app, /activeTab === "promo"/);
   assert.match(app, />Promo Builder</);
 }

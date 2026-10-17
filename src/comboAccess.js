@@ -115,18 +115,6 @@ export function canSeeNewOddsBoard(user) {
   return NEW_ODDS_BOARD_SHARED_EMAILS.some((item) => item.toLowerCase() === email);
 }
 
-/**
- * Betstamp Odds Board tab / #betstamp-odds-board. Kevin only — not Kenneth,
- * not VITE_COMBO_LOCKS_ALLOWLIST. Add emails here to share it later.
- */
-export const BETSTAMP_ODDS_BOARD_EMAILS = Object.freeze([OWNER_EMAIL]);
-
-export function canSeeBetstampOddsBoard(user) {
-  const email = userEmailToken(user);
-  if (!email) return false;
-  return BETSTAMP_ODDS_BOARD_EMAILS.some((item) => item.toLowerCase() === email);
-}
-
 function readUnderdogPredictAllowlist(env) {
   return readNamedAllowlist(env, UNDERDOG_PREDICT_ALLOWLIST_ENV, UNDERDOG_PREDICT_ALLOWLIST_ENV_ALT);
 }
@@ -187,8 +175,6 @@ export const APP_HASH_TABS = Object.freeze({
   betstamp: "oddsBetstamp",
   "new-odds-board": "oddsBetstamp",
   "new-odds": "oddsBetstamp",
-  betstampBoard: "betstampBoard",
-  "betstamp-odds-board": "betstampBoard",
   combo: "combo",
   missTape: "missTape",
   miss: "missTape",
@@ -248,7 +234,6 @@ export function serializeAppHash({ tab = null, lockId = null, cardId = null } = 
   if (resolved === "liveDesk") return "#live-trading-desk";
   if (resolved === "rawEdges") return "#raw-edges";
   if (resolved === "oddsBetstamp") return "#new-odds-board";
-  if (resolved === "betstampBoard") return "#betstamp-odds-board";
   return "#" + resolved;
 }
 
@@ -297,18 +282,6 @@ export function resolveAppHash(parsed, user) {
   }
   if (tab === "oddsBetstamp") {
     if (canSeeNewOddsBoard(user)) {
-      return { tab, lockId: null, cardId: null, notice: null, allowed: true };
-    }
-    return {
-      tab: "promo",
-      lockId: null,
-      cardId: null,
-      notice: user ? "noaccess" : "signin",
-      allowed: false,
-    };
-  }
-  if (tab === "betstampBoard") {
-    if (canSeeBetstampOddsBoard(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }
     return {
