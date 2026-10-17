@@ -23,7 +23,7 @@ export function decimalToAmerican(odds) {
 }
 
 // Betstamp docs show decimal odds. Some feeds may already send American.
-// 0 < n < 1 is a PM contract / win probability (same as OddsBoard / unhedgedTape).
+// 0 < n < 1 is a PM contract / win probability (same as OddsBoard).
 export function toAmericanOdds(odds) {
   if (odds == null || odds === "") return null;
   const n = Number(odds);

@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
 import { createClient } from "@supabase/supabase-js";
 import ComboLocks from "./ComboLocks";
 import ComboTape from "./ComboTape";
-import UnhedgedTape from "./UnhedgedTape";
 import RawParlayEdges from "./RawParlayEdges";
 import RootFor from "./RootFor";
 import LiveTradingDesk from "./LiveTradingDesk";
@@ -1858,7 +1857,7 @@ export default function App() {
       setFocusLockId(null);
     }
     if (activeTab === "profile" && !user) setActiveTab("promo");
-    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "rawEdges" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) {
+    if ((activeTab === "missTape" || activeTab === "rawEdges" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) {
       setActiveTab("promo");
     }
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) {
@@ -1870,7 +1869,7 @@ export default function App() {
     if (authLoading) return;
     if (activeTab === "combo" && !canSeeComboLocks(user)) return;
     if (activeTab === "profile" && !user) return;
-    if ((activeTab === "missTape" || activeTab === "unhedged" || activeTab === "rawEdges" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
+    if ((activeTab === "missTape" || activeTab === "rawEdges" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
     const desired = serializeAppHash({
       tab: activeTab || "promo",
@@ -2930,7 +2929,6 @@ export default function App() {
         {canSeeOwnerTools(user) && (
           <>
             <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
-            <a href={tabHash("unhedged")} style={tabStyle("unhedged")} onClick={onNavTabClick("unhedged")}>Unhedged RFQs</a>
             <a href={tabHash("rawEdges")} style={tabStyle("rawEdges")} onClick={onNavTabClick("rawEdges")}>Combo Sniper</a>
             <a href={tabHash("liveDesk")} style={tabStyle("liveDesk")} onClick={onNavTabClick("liveDesk")}>Live Trading Desk</a>
           </>
@@ -3008,7 +3006,6 @@ export default function App() {
 
           {activeTab === "missTape" && canSeeOwnerTools(user) && <ComboTape user={user} />}
 
-          {activeTab === "unhedged" && canSeeOwnerTools(user) && <UnhedgedTape user={user} />}
 
           {activeTab === "rawEdges" && canSeeOwnerTools(user) && <RawParlayEdges user={user} />}
 

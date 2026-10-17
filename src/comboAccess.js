@@ -179,7 +179,8 @@ export const APP_HASH_TABS = Object.freeze({
   missTape: "missTape",
   miss: "missTape",
   "miss-tape": "missTape",
-  unhedged: "unhedged",
+  // Unhedged RFQs tab removed (Kevin, Oct 17): old #unhedged links open Combo Sniper (owner) or Promo (everyone else).
+  unhedged: "rawEdges",
   rawEdges: "rawEdges",
   "raw-edges": "rawEdges",
   liveDesk: "liveDesk",
@@ -258,7 +259,7 @@ export function clearComboHash(hash) {
 
 /**
  * Gate a parsed hash for the current user. Combo / owner tabs (Miss tape,
- * Unhedged, Live Trading Desk), New Odds Board and Betstamp Odds Board never land
+ * Combo Sniper, Live Trading Desk), New Odds Board and Betstamp Odds Board never land
  * unless the user is allowed.
  * Denied links fall back to Promo with a soft sign-in / no-access notice.
  */
@@ -292,7 +293,7 @@ export function resolveAppHash(parsed, user) {
       allowed: false,
     };
   }
-  if (tab === "missTape" || tab === "unhedged" || tab === "rawEdges" || tab === "liveDesk") {
+  if (tab === "missTape" || tab === "rawEdges" || tab === "liveDesk") {
     if (canSeeOwnerTools(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }

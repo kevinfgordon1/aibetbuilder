@@ -350,7 +350,7 @@ assert.deepEqual(parseAppHash("#new-odds-board"), { tab: "oddsBetstamp", lockId:
 assert.equal(serializeAppHash({ tab: "oddsBetstamp" }), "#new-odds-board");
 assert.deepEqual(parseAppHash("#missTape"), { tab: "missTape", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#miss"), { tab: "missTape", lockId: null, cardId: null });
-assert.deepEqual(parseAppHash("#unhedged"), { tab: "unhedged", lockId: null, cardId: null });
+assert.deepEqual(parseAppHash("#unhedged"), { tab: "rawEdges", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#profile"), { tab: "profile", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#combo"), { tab: "combo", lockId: null, cardId: null });
 assert.deepEqual(parseAppHash("#combo/lock-1"), { tab: "combo", lockId: "lock-1", cardId: null });
@@ -362,7 +362,7 @@ assert.equal(serializeAppHash({ tab: "promo", cardId: id1 }), "#promo/" + encode
 assert.equal(serializeAppHash({ tab: "ev", cardId: evId }), "#ev/" + encodeURIComponent(evId));
 assert.equal(serializeAppHash({ tab: "odds" }), "#odds");
 assert.equal(serializeAppHash({ tab: "missTape" }), "#missTape");
-assert.equal(serializeAppHash({ tab: "unhedged" }), "#unhedged");
+assert.equal(serializeAppHash({ tab: "unhedged" }), "#raw-edges");
 assert.equal(comboLockHash("p1"), "#combo/p1");
 assert.equal(profileHash(), "#profile");
 assert.equal(tabHash("promo", { cardId: "x" }), "#promo/x");
@@ -400,7 +400,7 @@ const stranger = { id: "u2", email: "stranger@gmail.com" };
   const miss = resolveAppHash(parseAppHash("#missTape"), stranger);
   assert.equal(miss.tab, "promo");
   assert.equal(miss.notice, "noaccess");
-  assert.equal(resolveAppHash(parseAppHash("#unhedged"), kevin).tab, "unhedged");
+  assert.equal(resolveAppHash(parseAppHash("#unhedged"), kevin).tab, "rawEdges");
   const newOddsDenied = resolveAppHash(parseAppHash("#new-odds-board"), stranger);
   assert.equal(newOddsDenied.tab, "promo");
   assert.equal(newOddsDenied.allowed, false);

@@ -183,10 +183,6 @@ function timeoutErr(label = "odds_cache") {
   assert.match(combo, /sourceUnhealthy/);
   assert.match(combo, /Data delayed/);
 
-  const uh = fs.readFileSync(path.join(dir, "UnhedgedTape.jsx"), "utf8");
-  assert.match(uh, /DataSourceBanner/);
-  assert.match(uh, /dataSourceStatus/);
-  assert.match(uh, /context: "unhedged"/);
 
   const odds = fs.readFileSync(path.join(dir, "oddsLoad.js"), "utf8");
   assert.match(odds, /from "\.\/dataSourceHealth\.js"/);
