@@ -12,9 +12,10 @@ const arc = (cx, cy, r, f0, f1) => { const [x0, y0] = pt(cx, cy, r, f0); const [
 // Preview: in-play legs moving the needle (signed $ share of now − pregame), one shared scale.
 function LiveLegs({ d }) {
   const s = d.sweat || {}; const model = d.model || {};
-  const positions = d.livePos || model.positions || [];
+  const positions = d.livePos || [...(model.positions || []), ...(s.kept || [])];
+  const probs = { ...(s.last || {}), ...(model.probs || {}) };
   const starts = {}; const meta = {}; for (const e of d.perEvent || []) { starts[e.event] = e.start; meta[e.event] = e; }
-  const { legs, settled } = liveLegMoves(positions, model.probs || {}, s.frozen || {}, starts);
+  const { legs, settled } = liveLegMoves(positions, probs, s.frozen || {}, starts, new Set(s.finished || []));
   const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), 1);
   return (
@@ -22,7 +23,7 @@ function LiveLegs({ d }) {
       <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
       <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Live legs moving the needle</div>
       {!shown.length ? <div className="sub" style={{ fontSize: 13, padding: "10px 0" }}>No legs are live right now. Once a game you're in kicks off, its push on the needle shows up here.</div>
-        : shown.map((l) => { const e = meta[l.event] || {}; const pk = e.rootFor; const p = pk && model.probs[l.event] ? model.probs[l.event][pk] : null; const am = american(p); const pos = l.move >= 0;
+        : shown.map((l) => { const e = meta[l.event] || {}; const pk = e.rootFor; const p = pk && probs[l.event] ? probs[l.event][pk] : null; const am = american(p); const pos = l.move >= 0;
           return (
             <div key={l.event} style={{ margin: "6px 0" }}>
               <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{e.rootForName || e.game || l.event}</b> <span className="sub">{e.game && e.rootForName ? `${e.game} · ` : ""}{am != null ? `live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>

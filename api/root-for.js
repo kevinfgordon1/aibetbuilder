@@ -156,9 +156,9 @@ async function needleDay(client, userId, out, now, frozen) {
     const { data: cur } = await T('root_for_needle_days').select('day,final,snap').eq('user_id', userId).eq('day', day).limit(1);
     const row0 = (cur || [])[0];
     if (!(row0 && row0.final)) {
-      const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} };
+      const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} }; snap.lastAt = snap.lastAt || {};
       const evs = TD.todayEvents(out.perEvent || [], now);
-      for (const ev of evs) { if (probs[ev]) snap.last[ev] = probs[ev]; if (frozen && frozen[ev]) snap.frozen[ev] = frozen[ev]; }
+      for (const ev of evs) { if (probs[ev]) { snap.last[ev] = probs[ev]; snap.lastAt[ev] = stamp; } if (frozen && frozen[ev]) snap.frozen[ev] = frozen[ev]; }
       for (const p of TD.touchedLocks(model, new Set(Object.keys(snap.last)))) snap.positions[p.id] = p;
       const dayEvs = Object.keys(snap.frozen);
       if (dayEvs.length) {
@@ -207,10 +207,23 @@ async function sweatBaseline(client, out, now, userId) {
       else { frozen[ev] = probs[ev]; source[ev] = 'snapshot'; const c = new Date(now).toISOString(); if (!since || c < since) since = c; }
     }
     const history = userId ? await needleDay(client, userId, out, now, frozen) : null;
+    // All: finished games stay counted at their last live chances for 12h after they end (see finishedCarry).
+    let carry = null;
+    if (userId) {
+      try {
+        const lo = new Date(now - 2 * 86400000).toISOString().slice(0, 10);
+        const { data: days } = await client.from('root_for_needle_days').select('day,snap,updated_at').eq('user_id', userId).gte('day', lo).order('day', { ascending: true });
+        const kickoffs = {}; for (const x of rows) if (x && x.kickoff) kickoffs[x.event] = x.kickoff;
+        carry = S.finishedCarry({ positions: (out.model && out.model.positions) || [], probs, frozen, kickoffs, now,
+          days: (days || []).map((x) => ({ day: x.day, snap: x.snap, updatedAt: x.updated_at })) });
+      } catch (_) { carry = null; }
+    }
     // Today's needle reads the saved day row (all of the day's games and locks, settled ones included), so it matches history.
     const TD = await import('../src/rootForToday.js'); const sd = TD.sheetDay(now);
     const dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
-    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key, frozen, source, since, backfilled: backfill.length, ...(history ? { history } : {}), ...(dayRow ? { dayRow } : {}) };
+    const kept = carry && carry.kept.length ? carry : null;
+    return { started: r.started.length > 0 || !!kept, gamesStarted: r.started.length + (kept ? kept.finished.length : 0), baseline: r.baseline + (kept ? kept.baseAdd : 0), now: Number(out.ev) + (kept ? kept.nowAdd : 0), slateKey: key, frozen: kept ? { ...kept.frozen, ...frozen } : frozen, source,
+      ...(kept ? { kept: kept.kept, last: kept.last, finished: kept.finished, finishedDay: kept.finishedDay, endedAt: kept.endedAt } : {}), since, backfilled: backfill.length, ...(history ? { history } : {}), ...(dayRow ? { dayRow } : {}) };
   } catch (e) {
     return { started: null, baseline: null, now: Number(out.ev), error: 'Pregame number unavailable' };
   }
