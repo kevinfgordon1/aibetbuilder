@@ -5,7 +5,7 @@ import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney } from "./rootForS
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const pc = (p) => (p * 100 < 1 && p > 0 ? "<1%" : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`);
 
-export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
+export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends" }) {
   const wrap = useRef(null); const [W, setW] = useState(720); const [hx, setHx] = useState(null);
   useEffect(() => {
     const el = wrap.current; if (!el || typeof ResizeObserver === "undefined") return undefined;
@@ -46,7 +46,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         </defs>
         <rect x={x(p10)} y={top} width={Math.max(0, x(p90) - x(p10))} height={plotH} fill="#93c5fd" opacity=".07" />
         <g opacity=".9"><path d={`M${x(p10)},${top + plotH + 58}v6H${x(p90)}v-6`} fill="none" stroke="#93c5fd" />
-          <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 77} fill="#93c5fd" fontSize="11" textAnchor="middle">Most weekends: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
+          <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 77} fill="#93c5fd" fontSize="11" textAnchor="middle">Most {unit}: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
         <path d={area} fill="url(#rf-h)" />
         <path d={line} fill="none" stroke="#e5e7eb" strokeOpacity=".55" strokeWidth="1.5" />
         {sp && <g>
@@ -64,10 +64,10 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}
         {sp && <g>
           <line x1={spX + 3.5} x2={spX + 3.5} y1={top + plotH} y2={top + plotH + 24} stroke="#ef4444" strokeWidth="1.5" />
-          <text x={spX} y={top + plotH + 35} fill="#fca5a5" fontSize="11" fontWeight="700">{money(sp.x)} worst case</text>
+          <text x={spX} y={top + plotH + 35} fill="#fca5a5" fontSize="11" fontWeight="700">{money(sp.x)} {worstWord}</text>
           <text x={spX} y={top + plotH + 49} fill="#fca5a5" fontSize="11">{pc(sp.p)} chance</text>
         </g>}
-        <text x={(padL + W - padR) / 2} y={H - 4} fill="#cbd5e1" fontSize="12" textAnchor="middle">Your result ($)</text>
+        <text x={(padL + W - padR) / 2} y={H - 4} fill="#cbd5e1" fontSize="12" textAnchor="middle">{xLabel}</text>
         <text transform={`translate(13,${top + plotH / 2}) rotate(-90)`} fill="#cbd5e1" fontSize="12" textAnchor="middle">More likely →</text>
         {hx != null && <line x1={x(hx)} x2={x(hx)} y1={top} y2={top + plotH} stroke="#fff" strokeOpacity=".7" />}
         <rect x={0} y={0} width={W} height={H} fill="transparent" onMouseMove={onMove} onTouchStart={onMove} onTouchMove={onMove} onMouseLeave={() => setHx(null)} />
@@ -80,8 +80,8 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best }) {
         </div>
       )}
       <div className="note">
-        Smoothed from {hist.samples ? hist.samples.toLocaleString("en-US") : "simulated"} simulated weekends. Deeper red = bigger loss, deeper green = bigger win; hover or tap for the chance of finishing below any amount.
-        {m.beyond > 0 ? ` Chart stops at ${shortMoney(m.xMax)}: ${pc(m.beyond)} of weekends go higher (rare big wins${best && best.pnl ? `, up to ${money(best.pnl)}` : ""}).` : ""}
+        Smoothed from {hist.samples ? hist.samples.toLocaleString("en-US") : "simulated"} simulated {unit}. {unit === "weekends" ? "Deeper red = bigger loss, deeper green = bigger win" : "Deeper green = higher expected profit"}; hover or tap for the chance of finishing below any amount.
+        {m.beyond > 0 ? ` Chart stops at ${shortMoney(m.xMax)}: ${pc(m.beyond)} of ${unit} go higher (rare big ${unit === "weekends" ? "wins" : "days"}${best && best.pnl ? `, up to ${money(best.pnl)}` : ""}).` : ""}
       </div>
     </div>
   );

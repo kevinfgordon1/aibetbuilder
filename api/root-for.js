@@ -1,5 +1,6 @@
 'use strict';
-// GET /api/root-for — owner-only "What to root for" across ALL open Combo Locks.
+// GET /api/root-for — "What to root for" across the SIGNED-IN USER'S OWN open Combo Locks (scoped by auth user id).
+// GET /api/root-for?check=1 — cheap: { ok, locks } count of the user's open locks (used to hide the sheet when 0).
 // Reads combo_parlays / combo_fills / combo_single_orders (read-only), live venue books
 // (Kalshi public orderbooks, odds-relay Polymarket US + Novig), and runs the joint engine.
 const lib = require('./combo-probe-lib');
@@ -23,7 +24,7 @@ const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
 
 function json(res, status, body) { res.setHeader('Cache-Control', 'no-store'); res.status(status).json(body); }
 
-async function requireOwner(req) {
+async function requireUser(req) {
   const token = lib.readBearer(req);
   if (!token) return { ok: false, status: 401, error: 'Sign in required' };
   const env = deps.env || process.env;
@@ -33,12 +34,21 @@ async function requireOwner(req) {
   const { data, error } = await deps.createClient(url, anon, clientOpts).auth.getUser(token);
   const user = data && data.user;
   if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
-  if (!lib.isComboOwner(user)) return { ok: false, status: 403, error: 'Not allowed' };
-  return { ok: true, user };
+  return { ok: true, user, owner: lib.isComboOwner(user) };
 }
 
-/** Open locks: not archived, not merged away, not settled. */
+/** Count of the user's open locks (same filters as loadLocks). */
+async function countLocks(client, userId) {
+  if (!userId) throw new Error('no user');
+  const { count, error } = await client.from('combo_parlays').select('id', { count: 'exact', head: true })
+    .eq('user_id', userId).is('archived_at', null).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null);
+  if (error) throw error;
+  return count || 0;
+}
+
+/** Open locks for ONE user: not archived, not merged away, not settled. Fills/orders only for those lock ids. */
 async function loadLocks(client, userId) {
+  if (!userId) throw new Error('no user');
   const { data: parlays, error } = await client.from('combo_parlays')
     .select('id,label,legs,parlay_stake,parlay_american,fill_american,is_free_bet,sportsbook,active,starts_at,hedge_mode,kalshi_status')
     .eq('user_id', userId).is('archived_at', null).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null)
@@ -109,20 +119,26 @@ async function sweatBaseline(client, out, now) {
 
 async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
-  const auth = await requireOwner(req);
+  const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   const env = deps.env || process.env;
   const url = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
   const key = env.SUPABASE_SERVICE_KEY;
   if (!url || !key) return json(res, 503, { ok: false, error: 'Server is not configured' });
   try {
+    const client = deps.createClient(url, key, clientOpts);
+    const q = (req.query) || {};
+    if (q.check === '1' || q.check === 1) return json(res, 200, { ok: true, locks: await countLocks(client, auth.user.id) });
     const M = await loadMods();
-    const { parlays, fills, singles } = await loadLocks(deps.createClient(url, key, clientOpts), auth.user.id);
+    const { parlays, fills, singles } = await loadLocks(client, auth.user.id);
+    if (!parlays.length) return json(res, 200, { ok: true, empty: true, locksTotal: 0 });
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
     const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
-    const sweat = SWEAT_ENABLED() ? await sweatBaseline(deps.createClient(url, key, clientOpts), out, now) : undefined;
-    return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, ...(sweat ? { sweat } : {}) });
+    // pregame-probs table is not per-user: only the owner's sheet may write it (and it's off unless enabled)
+    const sweat = SWEAT_ENABLED() && auth.owner ? await sweatBaseline(client, out, now) : undefined;
+    const lockLabels = Object.fromEntries(parlays.map((p) => [p.id, p.label || '']));
+    return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, lockLabels, ...(sweat ? { sweat } : {}) });
   } catch (e) {
     console.error('[root-for]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not compute right now' });
@@ -132,4 +148,4 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { loadLocks, loadMarkets, loadMods };
+module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods };
