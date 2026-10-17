@@ -7,7 +7,7 @@ import EvBars from "./RootForEvBars";
 import SweatMeter from "./RootForSweat";
 import { expectedProfit } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
-import { todayEvents, touchedLocks, sheetDayLabel } from "./rootForToday";
+import { todayEvents, touchedLocks, sheetDayLabel, sheetDay } from "./rootForToday";
 import { summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
@@ -128,6 +128,25 @@ function TouchedLocks({ today }) {
 // Hedge fills are already in each lock's hit/miss P&L; later legs stay at current inverse-bet prices.
 // Root for / against: E[P | result] − E[P] of those locks, restricted to today's games' outcomes.
 // Needle for today's locks only: same frozen kickoff probabilities, restricted to locks touching today's games.
+// Today after every game of the sheet day is final (until the 11 AM ET rollover): the saved day row (owner only).
+function finalTodayView(base, nowMs) {
+  const dr = base && base.sweat && base.sweat.dayRow; if (!dr) return null;
+  if (String(dr.day).slice(0, 10) !== sheetDay(nowMs)) return null;
+  const pre = Number(dr.pregame_ev), live = Number(dr.live_ev); if (!Number.isFinite(pre) || !Number.isFinite(live)) return null;
+  return { row: dr, pre, live, result: Number.isFinite(Number(dr.result)) ? Number(dr.result) : live - pre, dayLabel: sheetDayLabel(nowMs) };
+}
+export function FinalToday({ f, d }) {
+  const sweat = { ...(d.sweat || {}), started: true, baseline: f.pre, now: f.live, since: null, source: {}, error: undefined };
+  return (
+    <div>
+      <div className="lead">All of today’s games are final ({f.dayLabel}).</div>
+      <div className="lead2">{f.row.games} game{f.row.games === 1 ? "" : "s"} across {f.row.locks} lock{f.row.locks === 1 ? "" : "s"}: <b className={f.result >= 0 ? "pos" : "neg"}>{sMoney(f.result)}</b> vs kickoff odds. Today switches to the next day at 11 AM ET.</div>
+      <SweatMeter d={{ ...d, sweat }} />
+      <NeedleHistory rows={d.sweat && d.sweat.history} />
+    </div>
+  );
+}
+
 function todaySweat(base, pos, evNow) {
   const s = base && base.sweat; if (!s) return s;
   // Owner: the saved day row covers every game/lock of the sheet day (settled ones too) — same number as the history row.
@@ -223,8 +242,10 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
     return n;
   });
   const tv = useMemo(() => todayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now()), [base]);
+  const fv = useMemo(() => (tv ? null : finalTodayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now())), [base, tv]);
   const [scopeSel, setScope] = useState("all"); // always defaults to All
   const scope = scopeSel;
+  const showFinal = scope === "today" && !tv && !!fv;
   if (!can || (base && base.empty)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
@@ -285,7 +306,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         What to root for
         <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 10 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-          {tv && <span className="seg" role="group" aria-label="Games">
+          {(tv || fv) && <span className="seg" role="group" aria-label="Games">
             <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")}>Today</button>
             <button type="button" className={scope === "all" ? "on" : ""} aria-pressed={scope === "all"} onClick={() => setScope("all")}>All</button>
           </span>}
@@ -298,8 +319,9 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
-      {open && d && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} /> : <Simple d={base} />)}
-      {open && d && view === "detailed" && (
+      {open && d && showFinal && <FinalToday f={fv} d={base} />}
+      {open && d && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} /> : <Simple d={base} />)}
+      {open && d && !showFinal && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">
