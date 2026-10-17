@@ -155,6 +155,8 @@ async function fetchLegs(rfqId) {
   p.catch(() => legCache.delete(rfqId));
   return p;
 }
+// Logged top-of-book $ for Polymarket / Novig TD legs: what was there when the request came in, not now.
+const rfqSizeClause = (usd) => (Number(usd) > 0 ? ` · ${Number(usd) < 1 ? "under $1" : "$" + Math.round(Number(usd)).toLocaleString()} at that price` : "");
 const LEG_TIP = "Fair = 1 minus the implied chance of the best opposing price ($500 of depth, fees included), logged when the request came in. Inverse bet method.";
 const PlainLegs = ({ e }) => <div className="legs">{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</div>;
 // Rows under 1% EV (EV/$100 risked < $1.00) keep the simple leg list: no detail fetch, no price lookups.
@@ -200,7 +202,7 @@ function SniperLegDetail({ e }) {
                 {l.others.length > 0 && <span>also {l.others.map((o) => `${venueLabel(o.venue)} ${formatAmericanOdds(o.american)}`).join(", ")}</span>}
               </div>
             )}
-            {l.now && <div className="lmeta">{l.now.atRfq ? "Top" : "Now"} on {venueLabel(l.now.venue)}{l.now.atRfq ? " at the RFQ" : ""}: {formatAmericanOdds(l.now.american)}{formatAvailableSizeClause(l.now.size)}{l.now.afterKalshiFee ? " · after Kalshi fee" : l.now.afterPolyFee ? " · after Polymarket fee" : ""}</div>}
+            {l.now && <div className="lmeta">{l.now.atRfq ? "Top" : "Now"} on {venueLabel(l.now.venue)}{l.now.atRfq ? " at the RFQ" : ""}: {formatAmericanOdds(l.now.american)}{l.now.atRfq ? rfqSizeClause(l.now.size) : formatAvailableSizeClause(l.now.size)}{l.now.afterKalshiFee ? " · after Kalshi fee" : l.now.afterPolyFee ? " · after Polymarket fee" : ""}</div>}
           </div>
         </div>
       ))}

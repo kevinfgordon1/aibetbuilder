@@ -87,5 +87,8 @@ console.log("sniperLegs ok");
   assert.deepEqual(r.others, [{ venue: "kalshi", american: 124 }]); // Novig failed depth: not shown
   assert.deepEqual(r.now, { venue: "polymarket", american: 130, size: 640.5, atRfq: true, afterPolyFee: true });
   assert.equal(r.kalshiLive, undefined);
+  // Logged (at-RFQ) size never turns into "currently available" on the Best opp line.
+  const [same] = applyLive([{ ...r, now: { ...r.now, american: 133 } }], { nowMs: Date.parse("2026-10-17T12:00:00Z") });
+  assert.equal(same.bestOpp.size, undefined); assert.equal(same.now.atRfq, true);
 }
 console.log("sniperLegs multi-venue TD ok");

@@ -211,7 +211,7 @@ export function applyLive(rows, { kalshiBooks = {}, kalshiStatus = {}, nowMs = D
       const top = st === "active" || st === "open" ? kalshiTopAsk(kalshiBooks[kl.ticker], kl.side) : null;
       out.now = top ? { venue: "kalshi", american: americanFromProb(takerAllIn(top.px)), size: top.px * top.contracts, afterKalshiFee: true } : null;
     }
-    if (out.now && out.bestOpp && out.now.venue === out.bestOpp.venue && out.now.american === out.bestOpp.american && out.now.size > 0) {
+    if (out.now && !out.now.atRfq && out.bestOpp && out.now.venue === out.bestOpp.venue && out.now.american === out.bestOpp.american && out.now.size > 0) {
       out.bestOpp = { ...out.bestOpp, size: out.now.size };
       out.now = null;
     }
