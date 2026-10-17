@@ -66,4 +66,18 @@ assert.equal(gaugeFrac(99999, -4000, 2600, 15000), 1);
   assert.ok(Math.abs(m.total - (expectedProfit(pos, P) - expectedProfit(pos, { ...P, ...Fz }))) < 1e-9);
   assert.ok(Math.abs(m.legs[0].move + m.settled - m.total) < 1e-9 && m.settled !== 0);
 }
+// Today & beyond: finished games of today's sheet day count at any age; yesterday's don't (even within 12h)
+{
+  const H = 3600 * 1000; const now = Date.parse("2026-10-18T14:00:00Z");
+  const A = { id: "A", legs: [{ event: "T", allowed: ["t"] }], hit: 100, miss: -10 }; // today's game, ended 14h ago
+  const B = { id: "B", legs: [{ event: "Y", allowed: ["y"] }], hit: 100, miss: -10 }; // yesterday's game, ended 6h ago
+  const days = [
+    { day: "2026-10-17", snap: { positions: { B }, last: { Y: { y: 0.98, n: 0.02 } }, frozen: { Y: { y: 0.5, n: 0.5 } }, lastAt: { Y: new Date(now - 6 * H).toISOString() } } },
+    { day: "2026-10-18", snap: { positions: { A }, last: { T: { t: 0.98, n: 0.02 } }, frozen: { T: { t: 0.5, n: 0.5 } }, lastAt: { T: new Date(now - 14 * H).toISOString() } } },
+  ];
+  const all = finishedCarry({ days, now });
+  assert.deepEqual(all.kept.map((p) => p.id), ["B"]); // 12h rule
+  const tu = finishedCarry({ days, now, keep: (ev, endedMs, day) => day === "2026-10-18" });
+  assert.deepEqual(tu.kept.map((p) => p.id), ["A"]);
+}
 console.log("rootForSweat tests ok");

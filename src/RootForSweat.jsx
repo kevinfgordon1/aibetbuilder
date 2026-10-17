@@ -12,7 +12,8 @@ const arc = (cx, cy, r, f0, f1) => { const [x0, y0] = pt(cx, cy, r, f0); const [
 // Preview: in-play legs moving the needle (signed $ share of now − pregame), one shared scale.
 function LiveLegs({ d }) {
   const s = d.sweat || {}; const model = d.model || {};
-  const positions = d.livePos || [...(model.positions || []), ...(s.kept || [])];
+  const kept = (s.kept || []).filter((p) => !s.keptIds || s.keptIds.includes(String(p.id)));
+  const positions = d.livePos || [...(model.positions || []), ...kept];
   const probs = { ...(s.last || {}), ...(model.probs || {}) };
   const starts = {}; const meta = {}; for (const e of d.perEvent || []) { starts[e.event] = e.start; meta[e.event] = e; }
   const { legs, settled } = liveLegMoves(positions, probs, s.frozen || {}, starts, new Set(s.finished || []));
