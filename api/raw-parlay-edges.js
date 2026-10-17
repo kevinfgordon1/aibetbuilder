@@ -10,7 +10,8 @@
 //   stores (fair_promo_best_american: Π (1 − implied(best guarded opposing price across trusted
 //   books + exchanges)), from odds_cache). Rows whose sportsbook data is older than
 //   PROMO_MAX_AGE_MS are skipped. (Superseded Oct 16: inverse bet live only, ML + TD.)
-//   { ok, makerRate, series, edges: [...top 200 by EV], days: [{ day, count, ev, maxLoss }], scanned }
+//   { ok, makerRate, series, edges: [...union of the top MAX_RETURN by every sort key], complete, days: [{ day, count, ev, maxLoss }], scanned,
+//     skipped: { noFair: { total, byVenue, byDay }, beforeLive: { total, byVenue }, windowStart, requestedStart, earliestAvailable } }
 'use strict';
 
 const lib = require('./combo-probe-lib');
@@ -39,7 +40,9 @@ const PAGE = 1000;
 const MAX_ROWS = 400000;
 const SNIPER_TABLE = 'combo_sniper_traded';
 const PASS_COL = { kalshi: 'pass_kalshi', pm: 'pass_pm', promo: 'pass_promo' };
-const MAX_RETURN = 200;
+// Per sort key. The response keeps the union of the top MAX_RETURN by EV/$100, EV and size, so whichever sort the
+// page uses its top rows are all present (the old top-200-by-EV cut dropped high-margin small rows, e.g. Polymarket).
+const MAX_RETURN = 2500;
 // odds_cache is refreshed by a 5-minute cron; allow one missed tick of slack.
 const PROMO_MAX_AGE_MS = 6 * 60 * 1000;
 
@@ -138,6 +141,50 @@ async function fetchRows(client, since, minCost, { fair = 'kalshi', venue = 'all
   return out.slice(0, MAX_ROWS);
 }
 
+/** Traded requests in the window the scan can't score because there's no inverse-bet fair (logged NULL), plus requests
+ *  hidden because they're before the inverse-bet go-live. Read-only counts; failures return null (never block the scan). */
+async function skippedCounts(client, { requestedStart, windowStart, minCost, venue, nowMs }) {
+  const out = { noFair: null, beforeLive: null, windowStart, requestedStart, earliestAvailable: null };
+  const scope = (q) => { if (venue !== 'all') q = q.eq('venue', venue); if (minCost > 0) q = q.gte('rfq_target_cost', minCost); return q; };
+  try {
+    const { data, error } = await scope(client.from(SNIPER_TABLE).select('rfq_id,rfq_created_ts,venue')
+      .is('fair_pm_inverse_american', null).gte('rfq_created_ts', windowStart).lt('rfq_created_ts', new Date(nowMs + 60000).toISOString()))
+      .order('rfq_created_ts', { ascending: false }).limit(10000);
+    if (error) throw error;
+    const byVenue = {}, byDay = {};
+    for (const r of data || []) {
+      const v = r.venue === 'polymarket' ? 'polymarket' : 'kalshi';
+      byVenue[v] = (byVenue[v] || 0) + 1;
+      const d = etDayKeyLocal(r.rfq_created_ts);
+      byDay[d] = byDay[d] || {}; byDay[d][v] = (byDay[d][v] || 0) + 1;
+    }
+    out.noFair = { total: (data || []).length, byVenue, byDay };
+  } catch (_) { /* counts are informational */ }
+  try {
+    if (requestedStart < windowStart) {
+      const byVenue = {};
+      for (const v of venue === 'all' ? ['kalshi', 'polymarket'] : [venue]) {
+        let q = client.from(SNIPER_TABLE).select('rfq_id', { count: 'exact', head: true }).eq('venue', v)
+          .gte('rfq_created_ts', requestedStart).lt('rfq_created_ts', windowStart);
+        if (minCost > 0) q = q.gte('rfq_target_cost', minCost);
+        const { count, error } = await q;
+        if (error) throw error;
+        byVenue[v] = count || 0;
+      }
+      out.beforeLive = { total: Object.values(byVenue).reduce((a, b) => a + b, 0), byVenue };
+    } else out.beforeLive = { total: 0, byVenue: {} };
+  } catch (_) { /* informational */ }
+  try {
+    const { data, error } = await client.from(SNIPER_TABLE).select('rfq_created_ts').order('rfq_created_ts', { ascending: true }).limit(1);
+    if (!error && data && data[0]) out.earliestAvailable = data[0].rfq_created_ts;
+  } catch (_) { /* informational */ }
+  return out;
+}
+function etDayKeyLocal(ts) {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? 'unknown' : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
 function publicError(e) {
   const msg = String((e && e.message) || e || 'Unknown error');
   if (/statement timeout/i.test(msg)) return 'Database query timed out — try a shorter range or a higher Min $ filter.';
@@ -163,7 +210,12 @@ async function handler(req, res) {
   try {
     const { edgesMod: E, buyerOdds: B, riskMod: R } = await mods();
     const opts = parseOpts(req.query || {});
-    const rows = await fetchRows(deps.createClient(url, key, clientOpts), sinceIso(deps.now(), opts.days), opts.minCost, opts, deps.now());
+    const svc = deps.createClient(url, key, clientOpts);
+    const windowStart = sinceIso(deps.now(), opts.days);
+    const [rows, skipped] = await Promise.all([
+      fetchRows(svc, windowStart, opts.minCost, opts, deps.now()),
+      skippedCounts(svc, { requestedStart: sinceIsoRaw(deps.now(), opts.days), windowStart, minCost: opts.minCost, venue: opts.venue, nowMs: deps.now() }),
+    ]);
     // Exact maker rate per series (Kalshi GET /series fee_type × multiplier).
     const seriesList = [...new Set(rows.filter((r) => r.venue !== 'polymarket').map((r) => B.seriesOfTicker(r.market_ticker)).filter(Boolean))];
     const rates = {};
@@ -182,7 +234,7 @@ async function handler(req, res) {
       const s = r.venue === 'polymarket' ? null : B.seriesOfTicker(r.market_ticker);
       const makerRate = r.venue === 'polymarket' ? 0 : (s && rates[s] ? rates[s].rate : B.FALLBACK_MAKER_RATE);
       const e = E.scoreRawEdge(r, { edgeAmerican: opts.edge, makerRate });
-      if (e) e.kalshiFairAmerican = r.fair_kalshi_american != null ? Number(r.fair_kalshi_american) : null;
+      if (e) { e.kalshiFairAmerican = r.fair_kalshi_american != null ? Number(r.fair_kalshi_american) : null; e.summary = E.legSummary(e.legsRaw); }
       if (e && e.flagged && E.matchesMarket(e, opts.market) && E.matchesVenue(e, opts.venue)) edges.push(e);
     }
     const days = E.summarizeByDay(edges);
@@ -199,8 +251,10 @@ async function handler(req, res) {
     }
     const total = edges.length ? R.portfolioRisk(E.toRiskPositions(edges), { eventProbs: merged }) : null;
     if (total) delete total.worstOutcome;
-    edges.sort((a, b) => b.ev - a.ev);
-    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, staleSkipped, fairSource: opts.fair, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: edges.slice(0, MAX_RETURN).map(({ legsRaw, ...e }) => e), total: edges.length });
+    // Cut AFTER ranking by every sort key (EV/$100, EV, size), never by EV alone — see MAX_RETURN.
+    const top = E.topForEverySort(edges, MAX_RETURN);
+    const slim = top.edges.map(({ legsRaw, bestTraderAmerican, offerAmerican, offerYes, ...e }) => e);
+    return json(res, 200, { ok: true, opts, series: rates, scanned: rows.length, staleSkipped, skipped, fairSource: opts.fair, truncated: rows.length >= MAX_ROWS, days, risk: total, edges: slim, complete: top.complete, total: edges.length });
   } catch (e) {
     console.error('[raw-parlay-edges]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: publicError(e) });
@@ -211,4 +265,4 @@ module.exports = handler;
 module.exports.config = { maxDuration: 300 };
 module.exports._setDeps = (patch) => { deps = { ...deps, ...patch }; };
 module.exports._resetDeps = () => { deps = freshDeps(); };
-module.exports._helpers = { parseOpts, sinceIso };
+module.exports._helpers = { parseOpts, sinceIso, sinceIsoRaw, MAX_RETURN };

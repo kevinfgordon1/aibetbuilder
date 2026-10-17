@@ -326,5 +326,47 @@ export function sortRawEdges(edges, key = DEFAULT_SORT) {
   });
 }
 
+/** One-line summary of a parlay's legs: { n, leagues:["NFL"], kinds:["ML","TD"], dates:["Oct 25"], text:"5 legs · NFL ML · Oct 25" }. */
+export function legSummary(legsRaw) {
+  const legs = Array.isArray(legsRaw) ? legsRaw : [];
+  const leagues = new Set(), kinds = new Set(), dates = new Set();
+  for (const raw of legs) {
+    const td = parseTdLeg(raw);
+    if (td) { leagues.add("NFL"); kinds.add("TD"); if (td.date) dates.add(td.date); continue; }
+    const l = parseLeg(raw);
+    leagues.add(l.league || "Other"); kinds.add("ML"); if (l.date) dates.add(l.date);
+  }
+  const ds = [...dates].sort((a, b) => Date.parse(a + " 2026") - Date.parse(b + " 2026"));
+  const out = { n: legs.length, leagues: [...leagues], kinds: [...kinds], dates: ds };
+  const dateTxt = ds.length <= 1 ? ds[0] : `${ds[0]}–${ds[ds.length - 1]}`;
+  out.text = [`${legs.length} leg${legs.length === 1 ? "" : "s"}`, `${out.leagues.join("/")} ${out.kinds.join(" + ")}`, dateTxt].filter(Boolean).join(" · ");
+  return out;
+}
+
+/** Leg-count buckets for the filter chips. */
+export const LEG_BUCKETS = Object.freeze([
+  { v: "all", label: "Any legs", test: () => true },
+  { v: "2-3", label: "2–3 legs", test: (n) => n >= 2 && n <= 3 },
+  { v: "4-5", label: "4–5 legs", test: (n) => n >= 4 && n <= 5 },
+  { v: "6+", label: "6+ legs", test: (n) => n >= 6 },
+]);
+export function matchesLegBucket(edge, bucket = "all") {
+  const b = LEG_BUCKETS.find((x) => x.v === bucket) || LEG_BUCKETS[0];
+  return b.test(Number(edge && edge.nLegs) || 0);
+}
+export function matchesLeague(edge, league = "all") {
+  if (!league || league === "all") return true;
+  const ls = (edge && edge.summary && edge.summary.leagues) || [];
+  return ls.includes(league);
+}
+
+/** Server-side cutoff that never depends on which sort the page uses: union of the top `n` by every sort key. */
+export function topForEverySort(edges, n) {
+  if (!Array.isArray(edges) || edges.length <= n) return { edges: sortRawEdges(edges, DEFAULT_SORT), complete: true };
+  const keep = new Map();
+  for (const k of Object.values(SORT_KEYS)) for (const e of sortRawEdges(edges, k).slice(0, n)) keep.set(e.rfq_id, e);
+  return { edges: sortRawEdges([...keep.values()], DEFAULT_SORT), complete: false };
+}
+
 /** Positions for parlayRisk from scored edges. */
 export const toRiskPositions = (edges) => (edges || []).map((e) => ({ legs: e.legsRaw || [], contracts: e.contracts, keep: e.weReceive, handle: e.handle, ev: e.ev }));
