@@ -16,24 +16,24 @@ export default function SweatMeter({ d }) {
   const hi = Math.max(d.hist ? quantileOf(d.hist, 0.95) : center + 1, center + 1, now + 1);
   const f = started && base != null ? gaugeFrac(now, lo, base, hi) : 0.5;
   const diff = started && base != null ? now - base : 0;
-  const mood = s.error ? "Pregame number unavailable" : !started ? "No games have started yet" : base == null ? "Pregame number unavailable" : diff >= 0 ? "Cruising" : "Sweating";
+  const mood = s.error ? "Pregame number unavailable" : !started ? "No games have started yet" : base == null ? "Pregame number unavailable" : Math.abs(diff) < 0.5 ? "On track" : diff > 0 ? "Above expected" : "Below expected";
   const W = 260, cx = 130, cy = 120, r = 100; const [nx, ny] = pt(cx, cy, r - 18, f);
   const segs = 24;
   return (
     <div className="sweat" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, background: "#111827", border: "1px solid #1f2937", borderRadius: 10, padding: "10px 14px", margin: "8px 0 12px" }}>
-      <svg viewBox={`0 0 ${W} 140`} style={{ width: 240, maxWidth: "100%", display: "block" }} role="img" aria-label="Sweat meter">
+      <svg viewBox={`0 0 ${W} 140`} style={{ width: 240, maxWidth: "100%", display: "block" }} role="img" aria-label="Live meter">
         {Array.from({ length: segs }, (_, i) => { const f0 = i / segs, f1 = (i + 1) / segs; const t = Math.abs((f0 + f1) / 2 - 0.5) * 2; const red = (f0 + f1) / 2 < 0.5;
           const col = red ? `rgba(${Math.round(254 - 101 * t)},${Math.round(202 - 175 * t)},${Math.round(202 - 175 * t)},1)` : `rgba(${Math.round(209 - 204 * t)},${Math.round(250 - 100 * t)},${Math.round(229 - 124 * t)},1)`;
           return <path key={i} d={arc(cx, cy, r, f0, f1 + 0.002)} stroke={col} strokeWidth="20" fill="none" />; })}
         <line x1={cx} x2={cx} y1={cy - r - 14} y2={cy - r + 14} stroke="#e5e7eb" strokeWidth="2" />
-        <text x={cx - r} y={cy + 18} fill="#fca5a5" fontSize="12" textAnchor="middle">Sweating</text>
-        <text x={cx + r} y={cy + 18} fill="#6ee7b7" fontSize="12" textAnchor="middle">Cruising</text>
+        <text x={4} y={cy + 18} fill="#fca5a5" fontSize="12" textAnchor="start">Below expected</text>
+        <text x={W - 4} y={cy + 18} fill="#6ee7b7" fontSize="12" textAnchor="end">Above expected</text>
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#f9fafb" strokeWidth="4" strokeLinecap="round" />
         <circle cx={cx} cy={cy} r="7" fill="#f9fafb" />
       </svg>
       <div style={{ flex: "1 1 200px", fontSize: 14, lineHeight: 1.55 }}>
-        <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>Sweat meter</div>
-        <div style={{ fontSize: 20, fontWeight: 700, color: !started || base == null ? "#e5e7eb" : diff >= 0 ? "#6ee7b7" : "#fca5a5" }}>{mood}</div>
+        <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>Live meter</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: !started || base == null || Math.abs(diff) < 0.5 ? "#e5e7eb" : diff >= 0 ? "#6ee7b7" : "#fca5a5" }}>{mood}</div>
         <div>Now <b>{money(now)}</b> expected</div>
         {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
         {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> from games played</div>}
