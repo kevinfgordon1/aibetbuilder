@@ -53,7 +53,7 @@ const SORT_OPTS = [
 ];
 
 const TIP = {
-  fair: "Fair odds, legs multiplied together, always Kevin's inverse bet method (live). Each leg: 1 minus the implied chance of the best OPPOSING price with $500 of depth, fees included. Moneylines: best of the live Kalshi, Polymarket US, Novig and ProphetX books; any source older than 15 seconds is dropped. Player TD legs: the opposite side on Kalshi (the only live TD book). EV, EV/$100, the risk card and worst-case probabilities all use this fair.",
+  fair: "Fair odds, legs multiplied together, always Kevin's inverse bet method (live). Each leg: 1 minus the implied chance of the best OPPOSING price with $500 of depth, fees included. Moneylines: best of the live Kalshi, Polymarket US, Novig and ProphetX books; any source older than 15 seconds is dropped. Player TD legs: the opposite side, best of the live Kalshi, Polymarket US and Novig TD books (same $500 depth, 15% overround and 15-second rules; Kalshi alone when the others are not live). EV, EV/$100, the risk card and worst-case probabilities all use this fair.",
   mm: "The price the winning market maker quoted, before the taker's fee. Polymarket: the anonymous RFQ trade print matched to this request.",
   got: "What the taker actually paid all-in, after Kalshi's taker fee (0.07 × contracts × price × (1 − price), rounded up to the cent on the whole order). Polymarket: combo taker fee contracts × price × (0.0695 × (1 − price) + 0.06 × (1 − price)^4), rounded up to the cent.",
   sell: "The price we'd actually receive selling YES on the venue's price grid, after our maker fee (Kalshi: series rate, currently $0; Polymarket combos: $0) and rounding. EV is computed from this price.",
@@ -155,6 +155,8 @@ async function fetchLegs(rfqId) {
   p.catch(() => legCache.delete(rfqId));
   return p;
 }
+// Logged top-of-book $ for Polymarket / Novig TD legs: what was there when the request came in, not now.
+const rfqSizeClause = (usd) => (Number(usd) > 0 ? ` · ${Number(usd) < 1 ? "under $1" : "$" + Math.round(Number(usd)).toLocaleString()} at that price` : "");
 const LEG_TIP = "Fair = 1 minus the implied chance of the best opposing price ($500 of depth, fees included), logged when the request came in. Inverse bet method.";
 const PlainLegs = ({ e }) => <div className="legs">{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</div>;
 // Rows under 1% EV (EV/$100 risked < $1.00) keep the simple leg list: no detail fetch, no price lookups.
@@ -191,7 +193,7 @@ function SniperLegDetail({ e }) {
               ? <div className="lfair">{formatAmericanOdds(l.fairAmerican)}{l.winPct != null && ` (${l.winPct.toFixed(1)}%)`}</div>
               : <div className="lsub">No fair logged for this leg</div>}
             {l.bestOpp && (
-              <div className="lopp">Best opp: {formatAmericanOdds(l.bestOpp.american)} on {venueLabel(l.bestOpp.venue)}{formatAvailableSizeClause(l.bestOpp.size)}{l.bestOpp.side ? ` · ${l.bestOpp.side}` : ""}{l.bestOpp.afterKalshiFee ? " · after Kalshi fee" : ""}</div>
+              <div className="lopp">Best opp: {formatAmericanOdds(l.bestOpp.american)} on {venueLabel(l.bestOpp.venue)}{formatAvailableSizeClause(l.bestOpp.size)}{l.bestOpp.side ? ` · ${l.bestOpp.side}` : ""}{l.bestOpp.afterKalshiFee ? " · after Kalshi fee" : l.bestOpp.afterPolyFee ? " · after Polymarket fee" : ""}</div>
             )}
             {(l.depth || (l.others && l.others.length > 0)) && (
               <div className="lmeta">
@@ -200,7 +202,7 @@ function SniperLegDetail({ e }) {
                 {l.others.length > 0 && <span>also {l.others.map((o) => `${venueLabel(o.venue)} ${formatAmericanOdds(o.american)}`).join(", ")}</span>}
               </div>
             )}
-            {l.now && <div className="lmeta">Now on {venueLabel(l.now.venue)}: {formatAmericanOdds(l.now.american)}{formatAvailableSizeClause(l.now.size)}{l.now.afterKalshiFee ? " · after Kalshi fee" : ""}</div>}
+            {l.now && <div className="lmeta">{l.now.atRfq ? "Top" : "Now"} on {venueLabel(l.now.venue)}{l.now.atRfq ? " at the RFQ" : ""}: {formatAmericanOdds(l.now.american)}{l.now.atRfq ? rfqSizeClause(l.now.size) : formatAvailableSizeClause(l.now.size)}{l.now.afterKalshiFee ? " · after Kalshi fee" : l.now.afterPolyFee ? " · after Polymarket fee" : ""}</div>}
           </div>
         </div>
       ))}

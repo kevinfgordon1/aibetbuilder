@@ -93,7 +93,7 @@ const sourcePrices = (leg) => {
     const c = Number(s.costAmerican);
     if (!Number.isFinite(c)) continue;
     const v = String(s.venue || "").toLowerCase();
-    if (!by[v] || probFromAmerican(c) < probFromAmerican(by[v].cost)) by[v] = { venue: v, cost: c, via: s.via || null, top: Number.isFinite(Number(s.topAmerican)) ? Number(s.topAmerican) : null };
+    if (!by[v] || probFromAmerican(c) < probFromAmerican(by[v].cost)) by[v] = { venue: v, cost: c, via: s.via || null, top: Number.isFinite(Number(s.topAmerican)) ? Number(s.topAmerican) : null, topUsd: Number(s.topUsd) > 0 ? Number(s.topUsd) : null };
   }
   return Object.values(by);
 };
@@ -147,7 +147,7 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
       const bestVenue = String(leg.best || "").toLowerCase();
       const best = prices.find((x) => x.venue === bestVenue) || prices.sort((a, b) => probFromAmerican(a.cost) - probFromAmerican(b.cost))[0] || null;
       if (best) {
-        row.bestOpp = { american: best.cost, venue: best.venue, side: row.oppSide, afterKalshiFee: best.venue === "kalshi" };
+        row.bestOpp = { american: best.cost, venue: best.venue, side: row.oppSide, afterKalshiFee: best.venue === "kalshi", afterPolyFee: best.venue === "polymarket" };
         if (best.top != null && best.top !== best.cost) row.depth = { top: best.top, at500: best.cost };
         row.others = prices.filter((x) => x !== best).map((x) => ({ venue: x.venue, american: x.cost }));
         if (best.venue === "kalshi") {
@@ -157,6 +157,10 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
           if (lside === "no") row.kalshiLive = { ticker: legTicker, side: "yes" };
           else if (row.kind === "ml" && best.via === "yes_opp" && row.oppAbbr) row.kalshiLive = { ticker: `${ev}-${row.oppAbbr}`, side: "yes" };
           else row.kalshiLive = { ticker: legTicker, side: "no" };
+        } else if (row.kind === "td") {
+          // Polymarket / Novig TD books come from the worker's relay feed; the board has no TD quotes, so show
+          // the top of that venue's book as logged at the RFQ (price after that venue's fee, $ at the top price).
+          if (best.top != null && best.topUsd != null) row.now = { venue: best.venue, american: best.top, size: best.topUsd, atRfq: true, afterPolyFee: best.venue === "polymarket" };
         } else if (row.kind === "ml" && row.oppAbbr) {
           const qk = `${best.venue}|${gameKey(date, away, home)}|${canon(row.oppAbbr)}`;
           const q = B.quotes[qk];
@@ -207,7 +211,7 @@ export function applyLive(rows, { kalshiBooks = {}, kalshiStatus = {}, nowMs = D
       const top = st === "active" || st === "open" ? kalshiTopAsk(kalshiBooks[kl.ticker], kl.side) : null;
       out.now = top ? { venue: "kalshi", american: americanFromProb(takerAllIn(top.px)), size: top.px * top.contracts, afterKalshiFee: true } : null;
     }
-    if (out.now && out.bestOpp && out.now.venue === out.bestOpp.venue && out.now.american === out.bestOpp.american && out.now.size > 0) {
+    if (out.now && !out.now.atRfq && out.bestOpp && out.now.venue === out.bestOpp.venue && out.now.american === out.bestOpp.american && out.now.size > 0) {
       out.bestOpp = { ...out.bestOpp, size: out.now.size };
       out.now = null;
     }
