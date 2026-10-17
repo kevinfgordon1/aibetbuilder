@@ -72,6 +72,25 @@ function client(user) {
   h._setDeps({ env, now: () => T0, createClient: () => ({ auth: { getUser: async () => ({ data: { user: OWNER }, error: null }) }, from: () => kqm() }), lookupSeries: async () => ({ fee_type: 'quadratic', fee_multiplier: 1 }) });
   const rk = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { fair: 'kalshi' } }, rk);
   assert.equal(rk.code, 200, JSON.stringify(rk.body)); assert.equal(rk.body.scanned, 1002);
+  // ?legs=<rfq_id>: per-leg detail from the logged inverse-bet legs; relay failure never fails it; owner only
+  const legRow = { rfq_id: 'L1', venue: 'kalshi', legs: ['KXNFLGAME-26OCT18LACKC-KC:yes'], legs_kalshi: null,
+    pm_inverse_legs: [{ p: 0.78, best: 'novig', team: 'kc', fairAmerican: -355, sources: [{ used: true, venue: 'novig', reason: 'ok', costAmerican: 355, topAmerican: 355 }] }] };
+  const lq = { select() { return lq; }, eq(c, v) { lq.id = v; return lq; }, limit() { return Promise.resolve({ data: lq.id === 'L1' ? [legRow] : [], error: null }); } };
+  const legClient = (user) => ({ auth: { getUser: async () => ({ data: { user }, error: null }) }, from(t) { assert.equal(t, 'noboost_paper_rfqs'); return lq; } });
+  h._setDeps({ env, createClient: () => legClient(OWNER), fetch: async () => { throw new Error('relay down'); } });
+  const rl = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { legs: 'L1' } }, rl);
+  assert.equal(rl.code, 200, JSON.stringify(rl.body));
+  assert.equal(rl.body.legs.length, 1);
+  assert.equal(rl.body.legs[0].title, 'Kansas City Chiefs ML');
+  assert.equal(rl.body.legs[0].fairAmerican, -355);
+  assert.equal(rl.body.legs[0].bestOpp.side, 'Los Angeles Chargers ML');
+  const r404 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { legs: 'nope' } }, r404);
+  assert.equal(r404.code, 404);
+  const r400 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { legs: "x' or 1=1" } }, r400);
+  assert.equal(r400.code, 400);
+  h._setDeps({ env, createClient: () => legClient({ id: 'x', email: 'tester@gmail.com' }) });
+  const r403 = mkRes(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { legs: 'L1' } }, r403);
+  assert.equal(r403.code, 403);
   h._resetDeps();
   console.log('raw-parlay-edges api tests passed');
 })().catch((e) => { console.error(e); process.exit(1); });
