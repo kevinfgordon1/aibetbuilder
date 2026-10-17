@@ -5,7 +5,7 @@ import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import { createClient } from "@supabase/supabase-js";
-import { todayEvents, todayDistribution, touchedLocks } from "./rootForToday";
+import { todayEvents, touchedLocks } from "./rootForToday";
 import { summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
@@ -45,23 +45,23 @@ function conditioned(model, picks) {
 }
 
 
-function todaySentence(d, range) {
-  const top = topByGain(d, 1)[0];
-  const head = range ? <>Today's games will most likely move your EV between <b className={range.lo < 0 ? "neg" : "pos"}>{sMoney(range.lo)}</b> and <b className={range.hi < 0 ? "neg" : "pos"}>{sMoney(range.hi)}</b>.</> : "Today's games can move your EV.";
-  return <>{head}{top ? ` Biggest game: ${top.game} (root for ${top.name}).` : ""}</>;
+function todaySentence(d) {
+  const top = topByGain(d, 1)[0]; const ev = Number(d.ev) || 0;
+  const head = ev >= 0 ? `You're expected to make about ${sMoney(ev)} on today's locks.` : `You're expected to lose about ${sMoney(ev).replace("−", "")} on today's locks.`;
+  return `${head}${top ? ` Biggest game: ${top.game} (root for ${top.name}).` : ""}`;
 }
 
 function Simple({ d, today }) {
   const range = typicalRange(d.hist);
   return (
     <div>
-      <div className="lead">{today ? todaySentence(d, range) : summarySentence(d)}</div>
-      {range && !today && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      <div className="lead">{today ? todaySentence(d) : summarySentence(d)}</div>
+      {range && <div className="lead2">{today ? "Today's locks most likely land" : "Most weekends land"} between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
-          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit{today ? "" : ` (EV now ${sMoney(d.ev)})`}</div>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit ({today ? "EV on today\u2019s locks" : "EV now"} {sMoney(d.ev)})</div>
           {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{t.game ? `${matchup(t)} · ` : ""}{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
@@ -71,7 +71,7 @@ function Simple({ d, today }) {
         <div className="panel bad">
           <h5>Root against these</h5>
           <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
-          {d.worst && !today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst case scenario: <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${worstChance(d.worst.p)})` : ""}</div>}
+          {d.worst && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst case scenario: <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${worstChance(d.worst.p)})` : ""}</div>}
           {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{k.game ? `${matchup(k)} · ` : ""}{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
@@ -79,18 +79,16 @@ function Simple({ d, today }) {
             </div>)); })()}
         </div>
       </div>
-      {!today && <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />}
-      <h4>{today ? "Where today's games can leave you" : "How likely each result is"}</h4>
+      <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
+      <h4>{today ? "How likely each result is (today\u2019s locks)" : "How likely each result is"}</h4>
       <Curve d={d} today={today} />
       <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
     </div>
   );
 }
 
-function Curve({ d, today }) {
-  return today
-    ? <PnlCurve hist={d.hist} worst={d.worst} ev={0} pProfit={d.pProfit} best={d.best} xLabel="Change in your expected profit from today's games ($)" worstWord="worst day" unit="days" evLabel="No change" />
-    : <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />;
+function Curve({ d }) {
+  return <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />;
 }
 
 function TouchedLocks({ today }) {
@@ -102,15 +100,22 @@ function TouchedLocks({ today }) {
   );
 }
 
-// Today = games kicking off today (ET). Lists keep the full-engine E[P | result] − E[P]; chart = CHANGE in EV from today's games (EV after today − EV now, mean ≈ $0).
+// Today = the same correlated engine as All, run only over locks with at least one leg in a game kicking off today (ET).
+// Hedge fills are already in each lock's hit/miss P&L; later legs stay at current inverse-bet prices.
+// Root for / against: E[P | result] − E[P] of those locks, restricted to today's games' outcomes.
+function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function todayView(base, nowMs) {
   if (!base || !base.model) return null;
   const evs = todayEvents(base.perEvent, nowMs); if (!evs.size) return null;
-  const dist = todayDistribution(base.model, evs, { offset: Number(base.ev) || 0 }); if (!dist) return null;
+  const pos = touchedLocks(base.model, evs); if (!pos.length) return null;
+  let r; try { r = rootFor(pos, base.model.probs, { histBins: 32, rng: seeded(7) }); } catch { return null; }
+  const meta = {}; for (const e of base.perEvent || []) { meta[e.event] = e; for (const o of e.outcomes || []) meta[`${e.event}:${o.outcome}`] = o; }
+  const deco = (o) => { const m = meta[`${o.event}:${o.outcome}`] || {}; return { ...o, name: m.name || o.outcome, game: m.game, american: m.american, start: m.start, slot: m.slot }; };
+  const perEvent = r.perEvent.filter((e) => evs.has(e.event)).map((e) => { const m = meta[e.event] || {}; return { ...e, game: m.game || e.event, rootForName: m.rootForName, american: m.american, start: m.start, slot: m.slot, outcomes: e.outcomes.map(deco) }; });
   const labels = base.lockLabels || {};
-  const locks = touchedLocks(base.model, evs).map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
+  const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   return {
-    d: { ...base, perEvent: base.perEvent.filter((e) => evs.has(e.event)), top: (base.top || []).filter((t) => evs.has(t.event)), hist: dist.hist, worst: dist.worst, best: dist.best, pProfit: dist.pProfit },
+    d: { ...base, ...r, perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
     info: { games: evs.size, locks, total: (base.model.positions || []).length },
   };
 }
@@ -287,9 +292,9 @@ export default function RootFor({ user, initialData = null }) {
             <div className="tile"><span>Chance of a profit</span><b>{pct(d.pProfit, 1)}</b><span>{d.exact && d.exact.pProfit === false ? "simulated" : "exact"}</span></div>
           </div>
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
-          {!(scope === "today" && tv && !whatIf) && <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />}
+          {(() => { const x = scope === "today" && tv && !whatIf ? tv.d : d; return <EvBars hist={x.hist} ev={x.ev} pProfit={x.pProfit} worst={x.worst} />; })()}
           {scope === "today" && tv && !whatIf
-            ? <><h4>Where today's games can leave you</h4><TouchedLocks today={tv.info} /><Curve d={tv.d} today={tv.info} /></>
+            ? <><h4>How likely each result is (today\u2019s locks)</h4><TouchedLocks today={tv.info} /><Curve d={tv.d} today={tv.info} /></>
             : <><h4>How likely each result is{whatIf ? " (what-if)" : ""}</h4><Curve d={d} /></>}
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
