@@ -341,3 +341,46 @@ console.log('kalshi-games tests passed');
   assert.equal(otherNhl.length, 1);
   assert.deepEqual(otherNhl[0].markets.prop, []);
 }
+
+// ── Oct 17 2026: Kalshi keyed Saturday CFB under Friday (26OCT16MIZZMISS, 03:00Z placeholder) ──
+(() => {
+  const now = Date.parse('2026-10-17T14:29:00Z'); // 10:29 AM ET Sat
+  const ev = (key, a, b) => ({
+    event_ticker: `KXNCAAFGAME-${key}`, title: `${a.label} vs ${b.label}`,
+    markets: [a, b].map((s) => ({ ticker: `KXNCAAFGAME-${key}-${s.code}`, yes_sub_title: s.label, occurrence_datetime: '2026-10-17T03:00:00Z' })),
+  });
+  const side = [
+    ev('26OCT16MIZZMISS', { code: 'MIZZ', label: 'Missouri' }, { code: 'MISS', label: 'Ole Miss' }),
+    ev('26OCT16ASUTTU', { code: 'ASU', label: 'Arizona St.' }, { code: 'TTU', label: 'Texas Tech' }),
+    ev('26OCT16FINALX', { code: 'AAA', label: 'Alpha' }, { code: 'BBB', label: 'Beta' }),
+  ];
+  const team = (location, shortDisplayName, abbreviation) => ({ team: { location, shortDisplayName, abbreviation, displayName: `${location} X` } });
+  const espnGames = h.espnGamesFrom({ events: [
+    { id: '1', date: '2026-10-17T19:30Z', status: { type: { state: 'pre' } }, competitions: [{ date: '2026-10-17T19:30Z', competitors: [team('Ole Miss', 'Ole Miss', 'MISS'), team('Missouri', 'Missouri', 'MIZ')] }] },
+    { id: '2', date: '2026-10-17T19:30Z', status: { type: { state: 'pre' } }, competitions: [{ date: '2026-10-17T19:30Z', competitors: [team('Texas Tech', 'Texas Tech', 'TTU'), team('Arizona State', 'Arizona St', 'ASU')] }] },
+    // Already kicked off: must stay dropped.
+    { id: '3', date: '2026-10-17T13:00Z', status: { type: { state: 'in' } }, competitions: [{ date: '2026-10-17T13:00Z', competitors: [team('Alpha', 'Alpha', 'AAA'), team('Beta', 'Beta', 'BBB')] }] },
+  ] });
+  assert.equal(espnGames.length, 3);
+  const without = h.groupSportGames({ side }, now);
+  assert.equal(without.length, 0, 'key-day cutoff drops mis-dated games without ESPN');
+  const games = h.groupSportGames({ side }, now, { espnGames });
+  assert.deepEqual(games.map((g) => g.key).sort(), ['26OCT16ASUTTU', '26OCT16MIZZMISS']);
+  const mizz = games.find((g) => g.key === '26OCT16MIZZMISS');
+  assert.equal(mizz.startTime, '2026-10-17T19:30:00.000Z');
+  assert.equal(mizz.kickoffSource, 'espn');
+  // After kickoff ESPN is not "pre" / kickoff not in the future: dropped.
+  assert.equal(h.groupSportGames({ side }, Date.parse('2026-10-17T19:31:00Z'), { espnGames }).length, 0);
+})();
+
+// A failed first page marks the series failed (slate unknown, not empty).
+(async () => {
+  const failed = await h.fetchSeriesEvents('KXNCAAFGAME', async () => null);
+  assert.equal(failed.length, 0);
+  assert.equal(failed.failed, true);
+  let n = 0;
+  const ok = await h.fetchSeriesEvents('KXNCAAFGAME', async () => (++n === 1 ? { events: [{ event_ticker: 'A' }], cursor: 'c' } : { events: [{ event_ticker: 'B' }], cursor: '' }));
+  assert.equal(ok.length, 2);
+  assert.equal(ok.failed, undefined);
+  console.log('kalshi-games mis-dated CFB + failed-series tests passed');
+})();
