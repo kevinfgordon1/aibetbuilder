@@ -3016,7 +3016,7 @@ export default function App() {
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
-          {activeTab === "combo" && canSeeComboLocks(user) && canSeeOwnerTools(user) && <RootFor user={user} />}
+          {activeTab === "combo" && canSeeComboLocks(user) && <RootFor user={user} />}
           {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} />}
 
           {activeTab === "missTape" && canSeeOwnerTools(user) && <ComboTape user={user} />}

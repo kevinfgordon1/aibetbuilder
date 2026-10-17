@@ -1,11 +1,12 @@
-// "What to root for" — owner-only cheat sheet across ALL open Combo Locks (live inverse bet fairs).
+// "What to root for" — cheat sheet across the signed-in user's OWN open Combo Locks (live inverse bet fairs).
+// Shown to any signed-in user with open locks; the server scopes every query to the auth user id.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import { createClient } from "@supabase/supabase-js";
-import { canSeeOwnerTools } from "./comboAccess";
-import { nightmareKeys, summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
+import { todayEvents, todayDistribution, touchedLocks } from "./rootForToday";
+import { summarySentence, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
 const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
@@ -41,12 +42,14 @@ function conditioned(model, picks) {
 }
 
 
-function Simple({ d, nightmare }) {
+function Simple({ d, today }) {
   const range = typicalRange(d.hist);
   return (
     <div>
       <div className="lead">{summarySentence(d)}</div>
-      {range && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      {range && !today && <div className="lead2">Most weekends land between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      {range && today && <div className="lead2">After today's games, your expected profit will most likely sit between <b className={range.lo < 0 ? "neg" : "pos"}>{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
+      {today && <TouchedLocks today={today} />}
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
@@ -60,7 +63,8 @@ function Simple({ d, nightmare }) {
         <div className="panel bad">
           <h5>Root against these</h5>
           <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
-          {d.worst && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>If every lock misses: <span className="neg">{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${chanceWords(d.worst.p)})` : ""}</div>}
+          {d.worst && today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst day today leaves your EV at <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
+          {d.worst && !today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>If every lock misses: <span className="neg">{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
           {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
@@ -68,12 +72,40 @@ function Simple({ d, nightmare }) {
             </div>)); })()}
         </div>
       </div>
-      <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
-      <h4>How likely each result is</h4>
-      <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
+      {!today && <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />}
+      <h4>{today ? "Where today's games can leave you" : "How likely each result is"}</h4>
+      <Curve d={d} today={today} />
       <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
     </div>
   );
+}
+
+function Curve({ d, today }) {
+  return today
+    ? <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} xLabel="Your expected profit after today's games ($)" worstWord="worst day" unit="days" />
+    : <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />;
+}
+
+function TouchedLocks({ today }) {
+  return (
+    <details className="touched">
+      <summary>Today: {today.games} game{today.games === 1 ? "" : "s"} touch <b>{today.locks.length}</b> of {today.total} open locks</summary>
+      <ul>{today.locks.map((l) => <li key={l.id}>{l.label || "Lock"} <span className="sub">· {l.legs.length} legs, {l.todayLegs} today</span></li>)}</ul>
+    </details>
+  );
+}
+
+// Today = games kicking off today (ET). Lists keep the full-engine E[P | result] − E[P]; chart = EV after today.
+function todayView(base, nowMs) {
+  if (!base || !base.model) return null;
+  const evs = todayEvents(base.perEvent, nowMs); if (!evs.size) return null;
+  const dist = todayDistribution(base.model, evs); if (!dist) return null;
+  const labels = base.lockLabels || {};
+  const locks = touchedLocks(base.model, evs).map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
+  return {
+    d: { ...base, perEvent: base.perEvent.filter((e) => evs.has(e.event)), top: (base.top || []).filter((t) => evs.has(t.event)), hist: dist.hist, worst: dist.worst, best: dist.best, pProfit: dist.pProfit },
+    info: { games: evs.size, locks, total: (base.model.positions || []).length },
+  };
 }
 
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
@@ -86,6 +118,23 @@ export default function RootFor({ user, initialData = null }) {
   const [view, setViewState] = useState(readView);
   const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ } };
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
+  const signedIn = !!(user && user.id);
+  // cheap lock count so users with no open locks never see the sheet
+  const [lockCount, setLockCount] = useState(initialData ? (initialData.locksTotal || 1) : null);
+  useEffect(() => {
+    if (!signedIn || initialData) return undefined; let dead = false;
+    (async () => {
+      try {
+        const c = supabase(); if (!c) return;
+        const { data: { session } } = await c.auth.getSession(); if (!session) return;
+        const r = await fetch("/api/root-for?check=1", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
+        const j = await r.json().catch(() => null);
+        if (!dead && r.ok && j && j.ok) setLockCount(j.locks || 0);
+      } catch { /* stay hidden */ }
+    })();
+    return () => { dead = true; };
+  }, [signedIn, initialData]);
+  const can = signedIn && lockCount > 0;
   const load = useCallback(async () => {
     const c = supabase();
     if (!c) return setSt({ loading: false, error: "Not configured", data: null });
@@ -100,13 +149,13 @@ export default function RootFor({ user, initialData = null }) {
     } catch (e) { setSt((s) => ({ loading: false, error: String((e && e.message) || e), data: s.data })); }
   }, []);
   // fetch only once the sheet is shown
-  useEffect(() => { if (open && canSeeOwnerTools(user) && !initialData && !st.data && !st.loading) load(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && can && !initialData && !st.data && !st.loading) load(); }, [open, can]); // eslint-disable-line react-hooks/exhaustive-deps
   // live: reprice every 10 minutes while the tab is visible (in-game prices included). No alerts.
   useEffect(() => {
-    if (!open || !canSeeOwnerTools(user) || initialData) return undefined;
+    if (!open || !can || initialData) return undefined;
     const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") load(); }, REFRESH_MS);
     return () => clearInterval(id);
-  }, [open, user, initialData, load]);
+  }, [open, can, initialData, load]);
   const [picks, setPicks] = useState({});
   const base = st.data;
   const whatIf = useMemo(() => {
@@ -123,8 +172,10 @@ export default function RootFor({ user, initialData = null }) {
     else delete n[ev];
     return n;
   });
-  const nightmare = useMemo(() => (base && base.model ? nightmareKeys(base.model) : []), [base]);
-  if (!canSeeOwnerTools(user)) return null;
+  const tv = useMemo(() => todayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now()), [base]);
+  const [scopeSel, setScope] = useState(null); // null = default: Today when there are games today (ET), else All
+  const scope = scopeSel || (tv ? "today" : "all");
+  if (!can || (base && base.empty)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
   if (base) for (const e of base.perEvent) { const k = (e.slot && e.slot.key) || "9"; let g = slots.find((x) => x.key === k); if (!g) slots.push((g = { key: k, label: (e.slot && e.slot.label) || "Other days", rows: [] })); g.rows.push(e); }
@@ -170,13 +221,19 @@ export default function RootFor({ user, initialData = null }) {
         .rootfor .bar{margin:8px 0}.rootfor .bl{font-size:13px;margin-bottom:3px}
         .rootfor .bt{display:flex;align-items:center;gap:8px}.rootfor .bf{height:14px;border-radius:4px;min-width:4px;flex:0 0 auto}
         .rootfor .bf.pos{background:#34d399}.rootfor .bf.negb{background:#f87171}.rootfor .bv{font-weight:700;font-size:13px;white-space:nowrap}
+        .rootfor .touched{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:8px 12px;margin:0 0 10px}.rootfor .touched summary{cursor:pointer;color:#cbd5e1}.rootfor .touched ul{margin:6px 0 0 18px;padding:0;columns:2}.rootfor .touched li{margin:2px 0;break-inside:avoid}
+        @media (max-width:700px){.rootfor .touched ul{columns:1}}
         @media (max-width:700px){.rootfor .pair{grid-template-columns:1fr}}
         @media (max-width:600px){.rootfor .hide-sm{display:none}}
       `}</style>
       <h3>
-        What to root for <span className="tag">Owner</span>
+        What to root for
         <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 10 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+          {tv && <span className="seg" role="group" aria-label="Games">
+            <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")}>Today</button>
+            <button type="button" className={scope === "all" ? "on" : ""} aria-pressed={scope === "all"} onClick={() => setScope("all")}>All</button>
+          </span>}
           <span className="seg" role="group" aria-label="View">
             <button type="button" className={view === "simple" ? "on" : ""} aria-pressed={view === "simple"} onClick={() => setView("simple")}>Simple</button>
             <button type="button" className={view === "detailed" ? "on" : ""} aria-pressed={view === "detailed"} onClick={() => setView("detailed")}>Detailed</button>
@@ -186,7 +243,7 @@ export default function RootFor({ user, initialData = null }) {
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
-      {open && d && view === "simple" && <Simple d={base} nightmare={nightmare} />}
+      {open && d && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} /> : <Simple d={base} />)}
       {open && d && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
@@ -200,7 +257,7 @@ export default function RootFor({ user, initialData = null }) {
           <table>
             <thead><tr><th>#</th><th>Root for</th><th className="hide-sm">Game</th><th className="num">Chance now</th><th className="num">Fair</th><th className="num">Adds to exp. profit</th><th className="num">Swing</th><th className="num hide-sm">If it hits / misses</th></tr></thead>
             <tbody>
-              {topByGain(base).map((t, i) => (
+              {topByGain(scope === "today" && tv ? tv.d : base).map((t, i) => (
                 <tr key={t.event}>
                   <td>{i + 1}</td><td><b>{t.name}</b></td><td className="hide-sm">{t.game}</td>
                   <td className="num">{pct(t.p)}</td><td className="num">{am(t.american)}</td>
@@ -218,9 +275,10 @@ export default function RootFor({ user, initialData = null }) {
             <div className="tile"><span>Chance of a profit</span><b>{pct(d.pProfit, 1)}</b><span>{d.exact && d.exact.pProfit === false ? "simulated" : "exact"}</span></div>
           </div>
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
-          <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
-          <h4>How likely each result is{whatIf ? " (what-if)" : ""}</h4>
-          <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />
+          {!(scope === "today" && tv && !whatIf) && <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />}
+          {scope === "today" && tv && !whatIf
+            ? <><h4>Where today's games can leave you</h4><TouchedLocks today={tv.info} /><Curve d={tv.d} today={tv.info} /></>
+            : <><h4>How likely each result is{whatIf ? " (what-if)" : ""}</h4><Curve d={d} /></>}
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
             <thead><tr><th>Game</th><th className="hide-sm">Start</th><th>Root for</th><th className="num">Chance now</th><th className="num">Swing</th><th>What-if</th></tr></thead>
