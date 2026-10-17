@@ -58,3 +58,9 @@ console.log("rootForSimple tests ok");
   assert.equal(s.avgLoss, -50); assert.equal(s.avgWin, 70); assert.ok(Math.abs(s.lossArea + s.winArea - 10) < 1e-9);
   console.log("split ok");
 }
+{
+  const { topByDrop } = await import("./rootForSimple.js");
+  const t = topByDrop({ ev: 0, perEvent: [{ outcomes: [{ event: "G", name: "PIT Steelers by under 3", ifHit: -5 }] }] });
+  assert.equal(t[0].label, "PIT Steelers win by 1–2");
+  console.log("label ok");
+}

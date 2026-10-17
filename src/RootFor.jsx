@@ -44,7 +44,6 @@ function conditioned(model, picks) {
 
 function Simple({ d, nightmare }) {
   const range = typicalRange(d.hist);
-  const worstAm = d.worst && americanFromP(d.worst.p);
   return (
     <div>
       <div className="lead">{summarySentence(d)}</div>
@@ -52,20 +51,22 @@ function Simple({ d, nightmare }) {
       <SweatMeter d={d} />
       <div className="pair">
         <div className="panel good">
-          <h5>Root for these 5 <span className="sub">· EV now {sMoney(d.ev)} · new EV if they win (change)</span></h5>
+          <h5>Root for these teams</h5>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit (EV now {sMoney(d.ev)})</div>
           {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf pos" style={{ width: `calc((100% - 170px) * ${(t.gain / mx).toFixed(4)})` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>EV {sMoney(t.ifHit)} ({sMoney(t.gain)})</span></div>
+              <div className="bt"><div className="bf pos" style={{ width: `calc((100% - 100px) * ${(t.gain / mx).toFixed(4)})` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>{sMoney(t.gain)} EV</span></div>
             </div>)); })()}
         </div>
         <div className="panel bad">
-          <h5>Your nightmare: <span className="neg">{sMoney(d.worst && d.worst.pnl)}</span> {worstAm != null && <span className="sub">· odds {fmtAmerican(worstAm)} ({chanceWords(d.worst.p)})</span>}</h5>
-          <div className="sub" style={{ margin: "-2px 0 6px" }}>Results that hurt most · EV now {sMoney(d.ev)} · new EV if it happens (change)</div>
+          <h5>Root against these</h5>
+          <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
+          {d.worst && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>If every lock misses: <span className="neg">{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${chanceWords(d.worst.p)})` : ""}</div>}
           {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf negb" style={{ width: `calc((100% - 170px) * ${(-k.drop / mx).toFixed(4)})` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>EV {sMoney(k.ifHit)} ({sMoney(k.drop)})</span></div>
+              <div className="bt"><div className="bf negb" style={{ width: `calc((100% - 100px) * ${(-k.drop / mx).toFixed(4)})` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)} EV</span></div>
             </div>)); })()}
         </div>
       </div>

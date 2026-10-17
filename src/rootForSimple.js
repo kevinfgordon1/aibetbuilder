@@ -106,6 +106,7 @@ export function topByDrop(d, n = 5) {
   return (d.perEvent || []).flatMap((e) => e.outcomes || [])
     .filter((o) => o && Number.isFinite(o.ifHit) && o.name)
     .map((o) => ({ ...o, drop: o.ifHit - ev, label: /\bby\b/.test(o.name) ? `${o.name.replace(/^(\S+\s+\S+)\s+by/, "$1 win by")}` : `${o.name} win` }))
+    .map((o) => ({ ...o, label: o.label.replace(/win by under (\d+)\b/, (m, n) => (+n >= 3 ? `win by 1–${+n - 1}` : m)) }))
     .filter((o) => o.drop < -0.5)
     .sort((a, b) => a.drop - b.drop)
     .filter((o) => (seen.has(o.event) ? false : (seen.add(o.event), true)))
