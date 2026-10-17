@@ -384,3 +384,25 @@ console.log('kalshi-games tests passed');
   assert.equal(ok.failed, undefined);
   console.log('kalshi-games mis-dated CFB + failed-series tests passed');
 })();
+
+// Oct 17 2026: moneyline filed under Oct 16, spread/total under Oct 17 (KXNCAAF*-26OCT17UKOKLA).
+(() => {
+  const now = Date.parse('2026-10-17T15:30:00Z');
+  const mk = (series, key, markets) => ({ event_ticker: `${series}-${key}`, title: 'Kentucky vs Oklahoma', sub_title: 'UK vs OKLA (Oct 17)', markets });
+  const side = [mk('KXNCAAFGAME', '26OCT16UKOKLA', [
+    { ticker: 'KXNCAAFGAME-26OCT16UKOKLA-UK', yes_sub_title: 'Kentucky' }, { ticker: 'KXNCAAFGAME-26OCT16UKOKLA-OKLA', yes_sub_title: 'Oklahoma' }])];
+  const spread = [mk('KXNCAAFSPREAD', '26OCT17UKOKLA', [{ ticker: 'KXNCAAFSPREAD-26OCT17UKOKLA-OKLA14', yes_sub_title: 'Oklahoma wins by over 13.5 Points' }])];
+  const total = [mk('KXNCAAFTOTAL', '26OCT17UKOKLA', [{ ticker: 'KXNCAAFTOTAL-26OCT17UKOKLA-43', yes_sub_title: 'Over 42.5 points scored' }])];
+  const espnGames = [{ id: '1', kickoffMs: Date.parse('2026-10-17T23:30:00Z'), state: 'pre', teams: [{ abbr: 'UK', names: ['kentucky'] }, { abbr: 'OU', names: ['oklahoma'] }] }];
+  const games = h.groupSportGames({ side, spread, total }, now, { espnGames });
+  assert.equal(games.length, 1);
+  assert.equal(games[0].key, '26OCT16UKOKLA');
+  assert.deepEqual(games[0].markets.total.map((m) => m.label), ['Over 42.5', 'Under 42.5']);
+  assert.deepEqual(games[0].markets.spread.map((m) => m.label), ['Oklahoma \u221213.5', 'Kentucky +13.5']);
+  // Two moneyline games for the same teams within a day: ambiguous, nothing is folded.
+  const side2 = side.concat([mk('KXNCAAFGAME', '26OCT18UKOKLA', [
+    { ticker: 'KXNCAAFGAME-26OCT18UKOKLA-UK', yes_sub_title: 'Kentucky' }, { ticker: 'KXNCAAFGAME-26OCT18UKOKLA-OKLA', yes_sub_title: 'Oklahoma' }])]);
+  const amb = h.groupSportGames({ side: side2, spread, total }, now, { espnGames });
+  assert.ok(amb.every((g) => g.markets.total.length === 0), 'ambiguous host is not guessed');
+  console.log('kalshi-games off-by-one series merge tests passed');
+})();
