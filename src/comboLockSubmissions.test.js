@@ -150,3 +150,17 @@ function mockClient() {
 }
 
 console.log("comboLockSubmissions.test.js ok");
+
+// History .in() reads drop the redundant user_id filter (lets Postgres use the per-lock partial
+// indexes); single-lock reads keep it.
+{
+  const calls = [];
+  const mk = () => { const b = new Proxy({}, { get: (_t, k) => (...a) => { calls.push([k, ...a]); return b; } }); return b; };
+  const client = { from: () => mk() };
+  calls.length = 0;
+  archivedLockSubmissionQueries(client, { userId: "u", parlayIds: ["a", "b"] });
+  assert.equal(calls.some(([k, c]) => k === "eq" && c === "user_id"), false);
+  calls.length = 0;
+  livingLockSubmissionQueries(client, { userId: "u", parlayId: "a" });
+  assert.equal(calls.filter(([k, c]) => k === "eq" && c === "user_id").length, 2);
+}
