@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig } from "./rootForSweat.js";
+import { slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves } from "./rootForSweat.js";
 assert.equal(slateKey(Date.parse("2026-10-16T23:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T02:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T16:00:00Z")), "2026-10-20");
@@ -24,4 +24,16 @@ assert.equal(outcomeSig({ b: 1, a: 2 }), "a|b");
 assert.equal(gaugeFrac(2600, -4000, 2600, 15000), 0.5);
 assert.equal(gaugeFrac(-4000, -4000, 2600, 15000), 0);
 assert.equal(gaugeFrac(99999, -4000, 2600, 15000), 1);
+// live leg chart: shares add up exactly to now − pregame; decided games go to `settled`
+{
+  const ps = [{ legs: [{ event: "A", allowed: ["a"] }, { event: "B", allowed: ["b"] }], hit: 1000, miss: -100 }, { legs: [{ event: "B", allowed: ["b"] }, { event: "C", allowed: ["c"] }], hit: 500, miss: -80 }];
+  const live = { A: { a: 0.7, x: 0.3 }, B: { b: 0.3, y: 0.7 }, C: { c: 0.99, z: 0.01 } };
+  const fz = { A: { a: 0.5, x: 0.5 }, B: { b: 0.45, y: 0.55 }, C: { c: 0.6, z: 0.4 } };
+  const r = liveLegMoves(ps, live, fz, {});
+  const want = expectedProfit(ps, live) - expectedProfit(ps, fz);
+  assert.ok(Math.abs(r.total - want) < 1e-9);
+  assert.ok(Math.abs(r.legs.reduce((a, l) => a + l.move, 0) + r.settled - want) < 1e-9);
+  assert.deepEqual(r.legs.map((l) => l.event), ["B", "A"]);
+  assert.equal(liveLegMoves(ps, live, {}, {}).legs.length, 0);
+}
 console.log("rootForSweat tests ok");

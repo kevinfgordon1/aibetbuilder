@@ -144,7 +144,7 @@ export function FinalToday({ f, d }) {
     <div>
       <div className="lead">All of today’s games are final ({f.dayLabel}).</div>
       <div className="lead2">{f.row.games} game{f.row.games === 1 ? "" : "s"} across {f.row.locks} lock{f.row.locks === 1 ? "" : "s"}: <b className={f.result >= 0 ? "pos" : "neg"}>{sMoney(f.result)}</b> vs kickoff odds. Today switches to the next day at 11 AM ET.</div>
-      <SweatMeter d={{ ...d, sweat }} />
+      <SweatMeter d={{ ...d, sweat }} legs={false} />
       <NeedleHistory rows={d.sweat && d.sweat.history} />
     </div>
   );
@@ -176,7 +176,7 @@ function todayView(base, nowMs) {
   const labels = base.lockLabels || {};
   const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   return {
-    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
+    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), livePos: pos, perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
     info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: sheetDayLabel(nowMs) + (sheetDayLabel(nowMs) !== sheetDayLabel(nowMs + 11 * 3600 * 1000) ? ", until 11 AM ET" : "") },
   };
 }
