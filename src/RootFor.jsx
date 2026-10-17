@@ -6,7 +6,7 @@ import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import { createClient } from "@supabase/supabase-js";
 import { todayEvents, todayDistribution, touchedLocks } from "./rootForToday";
-import { summarySentence, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
+import { summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
 const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
