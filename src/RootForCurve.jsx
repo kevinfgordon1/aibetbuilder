@@ -11,7 +11,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
     const el = wrap.current; if (!el || typeof ResizeObserver === "undefined") return undefined;
     const ro = new ResizeObserver(([e]) => setW(Math.max(280, Math.round(e.contentRect.width)))); ro.observe(el); return () => ro.disconnect();
   }, []);
-  const m = curveModel(hist, { worst });
+  const m = curveModel(hist, { worst, cap: 0.995 }); // a little past the 99% best case so its marker sits inside
   if (!m) return null;
   const small = W < 520; const H = small ? 266 : 276; const top = 26, bot = 98, padL = 24, padR = 10;
   const plotH = H - top - bot; const x = (v) => padL + ((v - m.xMin) / (m.xMax - m.xMin)) * (W - padL - padR);
@@ -31,6 +31,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
   };
   const hc = hx != null ? cdfAt(hist, hx) : null;
   const sp = m.spike; const spX = sp ? x(sp.x) : null;
+  const p99 = quantileOf(hist, 0.99); const b99 = Number.isFinite(p99) && p99 > m.xMin && p99 <= m.xMax ? x(p99) : null;
   return (
     <div ref={wrap} className="pnlcurve" style={{ width: "100%", maxWidth: 900, position: "relative" }}>
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="How the weekend could go" style={{ display: "block", touchAction: "pan-y" }}>
@@ -66,6 +67,11 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
           <line x1={spX + 3.5} x2={spX + 3.5} y1={top + plotH} y2={top + plotH + 24} stroke="#ef4444" strokeWidth="1.5" />
           <text x={spX} y={top + plotH + 35} fill="#fca5a5" fontSize="11" fontWeight="700">{money(sp.x)} {worstWord}</text>
           <text x={spX} y={top + plotH + 49} fill="#fca5a5" fontSize="11">{pc(sp.p)} chance</text>
+        </g>}
+        {b99 != null && <g>
+          <line x1={b99} x2={b99} y1={top + plotH} y2={top + plotH + 24} stroke="#10b981" strokeWidth="1.5" />
+          <text x={Math.min(b99 + 4, W - padR)} y={top + plotH + 35} fill="#6ee7b7" fontSize="11" fontWeight="700" textAnchor="end">{money(p99)} best case (99%)</text>
+          <text x={Math.min(b99 + 4, W - padR)} y={top + plotH + 49} fill="#6ee7b7" fontSize="11" textAnchor="end">1% chance of doing better</text>
         </g>}
         <text x={(padL + W - padR) / 2} y={H - 4} fill="#cbd5e1" fontSize="12" textAnchor="middle">{xLabel}</text>
         <text transform={`translate(13,${top + plotH / 2}) rotate(-90)`} fill="#cbd5e1" fontSize="12" textAnchor="middle">More likely →</text>

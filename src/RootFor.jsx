@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
+import SweatMeter from "./RootForSweat";
+import { expectedProfit } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
 import { todayEvents, touchedLocks } from "./rootForToday";
 import { summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -58,6 +60,7 @@ function Simple({ d, today }) {
       <div className="lead">{today ? todaySentence(d) : summarySentence(d)}</div>
       {range && <div className="lead2">{today ? "Today's locks most likely land" : "Most weekends land"} between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
+      <SweatMeter d={d} />
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
@@ -103,6 +106,15 @@ function TouchedLocks({ today }) {
 // Today = the same correlated engine as All, run only over locks with at least one leg in a game kicking off today (ET).
 // Hedge fills are already in each lock's hit/miss P&L; later legs stay at current inverse-bet prices.
 // Root for / against: E[P | result] − E[P] of those locks, restricted to today's games' outcomes.
+// Needle for today's locks only: same frozen kickoff probabilities, restricted to locks touching today's games.
+function todaySweat(base, pos, evNow) {
+  const s = base && base.sweat; if (!s || !s.frozen || !base.model) return s;
+  const evs = new Set(pos.flatMap((p) => p.legs.map((l) => l.event)));
+  const frozen = Object.fromEntries(Object.entries(s.frozen).filter(([ev]) => evs.has(ev)));
+  const source = Object.fromEntries(Object.entries(s.source || {}).filter(([ev]) => evs.has(ev)));
+  const started = Object.keys(frozen).length > 0;
+  return { ...s, frozen, source, started, since: Object.values(source).includes("snapshot") ? s.since : null, now: evNow, baseline: expectedProfit(pos, { ...base.model.probs, ...frozen }) };
+}
 function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function todayView(base, nowMs) {
   if (!base || !base.model) return null;
@@ -115,7 +127,7 @@ function todayView(base, nowMs) {
   const labels = base.lockLabels || {};
   const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   return {
-    d: { ...base, ...r, perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
+    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
     info: { games: evs.size, locks, total: (base.model.positions || []).length },
   };
 }
