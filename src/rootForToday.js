@@ -12,10 +12,21 @@ import { expectedProfit } from "./rootForSweat.js";
 
 const etDate = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
 
+// "Today" rolls over at 11:00 AM ET: until then it still shows the previous day's games (and needle).
+export const ROLLOVER_HOUR_ET = 11;
+const H = 3600 * 1000;
+export function sheetDay(nowMs) { return etDate(nowMs - ROLLOVER_HOUR_ET * H); }
+// A game's day: its ET kickoff date, with after-midnight kickoffs (before 5 AM ET) counted to the night before.
+export function gameDay(startMs) { return etDate(startMs - 5 * H); }
 export function todayEvents(perEvent = [], nowMs) {
-  const today = etDate(nowMs); const out = new Set();
-  for (const e of perEvent) if (e && e.event && e.start && etDate(Date.parse(e.start)) === today) out.add(e.event);
+  const today = sheetDay(nowMs); const out = new Set();
+  for (const e of perEvent) if (e && e.event && e.start && gameDay(Date.parse(e.start)) === today) out.add(e.event);
   return out;
+}
+// "Fri Oct 16" for the sheet day.
+export function sheetDayLabel(nowMs) {
+  const d = sheetDay(nowMs); const t = Date.parse(`${d}T12:00:00Z`);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(t));
 }
 
 export function touchedLocks(model, events) {

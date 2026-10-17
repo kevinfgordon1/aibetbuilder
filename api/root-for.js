@@ -140,9 +140,44 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
   return { [h]: raw[h], [o]: 1 - raw[h] };
 }
 
+// Daily needle history (owner only). One row per sheet day (Today rolls over at 11 AM ET).
+// result = EV of the day's locks at the day's games' latest chances − EV with those games at their kickoff numbers
+// (later games stay at current chances in both, so only the day's games count).
+// Finished games drop out of live prices and settled locks drop out of open locks, so the row keeps a snapshot:
+// every lock and game seen that day, each game's last live chances, and its kickoff numbers.
+// The day turns final when every game is decided (some outcome ≥ 98%, or its market has closed) or at the
+// 11 AM ET rollover; a final row is never rewritten. Never fails the request.
+async function needleDay(client, userId, out, now, frozen) {
+  try {
+    const S = await import('../src/rootForSweat.js'); const TD = await import('../src/rootForToday.js');
+    const day = TD.sheetDay(now); const model = out.model || {}; const probs = model.probs || {};
+    const T = (t) => client.from(t); const stamp = new Date(now).toISOString();
+    await T('root_for_needle_days').update({ final: true, final_reason: 'rollover', updated_at: stamp }).eq('user_id', userId).eq('final', false).lt('day', day);
+    const { data: cur } = await T('root_for_needle_days').select('day,final,snap').eq('user_id', userId).eq('day', day).limit(1);
+    const row0 = (cur || [])[0];
+    if (!(row0 && row0.final)) {
+      const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} };
+      const evs = TD.todayEvents(out.perEvent || [], now);
+      for (const ev of evs) { if (probs[ev]) snap.last[ev] = probs[ev]; if (frozen && frozen[ev]) snap.frozen[ev] = frozen[ev]; }
+      for (const p of TD.touchedLocks(model, new Set(Object.keys(snap.last)))) snap.positions[p.id] = p;
+      const dayEvs = Object.keys(snap.frozen);
+      if (dayEvs.length) {
+        const pos = Object.values(snap.positions);
+        const liveP = { ...probs, ...Object.fromEntries(dayEvs.map((ev) => [ev, probs[ev] || snap.last[ev]])) };
+        const preP = { ...liveP, ...snap.frozen };
+        const liveEv = S.expectedProfit(pos, liveP); const preEv = S.expectedProfit(pos, preP);
+        const decided = Object.keys(snap.last).every((ev) => !probs[ev] || Math.max(...Object.values(probs[ev])) >= 0.98);
+        await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'all_decided' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
+      }
+    }
+    const { data: hist } = await T('root_for_needle_days').select('day,result,pregame_ev,live_ev,games,locks,final').eq('user_id', userId).order('day', { ascending: false }).limit(30);
+    return hist || [];
+  } catch (_) { return null; }
+}
+
 // Sweat meter (see src/rootForSweat.js): each game locked at its own kickoff. Owner only. Never fails the request.
 // Returns frozen kickoff probabilities per started game so the client can build the needle for All or Today's locks.
-async function sweatBaseline(client, out, now) {
+async function sweatBaseline(client, out, now, userId) {
   try {
     const S = await import('../src/rootForSweat.js');
     const key = S.slateKey(now);
@@ -153,10 +188,14 @@ async function sweatBaseline(client, out, now) {
     const backfill = []; const probs = (out.model && out.model.probs) || {};
     await Promise.all(Object.entries(probs).map(async ([ev, dist]) => {
       const t = starts[ev] ? Date.parse(starts[ev]) : NaN; if (!Number.isFinite(t) || now < t) return;
-      const sig = S.outcomeSig(dist); if (have.has(`${ev}#${sig}`)) return;
-      try { const p = await kickoffProbs(ev, dist, starts[ev], out.model.positions); if (p) { const row = { slate_key: key, event: ev, sig, probs: p, kickoff: new Date(t).toISOString(), captured_at: new Date(t).toISOString() }; rows.push(row); backfill.push(row); } } catch (_) { /* fall back to first snapshot */ }
+      const sig = S.outcomeSig(dist);
+      // a saved row taken after the REAL kickoff (late first snapshot, or saved under an old placeholder kickoff)
+      // is replaced by Kalshi's price at kickoff when history is available
+      const old = rows.find((x) => x.event === ev && x.sig === sig);
+      if (old && !(old.captured_at && Date.parse(old.captured_at) - t > 5 * 60000)) return;
+      try { const p = await kickoffProbs(ev, dist, starts[ev], out.model.positions); if (p) { const row = { slate_key: key, event: ev, sig, probs: p, kickoff: new Date(t).toISOString(), captured_at: new Date(t).toISOString() }; if (old) rows.splice(rows.indexOf(old), 1); rows.push(row); backfill.push(row); } } catch (_) { /* fall back to first snapshot */ }
     }));
-    if (backfill.length) { const { error: e0 } = await client.from('root_for_pregame_probs').upsert(backfill, { onConflict: 'slate_key,event,sig', ignoreDuplicates: true }); if (e0) throw e0; }
+    if (backfill.length) { const { error: e0 } = await client.from('root_for_pregame_probs').upsert(backfill, { onConflict: 'slate_key,event,sig' }); if (e0) throw e0; }
     const r = S.pregameBaseline({ model: out.model, starts, now, key, rows });
     if (r.overwrite.length) { const { error: e1 } = await client.from('root_for_pregame_probs').upsert(r.overwrite, { onConflict: 'slate_key,event,sig' }); if (e1) throw e1; }
     if (r.insertOnce.length) { const { error: e2 } = await client.from('root_for_pregame_probs').upsert(r.insertOnce, { onConflict: 'slate_key,event,sig', ignoreDuplicates: true }); if (e2) throw e2; }
@@ -164,10 +203,14 @@ async function sweatBaseline(client, out, now) {
     const bySig = new Map(rows.map((x) => [`${x.event}#${x.sig}`, x])); const frozen = {}; const source = {}; let since = null;
     for (const ev of r.started) {
       const x = bySig.get(`${ev}#${S.outcomeSig(probs[ev])}`);
-      if (x && x.probs) { frozen[ev] = x.probs; const late = x.captured_at && x.kickoff && Date.parse(x.captured_at) - Date.parse(x.kickoff) > 5 * 60000; source[ev] = backfill.includes(x) || (x.captured_at && x.kickoff && x.captured_at === x.kickoff) ? 'kickoff' : late ? 'snapshot' : 'pregame'; if (late && (!since || x.captured_at < since)) since = x.captured_at; }
+      if (x && x.probs) { frozen[ev] = x.probs; const late = x.captured_at && starts[ev] && Date.parse(x.captured_at) - Date.parse(starts[ev]) > 5 * 60000; source[ev] = backfill.includes(x) || (x.captured_at && x.kickoff && x.captured_at === x.kickoff) ? 'kickoff' : late ? 'snapshot' : 'pregame'; if (late && (!since || x.captured_at < since)) since = x.captured_at; }
       else { frozen[ev] = probs[ev]; source[ev] = 'snapshot'; const c = new Date(now).toISOString(); if (!since || c < since) since = c; }
     }
-    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key, frozen, source, since, backfilled: backfill.length };
+    const history = userId ? await needleDay(client, userId, out, now, frozen) : null;
+    // Today's needle reads the saved day row (all of the day's games and locks, settled ones included), so it matches history.
+    const TD = await import('../src/rootForToday.js'); const sd = TD.sheetDay(now);
+    const dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
+    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key, frozen, source, since, backfilled: backfill.length, ...(history ? { history } : {}), ...(dayRow ? { dayRow } : {}) };
   } catch (e) {
     return { started: null, baseline: null, now: Number(out.ev), error: 'Pregame number unavailable' };
   }
@@ -175,6 +218,22 @@ async function sweatBaseline(client, out, now) {
 
 async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
+  // Vercel cron (every 10 min): keep the owner's needle + daily history current even with the sheet closed.
+  // Needs CRON_SECRET (Vercel sends "Authorization: Bearer <CRON_SECRET>"); without it the cron is refused.
+  if ((req.query || {}).cron === 'needle') {
+    const env0 = deps.env || process.env; const sec = env0.CRON_SECRET;
+    if (!sec || lib.readBearer(req) !== sec) return json(res, 401, { ok: false, error: 'cron auth' });
+    try {
+      const client = deps.createClient(env0.SUPABASE_URL || env0.VITE_SUPABASE_URL, env0.SUPABASE_SERVICE_KEY, clientOpts);
+      const uid = lib.OWNER_USER_ID; const M = await loadMods();
+      const { parlays, fills, singles } = await loadLocks(client, uid);
+      if (!parlays.length) return json(res, 200, { ok: true, empty: true });
+      const mk = await loadMarkets(M, parlays, env0); const now = deps.now();
+      const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
+      const sw = await sweatBaseline(client, out, now, uid);
+      return json(res, 200, { ok: true, days: (sw.history || []).length });
+    } catch (e) { return json(res, 500, { ok: false, error: 'cron failed' }); }
+  }
   const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   const env = deps.env || process.env;
@@ -203,7 +262,7 @@ async function handler(req, res) {
     const now = deps.now();
     const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
     // pregame-probs table is not per-user: only the owner's sheet may write it (and it's off unless enabled)
-    const sweat = auth.owner && uid === auth.user.id ? await sweatBaseline(client, out, now) : undefined;
+    const sweat = auth.owner && uid === auth.user.id ? await sweatBaseline(client, out, now, uid) : undefined;
     const lockLabels = Object.fromEntries(parlays.map((p) => [p.id, p.label || '']));
     return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, lockLabels, ...(sweat ? { sweat } : {}) });
   } catch (e) {
