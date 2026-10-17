@@ -5,7 +5,7 @@ import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney } from "./rootForS
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const pc = (p) => (p * 100 < 1 && p > 0 ? "<1%" : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`);
 
-export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends" }) {
+export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends", evLabel = null }) {
   const wrap = useRef(null); const [W, setW] = useState(720); const [hx, setHx] = useState(null);
   useEffect(() => {
     const el = wrap.current; if (!el || typeof ResizeObserver === "undefined") return undefined;
@@ -52,13 +52,13 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
         {sp && <g>
           <rect x={spX} y={top} width={7} height={plotH} rx={2} fill="#991b1b"><title>{`Worst case ${money(sp.x)}: ${pc(sp.p)} chance`}</title></rect>
         </g>}
-        {m.xMin < 0 && m.xMax > 0 && <g>
+        {!evLabel && m.xMin < 0 && m.xMax > 0 && <g>
           <line x1={z} x2={z} y1={top - 2} y2={top + plotH} stroke="#e5e7eb" strokeDasharray="3 3" />
           <text x={z - 4} y={16} fill="#e5e7eb" fontSize="11" textAnchor="end">{small && z < 100 ? "$0" : "Break-even $0"}</text>
         </g>}
         {evIn && <g>
           <line x1={x(ev)} x2={x(ev)} y1={top - 2} y2={top + plotH} stroke="#f59e0b" strokeWidth="1.5" />
-          <text x={x(ev) + 4} y={16} fill="#fbbf24" fontSize="11" fontWeight="700">Expected {money(ev)}</text>
+          <text x={x(ev) + 4} y={16} fill="#fbbf24" fontSize="11" fontWeight="700">{evLabel || `Expected ${money(ev)}`}</text>
         </g>}
         <line x1={padL} x2={W - padR} y1={top + plotH} y2={top + plotH} stroke="#374151" />
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}

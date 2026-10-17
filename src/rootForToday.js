@@ -25,7 +25,7 @@ export function touchedLocks(model, events) {
 // small seeded RNG so the chart is stable between renders
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
-export function todayDistribution(model, events, { samples = 20000, bins = 32, seed = 7 } = {}) {
+export function todayDistribution(model, events, { samples = 20000, bins = 32, seed = 7, offset = 0 } = {}) {
   const evs = [...events].filter((e) => model && model.probs && model.probs[e]);
   if (!evs.length) return null;
   const pos = touchedLocks(model, new Set(evs));
@@ -36,7 +36,7 @@ export function todayDistribution(model, events, { samples = 20000, bins = 32, s
   for (let i = 0; i < samples; i++) {
     const probs = { ...model.probs };
     evs.forEach((e, j) => { const u = r() * cum[j][cum[j].length - 1][1]; const hit = cum[j].find(([, c]) => u <= c) || cum[j][cum[j].length - 1]; probs[e] = { [hit[0]]: 1 }; });
-    vals[i] = base + expectedProfit(pos, probs);
+    vals[i] = base + expectedProfit(pos, probs) - offset; // offset = EV now → change in EV from today's games
   }
   let lo = Infinity, hi = -Infinity, sum = 0, below = 0;
   for (const v of vals) { if (v < lo) lo = v; if (v > hi) hi = v; sum += v; if (v < 0) below++; }
