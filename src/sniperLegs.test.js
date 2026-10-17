@@ -21,7 +21,7 @@ assert.equal(rows[0].subtitle, "Washington Commanders @ San Francisco 49ers");
 assert.equal(rows[0].when, "Oct 19, 8:15 PM ET");
 assert.equal(rows[0].fairAmerican, -338); // logged inverse-bet fair, never recomputed
 assert.equal(rows[0].winPct.toFixed(1), "77.2");
-assert.deepEqual(rows[0].bestOpp, { american: 338, venue: "novig", side: "Washington Commanders ML", afterKalshiFee: false });
+assert.deepEqual(rows[0].bestOpp, { american: 338, venue: "novig", side: "Washington Commanders ML", afterKalshiFee: false, afterPolyFee: false });
 assert.deepEqual(rows[0].depth, { top: 344, at500: 338 });
 assert.deepEqual(rows[0].others.map((o) => o.venue).sort(), ["kalshi", "polymarket"]);
 assert.equal(rows[0].now.venue, "novig");
@@ -70,3 +70,22 @@ assert.equal(same[0].now, null);
 const ml = buildLegRows(["KXNFLGAME-26OCT18HOUJAC-JAC:yes"], [{ p: 0.56, best: "kalshi", fairAmerican: -127, sources: [{ via: "yes_opp", used: true, venue: "kalshi", reason: "ok", costAmerican: 127 }] }], null);
 assert.deepEqual(ml[0].kalshiLive, { ticker: "KXNFLGAME-26OCT18HOUJAC-HOU", side: "yes" });
 console.log("sniperLegs ok");
+
+// Multi-venue TD (worker td-multivenue): Polymarket best opp, fee note, top-of-book $ as logged at the RFQ.
+{
+  const tdLeg = { p: 0.57, id: "KXNFLTD-26OCT18BALCLE-BALDHENRY22-1", best: "polymarket", kind: "td", side: "yes", fairAmerican: -133,
+    sources: [
+      { via: "td_opposite", used: true, venue: "kalshi", reason: "ok", costAmerican: 124, topAmerican: 122, topUsd: 900, ageMs: 800 },
+      { via: "td_opposite", used: true, venue: "polymarket", reason: "ok", costAmerican: 133, topAmerican: 130, topUsd: 640.5, ageMs: 1200 },
+      { via: "td_opposite", used: false, venue: "novig", reason: "depth", costAmerican: null, topAmerican: 128, topUsd: 40, ageMs: 900 },
+    ] };
+  const [r] = buildLegRows(["KXNFLTD-26OCT18BALCLE-BALDHENRY22-1:yes"], [tdLeg], null);
+  assert.equal(r.bestOpp.venue, "polymarket");
+  assert.equal(r.bestOpp.afterPolyFee, true);
+  assert.equal(r.bestOpp.afterKalshiFee, false);
+  assert.deepEqual(r.depth, { top: 130, at500: 133 });
+  assert.deepEqual(r.others, [{ venue: "kalshi", american: 124 }]); // Novig failed depth: not shown
+  assert.deepEqual(r.now, { venue: "polymarket", american: 130, size: 640.5, atRfq: true, afterPolyFee: true });
+  assert.equal(r.kalshiLive, undefined);
+}
+console.log("sniperLegs multi-venue TD ok");
