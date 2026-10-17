@@ -22,6 +22,7 @@ function supabase() {
 const usd = (n) => (n == null || !Number.isFinite(Number(n)) ? "—" : (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const sUsd = (n) => (n > 0 ? "+" : "") + usd(n);
 const pct = (p, d = 1) => (p == null ? "—" : p > 0 && p * 100 < 0.5 * 10 ** -d ? `<${(10 ** -d).toFixed(d)}%` : (p * 100).toFixed(d) + "%");
+const worstChance = (p) => { const w = chanceWords(p); return w.startsWith("about 1 in ") ? `about a ${w.slice(6)} chance` : w.startsWith("less than") ? `${w} chance` : w; };
 const oneIn = (p) => (p > 0 ? `about 1 in ${Math.round(1 / p).toLocaleString("en-US")}` : "");
 const am = (a) => (a == null ? "—" : (a > 0 ? "+" : "") + Math.round(a));
 const amFromP = (p) => (!(p > 0 && p < 1) ? null : p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p);
@@ -63,8 +64,7 @@ function Simple({ d, today }) {
         <div className="panel bad">
           <h5>Root against these</h5>
           <div className="sub" style={{ margin: "-2px 0 2px" }}>How each loss decreases your expected profit</div>
-          {d.worst && today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst day today leaves your EV at <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
-          {d.worst && !today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst case scenario: <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (about a 1 in ${Math.round(1 / d.worst.p).toLocaleString("en-US")} chance)` : ""}</div>}
+          {d.worst && !today && <div className="sub" style={{ margin: "0 0 6px", fontSize: 11.5 }}>Worst case scenario: <span className={d.worst.pnl < 0 ? "neg" : "pos"}>{sMoney(d.worst.pnl)}</span>{d.worst.p > 0 ? ` (${worstChance(d.worst.p)})` : ""}</div>}
           {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
