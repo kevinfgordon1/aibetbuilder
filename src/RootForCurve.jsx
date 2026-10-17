@@ -5,7 +5,7 @@ import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney } from "./rootForS
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const pc = (p) => (p * 100 < 1 && p > 0 ? "<1%" : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`);
 
-export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends", evLabel = null }) {
+export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends", evLabel = null, todayLocks = false }) {
   const wrap = useRef(null); const [W, setW] = useState(720); const [hx, setHx] = useState(null);
   useEffect(() => {
     const el = wrap.current; if (!el || typeof ResizeObserver === "undefined") return undefined;
@@ -46,7 +46,7 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
         </defs>
         <rect x={x(p10)} y={top} width={Math.max(0, x(p90) - x(p10))} height={plotH} fill="#93c5fd" opacity=".07" />
         <g opacity=".9"><path d={`M${x(p10)},${top + plotH + 58}v6H${x(p90)}v-6`} fill="none" stroke="#93c5fd" />
-          <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 77} fill="#93c5fd" fontSize="11" textAnchor="middle">Most {unit}: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
+          <text x={(x(p10) + x(p90)) / 2} y={top + plotH + 77} fill="#93c5fd" fontSize="11" textAnchor="middle">{todayLocks ? "Most likely" : `Most ${unit}`}: {shortMoney(p10)} to {shortMoney(p90)}</text></g>
         <path d={area} fill="url(#rf-h)" />
         <path d={line} fill="none" stroke="#e5e7eb" strokeOpacity=".55" strokeWidth="1.5" />
         {sp && <g>
@@ -80,8 +80,8 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
         </div>
       )}
       <div className="note">
-        Smoothed from {hist.samples ? hist.samples.toLocaleString("en-US") : "simulated"} simulated {unit}. {unit === "weekends" ? "Deeper red = bigger loss, deeper green = bigger win" : "Deeper green = higher expected profit"}; hover or tap for the chance of finishing below any amount.
-        {m.beyond > 0 ? ` Chart stops at ${shortMoney(m.xMax)}: ${pc(m.beyond)} of ${unit} go higher (rare big ${unit === "weekends" ? "wins" : "days"}${best && best.pnl ? `, up to ${money(best.pnl)}` : ""}).` : ""}
+        Smoothed from {hist.samples ? hist.samples.toLocaleString("en-US") : "simulated"} {todayLocks ? "simulated outcomes of today\u2019s locks" : `simulated ${unit}`}. {todayLocks || unit === "weekends" ? "Deeper red = bigger loss, deeper green = bigger win" : "Deeper green = higher expected profit"}; hover or tap for the chance of finishing below any amount.
+        {m.beyond > 0 ? ` Chart stops at ${shortMoney(m.xMax)}: ${pc(m.beyond)} of ${todayLocks ? "outcomes" : unit} go higher (rare big ${todayLocks || unit === "weekends" ? "wins" : "days"}${best && best.pnl ? `, up to ${money(best.pnl)}` : ""}).` : ""}
       </div>
     </div>
   );
