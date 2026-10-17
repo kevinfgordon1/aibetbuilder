@@ -123,10 +123,8 @@ function todayView(base, nowMs) {
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
 
 export default function RootFor({ user, initialData = null }) {
-  // Hidden by default; an explicit Show is remembered per browser. New key = everyone starts hidden again.
-  const OPEN_KEY = "rootfor.open.v2";
-  const [open, setOpenState] = useState(() => { try { return typeof localStorage !== "undefined" && localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; } });
-  const setOpen = (f) => setOpenState((o) => { const n = typeof f === "function" ? f(o) : f; try { localStorage.setItem(OPEN_KEY, n ? "1" : "0"); } catch { /* private mode */ } return n; });
+  // Always starts hidden on every page load (no remembered open state).
+  const [open, setOpen] = useState(false);
   const [view, setViewState] = useState(readView);
   const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ } };
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
