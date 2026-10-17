@@ -396,6 +396,42 @@ async function fetchEspnFootball(sport, nowMs = Date.now()) {
   return out;
 }
 
+// Kalshi sometimes files one game's series under different dates, e.g. Oct 17
+// 2026: KXNCAAFGAME-26OCT16UKOKLA (moneyline, wrong day) but
+// KXNCAAFSPREAD-26OCT17UKOKLA / KXNCAAFTOTAL-26OCT17UKOKLA. Grouping by the
+// full key split them, so the moneyline game had no spreads/totals and the
+// spread/total group (no moneyline pair) was dropped. For date-only keys,
+// fold a group with no moneyline into the moneyline group with the same teams
+// whose date is within one day. Only one candidate is accepted (no guessing).
+const DATE_ONLY_KEY = /^(\d{2}[A-Z]{3}\d{2})(?!\d)([A-Z0-9]+)$/;
+function mergeOffByOneDateKeys(byKey) {
+  const sideByTeams = new Map();
+  for (const g of byKey.values()) {
+    const m = DATE_ONLY_KEY.exec(g.key);
+    if (!m || g.raw.side.length < 2) continue;
+    if (!sideByTeams.has(m[2])) sideByTeams.set(m[2], []);
+    sideByTeams.get(m[2]).push(g);
+  }
+  for (const [key, g] of [...byKey.entries()]) {
+    const m = DATE_ONLY_KEY.exec(key);
+    if (!m || g.raw.side.length >= 2) continue;
+    const day = dateOnlyUtcMs(key);
+    const hosts = (sideByTeams.get(m[2]) || []).filter((h) => {
+      const hd = dateOnlyUtcMs(h.key);
+      return Number.isFinite(day) && Number.isFinite(hd) && Math.abs(hd - day) <= 26 * 3600 * 1000;
+    });
+    if (hosts.length !== 1) continue;
+    const host = hosts[0];
+    for (const t of ['spread', 'total', 'prop']) {
+      if (!(g.raw[t] && g.raw[t].length)) continue;
+      // Never mix two ladders: only fill a series the host is missing.
+      if (host.raw[t] && host.raw[t].length) continue;
+      host.raw[t] = g.raw[t].slice();
+    }
+    byKey.delete(key);
+  }
+}
+
 function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
   const occOffset = Number(opts && opts.occurrenceStartOffsetMs) || 0;
   const byKey = new Map(); // key -> { key, title, date, occurrenceMs, raw:{side,spread,total} }
@@ -414,6 +450,7 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: type === 'prop' ? (m.yes_sub_title || '') : marketLabel(m), ...(type === 'prop' ? { status: m.status || '' } : {}) }); });
     }
   }
+  mergeOffByOneDateKeys(byKey);
   const games = [];
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
@@ -531,5 +568,5 @@ module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports._helpers = {
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
-  groupSportGames, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
+  groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };
