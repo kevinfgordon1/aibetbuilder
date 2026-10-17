@@ -87,8 +87,8 @@ function Simple({ d, today }) {
   );
 }
 
-function Curve({ d }) {
-  return <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} />;
+function Curve({ d, today }) {
+  return <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} todayLocks={!!today} />;
 }
 
 function TouchedLocks({ today }) {
@@ -294,7 +294,7 @@ export default function RootFor({ user, initialData = null }) {
           <div className="note">±2 SD is correlation-aware (same team across locks moves together). With long shots the real range is lopsided: most slates land near the downside, and a rare all-hit slate makes the upside tail much longer than the ±2 SD band suggests.</div>
           {(() => { const x = scope === "today" && tv && !whatIf ? tv.d : d; return <EvBars hist={x.hist} ev={x.ev} pProfit={x.pProfit} worst={x.worst} />; })()}
           {scope === "today" && tv && !whatIf
-            ? <><h4>How likely each result is (today\u2019s locks)</h4><TouchedLocks today={tv.info} /><Curve d={tv.d} today={tv.info} /></>
+            ? <><h4>How likely each result is (today’s locks)</h4><TouchedLocks today={tv.info} /><Curve d={tv.d} today={tv.info} /></>
             : <><h4>How likely each result is{whatIf ? " (what-if)" : ""}</h4><Curve d={d} /></>}
           <h4>Per game, by time slot <span className="sub" style={{ textTransform: "none" }}>· tap a team: won → lost → clear</span></h4>
           <table>
