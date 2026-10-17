@@ -7,7 +7,7 @@ import EvBars from "./RootForEvBars";
 import SweatMeter from "./RootForSweat";
 import { expectedProfit } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
-import { todayEvents, touchedLocks } from "./rootForToday";
+import { todayEvents, touchedLocks, sheetDayLabel } from "./rootForToday";
 import { summarySentence, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
@@ -61,6 +61,7 @@ function Simple({ d, today }) {
       {range && <div className="lead2">{today ? "Today's locks most likely land" : "Most weekends land"} between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
       <SweatMeter d={d} />
+      <NeedleHistory rows={d.sweat && d.sweat.history} />
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
@@ -94,10 +95,30 @@ function Curve({ d, today }) {
   return <PnlCurve hist={d.hist} worst={d.worst} ev={d.ev} pProfit={d.pProfit} best={d.best} todayLocks={!!today} />;
 }
 
+// Owner only (rows come back only for the owner): each day's needle result and a running total.
+function NeedleHistory({ rows }) {
+  if (!rows || !rows.length) return null;
+  const asc = [...rows].sort((a, b) => String(a.day).localeCompare(String(b.day)));
+  let run = 0; const withRun = asc.map((r) => { run += Number(r.result) || 0; return { ...r, run }; }).reverse();
+  const dl = (d) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${d}T12:00:00Z`));
+  return (
+    <details className="touched needle-hist" open>
+      <summary>How your games ran vs fair odds <span className="sub">· total <b className={run >= 0 ? "pos" : "neg"}>{sMoney(run)}</b> over {asc.length} day{asc.length === 1 ? "" : "s"}</span></summary>
+      <table style={{ width: "100%", fontSize: 12.5, marginTop: 6 }}>
+        <thead><tr><th style={{ textAlign: "left" }}>Day</th><th className="num">Games</th><th className="num">Locks</th><th className="num">vs kickoff odds</th><th className="num">Running total</th></tr></thead>
+        <tbody>{withRun.map((r) => (
+          <tr key={r.day}><td>{dl(r.day)}{r.final ? "" : <span className="sub"> · in progress</span>}</td><td className="num">{r.games}</td><td className="num">{r.locks}</td>
+            <td className={`num ${Number(r.result) >= 0 ? "pos" : "neg"}`}>{sMoney(Number(r.result) || 0)}</td><td className={`num ${r.run >= 0 ? "pos" : "neg"}`}>{sMoney(r.run)}</td></tr>))}</tbody>
+      </table>
+      <div className="sub" style={{ fontSize: 11.5, marginTop: 4 }}>Each day: how much the day's games moved the expected profit of the locks they touch, from kickoff numbers (inverse bet method) to final. A day closes when its games are decided, or at 11 AM ET the next morning.</div>
+    </details>
+  );
+}
+
 function TouchedLocks({ today }) {
   return (
     <details className="touched">
-      <summary>Today: {today.games} game{today.games === 1 ? "" : "s"} touch <b>{today.locks.length}</b> of {today.total} open locks</summary>
+      <summary>Today ({today.dayLabel}): {today.games} game{today.games === 1 ? "" : "s"} touch <b>{today.locks.length}</b> of {today.total} open locks</summary>
       <ul>{today.locks.map((l) => <li key={l.id}>{l.label || "Lock"} <span className="sub">· {l.legs.length} legs, {l.todayLegs} today</span></li>)}</ul>
     </details>
   );
@@ -128,7 +149,7 @@ function todayView(base, nowMs) {
   const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   return {
     d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
-    info: { games: evs.size, locks, total: (base.model.positions || []).length },
+    info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: sheetDayLabel(nowMs) + (sheetDayLabel(nowMs) !== sheetDayLabel(nowMs + 11 * 3600 * 1000) ? ", until 11 AM ET" : "") },
   };
 }
 
