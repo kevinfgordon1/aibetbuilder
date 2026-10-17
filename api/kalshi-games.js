@@ -291,16 +291,109 @@ function expandSpreads(raw, teamNamesOrSides) {
   return legs.sort((a, b) => (a.sort || 0) - (b.sort || 0));
 }
 
-async function fetchSeriesEvents(seriesTicker) {
+// A page that fails (Kalshi 429 / timeout under the parallel fan-out) used to
+// read as "no events", so a whole sport could vanish from the slate and that
+// empty slate was then CDN-cached. Each page now retries, and a series whose
+// first page never loads is reported as failed (`events.failed = true`).
+async function fetchJsonRetry(url, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    const data = await fetchJson(url);
+    if (data) return data;
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1) + Math.floor(Math.random() * 300)));
+  }
+  return null;
+}
+async function fetchSeriesEvents(seriesTicker, fetchFn = fetchJsonRetry) {
   const events = []; let cursor = '';
   for (let page = 0; page < 6; page++) {
     const url = `${KALSHI_BASE}/events?series_ticker=${encodeURIComponent(seriesTicker)}` +
       `&status=open&with_nested_markets=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-    const data = await fetchJson(url);
-    (data && data.events || []).forEach(e => events.push(e));
-    cursor = (data && data.cursor) || ''; if (!cursor) break;
+    const data = await fetchFn(url);
+    if (!data) { events.failed = true; break; }
+    (data.events || []).forEach(e => events.push(e));
+    cursor = data.cursor || ''; if (!cursor) break;
   }
   return events;
+}
+
+// ── ESPN kickoff rescue for mis-dated football tickers ──
+// Kalshi sometimes keys a Saturday college game under Friday's date with the
+// 03:00Z placeholder time (Oct 17 2026: KXNCAAFGAME-26OCT16MIZZMISS for
+// Missouri at Ole Miss, 3:30 PM ET Sat, plus ~35 more). The key-day cutoff then
+// drops a game that has not started. A dropped date-only football game is
+// kept ONLY when ESPN lists the same two teams as not yet started ("pre") with
+// a kickoff in the future, within 3 days after the key date; its startTime
+// becomes ESPN's kickoff. Anything ESPN shows as started/final, or cannot
+// match, stays dropped — never quote a started game.
+const ESPN_FOOTBALL = {
+  nfl: ['https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'],
+  ncaaf: [
+    'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=80&limit=500',
+    'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=81&limit=500',
+  ],
+};
+function normTeam(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/['\u2019]/g, '').replace(/\bst\.?(?=\s|$)/g, 'state').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function espnGamesFrom(body) {
+  const out = [];
+  for (const e of (body && body.events) || []) {
+    const c = e && e.competitions && e.competitions[0];
+    const state = e && e.status && e.status.type && e.status.type.state;
+    const ms = Date.parse((c && c.date) || e.date);
+    if (!c || !Number.isFinite(ms)) continue;
+    const teams = (c.competitors || []).map((x) => {
+      const t = x.team || {};
+      return {
+        abbr: String(t.abbreviation || '').toUpperCase(),
+        names: [t.location, t.shortDisplayName, t.displayName, t.name && t.location ? `${t.location} ${t.name}` : '', t.nickname]
+          .map(normTeam).filter(Boolean),
+      };
+    });
+    if (teams.length === 2) out.push({ id: e.id, kickoffMs: ms, state: state || '', teams });
+  }
+  return out;
+}
+function sideMatchesEspnTeam(side, team) {
+  const n = normTeam(side.label);
+  const code = teamCodeOf(tickerTail(side.ticker));
+  return (n && team.names.includes(n)) || (!!code && code === team.abbr);
+}
+function espnKickoffFor(rawSides, espnGames, keyDayMs, nowMs) {
+  const sides = (rawSides || []).filter((s) => !/-TIE$/i.test(s.ticker));
+  if (sides.length !== 2) return null;
+  const hits = (espnGames || []).filter((eg) => {
+    if (eg.state !== 'pre' || !(eg.kickoffMs > nowMs)) return false;
+    if (!(eg.kickoffMs >= keyDayMs && eg.kickoffMs < keyDayMs + 4 * 24 * 3600 * 1000)) return false;
+    const [a, b] = sides;
+    return (sideMatchesEspnTeam(a, eg.teams[0]) && sideMatchesEspnTeam(b, eg.teams[1]))
+      || (sideMatchesEspnTeam(a, eg.teams[1]) && sideMatchesEspnTeam(b, eg.teams[0]));
+  });
+  if (hits.length !== 1) return null; // ambiguous or none: stay dropped
+  return hits[0].kickoffMs;
+}
+function etYmd(ms) {
+  const p = {}; new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date(ms)).forEach((x) => (p[x.type] = x.value));
+  return `${p.year}${p.month}${p.day}`;
+}
+// ESPN's scoreboard rejects date ranges for college football, so ask per ET
+// day (today + next 2). Cached per warm instance for 60s.
+const espnCache = new Map();
+async function fetchEspnFootball(sport, nowMs = Date.now()) {
+  const urls = ESPN_FOOTBALL[sport];
+  if (!urls) return [];
+  const hit = espnCache.get(sport);
+  if (hit && nowMs - hit.at < 60000) return hit.games;
+  const days = [0, 1, 2].map((d) => etYmd(nowMs + d * 24 * 3600 * 1000));
+  const reqs = [];
+  urls.forEach((u) => days.forEach((d) => reqs.push(`${u}${u.includes('?') ? '&' : '?'}dates=${d}`)));
+  const bodies = await Promise.all(reqs.map((u) => fetchJsonRetry(u, 2)));
+  const seen = new Set(); const out = [];
+  bodies.forEach((b) => espnGamesFrom(b).forEach((g) => { if (!seen.has(g.id)) { seen.add(g.id); out.push(g); } }));
+  if (out.length) espnCache.set(sport, { at: nowMs, games: out });
+  return out;
 }
 
 function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
@@ -328,17 +421,31 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
     // (date-only key) stays through the end of that ET calendar day. NHL (date-only
     // key, but occurrence - 3h is the real puck drop) drops at puck drop.
     const exactOcc = occOffset > 0 && Number.isFinite(g.occurrenceMs) && !Number.isFinite(firstPitchUtcMs(g.key));
-    if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) continue;
+    let rescuedMs = NaN;
+    if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) {
+      const keyDay = dateOnlyUtcMs(g.key);
+      const k = opts && opts.espnGames && Number.isFinite(keyDay) && !exactOcc
+        ? espnKickoffFor(g.raw.side, opts.espnGames, keyDay, nowMs) : null;
+      if (!k) continue;
+      rescuedMs = k;
+    }
     const timed = firstPitchUtcMs(g.key);
     // Soccer occurrence_datetime is settlement (hours after full time), so use the ET day.
-    const startMs = Number.isFinite(timed) ? timed
+    const startMs = Number.isFinite(rescuedMs) ? rescuedMs
+      : Number.isFinite(timed) ? timed
       : (opts && opts.dateOnlyStart) ? dateOnlyUtcMs(g.key)
       : exactOcc ? g.occurrenceMs - occOffset
         : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
     if (!Number.isFinite(startMs)) continue;
     games.push({
-      key: g.key, title: g.title, date: g.date, startTime: new Date(startMs).toISOString(),
+      key: g.key, title: g.title,
+      // Rescued game: Kalshi's "(Oct 16)" is the wrong day; show ESPN's kickoff day.
+      date: Number.isFinite(rescuedMs) && g.date
+        ? String(g.date).replace(/\([A-Z][a-z]{2} \d{1,2}\)\s*$/, `(${new Date(rescuedMs).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' })})`)
+        : g.date,
+      startTime: new Date(startMs).toISOString(),
       ...(exactOcc ? { startExact: true } : {}),
+      ...(Number.isFinite(rescuedMs) ? { kickoffSource: 'espn' } : {}),
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: /-TIE$/i.test(m.ticker) ? 'Draw' : m.label })),
         spread: expandSpreads(g.raw.spread || [], g.raw.side),
@@ -352,10 +459,15 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
 
 async function fetchSportGames(seriesByType, opts) {
   const eventsByType = {};
+  const espnP = opts && opts.espnSport ? fetchEspnFootball(opts.espnSport).catch(() => []) : null;
   await Promise.all(Object.entries(seriesByType || {}).map(async ([type, series]) => {
     eventsByType[type] = await fetchSeriesEvents(series);
   }));
-  return groupSportGames(eventsByType, Date.now(), opts);
+  const espnGames = espnP ? await espnP : null;
+  const games = groupSportGames(eventsByType, Date.now(), { ...opts, ...(espnGames ? { espnGames } : {}) });
+  // Moneyline series never loaded: the sport's slate is unknown, not empty.
+  games.failed = !!(eventsByType.side && eventsByType.side.failed);
+  return games;
 }
 
 // Combo eligibility: Kalshi only builds combos from events listed in the combo
@@ -389,6 +501,7 @@ async function handler(req, res) {
       return;
     }
     const sports = {};
+    const failed = [];
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
       const propSpec = PROP_SERIES[sport];
@@ -396,11 +509,16 @@ async function handler(req, res) {
         occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0,
         ...(SOCCER_SPORTS.has(sport) ? { dateOnlyStart: true } : {}),
         ...(propSpec ? { propKind: propSpec.kind } : {}),
+        ...(ESPN_FOOTBALL[sport] ? { espnSport: sport } : {}),
       });
+      if (games.failed) failed.push(sport);
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
-    res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports });
+    // Never let the CDN keep a slate with a sport missing for 3 minutes.
+    if (failed.length) res.setHeader('Cache-Control', 'no-store');
+    res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, ...(failed.length ? { failed } : {}) });
   } catch (e) {
+    res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: null, sports: {}, error: String(e && e.message || e) });
   }
 }
@@ -413,5 +531,5 @@ module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports._helpers = {
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
-  groupSportGames, markComboEligible, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
+  groupSportGames, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };

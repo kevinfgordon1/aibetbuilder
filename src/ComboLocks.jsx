@@ -607,6 +607,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const [prefillWarning, setPrefillWarning] = useState(null);
   const createFormRef = useRef(null);
   const appliedNonceRef = useRef(null);
+  const prefillRetryRef = useRef(null);
+  const prefillGamesRef = useRef(null);
   const settleInflight = useRef(false);
   const [liveSettlement, setLiveSettlement] = useState({}); // parlay_id -> { result, status, ticker } from Kalshi this session
 
@@ -615,11 +617,20 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   // View-as: the owner already passed the gate server-side; the viewed tester may not be hardcoded.
   const owner = readOnly || canSeeComboLocks(user);
 
+  const gamesRetryRef = useRef(0);
   const loadGames = useCallback(async () => {
     try { const r = await fetch("/api/kalshi-games", { headers: { accept: "application/json" } });
       if (!r.ok) throw 0; const d = await r.json();
       const n = COMBO_SPORT_ORDER.reduce((acc, s) => acc + ((d.sports && d.sports[s]) || []).length, 0);
-      if (d && d.sports && n) { setGames(d); setSrcLive(true); setGamesReady(true); return; }
+      if (d && d.sports && n) {
+        setGames(d); setSrcLive(true); setGamesReady(true);
+        // A sport's Kalshi feed failed this load (its slate is unknown, not empty): try again shortly.
+        if (Array.isArray(d.failed) && d.failed.length && gamesRetryRef.current < 3) {
+          gamesRetryRef.current += 1;
+          setTimeout(() => { loadGames(); }, 4000 * gamesRetryRef.current);
+        } else if (!(Array.isArray(d.failed) && d.failed.length)) gamesRetryRef.current = 0;
+        return;
+      }
     } catch (_) {}
     setGames(SAMPLE); setSrcLive(false); setGamesReady(true);
   }, []);
@@ -972,9 +983,28 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   useEffect(() => {
     if (!prefill || !gamesReady) return;
     const nonce = prefill.nonce ?? prefill;
-    if (appliedNonceRef.current === nonce) return;
+    if (appliedNonceRef.current === nonce) {
+      // Same prefill, newer slate (e.g. a sport's feed failed on the first load):
+      // fill only legs that are still empty and refresh the warning. Never
+      // overwrite a leg already picked.
+      if (prefillRetryRef.current !== nonce || prefillGamesRef.current === games) return;
+      prefillGamesRef.current = games;
+      const again = mapPromoLegsToKalshi(prefill.legs, games.sports);
+      setLegRows((cur) => cur.map((row, i) => {
+        const r = again.rows[i];
+        if (row.gameKey || row.marketVal || !r || !r.gameKey || !r.marketVal) return row;
+        const g = gameIdx[r.gameKey];
+        return { ...row, gameKey: g ? comboGameId(g) : r.gameKey, marketVal: r.marketVal };
+      }));
+      setPrefillWarning(again.unmatched.length ? again.unmatched : null);
+      if (!again.unmatched.length) prefillRetryRef.current = null;
+      return;
+    }
     appliedNonceRef.current = nonce;
+    prefillGamesRef.current = games;
     const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports);
+    // Some legs missed: pull a fresh slate once and retry those legs on it.
+    if (unmatched.length) { prefillRetryRef.current = nonce; loadGames(); } else prefillRetryRef.current = null;
     const n = Math.max(rows.length, prefill.legs?.length || 0, 1);
     const next = [];
     for (let i = 0; i < n; i++) {
@@ -986,7 +1016,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     setForm(formFromPrefill(prefill));
     setPrefillWarning(unmatched.length ? unmatched : null);
     requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [prefill, gamesReady, games, gameIdx]);
+  }, [prefill, gamesReady, games, gameIdx, loadGames]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
   useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
   useEffect(() => {
