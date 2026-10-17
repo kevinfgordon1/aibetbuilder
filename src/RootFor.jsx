@@ -138,17 +138,29 @@ function finalTodayView(base, nowMs) {
   const pre = Number(dr.pregame_ev), live = Number(dr.live_ev); if (!Number.isFinite(pre) || !Number.isFinite(live)) return null;
   return { row: dr, pre, live, result: Number.isFinite(Number(dr.result)) ? Number(dr.result) : live - pre, dayLabel: sheetDayLabel(nowMs) };
 }
-export function FinalToday({ f, d }) {
+export function FinalToday({ f, d, past = false }) {
   const sweat = { ...(d.sweat || {}), started: true, baseline: f.pre, now: f.live, since: null, source: {}, error: undefined };
   return (
     <div>
-      <div className="lead">All of today’s games are final ({f.dayLabel}).</div>
-      <div className="lead2">{f.row.games} game{f.row.games === 1 ? "" : "s"} across {f.row.locks} lock{f.row.locks === 1 ? "" : "s"}: <b className={f.result >= 0 ? "pos" : "neg"}>{sMoney(f.result)}</b> vs kickoff odds. Today switches to the next day at 11 AM ET.</div>
+      <div className="lead">{past ? `${f.dayLabel}${f.row.final ? "" : " (still in progress)"}` : `All of today’s games are final (${f.dayLabel}).`}</div>
+      <div className="lead2">{f.row.games} game{f.row.games === 1 ? "" : "s"} across {f.row.locks} lock{f.row.locks === 1 ? "" : "s"}: <b className={f.result >= 0 ? "pos" : "neg"}>{sMoney(f.result)}</b> vs kickoff odds.{past ? " That day's games only, from kickoff numbers to final." : " Today switches to the next day at 11 AM ET."}</div>
       <SweatMeter d={{ ...d, sweat }} legs={false} />
       <NeedleHistory rows={d.sweat && d.sweat.history} />
     </div>
   );
 }
+
+// Meter per day filter. Server sends All (12h rule) at top level and Today & beyond under sweat.tu.
+function beyondSweat(s) { return s && s.tu ? { ...s, now: s.tu.now, baseline: s.tu.baseline, finished: s.tu.finished, keptIds: s.tu.keptIds } : s; }
+function allSweat(s) { return s && s.allKeptIds ? { ...s, keptIds: s.allKeptIds } : s; }
+// A past sheet day in retrospect, from its saved needle row.
+function pastDayView(base, day) {
+  const r = ((base && base.sweat && base.sweat.history) || []).find((h) => String(h.day).slice(0, 10) === day); if (!r) return null;
+  const pre = Number(r.pregame_ev), live = Number(r.live_ev); if (!Number.isFinite(pre) || !Number.isFinite(live)) return null;
+  const label = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" }).format(new Date(`${day}T12:00:00Z`));
+  return { row: r, pre, live, result: Number.isFinite(Number(r.result)) ? Number(r.result) : live - pre, dayLabel: label };
+}
+const pastDays = (base, nowMs) => ((base && base.sweat && base.sweat.history) || []).map((h) => String(h.day).slice(0, 10)).filter((x) => x < sheetDay(nowMs)).sort().reverse();
 
 function todaySweat(base, pos, evNow) {
   const s = base && base.sweat; if (!s) return s;
@@ -176,7 +188,7 @@ function todayView(base, nowMs) {
   const labels = base.lockLabels || {};
   const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   // finished games of this sheet day (no longer priced, kept at last live chances) feed the leg chart's "Finished games" line
-  const s0 = base.sweat || {}; const fin = new Set((s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === sheetDay(nowMs)));
+  const s0 = base.sweat || {}; const fin = new Set(((s0.tu && s0.tu.finished) || s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === sheetDay(nowMs)));
   const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
   return {
     d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
@@ -249,8 +261,14 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   });
   const tv = useMemo(() => todayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now()), [base]);
   const fv = useMemo(() => (tv ? null : finalTodayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now())), [base, tv]);
-  const [scopeSel, setScope] = useState("all"); // always defaults to All
-  const scope = scopeSel;
+  // Day filter: "beyond" = Today & beyond (default: every open lock; today's games incl. finished ones count live vs kickoff),
+  // "today" = today's games only, "all" = every lock + finished games for 12h after they end, "day:YYYY-MM-DD" = a past day.
+  const [scopeSel, setScope] = useState("beyond");
+  const hasAll = !!(base && base.sweat && !base.sweat.error && base.sweat.allKeptIds);
+  const nowMsS = base ? Date.parse(base.asOf) || Date.now() : Date.now();
+  const past = pastDays(base && !base.empty ? base : null, nowMsS);
+  const scope = scopeSel === "all" && !hasAll ? "beyond" : scopeSel.startsWith("day:") && !past.includes(scopeSel.slice(4)) ? "beyond" : scopeSel;
+  const pv = scope.startsWith("day:") ? pastDayView(base, scope.slice(4)) : null;
   const showFinal = scope === "today" && !tv && !!fv;
   if (!can || (base && base.empty)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
@@ -311,11 +329,17 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
       <h3>
         What to root for
         <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 10 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-          {(tv || fv) && <span className="seg" role="group" aria-label="Games">
-            <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")}>Today</button>
-            <button type="button" className={scope === "all" ? "on" : ""} aria-pressed={scope === "all"} onClick={() => setScope("all")}>All</button>
-          </span>}
+        <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          <span className="seg" role="group" aria-label="Games">
+            <button type="button" className={scope === "beyond" ? "on" : ""} aria-pressed={scope === "beyond"} onClick={() => setScope("beyond")} title="Every open lock. Today's games, finished ones included, count live vs kickoff">Today &amp; beyond</button>
+            {(tv || fv) && <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")} title="Only today's games">Today</button>}
+            {hasAll && <button type="button" className={scope === "all" ? "on" : ""} aria-pressed={scope === "all"} onClick={() => setScope("all")} title="Every lock; finished games count for 12 hours after they end">All</button>}
+          </span>
+          {past.length > 0 && <select aria-label="Past day" value={pv ? scope.slice(4) : ""} onChange={(e) => setScope(e.target.value ? `day:${e.target.value}` : "beyond")}
+            style={{ background: pv ? "#f59e0b" : "#1f2937", color: pv ? "#111827" : "#e5e7eb", border: "1px solid #374151", borderRadius: 8, padding: "3px 6px", fontSize: 12 }}>
+            <option value="">Past day…</option>
+            {past.map((x) => <option key={x} value={x}>{new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${x}T12:00:00Z`))}</option>)}
+          </select>}
           <span className="seg" role="group" aria-label="View">
             <button type="button" className={view === "simple" ? "on" : ""} aria-pressed={view === "simple"} onClick={() => setView("simple")}>Simple</button>
             <button type="button" className={view === "detailed" ? "on" : ""} aria-pressed={view === "detailed"} onClick={() => setView("detailed")}>Detailed</button>
@@ -325,9 +349,11 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
-      {open && d && showFinal && <FinalToday f={fv} d={base} />}
-      {open && d && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} /> : <Simple d={base} />)}
-      {open && d && !showFinal && view === "detailed" && (
+      {open && d && pv && <FinalToday f={pv} d={base} past />}
+      {open && d && !pv && showFinal && <FinalToday f={fv} d={base} />}
+      {open && d && !pv && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
+        : <Simple d={{ ...base, sweat: scope === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
+      {open && d && !pv && !showFinal && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">

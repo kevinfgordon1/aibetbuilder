@@ -207,23 +207,39 @@ async function sweatBaseline(client, out, now, userId) {
       else { frozen[ev] = probs[ev]; source[ev] = 'snapshot'; const c = new Date(now).toISOString(); if (!since || c < since) since = c; }
     }
     const history = userId ? await needleDay(client, userId, out, now, frozen) : null;
-    // All: finished games stay counted at their last live chances for 12h after they end (see finishedCarry).
-    let carry = null;
+    // Finished games (no longer priced) stay counted at their last live chances (see finishedCarry):
+    //  - All: for 12h after they end.
+    //  - Today & beyond (the sheet's default): today's sheet-day games, finished ones included, plus every upcoming leg.
+    const TD = await import('../src/rootForToday.js'); const sd = TD.sheetDay(now);
+    let carry = null; let carryTU = null;
     if (userId) {
       try {
         const lo = new Date(now - 2 * 86400000).toISOString().slice(0, 10);
         const { data: days } = await client.from('root_for_needle_days').select('day,snap,updated_at').eq('user_id', userId).gte('day', lo).order('day', { ascending: true });
         const kickoffs = {}; for (const x of rows) if (x && x.kickoff) kickoffs[x.event] = x.kickoff;
-        carry = S.finishedCarry({ positions: (out.model && out.model.positions) || [], probs, frozen, kickoffs, now,
-          days: (days || []).map((x) => ({ day: x.day, snap: x.snap, updatedAt: x.updated_at })) });
-      } catch (_) { carry = null; }
+        const args = { positions: (out.model && out.model.positions) || [], probs, frozen, kickoffs, now, days: (days || []).map((x) => ({ day: x.day, snap: x.snap, updatedAt: x.updated_at })) };
+        carry = S.finishedCarry(args);
+        carryTU = S.finishedCarry({ ...args, keep: (ev, endedMs, day) => day === sd });
+      } catch (_) { carry = null; carryTU = null; }
     }
     // Today's needle reads the saved day row (all of the day's games and locks, settled ones included), so it matches history.
-    const TD = await import('../src/rootForToday.js'); const sd = TD.sheetDay(now);
     const dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
-    const kept = carry && carry.kept.length ? carry : null;
-    return { started: r.started.length > 0 || !!kept, gamesStarted: r.started.length + (kept ? kept.finished.length : 0), baseline: r.baseline + (kept ? kept.baseAdd : 0), now: Number(out.ev) + (kept ? kept.nowAdd : 0), slateKey: key, frozen: kept ? { ...kept.frozen, ...frozen } : frozen, source,
-      ...(kept ? { kept: kept.kept, last: kept.last, finished: kept.finished, finishedDay: kept.finishedDay, endedAt: kept.endedAt } : {}), since, backfilled: backfill.length, ...(history ? { history } : {}), ...(dayRow ? { dayRow } : {}) };
+    const ids = (c) => (c ? c.kept.map((p) => String(p.id)) : []);
+    const union = carry || carryTU ? (() => {
+      const byId = {}; for (const c of [carry, carryTU]) if (c) for (const p of c.kept) byId[String(p.id)] = p;
+      return { kept: Object.values(byId), last: { ...(carryTU || {}).last, ...(carry || {}).last }, frozen: { ...(carryTU || {}).frozen, ...(carry || {}).frozen },
+        finishedDay: { ...(carryTU || {}).finishedDay, ...(carry || {}).finishedDay }, endedAt: { ...(carryTU || {}).endedAt, ...(carry || {}).endedAt } };
+    })() : null;
+    const add = (c, f) => (c ? c[f] : 0);
+    const anyKept = !!(union && union.kept.length);
+    return { started: r.started.length > 0 || anyKept, gamesStarted: r.started.length + (carry ? carry.finished.length : 0),
+      // All (12h rule)
+      baseline: r.baseline + add(carry, 'baseAdd'), now: Number(out.ev) + add(carry, 'nowAdd'),
+      // Today & beyond
+      tu: { baseline: r.baseline + add(carryTU, 'baseAdd'), now: Number(out.ev) + add(carryTU, 'nowAdd'), keptIds: ids(carryTU), finished: carryTU ? carryTU.finished : [] },
+      allKeptIds: ids(carry), slateKey: key, frozen: union ? { ...union.frozen, ...frozen } : frozen, source,
+      ...(anyKept ? { kept: union.kept, last: union.last, finished: carry ? carry.finished : [], finishedDay: union.finishedDay, endedAt: union.endedAt } : {}),
+      since, backfilled: backfill.length, ...(history ? { history } : {}), ...(dayRow ? { dayRow } : {}) };
   } catch (e) {
     return { started: null, baseline: null, now: Number(out.ev), error: 'Pregame number unavailable' };
   }

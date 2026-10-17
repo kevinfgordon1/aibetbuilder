@@ -88,7 +88,9 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
 // min(row updated_at, kickoff + 4h). Later legs of a kept lock use current prices when priced (else their own
 // last live chances); a kept lock with a leg priced nowhere, or a leg in a forgotten game, is left out.
 export const FINISHED_KEEP_MS = 12 * 3600 * 1000;
-export function finishedCarry({ positions = [], probs = {}, frozen = {}, days = [], kickoffs = {}, now = Date.now(), keepMs = FINISHED_KEEP_MS }) {
+// keep(ev, endedMs, day) picks which finished games count; default = ended within keepMs (All).
+// Today & beyond passes keep = finished game belongs to today's sheet day (any age).
+export function finishedCarry({ positions = [], probs = {}, frozen = {}, days = [], kickoffs = {}, now = Date.now(), keepMs = FINISHED_KEEP_MS, keep = null }) {
   const live = new Set(positions.map((p) => String(p.id)));
   const seen = {}; const last = {}; const fz = {}; const ended = {}; const dayOf = {};
   for (const r of days) {
@@ -103,7 +105,7 @@ export function finishedCarry({ positions = [], probs = {}, frozen = {}, days = 
     }
     Object.assign(fz, sn.frozen || {});
   }
-  const finished = Object.keys(last).filter((ev) => !probs[ev] && fz[ev] && now - ended[ev] <= keepMs);
+  const finished = Object.keys(last).filter((ev) => !probs[ev] && fz[ev] && (keep ? keep(ev, ended[ev], dayOf[ev]) : now - ended[ev] <= keepMs));
   const lastP = Object.fromEntries(finished.map((ev) => [ev, last[ev]]));
   const frozenFinished = Object.fromEntries(finished.map((ev) => [ev, fz[ev]]));
   const nowP = { ...lastP, ...probs };
