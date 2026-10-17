@@ -52,20 +52,20 @@ function Simple({ d, nightmare }) {
       <SweatMeter d={d} />
       <div className="pair">
         <div className="panel good">
-          <h5>Root for these 5 <span className="sub">· adds this to your expected profit if they win</span></h5>
+          <h5>Root for these 5 <span className="sub">· EV now {sMoney(d.ev)} · new EV if they win (change)</span></h5>
           {(() => { const top = topByGain(d); const mx = Math.max(...top.map((t) => t.gain), 1); return top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{am(t.american)}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf pos" style={{ width: `${(t.gain / mx) * 100}%` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>{sMoney(t.gain)}</span></div>
+              <div className="bt"><div className="bf pos" style={{ width: `calc((100% - 170px) * ${(t.gain / mx).toFixed(4)})` }} /><span className="bv pos" title={`Adds ${sMoney(t.gain)} to your expected profit if they win`}>EV {sMoney(t.ifHit)} ({sMoney(t.gain)})</span></div>
             </div>)); })()}
         </div>
         <div className="panel bad">
           <h5>Your nightmare: <span className="neg">{sMoney(d.worst && d.worst.pnl)}</span> {worstAm != null && <span className="sub">· odds {fmtAmerican(worstAm)} ({chanceWords(d.worst.p)})</span>}</h5>
-          <div className="sub" style={{ margin: "-2px 0 6px" }}>Results that hurt most · cuts this from your expected profit if it happens</div>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>Results that hurt most · EV now {sMoney(d.ev)} · new EV if it happens (change)</div>
           {(() => { const bad = topByDrop(d); const mx = Math.max(...bad.map((k) => -k.drop), 1); return bad.map((k) => (
             <div className="bar" key={k.event + k.outcome}>
               <div className="bl"><b>{k.label}</b> <span className="sub">{am(k.american)}{k.start ? ` · ${tStart(k.start)}` : ""}</span></div>
-              <div className="bt"><div className="bf negb" style={{ width: `${(-k.drop / mx) * 100}%` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>{sMoney(k.drop)}</span></div>
+              <div className="bt"><div className="bf negb" style={{ width: `calc((100% - 170px) * ${(-k.drop / mx).toFixed(4)})` }} /><span className="bv neg" title={`Cuts ${sMoney(k.drop)} from your expected profit if this happens`}>EV {sMoney(k.ifHit)} ({sMoney(k.drop)})</span></div>
             </div>)); })()}
         </div>
       </div>
@@ -165,7 +165,7 @@ export default function RootFor({ user, initialData = null }) {
         .rootfor .panel{border-radius:10px;padding:12px 14px;background:#111827;border:1px solid #1f2937}.rootfor .panel.good{border-color:#065f46}.rootfor .panel.bad{border-color:#7f1d1d}
         .rootfor .panel h5{margin:0 0 8px;font-size:15px}
         .rootfor .bar{margin:8px 0}.rootfor .bl{font-size:13px;margin-bottom:3px}
-        .rootfor .bt{display:flex;align-items:center;gap:8px}.rootfor .bf{height:14px;border-radius:4px;min-width:4px;flex:0 0 auto;max-width:calc(100% - 80px)}
+        .rootfor .bt{display:flex;align-items:center;gap:8px}.rootfor .bf{height:14px;border-radius:4px;min-width:4px;flex:0 0 auto}
         .rootfor .bf.pos{background:#34d399}.rootfor .bf.negb{background:#f87171}.rootfor .bv{font-weight:700;font-size:13px;white-space:nowrap}
         @media (max-width:700px){.rootfor .pair{grid-template-columns:1fr}}
         @media (max-width:600px){.rootfor .hide-sm{display:none}}
