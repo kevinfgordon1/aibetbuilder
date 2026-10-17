@@ -170,7 +170,7 @@ async function needleDay(client, userId, out, now, frozen) {
         await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'all_decided' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
       }
     }
-    const { data: hist } = await T('root_for_needle_days').select('day,result,games,locks,final').eq('user_id', userId).order('day', { ascending: false }).limit(30);
+    const { data: hist } = await T('root_for_needle_days').select('day,result,pregame_ev,live_ev,games,locks,final').eq('user_id', userId).order('day', { ascending: false }).limit(30);
     return hist || [];
   } catch (_) { return null; }
 }
@@ -207,7 +207,10 @@ async function sweatBaseline(client, out, now, userId) {
       else { frozen[ev] = probs[ev]; source[ev] = 'snapshot'; const c = new Date(now).toISOString(); if (!since || c < since) since = c; }
     }
     const history = userId ? await needleDay(client, userId, out, now, frozen) : null;
-    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key, frozen, source, since, backfilled: backfill.length, ...(history ? { history } : {}) };
+    // Today's needle reads the saved day row (all of the day's games and locks, settled ones included), so it matches history.
+    const TD = await import('../src/rootForToday.js'); const sd = TD.sheetDay(now);
+    const dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
+    return { started: r.started.length > 0, gamesStarted: r.started.length, baseline: r.baseline, now: Number(out.ev), slateKey: key, frozen, source, since, backfilled: backfill.length, ...(history ? { history } : {}), ...(dayRow ? { dayRow } : {}) };
   } catch (e) {
     return { started: null, baseline: null, now: Number(out.ev), error: 'Pregame number unavailable' };
   }

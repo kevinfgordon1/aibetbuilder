@@ -129,7 +129,13 @@ function TouchedLocks({ today }) {
 // Root for / against: E[P | result] − E[P] of those locks, restricted to today's games' outcomes.
 // Needle for today's locks only: same frozen kickoff probabilities, restricted to locks touching today's games.
 function todaySweat(base, pos, evNow) {
-  const s = base && base.sweat; if (!s || !s.frozen || !base.model) return s;
+  const s = base && base.sweat; if (!s) return s;
+  // Owner: the saved day row covers every game/lock of the sheet day (settled ones too) — same number as the history row.
+  const dr = s.dayRow;
+  if (dr && Number.isFinite(Number(dr.pregame_ev)) && Number.isFinite(Number(dr.live_ev))) {
+    return { ...s, started: true, baseline: Number(dr.pregame_ev), now: Number(dr.live_ev), dayResult: Number(dr.result) };
+  }
+  if (!s.frozen || !base.model) return s;
   const evs = new Set(pos.flatMap((p) => p.legs.map((l) => l.event)));
   const frozen = Object.fromEntries(Object.entries(s.frozen).filter(([ev]) => evs.has(ev)));
   const source = Object.fromEntries(Object.entries(s.source || {}).filter(([ev]) => evs.has(ev)));
