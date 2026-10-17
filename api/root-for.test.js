@@ -75,5 +75,26 @@ function call(token, query = {}, headers = {}) {
   assert.equal((await call('tok-a', { check: '1', view_as: CHRIS })).code, 403);
   // owner can't view a non-Combo-Locks id
   assert.equal((await call('tok-owner', { check: '1' }, { 'x-view-as': '00000000-0000-4000-8000-000000000000' })).code, 404);
+  // kickoff matching: Kalshi placeholder times are replaced by the real start or dropped
+  const { matchKey, isPlaceholderStart, loadMarkets } = handler._helpers;
+  assert.equal(matchKey('Northwestern', 'Michigan St.'), matchKey('Northwestern', 'Michigan State'));
+  assert.ok(isPlaceholderStart('2026-10-17T03:00:00Z')); assert.ok(!isPlaceholderStart('2026-10-17T19:30:00Z'));
+  const boards = {
+    kalshi: [{ ticker: 'KXNCAAFGAME-26OCT16MIZZMISS-MISS', away: 'Missouri', home: 'Ole Miss', start: '2026-10-17T03:00:00Z' },
+      { ticker: 'KXNCAAFGAME-26OCT16NWMSU-NW', away: 'Northwestern', home: 'Michigan St.', start: '2026-10-17T03:00:00Z' },
+      { ticker: 'KXNCAAFGAME-26OCT16XXYY-XX', away: 'Nowhere', home: 'Elsewhere', start: '2026-10-17T03:00:00Z' }],
+    polymarket: [{ away: 'Missouri', home: 'Ole Miss', start: '2026-10-17T19:30:00Z' }],
+    novig: [{ away: 'Northwestern', home: 'Michigan State', start: '2026-10-17T16:00:00.000Z' }],
+  };
+  const fakeFetch = async (u) => {
+    const m = /board\?venue=(\w+)&league=NCAAF/.exec(u);
+    const body = /\/health/.test(u) ? { status: {} } : m ? { quotes: boards[m[1]] } : /orderbooks/.test(u) ? { orderbooks: [] } : /NFL/.test(u) ? { quotes: [] } : { markets: [{ expected_expiration_time: '2026-10-17T03:00:00Z' }] };
+    return { ok: true, json: async () => body };
+  };
+  const M = { tickersNeeded: () => ['KXNCAAFGAME-26OCT16MIZZMISS-MISS', 'KXNCAAFGAME-26OCT16NWMSU-NW', 'KXNCAAFGAME-26OCT16XXYY-XX'], kalshiAsks: () => ({}), relayIndex: () => ({}) };
+  const mk = await loadMarkets(M, [], { ODDS_RELAY_URL: 'http://relay' }, fakeFetch, () => 0);
+  assert.equal(mk.starts['KXNCAAFGAME-26OCT16MIZZMISS'], '2026-10-17T19:30:00.000Z');
+  assert.equal(mk.starts['KXNCAAFGAME-26OCT16NWMSU'], '2026-10-17T16:00:00.000Z');
+  assert.equal(mk.starts['KXNCAAFGAME-26OCT16XXYY'], null);
   console.log('root-for api scoping tests ok');
 })().catch((e) => { console.error(e); process.exit(1); });
