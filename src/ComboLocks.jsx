@@ -450,7 +450,7 @@ const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 const HISTORY_BUFFER_HOURS = 6;
 
 // Owner-only "View as": Kevin picks a tester and sees their page read-only.
-export default function ComboLocks({ user, prefill = null, focusLockId = null }) {
+export default function ComboLocks({ user, prefill = null, focusLockId = null, onViewAsChange = null }) {
   const isOwner = canSeeOwnerTools(user);
   const [viewUsers, setViewUsers] = useState([]);
   const [viewId, setViewId] = useState("");
@@ -477,6 +477,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null })
   );
   // Layout effect: installed before the page's own effects fire their first requests.
   useLayoutEffect(() => (viewing ? installViewAsFetch(target.id) : undefined), [viewing, target && target.id]);
+  useEffect(() => { if (onViewAsChange) onViewAsChange(viewing ? target.id : ""); }, [viewing, target && target.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const viewedUser = useMemo(() => (viewing ? { id: target.id, email: target.email } : null), [viewing, target && target.id, target && target.email]);
   const page = (
     <ComboLocksPage

@@ -122,7 +122,8 @@ function todayView(base, nowMs) {
 
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
 
-export default function RootFor({ user, initialData = null }) {
+export default function RootFor({ user, initialData = null, viewAs = "" }) {
+  const vaH = viewAs ? { "x-view-as": viewAs } : {};
   // Always starts hidden on every page load (no remembered open state).
   const [open, setOpen] = useState(false);
   const [view, setViewState] = useState(readView);
@@ -137,7 +138,7 @@ export default function RootFor({ user, initialData = null }) {
       try {
         const c = supabase(); if (!c) return;
         const { data: { session } } = await c.auth.getSession(); if (!session) return;
-        const r = await fetch("/api/root-for?check=1", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
+        const r = await fetch("/api/root-for?check=1", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
         const j = await r.json().catch(() => null);
         if (!dead && r.ok && j && j.ok) setLockCount(j.locks || 0);
       } catch { /* stay hidden */ }
@@ -152,7 +153,7 @@ export default function RootFor({ user, initialData = null }) {
     try {
       const { data: { session } } = await c.auth.getSession();
       if (!session) throw new Error("Sign in required");
-      const r = await fetch("/api/root-for", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
+      const r = await fetch("/api/root-for", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `Request failed (${r.status})`);
       setSt({ loading: false, error: null, data: j });

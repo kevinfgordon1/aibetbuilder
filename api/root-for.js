@@ -4,6 +4,7 @@
 // Reads combo_parlays / combo_fills / combo_single_orders (read-only), live venue books
 // (Kalshi public orderbooks, odds-relay Polymarket US + Novig), and runs the joint engine.
 const lib = require('./combo-probe-lib');
+const viewAsLib = require('./combo-view-as-lib');
 
 let mods = null;
 async function loadMods() {
@@ -128,15 +129,26 @@ async function handler(req, res) {
   try {
     const client = deps.createClient(url, key, clientOpts);
     const q = (req.query) || {};
-    if (q.check === '1' || q.check === 1) return json(res, 200, { ok: true, locks: await countLocks(client, auth.user.id) });
+    // Owner "View as" (x-view-as header / view_as param): same server-side gate as the rest of Combo Locks.
+    // Anyone else is always scoped to their own token user id; any user_id param is ignored.
+    let uid = auth.user.id;
+    const target = viewAsLib.readViewAs(req);
+    if (target) {
+      const live = await client.from('combo_live_users').select('user_id');
+      if (live.error) throw live.error;
+      const gate = viewAsLib.authorizeViewAs(auth.user, target, (live.data || []).map((r) => r.user_id));
+      if (!gate.ok) return json(res, gate.status, { ok: false, error: gate.error });
+      uid = gate.targetId;
+    }
+    if (q.check === '1' || q.check === 1) return json(res, 200, { ok: true, locks: await countLocks(client, uid) });
     const M = await loadMods();
-    const { parlays, fills, singles } = await loadLocks(client, auth.user.id);
+    const { parlays, fills, singles } = await loadLocks(client, uid);
     if (!parlays.length) return json(res, 200, { ok: true, empty: true, locksTotal: 0 });
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
     const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
     // pregame-probs table is not per-user: only the owner's sheet may write it (and it's off unless enabled)
-    const sweat = SWEAT_ENABLED() && auth.owner ? await sweatBaseline(client, out, now) : undefined;
+    const sweat = SWEAT_ENABLED() && auth.owner && uid === auth.user.id ? await sweatBaseline(client, out, now) : undefined;
     const lockLabels = Object.fromEntries(parlays.map((p) => [p.id, p.label || '']));
     return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, lockLabels, ...(sweat ? { sweat } : {}) });
   } catch (e) {

@@ -1652,6 +1652,7 @@ export default function App() {
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [comboPrefill, setComboPrefill] = useState(null);
   const [focusLockId, setFocusLockId] = useState(null);
+  const [comboViewAs, setComboViewAs] = useState(""); // owner View as target on Combo Locks (What to root for follows it)
   const [focusCardId, setFocusCardId] = useState(null);
   const [routeNotice, setRouteNotice] = useState(null);
   const focusedCardApplied = useRef(null);
@@ -3016,8 +3017,8 @@ export default function App() {
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
-          {activeTab === "combo" && canSeeComboLocks(user) && <RootFor user={user} />}
-          {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} />}
+          {activeTab === "combo" && canSeeComboLocks(user) && <RootFor key={comboViewAs || "self"} user={user} viewAs={comboViewAs} />}
+          {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} onViewAsChange={setComboViewAs} />}
 
           {activeTab === "missTape" && canSeeOwnerTools(user) && <ComboTape user={user} />}
 
