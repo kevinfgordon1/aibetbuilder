@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { formatAmericanOdds, formatAvailableSizeClause } from "./trueOddsLine.js";
-import { venueLabel } from "./sniperLegs.js";
+import { venueLabel, wantsLegDetail } from "./sniperLegs.js";
 import {
   DEFAULT_EDGE_AMERICAN,
   DEFAULT_SORT,
@@ -156,7 +156,12 @@ async function fetchLegs(rfqId) {
   return p;
 }
 const LEG_TIP = "Fair = 1 minus the implied chance of the best opposing price ($500 of depth, fees included), logged when the request came in. Inverse bet method.";
+const PlainLegs = ({ e }) => <div className="legs">{e.legs.map((l, j) => <div key={j} className={e.legIsTd && e.legIsTd[j] ? "td" : undefined}>{l}</div>)}</div>;
+// Rows under 1% EV (EV/$100 risked < $1.00) keep the simple leg list: no detail fetch, no price lookups.
 function SniperLegs({ e }) {
+  return wantsLegDetail(e) ? <SniperLegDetail e={e} /> : <PlainLegs e={e} />;
+}
+function SniperLegDetail({ e }) {
   const [st, setSt] = useState({ legs: null, error: null });
   useEffect(() => {
     let live = true;

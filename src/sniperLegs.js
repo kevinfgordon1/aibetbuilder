@@ -158,3 +158,7 @@ export function buildLegRows(legsRaw, pmLegs, boards) {
     return row;
   });
 }
+
+/** Kevin (Oct 17): the detailed leg table (and its price lookups) only for rows at 1% EV or better (EV/$100 risked ≥ $1.00). */
+export const DETAIL_MIN_EV_PER_100 = 1;
+export const wantsLegDetail = (e) => Number(e && e.evPer100) >= DETAIL_MIN_EV_PER_100;

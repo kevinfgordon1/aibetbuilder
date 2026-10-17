@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildLegRows, indexBoards, fmtKickoffEt, isPlaceholderStart } from "./sniperLegs.js";
+import { wantsLegDetail, buildLegRows, indexBoards, fmtKickoffEt, isPlaceholderStart } from "./sniperLegs.js";
 
 const src = (venue, cost, top = cost, extra = {}) => ({ used: true, venue, reason: "ok", costAmerican: cost, topAmerican: top, ...extra });
 const pm = [
@@ -41,4 +41,8 @@ assert.equal(bare[0].when, "Oct 18");
 assert.equal(bare[0].fairAmerican, null);
 assert.equal(isPlaceholderStart("2026-10-18T03:00:00Z"), true);
 assert.equal(fmtKickoffEt("2026-10-18T17:00:00Z"), "Oct 18, 1:00 PM ET");
+assert.equal(wantsLegDetail({ evPer100: 1 }), true);
+assert.equal(wantsLegDetail({ evPer100: 3.99 }), true);
+assert.equal(wantsLegDetail({ evPer100: 0.99 }), false);
+assert.equal(wantsLegDetail({ evPer100: null }), false);
 console.log("sniperLegs ok");
