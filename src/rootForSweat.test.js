@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves } from "./rootForSweat.js";
+import { slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves, finishedCarry } from "./rootForSweat.js";
 assert.equal(slateKey(Date.parse("2026-10-16T23:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T02:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T16:00:00Z")), "2026-10-20");
@@ -35,5 +35,35 @@ assert.equal(gaugeFrac(99999, -4000, 2600, 15000), 1);
   assert.ok(Math.abs(r.legs.reduce((a, l) => a + l.move, 0) + r.settled - want) < 1e-9);
   assert.deepEqual(r.legs.map((l) => l.event), ["B", "A"]);
   assert.equal(liveLegMoves(ps, live, {}, {}).legs.length, 0);
+}
+// All view: finished games kept at last live chances for 12h after they end, then forgotten
+{
+  const H = 3600 * 1000; const now = Date.parse("2026-10-18T23:00:00Z");
+  const L1 = { id: "L1", legs: [{ event: "F", allowed: ["f"] }, { event: "G", allowed: ["g"] }], hit: 1000, miss: -100 }; // F finished, G live
+  const L2 = { id: "L2", legs: [{ event: "G", allowed: ["g"] }], hit: 200, miss: -50 }; // still in the live model
+  const L3 = { id: "L3", legs: [{ event: "OLD", allowed: ["o"] }], hit: 300, miss: -60 }; // game ended 13h ago
+  const probs = { G: { g: 0.6, h: 0.4 } }; const frozen = { G: { g: 0.5, h: 0.5 } };
+  const snap = { positions: { L1, L2, L3 }, last: { F: { f: 0.97, x: 0.03 }, OLD: { o: 0.99, p: 0.01 }, G: { g: 0.55, h: 0.45 } },
+    lastAt: { F: new Date(now - 2 * H).toISOString(), OLD: new Date(now - 13 * H).toISOString() }, frozen: { F: { f: 0.4, x: 0.6 }, OLD: { o: 0.5, p: 0.5 }, G: frozen.G } };
+  const r = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap, updatedAt: new Date(now).toISOString() }], now });
+  assert.deepEqual(r.finished, ["F"]);
+  assert.deepEqual(r.kept.map((p) => p.id), ["L1"]); // L2 is live (not double counted), L3's game is forgotten
+  // L1 Now: F at last live 0.97, G at current 0.6; Pregame: F at kickoff 0.4, G at kickoff 0.5
+  assert.ok(Math.abs(r.nowAdd - (0.97 * 0.6 * 1000 + (1 - 0.97 * 0.6) * -100)) < 1e-9);
+  assert.ok(Math.abs(r.baseAdd - (0.4 * 0.5 * 1000 + (1 - 0.4 * 0.5) * -100)) < 1e-9);
+  assert.equal(r.finishedDay.F, "2026-10-18");
+  // 12h later F is forgotten too: L1 leaves both Now and Pregame
+  const r2 = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap, updatedAt: new Date(now).toISOString() }], now: now + 11 * H });
+  assert.equal(r2.kept.length, 0); assert.equal(r2.nowAdd, 0); assert.equal(r2.baseAdd, 0);
+  // older snaps without lastAt: ended = min(row updated_at, kickoff + 4h)
+  const old = { ...snap, lastAt: undefined };
+  const r3 = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap: old, updatedAt: new Date(now).toISOString() }], kickoffs: { F: new Date(now - 20 * H).toISOString() }, now });
+  assert.ok(!r3.finished.includes("F")); assert.ok(r3.finished.includes("OLD")); // F kicked off 20h ago → ended ~16h ago; OLD falls back to updated_at
+  // chart: kept finished game goes to the "Finished games" line and everything still sums to now − pregame
+  const pos = [L2, ...r.kept]; const P = { ...r.last, ...probs }; const Fz = { ...r.frozen, ...frozen };
+  const m = liveLegMoves(pos, P, Fz, {}, new Set(r.finished));
+  assert.deepEqual(m.legs.map((l) => l.event), ["G"]);
+  assert.ok(Math.abs(m.total - (expectedProfit(pos, P) - expectedProfit(pos, { ...P, ...Fz }))) < 1e-9);
+  assert.ok(Math.abs(m.legs[0].move + m.settled - m.total) < 1e-9 && m.settled !== 0);
 }
 console.log("rootForSweat tests ok");

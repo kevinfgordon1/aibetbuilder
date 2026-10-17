@@ -175,8 +175,11 @@ function todayView(base, nowMs) {
   const perEvent = r.perEvent.filter((e) => evs.has(e.event)).map((e) => { const m = meta[e.event] || {}; return { ...e, game: m.game || e.event, rootForName: m.rootForName, american: m.american, start: m.start, slot: m.slot, outcomes: e.outcomes.map(deco) }; });
   const labels = base.lockLabels || {};
   const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
+  // finished games of this sheet day (no longer priced, kept at last live chances) feed the leg chart's "Finished games" line
+  const s0 = base.sweat || {}; const fin = new Set((s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === sheetDay(nowMs)));
+  const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
   return {
-    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), livePos: pos, perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
+    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
     info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: sheetDayLabel(nowMs) + (sheetDayLabel(nowMs) !== sheetDayLabel(nowMs + 11 * 3600 * 1000) ? ", until 11 AM ET" : "") },
   };
 }
