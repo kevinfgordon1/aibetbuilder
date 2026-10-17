@@ -31,7 +31,37 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
   };
   const hc = hx != null ? cdfAt(hist, hx) : null;
   const sp = m.spike; const spX = sp ? x(sp.x) : null;
+  const tw = (str, fs = 11) => String(str).length * fs * 0.58; // rough text width for collision checks
   const p99 = quantileOf(hist, 0.99); const b99 = Number.isFinite(p99) && p99 > m.xMin && p99 <= m.xMax ? x(p99) : null;
+  // Top labels: "Break-even $0" and "Expected $X" never overlap. Default: break-even to the left of its line,
+  // expected to the right of its line. If expected is left of $0 (or they'd touch), flip them; if a label would
+  // run off the edge or still collide, drop expected to a second row with a short leader line.
+  const showBE = !evLabel && m.xMin < 0 && m.xMax > 0;
+  const lab = (() => {
+    const beText = small && z < 100 ? "$0" : "Break-even $0";
+    const evText = evLabel || `Expected ${money(ev)}`;
+    const ex = evIn ? x(ev) : null; const L = padL, R = W - padR;
+    let beX = z - 4, beAnchor = "end", evX = ex != null ? ex + 4 : 0, evAnchor = "start", evY = 16, beY = 16, evLeader = false;
+    const span = (x0, a, t) => (a === "end" ? [x0 - tw(t), x0] : [x0, x0 + tw(t)]);
+    const hit = (a, b) => a[0] < b[1] + 6 && b[0] < a[1] + 6;
+    if (ex != null && showBE && ex < z) { beX = z + 4; beAnchor = "start"; evX = ex - 4; evAnchor = "end"; }
+    if (ex != null) {
+      const e = span(evX, evAnchor, evText);
+      if (e[0] < L) { evX = ex + 4; evAnchor = "start"; }
+      if (e[1] > R) { evX = ex - 4; evAnchor = "end"; }
+      const b = span(beX, beAnchor, beText);
+      if (b[0] < L) { beX = z + 4; beAnchor = "start"; }
+      if (b[1] > R) { beX = z - 4; beAnchor = "end"; }
+      if (showBE && hit(span(evX, evAnchor, evText), span(beX, beAnchor, beText))) { evY = top + 12; evLeader = true; }
+    }
+    return { beText, evText, beX, beY, beAnchor, evX, evY, evAnchor, evLeader };
+  })();
+  // Bottom labels: worst case (left) and 99% best case (right). If they'd collide, lift the best case label into
+  // the plot just above the axis, with its tick line as the leader.
+  const wcText = sp ? `${money(sp.x)} ${worstWord}` : "";
+  const bcText = b99 != null ? `${money(p99)} best case (99%)` : "";
+  const bcX = b99 != null ? Math.min(b99 + 4, W - padR) : 0;
+  const bcLift = !!(sp && b99 != null && spX + Math.max(tw(wcText), tw(`${pc(sp.p)} chance`)) + 8 > bcX - Math.max(tw(bcText), tw("1% chance of doing better")));
   return (
     <div ref={wrap} className="pnlcurve" style={{ width: "100%", maxWidth: 900, position: "relative" }}>
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="How the weekend could go" style={{ display: "block", touchAction: "pan-y" }}>
@@ -53,25 +83,26 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
         {sp && <g>
           <rect x={spX} y={top} width={7} height={plotH} rx={2} fill="#991b1b"><title>{`Worst case ${money(sp.x)}: ${pc(sp.p)} chance`}</title></rect>
         </g>}
-        {!evLabel && m.xMin < 0 && m.xMax > 0 && <g>
+        {showBE && <g>
           <line x1={z} x2={z} y1={top - 2} y2={top + plotH} stroke="#e5e7eb" strokeDasharray="3 3" />
-          <text x={z - 4} y={16} fill="#e5e7eb" fontSize="11" textAnchor="end">{small && z < 100 ? "$0" : "Break-even $0"}</text>
+          <text x={lab.beX} y={lab.beY} fill="#e5e7eb" fontSize="11" textAnchor={lab.beAnchor}>{lab.beText}</text>
         </g>}
         {evIn && <g>
           <line x1={x(ev)} x2={x(ev)} y1={top - 2} y2={top + plotH} stroke="#f59e0b" strokeWidth="1.5" />
-          <text x={x(ev) + 4} y={16} fill="#fbbf24" fontSize="11" fontWeight="700">{evLabel || `Expected ${money(ev)}`}</text>
+          {lab.evLeader && <line x1={x(ev)} x2={lab.evX + (lab.evAnchor === "end" ? 2 : -2)} y1={lab.evY - 4} y2={lab.evY - 4} stroke="#f59e0b" strokeWidth="1" />}
+          <text x={lab.evX} y={lab.evY} fill="#fbbf24" fontSize="11" fontWeight="700" textAnchor={lab.evAnchor}>{lab.evText}</text>
         </g>}
         <line x1={padL} x2={W - padR} y1={top + plotH} y2={top + plotH} stroke="#374151" />
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}
         {sp && <g>
           <line x1={spX + 3.5} x2={spX + 3.5} y1={top + plotH} y2={top + plotH + 24} stroke="#ef4444" strokeWidth="1.5" />
-          <text x={spX} y={top + plotH + 35} fill="#fca5a5" fontSize="11" fontWeight="700">{money(sp.x)} {worstWord}</text>
+          <text x={spX} y={top + plotH + 35} fill="#fca5a5" fontSize="11" fontWeight="700">{wcText}</text>
           <text x={spX} y={top + plotH + 49} fill="#fca5a5" fontSize="11">{pc(sp.p)} chance</text>
         </g>}
         {b99 != null && <g>
-          <line x1={b99} x2={b99} y1={top + plotH} y2={top + plotH + 24} stroke="#10b981" strokeWidth="1.5" />
-          <text x={Math.min(b99 + 4, W - padR)} y={top + plotH + 35} fill="#6ee7b7" fontSize="11" fontWeight="700" textAnchor="end">{money(p99)} best case (99%)</text>
-          <text x={Math.min(b99 + 4, W - padR)} y={top + plotH + 49} fill="#6ee7b7" fontSize="11" textAnchor="end">1% chance of doing better</text>
+          <line x1={b99} x2={b99} y1={bcLift ? top + plotH - 34 : top + plotH} y2={bcLift ? top + plotH : top + plotH + 24} stroke="#10b981" strokeWidth="1.5" />
+          <text x={bcLift ? b99 - 4 : bcX} y={bcLift ? top + plotH - 22 : top + plotH + 35} fill="#6ee7b7" fontSize="11" fontWeight="700" textAnchor="end">{bcText}</text>
+          <text x={bcLift ? b99 - 4 : bcX} y={bcLift ? top + plotH - 8 : top + plotH + 49} fill="#6ee7b7" fontSize="11" textAnchor="end">1% chance of doing better</text>
         </g>}
         <text x={(padL + W - padR) / 2} y={H - 4} fill="#cbd5e1" fontSize="12" textAnchor="middle">{xLabel}</text>
         <text transform={`translate(13,${top + plotH / 2}) rotate(-90)`} fill="#cbd5e1" fontSize="12" textAnchor="middle">More likely →</text>
