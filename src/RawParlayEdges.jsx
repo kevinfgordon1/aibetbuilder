@@ -191,7 +191,7 @@ function SniperLegDetail({ e }) {
               ? <div className="lfair">{formatAmericanOdds(l.fairAmerican)}{l.winPct != null && ` (${l.winPct.toFixed(1)}%)`}</div>
               : <div className="lsub">No fair logged for this leg</div>}
             {l.bestOpp && (
-              <div className="lopp">Best opp: {formatAmericanOdds(l.bestOpp.american)} on {venueLabel(l.bestOpp.venue)}{l.bestOpp.side ? ` · ${l.bestOpp.side}` : ""}{l.bestOpp.afterKalshiFee ? " · after Kalshi fee" : ""}</div>
+              <div className="lopp">Best opp: {formatAmericanOdds(l.bestOpp.american)} on {venueLabel(l.bestOpp.venue)}{formatAvailableSizeClause(l.bestOpp.size)}{l.bestOpp.side ? ` · ${l.bestOpp.side}` : ""}{l.bestOpp.afterKalshiFee ? " · after Kalshi fee" : ""}</div>
             )}
             {(l.depth || (l.others && l.others.length > 0)) && (
               <div className="lmeta">
@@ -200,7 +200,7 @@ function SniperLegDetail({ e }) {
                 {l.others.length > 0 && <span>also {l.others.map((o) => `${venueLabel(o.venue)} ${formatAmericanOdds(o.american)}`).join(", ")}</span>}
               </div>
             )}
-            {l.now && <div className="lmeta">Now on {venueLabel(l.now.venue)}: {formatAmericanOdds(l.now.american)}{formatAvailableSizeClause(l.now.size)}</div>}
+            {l.now && <div className="lmeta">Now on {venueLabel(l.now.venue)}: {formatAmericanOdds(l.now.american)}{formatAvailableSizeClause(l.now.size)}{l.now.afterKalshiFee ? " · after Kalshi fee" : ""}</div>}
           </div>
         </div>
       ))}

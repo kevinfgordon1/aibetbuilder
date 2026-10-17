@@ -36,6 +36,7 @@ function defaultCreateClient(...args) {
 }
 const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now(), fetch: (...a) => fetch(...a) });
 const RELAY_FALLBACK = 'https://odds-relay-production-34da.up.railway.app';
+const KALSHI_API = 'https://api.elections.kalshi.com/trade-api/v2';
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
 const COLS = 'rfq_id,rfq_created_ts,market_ticker,n_legs,legs,contracts,rfq_target_cost,fair_mid_american,fair_promo_best_american,promo_max_age_ms,fair_pm_inverse_american,traded_yes,traded_contracts,outcome,venue,legs_kalshi,poly_tick_size';
@@ -224,7 +225,26 @@ async function legDetail(svc, rfqId, L, E) {
       if (r && r.ok) { const j = await r.json(); boards[v].push(...((j && j.quotes) || [])); }
     } catch (_) { /* kickoff / now are optional */ }
   })));
-  return { ok: true, legs: L.buildLegRows(legsRaw, row.pm_inverse_legs, L.indexBoards(boards)) };
+  const rows = L.buildLegRows(legsRaw, row.pm_inverse_legs, L.indexBoards(boards));
+  // Live Kalshi orderbooks + market status for Kalshi best-opp legs (public endpoints; failures just drop the $ line).
+  const tickers = [...new Set(rows.filter((r) => r.kalshiLive && !L.legStarted(r, deps.now())).map((r) => r.kalshiLive.ticker))];
+  const kalshiBooks = {}, kalshiStatus = {};
+  if (tickers.length) {
+    const getJ = async (u) => {
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      const t = ctl ? setTimeout(() => ctl.abort(), 4000) : null;
+      try { const r = await deps.fetch(u, { headers: { accept: 'application/json' }, signal: ctl ? ctl.signal : undefined }); return r && r.ok ? await r.json() : null; } finally { if (t) clearTimeout(t); }
+    };
+    await Promise.all([
+      getJ(`${KALSHI_API}/markets/orderbooks?${tickers.map((t) => `tickers=${encodeURIComponent(t)}`).join('&')}`).then((j) => {
+        for (const ob of (j && j.orderbooks) || []) { const k = String(ob.ticker || ob.market_ticker || '').toUpperCase(); if (k) kalshiBooks[k] = ob; }
+      }).catch(() => {}),
+      getJ(`${KALSHI_API}/markets?tickers=${tickers.map(encodeURIComponent).join(',')}`).then((j) => {
+        for (const m of (j && j.markets) || []) if (m && m.ticker) kalshiStatus[String(m.ticker).toUpperCase()] = m.status;
+      }).catch(() => {}),
+    ]);
+  }
+  return { ok: true, legs: L.applyLive(rows, { kalshiBooks, kalshiStatus, nowMs: deps.now() }) };
 }
 
 async function handler(req, res) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { wantsLegDetail, buildLegRows, indexBoards, fmtKickoffEt, isPlaceholderStart } from "./sniperLegs.js";
+import { applyLive, kalshiTopAsk, legStarted, wantsLegDetail, buildLegRows, indexBoards, fmtKickoffEt, isPlaceholderStart } from "./sniperLegs.js";
 
 const src = (venue, cost, top = cost, extra = {}) => ({ used: true, venue, reason: "ok", costAmerican: cost, topAmerican: top, ...extra });
 const pm = [
@@ -45,4 +45,28 @@ assert.equal(wantsLegDetail({ evPer100: 1 }), true);
 assert.equal(wantsLegDetail({ evPer100: 3.99 }), true);
 assert.equal(wantsLegDetail({ evPer100: 0.99 }), false);
 assert.equal(wantsLegDetail({ evPer100: null }), false);
+// live liquidity: Kalshi TD NO leg reads the orderbook (buy NO = 1 − best YES bid), $ = price × contracts
+assert.deepEqual(rows[1].kalshiLive, { ticker: "KXNFLTD-26OCT18ARILAR-LARPNACUA12-1", side: "no" });
+const before = Date.parse("2026-10-18T12:00:00Z");
+const ob = { orderbook_fp: { yes_dollars: [["0.4000", "100"], ["0.4500", "2000"]], no_dollars: [["0.5000", "10"]] } };
+assert.deepEqual(kalshiTopAsk(ob, "no"), { px: 0.55, contracts: 2000 });
+assert.deepEqual(kalshiTopAsk(ob, "yes"), { px: 0.5, contracts: 10 });
+const live = applyLive(rows, { kalshiBooks: { "KXNFLTD-26OCT18ARILAR-LARPNACUA12-1": ob }, kalshiStatus: { "KXNFLTD-26OCT18ARILAR-LARPNACUA12-1": "active" }, nowMs: before });
+assert.equal(live[1].now.venue, "kalshi");
+assert.equal(live[1].now.size, 1100);
+assert.equal(live[1].now.afterKalshiFee, true);
+assert.equal(live[1].now.american, -131); // 0.55 + 0.07·0.55·0.45 = 0.5673
+assert.equal("kalshiLive" in live[1], false);
+// closed market or started game: nothing live
+assert.equal(applyLive(rows, { kalshiBooks: { "KXNFLTD-26OCT18ARILAR-LARPNACUA12-1": ob }, kalshiStatus: { "KXNFLTD-26OCT18ARILAR-LARPNACUA12-1": "closed" }, nowMs: before })[1].now, null);
+const after = applyLive(rows, { kalshiBooks: {}, kalshiStatus: {}, nowMs: Date.parse("2026-10-18T21:00:00Z") });
+assert.equal(after[1].now, null);
+assert.equal(legStarted(rows[0], Date.parse("2026-10-21T12:00:00Z")), true);
+// live price equal to the logged best opp: $ moves onto the Best opp line
+const same = applyLive([{ ...rows[0], now: { venue: "novig", american: 338, size: 500 } }], { nowMs: before });
+assert.equal(same[0].bestOpp.size, 500);
+assert.equal(same[0].now, null);
+// ML via yes_opp → YES on the other team's ticker
+const ml = buildLegRows(["KXNFLGAME-26OCT18HOUJAC-JAC:yes"], [{ p: 0.56, best: "kalshi", fairAmerican: -127, sources: [{ via: "yes_opp", used: true, venue: "kalshi", reason: "ok", costAmerican: 127 }] }], null);
+assert.deepEqual(ml[0].kalshiLive, { ticker: "KXNFLGAME-26OCT18HOUJAC-HOU", side: "yes" });
 console.log("sniperLegs ok");
