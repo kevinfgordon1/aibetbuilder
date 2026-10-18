@@ -81,3 +81,23 @@ assert.equal(gaugeFrac(99999, -4000, 2600, 15000), 1);
   assert.deepEqual(tu.kept.map((p) => p.id), ["A"]);
 }
 console.log("rootForSweat tests ok");
+
+// finished games: liveLegMoves lists them in `done`
+{
+  const pos = [{ id: "a", legs: [{ event: "G", allowed: ["H"] }], hit: 100, miss: -10 }];
+  const r = liveLegMoves(pos, { G: { H: 1, J: 0 } }, { G: { H: 0.5, J: 0.5 } }, {}, new Set(["G"]));
+  assert.equal(r.legs.length, 0); assert.equal(r.done.length, 1); assert.equal(Math.round(r.done[0].move), 55);
+}
+// adaptPregame: drop "neither" (rescale), sum buckets into a team, refuse a split it can't make, ignore late rows
+{
+  const { adaptPregame } = await import("./rootForSweat.js");
+  const ko = Date.parse("2026-10-18T17:00:00Z");
+  const rows = [{ event: "E", sig: "A<7|A>=7|B|__neither", probs: { B: 0.275, "A<7": 0.2075, "A>=7": 0.5075, __neither: 0.01 }, captured_at: "2026-10-18T16:59:54Z" },
+    { event: "E", sig: "A<7|A>=7|B", probs: { B: 0.3, "A<7": 0.2, "A>=7": 0.5 }, captured_at: "2026-10-18T17:10:09Z" }];
+  const a = adaptPregame(rows, "E", { "A<7": 0, "A>=7": 0, B: 0 }, ko);
+  assert.ok(Math.abs(a.probs.B - 0.275 / 0.99) < 1e-9); assert.equal(a.sig, "A<7|A>=7|B");
+  const t = adaptPregame(rows, "E", { A: 0, B: 0 }, ko); assert.ok(Math.abs(t.probs.A - 0.715 / 0.99) < 1e-9);
+  assert.equal(adaptPregame([{ event: "E", probs: { A: 0.6, B: 0.4 }, captured_at: "2026-10-18T16:59:00Z" }], "E", { "A<7": 0, "A>=7": 0, B: 0 }, ko), null);
+  assert.equal(adaptPregame([rows[1]], "E", { "A<7": 0, "A>=7": 0, B: 0, __neither: 0 }, ko), null);
+}
+console.log("rootForSweat finished/adapt ok");

@@ -36,7 +36,20 @@ export function timeSlot(iso) {
   return { key: "4-other", label: "Other days" };
 }
 
-export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {} }) {
+// Final result of a finished game from its last live chances (snapshot): the outcome at >= 95%, mapped onto this
+// event's outcome list (a team maps onto a plain team outcome; a spread bucket maps onto its bucket or its team).
+// Ambiguous (team won but the list splits that team into margin buckets) -> null, the game stays unpriced.
+export const FINAL_MIN_P = 0.95;
+export function finalOutcome(last, outs = []) {
+  if (!last) return null;
+  const [w, p] = Object.entries(last).filter(([o]) => o !== NEITHER).sort((x, y) => y[1] - x[1])[0] || [];
+  if (!(p >= FINAL_MIN_P)) return null;
+  if (outs.includes(w)) return w;
+  const team = String(w).split(/[<>]=?/)[0];
+  return team !== w && outs.includes(team) ? team : null;
+}
+
+export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {} }) {
   const positions = []; const skipped = []; let resting = 0;
   for (const p of parlays) {
     const r = lockPositions(p, fills, singles);
@@ -96,24 +109,26 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiB
   for (const pos of resolved) for (const l of pos.legs) if (spreadOf[l.event]) l.outcomes = evOutcomes[l.event];
 
   // ---- 3. raw inverse chances per event (no scaling); residual "neither" keeps sides exclusive
-  const probs = {}; const shown = {}; const unpricedEv = new Set(); const clamps = [];
+  const probs = {}; const shown = {}; const unpricedEv = new Set(); const clamps = []; const finalEv = {};
+  // finished game (no live price): count it at its final result (1 = winner, 0 = rest) instead of dropping its locks
+  const settle = (ev, outs) => { const w = finalOutcome(finals[ev], outs); if (w == null) return false; probs[ev] = Object.fromEntries(outs.map((o) => [o, o === w ? 1 : 0])); finalEv[ev] = w; return true; };
   for (const [ev, outs] of Object.entries(evOutcomes)) {
     if (evKind[ev] === "binary") {
       const held = new Set(); for (const pos of resolved) for (const l of pos.legs) if (l.event === ev) held.add(l.allowed[0]);
       const py = held.has("yes") ? fair(ev, "yes").p : null; const pn = held.has("no") ? fair(ev, "no").p : null;
-      if (py == null && pn == null) { unpricedEv.add(ev); continue; }
-      probs[ev] = py != null && pn != null ? { yes: py, no: pn, [NEITHER]: Math.max(0, 1 - py - pn) } : py != null ? { yes: py, no: 1 - py } : { yes: 1 - pn, no: pn };
+      if (py == null && pn == null) { if (!settle(ev, outs)) unpricedEv.add(ev); continue; }
+      probs[ev] = py != null && pn != null ? (py + pn > 1 ? { yes: py / (py + pn), no: pn / (py + pn), [NEITHER]: 0 } : { yes: py, no: pn, [NEITHER]: 1 - py - pn }) : py != null ? { yes: py, no: 1 - py } : { yes: 1 - pn, no: pn };
       continue;
     }
     const teams = (() => { const sp = spreadOf[ev]; if (!sp) return outs; const r = legEvent({ ticker: `${ev}-${sp.team}` }); return r.outcomes; })();
     const [a, b] = teams; const held = mlHeld[ev] || new Set();
     const ra = fair(`${ev}-${a}`, "yes").p, rb = fair(`${ev}-${b}`, "yes").p;
     let pa, pb, pn = 0;
-    if (held.has(a) && held.has(b) && ra != null && rb != null) { pa = ra; pb = rb; pn = Math.max(0, 1 - ra - rb); }
+    if (held.has(a) && held.has(b) && ra != null && rb != null) { const z = ra + rb; if (z > 1) { pa = ra / z; pb = rb / z; } else { pa = ra; pb = rb; pn = 1 - z; } } // both sides held: crossed/stale books summing past 100% are scaled to 100%
     else if (held.has(b) && !held.has(a) && rb != null) { pb = rb; pa = 1 - rb; }
     else if (ra != null) { pa = ra; pb = 1 - ra; }
     else if (rb != null) { pb = rb; pa = 1 - rb; }
-    else { unpricedEv.add(ev); continue; }
+    else { if (!settle(ev, outs)) unpricedEv.add(ev); continue; }
     shown[`${ev}:${a}`] = pa; shown[`${ev}:${b}`] = pb;
     const sp = spreadOf[ev];
     if (!sp) { probs[ev] = { [a]: pa, [b]: pb, ...(pn > 0 ? { [NEITHER]: pn } : {}) }; continue; }
@@ -121,7 +136,7 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiB
     let big;
     if (sp.sides.has("yes")) { const y = fair(sp.ticker, "yes").p; big = y; }
     if (big == null && sp.sides.has("no")) { const n = fair(sp.ticker, "no").p; if (n != null) big = pS - (n - pO); }
-    if (big == null) { unpricedEv.add(ev); continue; }
+    if (big == null) { if (!settle(ev, outs)) unpricedEv.add(ev); continue; }
     if (big > pS || big < 0) { clamps.push(ev); big = Math.min(pS, Math.max(0, big)); }
     probs[ev] = { [`${S}>=${sp.k}`]: big, [`${S}<${sp.k}`]: pS - big, [O]: pO, ...(pn > 0 ? { [NEITHER]: pn } : {}) };
     shown[`${ev}:${S}>=${sp.k}`] = big;
@@ -158,7 +173,7 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiB
     baseWorst: res.worst,
     legs: Object.entries(legInfo).map(([k, f]) => ({ key: k, p: f.p, american: f.american, best: f.best, oppAmerican: f.oppAmerican })),
     locksPriced: priced.filter((x) => !x.single).length, locksTotal: parlays.length, unpriced, skipped, resting,
-    spreadGames: Object.keys(spreadOf), spreadClamps: clamps, notes,
-    model: { positions: priced.map(({ id, legs, hit, miss }) => ({ id, legs: legs.map(({ event, kind, outcomes, allowed }) => ({ event, kind, outcomes, allowed })), hit, miss })), probs, groups, teamNames, shown },
+    finals: finalEv, spreadGames: Object.keys(spreadOf), spreadClamps: clamps, notes,
+    model: { finals: finalEv, positions: priced.map(({ id, legs, hit, miss }) => ({ id, legs: legs.map(({ event, kind, outcomes, allowed }) => ({ event, kind, outcomes, allowed })), hit, miss })), probs, groups, teamNames, shown },
   };
 }

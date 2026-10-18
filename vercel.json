@@ -30,7 +30,7 @@
     },
     {
       "path": "/api/root-for?cron=needle",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/5 * * * *"
     }
   ],
   "functions": {

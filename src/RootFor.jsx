@@ -80,7 +80,7 @@ function Simple({ d, today }) {
       <div className="pair">
         <div className="panel good">
           <h5>Root for these teams</h5>
-          <div className="sub" style={{ margin: "-2px 0 6px" }}>How each win increases your expected profit ({today ? "EV on today\u2019s locks" : "EV now"} {sMoney(d.ev)})</div>
+          <div className="sub" style={{ margin: "-2px 0 6px" }}>Adds if they win (EV): how much each win raises your expected profit from here ({today ? "EV on today\u2019s locks" : "EV now"} {sMoney(d.ev)})</div>
           {top.map((t) => (
             <div className="bar" key={t.event + t.outcome} title={t.game}>
               <div className="bl"><b>{t.name}</b> <span className="sub">{t.game ? `${matchup(t)} · ` : ""}{t.american != null ? `fair ${am(t.american)}` : ""}{t.start ? ` · ${tStart(t.start)}` : ""}</span></div>

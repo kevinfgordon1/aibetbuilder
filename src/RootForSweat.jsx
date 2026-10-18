@@ -16,13 +16,21 @@ function LiveLegs({ d }) {
   const positions = d.livePos || [...(model.positions || []), ...kept];
   const probs = { ...(s.last || {}), ...(model.probs || {}) };
   const starts = {}; const meta = {}; for (const e of d.perEvent || []) { starts[e.event] = e.start; meta[e.event] = e; }
-  const { legs, settled } = liveLegMoves(positions, probs, s.frozen || {}, starts, new Set(s.finished || []));
+  const finals = model.finals || {};
+  const { legs, done, settled } = liveLegMoves(positions, probs, s.frozen || {}, starts, new Set([...(s.finished || []), ...Object.keys(finals)]));
+  const doneShown = done.filter((l) => Math.abs(l.move) >= 0.5);
+  const result = (ev) => { // "HOU Texans won" / "Over 42.5 hit"
+    const pr = probs[ev] || {}; const w = finals[ev] || Object.entries(pr).filter(([o]) => o !== "__neither").sort((a, b) => b[1] - a[1])[0]?.[0]; if (!w) return ev;
+    const e = meta[ev] || {}; const team = String(w).split(/[<>]=?/)[0];
+    const nm = ((e.outcomes || []).find((o) => o.outcome === w) || {}).name || (model.teamNames || {})[`${ev}:${team}`] || w;
+    return w === "yes" || w === "no" || /^(Not: |Over |Under )/.test(nm) ? `${nm} hit` : `${nm} won`;
+  };
   const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
-  const mx = Math.max(...shown.map((l) => Math.abs(l.move)), 1);
+  const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
   return (
     <div className="livelegs" data-noclick style={{ flex: "1 1 300px", minWidth: 0, borderLeft: "1px solid #1f2937", paddingLeft: 14 }}>
       <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
-      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Live legs moving the needle</div>
+      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Live legs moving the needle <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· change in expected profit since kickoff</span></div>
       {!shown.length ? <div className="sub" style={{ fontSize: 13, padding: "10px 0" }}>No legs are live right now. Once a game you're in kicks off, its push on the needle shows up here.</div>
         : shown.map((l) => { const e = meta[l.event] || {}; const pk = e.rootFor; const p = pk && probs[l.event] ? probs[l.event][pk] : null; const am = american(p); const pos = l.move >= 0;
           return (
@@ -30,10 +38,21 @@ function LiveLegs({ d }) {
               <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{e.rootForName || e.game || l.event}</b> <span className="sub">{e.game && e.rootForName ? `${e.game} · ` : ""}{am != null ? `live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
-                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)}</span>
+                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
               </div>
             </div>); })}
-      {shown.length > 0 && Math.abs(settled) >= 0.5 && <div className="sub" style={{ fontSize: 11.5, marginTop: 4 }}>Finished games: <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> (not shown)</div>}
+      {doneShown.length > 0 && <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Finished games <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· total <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> change in expected profit since kickoff</span></div>
+        {doneShown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
+          return (
+            <div key={l.event} style={{ margin: "6px 0" }}>
+              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}final</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
+                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
+              </div>
+            </div>); })}
+      </div>}
     </div>
   );
 }
