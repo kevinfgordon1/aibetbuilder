@@ -23,7 +23,7 @@ export function UpdatedPill({ asOf, loading }) {
 }
 
 // Preview: in-play legs moving the needle (signed $ share of now − pregame), one shared scale.
-function LiveLegs({ d }) {
+function LiveLegs({ d, part = "live" }) {
   const s = d.sweat || {}; const model = d.model || {};
   const kept = (s.kept || []).filter((p) => !s.keptIds || s.keptIds.includes(String(p.id)));
   const positions = d.livePos || [...(model.positions || []), ...kept];
@@ -40,6 +40,22 @@ function LiveLegs({ d }) {
   };
   const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
+  if (part === "done") return !doneShown.length ? null : (
+    <div className="donelegs" data-noclick style={{ alignSelf: "stretch", width: "100%", borderTop: "1px solid #1f2937", paddingTop: 8, marginTop: 4 }}>
+      {doneShown.length > 0 && <div>
+        <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Finished games <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· total <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> change in expected profit since kickoff</span></div>
+        {doneShown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
+          return (
+            <div key={l.event} style={{ margin: "6px 0" }}>
+              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}final</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
+                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
+              </div>
+            </div>); })}
+      </div>}
+    </div>
+  );
   return (
     <div className="livelegs" data-noclick style={{ flex: "1 1 300px", minWidth: 0, borderLeft: "1px solid #1f2937", paddingLeft: 14 }}>
       <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
@@ -54,18 +70,6 @@ function LiveLegs({ d }) {
                 <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
               </div>
             </div>); })}
-      {doneShown.length > 0 && <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Finished games <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· total <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> change in expected profit since kickoff</span></div>
-        {doneShown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
-          return (
-            <div key={l.event} style={{ margin: "6px 0" }}>
-              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}final</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
-                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
-              </div>
-            </div>); })}
-      </div>}
     </div>
   );
 }
@@ -105,6 +109,7 @@ export default function SweatMeter({ d, legs = true }) {
         <circle cx={cx} cy={cy} r="7" fill="#f9fafb" />
       </svg>
         {d.asOf && <UpdatedPill asOf={d.asOf} loading={pillLoading} />}
+        {legs && started && base != null && <LiveLegs d={d} part="done" />}
       </div>
       <div style={{ flex: "1 1 200px", fontSize: 14, lineHeight: 1.55 }}>
         <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>Live meter</div>
