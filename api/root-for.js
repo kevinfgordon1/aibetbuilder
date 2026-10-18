@@ -68,9 +68,49 @@ async function loadLocks(client, userId) {
 }
 
 /** Normalized "away|home" for matching the same game across venues ("Michigan St." == "Michigan State"). */
+function normTeam(x) { return String(x || '').toLowerCase().replace(/\bst\.?(?=\s|$)/g, 'state').replace(/[^a-z0-9]+/g, ' ').trim(); }
 function matchKey(away, home) {
-  const n = (x) => String(x || '').toLowerCase().replace(/\bst\.?(?=\s|$)/g, 'state').replace(/[^a-z0-9]+/g, ' ').trim();
-  const a = n(away), h = n(home); return a && h ? `${a}|${h}` : '';
+  const a = normTeam(away), h = normTeam(home); return a && h ? `${a}|${h}` : '';
+}
+
+// Canonical NFL teams: abbreviation -> [nickname, ...exact aliases]. Kalshi names NFL teams several ways
+// ("HOU Texans", "Houston", "New York J", "LA Chargers"); Polymarket / Novig use "Houston Texans".
+const NFL_TEAMS = {
+  ARI: ['cardinals', 'arizona', 'ari'], ATL: ['falcons', 'atlanta', 'atl'], BAL: ['ravens', 'baltimore', 'bal'], BUF: ['bills', 'buffalo', 'buf'],
+  CAR: ['panthers', 'carolina', 'car'], CHI: ['bears', 'chicago', 'chi'], CIN: ['bengals', 'cincinnati', 'cin'], CLE: ['browns', 'cleveland', 'cle'],
+  DAL: ['cowboys', 'dallas', 'dal'], DEN: ['broncos', 'denver', 'den'], DET: ['lions', 'detroit', 'det'], GB: ['packers', 'green bay', 'gb'],
+  HOU: ['texans', 'houston', 'hou'], IND: ['colts', 'indianapolis', 'ind'], JAC: ['jaguars', 'jacksonville', 'jac', 'jax'], KC: ['chiefs', 'kansas city', 'kc'],
+  LV: ['raiders', 'las vegas', 'lv'], LAC: ['chargers', 'los angeles c', 'la c', 'lac'], LAR: ['rams', 'los angeles r', 'la r', 'lar'], MIA: ['dolphins', 'miami', 'mia'],
+  MIN: ['vikings', 'minnesota', 'min'], NE: ['patriots', 'new england', 'ne'], NO: ['saints', 'new orleans', 'nola', 'no'], NYG: ['giants', 'new york g', 'ny g', 'nyg'],
+  NYJ: ['jets', 'new york j', 'ny j', 'nyj'], PHI: ['eagles', 'philadelphia', 'phi'], PIT: ['steelers', 'pittsburgh', 'pit'], SF: ['49ers', 'niners', 'san francisco', 'sf'],
+  SEA: ['seahawks', 'seattle', 'sea'], TB: ['buccaneers', 'tampa bay', 'tb'], TEN: ['titans', 'tennessee', 'ten'], WAS: ['commanders', 'washington', 'was', 'wsh'],
+};
+const NFL_NICK = {}; const NFL_ALIAS = {};
+for (const [ab, [nick, ...al]] of Object.entries(NFL_TEAMS)) { NFL_NICK[nick] = ab; NFL_ALIAS[nick] = ab; for (const a of al) NFL_ALIAS[a] = ab; }
+NFL_NICK.niners = 'SF';
+/** NFL team name -> abbreviation: a nickname word anywhere ("HOU Texans"), else the whole name as an exact alias ("New York J"). */
+function nflTeam(x) {
+  const n = normTeam(x); if (!n) return null;
+  const hits = new Set(n.split(' ').map((w) => NFL_NICK[w]).filter(Boolean));
+  if (hits.size === 1) return [...hits][0];
+  return hits.size ? null : NFL_ALIAS[n] || null;
+}
+function nflKey(away, home) { const a = nflTeam(away), h = nflTeam(home); return a && h ? `nfl:${a}|${h}` : ''; }
+// College: explicit name aliases only (normalized name -> canonical normalized name); no nickname-only matching.
+const NCAAF_ALIASES = {};
+function ncaafKey(away, home) { const c = (x) => { const n = normTeam(x); return NCAAF_ALIASES[n] || n; }; const a = c(away), h = c(home); return a && h ? `${a}|${h}` : ''; }
+function boardKey(lg, away, home) { return lg === 'NFL' ? nflKey(away, home) : ncaafKey(away, home); }
+
+/** Kickoff stored on single-game locks (combo_parlays.starts_at, what combo-worker uses), keyed by ticker game id (e.g. 26OCT18HOUJAC). */
+function lockStarts(parlays) {
+  const out = {};
+  for (const p of parlays || []) {
+    const t = Date.parse(p && p.starts_at); if (!Number.isFinite(t)) continue;
+    const games = new Set((p.legs || []).map((l) => String((l && l.ticker) || '').toUpperCase().split('-')[1]).filter(Boolean));
+    if (games.size !== 1) continue; // a multi-game lock's starts_at is its earliest leg, not each game's kickoff
+    const g = [...games][0]; if (!(g in out) || t < Date.parse(out[g])) out[g] = new Date(t).toISOString();
+  }
+  return out;
 }
 /** Kalshi date-only placeholder kickoff: exactly 03:00:00 or 04:00:00 UTC (11 PM / midnight ET). */
 function isPlaceholderStart(t) { return /T0[34]:00:00(\.000)?Z$/.test(String(t || '')); }
@@ -86,33 +126,40 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   }));
   const kalshiAt = now();
   const base = String(env.ODDS_RELAY_URL || env.VITE_ODDS_RELAY_URL || RELAY_FALLBACK).replace(/\/+$/, '');
-  let relay = {}; const relayNote = []; const starts = {};
+  let relay = {}; const relayNote = []; const starts = {}; const lockStart = lockStarts(parlays);
   try {
     const h = await getJ(`${base}/health`);
     const polledAt = now();
     const nv = (h && h.novig) || {};
     const novigLive = /ws:up/.test(String((h.status || {}).novig || '')) && Number(nv.lastWsMsgAt) > 0 && polledAt - Number(nv.lastWsMsgAt) < 15000;
     const boards = { kalshi: [], polymarket: [], novig: [] };
+    const leagueOf = new Map(); // quote -> league it was fetched under (matching rules differ for NFL / college)
     await Promise.all(['NFL', 'NCAAF'].flatMap((lg) => Object.keys(boards).map(async (v) => {
-      try { const j = await getJ(`${base}/board?venue=${v}&league=${lg}`); boards[v].push(...(j.quotes || [])); } catch (e) { relayNote.push(`${v} ${lg}: ${String(e.message).slice(0, 60)}`); }
+      try { const j = await getJ(`${base}/board?venue=${v}&league=${lg}`); const qs = j.quotes || []; for (const q of qs) if (q && typeof q === 'object') leagueOf.set(q, lg); boards[v].push(...qs); } catch (e) { relayNote.push(`${v} ${lg}: ${String(e.message).slice(0, 60)}`); }
     })));
     // Kalshi's board start is often a date-only placeholder (e.g. 03:00Z = 11 PM ET on the ticker date, even for
     // Saturday games). Prefer the real kickoff from Polymarket / Novig for the same matchup; a Kalshi-only placeholder
     // time is treated as unknown (no time shown, not counted as Today).
+    // Football: a Kalshi board start is never used as kickoff (it is often expected_expiration = kickoff + 3h, e.g.
+    // HOU@JAC London 13:30Z shown as 16:30Z). Order: Polymarket / Novig start, then the lock's own starts_at
+    // (single-game locks), else unknown.
     const real = {};
-    for (const q of [...boards.polymarket, ...boards.novig]) { if (!q || !q.start) continue; const k = matchKey(q.away, q.home); if (k && !real[k]) real[k] = new Date(Date.parse(q.start)).toISOString(); }
+    for (const q of [...boards.polymarket, ...boards.novig]) {
+      if (!q || !q.start || !Number.isFinite(Date.parse(q.start))) continue; const iso = new Date(Date.parse(q.start)).toISOString();
+      for (const k of [matchKey(q.away, q.home), boardKey(leagueOf.get(q), q.away, q.home)]) if (k && !real[k]) real[k] = iso;
+    }
     for (const q of boards.kalshi) {
       if (!q || !q.ticker) continue;
       const ev = String(q.ticker).toUpperCase().split('-').slice(0, 2).join('-'); if (ev in starts) continue;
-      const r = real[matchKey(q.away, q.home)];
-      starts[ev] = r || (q.start && !isPlaceholderStart(q.start) ? q.start : null);
+      const k2 = boardKey(leagueOf.get(q), q.away, q.home);
+      starts[ev] = real[matchKey(q.away, q.home)] || (k2 && real[k2]) || lockStart[ev.split('-')[1]] || null;
     }
     relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive, polledAt });
   } catch (e) { relayNote.push(`relay: ${String(e.message).slice(0, 80)}`); }
   // start times for games the relay doesn't carry (e.g. NHL): Kalshi market close/expected times
   const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !(ev in starts));
   await Promise.all(missing.slice(0, 40).map(async (ev) => {
-    try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (t && /FOOTBALL|NFL|NCAAF/i.test(ev) && isPlaceholderStart(t)) { starts[ev] = null; return; } if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
+    try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (/FOOTBALL|NFL|NCAAF/i.test(ev) && lockStart[ev.split('-')[1]]) { starts[ev] = lockStart[ev.split('-')[1]]; return; } if (t && /FOOTBALL|NFL|NCAAF/i.test(ev) && isPlaceholderStart(t)) { starts[ev] = null; return; } if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
   }));
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
@@ -303,4 +350,4 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods, matchKey, isPlaceholderStart };
+module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods, matchKey, isPlaceholderStart, nflTeam, nflKey, lockStarts };
