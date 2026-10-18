@@ -141,3 +141,14 @@ export function adaptPregame(rows = [], ev, dist, kickoffMs) {
   }
   return null;
 }
+
+// Day baseline with per-lock freezes (api lockBaselines): a frozen lock counts its contracts and leg chances as of
+// its first kickoff (+ later adds); any other lock at preP (live pregame, so it moves baseline and Now alike).
+export function lockedPregameEv(positions, preP, lockPre) {
+  let sum = 0;
+  for (const p of positions || []) {
+    const f = lockPre && lockPre[String(p.id)];
+    sum += f ? expectedProfit([f.pos], { ...preP, ...f.probs }) + Number(f.adds || 0) : expectedProfit([p], preP);
+  }
+  return sum;
+}

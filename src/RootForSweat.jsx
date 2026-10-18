@@ -2,7 +2,7 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 // Sheet passes its loading flag down so the pill under the gauge can say "refreshing…".
 export const PillLoading = React.createContext(false);
-import { gaugeFrac, liveLegMoves } from "./rootForSweat";
+import { gaugeFrac, liveLegMoves, lockedPregameEv } from "./rootForSweat";
 import { american } from "./rootForPrices";
 import { quantileOf } from "./rootForSimple";
 import { rootFor } from "./rootForEngine";
@@ -14,7 +14,8 @@ function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) 
 export function pregameRange(d, s) {
   try {
     const model = d.model || {}; const sn = (s.dayRow && s.dayRow.snap) || null; let pos; let preP;
-    if (s.dayResult != null && sn && sn.positions) { // Today: the saved day row (all of the day's locks, settled ones too)
+    const today = s.dayResult != null && !!(sn && sn.positions);
+    if (today) { // Today: the saved day row (all of the day's locks, settled ones too)
       pos = Object.values(sn.positions); preP = { ...(model.probs || {}), ...(sn.last || {}), ...(sn.frozen || {}) };
     } else { // Today & beyond / All: open locks + kept finished ones, as Now
       const kept = (s.kept || []).filter((p) => !s.keptIds || s.keptIds.includes(String(p.id)));
@@ -22,9 +23,15 @@ export function pregameRange(d, s) {
       preP = { ...((sn && sn.last) || {}), ...(s.last || {}), ...(model.probs || {}), ...((sn && sn.frozen) || {}), ...(s.frozen || {}) };
     }
     if (!pos.length) return null;
-    const r = rootFor(pos, preP, { histBins: 40, mcSamples: 20000, rng: seeded(11) });
+    // per-lock freezes (first-kickoff snapshots): contracts as of then; for the joint simulation each game uses the
+    // chances of the earliest-frozen lock holding it (one draw per game), then the range is shifted to the center
+    const lp = (sn && sn.lockPre) || {}; const byT = Object.values(lp).sort((a, b) => String(b.t0).localeCompare(String(a.t0)));
+    const simP = { ...preP }; for (const f of byT) Object.assign(simP, f.probs || {});
+    const simPos = pos.map((p) => { const f = lp[String(p.id)]; return f ? { ...p, hit: f.pos.hit, miss: f.pos.miss } : p; });
+    const center = today ? null : lockedPregameEv(pos, preP, lp);
+    const r = rootFor(simPos, simP, { histBins: 40, mcSamples: 20000, rng: seeded(11) });
     if (!r || !r.hist || !r.hist.bins || !r.hist.bins.length) return null;
-    return { ev: Number(r.ev), q023: quantileOf(r.hist, 0.023), q977: quantileOf(r.hist, 0.977) };
+    return { ev: Number(r.ev), q023: quantileOf(r.hist, 0.023), q977: quantileOf(r.hist, 0.977), center, frozenLocks: Object.keys(lp).length, fallbackLegs: Object.values(lp).reduce((a, f) => a + Number(f.fb || 0), 0) };
   } catch { return null; }
 }
 // Finished binary legs (props/totals/spreads) lose their names when they drop off the board: saved names first,
@@ -118,7 +125,7 @@ export default function SweatMeter({ d, legs = true }) {
   const s0 = d && d.sweat;
   const preR = useMemo(() => (legs && s0 && s0.started ? pregameRange(d, s0) : null), [d && d.asOf, legs, s0 && s0.baseline, s0 && s0.dayResult, s0 && (s0.keptIds || []).length, s0 && (s0.kept || []).length, d && d.model && (d.model.positions || []).length]); // eslint-disable-line react-hooks/exhaustive-deps
   const s = s0; if (!s) return null;
-  const now = Number.isFinite(Number(s.now)) ? Number(s.now) : Number(d.ev); const started = s.started === true; const base = Number.isFinite(s.baseline) ? s.baseline : null;
+  const now = Number.isFinite(Number(s.now)) ? Number(s.now) : Number(d.ev); const started = s.started === true; const base = preR && started && Number.isFinite(preR.center) ? preR.center : Number.isFinite(s.baseline) ? s.baseline : null;
   const center = started && base != null ? base : now;
   // ±2 SD lines + axis: frozen pregame distribution of the day (pregameRange); falls back to the sheet's current
   // distribution (past/final days) when the pregame one can't be built.
