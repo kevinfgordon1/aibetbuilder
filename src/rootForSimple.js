@@ -1,3 +1,4 @@
+import { expectedProfit } from "./rootForSweat.js";
 // Plain-English helpers for the Simple view of "What to root for".
 import { NEITHER } from "./rootForEngine.js";
 
@@ -70,6 +71,19 @@ export function chanceWords(p) {
   return "no chance";
 }
 
+// Vs-kickoff baseline per game: EV with that game at its kickoff (frozen) chances and every other game as it is now
+// (finished games at their final result). ifHit − this = EV already gained from the game's move + what's left if it happens.
+export function kickoffRef(d) {
+  const m = d && d.model; const fz = (d && d.sweat && d.sweat.frozen) || {}; const ev = Number(d && d.ev) || 0;
+  if (!m || !m.positions) return null; const cache = {};
+  return (event) => {
+    if (event in cache) return cache[event];
+    const cur = (m.probs || {})[event]; const k = fz[event];
+    const same = cur && k && Object.keys(cur).sort().join("|") === Object.keys(k).sort().join("|");
+    return (cache[event] = same ? expectedProfit(m.positions, { ...m.probs, [event]: k }) : ev);
+  };
+}
+
 // One-sentence headline.
 // Headline = the meter's "Now" when there is one (open locks + today's finished games / settled locks), else d.ev.
 export function summarySentence(d) {
@@ -90,24 +104,25 @@ export function typicalRange(hist) {
 
 // Rank outcomes by how much a win ADDS to expected profit: E[P | wins] − E[P].
 // ifHit comes from the joint (correlated) engine, so this equals swing × (1 − p) without assuming independence.
-export function topByGain(d, n = 5) {
+// ref(event) = optional baseline per game (vs-kickoff lists: EV with that game at its kickoff chances); default = EV now.
+export function topByGain(d, n = 5, ref = null) {
   if (!d) return [];
   const ev = Number(d.ev) || 0;
   const all = (d.perEvent || []).flatMap((e) => e.outcomes || []);
   const src = all.length ? all : d.top || [];
   return src.filter((o) => o && Number.isFinite(o.ifHit) && o.name)
-    .map((o) => ({ ...o, gain: o.ifHit - ev }))
+    .map((o) => ({ ...o, gain: o.ifHit - (ref ? ref(o.event) : ev) }))
     .filter((o) => o.gain > 0.5)
     .sort((a, b) => b.gain - a.gain).slice(0, n);
 }
 
 // Most damaging results: E[P | result] − E[P] (most negative first), at most one per game, from the joint engine.
-export function topByDrop(d, n = 5) {
+export function topByDrop(d, n = 5, ref = null) {
   if (!d) return [];
   const ev = Number(d.ev) || 0; const seen = new Set();
   return (d.perEvent || []).flatMap((e) => e.outcomes || [])
     .filter((o) => o && Number.isFinite(o.ifHit) && o.name)
-    .map((o) => ({ ...o, drop: o.ifHit - ev, label: /\bby\b/.test(o.name) ? `${o.name.replace(/^(\S+\s+\S+)\s+by/, "$1 win by")}` : `${o.name} win` }))
+    .map((o) => ({ ...o, drop: o.ifHit - (ref ? ref(o.event) : ev), label: /\bby\b/.test(o.name) ? `${o.name.replace(/^(\S+\s+\S+)\s+by/, "$1 win by")}` : `${o.name} win` }))
     .map((o) => ({ ...o, label: o.label.replace(/win by under (\d+)\b/, (m, n) => (+n >= 3 ? `win by 1–${+n - 1}` : m)) }))
     .filter((o) => o.drop < -0.5)
     .sort((a, b) => a.drop - b.drop)
