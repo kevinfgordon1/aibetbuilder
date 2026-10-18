@@ -1,10 +1,53 @@
 // Sweat meter: semicircle gauge, center = pregame expected profit, needle = live expected profit now.
-import React, { useContext, useEffect, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 // Sheet passes its loading flag down so the pill under the gauge can say "refreshing…".
 export const PillLoading = React.createContext(false);
-import { gaugeFrac, liveLegMoves } from "./rootForSweat";
+import { gaugeFrac, liveLegMoves, lockedPregameEv } from "./rootForSweat";
 import { american } from "./rootForPrices";
 import { quantileOf } from "./rootForSimple";
+import { rootFor } from "./rootForEngine";
+
+function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let x = a; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; }; }
+// Pregame range for the day: the same locks as Now, every one of the day's games at its kickoff (frozen) chances,
+// later games at their current pregame chances. Kickoff numbers never change, so the range doesn't drift as games
+// finish. 2.3rd/97.7th percentiles of that distribution = the ±2 SD lines (the engine only gives percentiles).
+export function pregameRange(d, s) {
+  try {
+    const model = d.model || {}; const sn = (s.dayRow && s.dayRow.snap) || null; let pos; let preP;
+    const today = s.dayResult != null && !!(sn && sn.positions);
+    if (today) { // Today: the saved day row (all of the day's locks, settled ones too)
+      pos = Object.values(sn.positions); preP = { ...(model.probs || {}), ...(sn.last || {}), ...(sn.frozen || {}) };
+    } else { // Today & beyond / All: open locks + kept finished ones, as Now
+      const kept = (s.kept || []).filter((p) => !s.keptIds || s.keptIds.includes(String(p.id)));
+      pos = [...(model.positions || []), ...kept];
+      preP = { ...((sn && sn.last) || {}), ...(s.last || {}), ...(model.probs || {}), ...((sn && sn.frozen) || {}), ...(s.frozen || {}) };
+    }
+    if (!pos.length) return null;
+    // per-lock freezes (first-kickoff snapshots): contracts as of then; for the joint simulation each game uses the
+    // chances of the earliest-frozen lock holding it (one draw per game), then the range is shifted to the center
+    const lp = (sn && sn.lockPre) || {}; const byT = Object.values(lp).sort((a, b) => String(b.t0).localeCompare(String(a.t0)));
+    const simP = { ...preP }; for (const f of byT) Object.assign(simP, f.probs || {});
+    const simPos = pos.map((p) => { const f = lp[String(p.id)]; return f ? { ...p, hit: f.pos.hit, miss: f.pos.miss } : p; });
+    const center = today ? null : lockedPregameEv(pos, preP, lp);
+    const r = rootFor(simPos, simP, { histBins: 40, mcSamples: 20000, rng: seeded(11) });
+    if (!r || !r.hist || !r.hist.bins || !r.hist.bins.length) return null;
+    return { ev: Number(r.ev), q023: quantileOf(r.hist, 0.023), q977: quantileOf(r.hist, 0.977), center, frozenLocks: Object.keys(lp).length, fallbackLegs: Object.values(lp).reduce((a, f) => a + Number(f.fb || 0), 0) };
+  } catch { return null; }
+}
+// Finished binary legs (props/totals/spreads) lose their names when they drop off the board: saved names first,
+// else read the Kalshi ticker ("KXNFLTD-26OCT18NONYG-NOKMILLER5-1" → "K. Miller (NO) 1+ TD").
+const NFL = ["ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAC","JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA","SF","TB","TEN","WAS"];
+const splitGame = (g) => { for (const a of NFL) if (g.startsWith(a) && NFL.includes(g.slice(a.length))) return `${a}@${g.slice(a.length)}`; return g; };
+const titleCase = (x) => x.charAt(0) + x.slice(1).toLowerCase();
+export function tickerLabel(ev) {
+  const m = String(ev).match(/^KX[A-Z]*?(TD|TOTAL|SPREAD|GAME)-\d{2}[A-Z]{3}\d{2}([A-Z]+)(?:-(.+))?$/); if (!m) return null;
+  const [, kind, game, tail = ""] = m; const g = splitGame(game);
+  if (kind === "TOTAL" && /^\d+$/.test(tail)) return `Over ${Number(tail) - 0.5} ${g}`;
+  if (kind === "SPREAD") { const s = tail.match(/^([A-Z]+?)(\d+)$/); if (s) return `${s[1]} −${Number(s[2]) - 0.5} (${g})`; }
+  if (kind === "TD") { const s = tail.match(/^([A-Z]+?)([A-Z])([A-Z]+)\d+-(\d+)$/); if (s) { const team = NFL.find((a) => game.includes(a) && tail.startsWith(a) && /^[A-Z]{2,}/.test(tail.slice(a.length))) || s[1];
+    const rest = tail.slice(team.length).replace(/\d+-\d+$/, ""); return `${rest.charAt(0)}. ${titleCase(rest.slice(1))} (${team}) ${s[4]}+ TD`; } }
+  return null;
+}
 
 const etTime = (iso) => new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
@@ -36,7 +79,10 @@ function LiveLegs({ d, part = "live" }) {
     const pr = probs[ev] || {}; const w = finals[ev] || Object.entries(pr).filter(([o]) => o !== "__neither").sort((a, b) => b[1] - a[1])[0]?.[0]; if (!w) return ev;
     const e = meta[ev] || {}; const team = String(w).split(/[<>]=?/)[0];
     const nm = ((e.outcomes || []).find((o) => o.outcome === w) || {}).name || (model.teamNames || {})[`${ev}:${team}`] || w;
-    return w === "yes" || w === "no" || /^(Not: |Over |Under )/.test(nm) ? `${nm} hit` : `${nm} won`;
+    const saved = (((s.dayRow && s.dayRow.snap && s.dayRow.snap.names) || {})[ev]) || null;
+    if (w === "yes" || w === "no") { const lbl = (saved && (saved.yes || saved.label)) || e.rootForName || tickerLabel(ev) || e.game || ev; return `${String(lbl).replace(/:\s*$/, "")} — ${w === "yes" ? "hit" : "no hit"}`; }
+    const nm2 = nm === w && saved && saved[w] ? saved[w] : nm;
+    return /^(Not: |Over |Under )/.test(nm2) ? `${nm2} — hit` : `${nm2} won`;
   };
   const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
@@ -76,24 +122,29 @@ function LiveLegs({ d, part = "live" }) {
 
 export default function SweatMeter({ d, legs = true }) {
   const pillLoading = useContext(PillLoading);
-  const s = d && d.sweat; if (!s) return null;
-  const now = Number.isFinite(Number(s.now)) ? Number(s.now) : Number(d.ev); const started = s.started === true; const base = Number.isFinite(s.baseline) ? s.baseline : null;
+  const s0 = d && d.sweat;
+  const preR = useMemo(() => (legs && s0 && s0.started ? pregameRange(d, s0) : null), [d && d.asOf, legs, s0 && s0.baseline, s0 && s0.dayResult, s0 && (s0.keptIds || []).length, s0 && (s0.kept || []).length, d && d.model && (d.model.positions || []).length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const s = s0; if (!s) return null;
+  const now = Number.isFinite(Number(s.now)) ? Number(s.now) : Number(d.ev); const started = s.started === true; const base = preR && started && Number.isFinite(preR.center) ? preR.center : Number.isFinite(s.baseline) ? s.baseline : null;
   const center = started && base != null ? base : now;
-  // ±2 SD lines: the sheet's own result distribution (d.hist). Only percentiles exist, so 2.3rd/97.7th percentile
-  // spreads (measured from the sheet's expected value d.ev) are placed around the gauge's expectation.
-  const hasH = !!(d.hist && d.hist.bins && d.hist.bins.length); const mean = Number.isFinite(Number(d.ev)) ? Number(d.ev) : now;
-  const sdLo = hasH ? Math.max(1, mean - quantileOf(d.hist, 0.023)) : null, sdHi = hasH ? Math.max(1, quantileOf(d.hist, 0.977) - mean) : null;
+  // ±2 SD lines + axis: frozen pregame distribution of the day (pregameRange); falls back to the sheet's current
+  // distribution (past/final days) when the pregame one can't be built.
+  const pre = preR && started && base != null ? preR : null;
+  const hasH = !!pre || !!(d.hist && d.hist.bins && d.hist.bins.length); const mean = pre ? pre.ev : Number.isFinite(Number(d.ev)) ? Number(d.ev) : now;
+  const sdLo = !hasH ? null : Math.max(1, mean - (pre ? pre.q023 : quantileOf(d.hist, 0.023))), sdHi = !hasH ? null : Math.max(1, (pre ? pre.q977 : quantileOf(d.hist, 0.977)) - mean);
   const m2 = hasH ? center - sdLo : null, p2 = hasH ? center + sdHi : null;
-  // dollar axis: ±2 SD sit at 1/8 from each end (gauge edges = ±2.67 SD), widened if the needle goes past
-  const lo = hasH ? Math.min(center - sdLo * 4 / 3, now) : Math.min(d.worst && Number.isFinite(d.worst.pnl) ? d.worst.pnl : center - 1, center - 1);
-  const hi = hasH ? Math.max(center + sdHi * 4 / 3, now) : Math.max(d.hist ? quantileOf(d.hist, 0.95) : center + 1, center + 1, now + 1);
+  // one dollar axis for needle + lines: ±2 SD sit 1/8 in from each end (ends = ±2.67 SD). Never widened, so the
+  // lines stay put; a needle past an end is pinned there with an arrow.
+  const lo = hasH ? center - sdLo * 4 / 3 : Math.min(d.worst && Number.isFinite(d.worst.pnl) ? d.worst.pnl : center - 1, center - 1, now);
+  const hi = hasH ? center + sdHi * 4 / 3 : Math.max(d.hist ? quantileOf(d.hist, 0.95) : center + 1, center + 1, now);
+  const off = started && base != null ? (now > hi ? 1 : now < lo ? -1 : 0) : 0;
   const f = started && base != null ? gaugeFrac(now, lo, base, hi) : 0.5;
   const diff = started && base != null ? now - base : 0;
   const mood = s.error ? "Pregame number unavailable" : !started ? "No games have started yet" : base == null ? "Pregame number unavailable" : Math.abs(diff) < 0.5 ? "On track" : diff > 0 ? "Above expected" : "Below expected";
   const W = 260, cx = 130, cy = 132, r = 100; const [nx, ny] = pt(cx, cy, r - 18, f);
   const segs = 24;
   return (
-    <div className="sweat" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, background: "#111827", border: "1px solid #1f2937", borderRadius: 10, padding: "10px 14px", margin: "8px 0 12px" }}>
+    <div className="sweat" style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 16, background: "#111827", border: "1px solid #1f2937", borderRadius: 10, padding: "10px 14px", margin: "8px 0 12px" }}>
       <div style={{ flex: "0 1 460px", maxWidth: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
       <svg viewBox={`-60 0 ${W + 120} 152`} style={{ width: 460, maxWidth: "100%", display: "block" }} role="img" aria-label="Live meter">
         {Array.from({ length: segs }, (_, i) => { const f0 = i / segs, f1 = (i + 1) / segs; const t = Math.abs((f0 + f1) / 2 - 0.5) * 2; const red = (f0 + f1) / 2 < 0.5;
@@ -107,16 +158,18 @@ export default function SweatMeter({ d, legs = true }) {
         <text x={W - 4} y={cy + 18} fill="#6ee7b7" fontSize="12" textAnchor="end">Above expected</text>
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#f9fafb" strokeWidth="4" strokeLinecap="round" />
         <circle cx={cx} cy={cy} r="7" fill="#f9fafb" />
+        {off !== 0 && (() => { const g = off > 0 ? 1 : 0; const [ax, ay] = pt(cx, cy, r - 18, g); const dx = off > 0 ? 1 : -1;
+          return <g><polygon points={`${ax + dx * 14},${ay} ${ax + dx * 2},${ay - 7} ${ax + dx * 2},${ay + 7}`} fill="#f5c542" /><text x={ax - dx * 4} y={ay - 10} fill="#f5c542" fontSize="10.5" fontWeight="700" textAnchor={off > 0 ? "end" : "start"}>{money(now)} off scale</text></g>; })()}
       </svg>
         {d.asOf && <UpdatedPill asOf={d.asOf} loading={pillLoading} />}
         {legs && started && base != null && <LiveLegs d={d} part="done" />}
       </div>
-      <div style={{ flex: "1 1 200px", fontSize: 14, lineHeight: 1.55 }}>
+      <div style={{ flex: "1 1 200px", fontSize: 14, lineHeight: 1.55, paddingTop: 8 }}>
         <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>Live meter</div>
         <div style={{ fontSize: 20, fontWeight: 700, color: !started || base == null || Math.abs(diff) < 0.5 ? "#e5e7eb" : diff >= 0 ? "#6ee7b7" : "#fca5a5" }}>{mood}</div>
         <div>Now <b>{money(now)}</b> expected</div>
         {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
-        {hasH && <div className="sub" style={{ fontSize: 11.5 }}>Dotted lines: likely range (±2 SD) {money(m2)} to {money(p2)}</div>}
+        {hasH && <div className="sub" style={{ fontSize: 11.5 }}>{pre ? "Pregame likely range" : "Dotted lines: likely range"} (±2 SD) {money(m2)} to {money(p2)}</div>}
         {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> from games played</div>}
         {started && s.source && Object.values(s.source).includes("kickoff") && <div className="sub" style={{ fontSize: 11.5 }}>Some starting points are Kalshi prices at kickoff (saved history).</div>}
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}

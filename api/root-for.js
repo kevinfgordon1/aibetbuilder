@@ -202,6 +202,70 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
   return { [h]: raw[h], [o]: 1 - raw[h] };
 }
 
+// Per-lock pregame baseline (Kevin, Oct 18): a lock's baseline locks when its FIRST leg kicks off. Every leg is
+// taken at its chances at that moment, with the lock's contracts as of then, and frozen in the day snapshot
+// (snap.lockPre[id] = { t0, pos, probs, adds, fb }). Seen within 5 min of that kickoff → the live chances; later
+// → Kalshi 1-minute candles at the first kickoff; else the nearest earlier stored price (root_for_pregame_probs,
+// latest captured at/before the kickoff, else the earliest stored, else that game's kickoff row) — counted in fb.
+// Contracts added after the first kickoff (rare) join at the chances when we first see them (adds).
+// Locks whose first leg hasn't started count at live pregame in both baseline and Now (no effect on the needle).
+async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
+  const S = await import('../src/rootForSweat.js');
+  snap.lockPre = snap.lockPre || {};
+  const memo = new Map(); const deadline = Date.now() + 5000; // locks not reached in time freeze on the next request
+  const rf = async (u, o) => { for (let i = 0; ; i++) { const r = await deps.fetch(u, o); if (r.status !== 429 || i >= 3) return r; await new Promise((z) => setTimeout(z, 300 * (i + 1))); } }; // Kalshi rate limit
+  const cached = (key, fn) => { if (!memo.has(key)) memo.set(key, fn().catch(() => null)); return memo.get(key); };
+  const kick = (ev) => { const s = starts[ev] || ((rows.find((x) => x.event === ev && x.kickoff) || {}).kickoff); const ms = s ? Date.parse(s) : NaN; return Number.isFinite(ms) ? ms : null; };
+  const binCandle = async (ev, k, held) => {
+    try {
+      const series = ev.split('-')[0];
+      const r = await rf(`${KALSHI}/series/${series}/markets/${encodeURIComponent(ev)}/candlesticks?start_ts=${k - 1800}&end_ts=${k}&period_interval=1`, { headers: { accept: 'application/json' } });
+      if (!r.ok) return null; const j = await r.json();
+      const c = (j.candlesticks || []).filter((x) => x && x.yes_bid && x.yes_ask && x.yes_ask.close_dollars != null).pop(); if (!c) return null;
+      const bid = Number(c.yes_bid.close_dollars), ask = Number(c.yes_ask.close_dollars); // inverse bet method: held side at its own bid
+      const y = held === 'no' ? ask : bid; return Number.isFinite(y) ? { yes: y, no: 1 - y } : null;
+    } catch { return null; }
+  };
+  const todo = [];
+  for (const p of pos) {
+    const id = String(p.id); const legs = p.legs || [];
+    const ks = legs.map((l) => kick(l.event)).filter((x) => x != null); if (!ks.length) continue;
+    const t0 = Math.min(...ks); if (now < t0) continue;
+    const cur = snap.lockPre[id];
+    if (cur) { // contracts changed after the freeze: the difference joins at today's chances
+      if (Number(cur.pos.hit) !== Number(p.hit) || Number(cur.pos.miss) !== Number(p.miss)) {
+        cur.adds = Number(cur.adds || 0) + S.expectedProfit([p], liveP) - S.expectedProfit([{ ...p, hit: cur.pos.hit, miss: cur.pos.miss }], liveP);
+        cur.pos = { ...cur.pos, hit: p.hit, miss: p.miss };
+      }
+      continue;
+    }
+    todo.push({ id, p, legs, t0 });
+  }
+  const freeze = async ({ id, p, legs, t0 }) => {
+    if (Date.now() > deadline) return;
+    const probs = {}; let fb = 0; const fresh = now - t0 <= 5 * 60000;
+    for (const l of legs) {
+      const ev = l.event; if (probs[ev]) continue; const dist = liveP[ev] || preP[ev];
+      if (fresh && liveP[ev]) { probs[ev] = liveP[ev]; continue; }
+      const iso = new Date(t0).toISOString(); let got = null;
+      try {
+        const teams = Object.keys(dist || {}).filter((o) => o !== '__neither'); const held = (l.allowed || [])[0];
+        if (teams.length === 2 && teams.includes('yes') && teams.includes('no')) got = await cached(`b|${ev}|${t0}|${held}`, () => binCandle(ev, Math.floor(t0 / 1000), held));
+        else got = await cached(`m|${ev}|${t0}`, () => kickoffProbs(ev, dist, iso, pos, rf));
+      } catch { got = null; }
+      if (got) { probs[ev] = got; continue; }
+      fb += 1;
+      const mine = rows.filter((x) => x.event === ev && x.probs);
+      const before = mine.filter((x) => x.captured_at && Date.parse(x.captured_at) <= t0).sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
+      const earliest = [...mine].sort((a, b) => String(a.captured_at).localeCompare(String(b.captured_at)))[0];
+      probs[ev] = (before || earliest || {}).probs || (snap.frozen || {})[ev] || dist;
+    }
+    if (Date.now() > deadline + 2500) return; // too slow: try again next request rather than freeze half-fetched
+    snap.lockPre[id] = { t0: new Date(t0).toISOString(), pos: { id: p.id, legs, hit: p.hit, miss: p.miss }, probs, adds: 0, fb };
+  };
+  for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(freeze));
+}
+
 // Daily needle history (owner only). One row per sheet day (Today rolls over at 11 AM ET).
 // result = EV of the day's locks at the day's games' latest chances − EV with those games at their kickoff numbers
 // (later games stay at current chances in both, so only the day's games count).
@@ -209,7 +273,7 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
 // every lock and game seen that day, each game's last live chances, and its kickoff numbers.
 // The day turns final when every game is decided (some outcome ≥ 98%, or its market has closed) or at the
 // 11 AM ET rollover; a final row is never rewritten. Never fails the request.
-async function needleDay(client, userId, out, now, frozen) {
+async function needleDay(client, userId, out, now, frozen, starts = {}, rows = []) {
   try {
     const S = await import('../src/rootForSweat.js'); const TD = await import('../src/rootForToday.js');
     const day = TD.sheetDay(now); const model = out.model || {}; const probs = model.probs || {};
@@ -221,13 +285,16 @@ async function needleDay(client, userId, out, now, frozen) {
       const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} }; snap.lastAt = snap.lastAt || {};
       const evs = TD.todayEvents(out.perEvent || [], now);
       for (const ev of evs) { if (probs[ev]) { snap.last[ev] = probs[ev]; snap.lastAt[ev] = stamp; } if (frozen && frozen[ev]) snap.frozen[ev] = frozen[ev]; }
+      // keep each leg's display names (finished props/totals drop off the board and lose them)
+      snap.names = snap.names || {}; for (const e of out.perEvent || []) { if (!e || !evs.has(e.event)) continue; const nm = {}; for (const o of e.outcomes || []) if (o && o.outcome && o.name) nm[o.outcome] = o.name; if (e.rootForName) nm.label = e.rootForName; if (e.game) nm.game = e.game; if (Object.keys(nm).length) snap.names[e.event] = nm; }
       for (const p of TD.touchedLocks(model, new Set(Object.keys(snap.last)))) snap.positions[p.id] = p;
       const dayEvs = Object.keys(snap.frozen);
       if (dayEvs.length) {
         const pos = Object.values(snap.positions);
         const liveP = { ...probs, ...Object.fromEntries(dayEvs.map((ev) => [ev, probs[ev] || snap.last[ev]])) };
         const preP = { ...liveP, ...snap.frozen };
-        const liveEv = S.expectedProfit(pos, liveP); const preEv = S.expectedProfit(pos, preP);
+        await lockBaselines(snap, pos, liveP, preP, starts, rows, now);
+        const liveEv = S.expectedProfit(pos, liveP); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
         const decided = Object.keys(snap.last).every((ev) => !probs[ev] || Math.max(...Object.values(probs[ev])) >= 0.98);
         await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'all_decided' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
       }
@@ -284,7 +351,7 @@ async function sweatBaseline(client, out, now, userId) {
       if (x && x.probs) { frozen[ev] = x.probs; const late = x.captured_at && starts[ev] && Date.parse(x.captured_at) - Date.parse(starts[ev]) > 5 * 60000; source[ev] = backfill.includes(x) || (x.captured_at && x.kickoff && x.captured_at === x.kickoff) ? 'kickoff' : late ? 'snapshot' : 'pregame'; if (late && (!since || x.captured_at < since)) since = x.captured_at; }
       else { frozen[ev] = probs[ev]; source[ev] = 'snapshot'; const c = new Date(now).toISOString(); if (!since || c < since) since = c; }
     }
-    const history = userId ? await needleDay(client, userId, out, now, frozen) : null;
+    const history = userId ? await needleDay(client, userId, out, now, frozen, starts, rows) : null;
     // Finished games (no longer priced) stay counted at their last live chances (see finishedCarry):
     //  - All: for 12h after they end.
     //  - Today & beyond (the sheet's default): today's sheet-day games, finished ones included, plus every upcoming leg.
