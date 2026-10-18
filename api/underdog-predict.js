@@ -4,6 +4,9 @@
 // New Odds Board. Indexes NFL, CFB (app sport NCAAF), and MLB moneylines,
 // spreads, and totals from /v1/lobbies/content/lines (Team Picks
 // PickemStat pills, phone PE). A market with no prediction quote is omitted.
+// An aged moneyline side whose price still equals Kalshi's current yes
+// ask is restamped as fresh first (lib/underdog-kalshi-confirm.js), since
+// Underdog's updated_at only moves when the price changes.
 // A side whose quote updated_at is older than 24 hours
 // (UNDERDOG_BOARD_OMIT_MS) is omitted (missing timestamps stay). A side
 // aged 1–24 hours stays in this payload; Promo ranking still skips it
