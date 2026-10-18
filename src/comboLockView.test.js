@@ -167,6 +167,37 @@ assert.equal(historyRow({ id: "y" }, { fair_american: 760 }).fair, "+760");
   assert.equal(qh.addedText, "Wed, Oct 7 · 4:15 PM ET");
   assert.ok(QUOTE_ROWS_SHOWN >= 3);
 }
+// Over limit uses the room the worker saw (combo_submissions.remaining), not today's lock room.
+{
+  const P = "pk";
+  const parlay = { id: P, user_id: "u", active: true, archived_at: null, fill_american: 758, max_contracts: 101, starts_at: "2026-10-18T17:00:00Z", created_at: "2026-10-18T15:55:00Z", legs: [] };
+  const sub = (id, status, contracts, at, extra = {}) => ({ id, user_id: "u", parlay_id: P, status, contracts, created_at: at, rfq_id: "rfq-" + id, venue: "kalshi", ...extra });
+  const now = Date.parse("2026-10-18T16:56:00Z");
+  const attempts = buildLockAttempts({
+    parlay,
+    fills: [],
+    submissions: [
+      sub("q1", "unfilled", 85, "2026-10-18T16:54:30Z", { fill_american: 758, quote_id: "qq1" }),
+      sub("d1", "declined", 85, "2026-10-18T16:54:34Z", { skip_reason: "oversized", remaining: 16 }),
+      sub("d2", "declined", 162, "2026-10-18T16:42:51Z", { skip_reason: "oversized", remaining: 101 }),
+      sub("d3", "declined", 90, "2026-10-18T16:30:00Z", { skip_reason: "oversized", remaining: 6 }),
+    ],
+    outcomes: [],
+    now,
+  });
+  const qh = quoteHistory(attempts, { parlay, now });
+  const over = qh.notFilled.filter((q) => q.result === "over limit").map((q) => q.detail);
+  assert.deepEqual(over, [
+    "asked 85, room for 16 (85 held by a live quote)",
+    "asked 162, room for 101",
+    "asked 90, room for 6 (95 held by live quotes)",
+  ]);
+  // Lock already has fills: held amount is not exact.
+  assert.equal(quoteRow({ bucket: "oversized", contracts: 85, submission: { skip_reason: "oversized", remaining: 10 } }, { left: 60, filled: 41 }).detail,
+    "asked 85, room for 10 (rest held by live quotes)");
+  // No saved remaining: old behaviour (lock room now).
+  assert.equal(quoteRow({ bucket: "oversized", contracts: 85, submission: { skip_reason: "oversized" } }, { left: 60 }).detail, "asked 85, room for 60");
+}
 assert.equal(quoteRow({ bucket: "awaiting", reason: "open", at: null, contracts: 10 }, { ended: true }).result, "expired");
 assert.equal(quoteRow({ bucket: "awaiting", reason: "open", contracts: 10 }).result, "offer resting · waiting");
 assert.equal(quoteRow({ bucket: "too_slow", contracts: 10, ourNo: 0.92 }).price, "+1150");
