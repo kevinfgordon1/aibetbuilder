@@ -96,5 +96,31 @@ function call(token, query = {}, headers = {}) {
   assert.equal(mk.starts['KXNCAAFGAME-26OCT16MIZZMISS'], '2026-10-17T19:30:00.000Z');
   assert.equal(mk.starts['KXNCAAFGAME-26OCT16NWMSU'], '2026-10-17T16:00:00.000Z');
   assert.equal(mk.starts['KXNCAAFGAME-26OCT16XXYY'], null);
+  // NFL: Kalshi "HOU Texans" == Polymarket "Houston Texans"; a Kalshi board start (kickoff + 3h) is never used for football
+  const { nflTeam, lockStarts } = handler._helpers;
+  assert.equal(nflTeam('HOU Texans'), 'HOU'); assert.equal(nflTeam('Jacksonville Jaguars'), 'JAC'); assert.equal(nflTeam('New York J'), 'NYJ');
+  assert.equal(nflTeam('Los Angeles R'), 'LAR'); assert.equal(nflTeam('LA Chargers'), 'LAC'); assert.equal(nflTeam('NOLA Saints'), 'NO'); assert.equal(nflTeam('Nowhere'), null);
+  const nfl = {
+    kalshi: [{ ticker: 'KXNFLGAME-26OCT18HOUJAC-HOU', away: 'HOU Texans', home: 'JAC Jaguars', start: '2026-10-18T16:30:00Z' },
+      { ticker: 'KXNFLGAME-26OCT18CHIATL-ATL', away: 'Chicago Bears', home: 'Atlanta Falcons', start: '2026-10-18T17:00Z' },
+      { ticker: 'KXNFLGAME-26OCT25CINBAL-BAL', away: 'Cincinnati', home: 'Baltimore', start: '2026-10-25T20:00:00Z' },
+      { ticker: 'KXNFLGAME-26OCT25TBCAR-TB', away: 'Tampa Bay', home: 'Carolina', start: '2026-10-25T20:00:00Z' }],
+    polymarket: [{ away: 'Houston Texans', home: 'Jacksonville Jaguars', start: '2026-10-18T13:30:00Z' }, { away: 'Chicago Bears', home: 'Atlanta Falcons', start: '2026-10-18T17:00:00Z' }],
+    novig: [],
+  };
+  const fetch2 = async (u) => {
+    const m = /board\?venue=(\w+)&league=NFL/.exec(u);
+    const body = /\/health/.test(u) ? { status: {} } : m ? { quotes: nfl[m[1]] } : /orderbooks/.test(u) ? { orderbooks: [] } : /NCAAF/.test(u) ? { quotes: [] } : { markets: [] };
+    return { ok: true, json: async () => body };
+  };
+  const locks = [{ starts_at: '2026-10-25T17:00:00+00:00', legs: [{ ticker: 'KXNFLGAME-26OCT25TBCAR-TB' }, { ticker: 'KXNFLTOTAL-26OCT25TBCAR-45' }] },
+    { starts_at: '2026-10-18T13:30:00+00:00', legs: [{ ticker: 'KXNFLGAME-26OCT25CINBAL-BAL' }, { ticker: 'KXNFLGAME-26OCT18HOUJAC-HOU' }] }];
+  assert.deepEqual(lockStarts(locks), { '26OCT25TBCAR': '2026-10-25T17:00:00.000Z' });
+  const M2 = { tickersNeeded: () => [], kalshiAsks: () => ({}), relayIndex: () => ({}) };
+  const mk2 = await loadMarkets(M2, locks, { ODDS_RELAY_URL: 'http://relay' }, fetch2, () => 0);
+  assert.equal(mk2.starts['KXNFLGAME-26OCT18HOUJAC'], '2026-10-18T13:30:00.000Z');
+  assert.equal(mk2.starts['KXNFLGAME-26OCT18CHIATL'], '2026-10-18T17:00:00.000Z');
+  assert.equal(mk2.starts['KXNFLGAME-26OCT25CINBAL'], null); // Kalshi-only, multi-game lock: unknown, not kickoff + 3h
+  assert.equal(mk2.starts['KXNFLGAME-26OCT25TBCAR'], '2026-10-25T17:00:00.000Z'); // single-game lock's starts_at
   console.log('root-for api scoping tests ok');
 })().catch((e) => { console.error(e); process.exit(1); });
