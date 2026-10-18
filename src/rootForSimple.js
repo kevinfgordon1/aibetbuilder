@@ -71,11 +71,13 @@ export function chanceWords(p) {
 }
 
 // One-sentence headline.
+// Headline = the meter's "Now" when there is one (open locks + today's finished games / settled locks), else d.ev.
 export function summarySentence(d) {
   if (!d) return "";
   const top = topByGain(d, 1)[0] || (d.top && d.top[0]);
-  const ev = Number(d.ev);
-  const head = ev >= 0 ? `You're expected to make about ${sMoney(ev)}.` : `You're expected to lose about ${money0(ev)}.`;
+  const sn = d.sweat && Number(d.sweat.now); const withDone = Number.isFinite(sn) && d.sweat.started === true;
+  const ev = withDone ? sn : Number(d.ev); const tail = withDone ? " today (including finished games)" : "";
+  const head = ev >= 0 ? `You're expected to make about ${sMoney(ev)}${tail}.` : `You're expected to lose about ${money0(ev)}${tail}.`;
   return top ? `${head} Biggest game: ${top.game} (root for ${top.name}).` : head;
 }
 

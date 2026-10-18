@@ -164,6 +164,18 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
 
+/** Last live chances of recently seen games (daily needle snapshots, last 2 days; market facts, same for every user).
+ * A finished game stops being priced; computeRootFor counts it at its final result (outcome >= 95%) from these. */
+async function loadFinals(client, now) {
+  try {
+    const lo = new Date(now - 2 * 86400000).toISOString().slice(0, 10);
+    const { data, error } = await client.from('root_for_needle_days').select('day,last:snap->last').gte('day', lo).order('day', { ascending: true });
+    if (error) throw error;
+    const out = {}; for (const r of data || []) Object.assign(out, (r && r.last) || {});
+    return out;
+  } catch (e) { console.error('[root-for] finals unavailable:', String((e && e.message) || e).slice(0, 120)); return {}; }
+}
+
 // Kickoff backfill for a started plain moneyline game we never saved (saving was off): Kalshi 1-minute candles
 // ending at kickoff, inverse bet method on top of book: P(team) = max(team yes bid, 1 − other team's yes ask).
 // Both sides held → raw inverted numbers + "neither"; one side held → that side raw, the other 1 − it.
@@ -181,6 +193,7 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
   };
   const [A, B] = await Promise.all(teams.map(last)); if (!A || !B) return null;
   const raw = { [teams[0]]: Math.max(A.bid, 1 - B.ask), [teams[1]]: Math.max(B.bid, 1 - A.ask) };
+  { const z = raw[teams[0]] + raw[teams[1]]; if (z > 1) { raw[teams[0]] /= z; raw[teams[1]] /= z; } } // crossed books: scale to 100% (same as computeRootFor)
   const held = new Set(); for (const p of positions || []) for (const l of p.legs || []) if (l.event === ev && l.allowed && l.allowed.length === 1) held.add(l.allowed[0]);
   if (NEITHER in dist || (held.has(teams[0]) && held.has(teams[1]))) { const n = Math.max(0, 1 - raw[teams[0]] - raw[teams[1]]); return { [teams[0]]: raw[teams[0]], [teams[1]]: raw[teams[1]], ...(n > 0 || NEITHER in dist ? { [NEITHER]: n } : {}) }; }
   const h = held.has(teams[1]) && !held.has(teams[0]) ? teams[1] : teams[0]; const o = h === teams[0] ? teams[1] : teams[0];
@@ -232,6 +245,22 @@ async function sweatBaseline(client, out, now, userId) {
     const { data, error } = await client.from('root_for_pregame_probs').select('event,sig,probs,kickoff,captured_at').eq('slate_key', key);
     if (error) throw error;
     const rows = [...(data || [])]; const have = new Set(rows.map((r) => `${r.event}#${r.sig}`));
+    // finished games drop off the live boards (no start time any more): use the saved kickoff of the row for
+    // today's outcome set, else the latest saved kickoff for that game
+    for (const [ev, dist] of Object.entries((out.model && out.model.probs) || {})) {
+      if (starts[ev]) continue; const sig = S.outcomeSig(dist);
+      const m = rows.find((x) => x.event === ev && x.sig === sig && x.kickoff) || rows.filter((x) => x.event === ev && x.kickoff).sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
+      if (m) starts[ev] = new Date(m.kickoff).toISOString();
+    }
+    // outcome set changed after kickoff (no on-time row for today's sig): regroup the latest on-time row for that game
+    // (in memory only; the stored rows are never rewritten)
+    for (const [ev, dist] of Object.entries((out.model && out.model.probs) || {})) {
+      const t = starts[ev] ? Date.parse(starts[ev]) : NaN; if (!Number.isFinite(t) || now < t) continue;
+      const sig = S.outcomeSig(dist); const cur = rows.find((x) => x.event === ev && x.sig === sig);
+      if (cur && !(cur.captured_at && Date.parse(cur.captured_at) - t > 5 * 60000)) continue;
+      const a = S.adaptPregame(rows, ev, dist, t); if (!a) continue;
+      if (cur) rows.splice(rows.indexOf(cur), 1); rows.push(a); have.add(`${ev}#${sig}`);
+    }
     const backfill = []; const probs = (out.model && out.model.probs) || {};
     await Promise.all(Object.entries(probs).map(async ([ev, dist]) => {
       const t = starts[ev] ? Date.parse(starts[ev]) : NaN; if (!Number.isFinite(t) || now < t) return;
@@ -240,7 +269,7 @@ async function sweatBaseline(client, out, now, userId) {
       // is replaced by Kalshi's price at kickoff when history is available
       const old = rows.find((x) => x.event === ev && x.sig === sig);
       if (old && !(old.captured_at && Date.parse(old.captured_at) - t > 5 * 60000)) return;
-      try { const p = await kickoffProbs(ev, dist, starts[ev], out.model.positions); if (p) { const row = { slate_key: key, event: ev, sig, probs: p, kickoff: new Date(t).toISOString(), captured_at: new Date(t).toISOString() }; if (old) rows.splice(rows.indexOf(old), 1); rows.push(row); backfill.push(row); } } catch (_) { /* fall back to first snapshot */ }
+      try { const p = await kickoffProbs(ev, dist, starts[ev], out.model.positions); if (p) { const row = { slate_key: key, event: ev, sig, probs: p, kickoff: new Date(t).toISOString(), captured_at: new Date(t).toISOString() }; if (old) rows.splice(rows.indexOf(old), 1); rows.push(row); backfill.push(row); } else console.error('[root-for] kickoff backfill: no Kalshi kickoff price for', ev, sig); } catch (e) { console.error('[root-for] kickoff backfill failed for', ev, String((e && e.message) || e).slice(0, 120)); }
     }));
     if (backfill.length) { const { error: e0 } = await client.from('root_for_pregame_probs').upsert(backfill, { onConflict: 'slate_key,event,sig' }); if (e0) throw e0; }
     const r = S.pregameBaseline({ model: out.model, starts, now, key, rows });
@@ -305,7 +334,7 @@ async function handler(req, res) {
       const { parlays, fills, singles } = await loadLocks(client, uid);
       if (!parlays.length) return json(res, 200, { ok: true, empty: true });
       const mk = await loadMarkets(M, parlays, env0); const now = deps.now();
-      const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
+      const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });
       const sw = await sweatBaseline(client, out, now, uid);
       return json(res, 200, { ok: true, days: (sw.history || []).length });
     } catch (e) { return json(res, 500, { ok: false, error: 'cron failed' }); }
@@ -336,7 +365,7 @@ async function handler(req, res) {
     if (!parlays.length) return json(res, 200, { ok: true, empty: true, locksTotal: 0 });
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
-    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt });
+    const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });
     // pregame-probs table is not per-user: only the owner's sheet may write it (and it's off unless enabled)
     const sweat = auth.owner && uid === auth.user.id ? await sweatBaseline(client, out, now, uid) : undefined;
     const lockLabels = Object.fromEntries(parlays.map((p) => [p.id, p.label || '']));

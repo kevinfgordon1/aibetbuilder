@@ -70,13 +70,13 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
     .sort((a, b) => (Date.parse(starts[a] || "") || 0) - (Date.parse(starts[b] || "") || 0) || a.localeCompare(b));
   let cur = { ...probs }; for (const ev of evs) cur[ev] = frozen[ev];
   const pregame = expectedProfit(positions, cur); let prev = pregame;
-  const legs = []; let settled = 0;
+  const legs = []; const done = []; let settled = 0;
   for (const ev of evs) {
     cur = { ...cur, [ev]: probs[ev] }; const v = expectedProfit(positions, cur); const move = v - prev; prev = v;
-    if (finished.has(ev) || Math.max(...Object.values(probs[ev])) >= 0.98) settled += move; else legs.push({ event: ev, move });
+    if (finished.has(ev) || Math.max(...Object.values(probs[ev])) >= 0.98) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
   }
-  legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
-  return { legs, settled, total: prev - pregame };
+  legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
+  return { legs, done, settled, total: prev - pregame };
 }
 
 // All view: finished games stay counted at their LAST live chances (same as Today) for 12 hours after the game
@@ -114,4 +114,30 @@ export function finishedCarry({ positions = [], probs = {}, frozen = {}, days = 
   const kept = Object.entries(seen).filter(([id, p]) => !live.has(id) && p && Array.isArray(p.legs) && ok(p)).map(([, p]) => p);
   return { kept, last: lastP, frozen: frozenFinished, finished, finishedDay: Object.fromEntries(finished.map((ev) => [ev, dayOf[ev]])),
     endedAt: Object.fromEntries(finished.map((ev) => [ev, new Date(ended[ev]).toISOString()])), nowAdd: expectedProfit(kept, nowP), baseAdd: expectedProfit(kept, preP) };
+}
+
+// Pregame fallback when a game's outcome set changed after kickoff (e.g. one side's lock settled, so the
+// "neither" outcome or a spread split appeared/disappeared): reuse the latest ON-TIME row (captured no later than
+// 5 min after kickoff) for the same game, mapped onto the new outcome set. Same inverse-bet chances, only regrouped:
+//  - an outcome present in both keeps its chance; a team = sum of its saved margin buckets;
+//  - "neither" dropped -> the rest scaled back to 100%; "neither" added -> 0.
+// A split the saved row can't provide (team -> margin buckets, or a different strike) -> null.
+const NEI = "__neither";
+export function adaptPregame(rows = [], ev, dist, kickoffMs) {
+  const want = Object.keys(dist || {}); if (!want.length || !Number.isFinite(kickoffMs)) return null;
+  const ok = rows.filter((r) => r && r.event === ev && r.probs && r.captured_at && Date.parse(r.captured_at) - kickoffMs <= 5 * 60000)
+    .sort((a, b) => Date.parse(b.captured_at) - Date.parse(a.captured_at));
+  for (const r of ok) {
+    const src = r.probs; const out = {}; let bad = false;
+    for (const o of want) {
+      if (o === NEI) { out[o] = src[NEI] || 0; continue; }
+      if (o in src) { out[o] = src[o]; continue; }
+      const parts = Object.keys(src).filter((k) => k !== o && k.split(/[<>]=?/)[0] === o && /[<>]/.test(k));
+      if (parts.length >= 2) out[o] = parts.reduce((a, k) => a + src[k], 0); else { bad = true; break; }
+    }
+    if (bad) continue;
+    if (!want.includes(NEI)) { const z = want.reduce((a, o) => a + out[o], 0); if (!(z > 0)) continue; for (const o of want) out[o] /= z; }
+    return { ...r, sig: outcomeSig(dist), probs: out, adaptedFrom: r.sig };
+  }
+  return null;
 }
