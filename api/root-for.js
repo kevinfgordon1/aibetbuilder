@@ -221,6 +221,8 @@ async function needleDay(client, userId, out, now, frozen) {
       const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} }; snap.lastAt = snap.lastAt || {};
       const evs = TD.todayEvents(out.perEvent || [], now);
       for (const ev of evs) { if (probs[ev]) { snap.last[ev] = probs[ev]; snap.lastAt[ev] = stamp; } if (frozen && frozen[ev]) snap.frozen[ev] = frozen[ev]; }
+      // keep each leg's display names (finished props/totals drop off the board and lose them)
+      snap.names = snap.names || {}; for (const e of out.perEvent || []) { if (!e || !evs.has(e.event)) continue; const nm = {}; for (const o of e.outcomes || []) if (o && o.outcome && o.name) nm[o.outcome] = o.name; if (e.rootForName) nm.label = e.rootForName; if (e.game) nm.game = e.game; if (Object.keys(nm).length) snap.names[e.event] = nm; }
       for (const p of TD.touchedLocks(model, new Set(Object.keys(snap.last)))) snap.positions[p.id] = p;
       const dayEvs = Object.keys(snap.frozen);
       if (dayEvs.length) {
