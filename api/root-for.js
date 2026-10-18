@@ -212,7 +212,7 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
 async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
   const S = await import('../src/rootForSweat.js');
   snap.lockPre = snap.lockPre || {};
-  const memo = new Map(); const deadline = Date.now() + 8000; // locks not reached in time freeze on the next request
+  const memo = new Map(); const deadline = Date.now() + 5000; // locks not reached in time freeze on the next request
   const rf = async (u, o) => { for (let i = 0; ; i++) { const r = await deps.fetch(u, o); if (r.status !== 429 || i >= 3) return r; await new Promise((z) => setTimeout(z, 300 * (i + 1))); } }; // Kalshi rate limit
   const cached = (key, fn) => { if (!memo.has(key)) memo.set(key, fn().catch(() => null)); return memo.get(key); };
   const kick = (ev) => { const s = starts[ev] || ((rows.find((x) => x.event === ev && x.kickoff) || {}).kickoff); const ms = s ? Date.parse(s) : NaN; return Number.isFinite(ms) ? ms : null; };
@@ -260,7 +260,7 @@ async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
       const earliest = [...mine].sort((a, b) => String(a.captured_at).localeCompare(String(b.captured_at)))[0];
       probs[ev] = (before || earliest || {}).probs || (snap.frozen || {})[ev] || dist;
     }
-    if (Date.now() > deadline + 4000) return; // too slow: try again next request rather than freeze half-fetched
+    if (Date.now() > deadline + 2500) return; // too slow: try again next request rather than freeze half-fetched
     snap.lockPre[id] = { t0: new Date(t0).toISOString(), pos: { id: p.id, legs, hit: p.hit, miss: p.miss }, probs, adds: 0, fb };
   };
   for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(freeze));
