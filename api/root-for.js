@@ -154,7 +154,9 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
       const k2 = boardKey(leagueOf.get(q), q.away, q.home);
       starts[ev] = real[matchKey(q.away, q.home)] || (k2 && real[k2]) || lockStart[ev.split('-')[1]] || null;
     }
-    relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive, polledAt });
+    const tNow = now(); const started = new Set(Object.entries(starts).filter(([, t]) => t && Date.parse(t) <= tNow).map(([ev]) => ev));
+    relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive, polledAt, started, kalshiBooks, kalshiAt });
+    for (const d of relay.droppedNovig || []) relayNote.push(`novig ${d.event}-${d.team} ignored (${d.reason}${d.ref != null ? `, ${d.novig} vs ${d.ref}` : ''})`);
   } catch (e) { relayNote.push(`relay: ${String(e.message).slice(0, 80)}`); }
   // start times for games the relay doesn't carry (e.g. NHL): Kalshi market close/expected times
   const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !(ev in starts));
