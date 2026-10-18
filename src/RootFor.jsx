@@ -31,7 +31,19 @@ const oneIn = (p) => (p > 0 ? `about 1 in ${Math.round(1 / p).toLocaleString("en
 const am = (a) => (a == null ? "—" : (a > 0 ? "+" : "") + Math.round(a));
 const amFromP = (p) => (!(p > 0 && p < 1) ? null : p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p);
 const etStamp = (iso) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
-const REFRESH_MS = 10 * 60 * 1000;
+// Sunday Oct 18, 2026 only: 2-minute refresh. Reverts to 10 min after 11:59 PM ET (Oct 19 04:00 UTC) with no deploy.
+const FAST_UNTIL = Date.parse("2026-10-19T04:00:00Z");
+export const refreshMs = (now = Date.now()) => (now < FAST_UNTIL ? 2 : 10) * 60 * 1000;
+const agoText = (s) => (s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s ago` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`);
+// big ticking "Updated 37s ago" pill, from the server's computed asOf; amber > 3 min, red > 6 min
+function UpdatedPill({ asOf, loading }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
+  const t = Date.parse(asOf); if (!Number.isFinite(t)) return null;
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  const lvl = s > 360 ? "red" : s > 180 ? "amber" : "ok";
+  return <span className={`upd-pill ${lvl}`} role="status" aria-live="off" title={`Data computed ${etStamp(asOf)}`}><span className="dot" />Updated {agoText(s)}{loading ? " · refreshing…" : ""}</span>;
+}
 const tStart = (iso) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }) + " ET" : "");
 
 // condition one game on a team winning (keep its outcomes) or losing (drop them), renormalized
@@ -237,10 +249,12 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   }, []);
   // fetch only once the sheet is shown
   useEffect(() => { if (open && can && !initialData && !st.data && !st.loading) load(); }, [open, can]); // eslint-disable-line react-hooks/exhaustive-deps
-  // live: reprice every 10 minutes while the tab is visible (in-game prices included). No alerts.
+  // live: reprice every 10 minutes (2 min on Oct 18, 2026 ET) while the tab is visible (in-game prices included). No alerts.
   useEffect(() => {
     if (!open || !can || initialData) return undefined;
-    const id = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") load(); }, REFRESH_MS);
+    // tick every 15s and reload once refreshMs() has passed, so the cadence flips back to 10 min at midnight ET without a remount
+    let last = Date.now();
+    const id = setInterval(() => { if (Date.now() - last >= refreshMs() - 1000 && (typeof document === "undefined" || document.visibilityState !== "hidden")) { last = Date.now(); load(); } }, 15000);
     return () => clearInterval(id);
   }, [open, can, initialData, load]);
   const [picks, setPicks] = useState({});
@@ -325,10 +339,16 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         @media (max-width:700px){.rootfor .touched ul{columns:1}}
         @media (max-width:700px){.rootfor .pair{grid-template-columns:1fr}}
         @media (max-width:600px){.rootfor .hide-sm{display:none}}
+        .rootfor .upd-pill{display:inline-flex;align-items:center;gap:7px;margin-left:10px;padding:4px 12px;border-radius:999px;font-size:15px;font-weight:800;background:#000;color:#f5c542;border:2px solid #f5c542;white-space:nowrap;font-variant-numeric:tabular-nums}
+        .rootfor .upd-pill .dot{width:9px;height:9px;border-radius:50%;background:#f5c542;animation:updpulse 1.6s infinite}
+        .rootfor .upd-pill.amber{color:#f59e0b;border-color:#f59e0b}.rootfor .upd-pill.amber .dot{background:#f59e0b}
+        .rootfor .upd-pill.red{color:#fff;background:#7f1d1d;border-color:#ef4444}.rootfor .upd-pill.red .dot{background:#ef4444}
+        @keyframes updpulse{0%,100%{opacity:1}50%{opacity:.25}}
       `}</style>
       <h3>
         What to root for
-        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every 10 min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
+        {d && <UpdatedPill asOf={d.asOf} loading={st.loading} />}
+        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           <span className="seg" role="group" aria-label="Games">
             <button type="button" className={scope === "beyond" ? "on" : ""} aria-pressed={scope === "beyond"} onClick={() => setScope("beyond")} title="Every open lock. Today's games, finished ones included, count live vs kickoff">Today &amp; beyond</button>

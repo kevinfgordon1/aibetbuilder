@@ -42,20 +42,29 @@ export default function SweatMeter({ d, legs = true }) {
   const s = d && d.sweat; if (!s) return null;
   const now = Number.isFinite(Number(s.now)) ? Number(s.now) : Number(d.ev); const started = s.started === true; const base = Number.isFinite(s.baseline) ? s.baseline : null;
   const center = started && base != null ? base : now;
-  const lo = Math.min(d.worst && Number.isFinite(d.worst.pnl) ? d.worst.pnl : center - 1, center - 1);
-  const hi = Math.max(d.hist ? quantileOf(d.hist, 0.95) : center + 1, center + 1, now + 1);
+  // ±2 SD lines: the sheet's own result distribution (d.hist). Only percentiles exist, so 2.3rd/97.7th percentile
+  // spreads (measured from the sheet's expected value d.ev) are placed around the gauge's expectation.
+  const hasH = !!(d.hist && d.hist.bins && d.hist.bins.length); const mean = Number.isFinite(Number(d.ev)) ? Number(d.ev) : now;
+  const sdLo = hasH ? Math.max(1, mean - quantileOf(d.hist, 0.023)) : null, sdHi = hasH ? Math.max(1, quantileOf(d.hist, 0.977) - mean) : null;
+  const m2 = hasH ? center - sdLo : null, p2 = hasH ? center + sdHi : null;
+  // dollar axis: ±2 SD sit at 1/8 from each end (gauge edges = ±2.67 SD), widened if the needle goes past
+  const lo = hasH ? Math.min(center - sdLo * 4 / 3, now) : Math.min(d.worst && Number.isFinite(d.worst.pnl) ? d.worst.pnl : center - 1, center - 1);
+  const hi = hasH ? Math.max(center + sdHi * 4 / 3, now) : Math.max(d.hist ? quantileOf(d.hist, 0.95) : center + 1, center + 1, now + 1);
   const f = started && base != null ? gaugeFrac(now, lo, base, hi) : 0.5;
   const diff = started && base != null ? now - base : 0;
   const mood = s.error ? "Pregame number unavailable" : !started ? "No games have started yet" : base == null ? "Pregame number unavailable" : Math.abs(diff) < 0.5 ? "On track" : diff > 0 ? "Above expected" : "Below expected";
-  const W = 260, cx = 130, cy = 120, r = 100; const [nx, ny] = pt(cx, cy, r - 18, f);
+  const W = 260, cx = 130, cy = 132, r = 100; const [nx, ny] = pt(cx, cy, r - 18, f);
   const segs = 24;
   return (
     <div className="sweat" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, background: "#111827", border: "1px solid #1f2937", borderRadius: 10, padding: "10px 14px", margin: "8px 0 12px" }}>
-      <svg viewBox={`0 0 ${W} 140`} style={{ width: 240, maxWidth: "100%", display: "block" }} role="img" aria-label="Live meter">
+      <svg viewBox={`-24 0 ${W + 48} 152`} style={{ width: 270, maxWidth: "100%", display: "block" }} role="img" aria-label="Live meter">
         {Array.from({ length: segs }, (_, i) => { const f0 = i / segs, f1 = (i + 1) / segs; const t = Math.abs((f0 + f1) / 2 - 0.5) * 2; const red = (f0 + f1) / 2 < 0.5;
           const col = red ? `rgba(${Math.round(254 - 101 * t)},${Math.round(202 - 175 * t)},${Math.round(202 - 175 * t)},1)` : `rgba(${Math.round(209 - 204 * t)},${Math.round(250 - 100 * t)},${Math.round(229 - 124 * t)},1)`;
           return <path key={i} d={arc(cx, cy, r, f0, f1 + 0.002)} stroke={col} strokeWidth="20" fill="none" />; })}
         <line x1={cx} x2={cx} y1={cy - r - 14} y2={cy - r + 14} stroke="#e5e7eb" strokeWidth="2" />
+        <text x={cx} y={cy - r - 17} fill="#f5c542" fontSize="13" fontWeight="700" textAnchor="middle">{money(center)}</text>
+        {hasH && [[m2, "#fca5a5"], [p2, "#6ee7b7"]].map(([v, col]) => { const g = gaugeFrac(v, lo, center, hi); const [x0, y0] = pt(cx, cy, r - 12, g); const [x1, y1] = pt(cx, cy, r + 12, g); const [tx, ty] = pt(cx, cy, r + 24, g);
+          return <g key={col}><line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#f9fafb" strokeWidth="2" strokeDasharray="2 2" /><text x={tx} y={ty} fill={col} fontSize="11" fontWeight="700" textAnchor="middle">{money(v)}</text></g>; })}
         <text x={4} y={cy + 18} fill="#fca5a5" fontSize="12" textAnchor="start">Below expected</text>
         <text x={W - 4} y={cy + 18} fill="#6ee7b7" fontSize="12" textAnchor="end">Above expected</text>
         <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#f9fafb" strokeWidth="4" strokeLinecap="round" />
@@ -66,6 +75,7 @@ export default function SweatMeter({ d, legs = true }) {
         <div style={{ fontSize: 20, fontWeight: 700, color: !started || base == null || Math.abs(diff) < 0.5 ? "#e5e7eb" : diff >= 0 ? "#6ee7b7" : "#fca5a5" }}>{mood}</div>
         <div>Now <b>{money(now)}</b> expected</div>
         {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
+        {hasH && <div className="sub" style={{ fontSize: 11.5 }}>Dotted lines: likely range (±2 SD) {money(m2)} to {money(p2)}</div>}
         {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> from games played</div>}
         {started && s.source && Object.values(s.source).includes("kickoff") && <div className="sub" style={{ fontSize: 11.5 }}>Some starting points are Kalshi prices at kickoff (saved history).</div>}
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}
