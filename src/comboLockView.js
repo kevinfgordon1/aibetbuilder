@@ -409,6 +409,7 @@ export function historyRow(line, parlay) {
  * this lock only. Filled first, then everything that did not fill. */
 
 export const QUOTE_ROWS_SHOWN = 5;
+const QUOTE_HOLD_MS = 20000;
 
 const SKIP_WORDS = [
   [/^(oversized|rfq_too_large|over_limit|overlimit|too_large)$/, "over limit", "warn"],
@@ -456,7 +457,29 @@ function statusOf(row) {
 }
 
 /** One quote row: time (ET), price (American), size, venue, plain result. */
-export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
+/**
+ * "asked 85, room for 16 (85 held by a live quote)". Room is what the worker
+ * saw when it declined (combo_submissions.remaining = max - filled - open
+ * quotes), not today's lock room, so a decline made while our own quote was
+ * live no longer reads "asked 85, room for 101". Falls back to the lock's
+ * current room on rows without a saved remaining.
+ */
+function overLimitDetail(size, s, left, filled, liveQuotes) {
+  const saved = toNum(s && s.remaining);
+  const room = saved != null && saved >= 0 ? saved : left;
+  if (!(room > 0)) return `asked ${countText(size)}`;
+  let text = `asked ${countText(size)}, room for ${countText(room)}`;
+  if (saved != null && saved < left) {
+    // Exact only while the lock has no fills (fills since the decision would skew it).
+    const held = Math.round(left - saved);
+    const one = Array.isArray(liveQuotes) && liveQuotes.length === 1 && Math.round(liveQuotes[0]) === held;
+    if (!(filled > 0) && held >= 1) text += ` (${countText(held)} held by ${one ? "a live quote" : "live quotes"})`;
+    else text += " (rest held by live quotes)";
+  }
+  return text;
+}
+
+export function quoteRow(row, { left = 0, filled = 0, liveQuotes = null, ended = false, ticker = null } = {}) {
   if (!row) return null;
   const s = row.submission || {};
   const o = row.outcome || {};
@@ -499,9 +522,7 @@ export function quoteRow(row, { left = 0, ended = false, ticker = null } = {}) {
   } else if (row.bucket === "skipped" || row.bucket === "oversized") {
     offered = false;
     [result, tone] = skipWords(row);
-    if (result === "over limit" && size != null) {
-      details.push(left > 0 ? `asked ${countText(size)}, room for ${countText(left)}` : `asked ${countText(size)}`);
-    }
+    if (result === "over limit" && size != null) details.push(overLimitDetail(size, s, left, filled, liveQuotes));
     if (row.skipFill === "filled") {
       const a = americanFromNoPrice(row.tapeNo);
       details.push(a != null ? `someone else filled it at ${fmtAmerican(a)}` : "someone else filled it");
@@ -565,13 +586,23 @@ export function quoteHistory(attempts, { parlay, now = Date.now() } = {}) {
   const p = parlay || tape.parlay || null;
   const fill = tape.fill || {};
   const left = toNum(fill.left) || 0;
+  const filledNow = toNum(fill.filled) || 0;
   const startMs = p && p.starts_at ? tsOf(p.starts_at) : 0;
   const ended = !!(p && (p.archived_at || (startMs && now >= startMs)));
   const rows = [...(tape.rows || [])].sort((a, b) => tsOf(b.at) - tsOf(a.at));
   const filled = [];
   const notFilled = [];
+  // Our quotes sent in the 20s before a decline (the worker's unaccepted-quote hold).
+  const sentRows = rows.filter((r) => r.bucket !== "skipped" && r.bucket !== "oversized" && r.at);
+  const liveQuotesAt = (r) => {
+    const t = tsOf(r.at);
+    if (!t) return null;
+    return sentRows.filter((x) => { const xt = tsOf(x.at); return xt <= t && t - xt <= QUOTE_HOLD_MS; })
+      .map((x) => toNum((x.submission && x.submission.contracts) ?? x.contracts) || 0);
+  };
   for (const r of rows) {
-    const q = quoteRow(r, { left, ended, ticker: p && p.combo_ticker });
+    const liveQuotes = r.bucket === "oversized" || r.bucket === "skipped" ? liveQuotesAt(r) : null;
+    const q = quoteRow(r, { left, filled: filledNow, liveQuotes, ended, ticker: p && p.combo_ticker });
     if (!q) continue;
     (r.bucket === "filled" ? filled : notFilled).push(q);
   }
