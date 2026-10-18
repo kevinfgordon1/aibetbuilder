@@ -53,7 +53,14 @@ const etDate = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZ
 
 /** Index relay quotes (polymarket-us / novig moneylines) by Kalshi game event, using the Kalshi relay
  *  board for team names. Returns { [event]: { [teamCode]: { [venue]: { levels, at } } } }. */
-export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novigLive = false, polledAt = Date.now() }) {
+// Root-for only. Started games: a Novig in-game quote is dropped when its own update time is older than
+// NOVIG_INPLAY_MAX_AGE_MS, or when it disagrees with a fresh Polymarket US / Kalshi price for the same team by more
+// than NOVIG_INPLAY_MAX_GAP (seen Oct 18: Novig TB stuck at its kickoff 0.44 while Polymarket showed 0.77, even though
+// Novig kept refreshing the quote's timestamp). The inverse bet method on the remaining venues is unchanged.
+export const NOVIG_INPLAY_MAX_AGE_MS = 3 * 60 * 1000;
+export const NOVIG_INPLAY_MAX_GAP = 0.1;
+const topOf = (levels) => { const ps = (levels || []).map((l) => Number(l[0])).filter((x) => x > 0 && x < 1); return ps.length ? Math.min(...ps) : null; };
+export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novigLive = false, polledAt = Date.now(), started = null, kalshiBooks = {}, kalshiAt = polledAt }) {
   const games = new Map(); // event → { away, home, date, codes:[awayCode, homeCode] }
   for (const q of kalshiBoard) {
     if (!q || q.bet_type !== "moneyline" || !q.ticker) continue;
@@ -79,10 +86,24 @@ export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novi
       const levels = Array.isArray(q.depth) && q.depth.length ? q.depth.map((x) => [Number(x.odds), Number(x.size)]) : q.size > 0 ? [[odds, Number(q.size)]] : [];
       const changed = Date.parse(q.updated_at || "") || 0;
       const at = venue === "polymarket" ? Math.max(Date.parse(q.confirmed_at || "") || 0, changed) : novigLive ? polledAt : changed;
-      ((out[ev] = out[ev] || {})[code] = out[ev][code] || {})[venue] = { levels, at };
+      ((out[ev] = out[ev] || {})[code] = out[ev][code] || {})[venue] = { levels, at, changed };
     }
   };
   put("polymarket", polymarket); put("novig", novig);
+  const dropped = [];
+  if (started && started.size) for (const ev of Object.keys(out)) {
+    if (!started.has(ev)) continue;
+    for (const [code, vs] of Object.entries(out[ev])) {
+      const nv = vs.novig; if (!nv) continue;
+      const pm = vs.polymarket && polledAt - vs.polymarket.at <= STALE_MS ? topOf(vs.polymarket.levels) : null;
+      const kb = kalshiBooks[`${ev}-${code}`]; const ks = kb && polledAt - kalshiAt <= STALE_MS ? topOf(kb.yes) : null;
+      const ref = pm != null ? pm : ks; const top = topOf(nv.levels);
+      const old = !(nv.changed > 0) || polledAt - nv.changed > NOVIG_INPLAY_MAX_AGE_MS;
+      const off = ref != null && top != null && Math.abs(top - ref) > NOVIG_INPLAY_MAX_GAP;
+      if (old || off) { delete vs.novig; dropped.push({ event: ev, team: code, novig: top, ref, reason: old ? "old" : "off-market" }); }
+    }
+  }
+  Object.defineProperty(out, "droppedNovig", { value: dropped, enumerable: false });
   return out;
 }
 
