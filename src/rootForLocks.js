@@ -2,6 +2,7 @@
 // fill prices, fees included (same receipt math as the Statement: lockFillReceipt).
 import { bookPnL, lockKind } from "./comboLockProfile.js";
 import { lockFillReceipt } from "./comboStatement.js";
+import { isLockCapFill } from "./comboTape.js";
 
 const num = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const r2 = (x) => Math.round(x * 100) / 100;
@@ -11,7 +12,7 @@ const r2 = (x) => Math.round(x * 100) / 100;
 export function lockPositions(parlay, fills = [], singles = [], filledCount = null) {
   const book = bookPnL({ stake: parlay.parlay_stake, american: parlay.parlay_american, kind: lockKind(parlay) });
   if (!book) return { skip: "no stake / odds" };
-  const mine = (fills || []).filter((f) => f && f.parlay_id === parlay.id && f.is_combo !== false && f.is_taker !== true);
+  const mine = (fills || []).filter((f) => f && f.parlay_id === parlay.id && f.is_combo !== false && isLockCapFill(f));
   const filled = num(filledCount) != null ? num(filledCount) : mine.reduce((a, f) => a + (num(f.count) || 0), 0);
   const rec = filled > 0 ? lockFillReceipt(parlay, mine, filled) : { received: 0, fees: 0, ok: true };
   const received = rec.ok ? rec.received : 0;

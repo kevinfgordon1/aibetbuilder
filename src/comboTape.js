@@ -450,10 +450,23 @@ function polyTwinClaims(submissions, fills, attributedOrders) {
   return claimed;
 }
 
-// True lock hedge fills only (maker / non-taker). Manual taker buys on the
-// same market must not move the hedged bar or the remaining cap.
+// A taker fill that is itself the lock's hedge: we took NO on the market
+// (buy NO, or sell YES). Single-leg / "Lock it" hedges are placed as taker
+// orders (McMichael 3ef0…: 20 + 1730 NO buys), so they are the real hedge.
+// A taker YES buy on the same market is the opposite position (Kenny 799f71e3
+// 12.85 YES buy) and rows with no side stay excluded.
+export function isTakerHedgeFill(f) {
+  if (!f || f.is_taker !== true) return false;
+  const side = String(f.outcome_side || "").toLowerCase();
+  const action = String(f.action || "").toLowerCase();
+  return (side === "no" && action === "buy") || (side === "yes" && action === "sell");
+}
+
+// Lock hedge fills: maker fills plus taker fills that are the hedge (see
+// isTakerHedgeFill). Manual taker YES buys on the same market must not move
+// the hedged bar or the remaining cap.
 export function isLockCapFill(f) {
-  return !!f && f.is_taker !== true;
+  return !!f && (f.is_taker !== true || isTakerHedgeFill(f));
 }
 
 export function mergeSubmissionFillCounts(byParlay, submissions = [], fills = []) {
