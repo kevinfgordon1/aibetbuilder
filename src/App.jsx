@@ -1230,6 +1230,35 @@ function SendToComboLocksButton({ onSend }) {
   );
 }
 
+// Promo single-leg free bet -> Combo Locks single-leg lock (pre-filled; the user
+// reviews and confirms in Combo Locks before anything is saved).
+function LockItButton({ onLock }) {
+  return (
+    <button
+      type="button"
+      data-testid="promo-lock-it"
+      title={`Open Combo Locks with this leg, sportsbook, free-bet stake and odds filled in. Nothing saves until you confirm.`}
+      onClick={(e) => { e.stopPropagation(); onLock(); }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "7px 12px",
+        borderRadius: 8,
+        fontSize: 12,
+        fontWeight: 700,
+        fontFamily: "'DM Sans', sans-serif",
+        background: "rgba(16,185,129,0.14)",
+        color: "#6ee7b7",
+        border: "1px solid rgba(16,185,129,0.45)",
+        cursor: "pointer",
+      }}
+    >
+      🔒 Lock it
+    </button>
+  );
+}
+
 function ExcludeLegButton({ leg, onExclude }) {
   if (!leg) return null;
   return (
@@ -2714,7 +2743,7 @@ export default function App() {
     setFocusCardId(id);
   }, [optimizeTick, promoType, promoBook, stake, numLegs, scanNumLegs, promoScanBusy, promoFilterPending, scanCompletedForCurrent, topParlaysWithHedge, topNoPromoWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
 
-  const sendToComboLocks = (p, kind = "cash") => {
+  const sendToComboLocks = (p, kind = "cash", source = "") => {
     if (!canSeeComboLocks(user)) return;
     const american = kind === "freebet"
       ? p.parlayOdds
@@ -2729,6 +2758,7 @@ export default function App() {
       promoType: promoKind,
       sportsbook: activePromoBookData?.label || "",
       boostPct: promoKind === "boost" ? boostPct : "",
+      source,
     }));
     setActiveTab("combo");
   };
@@ -3749,7 +3779,7 @@ export default function App() {
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                                   <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${stake} cash stake.
-                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
+                                  {" "}{isSingle ? (canSeeComboLocks(user) ? "No opposite price at a book — tap Lock it to hedge it as a single-leg lock on Kalshi and Polymarket instead." : "No opposite price is available to lock both sides.") : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
                                 </div>
                               </>
                             )}
@@ -3908,6 +3938,9 @@ export default function App() {
                             {canSeeComboLocks(user) && !isSingle && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
                             )}
+                            {canSeeComboLocks(user) && isSingle && (
+                              <LockItButton onLock={() => sendToComboLocks(p, "freebet", "promo-lock-it")} />
+                            )}
                           </div>
                           {showLock && (
                             <div onClick={e => e.stopPropagation()}>
@@ -3956,9 +3989,11 @@ export default function App() {
                                   <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${fbAmount} free bet.
                                   {" "}{isSingle ? "No opposite price is available to lock both sides." : canSeeComboLocks(user) ? "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss." : "A per-leg 2-way cannot lock every multi-leg outcome."}
                                 </div>
-                                {canSeeComboLocks(user) && !isSingle && (
+                                {canSeeComboLocks(user) && (
                                   <div style={{ marginTop: 12 }}>
-                                    <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
+                                    {isSingle
+                                      ? <LockItButton onLock={() => sendToComboLocks(p, "freebet", "promo-lock-it")} />
+                                      : <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />}
                                   </div>
                                 )}
                               </>
