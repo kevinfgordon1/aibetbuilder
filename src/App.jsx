@@ -119,6 +119,7 @@ import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
+import { findTopParlaysExact, linearEvForm } from "./promoExactScan.js";
 import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
@@ -2351,6 +2352,10 @@ export default function App() {
 
   const parlayLegPool = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
+    // Free bet / boost / no promo run the exact search over EVERY leg, so
+    // no cap: a top-N-by-edge cap is what let NCAAF legs push out the
+    // MLB/NFL/NBA legs of the best NCAAF-off parlay.
+    if (linearEvForm(promoType, 1, 0)) return promoLegs;
     const sorted = [...promoLegs]
       .sort((a, b) => (ourTrueProb(b.bestOpp) - impliedProb(b.dk)) - (ourTrueProb(a.bestOpp) - impliedProb(a.dk)));
     const capped = capLegsMonotonic(sorted, scanPromoDateRange, PARLAY_LEG_CAP);
@@ -2358,7 +2363,7 @@ export default function App() {
     const pinned = pinTeamIncludeLegs(sorted, includeTeamTokens, PARLAY_LEG_CAP);
     const seen = new Set(pinned);
     return pinned.concat(capped.filter((l) => !seen.has(l)));
-  }, [promoLegs, isParlayPromo, includeTeamTokens, scanPromoDateRange]);
+  }, [promoLegs, isParlayPromo, includeTeamTokens, scanPromoDateRange, promoType]);
 
   const currentPromoScanKey = useMemo(
     () => promoScanInputKey({
@@ -2409,7 +2414,8 @@ export default function App() {
     const ac = new AbortController();
     const scanKey = currentPromoScanKey;
     setPromoScanBusy(true);
-    findTopParlaysChunked(parlayLegPool, scanNumLegs, calc, {
+    const evForm = linearEvForm(promoType, atStake, effectiveBoostPct(promoType, scanBoostPct));
+    (evForm ? findTopParlaysExact : findTopParlaysChunked)(parlayLegPool, scanNumLegs, calc, ...(evForm ? [evForm] : []), {
       maxResults: SCAN_DEEP_RESULTS,
       minFinalOdds: parsedMinFinal,
       maxFinalOdds: parsedMaxFinal,
@@ -2681,6 +2687,7 @@ export default function App() {
         : (ls) => calcParlayEV(ls, effectiveBoostPct(promoType, scanBoostPct), atStake);
     const ac = new AbortController();
     findBestAcrossLegCounts(parlayLegPool, calc, {
+      evForm: linearEvForm(promoType, atStake, effectiveBoostPct(promoType, scanBoostPct)),
       maxLegs: MAX_PROMO_LEGS,
       minFinalOdds: parsedMinFinal,
       maxFinalOdds: parsedMaxFinal,
