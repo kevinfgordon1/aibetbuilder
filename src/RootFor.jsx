@@ -5,7 +5,7 @@ import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import SweatMeter, { PillLoading } from "./RootForSweat";
-import { expectedProfit } from "./rootForSweat";
+import { expectedProfit, lockDecided, dayValue } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
 import { todayEvents, touchedLocks, sheetDayLabel, sheetDay } from "./rootForToday";
 import { summarySentence, kickoffRef, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
@@ -162,8 +162,8 @@ export function DaySheet({ row, past = false }) {
   const approx = !sn || !sn.lockPre || !Object.keys(sn.lockPre).length;
   // settled results (snap.final, from Kalshi) → what these locks actually made; legs still live count at last price
   const fin = (sn && sn.final) || {}; const lastP = { ...((sn && sn.last) || {}), ...fin };
-  const settledPos = positions.filter((p) => p.legs.every((l) => fin[l.event])); const openN = new Set(positions.filter((p) => !settledPos.includes(p)).map((p) => String(p.id))).size;
-  const actual = sn && Object.keys(fin).length ? expectedProfit(settledPos, lastP) : null;
+  const settledPos = positions.filter((p) => lockDecided(p, fin)); const openN = new Set(positions.filter((p) => !settledPos.includes(p)).map((p) => String(p.id))).size;
+  const actual = sn && Object.keys(fin).length ? dayValue(settledPos, lastP, fin) : null;
   const d = { asOf: past ? undefined : row.updated_at, ev: live, model: { positions, probs: {}, finals: {}, teamNames: {} }, perEvent: [], livePos: positions,
     sweat: { started: true, baseline: pre, now: live, dayResult: result, dayRow: sn ? row : undefined, kept: [], last: lastP, frozen: (sn && sn.frozen) || {}, finished: Object.keys((sn && sn.last) || {}), source: {} } };
   return (
