@@ -160,12 +160,17 @@ export function DaySheet({ row, past = false }) {
   const pre = Number(row.pregame_ev), live = Number(row.live_ev); const result = Number.isFinite(Number(row.result)) ? Number(row.result) : live - pre;
   const sn = row.snap || null; const positions = sn && sn.positions ? Object.values(sn.positions) : [];
   const approx = !sn || !sn.lockPre || !Object.keys(sn.lockPre).length;
+  // settled results (snap.final, from Kalshi) → what these locks actually made; legs still live count at last price
+  const fin = (sn && sn.final) || {}; const lastP = { ...((sn && sn.last) || {}), ...fin };
+  const settledPos = positions.filter((p) => p.legs.every((l) => fin[l.event])); const openN = new Set(positions.filter((p) => !settledPos.includes(p)).map((p) => String(p.id))).size;
+  const actual = sn && Object.keys(fin).length ? expectedProfit(settledPos, lastP) : null;
   const d = { asOf: past ? undefined : row.updated_at, ev: live, model: { positions, probs: {}, finals: {}, teamNames: {} }, perEvent: [], livePos: positions,
-    sweat: { started: true, baseline: pre, now: live, dayResult: result, dayRow: sn ? row : undefined, kept: [], last: (sn && sn.last) || {}, frozen: (sn && sn.frozen) || {}, finished: Object.keys((sn && sn.last) || {}), source: {} } };
+    sweat: { started: true, baseline: pre, now: live, dayResult: result, dayRow: sn ? row : undefined, kept: [], last: lastP, frozen: (sn && sn.frozen) || {}, finished: Object.keys((sn && sn.last) || {}), source: {} } };
   return (
     <div>
       <div className="lead">{label}{row.final ? " — final" : past ? " (still in progress when last saved)" : ""}: <b className={result >= 0 ? "pos" : "neg"}>{sMoney(result)}</b> vs the pregame expectation.</div>
       <div className="lead2">{row.games} game{row.games === 1 ? "" : "s"} across {row.locks} lock{row.locks === 1 ? "" : "s"} · pregame {sMoney(pre)} → {row.final ? "final" : "latest"} {sMoney(live)}{past ? ` · saved ${etStamp(row.updated_at)}` : ""}.</div>
+      {actual != null && <div className="lead2" style={{ fontSize: 15 }}>Actual P/L for these locks{openN ? ` (settled so far, ${openN} lock${openN === 1 ? "" : "s"} still live)` : ""}: <b className={actual >= 0 ? "pos" : "neg"}>{sMoney(actual)}</b> <span className="sub">· sportsbook result + hedge fills for every lock touching this day (unfilled cash parlays count their lost stake); can differ from History P/L by a few dollars (fees, rounding).</span></div>}
       {approx && <div className="note" style={{ color: "#fbbf24" }}>Baseline approximate: this day was saved before per-lock first-kickoff baselines existed, so it uses each game's kickoff numbers{sn ? "" : " (no leg detail saved for this day)"}.</div>}
       <SweatMeter d={d} legs={!!sn} liveCol={false} />
     </div>

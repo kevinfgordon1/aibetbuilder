@@ -266,6 +266,54 @@ async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
   for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(freeze));
 }
 
+// Settled results for legs that dropped off the live boards (snap.last keeps only their LAST LIVE price, e.g.
+// PIT 0.565 an hour before the end). Kalshi market results: binary market → yes/no; game event → the team whose
+// market settled yes; "NE<8"/"NE>=8" buckets → that team won AND its "wins by 8+" spread market (KX…SPREAD-…-NE8).
+const kRetry = async (u) => { for (let i = 0; ; i++) { const r = await deps.fetch(u, { headers: { accept: 'application/json' } }); if (r.status !== 429 || i >= 3) return r; await new Promise((z) => setTimeout(z, 300 * (i + 1))); } };
+const SETTLED = new Set(['finalized', 'settled', 'determined']);
+async function kMarket(ticker) { try { const r = await kRetry(`${KALSHI}/markets/${encodeURIComponent(ticker)}`); if (!r.ok) return null; const j = await r.json(); return j && j.market; } catch { return null; } }
+async function resolveFinal(ev, dist) {
+  const outs = Object.keys(dist || {}); if (!outs.length) return null;
+  const done = (m) => m && SETTLED.has(String(m.status)) && (m.result === 'yes' || m.result === 'no');
+  if (outs.every((o) => o === 'yes' || o === 'no')) { const m = await kMarket(ev); return done(m) ? { yes: m.result === 'yes' ? 1 : 0, no: m.result === 'yes' ? 0 : 1 } : null; }
+  let ms; try { const r = await kRetry(`${KALSHI}/markets?event_ticker=${encodeURIComponent(ev)}&limit=100`); if (!r.ok) return null; ms = ((await r.json()) || {}).markets || []; } catch { return null; }
+  if (!ms.length || !ms.every(done)) return null;
+  const w = (ms.find((m) => m.result === 'yes') || {}).ticker; const team = w ? w.slice(ev.length + 1) : null;
+  const res = {};
+  for (const o of outs) {
+    if (o === '__neither') { res[o] = team ? 0 : 1; continue; }
+    const b = o.match(/^([A-Z]+)(<|>=)(\d+)$/);
+    if (!b) { res[o] = o === team ? 1 : 0; continue; }
+    if (b[1] !== team) { res[o] = 0; continue; }
+    const [series, ...rest] = ev.split('-'); const sm = await kMarket(`${series.replace('GAME', 'SPREAD')}-${rest.join('-')}-${team}${b[3]}`);
+    if (!done(sm)) return null; const cover = sm.result === 'yes'; res[o] = (b[2] === '>=') === cover ? 1 : 0;
+  }
+  return Object.values(res).some((v) => v === 1) ? res : null;
+}
+// fill snap.final for the day's legs no longer on the board (or not yet confirmed); returns true when every leg is settled
+async function resolveSnapFinals(snap, probs = {}) {
+  snap.final = snap.final || {}; const todo = Object.keys(snap.last || {}).filter((ev) => !snap.final[ev] && !(probs[ev] && Math.max(...Object.values(probs[ev])) >= 0.995));
+  for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(async (ev) => { const f = await resolveFinal(ev, snap.last[ev]).catch(() => null); if (f) snap.final[ev] = f; }));
+  return Object.keys(snap.last || {}).every((ev) => snap.final[ev] || (probs[ev] && Math.max(...Object.values(probs[ev])) >= 0.995));
+}
+// Keep saving recent sheet days until every leg of the day's locks is settled (works with no open locks / cron):
+// live_ev at settled results = what those locks actually made; final + 'settled' once all are decided.
+async function settleDays(client, userId, now, skipDay = null) {
+  try {
+    const S = await import('../src/rootForSweat.js');
+    const lo = new Date(now - 4 * 86400000).toISOString().slice(0, 10);
+    const { data } = await client.from('root_for_needle_days').select('day,final,final_reason,snap').eq('user_id', userId).gte('day', lo);
+    for (const row of data || []) {
+      if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled') || String(row.day).slice(0, 10) === skipDay) continue;
+      const snap = row.snap; const all = await resolveSnapFinals(snap);
+      const pos = Object.values(snap.positions); const liveP = { ...(snap.last || {}), ...snap.final }; const preP = { ...liveP, ...(snap.frozen || {}) };
+      const liveEv = S.expectedProfit(pos, liveP); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
+      const stamp = new Date(now).toISOString();
+      await client.from('root_for_needle_days').upsert({ user_id: userId, day: row.day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, snap, final: all || !!row.final, final_reason: all ? 'settled' : row.final_reason || null, updated_at: stamp }, { onConflict: 'user_id,day' });
+    }
+  } catch (e) { console.error('[root-for] settle failed:', String((e && e.message) || e).slice(0, 120)); }
+}
+
 // Daily needle history (owner only). One row per sheet day (Today rolls over at 11 AM ET).
 // result = EV of the day's locks at the day's games' latest chances − EV with those games at their kickoff numbers
 // (later games stay at current chances in both, so only the day's games count).
@@ -291,12 +339,13 @@ async function needleDay(client, userId, out, now, frozen, starts = {}, rows = [
       const dayEvs = Object.keys(snap.frozen);
       if (dayEvs.length) {
         const pos = Object.values(snap.positions);
-        const liveP = { ...probs, ...Object.fromEntries(dayEvs.map((ev) => [ev, probs[ev] || snap.last[ev]])) };
+        const allSettled = await resolveSnapFinals(snap, probs);
+        const liveP = { ...probs, ...Object.fromEntries(dayEvs.map((ev) => [ev, probs[ev] || snap.last[ev]])), ...snap.final };
         const preP = { ...liveP, ...snap.frozen };
         await lockBaselines(snap, pos, liveP, preP, starts, rows, now);
         const liveEv = S.expectedProfit(pos, liveP); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
-        const decided = Object.keys(snap.last).every((ev) => !probs[ev] || Math.max(...Object.values(probs[ev])) >= 0.98);
-        await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'all_decided' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
+        const decided = allSettled;
+        await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'settled' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
       }
     }
     const { data: hist } = await T('root_for_needle_days').select('day,result,pregame_ev,live_ev,games,locks,final').eq('user_id', userId).order('day', { ascending: false }).limit(30);
@@ -402,10 +451,10 @@ async function handler(req, res) {
       const client = deps.createClient(env0.SUPABASE_URL || env0.VITE_SUPABASE_URL, env0.SUPABASE_SERVICE_KEY, clientOpts);
       const uid = lib.OWNER_USER_ID; const M = await loadMods();
       const { parlays, fills, singles } = await loadLocks(client, uid);
-      if (!parlays.length) return json(res, 200, { ok: true, empty: true });
+      if (!parlays.length) { await settleDays(client, uid, deps.now()); return json(res, 200, { ok: true, empty: true }); }
       const mk = await loadMarkets(M, parlays, env0); const now = deps.now();
       const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });
-      const sw = await sweatBaseline(client, out, now, uid);
+      const sw = await sweatBaseline(client, out, now, uid); { const TD = await import('../src/rootForToday.js'); await settleDays(client, uid, now, TD.sheetDay(now)); } // today: needleDay above
       return json(res, 200, { ok: true, days: (sw.history || []).length });
     } catch (e) { return json(res, 500, { ok: false, error: 'cron failed' }); }
   }
@@ -442,6 +491,7 @@ async function handler(req, res) {
     const M = await loadMods();
     const { parlays, fills, singles } = await loadLocks(client, uid);
     if (!parlays.length) { // nothing open: still show the latest saved day (and the past-day picker)
+      if (auth.owner && uid === auth.user.id) await settleDays(client, uid, deps.now());
       const history = await needleHist().catch(() => []); const latest = history[0] ? await needleRow(String(history[0].day).slice(0, 10)).catch(() => null) : null;
       return json(res, 200, { ok: true, empty: true, locksTotal: 0, ...(history.length ? { asOf: new Date(deps.now()).toISOString(), sweat: { history, dayRow: latest } } : {}) });
     }
