@@ -225,6 +225,15 @@ function todayView(base, nowMs) {
 
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
 
+export function RootForEmpty() {
+  return (
+    <div className="rootfor-empty" style={{ border: "1px solid #374151", borderRadius: 12, padding: "12px 16px", margin: "0 0 16px", background: "#0b1220", color: "#e5e7eb", fontSize: 13 }}>
+      <div style={{ fontSize: 16, fontWeight: 600 }}>What to root for <span style={{ color: "#9ca3af", fontSize: 12, fontWeight: 400, marginLeft: 8 }}>No open locks</span></div>
+      <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 6 }}>The live needle starts here when your next lock's first game kicks off. After the games finish, each day's actual P/L is saved here so you can look back at past days.</div>
+    </div>
+  );
+}
+
 export default function RootFor({ user, initialData = null, viewAs = "" }) {
   const vaH = viewAs ? { "x-view-as": viewAs } : {};
   // Always starts hidden on every page load (no remembered open state).
@@ -313,8 +322,9 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   useEffect(() => { if (open && pickedDay && !initialData && !(pickedDay in dayRows)) loadDay(pickedDay); }, [open, pickedDay]); // eslint-disable-line react-hooks/exhaustive-deps
   const pickedRow = pickedDay ? (initialData && initialData.sweat && initialData.sweat.dayRow && String(initialData.sweat.dayRow.day).slice(0, 10) === pickedDay ? initialData.sweat.dayRow : dayRows[pickedDay]) : null;
   const todayRow = base && base.sweat && base.sweat.dayRow && base.sweat.dayRow.snap ? base.sweat.dayRow : null;
+  // Combo Locks user with no open locks and no saved days yet: a small empty state instead of nothing.
+  if (signedIn && ((lockCount === 0 && dayCount === 0) || (base && base.empty && !(base.sweat && base.sweat.dayRow)))) return <RootForEmpty />;
   if (!can) return null;
-  if (base && base.empty && !(base.sweat && base.sweat.dayRow)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
   if (base) for (const e of base.perEvent || []) { const k = (e.slot && e.slot.key) || "9"; let g = slots.find((x) => x.key === k); if (!g) slots.push((g = { key: k, label: (e.slot && e.slot.label) || "Other days", rows: [] })); g.rows.push(e); }

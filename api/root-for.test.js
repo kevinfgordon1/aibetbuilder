@@ -25,7 +25,8 @@ function from(name) {
     eq(c, v) { log.push([name, 'eq', c, v]); f.push((r) => r[c] === v); return q; },
     is(c, v) { f.push((r) => r[c] === v); return q; },
     in(c, vs) { log.push([name, 'in', c, vs]); f.push((r) => vs.includes(r[c])); return q; },
-    limit() { return q; },
+    limit() { return q; }, gte() { return q; }, order() { return q; },
+    upsert() { log.push([name, 'upsert']); return Promise.resolve({ error: null }); },
     then(res, rej) { const rows = (tables[name] || []).filter((r) => f.every((fn) => fn(r))); return Promise.resolve(head ? { count: rows.length, error: null } : { data: rows, error: null }).then(res, rej); },
   };
   return q;
