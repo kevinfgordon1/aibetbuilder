@@ -1196,6 +1196,15 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     }
     return { message: "Save failed" };
   };
+  // Save each leg's placement fair price for "What to root for" (server: /api/combo-leg-fairs). Fire and forget:
+  // the lock is already saved, and the 5-minute capture job retries anything this misses.
+  const saveLegFairs = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session && session.access_token; if (!token) return;
+      await fetch("/api/combo-leg-fairs", { method: "POST", headers: { accept: "application/json", authorization: "Bearer " + token } });
+    } catch (_) { /* best effort */ }
+  };
   const saveSeparateParlay = async (legs) => {
     const kind = lockKind(form);
     const exFill = feeOn ? (exchangeFromAllIn(+form.fill) || 0) : +form.fill;
@@ -1228,6 +1237,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       return;
     }
     setSubmitToast(buildLockSubmittedToast(row, { feesEnabled: feeOn }));
+    saveLegFairs();
     setLegRows([{ id: 1, gameKey: "", marketVal: "" }, { id: 2, gameKey: "", marketVal: "" }]);
     setForm((f) => ({ ...f, label: "", labelEdited: false, starts: "", sportsbook: "", boostPct: "" }));
     setMergePrompt(null);

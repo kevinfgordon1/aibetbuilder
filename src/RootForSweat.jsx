@@ -31,8 +31,16 @@ export function pregameRange(d, s) {
     const center = today ? null : lockedPregameEv(pos, preP, lp);
     const r = rootFor(simPos, simP, { histBins: 40, mcSamples: 20000, rng: seeded(11) });
     if (!r || !r.hist || !r.hist.bins || !r.hist.bins.length) return null;
-    return { ev: Number(r.ev), q023: quantileOf(r.hist, 0.023), q977: quantileOf(r.hist, 0.977), center, frozenLocks: Object.keys(lp).length, fallbackLegs: Object.values(lp).reduce((a, f) => a + Number(f.fb || 0), 0) };
+    return { ev: Number(r.ev), q023: quantileOf(r.hist, 0.023), q977: quantileOf(r.hist, 0.977), center, frozenLocks: Object.keys(lp).length, fallbackLegs: Object.values(lp).reduce((a, f) => a + Number(f.fb || 0), 0), ...savedLegCounts(lp) };
   } catch { return null; }
+}
+// How each frozen lock's kickoff numbers were taken: st = legs from prices saved ≤15 min before the first kickoff
+// (exact), fb = estimated (earlier saved price / stored snapshot), n = legs frozen. Locks frozen before n existed
+// are left out of the count.
+export function savedLegCounts(lp) {
+  let saved = 0, est = 0, legsN = 0;
+  for (const f of Object.values(lp || {})) { if (!f || f.n == null) continue; legsN += Number(f.n) || 0; saved += Number(f.st) || 0; est += Number(f.fb) || 0; }
+  return { savedLegs: saved, estimatedLegs: est, countedLegs: legsN };
 }
 // Finished binary legs (props/totals/spreads) lose their names when they drop off the board: saved names first,
 // else read the Kalshi ticker ("KXNFLTD-26OCT18NONYG-NOKMILLER5-1" → "K. Miller (NO) 1+ TD").
@@ -171,6 +179,7 @@ export default function SweatMeter({ d, legs = true, liveCol = true }) {
         {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
         {hasH && <div className="sub" style={{ fontSize: 11.5 }}>{pre ? "Pregame likely range" : "Dotted lines: likely range"} (±2 SD) {money(m2)} to {money(p2)}</div>}
         {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> from games played</div>}
+        {started && pre && pre.countedLegs > 0 && <div className="sub" data-testid="rf-saved-legs" style={{ fontSize: 11.5 }}>Kickoff numbers: <b>{pre.savedLegs}</b> of {pre.countedLegs} legs from prices saved before kickoff{pre.estimatedLegs ? `, ${pre.estimatedLegs} estimated` : ""}{pre.countedLegs - pre.savedLegs - pre.estimatedLegs > 0 ? `, ${pre.countedLegs - pre.savedLegs - pre.estimatedLegs} from live prices at kickoff` : ""}.</div>}
         {started && s.source && Object.values(s.source).includes("kickoff") && <div className="sub" style={{ fontSize: 11.5 }}>Some starting points are Kalshi prices at kickoff (saved history).</div>}
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}
         

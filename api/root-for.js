@@ -207,6 +207,17 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
   return { [h]: raw[h], [o]: 1 - raw[h] };
 }
 
+/** Saved leg fairs (combo_lock_leg_fairs) by lock id. Missing table / error → {} (the sheet falls back as before). */
+async function loadStoredFairs(client, ids) {
+  const out = {};
+  for (let i = 0; i < (ids || []).length; i += 200) {
+    const { data, error } = await client.from('combo_lock_leg_fairs').select('parlay_id,at_lock,at_lock_at,pregame,pregame_at').in('parlay_id', ids.slice(i, i + 200));
+    if (error) { console.error('[root-for] saved leg fairs unavailable:', String(error.message || error).slice(0, 120)); return out; }
+    for (const r of data || []) out[r.parlay_id] = r;
+  }
+  return out;
+}
+
 // Per-lock pregame baseline (Kevin, Oct 18): a lock's baseline locks when its FIRST leg kicks off. Every leg is
 // taken at its chances at that moment, with the lock's contracts as of then, and frozen in the day snapshot
 // (snap.lockPre[id] = { t0, pos, probs, adds, fb }). Seen within 5 min of that kickoff → the live chances; later
@@ -214,8 +225,11 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
 // latest captured at/before the kickoff, else the earliest stored, else that game's kickoff row) — counted in fb.
 // Contracts added after the first kickoff (rare) join at the chances when we first see them (adds).
 // Locks whose first leg hasn't started count at live pregame in both baseline and Now (no effect on the needle).
-async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
-  const S = await import('../src/rootForSweat.js');
+// Saved leg prices (combo_lock_leg_fairs, src/rootForStored.js) come first: a value saved ≤15 min before the first
+// kickoff IS the kickoff number (counted in st). An older saved value (e.g. at lock time) beats the generic
+// earlier-stored fallback but not the candles (still counted in fb). n = legs frozen for the lock.
+async function lockBaselines(snap, pos, liveP, preP, starts, rows, now, loadStored = null) {
+  const S = await import('../src/rootForSweat.js'); const ST = await import('../src/rootForStored.js');
   snap.lockPre = snap.lockPre || {};
   const memo = new Map(); const deadline = Date.now() + 5000; // locks not reached in time freeze on the next request
   const rf = async (u, o) => { for (let i = 0; ; i++) { const r = await deps.fetch(u, o); if (r.status !== 429 || i >= 3) return r; await new Promise((z) => setTimeout(z, 300 * (i + 1))); } }; // Kalshi rate limit
@@ -246,11 +260,17 @@ async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
     }
     todo.push({ id, p, legs, t0 });
   }
+  let stored = {};
+  if (todo.length && loadStored) { try { stored = (await loadStored([...new Set(todo.map((x) => x.id.split(':')[0]))])) || {}; } catch (_) { stored = {}; } }
+  const heldM = ST.heldByEvent(pos);
   const freeze = async ({ id, p, legs, t0 }) => {
     if (Date.now() > deadline) return;
-    const probs = {}; let fb = 0; const fresh = now - t0 <= 5 * 60000;
+    const probs = {}; let fb = 0; let st = 0; const fresh = now - t0 <= 5 * 60000;
+    const pick = ST.pickStored(stored[id.split(':')[0]], t0);
+    const fromStored = (ev, dist) => (pick ? ST.storedEventProbs(ev, dist, pick.fairs, heldM[ev] || new Set()) : null);
     for (const l of legs) {
       const ev = l.event; if (probs[ev]) continue; const dist = liveP[ev] || preP[ev];
+      if (pick && pick.kind === 'kickoff') { const sp = fromStored(ev, dist); if (sp) { probs[ev] = sp; st += 1; continue; } }
       if (fresh && liveP[ev]) { probs[ev] = liveP[ev]; continue; }
       const iso = new Date(t0).toISOString(); let got = null;
       try {
@@ -260,13 +280,14 @@ async function lockBaselines(snap, pos, liveP, preP, starts, rows, now) {
       } catch { got = null; }
       if (got) { probs[ev] = got; continue; }
       fb += 1;
+      if (pick && pick.kind === 'early') { const sp = fromStored(ev, dist); if (sp) { probs[ev] = sp; continue; } }
       const mine = rows.filter((x) => x.event === ev && x.probs);
       const before = mine.filter((x) => x.captured_at && Date.parse(x.captured_at) <= t0).sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
       const earliest = [...mine].sort((a, b) => String(a.captured_at).localeCompare(String(b.captured_at)))[0];
       probs[ev] = (before || earliest || {}).probs || (snap.frozen || {})[ev] || dist;
     }
     if (Date.now() > deadline + 2500) return; // too slow: try again next request rather than freeze half-fetched
-    snap.lockPre[id] = { t0: new Date(t0).toISOString(), pos: { id: p.id, legs, hit: p.hit, miss: p.miss }, probs, adds: 0, fb };
+    snap.lockPre[id] = { t0: new Date(t0).toISOString(), pos: { id: p.id, legs, hit: p.hit, miss: p.miss }, probs, adds: 0, fb, st, n: Object.keys(probs).length };
   };
   for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(freeze));
 }
@@ -374,7 +395,7 @@ async function needleDay(client, userId, out, now, frozen, starts = {}, rows = [
         const allSettled = await resolveSnapFinals(snap, probs);
         const liveP = { ...probs, ...Object.fromEntries(dayEvs.map((ev) => [ev, probs[ev] || snap.last[ev]])), ...snap.final };
         const preP = { ...liveP, ...snap.frozen };
-        await lockBaselines(snap, pos, liveP, preP, starts, rows, now);
+        await lockBaselines(snap, pos, liveP, preP, starts, rows, now, (ids) => loadStoredFairs(client, ids));
         const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
         const decided = allSettled || pos.every((p) => S.lockDecided(p, snap.final));
         await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'settled' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
@@ -543,4 +564,4 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods, matchKey, isPlaceholderStart, nflTeam, nflKey, lockStarts };
+module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, nflTeam, nflKey, lockStarts };
