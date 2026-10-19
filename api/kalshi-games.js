@@ -7,6 +7,7 @@
 //   NFL   side=KXNFLGAME    spread=KXNFLSPREAD   total=KXNFLTOTAL
 //   NCAAF side=KXNCAAFGAME  spread=KXNCAAFSPREAD total=KXNCAAFTOTAL
 //   NHL   side=KXNHLGAME    spread=KXNHLSPREAD   total=KXNHLTOTAL
+//   NBA   side=KXNBAGAME    spread=KXNBASPREAD   total=KXNBATOTAL
 // Series tickers were confirmed against the live Kalshi series catalog; if a
 // type 404s later, that ladder is simply empty (moneyline still ships).
 // All share the game key `<SERIES>-<DATE[TIME]><TEAMS>` (group on the part after
@@ -41,6 +42,9 @@ const MARKET_SERIES = {
   nfl: { side: 'KXNFLGAME', spread: 'KXNFLSPREAD', total: 'KXNFLTOTAL' },
   ncaaf: { side: 'KXNCAAFGAME', spread: 'KXNCAAFSPREAD', total: 'KXNCAAFTOTAL' },
   nhl: { side: 'KXNHLGAME', spread: 'KXNHLSPREAD', total: 'KXNHLTOTAL' },
+  // NBA (verified Oct 19 2026 against live Kalshi: KXNBAGAME-26OCT20OKCSAS,
+  // KXNBASPREAD-...-OKC5 "Oklahoma City wins by over 4.5 points", KXNBATOTAL-...-232).
+  nba: { side: 'KXNBAGAME', spread: 'KXNBASPREAD', total: 'KXNBATOTAL' },
   // Soccer: 3-way regulation result (90' + stoppage; no extra time/penalties).
   // Moneyline only — each event lists <TEAM A>, <TEAM B> and TIE (shown as "Draw").
   mls: { side: 'KXMLSGAME' },
@@ -71,7 +75,9 @@ const PROP_SERIES = {
 // drops at puck drop instead of lingering until midnight ET.
 // UFC occurrence_datetime sits ~3.5-4h after the fight's walkout (checked against
 // Odds API commence times, Oct 17 2026 card), so 4h back is the start estimate.
-const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, ufc: 4 * 3600 * 1000 };
+// NBA occurrence_datetime is also tip-off + 3h (KXNBAGAME-26OCT20OKCSAS 04:30Z for a
+// 9:30 PM ET tip; KXNBAGAME-26OCT20BOSDET likewise).
+const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, nba: 3 * 3600 * 1000, ufc: 4 * 3600 * 1000 };
 // NFL / college football occurrence_datetime is kickoff + 3h (Oct 19 2026: every
 // KXNCAAFGAME with a real time sat exactly 3.0h after ESPN's and the odds feed's
 // kickoff, e.g. Missouri St. vs Delaware 10 PM vs 7 PM ET; KXNFLGAME-26OCT19WASSF

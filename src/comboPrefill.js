@@ -6,9 +6,9 @@
 
 export const encVal = (t, s) => `${t}|${s}`;
 
-export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"];
+export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "nba", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"];
 export const COMBO_SPORT_LABEL = {
-  mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL",
+  mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL", nba: "NBA",
   mls: "MLS", epl: "EPL", laliga: "La Liga", seriea: "Serie A", bundesliga: "Bundesliga", ligue1: "Ligue 1", ucl: "UCL",
   ufc: "UFC",
 };
@@ -20,6 +20,7 @@ const PROMO_TO_SPORT = {
   americanfootball_nfl: "nfl",
   americanfootball_ncaaf: "ncaaf",
   icehockey_nhl: "nhl",
+  basketball_nba: "nba",
   soccer_usa_mls: "mls",
   soccer_epl: "epl",
   soccer_spain_la_liga: "laliga",
@@ -241,6 +242,42 @@ const NHL_TEAMS = [
   { id: "WPG", aliases: ["winnipeg jets", "winnipeg", "jets", "wpg"] },
 ];
 
+// Canonical ids are the codes Kalshi bakes into KXNBA game keys (26OCT20OKCSAS,
+// 26OCT20BOSDET, 26OCT21GSWLAL). Kalshi labels are city-only ("Oklahoma City",
+// "Los Angeles L" / "Los Angeles C", "New York"); books use full names.
+const NBA_TEAMS = [
+  { id: "ATL", aliases: ["atlanta hawks", "atlanta", "hawks", "atl"] },
+  { id: "BOS", aliases: ["boston celtics", "boston", "celtics", "bos"] },
+  { id: "BKN", aliases: ["brooklyn nets", "brooklyn", "nets", "bkn", "bk", "brk"] },
+  { id: "CHA", aliases: ["charlotte hornets", "charlotte", "hornets", "cha", "cho"] },
+  { id: "CHI", aliases: ["chicago bulls", "chicago", "bulls", "chi"] },
+  { id: "CLE", aliases: ["cleveland cavaliers", "cleveland", "cavaliers", "cavs", "cle"] },
+  { id: "DAL", aliases: ["dallas mavericks", "dallas", "mavericks", "mavs", "dal"] },
+  { id: "DEN", aliases: ["denver nuggets", "denver", "nuggets", "den"] },
+  { id: "DET", aliases: ["detroit pistons", "detroit", "pistons", "det"] },
+  { id: "GSW", aliases: ["golden state warriors", "golden state", "warriors", "gsw", "gs"] },
+  { id: "HOU", aliases: ["houston rockets", "houston", "rockets", "hou"] },
+  { id: "IND", aliases: ["indiana pacers", "indiana", "pacers", "ind"] },
+  { id: "LAC", aliases: ["los angeles clippers", "la clippers", "clippers", "los angeles c", "lac"] },
+  { id: "LAL", aliases: ["los angeles lakers", "la lakers", "lakers", "los angeles l", "lal"] },
+  { id: "MEM", aliases: ["memphis grizzlies", "memphis", "grizzlies", "grizz", "mem"] },
+  { id: "MIA", aliases: ["miami heat", "miami", "heat", "mia"] },
+  { id: "MIL", aliases: ["milwaukee bucks", "milwaukee", "bucks", "mil"] },
+  { id: "MIN", aliases: ["minnesota timberwolves", "minnesota", "timberwolves", "wolves", "min"] },
+  { id: "NOP", aliases: ["new orleans pelicans", "new orleans", "pelicans", "pels", "nop", "no", "nor"] },
+  { id: "NYK", aliases: ["new york knicks", "ny knicks", "knicks", "new york", "nyk", "ny"] },
+  { id: "OKC", aliases: ["oklahoma city thunder", "oklahoma city", "thunder", "okc", "okla city"] },
+  { id: "ORL", aliases: ["orlando magic", "orlando", "magic", "orl"] },
+  { id: "PHI", aliases: ["philadelphia 76ers", "philadelphia sixers", "philadelphia", "76ers", "sixers", "phi"] },
+  { id: "PHX", aliases: ["phoenix suns", "phoenix", "suns", "phx", "pho"] },
+  { id: "POR", aliases: ["portland trail blazers", "portland trailblazers", "portland", "trail blazers", "blazers", "por"] },
+  { id: "SAC", aliases: ["sacramento kings", "sacramento", "kings", "sac"] },
+  { id: "SAS", aliases: ["san antonio spurs", "san antonio", "spurs", "sas", "sa"] },
+  { id: "TOR", aliases: ["toronto raptors", "toronto", "raptors", "tor"] },
+  { id: "UTA", aliases: ["utah jazz", "utah", "jazz", "uta", "utah j"] },
+  { id: "WAS", aliases: ["washington wizards", "washington", "wizards", "was", "wsh"] },
+];
+
 function buildSportIndex(teams, extraTwo = []) {
   const twoLetter = new Set(extraTwo);
   const codeToId = {};
@@ -262,6 +299,7 @@ const SPORT_INDEX = {
   mlb: buildSportIndex(MLB_TEAMS, ["AZ", "KC", "SD", "SF", "TB"]),
   nfl: buildSportIndex(NFL_TEAMS, ["NE", "SF", "GB", "KC", "TB", "LV", "NO"]),
   nhl: buildSportIndex(NHL_TEAMS, ["LA", "NJ", "SJ", "TB"]),
+  nba: buildSportIndex(NBA_TEAMS, ["GS", "NO", "NY", "SA", "BK"]),
 };
 
 export function normalize(s) {
@@ -279,7 +317,7 @@ export function normalize(s) {
 export function canonicalTeamName(raw, sport = "mlb") {
   const id = identifyTeam(raw, sport);
   if (!id) return null;
-  const teams = sport === "nfl" ? NFL_TEAMS : sport === "mlb" ? MLB_TEAMS : sport === "nhl" ? NHL_TEAMS : null;
+  const teams = sport === "nfl" ? NFL_TEAMS : sport === "mlb" ? MLB_TEAMS : sport === "nhl" ? NHL_TEAMS : sport === "nba" ? NBA_TEAMS : null;
   const team = teams && teams.find((t) => t.id === id);
   const full = team && team.aliases && team.aliases[0];
   if (!full) return null;
@@ -898,7 +936,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
   for (const leg of promoLegs || []) {
     const sport = promoSportOf(leg);
     if (!sport) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, and NHL main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, NHL, and NBA main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }

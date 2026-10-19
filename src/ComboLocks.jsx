@@ -1646,7 +1646,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             )}
             {prefillWarning && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
-                Couldn't match {prefillWarning.length} leg{prefillWarning.length === 1 ? "" : "s"} automatically (supported: MLB, NFL, college football and NHL main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, MLB home runs, NFL anytime TDs, NHL goals). Pick those rows by hand, then save. Nothing has been saved yet.
+                Couldn't match {prefillWarning.length} leg{prefillWarning.length === 1 ? "" : "s"} automatically (supported: MLB, NFL, college football, NHL and NBA main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, MLB home runs, NFL anytime TDs, NHL goals). Pick those rows by hand, then save. Nothing has been saved yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
                   {prefillWarning.map((u, i) => <li key={i}>{u.name} — {u.reason}</li>)}
                 </ul>
