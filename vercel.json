@@ -34,7 +34,7 @@
     },
     {
       "path": "/api/combo-auto-settle",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/30 * * * *"
     }
   ],
   "functions": {
