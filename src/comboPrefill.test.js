@@ -1165,3 +1165,26 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
 
   console.log("comboPrefill player-prop tests passed");
 }
+
+// ── Oct 19 2026: college names the odds feed and Kalshi spell differently ──
+{
+  const { ncaafTeamsMatch, ncaafCanonName } = await import("./comboPrefill.js");
+  const game = (a, b) => ({ key: "26OCT24X", title: `${a} vs ${b}`, markets: { side: [{ label: a }, { label: b }] } });
+  const pairs = [
+    ["Pittsburgh Panthers @ Miami Hurricanes", game("Miami (FL)", "Pittsburgh")],
+    ["UL Monroe Warhawks @ Troy Trojans", game("Troy", "Louisiana-Monroe")],
+    ["James Madison Dukes @ App State Mountaineers", game("Appalachian St.", "James Madison")],
+    ["Massachusetts Minutemen @ UConn Huskies", game("UConn", "UMass")],
+    ["UAlbany Great Danes @ Rhode Island Rams", game("Rhode Island", "University at Albany")],
+    ["Stonehill Skyhawks @ Long Island University Sharks", game("LIU", "Stonehill")],
+    ["UT Martin Skyhawks @ Western Illinois Leathernecks", game("Western Illinois", "Tennessee-Martin")],
+  ];
+  for (const [promo, g] of pairs) assert.ok(ncaafTeamsMatch(promo, g), promo);
+  // Miami (FL) is not Miami (OH); UL Lafayette is not UL Monroe.
+  assert.ok(!ncaafTeamsMatch("Pittsburgh Panthers @ Miami Hurricanes", game("Miami (OH)", "Pittsburgh")));
+  assert.ok(!ncaafTeamsMatch("Louisiana Ragin' Cajuns @ Troy Trojans", game("Troy", "Louisiana-Monroe")));
+  assert.ok(ncaafTeamsMatch("Louisiana Ragin' Cajuns @ Troy Trojans", game("Troy", "Louisiana")));
+  assert.equal(ncaafCanonName("Appalachian St."), "appalachian state");
+  assert.equal(ncaafCanonName("Miami (FL)"), "miami florida");
+  console.log("comboPrefill college alias tests passed");
+}

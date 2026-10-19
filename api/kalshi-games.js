@@ -72,6 +72,12 @@ const PROP_SERIES = {
 // UFC occurrence_datetime sits ~3.5-4h after the fight's walkout (checked against
 // Odds API commence times, Oct 17 2026 card), so 4h back is the start estimate.
 const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, ufc: 4 * 3600 * 1000 };
+// NFL / college football occurrence_datetime is kickoff + 3h (Oct 19 2026: every
+// KXNCAAFGAME with a real time sat exactly 3.0h after ESPN's and the odds feed's
+// kickoff, e.g. Missouri St. vs Delaware 10 PM vs 7 PM ET; KXNFLGAME-26OCT19WASSF
+// 03:15Z for an 8:15 PM ET kickoff). Mis-dated games use a 03:00Z placeholder, so
+// ESPN's kickoff wins whenever ESPN lists the game (see groupSportGames).
+const FOOTBALL_OCCURRENCE_OFFSET_MS = 3 * 3600 * 1000;
 
 async function fetchJson(url) {
   const ctrl = new AbortController();
@@ -332,9 +338,12 @@ const ESPN_FOOTBALL = {
     'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?groups=81&limit=500',
   ],
 };
+// Kalshi label -> ESPN name where the words differ (normalized form on both sides).
+const ESPN_NAME_ALIASES = { 'university at albany': 'ualbany', albany: 'ualbany' };
 function normTeam(s) {
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const n = String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/['\u2019]/g, '').replace(/\bst\.?(?=\s|$)/g, 'state').replace(/[^a-z0-9]+/g, ' ').trim();
+  return ESPN_NAME_ALIASES[n] || n;
 }
 function espnGamesFrom(body) {
   const out = [];
@@ -360,18 +369,23 @@ function sideMatchesEspnTeam(side, team) {
   const code = teamCodeOf(tickerTail(side.ticker));
   return (n && team.names.includes(n)) || (!!code && code === team.abbr);
 }
-function espnKickoffFor(rawSides, espnGames, keyDayMs, nowMs) {
+// The one ESPN game with the same two teams kicking off within 4 days after the key date
+// (any state), else null (none or ambiguous).
+function espnMatchFor(rawSides, espnGames, keyDayMs) {
   const sides = (rawSides || []).filter((s) => !/-TIE$/i.test(s.ticker));
-  if (sides.length !== 2) return null;
+  if (sides.length !== 2 || !Number.isFinite(keyDayMs)) return null;
   const hits = (espnGames || []).filter((eg) => {
-    if (eg.state !== 'pre' || !(eg.kickoffMs > nowMs)) return false;
     if (!(eg.kickoffMs >= keyDayMs && eg.kickoffMs < keyDayMs + 4 * 24 * 3600 * 1000)) return false;
     const [a, b] = sides;
     return (sideMatchesEspnTeam(a, eg.teams[0]) && sideMatchesEspnTeam(b, eg.teams[1]))
       || (sideMatchesEspnTeam(a, eg.teams[1]) && sideMatchesEspnTeam(b, eg.teams[0]));
   });
-  if (hits.length !== 1) return null; // ambiguous or none: stay dropped
-  return hits[0].kickoffMs;
+  return hits.length === 1 ? hits[0] : null;
+}
+function espnKickoffFor(rawSides, espnGames, keyDayMs, nowMs) {
+  const hit = espnMatchFor(rawSides, espnGames, keyDayMs);
+  if (!hit || hit.state !== 'pre' || !(hit.kickoffMs > nowMs)) return null; // started / unmatched: stay dropped
+  return hit.kickoffMs;
 }
 function etYmd(ms) {
   const p = {}; new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -379,14 +393,15 @@ function etYmd(ms) {
   return `${p.year}${p.month}${p.day}`;
 }
 // ESPN's scoreboard rejects date ranges for college football, so ask per ET
-// day (today + next 2). Cached per warm instance for 60s.
+// day (today + next 7, so the whole week's kickoff times are known). Cached per
+// warm instance for 60s.
 const espnCache = new Map();
 async function fetchEspnFootball(sport, nowMs = Date.now()) {
   const urls = ESPN_FOOTBALL[sport];
   if (!urls) return [];
   const hit = espnCache.get(sport);
   if (hit && nowMs - hit.at < 60000) return hit.games;
-  const days = [0, 1, 2].map((d) => etYmd(nowMs + d * 24 * 3600 * 1000));
+  const days = [0, 1, 2, 3, 4, 5, 6, 7].map((d) => etYmd(nowMs + d * 24 * 3600 * 1000));
   const reqs = [];
   urls.forEach((u) => days.forEach((d) => reqs.push(`${u}${u.includes('?') ? '&' : '?'}dates=${d}`)));
   const bodies = await Promise.all(reqs.map((u) => fetchJsonRetry(u, 2)));
@@ -459,7 +474,14 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
     // key, but occurrence - 3h is the real puck drop) drops at puck drop.
     const exactOcc = occOffset > 0 && Number.isFinite(g.occurrenceMs) && !Number.isFinite(firstPitchUtcMs(g.key));
     let rescuedMs = NaN;
-    if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) {
+    // Football with an ESPN listing: ESPN's kickoff is the start (exact). Started on ESPN = drop.
+    const footballOff = Number(opts && opts.footballOccurrenceOffsetMs) || 0;
+    const espnHit = footballOff && opts.espnGames && !exactOcc && !Number.isFinite(firstPitchUtcMs(g.key))
+      ? espnMatchFor(g.raw.side, opts.espnGames, dateOnlyUtcMs(g.key)) : null;
+    if (espnHit) {
+      if (espnHit.state !== 'pre' || !(espnHit.kickoffMs > nowMs)) continue;
+      rescuedMs = espnHit.kickoffMs;
+    } else if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) {
       const keyDay = dateOnlyUtcMs(g.key);
       const k = opts && opts.espnGames && Number.isFinite(keyDay) && !exactOcc
         ? espnKickoffFor(g.raw.side, opts.espnGames, keyDay, nowMs) : null;
@@ -472,17 +494,17 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       : Number.isFinite(timed) ? timed
       : (opts && opts.dateOnlyStart) ? dateOnlyUtcMs(g.key)
       : exactOcc ? g.occurrenceMs - occOffset
-        : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs : dateOnlyUtcMs(g.key));
+        : (Number.isFinite(g.occurrenceMs) ? g.occurrenceMs - footballOff : dateOnlyUtcMs(g.key));
     if (!Number.isFinite(startMs)) continue;
     games.push({
       key: g.key, title: g.title,
-      // Rescued game: Kalshi's "(Oct 16)" is the wrong day; show ESPN's kickoff day.
+      // ESPN kickoff: Kalshi's "(Oct 16)" can be the wrong day; show ESPN's kickoff day.
       date: Number.isFinite(rescuedMs) && g.date
         ? String(g.date).replace(/\([A-Z][a-z]{2} \d{1,2}\)\s*$/, `(${new Date(rescuedMs).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' })})`)
         : g.date,
       startTime: new Date(startMs).toISOString(),
       ...(exactOcc ? { startExact: true } : {}),
-      ...(Number.isFinite(rescuedMs) ? { kickoffSource: 'espn' } : {}),
+      ...(Number.isFinite(rescuedMs) ? { kickoffSource: 'espn', ...(espnHit ? { startExact: true } : {}) } : {}),
       markets: {
         side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: /-TIE$/i.test(m.ticker) ? 'Draw' : m.label })),
         spread: expandSpreads(g.raw.spread || [], g.raw.side),
@@ -546,7 +568,7 @@ async function handler(req, res) {
         occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0,
         ...(SOCCER_SPORTS.has(sport) ? { dateOnlyStart: true } : {}),
         ...(propSpec ? { propKind: propSpec.kind } : {}),
-        ...(ESPN_FOOTBALL[sport] ? { espnSport: sport } : {}),
+        ...(ESPN_FOOTBALL[sport] ? { espnSport: sport, footballOccurrenceOffsetMs: FOOTBALL_OCCURRENCE_OFFSET_MS } : {}),
       });
       if (games.failed) failed.push(sport);
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
@@ -565,8 +587,9 @@ module.exports.MARKET_SERIES = MARKET_SERIES;
 module.exports.PROP_SERIES = PROP_SERIES;
 module.exports.SOCCER_SPORTS = SOCCER_SPORTS;
 module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
+module.exports.FOOTBALL_OCCURRENCE_OFFSET_MS = FOOTBALL_OCCURRENCE_OFFSET_MS;
 module.exports._helpers = {
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
-  groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
+  groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, espnMatchFor, fetchEspnFootball, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };

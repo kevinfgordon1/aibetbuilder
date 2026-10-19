@@ -406,3 +406,52 @@ console.log('kalshi-games tests passed');
   assert.ok(amb.every((g) => g.markets.total.length === 0), 'ambiguous host is not guessed');
   console.log('kalshi-games off-by-one series merge tests passed');
 })();
+
+// ── Oct 19 2026: football occurrence_datetime is kickoff + 3h; ESPN kickoff wins when listed ──
+(() => {
+  const OFF = require('./kalshi-games.js').FOOTBALL_OCCURRENCE_OFFSET_MS;
+  assert.equal(OFF, 3 * 3600 * 1000);
+  const now = Date.parse('2026-10-19T14:00:00Z');
+  const ev = (key, occ, a, b) => ({
+    event_ticker: `KXNCAAFGAME-${key}`, title: `${a.label} vs ${b.label}`, sub_title: `${a.code} vs ${b.code} (${key[2]}${key.slice(3, 5).toLowerCase()} ${Number(key.slice(5, 7))})`,
+    markets: [a, b].map((s) => ({ ticker: `KXNCAAFGAME-${key}-${s.code}`, yes_sub_title: s.label, occurrence_datetime: occ })),
+  });
+  const side = [
+    // Real time: Tue 7 PM ET kickoff, Kalshi occurrence 10 PM ET.
+    ev('26OCT20MOSUDEL', '2026-10-21T02:00:00Z', { code: 'MOSU', label: 'Missouri St.' }, { code: 'DEL', label: 'Delaware' }),
+    // 03:00Z placeholder keyed Friday; ESPN: Sat 1 PM ET.
+    ev('26OCT23AKRKENT', '2026-10-24T03:00:00Z', { code: 'AKR', label: 'Akron' }, { code: 'KENT', label: 'Kent St.' }),
+    // Not on ESPN yet (next week): occurrence − 3h.
+    ev('26OCT31AAABBB', '2026-10-31T19:30:00Z', { code: 'AAA', label: 'Alpha' }, { code: 'BBB', label: 'Beta' }),
+    // ESPN says already in progress: dropped.
+    ev('26OCT19CCCDDD', '2026-10-19T23:00:00Z', { code: 'CCC', label: 'Gamma' }, { code: 'DDD', label: 'Delta' }),
+    // Kalshi "University at Albany" vs ESPN "UAlbany".
+    ev('26OCT24ALBYURI', '2026-10-24T19:00:00Z', { code: 'ALBY', label: 'University at Albany' }, { code: 'URI', label: 'Rhode Island' }),
+  ];
+  const team = (location, abbreviation) => ({ team: { location, shortDisplayName: location, abbreviation, displayName: `${location} X` } });
+  const g = (id, date, state, a, b) => ({ id, date, status: { type: { state } }, competitions: [{ date, competitors: [a, b] }] });
+  const espnGames = h.espnGamesFrom({ events: [
+    g('1', '2026-10-20T23:00Z', 'pre', team('Missouri State', 'MOSU'), team('Delaware', 'DEL')),
+    g('2', '2026-10-24T17:00Z', 'pre', team('Akron', 'AKR'), team('Kent State', 'KENT')),
+    g('3', '2026-10-19T13:00Z', 'in', team('Gamma', 'CCC'), team('Delta', 'DDD')),
+    g('4', '2026-10-24T16:00Z', 'pre', team('UAlbany', 'UALB'), team('Rhode Island', 'RI')),
+  ] });
+  const games = h.groupSportGames({ side }, now, { espnGames, footballOccurrenceOffsetMs: OFF });
+  const by = Object.fromEntries(games.map((x) => [x.key, x]));
+  assert.equal(by['26OCT20MOSUDEL'].startTime, '2026-10-20T23:00:00.000Z');
+  assert.equal(by['26OCT20MOSUDEL'].startExact, true);
+  assert.equal(by['26OCT20MOSUDEL'].kickoffSource, 'espn');
+  assert.equal(by['26OCT23AKRKENT'].startTime, '2026-10-24T17:00:00.000Z');
+  assert.match(by['26OCT23AKRKENT'].date, /\(Oct 24\)/);
+  assert.equal(by['26OCT31AAABBB'].startTime, '2026-10-31T16:30:00.000Z');
+  assert.ok(!by['26OCT31AAABBB'].startExact);
+  assert.ok(!by['26OCT19CCCDDD'], 'started on ESPN: dropped');
+  assert.equal(by['26OCT24ALBYURI'].startTime, '2026-10-24T16:00:00.000Z');
+  // ESPN-confirmed games drop at kickoff.
+  const later = h.groupSportGames({ side }, Date.parse('2026-10-20T23:01:00Z'), { espnGames, footballOccurrenceOffsetMs: OFF });
+  assert.ok(!later.some((x) => x.key === '26OCT20MOSUDEL'));
+  // ESPN down: occurrence − 3h, no ESPN games, nothing exact.
+  const noEspn = h.groupSportGames({ side }, now, { espnGames: [], footballOccurrenceOffsetMs: OFF });
+  assert.equal(noEspn.find((x) => x.key === '26OCT20MOSUDEL').startTime, '2026-10-20T23:00:00.000Z');
+  console.log('kalshi-games football kickoff tests passed');
+})();
