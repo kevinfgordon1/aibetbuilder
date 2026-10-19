@@ -41,6 +41,7 @@ import {
   mergeSubmissionFillCounts,
   deskFillCounts,
   isLockCapFill,
+  isTakerHedgeFill,
   skipTapeSource,
   skipFillState,
   formatSkipReason,
@@ -851,6 +852,33 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   // Maker-only without the taker claim used to inflate — document the old bug figure.
   const inflated = round(165.38 + 13);
   assert.equal(inflated, 178.38);
+}
+
+// Single-leg "Lock it" hedge (McMichael 3ef0…): the hedge is placed as taker
+// NO buys (20 Polymarket + 1730 Kalshi). They are the lock's hedge and must
+// count; a taker YES buy on the same lock stays out; makers are not doubled.
+{
+  const pid = "3ef0-single-leg";
+  const takers = [
+    { fill_id: "poly-act:sl:x:20", order_id: "o-poly", parlay_id: pid, count: 20, is_taker: true, outcome_side: "no", action: "buy", yes_price: 0.19, no_price: 0.81 },
+    { fill_id: "sl-k:y:1730", order_id: "o-k", parlay_id: pid, count: 1730, is_taker: true, outcome_side: "no", action: "buy", yes_price: 0.18, no_price: 0.82 },
+  ];
+  const yesBuy = { fill_id: "t-yes", order_id: "o-yes", parlay_id: pid, count: 12.85, is_taker: true, outcome_side: "yes", action: "buy" };
+  const yesSell = { fill_id: "t-ys", order_id: "o-ys", parlay_id: pid, count: 5, is_taker: true, outcome_side: "yes", action: "sell" };
+  assert.equal(isTakerHedgeFill(takers[0]), true);
+  assert.equal(isTakerHedgeFill(yesBuy), false);
+  assert.equal(isTakerHedgeFill(yesSell), true);
+  assert.equal(isTakerHedgeFill({ is_taker: false, outcome_side: "no", action: "buy" }), false);
+  assert.equal(isLockCapFill(takers[1]), true);
+  assert.equal(isLockCapFill(yesBuy), false);
+  const subs = [
+    { parlay_id: pid, order_id: "o-poly", status: "filled", contracts: 20 },
+    { parlay_id: pid, order_id: "o-k", status: "filled", contracts: 1730 },
+    { parlay_id: pid, order_id: "o-yes", status: "filled", contracts: 13 },
+  ];
+  assert.equal(deskFillCounts([...takers, yesBuy], subs).byParlay[pid], 1750);
+  const maker = { fill_id: "m1", order_id: "o-m", parlay_id: pid, count: 30, is_taker: false };
+  assert.equal(deskFillCounts([...takers, maker], [...subs, { parlay_id: pid, order_id: "o-m", status: "filled", contracts: 30 }]).byParlay[pid], 1780);
 }
 
 // Bears+LAR+DET (parlay a87432ad…): 4 Kalshi trades each booked twice.

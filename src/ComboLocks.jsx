@@ -691,7 +691,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         // REAL combo fills (maker + taker). deskFillCounts sums maker/lock fills only;
         // taker rows are fetched so their order_ids claim filled submissions and cannot
         // inflate "Hedged so far" with quoted contracts.
-        fetchAllRows(() => supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee").eq("user_id", user.id).eq("is_combo", true).order("recorded_at", { ascending: true }).order("id", { ascending: true }), { expectedRows: pageHintRef.current.fills }),
+        fetchAllRows(() => supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,outcome_side,action,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee").eq("user_id", user.id).eq("is_combo", true).order("recorded_at", { ascending: true }).order("id", { ascending: true }), { expectedRows: pageHintRef.current.fills }),
       ]);
       // SECONDARY reads, started at the same time.
       const extraP = Promise.allSettled([

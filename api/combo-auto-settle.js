@@ -22,7 +22,7 @@ const lib = require('./combo-probe-lib');
 
 const CAPS = Object.freeze({ users: 50, locksPerUser: 300, tickerLookupsPerUser: 100, patchesPerRun: 100, msBudget: 45000 });
 const PARLAY_COLS = '*';
-const FILL_COLS = 'parlay_id,count,is_combo,is_taker,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee';
+const FILL_COLS = 'parlay_id,count,is_combo,is_taker,outcome_side,action,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee';
 const SUB_COLS = 'id,parlay_id,rfq_id,status,is_live,contracts,quote_id,order_id,market_ticker,venue,fill_american,cancel_requested_at,created_at';
 
 function defaultCreateClient(...args) { const { createClient } = require('@supabase/supabase-js'); return createClient(...args); }

@@ -8,6 +8,7 @@ import { lockProfile } from "./comboLockProfile.js";
 import { isAbsorbedParlay } from "./comboMerge.js";
 import { historyOutcome, settlementFromStored, settlementCopy } from "./comboSettlement.js";
 import { sportFromTicker, underlyingCopy } from "./comboLegResult.js";
+import { isLockCapFill } from "./comboTape.js";
 
 export const STATEMENT_TZ = "America/New_York";
 // History spans many days; Today is often empty. Default All.
@@ -377,7 +378,7 @@ export function lockFillReceipt(parlay, fills = [], filled = 0) {
   let fees = 0;
   for (const f of fills || []) {
     if (!f || !parlay || f.parlay_id !== parlay.id) continue;
-    if (f.is_taker === true || f.is_combo === false) continue;
+    if (f.is_combo === false || !isLockCapFill(f)) continue;
     const c = toNum(f.count);
     let y = toNum(f.yes_price);
     if (y == null && toNum(f.no_price) != null) y = 1 - toNum(f.no_price);
