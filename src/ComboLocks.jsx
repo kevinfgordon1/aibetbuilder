@@ -970,7 +970,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       // overwrite a leg already picked.
       if (prefillRetryRef.current !== nonce || prefillGamesRef.current === games) return;
       prefillGamesRef.current = games;
-      const again = mapPromoLegsToKalshi(prefill.legs, games.sports);
+      const again = mapPromoLegsToKalshi(prefill.legs, games.sports, Date.now(), games.started);
       setLegRows((cur) => cur.map((row, i) => {
         const r = again.rows[i];
         if (row.gameKey || row.marketVal || !r || !r.gameKey || !r.marketVal) return row;
@@ -983,7 +983,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     }
     appliedNonceRef.current = nonce;
     prefillGamesRef.current = games;
-    const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports);
+    const { rows, unmatched } = mapPromoLegsToKalshi(prefill.legs, games.sports, Date.now(), games.started);
     // Some legs missed: pull a fresh slate once and retry those legs on it.
     if (unmatched.length) { prefillRetryRef.current = nonce; loadGames(); } else prefillRetryRef.current = null;
     const n = Math.max(rows.length, prefill.legs?.length || 0, 1);

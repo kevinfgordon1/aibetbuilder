@@ -906,9 +906,16 @@ function promoMatchupLabel(leg) {
 // promo leg can fail here even when Kalshi still lists the event as open.
 // Prefer "already started" when Odds API commence_time is in the past; never
 // invent a map onto a different game.
-export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames = []) {
+export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames = [], startedGames = []) {
   const label = COMBO_SPORT_LABEL[sport] || String(sport || "").toUpperCase();
   const matchup = promoMatchupLabel(leg);
+  // The feed dropped this game at its start (exact puck drop / tip-off) and the leg
+  // carries no start time of its own: say it started, and when.
+  const gone = sameTeamsCandidates(leg, startedGames).find((g) => Date.parse(g.startTime) <= nowMs);
+  if (gone) {
+    const at = etDay(Date.parse(gone.startTime), { hour: "numeric", minute: "2-digit" });
+    return `${matchup || gone.title || "this game"} started at ${at} ET — Combo Locks only quotes pre-game Kalshi ${label} markets`;
+  }
   const startMs = Date.parse(leg?.commence_time);
   const started = Number.isFinite(startMs) && startMs <= nowMs;
   if (started) {
@@ -929,7 +936,8 @@ export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames 
   return `no matching Kalshi ${label} game`;
 }
 
-export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
+export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now(), startedBySport = null) {
+  const startedFlat = startedBySport ? flattenComboGames(startedBySport) : [];
   const unmatched = [];
   const rows = [];
   const flat = flattenComboGames(games);
@@ -947,7 +955,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now()) {
     }
     const game = matchKalshiGame(leg, flat);
     if (!game) {
-      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs, otherStartGames(leg, flat))));
+      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs, otherStartGames(leg, flat), startedFlat)));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
