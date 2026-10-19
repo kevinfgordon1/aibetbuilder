@@ -1234,3 +1234,22 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(identifyTeam("Portland Trail Blazers", "nba"), "POR");
   console.log("comboPrefill NBA tests passed");
 }
+
+// ── NHL started game: Kevin 2026-10-19 7:37 PM ET, Auston Matthews 1+ Goal (SJ @ TOR, puck drop 7:30 PM ET) ──
+{
+  const occ = "2026-10-20T02:30:00Z";
+  const ev = (ticker, markets) => ({ event_ticker: ticker, title: "San Jose vs Toronto", sub_title: "SJ vs TOR (Oct 19)", markets: markets.map(([t, l]) => ({ ticker: t, yes_sub_title: l, occurrence_datetime: occ })) });
+  const NOW = Date.parse("2026-10-19T23:37:00Z");
+  const OPTS = { occurrenceStartOffsetMs: kalshiGames.OCCURRENCE_START_OFFSET_MS.nhl, propKind: "goal" };
+  const games = kalshiGames._helpers.groupSportGames({ side: [ev("KXNHLGAME-26OCT19SJTOR", [["KXNHLGAME-26OCT19SJTOR-SJ", "San Jose"], ["KXNHLGAME-26OCT19SJTOR-TOR", "Toronto"]])], spread: [], total: [], prop: [] }, NOW, OPTS);
+  assert.equal(games.length, 0);
+  assert.equal(games.started.length, 1);
+  const leg = { name: "Auston Matthews 1+ Goal", market: "PROP", game: "San Jose Sharks @ Toronto Maple Leafs", sport: "icehockey_nhl" };
+  const out = mapPromoLegsToKalshi([leg], { nhl: [] }, NOW, { nhl: games.started.map((g) => ({ ...g, sport: "nhl" })) });
+  assert.equal(out.unmatched.length, 1);
+  assert.match(JSON.stringify(out.unmatched[0]), /started at Oct 19, 7:30 PM ET/);
+  // 10 min earlier it is still pre-game and maps.
+  const pre = kalshiGames._helpers.groupSportGames({ side: [ev("KXNHLGAME-26OCT19SJTOR", [["KXNHLGAME-26OCT19SJTOR-SJ", "San Jose"], ["KXNHLGAME-26OCT19SJTOR-TOR", "Toronto"]])], spread: [], total: [], prop: [] }, NOW - 10 * 60000, OPTS);
+  assert.equal(pre.length, 1);
+  console.log("comboPrefill NHL started-game tests passed");
+}

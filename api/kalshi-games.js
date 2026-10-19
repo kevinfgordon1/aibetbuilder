@@ -473,6 +473,10 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
   }
   mergeOffByOneDateKeys(byKey);
   const games = [];
+  // Exact-start games (NHL/NBA/UFC) that dropped off at their start within the last
+  // 6h. Identity only, never quotable: lets Combo Locks say "already started at
+  // 7:30 PM ET" instead of "no matching game" when a leg has no start time.
+  const started = [];
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
     // PRE-GAME: MLB (datetime key) drops once first pitch has passed. Football
@@ -488,6 +492,10 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       if (espnHit.state !== 'pre' || !(espnHit.kickoffMs > nowMs)) continue;
       rescuedMs = espnHit.kickoffMs;
     } else if (exactOcc ? !(g.occurrenceMs - occOffset > nowMs) : !isUpcomingGame(g.key, nowMs)) {
+      if (exactOcc && nowMs - (g.occurrenceMs - occOffset) < 6 * 3600 * 1000) {
+        started.push({ key: g.key, title: g.title, date: g.date, startTime: new Date(g.occurrenceMs - occOffset).toISOString(), startExact: true,
+          markets: { side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })), spread: [], total: [] } });
+      }
       const keyDay = dateOnlyUtcMs(g.key);
       const k = opts && opts.espnGames && Number.isFinite(keyDay) && !exactOcc
         ? espnKickoffFor(g.raw.side, opts.espnGames, keyDay, nowMs) : null;
@@ -519,6 +527,7 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       },
     });
   }
+  Object.defineProperty(games, 'started', { value: started, enumerable: false });
   return games;
 }
 
@@ -567,6 +576,7 @@ async function handler(req, res) {
     }
     const sports = {};
     const failed = [];
+    const started = {};
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
       const propSpec = PROP_SERIES[sport];
@@ -577,11 +587,12 @@ async function handler(req, res) {
         ...(ESPN_FOOTBALL[sport] ? { espnSport: sport, footballOccurrenceOffsetMs: FOOTBALL_OCCURRENCE_OFFSET_MS } : {}),
       });
       if (games.failed) failed.push(sport);
+      if (games.started && games.started.length) started[sport] = games.started.map((g) => ({ ...g, sport }));
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
     // Never let the CDN keep a slate with a sport missing for 3 minutes.
     if (failed.length) res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, ...(failed.length ? { failed } : {}) });
+    res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, started, ...(failed.length ? { failed } : {}) });
   } catch (e) {
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: null, sports: {}, error: String(e && e.message || e) });
