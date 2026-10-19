@@ -1036,7 +1036,7 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(both.rows[0].gameKey, "26OCT05PITPHI");
 
   // Sport chip / dropdown plumbing.
-  assert.deepEqual(COMBO_SPORT_ORDER, ["mlb", "nfl", "ncaaf", "nhl", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"]);
+  assert.deepEqual(COMBO_SPORT_ORDER, ["mlb", "nfl", "ncaaf", "nhl", "nba", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"]);
   const flat = flattenComboGames(sports);
   assert.equal(flat.length, 3);
   assert.ok(flat.every((g) => g.sportLabel === "NHL"));
@@ -1187,4 +1187,50 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(ncaafCanonName("Appalachian St."), "appalachian state");
   assert.equal(ncaafCanonName("Miami (FL)"), "miami florida");
   console.log("comboPrefill college alias tests passed");
+}
+
+// ── NBA: Kevin's 2026-10-19 Caesars 50% boost (Thunder ML, Pistons ML, Jazz ML) + spread/total ──
+{
+  const ev = (ticker, title, sub, markets, occ) => ({
+    event_ticker: ticker, title, sub_title: sub,
+    markets: markets.map(([t, label]) => ({ ticker: t, yes_sub_title: label, occurrence_datetime: occ })),
+  });
+  const mk = (g, a, b, An, Bn, sub, occ) => ({
+    side: [ev(`KXNBAGAME-${g}`, `${An} vs ${Bn}`, sub, [[`KXNBAGAME-${g}-${a}`, An], [`KXNBAGAME-${g}-${b}`, Bn]], occ)],
+    spread: [ev(`KXNBASPREAD-${g}`, `${An} vs ${Bn}: Spread`, sub,
+      [[`${a}5`, An, "4.5"], [`${b}5`, Bn, "4.5"], [`${b}3`, Bn, "2.5"]].map(([s, t, l]) => [`KXNBASPREAD-${g}-${s}`, `${t} wins by over ${l} points`]), occ)],
+    total: [ev(`KXNBATOTAL-${g}`, `${An} vs ${Bn}: Total`, sub, [[`KXNBATOTAL-${g}-232`, "Over 231.5 points"]], occ)],
+  });
+  const NOW = Date.parse("2026-10-19T22:00:00Z");
+  const OPTS = { occurrenceStartOffsetMs: kalshiGames.OCCURRENCE_START_OFFSET_MS.nba };
+  const okcsas = mk("26OCT20OKCSAS", "OKC", "SAS", "Oklahoma City", "San Antonio", "OKC vs SAS (Oct 20)", "2026-10-21T04:30:00Z");
+  const bosdet = mk("26OCT20BOSDET", "BOS", "DET", "Boston", "Detroit", "BOS vs DET (Oct 20)", "2026-10-21T02:30:00Z");
+  const utamem = mk("26OCT21UTAMEM", "UTA", "MEM", "Utah", "Memphis", "UTA vs MEM (Oct 21)", "2026-10-22T03:00:00Z");
+  const games = [okcsas, bosdet, utamem].flatMap((e) => kalshiGames._helpers.groupSportGames(e, NOW, OPTS)).map((g) => ({ ...g, sport: "nba" }));
+  assert.equal(games.length, 3);
+  const sports = { nba: games };
+  const legs = [
+    { name: "Oklahoma City Thunder ML", market: "ML", game: "Oklahoma City Thunder @ San Antonio Spurs", sport: "basketball_nba", commence_time: "2026-10-21T01:30:00Z" },
+    { name: "Detroit Pistons ML", market: "ML", game: "Boston Celtics @ Detroit Pistons", sport: "basketball_nba", commence_time: "2026-10-20T23:30:00Z" },
+    { name: "Utah Jazz ML", market: "ML", game: "Utah Jazz @ Memphis Grizzlies", sport: "basketball_nba", commence_time: "2026-10-22T00:00:00Z" },
+    { name: "San Antonio Spurs -4.5", market: "SPR", game: "Oklahoma City Thunder @ San Antonio Spurs", sport: "basketball_nba", commence_time: "2026-10-21T01:30:00Z" },
+    { name: "Boston Celtics +4.5", market: "SPR", game: "Boston Celtics @ Detroit Pistons", sport: "basketball_nba", commence_time: "2026-10-20T23:30:00Z" },
+    { name: "Thunder/Spurs u231.5", market: "TOT", game: "Oklahoma City Thunder @ San Antonio Spurs", sport: "basketball_nba", commence_time: "2026-10-21T01:30:00Z" },
+  ];
+  const out = mapPromoLegsToKalshi(legs, sports, NOW);
+  assert.deepEqual(out.unmatched, [], JSON.stringify(out.unmatched));
+  assert.deepEqual(out.rows, [
+    { gameKey: "26OCT20OKCSAS", marketVal: encVal("KXNBAGAME-26OCT20OKCSAS-OKC", "yes") },
+    { gameKey: "26OCT20BOSDET", marketVal: encVal("KXNBAGAME-26OCT20BOSDET-DET", "yes") },
+    { gameKey: "26OCT21UTAMEM", marketVal: encVal("KXNBAGAME-26OCT21UTAMEM-UTA", "yes") },
+    { gameKey: "26OCT20OKCSAS", marketVal: encVal("KXNBASPREAD-26OCT20OKCSAS-SAS5", "yes") },
+    { gameKey: "26OCT20BOSDET", marketVal: encVal("KXNBASPREAD-26OCT20BOSDET-DET5", "no") },
+    { gameKey: "26OCT20OKCSAS", marketVal: encVal("KXNBATOTAL-26OCT20OKCSAS-232", "no") },
+  ]);
+  assert.equal(identifyTeam("Los Angeles L", "nba"), "LAL");
+  assert.equal(identifyTeam("Los Angeles Clippers", "nba"), "LAC");
+  assert.equal(identifyTeam("New York", "nba"), "NYK");
+  assert.equal(identifyTeam("Philadelphia 76ers", "nba"), "PHI");
+  assert.equal(identifyTeam("Portland Trail Blazers", "nba"), "POR");
+  console.log("comboPrefill NBA tests passed");
 }

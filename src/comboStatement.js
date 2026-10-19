@@ -96,6 +96,7 @@ function sportFromLeg(leg) {
   if (/KXNCAAB/i.test(t) || /KXNCAAM/i.test(t)) return "ncaab";
   if (/KXNBA/i.test(t)) return "nba";
   if (/KXNHL/i.test(t)) return "nhl";
+  if (/KXNBA/i.test(t)) return "nba";
   return normalizeSportKey(leg.sport);
 }
 
