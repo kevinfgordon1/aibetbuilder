@@ -304,8 +304,8 @@ async function settleDays(client, userId, now, skipDay = null) {
     const lo = new Date(now - 4 * 86400000).toISOString().slice(0, 10);
     const { data } = await client.from('root_for_needle_days').select('day,final,final_reason,snap').eq('user_id', userId).gte('day', lo);
     for (const row of data || []) {
-      if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled') || String(row.day).slice(0, 10) === skipDay) continue;
-      const snap = row.snap; const legsAll = await resolveSnapFinals(snap);
+      if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled' && row.snap.settleV === 2) || String(row.day).slice(0, 10) === skipDay) continue;
+      const snap = row.snap; snap.settleV = 2; const legsAll = await resolveSnapFinals(snap); // v2: losing leg decides a lock
       const pos = Object.values(snap.positions); const all = legsAll || pos.every((p) => S.lockDecided(p, snap.final)); const liveP = { ...(snap.last || {}), ...snap.final }; const preP = { ...liveP, ...(snap.frozen || {}) };
       const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
       const stamp = new Date(now).toISOString();
