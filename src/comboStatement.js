@@ -205,14 +205,14 @@ export function lineInDateWindow(line, window) {
   return true;
 }
 
+// Built once: toLocaleDateString(…, options) builds a new Intl formatter per call, and History
+// formats two dates for every lock on every recompute (~0.2s of a 0.28s statement build).
+const STATEMENT_DAY_FMT = new Intl.DateTimeFormat("en-US", { timeZone: STATEMENT_TZ, month: "short", day: "numeric" });
+
 export function formatStatementDate(ts) {
   const ms = tsMs(ts);
   if (ms == null) return "";
-  return new Date(ms).toLocaleDateString("en-US", {
-    timeZone: STATEMENT_TZ,
-    month: "short",
-    day: "numeric",
-  });
+  return STATEMENT_DAY_FMT.format(new Date(ms));
 }
 
 export function statementDateCopy(line) {

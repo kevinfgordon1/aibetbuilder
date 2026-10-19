@@ -97,6 +97,7 @@ console.log("comboHistoryAll.test.js ok");
   assert.ok(ready > 0 && ready < awaitExtra, "lists stop loading before the slow reads are awaited");
   const coreBlock = page.slice(core, extra);
   assert.doesNotMatch(coreBlock, /is_live\.eq\.true|combo_match_counts|combo_parlay_bets/, "slow reads stay out of the core");
-  assert.match(page, /archFresh \? \[\] : allArchivedIds/, "archived per-lock reads are cached between polls");
+  assert.match(page, /archivedSubsPlan\(archCache, allArchivedIds\)/, "archived per-lock reads are cached between polls (only newly archived locks are read)");
+  assert.match(page, /fetchAllRows\(\(\) => supabase\.from\("combo_submissions"\)\.select\("id,parlay_id,contracts,status,is_live/, "filled/live submissions are paged past the 1,000-row cap");
 }
 assert.equal(ARCHIVED_SUBS_TTL_MS, 10 * 60 * 1000);
