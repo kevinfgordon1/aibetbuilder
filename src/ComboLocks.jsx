@@ -25,7 +25,7 @@
 // deletes the RFQ. Never accept/confirm.
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
+import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
@@ -1628,6 +1628,9 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             <div className="sec-sub">Already placed the parlay at your sportsbook? Enter it here.</div>
           </div>
           <div className="card">
+            {lockItNote(prefill) && (
+              <div className="note" data-testid="lock-it-note" style={{ marginBottom: 12 }}>{lockItNote(prefill)}</div>
+            )}
             {prefill && !gamesReady && (
               <div className="note warn" style={{ marginBottom: 12 }}>Matching your Promo Builder legs to live games…</div>
             )}

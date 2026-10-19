@@ -942,6 +942,7 @@ export function buildPromoComboPrefill({
   sportsbook,
   boostPct,
   nonce,
+  source = "",
 } = {}) {
   const fair = fairAmericanFromProb(combinedProb);
   // Every leg — including 4+ grown legs — must reach Combo Locks.
@@ -964,5 +965,19 @@ export function buildPromoComboPrefill({
     label: mapped.map((l) => l.name).join(" + "),
     labelEdited: true,
     legs: mapped,
+    ...(source ? { source } : {}),
   };
+}
+
+// "Lock it" from Promo (single-leg free bet): the banner Combo Locks shows above
+// the pre-filled form. American odds only. Returns null for any other prefill.
+export function lockItNote(prefill) {
+  if (!prefill || prefill.source !== "promo-lock-it") return null;
+  const am = Number(prefill.boost);
+  const odds = Number.isFinite(am) && am !== 0 ? (am > 0 ? `+${Math.round(am)}` : `${Math.round(am)}`) : "?";
+  const leg = prefill.legs?.[0]?.name || prefill.label || "this leg";
+  const book = prefill.sportsbook ? ` at ${prefill.sportsbook}` : "";
+  const stake = Number(prefill.stake);
+  const amt = Number.isFinite(stake) ? `$${stake % 1 ? stake.toFixed(2) : stake}` : "";
+  return `Lock it from Promo: ${leg} — ${amt} free bet${book} at ${odds}. Check the leg and sell odds, then tap Save. Nothing is saved until you confirm.`;
 }
