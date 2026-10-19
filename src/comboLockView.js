@@ -47,13 +47,30 @@ export function americanFromNoPrice(no) {
   return americanFromProb(1 - n);
 }
 
+// Intl formatters are expensive to build (each toLocale*String(…, options) call builds one);
+// History formats several dates and amounts for every one of ~600 locks on every render.
+const NUM_FMT = new Map();
+function numFmt(min, max) {
+  const k = `${min}:${max}`;
+  let f = NUM_FMT.get(k);
+  if (!f) { f = new Intl.NumberFormat("en-US", { minimumFractionDigits: min, maximumFractionDigits: max }); NUM_FMT.set(k, f); }
+  return f;
+}
+const INT_FMT = new Intl.NumberFormat("en-US");
+const DTF = new Map();
+function dtf(key, opts) {
+  let f = DTF.get(key);
+  if (!f) { f = new Intl.DateTimeFormat("en-US", opts); DTF.set(key, f); }
+  return f;
+}
+
 /** "$1,025" for whole dollars, "$23.21" otherwise. */
 export function dollars(v) {
   const n = toNum(v);
   if (n == null) return "—";
   const abs = Math.abs(n);
   const whole = Math.abs(abs - Math.round(abs)) < 0.005;
-  const s = abs.toLocaleString("en-US", { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 });
+  const s = numFmt(whole ? 0 : 2, whole ? 0 : 2).format(abs);
   return (n < 0 ? "-$" : "$") + s;
 }
 
@@ -61,13 +78,13 @@ export function dollars(v) {
 export function signedDollars(v) {
   const n = toNum(v);
   if (n == null) return "—";
-  const s = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const s = numFmt(2, 2).format(Math.abs(n));
   return (n < 0 ? "-$" : "+$") + s;
 }
 
 export function countText(n) {
   const v = toNum(n);
-  return v == null ? "—" : Math.round(v).toLocaleString("en-US");
+  return v == null ? "—" : INT_FMT.format(Math.round(v));
 }
 
 function validDate(iso) {
@@ -80,8 +97,8 @@ function validDate(iso) {
 export function etDateTime(iso, { weekday = true } = {}) {
   const d = validDate(iso);
   if (!d) return "";
-  const day = d.toLocaleDateString("en-US", { timeZone: ET_ZONE, ...(weekday ? { weekday: "short" } : {}), month: "short", day: "numeric" });
-  const time = d.toLocaleTimeString("en-US", { timeZone: ET_ZONE, hour: "numeric", minute: "2-digit" });
+  const day = dtf(weekday ? "wmd" : "md", { timeZone: ET_ZONE, ...(weekday ? { weekday: "short" } : {}), month: "short", day: "numeric" }).format(d);
+  const time = dtf("hm", { timeZone: ET_ZONE, hour: "numeric", minute: "2-digit" }).format(d);
   return `${day} · ${time} ET`;
 }
 
@@ -89,14 +106,14 @@ export function etDateTime(iso, { weekday = true } = {}) {
 export function etDay(iso) {
   const d = validDate(iso);
   if (!d) return "";
-  return d.toLocaleDateString("en-US", { timeZone: ET_ZONE, month: "short", day: "numeric" });
+  return dtf("md", { timeZone: ET_ZONE, month: "short", day: "numeric" }).format(d);
 }
 
 /** "Oct 7, 6:41 PM ET" — compact timestamp for activity tables. */
 export function etStamp(iso) {
   const d = validDate(iso);
   if (!d) return "—";
-  return d.toLocaleString("en-US", { timeZone: ET_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET";
+  return dtf("mdhm", { timeZone: ET_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d) + " ET";
 }
 
 const SPORT_WORD = { mlb: "MLB", nfl: "NFL", ncaaf: "College football", nhl: "NHL", nba: "NBA", ncaab: "College basketball", wnba: "WNBA" };

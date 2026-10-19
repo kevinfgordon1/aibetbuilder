@@ -4,9 +4,24 @@
 export const COMBO_PAGE_SIZE = 1000;
 export const COMBO_MAX_PAGES = 50;
 
-export async function fetchAllRows(makeQuery, { pageSize = COMBO_PAGE_SIZE, maxPages = COMBO_MAX_PAGES } = {}) {
+// expectedRows (e.g. last poll's count): request that many pages at once instead of one
+// after another; any further pages are still read in order. Same rows either way.
+export async function fetchAllRows(makeQuery, { pageSize = COMBO_PAGE_SIZE, maxPages = COMBO_MAX_PAGES, expectedRows = 0 } = {}) {
   const rows = [];
-  for (let page = 0; page < maxPages; page += 1) {
+  const ahead = Math.min(maxPages, Math.max(1, Math.ceil((Number(expectedRows) || 0) / pageSize) + (expectedRows > 0 && expectedRows % pageSize === 0 ? 1 : 0)));
+  let start = 0;
+  if (ahead > 1) {
+    const res = await Promise.all(Array.from({ length: ahead }, (_, page) => makeQuery().range(page * pageSize, page * pageSize + pageSize - 1)));
+    for (let page = 0; page < res.length; page += 1) {
+      const r = res[page];
+      if (!r || r.error) return { data: page === 0 ? null : rows, error: (r && r.error) || new Error("no response") };
+      const data = Array.isArray(r.data) ? r.data : [];
+      rows.push(...data);
+      if (data.length < pageSize) return { data: rows, error: null };
+    }
+    start = ahead;
+  }
+  for (let page = start; page < maxPages; page += 1) {
     const from = page * pageSize;
     const res = await makeQuery().range(from, from + pageSize - 1);
     if (!res || res.error) return { data: page === 0 ? null : rows, error: (res && res.error) || new Error("no response") };

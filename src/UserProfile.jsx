@@ -9,6 +9,7 @@ import { identityFromUser, profileDisplayName } from "./userProfile";
 import { sportChipSelected, toggleSportChip } from "./sportChips";
 import WhatsNewComposer from "./WhatsNewComposer";
 import { buildComboStatement } from "./comboStatement";
+import { fetchAllRows } from "./comboPaging";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
@@ -56,7 +57,8 @@ export default function UserProfile({
     try {
       const [{ data: parlays, error: pErr }, { data: fills, error: fErr }] = await Promise.all([
         supabase.from("combo_parlays").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(200),
-        supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker").eq("user_id", user.id).eq("is_combo", true).eq("is_taker", false),
+        // Paged: maker fills passed PostgREST's 1,000-row cap (1,029 for Kevin on Oct 19).
+        fetchAllRows(() => supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker").eq("user_id", user.id).eq("is_combo", true).eq("is_taker", false).order("id", { ascending: true })),
       ]);
       if (pErr) throw pErr;
       if (fErr) throw fErr;
