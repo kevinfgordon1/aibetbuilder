@@ -43,6 +43,7 @@ function setup({ user = OWNER } = {}) {
         from(table) {
           const preds = [];
           let single = false;
+          let window = null;
           const api = {
             select() { return api; },
             eq(c, v) { preds.push((r) => r[c] === v); log.push([table, 'eq', c, v]); return api; },
@@ -50,9 +51,11 @@ function setup({ user = OWNER } = {}) {
             is(c, v) { preds.push((r) => (r[c] ?? null) === v); return api; },
             order() { return api; },
             limit() { return api; },
+            range(from, to) { window = [from, to]; log.push([table, 'range', from, to]); return api; },
             maybeSingle() { single = true; return api; },
             then(ok, bad) {
-              const rows = (db[table] || []).filter((r) => preds.every((p) => p(r)));
+              let rows = (db[table] || []).filter((r) => preds.every((p) => p(r)));
+              if (window) rows = rows.slice(window[0], window[1] + 1);
               return Promise.resolve({ data: single ? rows[0] || null : rows, error: null }).then(ok, bad);
             },
           };
@@ -121,6 +124,26 @@ const q = (table, extra = {}) => ({ table, select: '*', filters: [], order: [], 
   assert.ok(!JSON.stringify(r.body).includes('SHOULD-NOT-LEAK'));
   assert.ok(!s.log.some((l) => l[0] === 'combo_exchange_keys'));
   assert.equal((await call('POST', { view_as: KENNY, queries: new Array(viewAs.MAX_QUERIES + 1).fill(q('combo_parlays')) })).code, 400);
+
+  // ── paged reads (.range) are honored and still pinned to the target ──
+  s = setup();
+  s.db.combo_parlays.push(
+    { id: 'p-kenny-2', user_id: KENNY, label: 'Kenny old', archived_at: '2026-10-11' },
+    { id: 'p-kenny-3', user_id: KENNY, label: 'Kenny older', archived_at: '2026-10-10' },
+  );
+  r = await call('POST', { view_as: KENNY, queries: [
+    q('combo_parlays', { filters: [{ op: 'eq', args: ['user_id', KEVIN] }], range: { from: 0, to: 1 } }),
+    q('combo_parlays', { range: { from: 2, to: 3 } }),
+    q('combo_parlays', { range: { from: 5, to: 2 } }),
+    q('combo_parlays', { range: { from: 0, to: viewAs.MAX_LIMIT } }),
+  ] });
+  assert.equal(r.code, 200);
+  const [page1, page2, backwards, tooBig] = r.body.results;
+  assert.deepEqual(page1.data.map((p) => p.id), ['p-kenny', 'p-kenny-2'], 'first page of the target only');
+  assert.deepEqual(page2.data.map((p) => p.id), ['p-kenny-3'], 'second page');
+  assert.ok(backwards.error && /bad range/.test(backwards.error.message));
+  assert.ok(tooBig.error && /bad range/.test(tooBig.error.message), 'range span capped at MAX_LIMIT');
+  assert.ok(s.log.some((l) => l[0] === 'combo_parlays' && l[1] === 'range' && l[2] === 2 && l[3] === 3));
 
   // ── lib: sanitize / read / reject ──
   assert.equal(viewAs.sanitizeQuery(q('combo_parlays', { filters: [{ op: 'or', args: ['status.eq.filled,is_live.eq.true'] }] })).ok, true);
