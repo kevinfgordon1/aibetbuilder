@@ -358,9 +358,23 @@ export async function findBestAcrossLegCounts(legs, calc, {
   yieldFn = yieldToMain,
   growFrom3Seeds = SCAN_GROW_FROM_3_SEEDS,
   acceptCombo = null,
+  evForm = null,
 } = {}) {
   const cap = Math.max(0, Math.min(Number(maxLegs) || 0, SCAN_MAX_PROMO_LEGS));
   if (cap < 1) return null;
+  if (evForm) {
+    // Exact best per leg count (monotonic in the leg pool).
+    const { findTopParlaysExact } = await import("./promoExactScan.js");
+    let bestExact = null;
+    for (let n = 1; n <= cap; n++) {
+      throwIfAborted(signal);
+      const top = await findTopParlaysExact(legs, n, calc, evForm, {
+        maxResults: 1, minFinalOdds, maxFinalOdds, acceptCombo, signal, yieldMs, yieldFn,
+      });
+      if (top[0] && (!bestExact || top[0].ev > bestExact.pick.ev)) bestExact = { numLegs: n, pick: top[0] };
+    }
+    return bestExact;
+  }
 
   let best = null;
   const consider = (n, pick) => {
