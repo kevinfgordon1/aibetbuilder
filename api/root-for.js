@@ -368,7 +368,8 @@ async function sweatBaseline(client, out, now, userId) {
       } catch (_) { carry = null; carryTU = null; }
     }
     // Today's needle reads the saved day row (all of the day's games and locks, settled ones included), so it matches history.
-    const dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
+    let dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
+    if (dayRow && userId) { try { const { data: x } = await client.from('root_for_needle_days').select('snap').eq('user_id', userId).eq('day', sd).limit(1); if (x && x[0]) dayRow = { ...dayRow, snap: x[0].snap }; } catch (_) { /* gauge falls back */ } }
     const ids = (c) => (c ? c.kept.map((p) => String(p.id)) : []);
     const union = carry || carryTU ? (() => {
       const byId = {}; for (const c of [carry, carryTU]) if (c) for (const p of c.kept) byId[String(p.id)] = p;
@@ -428,10 +429,22 @@ async function handler(req, res) {
       if (!gate.ok) return json(res, gate.status, { ok: false, error: gate.error });
       uid = gate.targetId;
     }
-    if (q.check === '1' || q.check === 1) return json(res, 200, { ok: true, locks: await countLocks(client, uid) });
+    // saved daily needle rows (owner's sheet days): the sheet stays visible for them even with no open locks
+    const NEEDLE_COLS = 'day,result,pregame_ev,live_ev,games,locks,final,updated_at';
+    const needleHist = async () => { const { data, error } = await client.from('root_for_needle_days').select(NEEDLE_COLS).eq('user_id', uid).order('day', { ascending: false }).limit(60); if (error) throw error; return data || []; };
+    const needleRow = async (day) => { const { data, error } = await client.from('root_for_needle_days').select(NEEDLE_COLS + ',snap').eq('user_id', uid).eq('day', day).limit(1); if (error) throw error; return (data || [])[0] || null; };
+    if (q.check === '1' || q.check === 1) { const hist = await needleHist().catch(() => []); return json(res, 200, { ok: true, locks: await countLocks(client, uid), days: hist.length }); }
+    // one saved day (gauge vs that day's frozen pregame baseline, final needle, finished legs)
+    if (q.day && /^\d{4}-\d{2}-\d{2}$/.test(String(q.day))) {
+      const [row, history] = await Promise.all([needleRow(String(q.day)), needleHist()]);
+      return json(res, 200, { ok: true, asOf: new Date(deps.now()).toISOString(), dayRow: row, history });
+    }
     const M = await loadMods();
     const { parlays, fills, singles } = await loadLocks(client, uid);
-    if (!parlays.length) return json(res, 200, { ok: true, empty: true, locksTotal: 0 });
+    if (!parlays.length) { // nothing open: still show the latest saved day (and the past-day picker)
+      const history = await needleHist().catch(() => []); const latest = history[0] ? await needleRow(String(history[0].day).slice(0, 10)).catch(() => null) : null;
+      return json(res, 200, { ok: true, empty: true, locksTotal: 0, ...(history.length ? { asOf: new Date(deps.now()).toISOString(), sweat: { history, dayRow: latest } } : {}) });
+    }
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
     const out = M.computeRootFor({ parlays, fills, singles, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });

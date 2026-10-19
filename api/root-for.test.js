@@ -59,16 +59,16 @@ function call(token, query = {}, headers = {}) {
   await assert.rejects(() => loadLocks({ from }, undefined), /no user/);
   assert.equal(await countLocks({ from }, A.id), 2);
   // handler: check mode returns each user's own count; user id always comes from the token, not the query
-  assert.deepEqual((await call('tok-a', { check: '1', user_id: 'user-b' })).body, { ok: true, locks: 2 });
-  assert.deepEqual((await call('tok-b', { check: '1' })).body, { ok: true, locks: 1 });
+  assert.deepEqual((await call('tok-a', { check: '1', user_id: 'user-b' })).body, { ok: true, locks: 2, days: 0 });
+  assert.deepEqual((await call('tok-b', { check: '1' })).body, { ok: true, locks: 1, days: 0 });
   // a user with no open locks gets an empty payload (no market fetches, nothing from other users)
   tokens['tok-c'] = { id: 'user-c', email: 'c@example.com' };
   assert.deepEqual((await call('tok-c')).body, { ok: true, empty: true, locksTotal: 0 });
   // View as: only the owner may read another Combo Locks user's sheet
   const CHRIS = '721c1166-be0b-4856-8a88-6de3a8b047b9';
   tokens['tok-owner'] = { id: '79ae1610-097e-4b46-a622-1e952f18e936', email: 'kev120909@gmail.com' };
-  assert.deepEqual((await call('tok-owner', { check: '1' }, { 'x-view-as': CHRIS })).body, { ok: true, locks: 1 });
-  assert.deepEqual((await call('tok-owner', { check: '1', view_as: CHRIS })).body, { ok: true, locks: 1 });
+  assert.deepEqual((await call('tok-owner', { check: '1' }, { 'x-view-as': CHRIS })).body, { ok: true, locks: 1, days: 0 });
+  assert.deepEqual((await call('tok-owner', { check: '1', view_as: CHRIS })).body, { ok: true, locks: 1, days: 0 });
   // non-owner asking to view as someone → 403, never their data
   const deny = await call('tok-a', { check: '1' }, { 'x-view-as': CHRIS });
   assert.equal(deny.code, 403); assert.equal(deny.body.locks, undefined);
