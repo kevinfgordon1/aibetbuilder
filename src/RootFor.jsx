@@ -152,6 +152,26 @@ export function FinalToday({ f, d, past = false }) {
   );
 }
 
+// A saved sheet day (today after everything settled, or any past day) from its needle row + snapshot:
+// gauge vs that day's frozen per-lock pregame baseline, needle at the final/latest number, finished legs by name.
+export function DaySheet({ row, past = false }) {
+  const day = String(row.day).slice(0, 10);
+  const label = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" }).format(new Date(`${day}T12:00:00Z`));
+  const pre = Number(row.pregame_ev), live = Number(row.live_ev); const result = Number.isFinite(Number(row.result)) ? Number(row.result) : live - pre;
+  const sn = row.snap || null; const positions = sn && sn.positions ? Object.values(sn.positions) : [];
+  const approx = !sn || !sn.lockPre || !Object.keys(sn.lockPre).length;
+  const d = { asOf: past ? undefined : row.updated_at, ev: live, model: { positions, probs: {}, finals: {}, teamNames: {} }, perEvent: [], livePos: positions,
+    sweat: { started: true, baseline: pre, now: live, dayResult: result, dayRow: sn ? row : undefined, kept: [], last: (sn && sn.last) || {}, frozen: (sn && sn.frozen) || {}, finished: Object.keys((sn && sn.last) || {}), source: {} } };
+  return (
+    <div>
+      <div className="lead">{label}{row.final ? " — final" : past ? " (still in progress when last saved)" : ""}: <b className={result >= 0 ? "pos" : "neg"}>{sMoney(result)}</b> vs the pregame expectation.</div>
+      <div className="lead2">{row.games} game{row.games === 1 ? "" : "s"} across {row.locks} lock{row.locks === 1 ? "" : "s"} · pregame {sMoney(pre)} → {row.final ? "final" : "latest"} {sMoney(live)}{past ? ` · saved ${etStamp(row.updated_at)}` : ""}.</div>
+      {approx && <div className="note" style={{ color: "#fbbf24" }}>Baseline approximate: this day was saved before per-lock first-kickoff baselines existed, so it uses each game's kickoff numbers{sn ? "" : " (no leg detail saved for this day)"}.</div>}
+      <SweatMeter d={d} legs={!!sn} liveCol={false} />
+    </div>
+  );
+}
+
 // Meter per day filter. Server sends All (12h rule) at top level and Today & beyond under sweat.tu.
 function beyondSweat(s) { return s && s.tu ? { ...s, now: s.tu.now, baseline: s.tu.baseline, finished: s.tu.finished, keptIds: s.tu.keptIds } : s; }
 function allSweat(s) { return s && s.allKeptIds ? { ...s, keptIds: s.allKeptIds } : s; }
@@ -209,7 +229,8 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
   const signedIn = !!(user && user.id);
   // cheap lock count so users with no open locks never see the sheet
-  const [lockCount, setLockCount] = useState(initialData ? (initialData.locksTotal || 1) : null);
+  const [lockCount, setLockCount] = useState(initialData ? (initialData.locksTotal || (initialData.sweat && initialData.sweat.dayRow ? 0 : 1)) : null);
+  const [dayCount, setDayCount] = useState(initialData && initialData.sweat && initialData.sweat.history ? initialData.sweat.history.length : 0);
   useEffect(() => {
     if (!signedIn || initialData) return undefined; let dead = false;
     (async () => {
@@ -218,12 +239,13 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         const { data: { session } } = await c.auth.getSession(); if (!session) return;
         const r = await fetch("/api/root-for?check=1", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
         const j = await r.json().catch(() => null);
-        if (!dead && r.ok && j && j.ok) setLockCount(j.locks || 0);
+        if (!dead && r.ok && j && j.ok) { setLockCount(j.locks || 0); setDayCount(j.days || 0); }
       } catch { /* stay hidden */ }
     })();
     return () => { dead = true; };
   }, [signedIn, initialData]);
-  const can = signedIn && lockCount > 0;
+  // shown with open locks, or (owner) with saved sheet days so today's/past results stay visible after everything settles
+  const can = signedIn && (lockCount > 0 || dayCount > 0);
   const load = useCallback(async () => {
     const c = supabase();
     if (!c) return setSt({ loading: false, error: "Not configured", data: null });
@@ -247,6 +269,14 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
     const id = setInterval(() => { if (Date.now() - last >= refreshMs() - 1000 && (typeof document === "undefined" || document.visibilityState !== "hidden")) { last = Date.now(); load(); } }, 15000);
     return () => clearInterval(id);
   }, [open, can, initialData, load]);
+  const [dayRows, setDayRows] = useState({});
+  const loadDay = useCallback(async (day) => {
+    try {
+      const c = supabase(); if (!c) return; const { data: { session } } = await c.auth.getSession(); if (!session) return;
+      const r = await fetch(`/api/root-for?day=${day}`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
+      const j = await r.json().catch(() => null); setDayRows((m) => ({ ...m, [day]: j && j.ok ? (j.dayRow || false) : false }));
+    } catch { setDayRows((m) => ({ ...m, [day]: false })); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [picks, setPicks] = useState({});
   const base = st.data;
   const whatIf = useMemo(() => {
@@ -270,14 +300,19 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   const [scopeSel, setScope] = useState("beyond");
   const hasAll = !!(base && base.sweat && !base.sweat.error && base.sweat.allKeptIds);
   const nowMsS = base ? Date.parse(base.asOf) || Date.now() : Date.now();
-  const past = pastDays(base && !base.empty ? base : null, nowMsS);
+  const past = pastDays(base, nowMsS);
   const scope = scopeSel === "all" && !hasAll ? "beyond" : scopeSel.startsWith("day:") && !past.includes(scopeSel.slice(4)) ? "beyond" : scopeSel;
   const pv = scope.startsWith("day:") ? pastDayView(base, scope.slice(4)) : null;
   const showFinal = scope === "today" && !tv && !!fv;
-  if (!can || (base && base.empty)) return null;
+  const pickedDay = scope.startsWith("day:") ? scope.slice(4) : null;
+  useEffect(() => { if (open && pickedDay && !initialData && !(pickedDay in dayRows)) loadDay(pickedDay); }, [open, pickedDay]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickedRow = pickedDay ? (initialData && initialData.sweat && initialData.sweat.dayRow && String(initialData.sweat.dayRow.day).slice(0, 10) === pickedDay ? initialData.sweat.dayRow : dayRows[pickedDay]) : null;
+  const todayRow = base && base.sweat && base.sweat.dayRow && base.sweat.dayRow.snap ? base.sweat.dayRow : null;
+  if (!can) return null;
+  if (base && base.empty && !(base.sweat && base.sweat.dayRow)) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
-  if (base) for (const e of base.perEvent) { const k = (e.slot && e.slot.key) || "9"; let g = slots.find((x) => x.key === k); if (!g) slots.push((g = { key: k, label: (e.slot && e.slot.label) || "Other days", rows: [] })); g.rows.push(e); }
+  if (base) for (const e of base.perEvent || []) { const k = (e.slot && e.slot.key) || "9"; let g = slots.find((x) => x.key === k); if (!g) slots.push((g = { key: k, label: (e.slot && e.slot.label) || "Other days", rows: [] })); g.rows.push(e); }
   slots.sort((a, b) => a.key.localeCompare(b.key));
   const teamBtns = (e) => {
     const g = base.model && base.model.groups[e.event]; if (!g) return null;
@@ -338,7 +373,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
       `}</style>
       <h3>
         What to root for
-        <span className="sub">{d ? `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games` : ""}</span>
+        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           <span className="seg" role="group" aria-label="Games">
             <button type="button" className={scope === "beyond" ? "on" : ""} aria-pressed={scope === "beyond"} onClick={() => setScope("beyond")} title="Every open lock. Today's games, finished ones included, count live vs kickoff">Today &amp; beyond</button>
@@ -359,11 +394,12 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
-      {open && d && pv && <FinalToday f={pv} d={base} past />}
-      {open && d && !pv && showFinal && <FinalToday f={fv} d={base} />}
-      {open && d && !pv && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
+      {open && d && pickedDay && (pickedRow ? <DaySheet row={pickedRow} past /> : pickedRow === false ? (pv ? <FinalToday f={pv} d={base} past /> : <div className="note">No saved numbers for that day.</div>) : <div className="note">Loading that day…</div>)}
+      {open && d && !pickedDay && base.empty && <DaySheet row={base.sweat.dayRow} past={String(base.sweat.dayRow.day).slice(0, 10) !== sheetDay(nowMsS)} />}
+      {open && d && !pickedDay && !base.empty && showFinal && (todayRow ? <DaySheet row={todayRow} /> : <FinalToday f={fv} d={base} />)}
+      {open && d && !pickedDay && !base.empty && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
         : <Simple d={{ ...base, sweat: scope === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
-      {open && d && !pv && !showFinal && view === "detailed" && (
+      {open && d && !pickedDay && !base.empty && !showFinal && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">

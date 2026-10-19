@@ -120,7 +120,7 @@ function LiveLegs({ d, part = "live" }) {
   );
 }
 
-export default function SweatMeter({ d, legs = true }) {
+export default function SweatMeter({ d, legs = true, liveCol = true }) {
   const pillLoading = useContext(PillLoading);
   const s0 = d && d.sweat;
   const preR = useMemo(() => (legs && s0 && s0.started ? pregameRange(d, s0) : null), [d && d.asOf, legs, s0 && s0.baseline, s0 && s0.dayResult, s0 && (s0.keptIds || []).length, s0 && (s0.kept || []).length, d && d.model && (d.model.positions || []).length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -175,7 +175,7 @@ export default function SweatMeter({ d, legs = true }) {
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}
         
       </div>
-      {legs && started && base != null && <LiveLegs d={d} />}
+      {legs && liveCol && started && base != null && <LiveLegs d={d} />}
     </div>
   );
 }
