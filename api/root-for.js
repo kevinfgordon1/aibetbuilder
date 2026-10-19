@@ -46,11 +46,12 @@ async function countLocks(client, userId) {
 }
 
 /** Open locks for ONE user: not archived, not merged away, not settled. Fills/orders only for those lock ids. */
+const LOCK_COLS = 'id,label,legs,parlay_stake,parlay_american,fill_american,is_free_bet,sportsbook,active,starts_at,hedge_mode,kalshi_status';
 const FILL_COLS = 'parlay_id,count,yes_price,no_price,fee,is_taker,is_combo,outcome_side,action,ticker,fill_id,order_id,kalshi_created_time,recorded_at';
 async function loadLocks(client, userId) {
   if (!userId) throw new Error('no user');
   const { data: parlays, error } = await client.from('combo_parlays')
-    .select('id,label,legs,parlay_stake,parlay_american,fill_american,is_free_bet,sportsbook,active,starts_at,hedge_mode,kalshi_status')
+    .select(LOCK_COLS)
     .eq('user_id', userId).is('archived_at', null).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null)
     .limit(1000);
   if (error) throw error;
@@ -353,16 +354,19 @@ async function settleDays(client, userId, now, skipDay = null) {
   try {
     const S = await import('../src/rootForSweat.js');
     const lo = new Date(now - 4 * 86400000).toISOString().slice(0, 10);
-    const { data } = await client.from('root_for_needle_days').select('day,final,final_reason,snap').eq('user_id', userId).gte('day', lo);
+    const { data } = await client.from('root_for_needle_days').select('day,final,final_reason,snap,result,live_ev,pregame_ev').eq('user_id', userId).gte('day', lo);
     for (const row of data || []) {
       if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled' && Number(row.snap.settleV) >= 3) || String(row.day).slice(0, 10) === skipDay) continue;
-      const snap = row.snap;
+      const snap = row.snap; const before = JSON.stringify(snap);
       if (!(Number(snap.settleV) >= 3)) await rebuildSnapPositions(client, snap); // v3: History P/L contract counts, no double-counted single orders
       snap.settleV = 3; const legsAll = await resolveSnapFinals(snap); // v2: losing leg decides a lock
       const pos = Object.values(snap.positions); const all = legsAll || pos.every((p) => S.lockDecided(p, snap.final)); const liveP = { ...(snap.last || {}), ...snap.final }; const preP = { ...liveP, ...(snap.frozen || {}) };
       const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
       const stamp = new Date(now).toISOString();
-      await client.from('root_for_needle_days').upsert({ user_id: userId, day: row.day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, snap, final: all || !!row.final, final_reason: all ? 'settled' : row.final_reason || null, updated_at: stamp }, { onConflict: 'user_id,day' });
+      const fin = all || !!row.final; const why = all ? 'settled' : row.final_reason || null;
+      const same = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+      if (fin === !!row.final && why === (row.final_reason || null) && JSON.stringify(snap) === before && same(row.result, liveEv - preEv) && same(row.live_ev, liveEv) && same(row.pregame_ev, preEv)) continue; // nothing changed: no write (keeps the DB quiet)
+      await client.from('root_for_needle_days').upsert({ user_id: userId, day: row.day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, snap, final: fin, final_reason: why, updated_at: stamp }, { onConflict: 'user_id,day' });
     }
   } catch (e) { console.error('[root-for] settle failed:', String((e && e.message) || e).slice(0, 120)); }
 }
@@ -380,10 +384,10 @@ async function needleDay(client, userId, out, now, frozen, starts = {}, rows = [
     const day = TD.sheetDay(now); const model = out.model || {}; const probs = model.probs || {};
     const T = (t) => client.from(t); const stamp = new Date(now).toISOString();
     await T('root_for_needle_days').update({ final: true, final_reason: 'rollover', updated_at: stamp }).eq('user_id', userId).eq('final', false).lt('day', day);
-    const { data: cur } = await T('root_for_needle_days').select('day,final,snap').eq('user_id', userId).eq('day', day).limit(1);
+    const { data: cur } = await T('root_for_needle_days').select('day,final,snap,result,live_ev,pregame_ev').eq('user_id', userId).eq('day', day).limit(1);
     const row0 = (cur || [])[0];
     if (!(row0 && row0.final)) {
-      const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} }; snap.lastAt = snap.lastAt || {};
+      const snap = (row0 && row0.snap) || { positions: {}, last: {}, frozen: {} }; const before = row0 && row0.snap ? JSON.stringify(row0.snap) : null; snap.lastAt = snap.lastAt || {};
       const evs = TD.todayEvents(out.perEvent || [], now);
       for (const ev of evs) { if (probs[ev]) { snap.last[ev] = probs[ev]; snap.lastAt[ev] = stamp; } if (frozen && frozen[ev]) snap.frozen[ev] = frozen[ev]; }
       // keep each leg's display names (finished props/totals drop off the board and lose them)
@@ -398,7 +402,8 @@ async function needleDay(client, userId, out, now, frozen, starts = {}, rows = [
         await lockBaselines(snap, pos, liveP, preP, starts, rows, now, (ids) => loadStoredFairs(client, ids));
         const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
         const decided = allSettled || pos.every((p) => S.lockDecided(p, snap.final));
-        await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'settled' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
+        const same = (a, b) => Math.abs(Number(a) - Number(b)) < 0.005;
+        if (!(before && !decided && JSON.stringify(snap) === before && same(row0.result, liveEv - preEv) && same(row0.live_ev, liveEv) && same(row0.pregame_ev, preEv))) await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'settled' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
       }
     }
     const { data: hist } = await T('root_for_needle_days').select('day,result,pregame_ev,live_ev,games,locks,final').eq('user_id', userId).order('day', { ascending: false }).limit(30);
@@ -493,23 +498,74 @@ async function sweatBaseline(client, out, now, userId) {
   }
 }
 
+// Needle cron for every user with Combo Locks (Kevin, Oct 19 2026). Each user only ever gets their OWN rows.
+//  - Live (prices + that user's day snapshot) only for users with a game in progress or a lock leg kicking off
+//    within 20 min (src/rootForActive.js; no network to decide). Their open locks, fills and live books are read
+//    ONCE for all of them together (no per-user / per-lock request storms); then each user's needle is computed
+//    and saved on its own (one day row per user per sheet day, written only when it changed).
+//  - Everyone else: no live price pulls and no snapshot writes; only the settle pass for saved days that are not
+//    final yet (finished legs → actual P/L; unchanged rows are not rewritten).
+// Owner first, then the rest rotated each run; stops starting new users near the time limit.
+const CRON_BUDGET_MS = 40000;
+async function savedKickoffs(client, now) {
+  try {
+    const S = await import('../src/rootForSweat.js'); const A = await import('../src/rootForActive.js');
+    const keys = [...new Set([S.slateKey(now), S.slateKey(now - 7 * 86400000)])];
+    const { data, error } = await client.from('root_for_pregame_probs').select('event,kickoff').in('slate_key', keys).limit(5000);
+    if (error) throw error;
+    const out = {}; for (const r of data || []) { const g = A.gameId(r.event + '-x'); if (g && r.kickoff && !out[g]) out[g] = r.kickoff; }
+    return out;
+  } catch (_) { return {}; }
+}
+async function needleCron(client, env) {
+  const t0 = Date.now(); const now = deps.now();
+  const A = await import('../src/rootForActive.js'); const TD = await import('../src/rootForToday.js'); const sd = TD.sheetDay(now);
+  const { data: rows, error } = await client.from('combo_parlays').select(LOCK_COLS + ',user_id')
+    .is('archived_at', null).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null).limit(3000);
+  if (error) throw error;
+  const plan = A.planUsers(rows || [], await savedKickoffs(client, now), now);
+  const turn = Math.floor(now / 300000);
+  const order = (xs) => { const o = xs.filter((x) => x.uid === lib.OWNER_USER_ID); const r = xs.filter((x) => x.uid !== lib.OWNER_USER_ID).sort((a, b) => a.uid.localeCompare(b.uid)); const k = r.length ? turn % r.length : 0; return [...o, ...r.slice(k), ...r.slice(0, k)]; };
+  const live = order(plan.live); const done = new Set(); const skipped = [];
+  // a past sheet day nobody is updating any more turns final at the 11 AM ET rollover (same rule as needleDay)
+  try { await client.from('root_for_needle_days').update({ final: true, final_reason: 'rollover', updated_at: new Date(now).toISOString() }).eq('final', false).lt('day', sd); } catch (_) { /* next run */ }
+  if (live.length) {
+    const M = await loadMods();
+    const all = live.flatMap((u) => u.locks);
+    const kids = await loadLockChildren(client, all.map((p) => p.id));
+    const mk = await loadMarkets(M, all, env); const finals = await loadFinals(client, now);
+    for (const u of live) {
+      if (Date.now() - t0 > CRON_BUDGET_MS) { skipped.push(u.uid); continue; }
+      try {
+        const ids = new Set(u.locks.map((p) => p.id)); const mine = (xs) => xs.filter((x) => ids.has(x.parlay_id));
+        const out = M.computeRootFor({ parlays: u.locks, fills: mine(kids.fills), singles: mine(kids.singles), submissions: mine(kids.submissions), kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals });
+        await sweatBaseline(client, out, now, u.uid); await settleDays(client, u.uid, now, sd); // today: needleDay inside sweatBaseline
+        done.add(u.uid);
+      } catch (e) { console.error('[root-for] cron user failed:', String((e && e.message) || e).slice(0, 120)); }
+    }
+  }
+  // settle-only: saved days (last 4) not final+settled yet, for users not updated live above
+  let settled = 0;
+  try {
+    const lo = new Date(now - 4 * 86400000).toISOString().slice(0, 10);
+    const { data: days } = await client.from('root_for_needle_days').select('user_id,final,final_reason,v:snap->>settleV').gte('day', lo).limit(2000);
+    const need = [...new Set((days || []).filter((d) => !(d.final && d.final_reason === 'settled' && Number(d.v) >= 3)).map((d) => d.user_id))].filter((id) => !done.has(id) && !skipped.includes(id));
+    for (const uid of need) { if (Date.now() - t0 > CRON_BUDGET_MS + 10000) break; await settleDays(client, uid, now); settled += 1; }
+  } catch (e) { console.error('[root-for] cron settle failed:', String((e && e.message) || e).slice(0, 120)); }
+  return { ok: true, users: plan.live.length + plan.idle.length, live: done.size, idle: plan.idle.length, skipped: skipped.length, settled };
+}
+
 async function handler(req, res) {
   if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
-  // Vercel cron (every 10 min): keep the owner's needle + daily history current even with the sheet closed.
+  // Vercel cron (every 5 min): keep EVERY Combo Locks user's needle + daily history current with the sheet closed.
   // Needs CRON_SECRET (Vercel sends "Authorization: Bearer <CRON_SECRET>"); without it the cron is refused.
   if ((req.query || {}).cron === 'needle') {
     const env0 = deps.env || process.env; const sec = env0.CRON_SECRET;
     if (!sec || lib.readBearer(req) !== sec) return json(res, 401, { ok: false, error: 'cron auth' });
     try {
       const client = deps.createClient(env0.SUPABASE_URL || env0.VITE_SUPABASE_URL, env0.SUPABASE_SERVICE_KEY, clientOpts);
-      const uid = lib.OWNER_USER_ID; const M = await loadMods();
-      const { parlays, fills, singles, submissions } = await loadLocks(client, uid);
-      if (!parlays.length) { await settleDays(client, uid, deps.now()); return json(res, 200, { ok: true, empty: true }); }
-      const mk = await loadMarkets(M, parlays, env0); const now = deps.now();
-      const out = M.computeRootFor({ parlays, fills, singles, submissions, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });
-      const sw = await sweatBaseline(client, out, now, uid); { const TD = await import('../src/rootForToday.js'); await settleDays(client, uid, now, TD.sheetDay(now)); } // today: needleDay above
-      return json(res, 200, { ok: true, days: (sw.history || []).length });
-    } catch (e) { return json(res, 500, { ok: false, error: 'cron failed' }); }
+      return json(res, 200, await needleCron(client, env0));
+    } catch (e) { console.error('[root-for] cron:', String((e && e.message) || e).slice(0, 160)); return json(res, 500, { ok: false, error: 'cron failed' }); }
   }
   const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
@@ -544,15 +600,16 @@ async function handler(req, res) {
     const M = await loadMods();
     const { parlays, fills, singles, submissions } = await loadLocks(client, uid);
     if (!parlays.length) { // nothing open: still show the latest saved day (and the past-day picker)
-      if (auth.owner && uid === auth.user.id) await settleDays(client, uid, deps.now());
+      await settleDays(client, uid, deps.now()); // own (or owner View-as) saved days keep settling; no-op rows are not rewritten
       const history = await needleHist().catch(() => []); const latest = history[0] ? await needleRow(String(history[0].day).slice(0, 10)).catch(() => null) : null;
       return json(res, 200, { ok: true, empty: true, locksTotal: 0, ...(history.length ? { asOf: new Date(deps.now()).toISOString(), sweat: { history, dayRow: latest } } : {}) });
     }
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
     const out = M.computeRootFor({ parlays, fills, singles, submissions, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });
-    // pregame-probs table is not per-user: only the owner's sheet may write it (and it's off unless enabled)
-    const sweat = auth.owner && uid === auth.user.id ? await sweatBaseline(client, out, now, uid) : undefined;
+    // Live needle for every Combo Locks user (Kevin, Oct 19): baselines + day rows are per user (uid); the
+    // pregame-probs rows it reads/writes are per game (market facts, the same for everyone).
+    const sweat = await sweatBaseline(client, out, now, uid);
     const lockLabels = Object.fromEntries(parlays.map((p) => [p.id, p.label || '']));
     return json(res, 200, { ok: true, asOf: new Date(now).toISOString(), relayNote: mk.relayNote, ...out, lockLabels, ...(sweat ? { sweat } : {}) });
   } catch (e) {
@@ -564,4 +621,4 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, nflTeam, nflKey, lockStarts };
+module.exports._helpers = { needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, nflTeam, nflKey, lockStarts };
