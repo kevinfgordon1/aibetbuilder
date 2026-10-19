@@ -1165,3 +1165,21 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
 
   console.log("comboPrefill player-prop tests passed");
 }
+
+// Promo "Lock it": a 1-leg free bet becomes a single-leg lock prefill.
+{
+  const leg = [{ name: "Corey Kiner Anytime TD", market: "TD", game: "Cincinnati @ Baylor", commence_time: "2026-10-17T19:30:00Z", sport: "americanfootball_ncaaf" }];
+  const one = buildPromoComboPrefill({ stake: 50, american: 320, combinedProb: 0.22, legs: leg, kind: "freebet", promoType: "freebet", sportsbook: "DraftKings", nonce: 3, lockIt: true });
+  assert.equal(one.lockIt, true);
+  assert.equal(one.kind, "freebet");
+  assert.equal(one.stake, 50);
+  assert.equal(one.boost, 320);
+  assert.equal(one.sportsbook, "DraftKings");
+  assert.equal(one.legs.length, 1);
+  assert.equal(one.label, "Corey Kiner Anytime TD");
+  assert.equal(one.fill, one.fair);
+  // lockIt never sticks to a multi-leg prefill.
+  const two = buildPromoComboPrefill({ stake: 25, american: 1200, combinedProb: 0.08, legs: [...leg, ...leg], kind: "freebet", nonce: 4, lockIt: true });
+  assert.equal(two.lockIt, false);
+  console.log("comboPrefill lock-it tests passed");
+}

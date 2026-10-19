@@ -1590,6 +1590,11 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             <div className="sec-sub">Already placed the parlay at your sportsbook? Enter it here.</div>
           </div>
           <div className="card">
+            {prefill?.lockIt && (
+              <div className="note" style={{ marginBottom: 12 }}>
+                <b>Lock it from Promo:</b> single-leg {prefill.kind === "freebet" ? "free bet" : "bet"}{prefill.sportsbook ? ` at ${prefill.sportsbook}` : ""}. Leg, book, stake, odds and bet type are filled in, and the sale price starts at fair. Review it, then save. It rests on Kalshi and Polymarket like any single-leg lock. Nothing has been saved yet.
+              </div>
+            )}
             {prefill && !gamesReady && (
               <div className="note warn" style={{ marginBottom: 12 }}>Matching your Promo Builder legs to live games…</div>
             )}

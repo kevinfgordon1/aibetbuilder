@@ -1205,10 +1205,11 @@ function ShowMorePicks({ remaining, locked, onShowMore, onLocked }) {
   );
 }
 
-function SendToComboLocksButton({ onSend }) {
+function SendToComboLocksButton({ onSend, label = "Send to Combo Locks", title }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={(e) => { e.stopPropagation(); onSend(); }}
       style={{
         display: "inline-flex",
@@ -1225,7 +1226,7 @@ function SendToComboLocksButton({ onSend }) {
         cursor: "pointer",
       }}
     >
-      Send to Combo Locks
+      {label}
     </button>
   );
 }
@@ -2729,6 +2730,7 @@ export default function App() {
       promoType: promoKind,
       sportsbook: activePromoBookData?.label || "",
       boostPct: promoKind === "boost" ? boostPct : "",
+      lockIt: p.legs?.length === 1,
     }));
     setActiveTab("combo");
   };
@@ -3907,6 +3909,13 @@ export default function App() {
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                             {canSeeComboLocks(user) && !isSingle && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
+                            )}
+                            {canSeeComboLocks(user) && isSingle && leg?.market !== "TT" && (
+                              <SendToComboLocksButton
+                                label="Lock it"
+                                title="Open a single-leg Combo Lock pre-filled with this free bet. It rests the hedge on Kalshi and Polymarket instead of a sportsbook. Nothing saves until you review it."
+                                onSend={() => sendToComboLocks(p, "freebet")}
+                              />
                             )}
                           </div>
                           {showLock && (

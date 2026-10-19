@@ -942,6 +942,7 @@ export function buildPromoComboPrefill({
   sportsbook,
   boostPct,
   nonce,
+  lockIt = false,
 } = {}) {
   const fair = fairAmericanFromProb(combinedProb);
   // Every leg — including 4+ grown legs — must reach Combo Locks.
@@ -964,5 +965,7 @@ export function buildPromoComboPrefill({
     label: mapped.map((l) => l.name).join(" + "),
     labelEdited: true,
     legs: mapped,
+    // Promo "Lock it": a 1-leg free bet sent over as a single-leg lock.
+    lockIt: !!lockIt && mapped.length === 1,
   };
 }
