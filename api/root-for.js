@@ -305,9 +305,9 @@ async function settleDays(client, userId, now, skipDay = null) {
     const { data } = await client.from('root_for_needle_days').select('day,final,final_reason,snap').eq('user_id', userId).gte('day', lo);
     for (const row of data || []) {
       if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled') || String(row.day).slice(0, 10) === skipDay) continue;
-      const snap = row.snap; const all = await resolveSnapFinals(snap);
-      const pos = Object.values(snap.positions); const liveP = { ...(snap.last || {}), ...snap.final }; const preP = { ...liveP, ...(snap.frozen || {}) };
-      const liveEv = S.expectedProfit(pos, liveP); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
+      const snap = row.snap; const legsAll = await resolveSnapFinals(snap);
+      const pos = Object.values(snap.positions); const all = legsAll || pos.every((p) => S.lockDecided(p, snap.final)); const liveP = { ...(snap.last || {}), ...snap.final }; const preP = { ...liveP, ...(snap.frozen || {}) };
+      const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
       const stamp = new Date(now).toISOString();
       await client.from('root_for_needle_days').upsert({ user_id: userId, day: row.day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, snap, final: all || !!row.final, final_reason: all ? 'settled' : row.final_reason || null, updated_at: stamp }, { onConflict: 'user_id,day' });
     }
@@ -343,8 +343,8 @@ async function needleDay(client, userId, out, now, frozen, starts = {}, rows = [
         const liveP = { ...probs, ...Object.fromEntries(dayEvs.map((ev) => [ev, probs[ev] || snap.last[ev]])), ...snap.final };
         const preP = { ...liveP, ...snap.frozen };
         await lockBaselines(snap, pos, liveP, preP, starts, rows, now);
-        const liveEv = S.expectedProfit(pos, liveP); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
-        const decided = allSettled;
+        const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
+        const decided = allSettled || pos.every((p) => S.lockDecided(p, snap.final));
         await T('root_for_needle_days').upsert({ user_id: userId, day, result: liveEv - preEv, pregame_ev: preEv, live_ev: liveEv, games: Object.keys(snap.last).length, locks: pos.length, events: Object.keys(snap.last), snap, final: decided, final_reason: decided ? 'settled' : null, updated_at: stamp }, { onConflict: 'user_id,day' });
       }
     }

@@ -152,3 +152,19 @@ export function lockedPregameEv(positions, preP, lockPre) {
   }
   return sum;
 }
+
+// A lock is decided once any settled leg lost (it can't win any more) or every leg settled.
+export function lockDecided(p, final = {}) {
+  let all = true;
+  for (const l of p.legs || []) { const f = final[l.event]; if (!f) { all = false; continue; } if (!(l.allowed || []).some((o) => f[o] === 1)) return true; }
+  return all;
+}
+
+// Day value of one lock: settled loss → its miss, every leg won → its hit (even if a later-day leg has no price in
+// the day's snapshot), else expected profit at the given chances.
+export function dayLockValue(p, probs = {}, final = {}) {
+  let all = true;
+  for (const l of p.legs || []) { const f = final[l.event]; if (!f) { all = false; continue; } if (!(l.allowed || []).some((o) => f[o] === 1)) return Number(p.miss) || 0; }
+  return all ? Number(p.hit) || 0 : expectedProfit([p], probs);
+}
+export const dayValue = (positions = [], probs = {}, final = {}) => positions.reduce((a, p) => a + dayLockValue(p, probs, final), 0);
