@@ -2,6 +2,7 @@
 import { legEvent, rootFor, NEITHER } from "./rootForEngine.js";
 import { legFair, american } from "./rootForPrices.js";
 import { lockPositions } from "./rootForLocks.js";
+import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape.js";
 
 const SPREAD_RE = /^(KX[A-Z]+)SPREAD-(\d{2}[A-Z]{3}\d{2}[A-Z]+)-([A-Z]+?)(\d+)$/;
 /** "KXNFLSPREAD-26OCT18NYJNE-NE8" → { game:"KXNFLGAME-26OCT18NYJNE", team:"NE", k:8 } ("NE wins by k+"). */
@@ -49,10 +50,12 @@ export function finalOutcome(last, outs = []) {
   return team !== w && outs.includes(team) ? team : null;
 }
 
-export function computeRootFor({ parlays = [], fills = [], singles = [], kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {} }) {
+export function computeRootFor({ parlays = [], fills = [], singles = [], submissions = null, kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {} }) {
   const positions = []; const skipped = []; let resting = 0;
+  // same contract count as History P/L (only when the caller loaded submissions)
+  const filledBy = submissions ? deskFillCounts(fills, submissions.filter(isConfirmedFillSubmission)).byParlay : null;
   for (const p of parlays) {
-    const r = lockPositions(p, fills, singles);
+    const r = lockPositions(p, fills, singles, filledBy ? (filledBy[p.id] || 0) : null);
     if (r.skip) { skipped.push({ id: p.id, label: p.label, reason: r.skip }); continue; }
     resting += r.positions[0].resting || 0;
     positions.push(...r.positions);
