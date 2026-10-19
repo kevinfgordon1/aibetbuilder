@@ -31,6 +31,10 @@
     {
       "path": "/api/root-for?cron=needle",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/combo-auto-settle",
+      "schedule": "*/30 * * * *"
     }
   ],
   "functions": {
@@ -84,6 +88,9 @@
     },
     "api/raw-parlay-edges.js": {
       "maxDuration": 300
+    },
+    "api/combo-auto-settle.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

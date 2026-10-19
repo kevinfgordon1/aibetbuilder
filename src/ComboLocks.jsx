@@ -29,7 +29,7 @@ import { mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGa
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
-import { resolveComboTicker, marketSettlement, historyOutcome, lockResultFromMarket, singleLegOf } from "./comboSettlement";
+import { historyOutcome, singleLegOf } from "./comboSettlement";
 import { SingleLegVenues } from "./SingleLegVenues";
 import { lockProfitWarning, lockProfile, signedMoney, moneyAbs, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
@@ -37,7 +37,8 @@ import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
 import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, ARCHIVED_ID_CHUNK, ARCHIVED_SUBS_TTL_MS } from "./comboLockSubmissions";
-import { settleLegs, uniqueEspnQueries, needsUnderlyingStamp, outcomeChrome } from "./comboLegResult";
+import { outcomeChrome } from "./comboLegResult";
+import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
 import { createViewAsClient, installViewAsFetch, viewAsBanner, viewAsSender } from "./comboViewAs";
 import ComboTesters from "./ComboTesters";
@@ -634,110 +635,12 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     } catch (_) {}
     setGames(SAMPLE); setSrcLive(false); setGamesReady(true);
   }, []);
-  const refreshSettlements = useCallback(async ({ living, archived, fills, outcomes, matchesByParlay, submissions, filledById }) => {
+  const refreshSettlements = useCallback(async (inputs) => {
     if (settleInflight.current) return;
-    const tickerOf = (row) => resolveComboTicker({
-      parlay: row,
-      fills,
-      outcomes,
-      matches: (matchesByParlay && matchesByParlay[row.id]) || [],
-      submissions,
-    });
-    const candidates = [];
-    const foundTickers = [];
-    (living || []).forEach((row) => {
-      if (!row) return;
-      const ticker = tickerOf(row);
-      if (ticker && !row.combo_ticker) foundTickers.push({ row, ticker });
-      if (row.kalshi_result === "yes" || row.kalshi_result === "no") return;
-      if (!((filledById && filledById[row.id]) > 0)) return;
-      if (ticker) candidates.push({ row, ticker });
-    });
-    (archived || []).forEach((row) => {
-      if (!row) return;
-      const ticker = tickerOf(row);
-      if (ticker && !row.combo_ticker) foundTickers.push({ row, ticker });
-      if (row.kalshi_result === "yes" || row.kalshi_result === "no") return;
-      if (ticker) candidates.push({ row, ticker });
-    });
-    const needUnderlying = [];
-    [...(living || []), ...(archived || [])].forEach((row) => {
-      if (needsUnderlyingStamp(row)) needUnderlying.push(row);
-    });
-    // Unfilled locks often have no combo ticker. Still stamp risk won / risk lost
-    // from Kalshi single-game legs or ESPN — do not wait for a combo market.
-    if (!candidates.length && !foundTickers.length && !needUnderlying.length) return;
-    const tickers = [...new Set(candidates.map((c) => c.ticker))];
     settleInflight.current = true;
     try {
-      const livePatch = {};
-      const rowPatch = {};
-      const stampTicker = ({ row, ticker }) => {
-        if (!ticker || row.combo_ticker || (rowPatch[row.id] && rowPatch[row.id].combo_ticker)) return;
-        rowPatch[row.id] = { ...(rowPatch[row.id] || {}), combo_ticker: ticker };
-      };
-      foundTickers.forEach(stampTicker);
-      candidates.forEach(stampTicker);
-      if (tickers.length) {
-        const r = await fetch("/api/kalshi-games?tickers=" + encodeURIComponent(tickers.join(",")), { headers: { accept: "application/json" } });
-        if (r.ok) {
-          const d = await r.json();
-          const markets = (d && d.markets) || {};
-          for (const { row, ticker } of candidates) {
-            const m = markets[ticker];
-            if (!m) continue;
-            const official = marketSettlement(m);
-            if (!official) continue;
-            const next = rowPatch[row.id] || {};
-            next.kalshi_result = lockResultFromMarket(row, official.result);
-            next.kalshi_status = m.status || null;
-            next.settled_at = new Date().toISOString();
-            rowPatch[row.id] = next;
-            livePatch[row.id] = { result: official.result, status: m.status, ticker };
-          }
-        }
-      }
-      if (needUnderlying.length) {
-        const started = needUnderlying.filter((p) => {
-          if (!p.starts_at) return true;
-          const t = Date.parse(p.starts_at);
-          return !Number.isFinite(t) || t <= Date.now();
-        });
-        const tickerRows = started.length ? started : needUnderlying;
-        const tickers = [...new Set(tickerRows.flatMap((p) => (p.legs || []).map((l) => l && l.ticker).filter(Boolean)))].slice(0, 50);
-        const markets = {};
-        for (let i = 0; i < tickers.length; i += 25) {
-          const batch = tickers.slice(i, i + 25);
-          const ur = await fetch("/api/kalshi-games?tickers=" + encodeURIComponent(batch.join(",")), { headers: { accept: "application/json" } });
-          if (ur.ok) {
-            const d = await ur.json();
-            Object.assign(markets, (d && d.markets) || {});
-          }
-        }
-        let espnGames = [];
-        const queries = uniqueEspnQueries(started).slice(0, 12);
-        if (queries.length) {
-          try {
-            const er = await fetch("/api/espn-scores?queries=" + encodeURIComponent(queries.map((q) => q.sport + ":" + q.date).join(",")), { headers: { accept: "application/json" } });
-            if (er.ok) {
-              const d = await er.json();
-              espnGames = (d && d.games) || [];
-            }
-          } catch (_) {}
-        }
-        for (const row of needUnderlying) {
-          const settled = settleLegs({ legs: row.legs, kalshiMarkets: markets, espnGames });
-          if (settled.outcome !== "won" && settled.outcome !== "lost" && settled.outcome !== "push") continue;
-          const src = settled.source === "espn" || settled.source === "kalshi_legs" ? settled.source : null;
-          if (!src) continue;
-          const next = rowPatch[row.id] || {};
-          next.underlying_result = settled.outcome;
-          next.underlying_source = src;
-          next.underlying_settled_at = new Date().toISOString();
-          next.leg_results = settled.legs;
-          rowPatch[row.id] = next;
-        }
-      }
+      // Same planner the server auto-settle job runs (src/comboAutoSettle.js).
+      const { rowPatch, livePatch } = await planSettlementPatches(inputs, { getJson: browserGetJson() });
       for (const [id, next] of Object.entries(rowPatch)) {
         if (!next || !Object.keys(next).length) continue;
         await supabase.from("combo_parlays").update(next).eq("id", id);

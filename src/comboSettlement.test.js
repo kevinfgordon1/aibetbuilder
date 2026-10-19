@@ -215,6 +215,9 @@ assert.equal(resolveComboTicker({
 }
 
 const locksSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+// The settlement planner moved out of the page into comboAutoSettle.js (shared with the auto-settle job).
+const settleSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "comboAutoSettle.js"), "utf8");
+assert.match(locksSrc, /planSettlementPatches\(inputs, \{ getJson: browserGetJson\(\) \}\)/);
 assert.match(locksSrc, /historyOutcome/);
 assert.match(locksSrc, /awaiting settlement/);
 assert.match(locksSrc, /outcomeChrome/);
@@ -222,16 +225,16 @@ assert.match(locksSrc, /chrome\.sourceText/);
 assert.match(locksSrc, /<ComboHistory/);
 assert.doesNotMatch(locksSrc, /History \+ profile/);
 assert.match(locksSrc, /submissions/);
-assert.match(locksSrc, /filledById && filledById\[row\.id\]\) > 0/);
-assert.match(locksSrc, /\(archived \|\| \[\]\)\.forEach/);
+assert.match(settleSrc, /filledById && filledById\[row\.id\]\) > 0/);
+assert.match(settleSrc, /\(archived \|\| \[\]\)\.forEach/);
 assert.match(locksSrc, /RiskProfile/);
 assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[p\.id\], \{ parlay: p \}\)\}/);
 assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
 assert.doesNotMatch(locksSrc, /AttemptHistory|MatchedRfqTable/);
-assert.match(locksSrc, /espn-scores/);
+assert.match(settleSrc, /espn-scores/);
 assert.match(locksSrc, /underlying_result/);
-assert.match(locksSrc, /needsUnderlyingStamp/);
-assert.match(locksSrc, /!candidates\.length && !foundTickers\.length && !needUnderlying\.length/);
+assert.match(settleSrc, /needsUnderlyingStamp/);
+assert.match(settleSrc, /!candidates\.length && !foundTickers\.length && !needUnderlying\.length/);
 assert.match(locksSrc, /Right now \(not hedged\)/);
 assert.match(locksSrc, /Not set yet/);
 assert.doesNotMatch(locksSrc, /UNHEDGED_RFQ_LIVE/);
