@@ -134,8 +134,15 @@ function sanitizeQuery(spec) {
     if (!Number.isFinite(n) || n < 1) return { ok: false, error: 'bad limit' };
     limit = Math.min(n, MAX_LIMIT);
   }
+  let range = null;
+  if (spec.range != null) {
+    const from = Math.floor(Number(spec.range && spec.range.from));
+    const to = Math.floor(Number(spec.range && spec.range.to));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < from || to - from + 1 > MAX_LIMIT) return { ok: false, error: 'bad range' };
+    range = { from, to };
+  }
   const single = spec.single === 'maybe' || spec.single === 'one' ? spec.single : null;
-  return { ok: true, plan: { table, scope: TABLES[table], select, selectOpts, filters, order, limit, single } };
+  return { ok: true, plan: { table, scope: TABLES[table], select, selectOpts, filters, order, limit, range, single } };
 }
 
 /** Run a sanitized plan with the service client, forced to the viewed user. */
@@ -150,6 +157,7 @@ async function runPlan(client, plan, targetId, parlayIds) {
   else q = q.in('parlay_id', parlayIds.length ? parlayIds : ['00000000-0000-0000-0000-000000000000']);
   for (const o of plan.order) q = q.order(o.column, { ascending: o.ascending });
   if (plan.limit != null) q = q.limit(plan.limit);
+  if (plan.range) q = q.range(plan.range.from, plan.range.to);
   if (plan.single === 'maybe') q = q.maybeSingle();
   else if (plan.single === 'one') q = q.single();
   const r = await q;

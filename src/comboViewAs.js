@@ -41,12 +41,15 @@ export function createViewAsClient({ realClient, targetId, send }) {
   });
 
   const builder = (table) => {
-    const spec = { table, select: "*", selectOpts: null, filters: [], order: [], limit: null, single: null };
+    const spec = { table, select: "*", selectOpts: null, filters: [], order: [], limit: null, range: null, single: null };
     let write = false;
     const b = {
       select(cols = "*", opts) { spec.select = cols; if (opts) spec.selectOpts = { count: opts.count, head: opts.head }; return b; },
       order(column, o) { spec.order.push({ column, ascending: !(o && o.ascending === false) }); return b; },
       limit(n) { spec.limit = n; return b; },
+      // Paged reads (fetchAllRows: every archived lock + every fill) need .range();
+      // without it History and Filled came back empty while viewing as someone.
+      range(from, to) { spec.range = { from, to }; return b; },
       maybeSingle() { spec.single = "maybe"; return b; },
       single() { spec.single = "one"; return b; },
       then(onOk, onErr) { return (write ? readOnlyResult() : enqueue(spec)).then(onOk, onErr); },

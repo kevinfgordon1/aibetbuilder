@@ -1,6 +1,7 @@
 // "View as" client: reads are batched to /api/combo-view-as, writes never leave
 // the browser, and combo API calls carry x-view-as while viewing.
 import assert from "node:assert/strict";
+import { fetchAllRows } from "./comboPaging.js";
 import { createViewAsClient, installViewAsFetch, isComboApiUrl, viewAsBanner, viewAsSender, VIEW_AS_HEADER } from "./comboViewAs.js";
 
 const KENNY = "42b5ee16-68d5-4b3b-a931-40aa17cd1a47";
@@ -25,7 +26,7 @@ const byTable = (t) => qs.find((q) => q.table === t);
 assert.deepEqual(byTable("combo_parlays"), {
   table: "combo_parlays", select: "*", selectOpts: null,
   filters: [{ op: "eq", args: ["user_id", "ignored"] }, { op: "is", args: ["archived_at", null] }],
-  order: [{ column: "created_at", ascending: false }], limit: 5, single: null,
+  order: [{ column: "created_at", ascending: false }], limit: 5, range: null, single: null,
 });
 assert.equal(byTable("combo_settings").single, "maybe");
 assert.ok(qs.some((q) => q.kind === "rpc" && q.name === "combo_my_fee_status"));
@@ -77,6 +78,20 @@ for (const [url, method] of [["/api/combo-lock-orders", "POST"], ["/api/combo-pr
 assert.equal(seen.length, 2, "blocked writes never reached the network");
 restore();
 assert.equal(win.fetch, origFetch, "restored when switching back");
+
+// Paged reads (History: every archived lock; Filled: every fill) go through .range().
+// Before this, fetchAllRows threw "range is not a function" while viewing, so
+// History, History P/L and Filled were empty for every viewed user.
+const pagedSent = [];
+const pagedClient = createViewAsClient({
+  realClient: null,
+  targetId: KENNY,
+  send: async (_id, queries) => { pagedSent.push(...queries); return queries.map((q) => ({ data: q.range.from === 0 ? new Array(1000).fill({ id: "x" }) : [{ id: "y" }], error: null })); },
+});
+const paged = await fetchAllRows(() => pagedClient.from("combo_parlays").select("*").eq("user_id", KENNY).not("archived_at", "is", null).order("archived_at", { ascending: false }));
+assert.equal(paged.error, null);
+assert.equal(paged.data.length, 1001, "both pages came back");
+assert.deepEqual(pagedSent.map((q) => q.range), [{ from: 0, to: 999 }, { from: 1000, to: 1999 }]);
 
 assert.match(viewAsBanner("Kenny"), /^Viewing as Kenny, read-only/);
 console.log("comboViewAs tests passed");
