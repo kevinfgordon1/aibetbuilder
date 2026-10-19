@@ -344,7 +344,51 @@ function significantTokens(s) {
   return normalize(s).split(" ").filter((t) => t.length >= 3 && t !== "the" && t !== "and");
 }
 
+// College names the odds feed / ESPN and Kalshi spell differently. Both sides are
+// rewritten to one form before the fuzzy match (Oct 19 2026 audit of this week's
+// ESPN slate vs Kalshi KXNCAAFGAME labels: App State, UMass, Miami (FL), UL Monroe,
+// UAlbany, LIU, UT Martin all failed).
+const NCAAF_NAME_ALIASES = [
+  [/\b(app state|appalachian state)\b/, "appalachian state"],
+  [/\b(massachusetts|umass)\b/, "umass"],
+  [/\bmiami (fl|florida|hurricanes)\b/, "miami florida"],
+  [/\bmiami (oh|ohio|redhawks)\b/, "miami ohio"],
+  [/\b(ul monroe|ulm|louisiana monroe)\b/, "ulm"],
+  [/\b(ul lafayette|louisiana lafayette|louisiana ragin cajuns)\b/, "louisiana lafayette"],
+  [/\b(ualbany|university at albany)\b/, "albany"],
+  [/\b(long island university|liu)\b/, "liu"],
+  [/\b(ut martin|tennessee martin)\b/, "tennessee martin"],
+  [/\b(nc state|north carolina state)\b/, "north carolina state"],
+  [/\b(uconn|connecticut)\b/, "uconn"],
+  [/\b(usf|south florida)\b/, "south florida"],
+  [/\b(ucf|central florida)\b/, "ucf"],
+  [/\b(fiu|florida international)\b/, "fiu"],
+  [/\b(fau|florida atlantic)\b/, "florida atlantic"],
+  [/\b(wku|western kentucky)\b/, "western kentucky"],
+  [/\b(mtsu|middle tennessee state|middle tennessee)\b/, "middle tennessee"],
+  [/\b(smu|southern methodist)\b/, "smu"],
+  [/\b(byu|brigham young)\b/, "byu"],
+  [/\b(utsa|ut san antonio|texas san antonio)\b/, "utsa"],
+  [/\b(utep|ut el paso|texas el paso)\b/, "utep"],
+  [/\b(unlv|nevada las vegas)\b/, "unlv"],
+  [/\b(uab|alabama birmingham)\b/, "uab"],
+  [/\b(ole miss|mississippi rebels)\b/, "ole miss"],
+  [/\b(southern miss|southern mississippi)\b/, "southern miss"],
+  [/\b(sfa|stephen f austin)\b/, "stephen f austin"],
+  [/\b(etsu|east tennessee state)\b/, "east tennessee state"],
+  [/\bhawai i\b/, "hawaii"],
+];
+export function ncaafCanonName(s) {
+  let n = normalize(String(s || "").replace(/[()]/g, " ").replace(/[-\u2013]/g, " ").replace(/['\u2019.]/g, ""))
+    .replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()
+    .replace(/\bst\b(?! [a-z]+s\b)/g, "state");
+  for (const [re, to] of NCAAF_NAME_ALIASES) n = n.replace(re, to);
+  return n;
+}
+
 function nameMatchesLabel(promoName, label) {
+  promoName = ncaafCanonName(promoName);
+  label = ncaafCanonName(label);
   const p = normalize(promoName);
   const k = normalize(label);
   if (!p || !k) return false;
@@ -358,7 +402,7 @@ function nameMatchesLabel(promoName, label) {
   return overlap.length >= Math.min(2, pt.length);
 }
 
-function ncaafTeamsMatch(promoGame, kalshiGame) {
+export function ncaafTeamsMatch(promoGame, kalshiGame) {
   const [away, home] = splitAt(promoGame);
   if (!away || !home) return false;
   const sides = (kalshiGame.markets?.side || []).map((m) => m.label).filter(Boolean);
