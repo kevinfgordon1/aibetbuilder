@@ -58,6 +58,7 @@ export const COMBO_LOCKS_ACCOUNTS = Object.freeze([
   Object.freeze({ email: "kmguido97@gmail.com", id: "42b5ee16-68d5-4b3b-a931-40aa17cd1a47" }),
   Object.freeze({ email: "ryandiroma@gmail.com", id: "24aa1d23-ec38-47fb-af30-db8757a65e70" }),
   Object.freeze({ email: "jwacheson@gmail.com", id: "ccc49569-c96c-4d8b-98b1-1a8ad48b6db0" }),
+  Object.freeze({ email: "cloudmassager@gmail.com", id: "8770ab01-362f-4ce2-9430-5181064c1ccf" }),
 ]);
 
 /** Emails + uids allowed to see Combo Locks. The env var is ignored on purpose. */
