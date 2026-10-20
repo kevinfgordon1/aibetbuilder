@@ -413,7 +413,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
       {st.error && <div className="note neg">{st.error}</div>}
       {open && d && pickedDay && (pickedRow ? <DaySheet row={pickedRow} past /> : pickedRow === false ? (pv ? <FinalToday f={pv} d={base} past /> : <div className="note">No saved numbers for that day.</div>) : <div className="note">Loading that day…</div>)}
       {open && d && !pickedDay && base.empty && <DaySheet row={base.sweat.dayRow} past={String(base.sweat.dayRow.day).slice(0, 10) !== sheetDay(nowMsS)} />}
-      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 14, margin: "12px 0" }}>No games today ({sheetDayLabel(nowMsS)}). Today switches to the next day at 11 AM ET. Tap All to see every open lock.</div>}
+      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 14, margin: "12px 0" }}>None of your open locks have a game on today’s sheet ({sheetDayLabel(nowMsS)}, runs until 11 AM ET). The next day’s games show here from 11 AM ET. Tap All to see every open lock.</div>}
       {open && d && !pickedDay && !base.empty && showFinal && (todayRow ? <DaySheet row={todayRow} /> : <FinalToday f={fv} d={base} />)}
       {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
         : <Simple d={{ ...base, sweat: scope === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
