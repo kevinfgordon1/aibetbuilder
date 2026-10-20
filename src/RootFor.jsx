@@ -309,13 +309,16 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   });
   const tv = useMemo(() => todayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now()), [base]);
   const fv = useMemo(() => (tv ? null : finalTodayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now())), [base, tv]);
-  // Day filter: "beyond" = Today & beyond (default: every open lock; today's games incl. finished ones count live vs kickoff),
-  // "today" = today's games only, "all" = every lock + finished games for 12h after they end, "day:YYYY-MM-DD" = a past day.
-  const [scopeSel, setScope] = useState("beyond");
+  // Day filter (Kevin, Oct 20 2026: Today / All; "Today & beyond" dropped, it was nearly the same as All):
+  // "today" = today's sheet-day games only (day switches at 11 AM ET), "all" (default) = every open lock + finished
+  // games for 12h after they end, "day:YYYY-MM-DD" = a past day. "beyond" stays internal: All's numbers when the
+  // server didn't send the 12h set.
+  const [scopeSel, setScope] = useState("all");
   const hasAll = !!(base && base.sweat && !base.sweat.error && base.sweat.allKeptIds);
   const nowMsS = base ? Date.parse(base.asOf) || Date.now() : Date.now();
   const past = pastDays(base, nowMsS);
-  const scope = scopeSel === "all" && !hasAll ? "beyond" : scopeSel.startsWith("day:") && !past.includes(scopeSel.slice(4)) ? "beyond" : scopeSel;
+  const scope = scopeSel === "all" && !hasAll ? "beyond" : scopeSel.startsWith("day:") && !past.includes(scopeSel.slice(4)) ? (hasAll ? "all" : "beyond") : scopeSel;
+  const noToday = scope === "today" && !tv && !fv;
   const pv = scope.startsWith("day:") ? pastDayView(base, scope.slice(4)) : null;
   const showFinal = scope === "today" && !tv && !!fv;
   const pickedDay = scope.startsWith("day:") ? scope.slice(4) : null;
@@ -391,11 +394,10 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           <span className="seg" role="group" aria-label="Games">
-            <button type="button" className={scope === "beyond" ? "on" : ""} aria-pressed={scope === "beyond"} onClick={() => setScope("beyond")} title="Every open lock. Today's games, finished ones included, count live vs kickoff">Today &amp; beyond</button>
-            {(tv || fv) && <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")} title="Only today's games">Today</button>}
-            {hasAll && <button type="button" className={scope === "all" ? "on" : ""} aria-pressed={scope === "all"} onClick={() => setScope("all")} title="Every lock; finished games count for 12 hours after they end">All</button>}
+            <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")} title="Only today's games (the day switches at 11 AM ET the next morning)">Today</button>
+            <button type="button" className={scope === "all" || scope === "beyond" ? "on" : ""} aria-pressed={scope === "all" || scope === "beyond"} onClick={() => setScope("all")} title="Every open lock; finished games count for 12 hours after they end">All</button>
           </span>
-          {past.length > 0 && <select aria-label="Past day" value={pv ? scope.slice(4) : ""} onChange={(e) => setScope(e.target.value ? `day:${e.target.value}` : "beyond")}
+          {past.length > 0 && <select aria-label="Past day" value={pv ? scope.slice(4) : ""} onChange={(e) => setScope(e.target.value ? `day:${e.target.value}` : "all")}
             style={{ background: pv ? "#f59e0b" : "#1f2937", color: pv ? "#111827" : "#e5e7eb", border: "1px solid #374151", borderRadius: 8, padding: "3px 6px", fontSize: 12 }}>
             <option value="">Past day…</option>
             {past.map((x) => <option key={x} value={x}>{new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${x}T12:00:00Z`))}</option>)}
@@ -411,10 +413,11 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
       {st.error && <div className="note neg">{st.error}</div>}
       {open && d && pickedDay && (pickedRow ? <DaySheet row={pickedRow} past /> : pickedRow === false ? (pv ? <FinalToday f={pv} d={base} past /> : <div className="note">No saved numbers for that day.</div>) : <div className="note">Loading that day…</div>)}
       {open && d && !pickedDay && base.empty && <DaySheet row={base.sweat.dayRow} past={String(base.sweat.dayRow.day).slice(0, 10) !== sheetDay(nowMsS)} />}
+      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 14, margin: "12px 0" }}>No games today ({sheetDayLabel(nowMsS)}). Today switches to the next day at 11 AM ET. Tap All to see every open lock.</div>}
       {open && d && !pickedDay && !base.empty && showFinal && (todayRow ? <DaySheet row={todayRow} /> : <FinalToday f={fv} d={base} />)}
-      {open && d && !pickedDay && !base.empty && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
+      {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
         : <Simple d={{ ...base, sweat: scope === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
-      {open && d && !pickedDay && !base.empty && !showFinal && view === "detailed" && (
+      {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">
