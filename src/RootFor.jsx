@@ -7,7 +7,7 @@ import EvBars from "./RootForEvBars";
 import SweatMeter, { PillLoading } from "./RootForSweat";
 import { expectedProfit, lockDecided, dayValue } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
-import { todayEvents, touchedLocks, sheetDayLabel, sheetDay } from "./rootForToday";
+import { todayEvents, touchedLocks, sheetDayLabel, sheetDay, todayDay, todayDayLabel } from "./rootForToday";
 import { summarySentence, kickoffRef, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
@@ -136,16 +136,16 @@ function TouchedLocks({ today }) {
 // Today after every game of the sheet day is final (until the 11 AM ET rollover): the saved day row (owner only).
 function finalTodayView(base, nowMs) {
   const dr = base && base.sweat && base.sweat.dayRow; if (!dr) return null;
-  if (String(dr.day).slice(0, 10) !== sheetDay(nowMs)) return null;
+  if (String(dr.day).slice(0, 10) !== todayDay(nowMs)) return null;
   const pre = Number(dr.pregame_ev), live = Number(dr.live_ev); if (!Number.isFinite(pre) || !Number.isFinite(live)) return null;
-  return { row: dr, pre, live, result: Number.isFinite(Number(dr.result)) ? Number(dr.result) : live - pre, dayLabel: sheetDayLabel(nowMs) };
+  return { row: dr, pre, live, result: Number.isFinite(Number(dr.result)) ? Number(dr.result) : live - pre, dayLabel: todayDayLabel(nowMs) };
 }
 export function FinalToday({ f, d, past = false }) {
   const sweat = { ...(d.sweat || {}), started: true, baseline: f.pre, now: f.live, since: null, source: {}, error: undefined };
   return (
     <div>
       <div className="lead">{past ? `${f.dayLabel}${f.row.final ? "" : " (still in progress)"}` : `All of today’s games are final (${f.dayLabel}).`}</div>
-      <div className="lead2">{f.row.games} game{f.row.games === 1 ? "" : "s"} across {f.row.locks} lock{f.row.locks === 1 ? "" : "s"}: <b className={f.result >= 0 ? "pos" : "neg"}>{sMoney(f.result)}</b> vs kickoff odds.{past ? " That day's games only, from kickoff numbers to final." : " Today switches to the next day at 11 AM ET."}</div>
+      <div className="lead2">{f.row.games} game{f.row.games === 1 ? "" : "s"} across {f.row.locks} lock{f.row.locks === 1 ? "" : "s"}: <b className={f.result >= 0 ? "pos" : "neg"}>{sMoney(f.result)}</b> vs kickoff odds.{past ? " That day's games only, from kickoff numbers to final." : " Today switches to the next day at 2 AM ET."}</div>
       <SweatMeter d={{ ...d, sweat }} legs={false} />
       <NeedleHistory rows={d.sweat && d.sweat.history} />
     </div>
@@ -189,10 +189,10 @@ function pastDayView(base, day) {
 }
 const pastDays = (base, nowMs) => ((base && base.sweat && base.sweat.history) || []).map((h) => String(h.day).slice(0, 10)).filter((x) => x < sheetDay(nowMs)).sort().reverse();
 
-function todaySweat(base, pos, evNow) {
+function todaySweat(base, pos, evNow, nowMs) {
   const s = base && base.sweat; if (!s) return s;
   // Owner: the saved day row covers every game/lock of the sheet day (settled ones too) — same number as the history row.
-  const dr = s.dayRow;
+  const dr = s.dayRow && String(s.dayRow.day).slice(0, 10) === todayDay(nowMs) ? s.dayRow : null;
   if (dr && Number.isFinite(Number(dr.pregame_ev)) && Number.isFinite(Number(dr.live_ev))) {
     return { ...s, started: true, baseline: Number(dr.pregame_ev), now: Number(dr.live_ev), dayResult: Number(dr.result) };
   }
@@ -206,7 +206,7 @@ function todaySweat(base, pos, evNow) {
 function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function todayView(base, nowMs) {
   if (!base || !base.model) return null;
-  const evs = todayEvents(base.perEvent, nowMs); if (!evs.size) return null;
+  const evs = todayEvents(base.perEvent, nowMs, todayDay(nowMs)); if (!evs.size) return null;
   const pos = touchedLocks(base.model, evs); if (!pos.length) return null;
   let r; try { r = rootFor(pos, base.model.probs, { histBins: 32, rng: seeded(7) }); } catch { return null; }
   const meta = {}; for (const e of base.perEvent || []) { meta[e.event] = e; for (const o of e.outcomes || []) meta[`${e.event}:${o.outcome}`] = o; }
@@ -215,11 +215,11 @@ function todayView(base, nowMs) {
   const labels = base.lockLabels || {};
   const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   // finished games of this sheet day (no longer priced, kept at last live chances) feed the leg chart's "Finished games" line
-  const s0 = base.sweat || {}; const fin = new Set(((s0.tu && s0.tu.finished) || s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === sheetDay(nowMs)));
+  const s0 = base.sweat || {}; const fin = new Set(((s0.tu && s0.tu.finished) || s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === todayDay(nowMs)));
   const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
   return {
-    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
-    info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: sheetDayLabel(nowMs) + (sheetDayLabel(nowMs) !== sheetDayLabel(nowMs + 11 * 3600 * 1000) ? ", until 11 AM ET" : "") },
+    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev, nowMs), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
+    info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
   };
 }
 
@@ -310,15 +310,19 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   const tv = useMemo(() => todayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now()), [base]);
   const fv = useMemo(() => (tv ? null : finalTodayView(base && !base.empty ? base : null, base ? Date.parse(base.asOf) || Date.now() : Date.now())), [base, tv]);
   // Day filter (Kevin, Oct 20 2026: Today / All; "Today & beyond" dropped, it was nearly the same as All):
-  // "today" = today's sheet-day games only (day switches at 11 AM ET), "all" (default) = every open lock + finished
+  // "today" = today's sheet-day games only (day switches at 2 AM ET), "all" (default) = every open lock + finished
   // games for 12h after they end, "day:YYYY-MM-DD" = a past day. "beyond" stays internal: All's numbers when the
   // server didn't send the 12h set.
-  const [scopeSel, setScope] = useState("all");
+  // null = automatic: Today when it has games, otherwise All.
+  const [scopeSel0, setScope] = useState(null);
   const hasAll = !!(base && base.sweat && !base.sweat.error && base.sweat.allKeptIds);
   const nowMsS = base ? Date.parse(base.asOf) || Date.now() : Date.now();
   const past = pastDays(base, nowMsS);
+  const scopeSel = scopeSel0 || (tv || fv ? "today" : "all");
   const scope = scopeSel === "all" && !hasAll ? "beyond" : scopeSel.startsWith("day:") && !past.includes(scopeSel.slice(4)) ? (hasAll ? "all" : "beyond") : scopeSel;
+  // Today picked but no games today: show All's content with a note instead of an empty card.
   const noToday = scope === "today" && !tv && !fv;
+  const scopeShown = noToday ? (hasAll ? "all" : "beyond") : scope;
   const pv = scope.startsWith("day:") ? pastDayView(base, scope.slice(4)) : null;
   const showFinal = scope === "today" && !tv && !!fv;
   const pickedDay = scope.startsWith("day:") ? scope.slice(4) : null;
@@ -393,8 +397,9 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
         What to root for
         <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          {open && <>
           <span className="seg" role="group" aria-label="Games">
-            <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")} title="Only today's games (the day switches at 11 AM ET the next morning)">Today</button>
+            <button type="button" className={scope === "today" ? "on" : ""} aria-pressed={scope === "today"} onClick={() => setScope("today")} title="Only today's games (switches to the next day at 2 AM ET)">Today</button>
             <button type="button" className={scope === "all" || scope === "beyond" ? "on" : ""} aria-pressed={scope === "all" || scope === "beyond"} onClick={() => setScope("all")} title="Every open lock; finished games count for 12 hours after they end">All</button>
           </span>
           {past.length > 0 && <select aria-label="Past day" value={pv ? scope.slice(4) : ""} onChange={(e) => setScope(e.target.value ? `day:${e.target.value}` : "all")}
@@ -407,17 +412,18 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
             <button type="button" className={view === "detailed" ? "on" : ""} aria-pressed={view === "detailed"} onClick={() => setView("detailed")}>Detailed</button>
           </span>
           <button type="button" onClick={load} disabled={st.loading}>{st.loading ? "Updating…" : "Refresh"}</button>
+          </>}
           <button type="button" onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Show"}</button>
         </span>
       </h3>
       {st.error && <div className="note neg">{st.error}</div>}
       {open && d && pickedDay && (pickedRow ? <DaySheet row={pickedRow} past /> : pickedRow === false ? (pv ? <FinalToday f={pv} d={base} past /> : <div className="note">No saved numbers for that day.</div>) : <div className="note">Loading that day…</div>)}
       {open && d && !pickedDay && base.empty && <DaySheet row={base.sweat.dayRow} past={String(base.sweat.dayRow.day).slice(0, 10) !== sheetDay(nowMsS)} />}
-      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 14, margin: "12px 0" }}>None of your open locks have a game on today’s sheet ({sheetDayLabel(nowMsS)}, runs until 11 AM ET). The next day’s games show here from 11 AM ET. Tap All to see every open lock.</div>}
+      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 13, margin: "10px 0 0", color: "#fbbf24" }}>No games today ({todayDayLabel(nowMsS)}), showing all open locks. Today switches to the next day at 2 AM ET.</div>}
       {open && d && !pickedDay && !base.empty && showFinal && (todayRow ? <DaySheet row={todayRow} /> : <FinalToday f={fv} d={base} />)}
-      {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
-        : <Simple d={{ ...base, sweat: scope === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
-      {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "detailed" && (
+      {open && d && !pickedDay && !base.empty && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
+        : <Simple d={{ ...base, sweat: scopeShown === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
+      {open && d && !pickedDay && !base.empty && !showFinal && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">

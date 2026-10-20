@@ -16,16 +16,18 @@ const etDate = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New
 export const ROLLOVER_HOUR_ET = 11;
 const H = 3600 * 1000;
 export function sheetDay(nowMs) { return etDate(nowMs - ROLLOVER_HOUR_ET * H); }
+// The Today filter alone switches to the next day's games at 2 AM ET (Kevin, Oct 20 2026). Saved days, the
+// "How your games ran" table and the needle cron keep the 11 AM ET sheet day above.
+export const TODAY_ROLLOVER_HOUR_ET = 2;
+export function todayDay(nowMs) { return etDate(nowMs - TODAY_ROLLOVER_HOUR_ET * H); }
 // A game's day: its ET kickoff date, with after-midnight kickoffs (before 5 AM ET) counted to the night before.
 export function gameDay(startMs) { return etDate(startMs - 5 * H); }
-export function todayEvents(perEvent = [], nowMs) {
-  const today = sheetDay(nowMs); const out = new Set();
+export function todayEvents(perEvent = [], nowMs, today = sheetDay(nowMs)) { const out = new Set();
   for (const e of perEvent) if (e && e.event && e.start && gameDay(Date.parse(e.start)) === today) out.add(e.event);
   return out;
 }
 // "Fri Oct 16" for the sheet day.
-export function sheetDayLabel(nowMs) {
-  const d = sheetDay(nowMs); const t = Date.parse(`${d}T12:00:00Z`);
+export function sheetDayLabel(nowMs, d = sheetDay(nowMs)) { const t = Date.parse(`${d}T12:00:00Z`);
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(t));
 }
 
@@ -56,3 +58,4 @@ export function todayDistribution(model, events, { samples = 20000, bins = 32, s
   for (const v of vals) { b[Math.min(bins - 1, Math.floor((v - lo) / w))].p += 1 / samples; if (v - lo < 0.5) atMin++; }
   return { ev: sum / samples, hist: { bins: b, samples, tailP: 0 }, worst: { pnl: lo, p: atMin / samples }, best: { pnl: hi }, pProfit: 1 - below / samples, touched: pos.length, events: evs.length };
 }
+export const todayDayLabel = (nowMs) => sheetDayLabel(nowMs, todayDay(nowMs));
