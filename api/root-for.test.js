@@ -123,5 +123,18 @@ function call(token, query = {}, headers = {}) {
   assert.equal(mk2.starts['KXNFLGAME-26OCT18CHIATL'], '2026-10-18T17:00:00.000Z');
   assert.equal(mk2.starts['KXNFLGAME-26OCT25CINBAL'], null); // Kalshi-only, multi-game lock: unknown, not kickoff + 3h
   assert.equal(mk2.starts['KXNFLGAME-26OCT25TBCAR'], '2026-10-25T17:00:00.000Z'); // single-game lock's starts_at
+  // NBA: ESPN real tip (BOS@DET 3 PM ET) beats Kalshi expected_expiration - 3h (6 PM ET); no ESPN game -> Kalshi fallback
+  const fetch3 = async (u) => {
+    const body = /\/health/.test(u) ? { status: {} } : /board\?venue/.test(u) ? { quotes: [] } : /orderbooks/.test(u) ? { orderbooks: [] }
+      : /espn\.com.*basketball\/nba.*dates=20261020/.test(u) ? { events: [{ date: '2026-10-20T19:00Z', competitions: [{ competitors: [{ homeAway: 'home', team: { abbreviation: 'DET' } }, { homeAway: 'away', team: { abbreviation: 'BOS' } }] }] }, { date: '2026-10-21T01:30Z', competitions: [{ competitors: [{ homeAway: 'home', team: { abbreviation: 'SA' } }, { homeAway: 'away', team: { abbreviation: 'OKC' } }] }] }] }
+      : { markets: [{ expected_expiration_time: '2026-10-21T01:00:00Z' }] };
+    return { ok: true, json: async () => body };
+  };
+  const M3 = { tickersNeeded: () => ['KXNBAGAME-26OCT20BOSDET-BOS', 'KXNBAGAME-26OCT20OKCSAS-OKC', 'KXNBAGAME-26OCT20PHINYK-NYK', 'KXNHLGAME-26OCT20WPGSTL-WPG'], kalshiAsks: () => ({}), relayIndex: () => ({}) };
+  const mk3 = await loadMarkets(M3, [{ starts_at: '2026-10-21T00:00:00Z', legs: [{ ticker: 'KXNHLGAME-26OCT20WPGSTL-WPG' }] }], { ODDS_RELAY_URL: 'http://relay' }, fetch3, () => 0);
+  assert.equal(mk3.starts['KXNBAGAME-26OCT20BOSDET'], '2026-10-20T19:00:00.000Z');
+  assert.equal(mk3.starts['KXNBAGAME-26OCT20OKCSAS'], '2026-10-21T01:30:00.000Z'); // ESPN "SA" == Kalshi "SAS"
+  assert.equal(mk3.starts['KXNBAGAME-26OCT20PHINYK'], '2026-10-20T22:00:00.000Z'); // not on ESPN: Kalshi - 3h
+  assert.equal(mk3.starts['KXNHLGAME-26OCT20WPGSTL'], '2026-10-21T00:00:00.000Z'); // single-game lock starts_at, any sport
   console.log('root-for api scoping tests ok');
 })().catch((e) => { console.error(e); process.exit(1); });
