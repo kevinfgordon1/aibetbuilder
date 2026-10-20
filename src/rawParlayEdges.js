@@ -101,10 +101,22 @@ export function legLabel(raw) {
   return [pick, l.matchup && `(${l.matchup})`, l.date].filter(Boolean).join(" ");
 }
 
+// One formatter + a per-UTC-hour memo: ET day boundaries always fall on a whole UTC hour (offsets are -4/-5h),
+// so every timestamp in the same UTC hour has the same ET day. Building a new Intl.DateTimeFormat per row was
+// most of the Combo Sniper scan time (~7.5 of 16 s for 60k rows), and 3-day scans now read ~300k rows.
+const ET_DAY_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
+const ET_DAY_BY_HOUR = new Map();
 export function etDayKey(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return null;
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  const ms = new Date(ts).getTime();
+  if (Number.isNaN(ms)) return null;
+  const hour = Math.floor(ms / 3600000);
+  let v = ET_DAY_BY_HOUR.get(hour);
+  if (v === undefined) {
+    v = ET_DAY_FMT.format(new Date(hour * 3600000));
+    if (ET_DAY_BY_HOUR.size > 20000) ET_DAY_BY_HOUR.clear();
+    ET_DAY_BY_HOUR.set(hour, v);
+  }
+  return v;
 }
 export function etTime(ts) {
   const d = new Date(ts);
