@@ -11,7 +11,7 @@ function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) 
 // Pregame range for the day: the same locks as Now, every one of the day's games at its kickoff (frozen) chances,
 // later games at their current pregame chances. Kickoff numbers never change, so the range doesn't drift as games
 // finish. 2.3rd/97.7th percentiles of that distribution = the ±2 SD lines (the engine only gives percentiles).
-export function pregameRange(d, s) {
+export function pregameRange(d, s, full = false) {
   try {
     const model = d.model || {}; const sn = (s.dayRow && s.dayRow.snap) || null; let pos; let preP;
     const today = s.dayResult != null && !!(sn && sn.positions);
@@ -31,8 +31,22 @@ export function pregameRange(d, s) {
     const center = today ? null : lockedPregameEv(pos, preP, lp);
     const r = rootFor(simPos, simP, { histBins: 40, mcSamples: 20000, rng: seeded(11) });
     if (!r || !r.hist || !r.hist.bins || !r.hist.bins.length) return null;
+    if (full) return { r, center };
     return { ev: Number(r.ev), q023: quantileOf(r.hist, 0.023), q977: quantileOf(r.hist, 0.977), center, frozenLocks: Object.keys(lp).length, fallbackLegs: Object.values(lp).reduce((a, f) => a + Number(f.fb || 0), 0), ...savedLegCounts(lp) };
   } catch { return null; }
+}
+// Pregame (kickoff-price) version of the sheet's distribution for the header, win/lose bars and result chart:
+// same simulation as the needle's ±2 SD lines, shifted so its expected value equals the needle's center.
+// null before any game has started (then live = pregame anyway).
+export function pregameView(d) {
+  const s = d && d.sweat; if (!s || s.started !== true) return null;
+  const out = pregameRange(d, s, true); if (!out) return null;
+  const c = Number.isFinite(out.center) ? out.center : Number.isFinite(Number(s.baseline)) ? Number(s.baseline) : null; if (c == null) return null;
+  const { r } = out; const k = c - Number(r.ev);
+  const bins = r.hist.bins.map((b) => ({ ...b, from: b.from + k, to: b.to + k }));
+  const pProfit = bins.reduce((a, b) => a + (b.to <= 0 ? 0 : b.from >= 0 ? b.p : b.p * (b.to / ((b.to - b.from) || 1))), 0);
+  const mv = (x) => (x && Number.isFinite(Number(x.pnl)) ? { ...x, pnl: Number(x.pnl) + k } : x);
+  return { ev: c, hist: { ...r.hist, bins }, worst: mv(r.worst), best: mv(r.best), pProfit };
 }
 // How each frozen lock's kickoff numbers were taken: st = legs from prices saved ≤15 min before the first kickoff
 // (exact), fb = estimated (earlier saved price / stored snapshot), n = legs frozen. Locks frozen before n existed
