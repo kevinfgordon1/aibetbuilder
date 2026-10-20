@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { rootFor } from "./rootForEngine";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
-import SweatMeter, { PillLoading } from "./RootForSweat";
+import SweatMeter, { PillLoading, pregameView } from "./RootForSweat";
 import { expectedProfit, lockDecided, dayValue } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
 import { todayEvents, touchedLocks, sheetDayLabel, sheetDay, todayDay, todayDayLabel } from "./rootForToday";
@@ -55,14 +55,20 @@ function todaySentence(d) {
   return `${head}${top ? ` Biggest game: ${top.game} (root for ${top.name}).` : ""}`;
 }
 
+// Header, win/lose bars and result chart use kickoff (pregame) numbers once games start; the needle's Now stays live.
+function usePregame(d) {
+  const pg = useMemo(() => pregameView(d), [d && d.asOf, d && d.sweat && d.sweat.baseline, d && d.sweat && d.sweat.dayResult, d && d.sweat && (d.sweat.keptIds || []).length, d && d.locksPriced, d && d.model && (d.model.positions || []).length]); // eslint-disable-line react-hooks/exhaustive-deps
+  return pg ? { ...d, ...pg } : d;
+}
 function Simple({ d, today }) {
-  const range = typicalRange(d.hist);
+  const g = usePregame(d);
+  const range = typicalRange(g.hist);
   // One shared scale for both columns so a +$498 bar and a -$136 bar are drawn in proportion.
   const kref = kickoffRef(d); const top = topByGain(d, 5, kref); const bad = topByDrop(d, 5, kref);
   const mx = Math.max(...top.map((t) => Math.abs(t.gain)), ...bad.map((k) => Math.abs(k.drop)), 1);
   return (
     <div>
-      <div className="lead">{today ? todaySentence(d) : summarySentence(d)}</div>
+      <div className="lead">{today ? todaySentence({ ...d, ev: g.ev }) : summarySentence({ ...d, ev: g.ev })}</div>
       {range && <div className="lead2">{today ? "Today's locks most likely land" : "Most weekends land"} between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
       <SweatMeter d={d} />
@@ -88,9 +94,9 @@ function Simple({ d, today }) {
             </div>))}
         </div>
       </div>
-      <EvBars hist={d.hist} ev={d.ev} pProfit={d.pProfit} worst={d.worst} />
+      <EvBars hist={g.hist} ev={g.ev} pProfit={g.pProfit} worst={g.worst} />
       <h4>{today ? "How likely each result is (today\u2019s locks)" : "How likely each result is"}</h4>
-      <Curve d={d} today={today} />
+      <Curve d={g} today={today} />
       <div className="note">Switch to <b>Detailed</b> for every game, what-ifs and the math.</div>
     </div>
   );
