@@ -25,7 +25,7 @@
 // deletes the RFQ. Never accept/confirm.
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
+import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, gameStartFromLegs, dateOnlyLegDays, etDateOf, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
@@ -1020,15 +1020,30 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     return { ticker: tk, side, label: m.label, type: m.type, game: g.title, gameKey: r.gameKey, ...(g.startExact && g.startTime ? { starts_at: g.startTime } : {}) };
   }).filter(Boolean), [legRows, gameIdx]);
 
-  // Game start autofill for NHL (exact puck drop from the feed): earliest leg start, only while the field is empty.
+  // Game start always follows the matched legs: earliest known start among them
+  // (props inherit their game's start). Recomputed whenever a leg is added,
+  // removed or changed — manual pick or Promo prefill — so a stale or book time
+  // never survives. A manual edit sticks until the legs change. Soccer games are
+  // day-only on Kalshi: a book/Promo time is kept only if it falls on that day.
   const startsTouched = useRef(false);
+  const legSig = legRows.map((r) => `${r.gameKey}|${r.marketVal}`).join(",");
+  const legStartIso = useMemo(() => gameStartFromLegs(legRows, gameIdx), [legRows, gameIdx]);
+  const lastLegSig = useRef(null);
   useEffect(() => {
+    const legsChanged = lastLegSig.current !== legSig;
+    lastLegSig.current = legSig;
+    if (legsChanged) startsTouched.current = false;
     if (startsTouched.current) return;
-    const ms = legRows.map((r) => { const g = r.gameKey && gameIdx[r.gameKey]; return g && g.startExact ? Date.parse(g.startTime) : NaN; }).filter(Number.isFinite);
-    if (!ms.length) return;
-    const v = toDatetimeLocalValue(new Date(Math.min(...ms)).toISOString());
-    setForm((f) => (f.starts ? f : { ...f, starts: v }));
-  }, [legRows, gameIdx]);
+    setForm((f) => {
+      let v = legStartIso ? toDatetimeLocalValue(legStartIso) : "";
+      if (!v && f.starts) {
+        const days = dateOnlyLegDays(legRows, gameIdx);
+        const cur = Date.parse(f.starts);
+        if (days.size && Number.isFinite(cur) && days.has(etDateOf(cur))) v = f.starts;
+      }
+      return f.starts === v ? f : { ...f, starts: v };
+    });
+  }, [legSig, legStartIso, legRows, gameIdx]);
 
   // keep label synced from legs unless the user has edited it
   useEffect(() => { setForm((f) => (f.labelEdited ? f : { ...f, label: readLegs().map((l) => l.label).join(" + ") })); }, [legRows, readLegs]);

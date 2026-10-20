@@ -21,7 +21,7 @@ const ufc = kg._helpers.groupSportGames({ side: [
   ev("26MAR07BUCMAL", "BUC", "MAL", "Joaquin Buckley", "Mike Malott", "2027-03-08T06:40:00Z"),
 ] }, now, { occurrenceStartOffsetMs: kg.OCCURRENCE_START_OFFSET_MS.ufc }).map((g) => ({ ...g, sport: "ufc" }));
 assert.ok(kg.MARKET_SERIES.ufc.side === "KXUFCFIGHT");
-assert.equal(ufc.find((g) => g.key === "26OCT17BUCMAL").startTime, "2026-10-18T02:40:00.000Z"); // Odds API 02:45Z
+assert.equal(ufc.find((g) => g.key === "26OCT17BUCMAL").startTime, "2026-10-18T01:40:00.000Z"); // Odds API 02:45Z; 5h back reads ~1h early (safe side)
 assert.ok(flattenComboGames({ ufc }).every((g) => g.sportLabel === "UFC"));
 
 const leg = (name, game, t) => ({ name: `${name} ML`, market: "ML", game, commence_time: t, sport: "mma_mixed_martial_arts" });

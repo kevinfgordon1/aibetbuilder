@@ -1253,3 +1253,26 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(pre.length, 1);
   console.log("comboPrefill NHL started-game tests passed");
 }
+
+// ── Game start from matched legs (Kevin 2026-10-19: form showed 7:40 PM from the book feed) ──
+{
+  const { gameStartFromLegs, gameStartMsOf, dateOnlyLegDays } = await import("./comboPrefill.js");
+  const idx = {
+    "nhl:26OCT19PITUTA": { key: "26OCT19PITUTA", sport: "nhl", startTime: "2026-10-20T01:00:00.000Z", startExact: true },
+    "nhl:26OCT20TORCBJ": { key: "26OCT20TORCBJ", sport: "nhl", startTime: "2026-10-20T23:00:00.000Z", startExact: true },
+    "mlb:26OCT192008CLETB": { key: "26OCT192008CLETB", sport: "mlb", startTime: "2026-10-20T00:08:00.000Z" },
+    "nfl:26OCT19WASSF": { key: "26OCT19WASSF", sport: "nfl", startTime: "2026-10-20T00:15:00.000Z" },
+    "epl:26OCT24ARSEVE": { key: "26OCT24ARSEVE", sport: "epl", startTime: "2026-10-24T04:00:00.000Z" },
+  };
+  // Hayton (PIT@UTA 9 PM) matched, Matthews row empty -> 9:00 PM ET, not the book's 7:40.
+  assert.equal(gameStartFromLegs([{ gameKey: "nhl:26OCT19PITUTA", marketVal: "x" }, { gameKey: "", marketVal: "" }], idx), "2026-10-20T01:00:00.000Z");
+  // Earliest of several sports; a prop row on PIT@UTA inherits the game's start.
+  assert.equal(gameStartFromLegs([{ gameKey: "nhl:26OCT19PITUTA" }, { gameKey: "mlb:26OCT192008CLETB" }, { gameKey: "nfl:26OCT19WASSF" }], idx), "2026-10-20T00:08:00.000Z");
+  assert.equal(gameStartFromLegs([{ gameKey: "nhl:26OCT20TORCBJ" }], idx), "2026-10-20T23:00:00.000Z");
+  // Soccer is day-only: no time from Kalshi, but its ET day is known.
+  assert.ok(!Number.isFinite(gameStartMsOf(idx["epl:26OCT24ARSEVE"])));
+  assert.equal(gameStartFromLegs([{ gameKey: "epl:26OCT24ARSEVE" }], idx), "");
+  assert.deepEqual([...dateOnlyLegDays([{ gameKey: "epl:26OCT24ARSEVE" }], idx)], ["2026-10-24"]);
+  assert.equal(gameStartFromLegs([], idx), "");
+  console.log("comboPrefill game-start tests passed");
+}
