@@ -121,6 +121,35 @@ function lockStarts(parlays) {
 /** Kalshi date-only placeholder kickoff: exactly 03:00:00 or 04:00:00 UTC (11 PM / midnight ET). */
 function isPlaceholderStart(t) { return /T0[34]:00:00(\.000)?Z$/.test(String(t || '')); }
 
+
+// ESPN scoreboard start times keyed by Kalshi event ticker (e.g. KXNBAGAME-26OCT20BOSDET).
+const ESPN_LEAGUE = { NBA: 'basketball/nba', NHL: 'hockey/nhl', MLB: 'baseball/mlb', WNBA: 'basketball/wnba' };
+const ESPN_ALIAS = { NBA: { NY: 'NYK', SA: 'SAS', GS: 'GSW', NO: 'NOP', UTAH: 'UTA', WSH: 'WAS' }, NHL: { NJ: 'NJD', LA: 'LAK', SJ: 'SJS', TB: 'TBL', UTAH: 'UTA', WSH: 'WSH' }, MLB: { CHW: 'CWS', WSH: 'WSH', AZ: 'ARI', ATH: 'ATH' }, WNBA: {} };
+const MONTHS = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+function parseKalshiGame(ev) {
+  const m = /^KX(NBA|NHL|MLB|WNBA)GAME-(\d\d)([A-Z]{3})(\d\d)([A-Z]+)$/.exec(String(ev || '').toUpperCase());
+  if (!m || !MONTHS[m[3]]) return null;
+  return { lg: m[1], date: `20${m[2]}${MONTHS[m[3]]}${m[4]}`, teams: m[5] };
+}
+async function espnStarts(evs, starts, getJ) {
+  const want = {}; for (const ev of evs) { const g = parseKalshiGame(ev); if (g) (want[`${g.lg}|${g.date}`] = want[`${g.lg}|${g.date}`] || []).push([ev, g]); }
+  await Promise.all(Object.entries(want).slice(0, 12).map(async ([k, list]) => {
+    const [lg, date] = k.split('|');
+    try {
+      const j = await getJ(`https://site.api.espn.com/apis/site/v2/sports/${ESPN_LEAGUE[lg]}/scoreboard?dates=${date}`);
+      const a = (x) => { const s = String(x || '').toUpperCase(); return ESPN_ALIAS[lg][s] || s; };
+      const byKey = {};
+      for (const e of j.events || []) {
+        const c = ((e.competitions || [])[0] || {}).competitors || []; const away = c.find((x) => x.homeAway === 'away'), home = c.find((x) => x.homeAway === 'home');
+        if (!away || !home || !Number.isFinite(Date.parse(e.date))) continue;
+        const iso = new Date(Date.parse(e.date)).toISOString();
+        for (const aa of [a(away.team && away.team.abbreviation), String((away.team && away.team.abbreviation) || '').toUpperCase()]) for (const hh of [a(home.team && home.team.abbreviation), String((home.team && home.team.abbreviation) || '').toUpperCase()]) byKey[aa + hh] = byKey[aa + hh] || iso;
+      }
+      for (const [ev, g] of list) if (byKey[g.teams]) starts[ev] = byKey[g.teams];
+    } catch (_) { /* fall back to Kalshi */ }
+  }));
+}
+
 /** Live books: Kalshi orderbooks for every needed ticker + relay boards (NFL, NCAAF). */
 async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   const tickers = M.tickersNeeded(parlays);
@@ -166,7 +195,12 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   } catch (e) { relayNote.push(`relay: ${String(e.message).slice(0, 80)}`); }
   // start times for games the relay doesn't carry (e.g. NHL): Kalshi market close/expected times
   const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !(ev in starts));
-  await Promise.all(missing.slice(0, 40).map(async (ev) => {
+  // Any sport: a single-game lock's own starts_at beats Kalshi's guess.
+  for (const ev of missing) { const g = lockStart[ev.split('-')[1]]; if (g && !(ev in starts)) starts[ev] = g; }
+  // NBA / NHL / MLB: real tip / puck drop / first pitch from ESPN's public scoreboard (Kalshi expected_expiration - 3h
+  // is wrong for afternoon games, e.g. BOS@DET 3 PM ET shown as 6 PM).
+  await espnStarts(missing.filter((ev) => !(ev in starts)), starts, getJ);
+  await Promise.all(missing.filter((ev) => !(ev in starts)).slice(0, 40).map(async (ev) => {
     try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (/FOOTBALL|NFL|NCAAF/i.test(ev) && lockStart[ev.split('-')[1]]) { starts[ev] = lockStart[ev.split('-')[1]]; return; } if (t && /FOOTBALL|NFL|NCAAF/i.test(ev) && isPlaceholderStart(t)) { starts[ev] = null; return; } if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
   }));
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
@@ -621,4 +655,4 @@ async function handler(req, res) {
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, nflTeam, nflKey, lockStarts };
+module.exports._helpers = { needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };
