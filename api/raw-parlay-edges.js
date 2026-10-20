@@ -102,7 +102,7 @@ const FAIR_COL = { kalshi: 'fair_mid_american', promo: 'fair_promo_best_american
 // when traded_yes > P(fair) (flag needs y < traded_yes and ev > 0 ⇒ y > P), so the prefilter drops nothing that
 // scoreRawEdge would flag. The window is split into time slices fetched in parallel, each keyset-paged.
 const SLICES = 12;
-const SLICE_CONCURRENCY = 6;
+const SLICE_CONCURRENCY = 10;
 async function fetchSlice(client, lo, hi, minCost, { fair, venue }) {
   const out = [];
   const seen = new Set();
@@ -184,9 +184,10 @@ async function skippedCounts(client, { requestedStart, windowStart, minCost, ven
   } catch (_) { /* informational */ }
   return out;
 }
+const ET_DAY_FMT_LOCAL = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
 function etDayKeyLocal(ts) {
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? 'unknown' : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  return Number.isNaN(d.getTime()) ? 'unknown' : ET_DAY_FMT_LOCAL.format(d);
 }
 
 function publicError(e) {
@@ -200,7 +201,9 @@ function publicError(e) {
  *  TD legs: 1 − opposite-side $500 Kalshi VWAP. Parlay = product (noboost-paper logger). */
 function fairRow(r) {
   if (r.fair_pm_inverse_american == null) return null;
-  return { ...r, fair_kalshi_american: r.fair_mid_american, fair_mid_american: r.fair_pm_inverse_american };
+  // In place (rows are ours, fetched for this request): a spread copy per row doubled memory on 300k-row scans.
+  if (!r.__fairSet) { r.fair_kalshi_american = r.fair_mid_american; r.fair_mid_american = r.fair_pm_inverse_american; r.__fairSet = true; }
+  return r;
 }
 
 // GET ?legs=<rfq_id> → { ok, legs: [...] }: one compact Combo Locks-style row per leg for an expanded Sniper row.
