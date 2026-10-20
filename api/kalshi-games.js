@@ -74,10 +74,12 @@ const PROP_SERIES = {
 // real start is occurrence - 3h. Used for the pre-game cutoff so a 7:30 PM game
 // drops at puck drop instead of lingering until midnight ET.
 // UFC occurrence_datetime sits ~3.5-4h after the fight's walkout (checked against
-// Odds API commence times, Oct 17 2026 card), so 4h back is the start estimate.
+// Odds API commence times, Oct 17 2026 card). Oct 19 2026 check vs ESPN for UFC 333:
+// prelims start 14:00Z and the first fight's occurrence is 19:00Z, so 5h back is used —
+// never later than the fight's real start (earlier fights on a card read early, safe).
 // NBA occurrence_datetime is also tip-off + 3h (KXNBAGAME-26OCT20OKCSAS 04:30Z for a
 // 9:30 PM ET tip; KXNBAGAME-26OCT20BOSDET likewise).
-const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, nba: 3 * 3600 * 1000, ufc: 4 * 3600 * 1000 };
+const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, nba: 3 * 3600 * 1000, ufc: 5 * 3600 * 1000 };
 // NFL / college football occurrence_datetime is kickoff + 3h (Oct 19 2026: every
 // KXNCAAFGAME with a real time sat exactly 3.0h after ESPN's and the odds feed's
 // kickoff, e.g. Missouri St. vs Delaware 10 PM vs 7 PM ET; KXNFLGAME-26OCT19WASSF

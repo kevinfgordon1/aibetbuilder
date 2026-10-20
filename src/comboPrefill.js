@@ -979,6 +979,38 @@ export function toDatetimeLocalValue(isoOrDate) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// ── Game start from the matched Kalshi legs (Combo Locks "Game start") ──
+// A game's start is trusted only when the feed knows the real time:
+//   - startExact (NHL/NBA puck drop / tip-off = occurrence - 3h, UFC estimate,
+//     football with an ESPN kickoff),
+//   - MLB keys that carry HHMM first pitch (26OCT192008CLETB),
+//   - NFL/NCAAF without ESPN: occurrence - 3h.
+// Soccer keys are the ET match day only (midnight), so they never set a time.
+// Player-prop rows live on their game, so they inherit that game's start.
+const HHMM_KEY = /^\d{2}[A-Z]{3}\d{2}\d{4}[A-Z]/;
+export function gameStartMsOf(g) {
+  if (!g || !g.startTime) return NaN;
+  const ms = Date.parse(g.startTime);
+  if (!Number.isFinite(ms)) return NaN;
+  if (g.startExact || HHMM_KEY.test(String(g.key || "")) || g.sport === "nfl" || g.sport === "ncaaf") return ms;
+  return NaN;
+}
+// Earliest known start among rows that picked a game (ISO, or "" when none is known).
+export function gameStartFromLegs(rows, gameIdx) {
+  const ms = (rows || []).map((r) => (r && r.gameKey && gameIdx ? gameStartMsOf(gameIdx[r.gameKey]) : NaN)).filter(Number.isFinite);
+  return ms.length ? new Date(Math.min(...ms)).toISOString() : "";
+}
+// Rows that picked a date-only (soccer) game: their ET days, for keeping a book time on that day.
+export function dateOnlyLegDays(rows, gameIdx) {
+  const out = new Set();
+  for (const r of rows || []) {
+    const g = r && r.gameKey && gameIdx ? gameIdx[r.gameKey] : null;
+    if (g && !Number.isFinite(gameStartMsOf(g))) { const d = keyEtDate(g.key); if (d) out.add(d); }
+  }
+  return out;
+}
+export function etDateOf(isoOrMs) { return etDateOfMs(typeof isoOrMs === "number" ? isoOrMs : Date.parse(isoOrMs)); }
+
 export function earliestCommence(legs) {
   const times = (legs || []).map((l) => l?.commence_time).filter(Boolean)
     .map((t) => new Date(t).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
