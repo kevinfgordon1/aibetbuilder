@@ -28,6 +28,7 @@ import { createClient } from "@supabase/supabase-js";
 import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, gameStartFromLegs, dateOnlyLegDays, etDateOf, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
+import GameCombo, { gameSearchText } from "./GameCombo.jsx";
 import { DataSourceBanner, DataSourceChip } from "./DataSourceStatus.jsx";
 import { historyOutcome, singleLegOf } from "./comboSettlement";
 import { SingleLegVenues } from "./SingleLegVenues";
@@ -615,6 +616,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const [liveSettlement, setLiveSettlement] = useState({}); // parlay_id -> { result, status, ticker } from Kalshi this session
 
   const gameList = useMemo(() => flattenComboGames(games.sports), [games]);
+  const gameOptions = useMemo(() => gameList.map((g) => { const label = formatGameOption(g); return { value: comboGameId(g), label, search: gameSearchText(g, label) }; }), [gameList]);
   const gameIdx = useMemo(() => indexComboGames(games.sports), [games]);
   // View-as: the owner already passed the gate server-side; the viewed tester may not be hardcoded.
   const owner = readOnly || canSeeComboLocks(user);
@@ -1524,6 +1526,9 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         .cl input,.cl select{width:100%;padding:9px 10px;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#12141a;color:#e8eaed;font:inherit}
         .cl .row{display:grid;gap:12px;margin-bottom:12px}.cl .c3{grid-template-columns:1fr 1fr 1fr}.cl .c2{grid-template-columns:1fr 1fr}
         .cl .legrow{display:grid;grid-template-columns:1fr 1.15fr auto;gap:8px;margin-bottom:8px;align-items:end}
+        .cl .gcombo{position:relative}.cl .gcombo input{padding-right:26px;text-overflow:ellipsis}.cl .gcombo-caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9aa0a6;font-size:11px}
+        .cl .gcombo-list{position:absolute;z-index:50;left:0;right:0;top:calc(100% + 4px);max-height:300px;overflow-y:auto;margin:0;padding:4px;list-style:none;background:#12141a;border:1px solid rgba(255,255,255,0.16);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+        .cl .gcombo-list li{padding:7px 9px;border-radius:6px;cursor:pointer;color:#e8eaed;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cl .gcombo-list li.hi{background:rgba(255,255,255,0.08)}.cl .gcombo-list li.sel{color:#7cc4ff}.cl .gcombo-list li.gcombo-empty{color:#9aa0a6;cursor:default}
         .cl .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer}
         .cl .btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}.cl .btn.mini{padding:6px 10px;font-size:13px}.cl .btn.danger{color:#f87171;border-color:rgba(248,113,113,.4)}
         .cl .num{font-variant-numeric:tabular-nums}
@@ -1671,10 +1676,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             {legRows.map((r) => (
               <div className="legrow" key={r.id}>
                 <div><label>Game</label>
-                  <select value={r.gameKey} onChange={(e) => setLeg(r.id, { gameKey: e.target.value, marketVal: "" })}>
-                    <option value="">— game —</option>
-                    {gameList.map((g) => <option key={comboGameId(g)} value={comboGameId(g)}>{formatGameOption(g)}</option>)}
-                  </select></div>
+                  <GameCombo value={r.gameKey} options={gameOptions} onChange={(v) => setLeg(r.id, { gameKey: v, marketVal: "" })} /></div>
                 <div><label>Bet</label>
                   <select value={r.marketVal} onChange={(e) => setLeg(r.id, { marketVal: e.target.value })}>
                     <option value="">— bet —</option>{marketGroups(r.gameKey, r.marketVal)}
