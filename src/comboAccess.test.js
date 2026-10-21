@@ -44,7 +44,7 @@ const KEVIN_ID = "79ae1610-097e-4b46-a622-1e952f18e936";
 const KEVIN_ALT = { id: "968efed8-54db-48a6-808b-194a7a03a4cb", email: "kevin.f.gordon1@gmail.com" };
 const GTESTER = { id: "dd23a3a8-cb45-4866-be11-df72b4767c26", email: "gmoneyvikes@gmail.com" };
 {
-  assert.equal(COMBO_LOCKS_ACCOUNTS.length, 8);
+  assert.equal(COMBO_LOCKS_ACCOUNTS.length, 9);
   assert.equal(canSeeComboLocks({ email: "ryandiroma@gmail.com", id: "24aa1d23-ec38-47fb-af30-db8757a65e70" }), true);
   assert.equal(canSeeComboLocks({ email: "ryandiroma@gmail.com", id: "00000000-0000-0000-0000-000000000000" }), false);
   const list = comboLocksAllowlist({ VITE_COMBO_LOCKS_ALLOWLIST: "tester@gmail.com, abc-uid" });
@@ -55,7 +55,7 @@ const GTESTER = { id: "dd23a3a8-cb45-4866-be11-df72b4767c26", email: "gmoneyvike
   assert.equal(list.has("tester@gmail.com"), false, "env allowlist is ignored");
   assert.equal(list.has("abc-uid"), false);
   assert.equal(list.has(KENNETH_GUIDO_EMAIL), true, "Kenneth has Combo Locks (Kevin approved 2026-10-09)");
-  assert.equal(list.size, 16);
+  assert.equal(list.size, 18);
 }
 
 const kevin = { id: KEVIN_ID, email: "Kev120909@gmail.com", user_metadata: { full_name: "Kevin Gordon" } };
