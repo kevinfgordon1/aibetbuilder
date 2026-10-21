@@ -141,10 +141,11 @@ assert.equal(lib.parseContracts(0), null);
 assert.equal(lib.parseContracts(-3), null);
 
 // ── Combo Locks visibility: hardcoded accounts (email AND uid), env ignored ──
-assert.equal(lib.COMBO_LOCKS_ACCOUNTS.length, 8);
+assert.equal(lib.COMBO_LOCKS_ACCOUNTS.length, 9);
 assert.equal(lib.canSeeComboLocks({ email: 'ryandiroma@gmail.com', id: '24aa1d23-ec38-47fb-af30-db8757a65e70' }), true);
 assert.equal(lib.canSeeComboLocks({ email: 'jwacheson@gmail.com', id: 'ccc49569-c96c-4d8b-98b1-1a8ad48b6db0' }), true);
 assert.equal(lib.canSeeComboLocks({ email: 'cloudmassager@gmail.com', id: '8770ab01-362f-4ce2-9430-5181064c1ccf' }), true);
+assert.equal(lib.canSeeComboLocks({ email: 'visionb4masses@gmail.com', id: 'a2c7089e-55fc-4c1f-907d-88d977d1dd98' }), true);
 assert.equal(lib.canSeeComboLocks({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }, {}), true);
 assert.equal(lib.canSeeComboLocks({ email: 'Kevin.F.Gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }), true);
 assert.equal(lib.canSeeComboLocks({ email: 'gmoneyvikes@gmail.com', id: 'dd23a3a8-cb45-4866-be11-df72b4767c26' }), true);
