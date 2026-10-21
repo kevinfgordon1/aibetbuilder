@@ -1738,8 +1738,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
                   {preview.d.feeUsd > 0 && <div className="muted num" style={{ fontSize: 12 }}>after the {money(preview.d.feeUsd)} Combo Locks fee (1%)</div>}
                 </div>
                 <div className="tile"><div className="k">Cash tied up</div>
-                  <div className="v num">{preview.cash ? money(preview.cash.total) : "—"}</div>
-                  <div className="muted num" style={{ fontSize: 12 }}>locked on Kalshi until the game settles{preview.cash && preview.cash.makerFee > 0 ? ` (incl. ${money(preview.cash.makerFee)} Kalshi fee)` : ""}</div>
+                  <div className="v num">{preview.cash ? moneyAbs(preview.cash.total) : "—"}</div>
+                  <div className="muted num" style={{ fontSize: 12 }}>locked on Kalshi until the game settles{preview.cash && preview.cash.makerFee > 0 ? ` (incl. ${moneyAbs(preview.cash.makerFee)} Kalshi fee)` : ""}</div>
                 </div>
               </div>
             )}
