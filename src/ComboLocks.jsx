@@ -96,6 +96,17 @@ function fillView(fillAfterFeeAmerican, makerRate = FALLBACK_MAKER_RATE) {
   const takerProb = sNom + TAKER_FEE * sNom * (1 - sNom);
   return { sEff, sNom, effTaker: americanFromProb(takerProb), noBid: floor2(1 - sNom).toFixed(2) };
 }
+// Cash the hedge locks on Kalshi until settlement, same as the worker's quoteCostDollars:
+// contracts × no_bid (we hold NO), plus the maker fee charged on the fill. The fill odds are
+// net of that fee, so this equals contracts × (1 − fill prob) up to cent rounding.
+function hedgeCashTiedUp(contracts, fillAfterFeeAmerican, makerRate = FALLBACK_MAKER_RATE) {
+  const n = Number(contracts);
+  if (!(n > 0) || !fillAfterFeeAmerican) return null;
+  const v = fillView(fillAfterFeeAmerican, makerRate);
+  const noCost = n * Number(v.noBid);
+  const makerFee = Math.ceil(makerRate * n * v.sNom * (1 - v.sNom) * 100 - 1e-9) / 100;
+  return { contracts: n, noBid: Number(v.noBid), noCost, makerFee, total: Math.round((noCost + makerFee) * 100) / 100 };
+}
 // Hedge cap / decide-at-fill live in comboLockProfile (cash + free-bet PnL).
 // This wrapper only attaches fillView (maker/taker fee display) for the UI.
 function decideAtFill(args) {
@@ -1060,7 +1071,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const d = decideAtFill({ parlayStake: stake, parlayAmerican: boost, fillAmerican: fill,
       fairAmerican: form.fair === "" ? null : +form.fair, rfqContracts: cap, hedgeMode: form.mode, kind, feeRate: feeOn ? COMBO_FEE_RATE : 0 });
     if (!d.ok) return null;
-    return { cap, d, kind };
+    return { cap, d, kind, cash: hedgeCashTiedUp(d.contracts, fill) };
   }, [form.stake, form.boost, form.fill, form.fair, form.mode, form.kind, feeOn]);
 
   // Lifecycle split (derived, so nothing can disappear):
@@ -1726,12 +1737,9 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
                   </div>
                   {preview.d.feeUsd > 0 && <div className="muted num" style={{ fontSize: 12 }}>after the {money(preview.d.feeUsd)} Combo Locks fee (1%)</div>}
                 </div>
-                <div className="tile"><div className="k">{preview.kind === "freebet" ? "Free bet kept" : "Worst case"}</div>
-                  <div className={"v " + (preview.d.worst >= 0 ? "pos" : "neg")}>
-                    {preview.kind === "freebet" && +form.stake > 0
-                      ? `${((Math.max(0, preview.d.worst) / +form.stake) * 100).toFixed(1)}% · ${money(preview.d.worst)}`
-                      : money(preview.d.worst)}
-                  </div>
+                <div className="tile"><div className="k">Cash tied up</div>
+                  <div className="v num">{preview.cash ? moneyAbs(preview.cash.total) : "—"}</div>
+                  <div className="muted num" style={{ fontSize: 12 }}>locked on Kalshi until the game settles{preview.cash && preview.cash.makerFee > 0 ? ` (incl. ~${moneyAbs(preview.cash.makerFee)} est. Kalshi fee; $0 on NFL-only cross-game parlays)` : ""}</div>
                 </div>
               </div>
             )}
