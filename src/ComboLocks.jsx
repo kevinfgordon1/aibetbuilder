@@ -1739,7 +1739,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
                 </div>
                 <div className="tile"><div className="k">Cash tied up</div>
                   <div className="v num">{preview.cash ? moneyAbs(preview.cash.total) : "—"}</div>
-                  <div className="muted num" style={{ fontSize: 12 }}>locked on Kalshi until the game settles{preview.cash && preview.cash.makerFee > 0 ? ` (incl. ${moneyAbs(preview.cash.makerFee)} Kalshi fee)` : ""}</div>
+                  <div className="muted num" style={{ fontSize: 12 }}>locked on Kalshi until the game settles{preview.cash && preview.cash.makerFee > 0 ? ` (incl. ~${moneyAbs(preview.cash.makerFee)} est. Kalshi fee; $0 on NFL-only cross-game parlays)` : ""}</div>
                 </div>
               </div>
             )}
