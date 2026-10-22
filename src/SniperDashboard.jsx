@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { fmtAmerican, fmtUsd } from "./sniperDashboard.js";
-import SniperMatched from "./SniperMatched";
+import SniperMatched, { MyFills } from "./SniperMatched";
 
 let client = null;
 function supabase() {
@@ -36,7 +36,7 @@ function Meter({ label, value, cap, note }) {
 
 export default function SniperDashboard() {
   const [book, setBook] = useState("auto");
-  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("fills"); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
   const load = useCallback(async () => {
     const c = supabase(); if (!c) { setErr("Supabase not configured"); return; }
     setLoading(true);
@@ -69,7 +69,14 @@ export default function SniperDashboard() {
       </div>
       {err && <div style={{ ...card, color: C.bad, marginBottom: 12 }}>{err}</div>}
       {!data && !err && <div style={{ color: C.muted }}>Loading…</div>}
-      {matched && <SniperMatched data={matched} />}
+      {matched && (
+        <div>
+          <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
+            {[["fills", "My Fills"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+          </div>
+          {tab === "fills" ? <MyFills data={matched} /> : <SniperMatched data={matched} />}
+        </div>
+      )}
       {data && (
         <>
           <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote, at least {Math.round((caps.minEdge || 0) * 100)}% edge after fees, $1,000 depth per leg, NFL only, no repeat parlays.</div>

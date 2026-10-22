@@ -76,6 +76,46 @@ function RootList({ title, items, word, good, tdNames }) {
   );
 }
 
+// "My Fills": only real live fills (filled_contracts > 0) — what Kevin actually holds. No quotes.
+export function MyFills({ data }) {
+  const rows = ((data && data.rows) || []).filter((r) => r.filled);
+  const sum = (f, xs = rows) => xs.reduce((a, r) => a + (Number(f(r)) || 0), 0);
+  const open = rows.filter((r) => r.status === "open"); const won = rows.filter((r) => r.status === "won").length; const lost = rows.filter((r) => r.status === "lost").length;
+  const pnl = sum((r) => r.pnl);
+  if (!rows.length) return <div style={{ ...card, color: C.text2 }}>No real fills yet. Positions show here once Kalshi confirms a fill.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        <Stat label="Fills" value={String(rows.length)} sub={`${open.length} open · ${won}-${lost} settled`} />
+        <Stat label="Contracts" value={sum((r) => r.contracts).toLocaleString("en-US", { maximumFractionDigits: 0 })} sub="total held (No side)" />
+        <Stat label="Open risk" value={fmtUsd(sum((r) => r.risk, open))} sub={`To win ${fmtUsd(sum((r) => r.toWin, open))}`} />
+        <Stat label="Total risked" value={fmtUsd(sum((r) => r.risk))} sub={`To win ${fmtUsd(sum((r) => r.toWin))}`} />
+        <Stat label="P&L (settled)" value={signed(pnl)} color={pnlColor(pnl)} sub={`Expected (all) ${signed(sum((r) => r.ev))}`} />
+      </div>
+      <div style={card}>
+        <div style={h2}>My fills (real money)</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We got", "Contracts", "Risk", "To win", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+            <tbody>{rows.map((r) => (
+              <tr key={r.rfqId}>
+                <td style={td}>{etTime(r.filledAt)}</td>
+                <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}</td>
+                <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
+                <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
+                <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}</td>
+                <td style={td}>{Number(r.contracts).toFixed(0)}</td>
+                <td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
+                <td style={{ ...td, color: r.pnl == null ? C.muted : pnlColor(r.pnl) }}>{r.pnl == null ? "—" : signed(r.pnl)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SniperMatched({ data }) {
   const [filter, setFilter] = useState("all");
   const rows = useMemo(() => (data && data.rows ? data.rows.filter((r) => filter === "all" || (filter === "open" ? r.status === "open" || r.status === "confirming" : r.status === filter)) : []), [data, filter]);
