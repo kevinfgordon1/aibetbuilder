@@ -32,13 +32,19 @@ export function rowState(r) {
 
 // rows: sniper_ledger rows for one book (dry or live); todayKey = ET day.
 export function summarizeLedger(rows, todayKey) {
-  let open = 0; const perGame = new Map(); let dayRisk = 0; let dayPnl = 0; let running = 0;
+  let open = 0; const perGame = new Map(); const filledGame = new Map(); let dayRisk = 0; let dayPnl = 0; let running = 0;
   const daily = new Map();
   for (const r of rows || []) {
     const risk = Number(r.risk) || 0;
     if (r.status === "open") {
       open += risk;
       for (const g of (r.games && r.games.length ? r.games : (r.legs || []).map(gameOf))) perGame.set(g, (perGame.get(g) || 0) + risk);
+    }
+    // Filled-only exposure: real live fills (dry_run=false, filled_cost>0) not yet settled.
+    const fc = Number(r.filled_cost) || 0;
+    if (r.dry_run === false && fc > 0 && r.phase !== "settled" && r.realized_pnl == null) {
+      const fr = fc + (Number(r.filled_fee) || 0);
+      for (const g of (r.games && r.games.length ? r.games : (r.legs || []).map(gameOf))) filledGame.set(g, (filledGame.get(g) || 0) + fr);
     }
     if (etDayKey(r.created_at) === todayKey && r.phase !== "cancelled" && r.phase !== "failed") dayRisk += risk;
     if (r.phase === "settled" && r.realized_pnl != null) {
@@ -49,9 +55,10 @@ export function summarizeLedger(rows, todayKey) {
     }
   }
   const games = [...perGame.entries()].map(([game, risk]) => ({ game, risk })).sort((a, b) => b.risk - a.risk);
+  const filledGames = [...filledGame.entries()].map(([game, risk]) => ({ game, risk })).sort((a, b) => b.risk - a.risk);
   const days = [...daily.values()].sort((a, b) => (a.day < b.day ? -1 : 1));
   let cum = 0; for (const d of days) { cum += d.pnl; d.running = cum; }
-  return { open, games, maxGame: games[0] || null, dayRisk, dayLoss: Math.max(0, -dayPnl), dayPnl, runningPnl: running, days };
+  return { open, games, filledGames, maxGame: games[0] || null, dayRisk, dayLoss: Math.max(0, -dayPnl), dayPnl, runningPnl: running, days };
 }
 
 export function quoteRow(r) {

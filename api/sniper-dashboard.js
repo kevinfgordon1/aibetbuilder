@@ -81,7 +81,7 @@ async function handler(req, res) {
     const quotes = [...openRows, ...recent.filter((r) => r.status !== 'open')]
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300).map(H.quoteRow);
     const sums = await pageAll(() => db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').gte('created_at', new Date(nowMs - 24 * 3600e3).toISOString()).order('created_at', { ascending: true }), 2000);
-    const labels = await legLabels(quotes, risk.games);
+    const labels = await legLabels(quotes, [...risk.games, ...risk.filledGames]);
     return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: H.skipsByHour(sums), ...labels });
   } catch (e) {
     console.error('[sniper-dashboard]', String((e && e.message) || e).slice(0, 200));
