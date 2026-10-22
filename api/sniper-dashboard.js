@@ -57,6 +57,7 @@ async function handler(req, res) {
     const since = new Date(nowMs - days * 864e5).toISOString();
     const db = deps.createClient(url, env.SUPABASE_SERVICE_KEY, clientOpts);
     if (q.matched === '1' || q.matched === 1) return json(res, 200, await matched(db, env, nowMs));
+    if (q.rootfor === '1' || q.rootfor === 1) return json(res, 200, await sniperRootFor(db, env, nowMs, q.check === '1'));
     const { data: sumRows, error: se } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').order('created_at', { ascending: false }).limit(1);
     if (se) throw new Error(se.message);
     const status = H.statusFrom(sumRows && sumRows[0], nowMs);
@@ -154,6 +155,46 @@ async function matched(db, env, nowMs) {
       fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null };
   });
   return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat };
+}
+
+// "What to root for" (Combo Locks sheet) over live, filled, unsettled sniper positions. The sniper is the HOUSE
+// (hit = all legs win = we lose our cost), so the engine's "root for" outcomes are the ones that beat the legs.
+// Same response shape as /api/root-for so src/RootFor.jsx renders it unchanged.
+async function sniperRootFor(db, env, nowMs, checkOnly) {
+  const S = matchedMod || (matchedMod = await import('../src/sniperMatched.js'));
+  const rows = (await pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', false).eq('status', 'open').gt('filled_contracts', 0).order('created_at', { ascending: false })))
+    .filter((r) => r.phase !== 'settled' && !r.settled_at && S.isMatched(r));
+  if (checkOnly) return { ok: true, locks: rows.length, days: 0 };
+  const asOf = new Date(nowMs).toISOString();
+  if (!rows.length) return { ok: true, empty: true, locksTotal: 0, asOf };
+  const tickers = [...new Set(rows.flatMap((r) => (r.legs || []).map((k) => String(k).split(':')[0].toUpperCase())))];
+  const mk = await kalshiMarkets(tickers.filter((t) => /^KXNFLTD/.test(t)));
+  const names = {}; for (const [t, m] of Object.entries(mk)) names[t] = m.title || m.yes_sub_title;
+  const positions = S.enginePositions(rows, names);
+  const L = legsMod || (legsMod = await import('../src/sniperLegLabels.js'));
+  const legKeys = [...new Set(rows.flatMap((r) => r.legs || []))];
+  const f = deps.fetch || fetch;
+  const boards = await Promise.all(L.espnDates(legKeys).slice(0, 14).map(async (d) => { try { const r = await f(`${ESPN}?dates=${d}`, { headers: { accept: 'application/json' } }); return r.ok ? r.json() : null; } catch (_) { return null; } }));
+  const gm = L.gamesFromEspn(boards.filter(Boolean));
+  const R = rootForApi(); const M = await R._helpers.loadMods();
+  const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
+  const root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts: markets.starts || {}, now: nowMs, kalshiAt: markets.kalshiAt });
+  // plain-English labels: "NE @ CHI", ESPN kickoff first, TD outcomes as "X scores a TD" / "X doesn't score"
+  const codeOf = (ev) => String(ev || '').toUpperCase().split('-')[1] || '';
+  const espn = (ev) => gm[codeOf(ev)] || null;
+  const gameOf = (ev, fallback) => { const g = espn(ev); return g ? `${g.away} @ ${g.home}` : fallback; };
+  const tdWho = {}; for (const p of positions) for (const l of p.legs) if (l.type === 'td') tdWho[l.ticker] = String(l.label || '').replace(/\s*TD$/, '');
+  const nameOf = (ev, outcome, cur) => (tdWho[ev] ? (outcome === 'yes' ? `${tdWho[ev]} scores a TD` : outcome === 'no' ? `${tdWho[ev]} doesn't score a TD` : cur) : cur);
+  const startOf = (ev, cur) => { const g = espn(ev); return (g && g.kickoff) || cur || null; };
+  const slotOf = (st) => (st ? { key: st, label: new Date(st).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'short', day: 'numeric' }) } : { key: '9', label: 'Kickoff unknown' });
+  const deco = (o) => { const start = startOf(o.event, o.start); return { ...o, name: nameOf(o.event, o.outcome, o.name), game: gameOf(o.event, o.game), start, slot: slotOf(start) }; };
+  root.perEvent = root.perEvent.map((e) => { const start = startOf(e.event, e.start); return { ...e, game: gameOf(e.event, e.game), start, slot: slotOf(start), rootForName: e.rootFor != null ? nameOf(e.event, e.rootFor, e.rootForName) : e.rootForName, outcomes: e.outcomes.map(deco) }; })
+    .sort((a, b) => String(a.start || '9').localeCompare(String(b.start || '9')));
+  root.top = (root.top || []).map(deco);
+  if (root.model && root.model.teamNames) for (const k of Object.keys(root.model.teamNames)) { const i = k.lastIndexOf(':'); root.model.teamNames[k] = nameOf(k.slice(0, i), k.slice(i + 1), root.model.teamNames[k]); }
+  const baseline = rows.reduce((a, r) => a + S.rowMoney(r).ev, 0);
+  const lockLabels = {}; for (const r of rows) lockLabels[r.rfq_id] = (r.legs || []).map((k) => L.legInfo(k, gm, names).bet).join(' + ');
+  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, lockLabels, sweat: { baseline, now: root.ev, started: true } };
 }
 
 module.exports = handler;
