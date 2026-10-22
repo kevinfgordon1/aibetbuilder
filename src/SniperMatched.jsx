@@ -77,6 +77,49 @@ function RootList({ title, items, word, good, tdNames }) {
 }
 
 
+// Sportsbook hedge check (alert-only; nothing is ever bet automatically). Books price the parlay's YES; if one
+// pays more than we sold at, betting S = contracts ÷ book decimal there locks the same profit either way.
+const ARB_WHY = {
+  td_no_not_offered: "Not hedgeable at sportsbooks: they don't offer “No touchdown” on a player, and this parlay has a TD No leg.",
+  td_props_not_posted_yet: "Sportsbook TD prices for this game aren't pulled yet (props load within 72 hours of kickoff). It re-checks every 5 minutes until kickoff.",
+  player_not_found: "A player in this parlay isn't listed at the sportsbooks we pull.",
+  no_book_has_every_leg: "No single sportsbook offers every leg of this parlay.",
+  no_books: "No sportsbook prices for one of these legs yet.",
+};
+export function BookArb({ a }) {
+  const box = { background: "#111", border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 };
+  const am = (x) => (x == null ? "—" : fmtAmerican(x));
+  if (!a) return <div style={box}><div style={{ ...h2, marginBottom: 4 }}>Sportsbook hedge</div><div style={{ color: C.muted, fontSize: 12 }}>Not checked yet for this fill.</div></div>;
+  const best = a.books && a.books[0];
+  const pre = (x) => (x == null ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
+  return (
+    <div data-testid="book-arb" style={box}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div style={{ ...h2, marginBottom: 6 }}>Sportsbook hedge {best && best.arb ? <span style={{ color: C.good }}>· ARB at {best.label}</span> : null}</div>
+        <div style={{ color: C.muted, fontSize: 11 }}>checked {etTime(a.at)} · alert only, never bets</div>
+      </div>
+      {!a.hedgeable ? <div style={{ fontSize: 12 }}>{ARB_WHY[a.reason] || `Not hedgeable (${a.reason}).`}</div> : (
+        <>
+          <div style={{ fontSize: 12, marginBottom: 6 }}>We sold at <b>{am(a.soldAmerican)}</b>. A book has to pay longer than that for an arb.{a.sgp ? <span style={{ color: C.gold }}> Same-game legs: books price correlation themselves, so these are estimates — check the book's own parlay price.</span> : null}</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Book", ...a.legs.map((l, i) => `Leg ${i + 1}`), "Parlay", "Hedge bet", "Locked profit", "ROI"].map((x) => <th key={x} style={{ ...th, fontSize: 11, padding: "4px 6px" }}>{x}</th>)}</tr></thead>
+            <tbody>{a.books.map((b) => (
+              <tr key={b.book}>
+                <td style={{ ...td, padding: "4px 6px", fontWeight: b.arb ? 700 : 400, color: b.arb ? C.good : C.text }}>{b.label}</td>
+                {a.legs.map((l) => <td key={l.ticker} style={{ ...td, padding: "4px 6px" }}>{am(l.prices[b.book])}</td>)}
+                <td style={{ ...td, padding: "4px 6px", fontWeight: 700 }}>{am(b.american)}</td>
+                <td style={{ ...td, padding: "4px 6px" }}>{b.arb ? fmtUsd(b.stake) : "—"}</td>
+                <td style={{ ...td, padding: "4px 6px", color: pnlColor(b.locked) }}>{signed(b.locked)}</td>
+                <td style={{ ...td, padding: "4px 6px", color: pnlColor(b.locked) }}>{pre(b.roi)}</td>
+              </tr>))}</tbody>
+          </table>
+          <div style={{ color: C.muted, fontSize: 11, marginTop: 6 }}>Parlay = product of the book's leg odds (decimal). Hedge bet = contracts ÷ book decimal, so the profit is the same whether the parlay hits or misses. Negative = the book is shorter than our price (no arb).</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Expanded "why this fill is +EV" card: per-leg inverse-bet inputs recorded at quote time + parlay math.
 const VENUES = [["kalshi", "Kalshi"], ["polymarket", "Polymarket"], ["novig", "Novig"], ["prophetx", "ProphetX"]];
 const amer = (p) => (p > 0 && p < 1 ? fmtAmerican(americanFromProb(p)) : "—");
@@ -129,6 +172,7 @@ export function FillBreakdown({ r }) {
         <div style={step}>6. Expected ROI = {signed(ev)} ÷ {fmtUsd(risk)} = <b style={{ color: C.good }}>{roi == null ? "—" : `${roi > 0 ? "+" : ""}${(roi * 100).toFixed(1)}%`}</b>{r.edge != null ? <span style={{ color: C.muted }}> (sniper logged {(r.edge * 100).toFixed(1)}%)</span> : null}</div>
         <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>Fair leg prices use the inverse bet method: the best opposing price across Kalshi, Polymarket, Novig and ProphetX, each net of its own fee.</div>
       </div>
+      <BookArb a={r.bookArb} />
     </div>
   );
 }
