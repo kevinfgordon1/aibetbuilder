@@ -148,11 +148,24 @@ async function matched(db, env, nowMs) {
   }
   const kick = (k) => { const g = S.legMeta(k, names).gameKey; return starts[g] || null; };
   const lab = await legLabels(rows.map((r) => ({ legs: r.legs || [] })), []);
+  // Quote-time breakdown: the sniper's own "quoted" decision (legDetail = best venue, fair, depth per leg).
+  const quoteAt = {};
+  try {
+    const ids = rows.filter((r) => Number(r.filled_contracts) > 0).map((r) => r.rfq_id).slice(0, 300);
+    if (ids.length) {
+      const { data: ds } = await db.from('sniper_decisions').select('rfq_id,created_at,details').in('rfq_id', ids).eq('action', 'quoted').order('created_at', { ascending: false });
+      for (const d of ds || []) if (!quoteAt[d.rfq_id] && d.details) {
+        const x = d.details;
+        quoteAt[d.rfq_id] = { at: d.created_at, fee: x.fee != null ? Number(x.fee) : null, makerRate: x.makerRate != null ? Number(x.makerRate) : null, fairYes: x.fairYes, quoteYes: x.quoteYes, contracts: x.contracts, risk: x.risk, ev: x.ev, roi: x.roi,
+          legDetail: (x.legDetail || []).map((l) => ({ ticker: l.ticker, side: l.side, name: l.name || null, fair: l.fair != null ? Number(l.fair) : null, venue: l.venue || null, depthUsd: l.depthUsd != null ? Number(l.depthUsd) : null, venues: l.venues || l.prices || null })) };
+      }
+    }
+  } catch (_) { /* breakdown optional */ }
   const list = rows.map((r) => {
     const m = S.rowMoney(r);
     return { rfqId: r.rfq_id, status: S.matchedStatus(r), filledAt: r.updated_at || r.created_at, createdAt: r.created_at, settledAt: r.settled_at,
       legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), ...(lab.legInfo[k] ? { bet: lab.legInfo[k].bet, game: lab.legInfo[k].game } : {}), kickoff: kick(k) || (lab.legInfo[k] && lab.legInfo[k].kickoff) || null, result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
-      fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null };
+      fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null, fee: r.filled_fee != null ? Number(r.filled_fee) : r.fee != null ? Number(r.fee) : null, quote: quoteAt[r.rfq_id] || null };
   });
   return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat };
 }
