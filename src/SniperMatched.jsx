@@ -76,12 +76,77 @@ function RootList({ title, items, word, good, tdNames }) {
   );
 }
 
+
+// Expanded "why this fill is +EV" card: per-leg inverse-bet inputs recorded at quote time + parlay math.
+const VENUES = [["kalshi", "Kalshi"], ["polymarket", "Polymarket"], ["novig", "Novig"], ["prophetx", "ProphetX"]];
+const amer = (p) => (p > 0 && p < 1 ? fmtAmerican(americanFromProb(p)) : "—");
+export function FillBreakdown({ r }) {
+  const q = r.quote || {};
+  const det = {}; for (const l of q.legDetail || []) det[`${String(l.ticker).toUpperCase()}:${l.side}`] = l;
+  const legs = r.legs.map((l) => ({ l, d: det[`${String(l.ticker).toUpperCase()}:${l.side}`] || null }));
+  const probs = legs.map((x) => (x.d && x.d.fair != null ? x.d.fair : null));
+  const prod = probs.every((p) => p != null) ? probs.reduce((a, p) => a * p, 1) : null;
+  const fair = prod != null ? prod : r.fairYes; const sold = r.soldYes; const n = Number(r.contracts) || 0;
+  const fee = r.fee != null ? r.fee : q.fee != null ? q.fee : 0;
+  const risk = r.risk; const ev = (sold - fair) * n - fee; const roi = risk > 0 ? ev / risk : null;
+  const box = { background: "#111", border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, flex: "1 1 280px" };
+  const step = { fontSize: 12, padding: "3px 0", color: C.text };
+  return (
+    <div data-testid="fill-breakdown" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "6px 2px 10px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {legs.map(({ l, d }, i) => {
+          const vp = d && d.venues && typeof d.venues === "object" ? d.venues : null;
+          return (
+            <div key={l.ticker + l.side} style={box}>
+              <div style={{ color: C.gold, fontWeight: 700, fontSize: 13 }}>Leg {i + 1}: {l.bet}</div>
+              <div style={{ color: C.muted, fontSize: 11, marginBottom: 6 }}>{l.game}{l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr>{["Venue", "Opposing price", "Fee", ""].map((x) => <th key={x} style={{ ...th, fontSize: 11, padding: "4px 6px" }}>{x}</th>)}</tr></thead>
+                <tbody>{VENUES.map(([k, name]) => {
+                  const v = vp && vp[k]; const best = d && d.venue === k;
+                  const price = v && (v.price ?? v.american ?? v.p);
+                  return (<tr key={k}><td style={{ ...td, padding: "4px 6px", fontWeight: best ? 700 : 400, color: best ? C.gold : C.text }}>{name}</td>
+                    <td style={{ ...td, padding: "4px 6px" }}>{v ? (typeof price === "number" && Math.abs(price) >= 100 ? fmtAmerican(price) : typeof price === "number" ? amer(price) : "—") : best ? <span>used (price not stored)</span> : <span style={{ color: C.muted }}>not captured</span>}</td>
+                    <td style={{ ...td, padding: "4px 6px", color: C.muted }}>{v && v.fee != null ? pct(v.fee) : "not captured"}</td>
+                    <td style={{ ...td, padding: "4px 6px", color: C.gold }}>{best ? "best" : ""}</td></tr>);
+                })}</tbody>
+              </table>
+              {d ? (
+                <div style={{ fontSize: 12, marginTop: 6 }}>Fair leg probability <b>{pct(d.fair, 1)}</b> ({amer(d.fair)}) after the best venue's fee · depth {d.depthUsd != null ? fmtUsd(d.depthUsd) : "—"} · source {d.venue || "—"}</div>
+              ) : <div style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>The sniper's quote-time record for this leg wasn't found.</div>}
+              {!vp && d && <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>The sniper only stored the winning venue for this quote; the other venues' prices weren't recorded.</div>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={box}>
+        <div style={{ ...h2, marginBottom: 6 }}>Parlay math</div>
+        <div style={step}>1. Fair parlay = {probs.map((p) => (p != null ? pct(p, 1) : "?")).join(" × ")} = <b>{pct(fair, 2)}</b> ({amer(fair)})</div>
+        <div style={step}>2. We sold the parlay at <b>{pct(sold, 1)}</b> ({amer(sold)}); we hold the No side at {amer(1 - sold)}</div>
+        <div style={step}>3. Kalshi fees: {fmtUsd(fee)}{q.makerRate != null ? ` (maker rate ${pct(q.makerRate, 2)})` : ""}</div>
+        <div style={step}>4. Risk = (1 − {sold.toFixed(3)}) × {n.toFixed(0)} contracts = <b>{fmtUsd(risk)}</b> to win {fmtUsd(r.toWin)}</div>
+        <div style={step}>5. Expected value = ({sold.toFixed(3)} − {fair.toFixed(4)}) × {n.toFixed(0)} − {fmtUsd(fee)} fees = <b style={{ color: pnlColor(ev) }}>{signed(ev)}</b></div>
+        <div style={step}>6. Expected ROI = {signed(ev)} ÷ {fmtUsd(risk)} = <b style={{ color: C.good }}>{roi == null ? "—" : `${roi > 0 ? "+" : ""}${(roi * 100).toFixed(1)}%`}</b>{r.edge != null ? <span style={{ color: C.muted }}> (sniper logged {(r.edge * 100).toFixed(1)}%)</span> : null}</div>
+        <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>Fair leg prices use the inverse bet method: the best opposing price across Kalshi, Polymarket, Novig and ProphetX, each net of its own fee.</div>
+      </div>
+    </div>
+  );
+}
+
 // "My Fills": only real live fills (filled_contracts > 0) — what Kevin actually holds. No quotes.
 export function MyFills({ data }) {
+  const [openId, setOpenId] = useState(null);
   const rows = ((data && data.rows) || []).filter((r) => r.filled);
   const sum = (f, xs = rows) => xs.reduce((a, r) => a + (Number(f(r)) || 0), 0);
   const open = rows.filter((r) => r.status === "open"); const won = rows.filter((r) => r.status === "won").length; const lost = rows.filter((r) => r.status === "lost").length;
   const pnl = sum((r) => r.pnl);
+  // Expected ROI after fees: ledger roi, else ev / risk. Totals are risk-weighted.
+  const expRoi = (r) => (r.edge != null && Number.isFinite(r.edge) ? r.edge : r.ev != null && r.risk > 0 ? r.ev / r.risk : null);
+  const expProfit = (r) => (r.ev != null && Number.isFinite(r.ev) ? r.ev : expRoi(r) != null ? expRoi(r) * r.risk : 0);
+  const withRoi = rows.filter((r) => expRoi(r) != null && r.risk > 0);
+  const totRisk = sum((r) => r.risk); const totEv = sum(expProfit);
+  const wRoi = withRoi.length ? sum((r) => expRoi(r) * r.risk, withRoi) / sum((r) => r.risk, withRoi) : null;
+  const sRoi = (x) => (x == null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
   if (!rows.length) return <div style={{ ...card, color: C.text2 }}>No real fills yet. Positions show here once Kalshi confirms a fill.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -90,25 +155,35 @@ export function MyFills({ data }) {
         <Stat label="Contracts" value={sum((r) => r.contracts).toLocaleString("en-US", { maximumFractionDigits: 0 })} sub="total held (No side)" />
         <Stat label="Open risk" value={fmtUsd(sum((r) => r.risk, open))} sub={`To win ${fmtUsd(sum((r) => r.toWin, open))}`} />
         <Stat label="Total risked" value={fmtUsd(sum((r) => r.risk))} sub={`To win ${fmtUsd(sum((r) => r.toWin))}`} />
-        <Stat label="P&L (settled)" value={signed(pnl)} color={pnlColor(pnl)} sub={`Expected (all) ${signed(sum((r) => r.ev))}`} />
+        <Stat label="P&L (settled)" value={signed(pnl)} color={pnlColor(pnl)} sub={`Expected (all) ${signed(totEv)}`} />
+        <Stat label="Exp. ROI" value={sRoi(wRoi)} color={wRoi > 0 ? C.good : undefined} sub={`Expected profit ${signed(totEv)} (risk-weighted)`} />
       </div>
       <div style={card}>
         <div style={h2}>My fills (real money)</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We got", "Contracts", "Risk", "To win", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
-            <tbody>{rows.map((r) => (
-              <tr key={r.rfqId}>
-                <td style={td}>{etTime(r.filledAt)}</td>
+            <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We got", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+            <tbody>{rows.map((r) => (<React.Fragment key={r.rfqId}>
+              <tr onClick={() => setOpenId(openId === r.rfqId ? null : r.rfqId)} style={{ cursor: "pointer", background: openId === r.rfqId ? "#1d1a14" : undefined }}>
+                <td style={td}><span style={{ color: C.gold }}>{openId === r.rfqId ? "▾" : "▸"}</span> {etTime(r.filledAt)}</td>
                 <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}</td>
                 <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
                 <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
                 <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}</td>
                 <td style={td}>{Number(r.contracts).toFixed(0)}</td>
                 <td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
+                <td style={{ ...td, color: expRoi(r) > 0 ? C.good : C.text }} title={`Expected profit ${signed(expProfit(r))}`}>{sRoi(expRoi(r))}</td>
                 <td style={{ ...td, color: r.pnl == null ? C.muted : pnlColor(r.pnl) }}>{r.pnl == null ? "—" : signed(r.pnl)}</td>
               </tr>
-            ))}</tbody>
+              {openId === r.rfqId && <tr><td colSpan={10} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} /></td></tr>}
+            </React.Fragment>))}</tbody>
+            <tfoot><tr>
+              <td style={{ ...td, fontWeight: 700 }} colSpan={5}>Total ({rows.length} fills)</td>
+              <td style={{ ...td, fontWeight: 700 }}>{sum((r) => r.contracts).toFixed(0)}</td>
+              <td style={{ ...td, fontWeight: 700 }}>{fmtUsd(totRisk)}</td><td style={{ ...td, fontWeight: 700 }}>{fmtUsd(sum((r) => r.toWin))}</td>
+              <td style={{ ...td, fontWeight: 700, color: wRoi > 0 ? C.good : C.text }}>{sRoi(wRoi)}<div style={{ color: C.muted, fontSize: 11, fontWeight: 400 }}>exp. {signed(totEv)}</div></td>
+              <td style={{ ...td, fontWeight: 700, color: pnlColor(pnl) }}>{signed(pnl)}</td>
+            </tr></tfoot>
           </table>
         </div>
       </div>
