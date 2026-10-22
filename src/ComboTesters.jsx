@@ -476,6 +476,33 @@ function CapsEditor({ user, busy, onSave }) {
   );
 }
 
+const usd2 = (n) => "$" + Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function creditsCell(c) {
+  if (!c) return "—";
+  if (!c.feesEnabled) return <span className="muted">No fees</span>;
+  return (
+    <span title={`Free allowance ${usd2(c.allowance)}/mo (left ${usd2(c.allowanceLeft)}) + purchased ${usd2(c.purchased)}. Pending = est. 1% fee if open locks fill to target (${Math.round(c.pendingContracts)} ct).`}>
+      <div>{usd2(c.used)} used · {usd2(c.left)} left</div>
+      <div className="muted" style={{ fontSize: 11 }}>{c.pending ? `${usd2(c.pending)} pending → ${usd2(c.leftAfterPending)} left` : "0 pending"}{c.purchased ? ` · ${usd2(c.purchased)} bought` : ""}</div>
+      {!c.canQuote && <div><span className="chip loss">Out of credits</span></div>}
+    </span>
+  );
+}
+function creditsSummary(rows) {
+  let fee = 0, exempt = 0, used = 0, pending = 0, left = 0, purchased = 0, seen = false;
+  for (const u of rows) {
+    const c = u.credits; if (!c) continue; seen = true;
+    if (!c.feesEnabled) { exempt += 1; continue; }
+    fee += 1; used += c.used; pending += c.pending; left += c.left; purchased += c.purchased;
+  }
+  if (!seen) return null;
+  return (
+    <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+      <b>Credits this month:</b> {fee} fee user{fee === 1 ? "" : "s"} ({exempt} no fees) · {usd2(used)} used · {usd2(pending)} pending if open locks fill to target · {usd2(left)} left ({usd2(purchased)} purchased) → {usd2(left - pending)} after pending
+    </div>
+  );
+}
+
 function AdminPanel({ supabase, selfId = null }) {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState(null);
@@ -524,7 +551,7 @@ function AdminPanel({ supabase, selfId = null }) {
       {open && users && (
         <div className="tst-scroll" style={{ marginTop: 8 }}>
           <table className="tst-table num">
-            <thead><tr><th>User</th><th>Status</th><th>Limits</th><th>Kalshi</th><th>Polymarket US</th><th>Balance</th><th>Locks</th><th>Orders 30d</th><th>Fills</th><th>Realized P/L</th><th /></tr></thead>
+            <thead><tr><th>User</th><th>Status</th><th>Limits</th><th>Kalshi</th><th>Polymarket US</th><th>Balance</th><th>Locks</th><th>Orders 30d</th><th>Fills</th><th>Realized P/L</th><th>Credits</th><th /></tr></thead>
             <tbody>
               {rows.map((u) => {
                 const st = userTradingState(u);
@@ -553,6 +580,7 @@ function AdminPanel({ supabase, selfId = null }) {
                     <td data-k="Orders 30d">{u.orders.last30d}</td>
                     <td data-k="Fills">{u.fills.count} · {Math.round(u.fills.contracts).toLocaleString("en-US")} ct{u.fills.todayContracts ? ` · ${Math.round(u.fills.todayContracts)} today` : ""}</td>
                     <td data-k="Realized P/L"><span className={p && p.realized < 0 ? "neg" : p && p.realized > 0 ? "pos" : ""}>{p ? signedMoney(p.realized) : "—"}</span>{p && p.pending ? <span className="muted"> · {p.pending} open</span> : null}</td>
+                    <td data-k="Credits">{creditsCell(u.credits)}</td>
                     <td data-k="">
                       {!u.is_owner && (
                         <span className="tst-actions">
@@ -568,6 +596,7 @@ function AdminPanel({ supabase, selfId = null }) {
               })}
             </tbody>
           </table>
+          {creditsSummary(rows)}
           <LowCashAdminList rows={lowCash.rows} selfId={selfId}
             nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
           <FundMoves supabase={supabase} userId={null} enabled title="Tester auto-funding (latest 20)" limit={20}
