@@ -75,7 +75,7 @@ export default function SniperDashboard() {
           <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote, at least {Math.round((caps.minEdge || 0) * 100)}% edge after fees, $1,000 depth per leg, NFL only, no repeat parlays.</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <Meter label="Open risk" value={r.open} cap={caps.totalOpen} />
-            <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? r.maxGame.game : "No open games"} />
+            <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? ((data.gameLabels || {})[r.maxGame.game] || r.maxGame.game) : "No open games"} />
             <Meter label="Today's loss" value={r.dayLoss} cap={caps.dailyLoss} note={`P&L today ${fmtUsd(r.dayPnl)}`} />
             <div style={{ ...card, flex: "1 1 200px" }}>
               <div style={{ color: C.text2, fontSize: 12 }}>Risk opened today</div>
@@ -88,7 +88,7 @@ export default function SniperDashboard() {
               <div style={h2}>Risk by game</div>
               {r.games.slice(0, 12).map((g) => (
                 <div key={g.game} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, margin: "4px 0" }}>
-                  <span style={{ width: 130, color: C.text2 }}>{g.game}</span>
+                  <span style={{ width: 190, color: C.text2 }}>{(data.gameLabels || {})[g.game] || g.game}</span>
                   <div style={{ flex: 1, height: 8, background: "#222", borderRadius: 4 }}><div style={{ width: `${Math.min(100, (g.risk / caps.perGame) * 100)}%`, height: 8, background: g.risk >= caps.perGame * 0.9 ? C.bad : C.gold, borderRadius: 4 }} /></div>
                   <span style={{ width: 120, textAlign: "right" }}>{fmtUsd(g.risk)} / {fmtUsd(caps.perGame)}</span>
                 </div>
@@ -106,7 +106,7 @@ export default function SniperDashboard() {
                   <tr key={q.rfqId}>
                     <td style={td}>{etTime(q.createdAt)}</td>
                     <td style={{ ...td, color: stateColor(q.state), fontWeight: 600 }}>{q.state}{q.pulledReason ? <div style={{ color: C.warn, fontSize: 11 }}>pulled: {q.pulledReason === "game_started" ? "at kickoff" : q.pulledReason}</div> : null}</td>
-                    <td style={td}>{q.legs.map((l) => <div key={l}>{legLabel(l)}</div>)}</td>
+                    <td style={td}>{q.legs.map((l) => { const li = (data.legInfo || {})[l]; return <div key={l} style={{ marginBottom: 2 }}>{li ? <><span style={{ color: C.text }}>{li.bet}</span><span style={{ color: C.muted }}> · {li.game}</span></> : legLabel(l)}</div>; })}</td>
                     <td style={td}>{fmtAmerican(q.fairAmerican)}</td>
                     <td style={{ ...td, color: C.gold }}>{fmtAmerican(q.quoteAmerican)}</td>
                     <td style={td}>{q.edge == null ? "—" : `${(q.edge * 100).toFixed(1)}%`}</td>

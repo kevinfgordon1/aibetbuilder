@@ -80,7 +80,8 @@ async function handler(req, res) {
     const quotes = [...openRows, ...recent.filter((r) => r.status !== 'open')]
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300).map(H.quoteRow);
     const sums = await pageAll(() => db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').gte('created_at', new Date(nowMs - 24 * 3600e3).toISOString()).order('created_at', { ascending: true }), 2000);
-    return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: H.skipsByHour(sums) });
+    const labels = await legLabels(quotes, risk.games);
+    return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: H.skipsByHour(sums), ...labels });
   } catch (e) {
     console.error('[sniper-dashboard]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not load sniper data' });
@@ -99,6 +100,27 @@ async function kalshiMarkets(tickers) {
     } catch (_) { /* names/results optional */ }
   }
   return out;
+}
+// Plain-English leg + game labels for the quotes table / risk by game (ESPN kickoffs + Kalshi TD names).
+let legsMod = null;
+const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+async function legLabels(quotes, games) {
+  try {
+    const L = legsMod || (legsMod = await import('../src/sniperLegLabels.js'));
+    const legKeys = [...new Set((quotes || []).flatMap((q) => q.legs || []))];
+    const gameKeys = [...new Set((games || []).map((g) => g.game))];
+    const f = deps.fetch || fetch;
+    const boards = await Promise.all(L.espnDates([...legKeys, ...gameKeys]).slice(0, 14).map(async (d) => {
+      try { const r = await f(`${ESPN}?dates=${d}`, { headers: { accept: 'application/json' } }); return r.ok ? r.json() : null; } catch (_) { return null; }
+    }));
+    const gm = L.gamesFromEspn(boards.filter(Boolean));
+    const tdTickers = [...new Set(legKeys.map((k) => String(k).split(':')[0].toUpperCase()).filter((t) => /^KXNFLTD/.test(t)))].slice(0, 500);
+    const mk = tdTickers.length ? await kalshiMarkets(tdTickers) : {};
+    const names = {}; for (const [t, m] of Object.entries(mk)) names[t] = m.title || m.yes_sub_title;
+    const legInfo = {}; for (const k of legKeys) legInfo[k] = L.legInfo(k, gm, names);
+    const gameLabels = {}; for (const g of gameKeys) gameLabels[g] = L.gameLabel(g, gm);
+    return { legInfo, gameLabels };
+  } catch (_) { return { legInfo: {}, gameLabels: {} }; }
 }
 async function matched(db, env, nowMs) {
   const S = matchedMod || (matchedMod = await import('../src/sniperMatched.js'));
@@ -124,10 +146,11 @@ async function matched(db, env, nowMs) {
     delete root.model;
   }
   const kick = (k) => { const g = S.legMeta(k, names).gameKey; return starts[g] || null; };
+  const lab = await legLabels(rows.map((r) => ({ legs: r.legs || [] })), []);
   const list = rows.map((r) => {
     const m = S.rowMoney(r);
     return { rfqId: r.rfq_id, status: S.matchedStatus(r), filledAt: r.updated_at || r.created_at, createdAt: r.created_at, settledAt: r.settled_at,
-      legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), kickoff: kick(k), result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
+      legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), ...(lab.legInfo[k] ? { bet: lab.legInfo[k].bet, game: lab.legInfo[k].game } : {}), kickoff: kick(k) || (lab.legInfo[k] && lab.legInfo[k].kickoff) || null, result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
       fairYes: m.fair, soldYes: m.sold, contracts: m.n, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null };
   });
   return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat };

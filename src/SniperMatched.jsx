@@ -68,7 +68,7 @@ function RootList({ title, items, word, good, tdNames }) {
       <div style={h2}>{title}</div>
       {items.length === 0 ? <div style={{ color: C.muted, fontSize: 12 }}>Nothing big riding on one result right now.</div> : items.map((o) => (
         <div key={`${o.event}:${o.outcome}`} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "5px 0", borderBottom: "1px solid #222" }}>
-          <span><b style={{ color: good ? C.good : C.bad }}>{word}{friendly(o, tdNames).label}</b><div style={{ color: C.muted, fontSize: 11 }}>{friendly(o, tdNames).game}{o.start ? ` · ${etTime(o.start)}` : ""} · {Math.round(o.p * 100)}% ({o.american != null ? fmtAmerican(o.american) : "—"})</div></span>
+          <span><b style={{ color: good ? C.good : C.bad }}>{word}{friendly(o, tdNames).label}</b><div style={{ color: C.muted, fontSize: 11 }}>{friendly(o, tdNames).game}{o.start && !String(friendly(o, tdNames).game || "").includes("·") ? ` · ${etTime(o.start)}` : ""} · {Math.round(o.p * 100)}% ({o.american != null ? fmtAmerican(o.american) : "—"})</div></span>
           <span style={{ color: good ? C.good : C.bad, fontWeight: 700, whiteSpace: "nowrap" }}>{signed(good ? o.gain : o.drop)}</span>
         </div>
       ))}
@@ -155,7 +155,7 @@ export default function SniperMatched({ data }) {
             <tr key={r.rfqId}>
               <td style={td}>{etTime(r.filledAt)}</td>
               <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}</td>
-              <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{l.kickoff ? ` · ${etTime(l.kickoff)}` : l.date ? ` · ${l.date}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
+              <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : l.date ? ` · ${l.date}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
               <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
               <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}<div style={{ color: C.muted, fontSize: 11 }}>we hold No {fmtAmerican(americanFromProb(1 - r.soldYes))}</div></td>
               <td style={td}>{pct(r.edge)}</td><td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
