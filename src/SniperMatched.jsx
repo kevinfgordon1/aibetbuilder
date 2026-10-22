@@ -6,7 +6,7 @@ import SweatMeter from "./RootForSweat";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import { topByGain, topByDrop } from "./rootForSimple";
-import { americanFromProb, fmtAmerican, fmtUsd } from "./sniperDashboard.js";
+import { americanFromProb, fmtAmerican, fmtUsd , takerSeesAmerican } from "./sniperDashboard.js";
 
 const C = { surface: "#181818", head: "#1f1f1f", border: "#2a2a2a", gold: "#bc9e66", text: "#e4e0d8", text2: "#a8a49c", muted: "#8a8a8a", good: "#7cc49a", bad: "#d88c84", warn: "#e0a04a" };
 const card = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 };
@@ -162,7 +162,7 @@ export function MyFills({ data }) {
         <div style={h2}>My fills (real money)</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We got", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+            <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We offer", "Taker sees", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
             <tbody>{rows.map((r) => (<React.Fragment key={r.rfqId}>
               <tr onClick={() => setOpenId(openId === r.rfqId ? null : r.rfqId)} style={{ cursor: "pointer", background: openId === r.rfqId ? "#1d1a14" : undefined }}>
                 <td style={td}><span style={{ color: C.gold }}>{openId === r.rfqId ? "▾" : "▸"}</span> {etTime(r.filledAt)}</td>
@@ -170,15 +170,16 @@ export function MyFills({ data }) {
                 <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
                 <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
                 <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}</td>
+                <td style={td} title="Buyer's odds after Kalshi taker fee">{fmtAmerican(takerSeesAmerican(r.soldYes, r.contracts))}</td>
                 <td style={td}>{Number(r.contracts).toFixed(0)}</td>
                 <td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
                 <td style={{ ...td, color: expRoi(r) > 0 ? C.good : C.text }} title={`Expected profit ${signed(expProfit(r))}`}>{sRoi(expRoi(r))}</td>
                 <td style={{ ...td, color: r.pnl == null ? C.muted : pnlColor(r.pnl) }}>{r.pnl == null ? "—" : signed(r.pnl)}</td>
               </tr>
-              {openId === r.rfqId && <tr><td colSpan={10} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} /></td></tr>}
+              {openId === r.rfqId && <tr><td colSpan={11} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} /></td></tr>}
             </React.Fragment>))}</tbody>
             <tfoot><tr>
-              <td style={{ ...td, fontWeight: 700 }} colSpan={5}>Total ({rows.length} fills)</td>
+              <td style={{ ...td, fontWeight: 700 }} colSpan={6}>Total ({rows.length} fills)</td>
               <td style={{ ...td, fontWeight: 700 }}>{sum((r) => r.contracts).toFixed(0)}</td>
               <td style={{ ...td, fontWeight: 700 }}>{fmtUsd(totRisk)}</td><td style={{ ...td, fontWeight: 700 }}>{fmtUsd(sum((r) => r.toWin))}</td>
               <td style={{ ...td, fontWeight: 700, color: wRoi > 0 ? C.good : C.text }}>{sRoi(wRoi)}<div style={{ color: C.muted, fontSize: 11, fontWeight: 400 }}>exp. {signed(totEv)}</div></td>
@@ -265,7 +266,7 @@ export default function SniperMatched({ data }) {
           {["all", "open", "won", "lost"].map((f) => <button key={f} onClick={() => setFilter(f)} style={{ background: filter === f ? C.gold : C.head, color: filter === f ? "#17140f" : C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 12, cursor: "pointer", textTransform: "capitalize" }}>{f}</button>)}
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We got", "Edge", "Risk", "To win", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+          <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We offer", "Taker sees", "Edge", "Risk", "To win", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
           <tbody>{rows.map((r) => (
             <tr key={r.rfqId}>
               <td style={td}>{etTime(r.filledAt)}</td>
@@ -273,6 +274,7 @@ export default function SniperMatched({ data }) {
               <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : l.date ? ` · ${l.date}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
               <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
               <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}<div style={{ color: C.muted, fontSize: 11 }}>we hold No {fmtAmerican(americanFromProb(1 - r.soldYes))}</div></td>
+              <td style={td} title="Buyer's odds after Kalshi taker fee">{fmtAmerican(takerSeesAmerican(r.soldYes, r.contracts))}</td>
               <td style={td}>{pct(r.edge)}</td><td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
               <td style={{ ...td, color: r.pnl == null ? C.muted : pnlColor(r.pnl) }}>{r.pnl == null ? "—" : signed(r.pnl)}</td>
             </tr>

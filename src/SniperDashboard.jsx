@@ -2,7 +2,7 @@
 // service (sniper_ledger / sniper_decisions) via /api/sniper-dashboard. No trading controls.
 import React, { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { fmtAmerican, fmtUsd } from "./sniperDashboard.js";
+import { fmtAmerican, fmtUsd, takerSeesAmerican } from "./sniperDashboard.js";
 import SniperMatched, { MyFills } from "./SniperMatched";
 import RootFor from "./RootFor";
 
@@ -107,9 +107,9 @@ export default function SniperDashboard({ user }) {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={h2}>Quotes, fills & results</div><span style={{ flex: 1 }} />
               <label style={{ color: C.text2, fontSize: 12, cursor: "pointer" }}><input type="checkbox" checked={onlyMatched} onChange={(e) => setOnlyMatched(e.target.checked)} /> Matched only</label></div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr>{["Time", "Status", "Legs", "Fair", "Quoted", "Edge", "Size", "Risk", "Fill", "Result / P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+              <thead><tr>{["Time", "Status", "Legs", "Fair", "We offer", "Taker sees", "Edge", "Size", "Risk", "Fill", "Result / P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
               <tbody>
-                {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={10}>No quotes in the last 7 days.</td></tr>}
+                {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={11}>No quotes in the last 7 days.</td></tr>}
                 {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).map((q) => (
                   <tr key={q.rfqId}>
                     <td style={td}>{etTime(q.createdAt)}</td>
@@ -117,6 +117,7 @@ export default function SniperDashboard({ user }) {
                     <td style={td}>{q.legs.map((l) => { const li = (data.legInfo || {})[l]; return <div key={l} style={{ marginBottom: 2 }}>{li ? <><span style={{ color: C.text }}>{li.bet}</span><span style={{ color: C.muted }}> · {li.game}</span></> : legLabel(l)}</div>; })}</td>
                     <td style={td}>{fmtAmerican(q.fairAmerican)}</td>
                     <td style={{ ...td, color: C.gold }}>{fmtAmerican(q.quoteAmerican)}</td>
+                    <td style={td} title="Buyer's odds after Kalshi taker fee">{fmtAmerican(q.quoteYes ? takerSeesAmerican(q.quoteYes, q.contracts) : null)}</td>
                     <td style={td}>{q.edge == null ? "—" : `${(q.edge * 100).toFixed(1)}%`}</td>
                     <td style={td}>{q.contracts}</td>
                     <td style={td}>{fmtUsd(q.risk)}</td>
