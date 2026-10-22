@@ -50,8 +50,10 @@ export function finalOutcome(last, outs = []) {
   return team !== w && outs.includes(team) ? team : null;
 }
 
-export function computeRootFor({ parlays = [], fills = [], singles = [], submissions = null, kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {} }) {
-  const positions = []; const skipped = []; let resting = 0;
+// extraPositions: ready-made engine positions ({ id, label, legs:[{ticker, side, label, game}], hit, miss }) that are
+// not Combo Locks (the Sniper dashboard feeds its own filled positions through the same engine).
+export function computeRootFor({ parlays = [], fills = [], singles = [], submissions = null, kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {}, extraPositions = [] }) {
+  const positions = [...extraPositions]; const skipped = []; let resting = 0;
   // same contract count as History P/L (only when the caller loaded submissions)
   const filledBy = submissions ? deskFillCounts(fills, submissions.filter(isConfirmedFillSubmission)).byParlay : null;
   for (const p of parlays) {

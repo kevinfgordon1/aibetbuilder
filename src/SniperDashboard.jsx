@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { fmtAmerican, fmtUsd } from "./sniperDashboard.js";
+import SniperMatched, { MyFills } from "./SniperMatched";
 
 let client = null;
 function supabase() {
@@ -35,7 +36,7 @@ function Meter({ label, value, cap, note }) {
 
 export default function SniperDashboard() {
   const [book, setBook] = useState("auto");
-  const [data, setData] = useState(null); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("fills"); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
   const load = useCallback(async () => {
     const c = supabase(); if (!c) { setErr("Supabase not configured"); return; }
     setLoading(true);
@@ -46,6 +47,7 @@ export default function SniperDashboard() {
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setData(j); setErr(null);
+      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then((x) => x.json()).then((m) => { if (m && m.ok) setMatched(m); }).catch(() => {});
     } catch (e) { setErr(String(e.message || e)); } finally { setLoading(false); }
   }, [book]);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
@@ -67,12 +69,20 @@ export default function SniperDashboard() {
       </div>
       {err && <div style={{ ...card, color: C.bad, marginBottom: 12 }}>{err}</div>}
       {!data && !err && <div style={{ color: C.muted }}>Loading…</div>}
+      {matched && (
+        <div>
+          <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
+            {[["fills", "My Fills"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+          </div>
+          {tab === "fills" ? <MyFills data={matched} /> : <SniperMatched data={matched} />}
+        </div>
+      )}
       {data && (
         <>
           <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote, at least {Math.round((caps.minEdge || 0) * 100)}% edge after fees, $1,000 depth per leg, NFL only, no repeat parlays.</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <Meter label="Open risk" value={r.open} cap={caps.totalOpen} />
-            <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? r.maxGame.game : "No open games"} />
+            <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? ((data.gameLabels || {})[r.maxGame.game] || r.maxGame.game) : "No open games"} />
             <Meter label="Today's loss" value={r.dayLoss} cap={caps.dailyLoss} note={`P&L today ${fmtUsd(r.dayPnl)}`} />
             <div style={{ ...card, flex: "1 1 200px" }}>
               <div style={{ color: C.text2, fontSize: 12 }}>Risk opened today</div>
@@ -85,7 +95,7 @@ export default function SniperDashboard() {
               <div style={h2}>Risk by game</div>
               {r.games.slice(0, 12).map((g) => (
                 <div key={g.game} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, margin: "4px 0" }}>
-                  <span style={{ width: 130, color: C.text2 }}>{g.game}</span>
+                  <span style={{ width: 190, color: C.text2 }}>{(data.gameLabels || {})[g.game] || g.game}</span>
                   <div style={{ flex: 1, height: 8, background: "#222", borderRadius: 4 }}><div style={{ width: `${Math.min(100, (g.risk / caps.perGame) * 100)}%`, height: 8, background: g.risk >= caps.perGame * 0.9 ? C.bad : C.gold, borderRadius: 4 }} /></div>
                   <span style={{ width: 120, textAlign: "right" }}>{fmtUsd(g.risk)} / {fmtUsd(caps.perGame)}</span>
                 </div>
@@ -93,16 +103,17 @@ export default function SniperDashboard() {
             </div>
           )}
           <div style={{ ...card, marginBottom: 14, overflowX: "auto" }}>
-            <div style={h2}>Quotes, fills & results</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={h2}>Quotes, fills & results</div><span style={{ flex: 1 }} />
+              <label style={{ color: C.text2, fontSize: 12, cursor: "pointer" }}><input type="checkbox" checked={onlyMatched} onChange={(e) => setOnlyMatched(e.target.checked)} /> Matched only</label></div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr>{["Time", "Status", "Legs", "Fair", "Quoted", "Edge", "Size", "Risk", "Fill", "Result / P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
               <tbody>
-                {data.quotes.length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={10}>No quotes in the last 7 days.</td></tr>}
-                {data.quotes.map((q) => (
+                {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={10}>No quotes in the last 7 days.</td></tr>}
+                {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).map((q) => (
                   <tr key={q.rfqId}>
                     <td style={td}>{etTime(q.createdAt)}</td>
                     <td style={{ ...td, color: stateColor(q.state), fontWeight: 600 }}>{q.state}{q.pulledReason ? <div style={{ color: C.warn, fontSize: 11 }}>pulled: {q.pulledReason === "game_started" ? "at kickoff" : q.pulledReason}</div> : null}</td>
-                    <td style={td}>{q.legs.map((l) => <div key={l}>{legLabel(l)}</div>)}</td>
+                    <td style={td}>{q.legs.map((l) => { const li = (data.legInfo || {})[l]; return <div key={l} style={{ marginBottom: 2 }}>{li ? <><span style={{ color: C.text }}>{li.bet}</span><span style={{ color: C.muted }}> · {li.game}</span></> : legLabel(l)}</div>; })}</td>
                     <td style={td}>{fmtAmerican(q.fairAmerican)}</td>
                     <td style={{ ...td, color: C.gold }}>{fmtAmerican(q.quoteAmerican)}</td>
                     <td style={td}>{q.edge == null ? "—" : `${(q.edge * 100).toFixed(1)}%`}</td>
