@@ -17,6 +17,7 @@
 
 const lib = require('./combo-probe-lib');
 const keysLib = require('./combo-keys-lib');
+const credits = require('../lib/combo-admin-credits');
 
 function defaultCreateClient(...args) {
   const { createClient } = require('@supabase/supabase-js');
@@ -130,6 +131,8 @@ async function buildUsers(client) {
     return u;
   });
   list.sort((a, b) => (b.is_owner - a.is_owner) || (b.in_live_users - a.in_live_users) || String(a.email || a.user_id).localeCompare(String(b.email || b.user_id)));
+  // Credits (fees): used / pending-to-target / left. Never fails the page.
+  await credits.attachCredits(client, list);
   return list;
 }
 

@@ -40,6 +40,7 @@ function setup({ user = OWNER } = {}) {
           const api = {
             select() { return api; },
             eq(c, v) { filter = [c, v]; return api; },
+            in() { return api; }, is() { return api; }, limit() { return api; },
             async maybeSingle() { return { data: (db[table] || []).find((r) => r[filter[0]] === filter[1]) || null, error: null }; },
             then(ok, bad) { return Promise.resolve({ data: db[table] || [], error: null }).then(ok, bad); },
             update(patch) {
@@ -50,6 +51,7 @@ function setup({ user = OWNER } = {}) {
           return api;
         },
         async rpc(name) {
+          if (name === 'combo_fee_status_for_worker') return { data: [{ user_id: KENNY, fees_enabled: true, monthly_allowance_usd: 100, allowance_used_usd: 1.53, allowance_left_usd: 98.47, credits_usd: 0, can_quote: true }, { user_id: KEVIN, fees_enabled: false }], error: null };
           assert.equal(name, 'combo_admin_user_stats');
           return { data: [
             { user_id: KEVIN, locks_total: 378, locks_active: 8, orders_30d: 529, fills_count: 563, fills_contracts: '71203.13', fills_today_contracts: '0' },
