@@ -231,19 +231,21 @@ function todayView(base, nowMs) {
 
 const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig", prophetx: "ProphetX" };
 
-export function RootForEmpty() {
+export function RootForEmpty({ noun = "locks" } = {}) {
   return (
     <div className="rootfor-empty" style={{ border: "1px solid #374151", borderRadius: 12, padding: "12px 16px", margin: "0 0 16px", background: "#0b1220", color: "#e5e7eb", fontSize: 13 }}>
-      <div style={{ fontSize: 16, fontWeight: 600 }}>What to root for <span style={{ color: "#9ca3af", fontSize: 12, fontWeight: 400, marginLeft: 8 }}>No open locks</span></div>
+      <div style={{ fontSize: 16, fontWeight: 600 }}>What to root for <span style={{ color: "#9ca3af", fontSize: 12, fontWeight: 400, marginLeft: 8 }}>No open {noun}</span></div>
       <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 6 }}>The live needle starts here when your next lock's first game kicks off. After the games finish, each day's actual P/L is saved here so you can look back at past days.</div>
     </div>
   );
 }
 
-export default function RootFor({ user, initialData = null, viewAs = "" }) {
+// apiUrl / noun / defaultOpen: the Sniper page reuses this sheet over its own live fills (/api/sniper-dashboard?rootfor=1).
+export default function RootFor({ user, initialData = null, viewAs = "", apiUrl = "/api/root-for", noun = "locks", defaultOpen = false }) {
+  const withQ = (q) => `${apiUrl}${apiUrl.includes("?") ? "&" : "?"}${q}`;
   const vaH = viewAs ? { "x-view-as": viewAs } : {};
   // Always starts hidden on every page load (no remembered open state).
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [view, setViewState] = useState(readView);
   const setView = (v) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ } };
   const [st, setSt] = useState({ loading: false, error: null, data: initialData });
@@ -257,7 +259,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
       try {
         const c = supabase(); if (!c) return;
         const { data: { session } } = await c.auth.getSession(); if (!session) return;
-        const r = await fetch("/api/root-for?check=1", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
+        const r = await fetch(withQ("check=1"), { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
         const j = await r.json().catch(() => null);
         if (!dead && r.ok && j && j.ok) { setLockCount(j.locks || 0); setDayCount(j.days || 0); }
       } catch { /* stay hidden */ }
@@ -273,7 +275,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
     try {
       const { data: { session } } = await c.auth.getSession();
       if (!session) throw new Error("Sign in required");
-      const r = await fetch("/api/root-for", { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
+      const r = await fetch(apiUrl, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `Request failed (${r.status})`);
       setSt({ loading: false, error: null, data: j });
@@ -293,7 +295,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   const loadDay = useCallback(async (day) => {
     try {
       const c = supabase(); if (!c) return; const { data: { session } } = await c.auth.getSession(); if (!session) return;
-      const r = await fetch(`/api/root-for?day=${day}`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
+      const r = await fetch(withQ(`day=${day}`), { headers: { accept: "application/json", authorization: "Bearer " + session.access_token, ...vaH } });
       const j = await r.json().catch(() => null); setDayRows((m) => ({ ...m, [day]: j && j.ok ? (j.dayRow || false) : false }));
     } catch { setDayRows((m) => ({ ...m, [day]: false })); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -336,7 +338,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
   const pickedRow = pickedDay ? (initialData && initialData.sweat && initialData.sweat.dayRow && String(initialData.sweat.dayRow.day).slice(0, 10) === pickedDay ? initialData.sweat.dayRow : dayRows[pickedDay]) : null;
   const todayRow = base && base.sweat && base.sweat.dayRow && base.sweat.dayRow.snap ? base.sweat.dayRow : null;
   // Combo Locks user with no open locks and no saved days yet: a small empty state instead of nothing.
-  if (signedIn && ((lockCount === 0 && dayCount === 0) || (base && base.empty && !(base.sweat && base.sweat.dayRow)))) return <RootForEmpty />;
+  if (signedIn && ((lockCount === 0 && dayCount === 0) || (base && base.empty && !(base.sweat && base.sweat.dayRow)))) return <RootForEmpty noun={noun} />;
   if (!can) return null;
   const d = base && whatIf && !whatIf.error ? { ...base, ...whatIf, top: base.top, perEvent: base.perEvent } : base;
   const slots = [];
@@ -401,7 +403,7 @@ export default function RootFor({ user, initialData = null, viewAs = "" }) {
       `}</style>
       <h3>
         What to root for
-        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open locks · ${d.events} games`) : ""}</span>
+        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun} · ${d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {open && <>
           <span className="seg" role="group" aria-label="Games">
