@@ -122,7 +122,7 @@ export function topByDrop(d, n = 5, ref = null) {
   const ev = Number(d.ev) || 0; const seen = new Set();
   return (d.perEvent || []).flatMap((e) => e.outcomes || [])
     .filter((o) => o && Number.isFinite(o.ifHit) && o.name)
-    .map((o) => ({ ...o, drop: o.ifHit - (ref ? ref(o.event) : ev), label: /\bby\b/.test(o.name) ? `${o.name.replace(/^(\S+\s+\S+)\s+by/, "$1 win by")}` : `${o.name} win` }))
+    .map((o) => ({ ...o, drop: o.ifHit - (ref ? ref(o.event) : ev), label: /\bby\b/.test(o.name) ? `${o.name.replace(/^(\S+\s+\S+)\s+by/, "$1 win by")}` : /\bTD$/.test(o.name) ? o.name : `${o.name} win` }))
     .map((o) => ({ ...o, label: o.label.replace(/win by under (\d+)\b/, (m, n) => (+n >= 3 ? `win by 1–${+n - 1}` : m)) }))
     .filter((o) => o.drop < -0.5)
     .sort((a, b) => a.drop - b.drop)

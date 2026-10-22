@@ -186,7 +186,7 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   const tdWho = {}; for (const p of positions) for (const l of p.legs) if (l.type === 'td') tdWho[l.ticker] = String(l.label || '').replace(/\s*\([A-Z]{2,4}\)\s*TD$/, '').replace(/\s*TD$/, '');
   const nameOf = (ev, outcome, cur) => (tdWho[ev] ? (outcome === 'yes' ? `${tdWho[ev]} scores a TD` : outcome === 'no' ? `${tdWho[ev]} doesn't score a TD` : cur) : cur);
   const startOf = (ev, cur) => { const g = espn(ev); return (g && g.kickoff) || cur || null; };
-  const slotOf = (st) => (st ? { key: st, label: new Date(st).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'short', day: 'numeric' }) } : { key: '9', label: 'Kickoff unknown' });
+  const slotOf = (st) => (st ? { key: st, label: new Date(st).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(/, (\d+:\d+ [AP]M)$/, ' · $1') + ' ET' } : { key: '9', label: 'Kickoff unknown' });
   const deco = (o) => { const start = startOf(o.event, o.start); return { ...o, name: nameOf(o.event, o.outcome, o.name), game: gameOf(o.event, o.game), start, slot: slotOf(start) }; };
   root.perEvent = root.perEvent.map((e) => { const start = startOf(e.event, e.start); return { ...e, game: gameOf(e.event, e.game), start, slot: slotOf(start), rootForName: e.rootFor != null ? nameOf(e.event, e.rootFor, e.rootForName) : e.rootForName, outcomes: e.outcomes.map(deco) }; })
     .sort((a, b) => String(a.start || '9').localeCompare(String(b.start || '9')));
