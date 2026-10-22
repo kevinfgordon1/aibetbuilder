@@ -29,3 +29,7 @@ const st = statusFrom({ created_at: "2026-10-22T16:00:00Z", details: { mode: "dr
 assert.strictEqual(st.mode, "dry"); assert.strictEqual(st.stale, false); assert.strictEqual(st.kickoffs.espn, 14);
 assert.strictEqual(statusFrom(null, 0).mode, "unknown");
 console.log("sniperDashboard.test.js ok");
+
+import { takerFee, takerSeesAmerican } from "./sniperDashboard.js";
+assert.strictEqual(takerFee(0.124, 80), 0.61);
+assert.strictEqual(takerSeesAmerican(0.124, 80), 660);

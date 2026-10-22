@@ -59,6 +59,7 @@ export function quoteRow(r) {
   return {
     rfqId: r.rfq_id, createdAt: r.created_at, state: rowState(r), legs: r.legs || [], games: r.games || [],
     fairAmerican: r.fair_american != null ? Number(r.fair_american) : americanFromProb(fair),
+    quoteYes: q > 0 && q < 1 ? q : null,
     quoteAmerican: r.quote_american != null ? Number(r.quote_american) : americanFromProb(q),
     edge: r.roi != null ? Number(r.roi) : null, risk: Number(r.risk) || 0, contracts: Number(r.contracts) || 0,
     ev: r.ev != null ? Number(r.ev) : null,
@@ -90,4 +91,19 @@ export function statusFrom(summary, nowMs) {
     stale: !(nowMs - at < 3 * 60 * 1000), kickoffs: d.kickoffs || null,
     rfqs: d.counts ? d.counts.rfqs : null, wouldQuote: d.counts ? d.counts.quotes : null,
   };
+}
+
+// Kalshi taker fee on combo series (KXMVECROSSCATEGORY / …0, fee_type quadratic*, multiplier 1):
+// ceil_to_cent(0.07 × C × P × (1−P)), charged to the buyer on top of C × P.
+export const KALSHI_TAKER_RATE = 0.07;
+export function takerFee(yesProb, contracts) {
+  const p = Number(yesProb), c = Number(contracts);
+  if (!(p > 0 && p < 1) || !(c > 0)) return 0;
+  return Math.ceil(Math.round(KALSHI_TAKER_RATE * c * p * (1 - p) * 1e6) / 1e4) / 100;
+}
+// Buyer's effective American odds after the taker fee.
+export function takerSeesAmerican(yesProb, contracts) {
+  const p = Number(yesProb), c = Number(contracts);
+  if (!(p > 0 && p < 1) || !(c > 0)) return americanFromProb(p);
+  return americanFromProb((c * p + takerFee(p, c)) / c);
 }
