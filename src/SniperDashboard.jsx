@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { fmtAmerican, fmtUsd } from "./sniperDashboard.js";
+import SniperMatched from "./SniperMatched";
 
 let client = null;
 function supabase() {
@@ -35,7 +36,7 @@ function Meter({ label, value, cap, note }) {
 
 export default function SniperDashboard() {
   const [book, setBook] = useState("auto");
-  const [data, setData] = useState(null); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
   const load = useCallback(async () => {
     const c = supabase(); if (!c) { setErr("Supabase not configured"); return; }
     setLoading(true);
@@ -46,6 +47,7 @@ export default function SniperDashboard() {
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setData(j); setErr(null);
+      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then((x) => x.json()).then((m) => { if (m && m.ok) setMatched(m); }).catch(() => {});
     } catch (e) { setErr(String(e.message || e)); } finally { setLoading(false); }
   }, [book]);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
@@ -67,6 +69,7 @@ export default function SniperDashboard() {
       </div>
       {err && <div style={{ ...card, color: C.bad, marginBottom: 12 }}>{err}</div>}
       {!data && !err && <div style={{ color: C.muted }}>Loading…</div>}
+      {matched && <SniperMatched data={matched} />}
       {data && (
         <>
           <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote, at least {Math.round((caps.minEdge || 0) * 100)}% edge after fees, $1,000 depth per leg, NFL only, no repeat parlays.</div>
@@ -93,12 +96,13 @@ export default function SniperDashboard() {
             </div>
           )}
           <div style={{ ...card, marginBottom: 14, overflowX: "auto" }}>
-            <div style={h2}>Quotes, fills & results</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={h2}>Quotes, fills & results</div><span style={{ flex: 1 }} />
+              <label style={{ color: C.text2, fontSize: 12, cursor: "pointer" }}><input type="checkbox" checked={onlyMatched} onChange={(e) => setOnlyMatched(e.target.checked)} /> Matched only</label></div>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr>{["Time", "Status", "Legs", "Fair", "Quoted", "Edge", "Size", "Risk", "Fill", "Result / P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
               <tbody>
-                {data.quotes.length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={10}>No quotes in the last 7 days.</td></tr>}
-                {data.quotes.map((q) => (
+                {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={10}>No quotes in the last 7 days.</td></tr>}
+                {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).map((q) => (
                   <tr key={q.rfqId}>
                     <td style={td}>{etTime(q.createdAt)}</td>
                     <td style={{ ...td, color: stateColor(q.state), fontWeight: 600 }}>{q.state}{q.pulledReason ? <div style={{ color: C.warn, fontSize: 11 }}>pulled: {q.pulledReason === "game_started" ? "at kickoff" : q.pulledReason}</div> : null}</td>
