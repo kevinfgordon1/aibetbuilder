@@ -35,6 +35,38 @@ function Meter({ label, value, cap, note }) {
   );
 }
 
+// Risk by game: toggle between real fills only and fills + live quotes (what the per-game cap counts).
+function RiskByGame({ r, caps, labels }) {
+  const [view, setView] = useState("filled");
+  const filled = r.filledGames || [];
+  const rows = view === "filled" ? filled : r.games;
+  if (!filled.length && !r.games.length) return null;
+  const capLine = view === "all";
+  const scale = capLine ? caps.perGame : Math.max(caps.perGame, ...rows.map((g) => g.risk), 1);
+  return (
+    <div style={{ ...card, marginBottom: 14 }} data-testid="risk-by-game">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        <div style={{ ...h2, margin: 0 }}>{view === "filled" ? "Filled risk by game" : "Filled + open quotes by game"}</div>
+        <span style={{ flex: 1 }} />
+        {[["filled", "Filled"], ["all", "Filled + open quotes"]].map(([k, l]) => <button key={k} onClick={() => setView(k)} style={{ background: view === k ? C.gold : C.head, color: view === k ? "#17140f" : C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+      </div>
+      <div style={{ color: C.muted, fontSize: 11, marginBottom: 8 }}>{view === "filled" ? `Money at risk on live fills that haven't settled (a parlay counts in every game it touches)` : `Fills plus live quotes waiting on a buyer — what the ${fmtUsd(caps.perGame)} per-game cap counts`}</div>
+      {rows.length === 0 && <div style={{ color: C.muted, fontSize: 12 }}>{view === "filled" ? "No unsettled fills." : "No open risk."}</div>}
+      {rows.slice(0, 12).map((g) => (
+        <div key={g.game} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, margin: "4px 0" }}>
+          <span style={{ width: 230, color: C.text2 }}>{labels[g.game] || g.game}</span>
+          <div style={{ flex: 1, height: 8, background: "#222", borderRadius: 4, position: "relative" }}>
+            <div style={{ width: `${Math.min(100, (g.risk / scale) * 100)}%`, height: 8, background: capLine && g.risk >= caps.perGame * 0.9 ? C.bad : C.gold, borderRadius: 4 }} />
+            {capLine && <div title={`${fmtUsd(caps.perGame)} per-game cap`} style={{ position: "absolute", right: 0, top: -3, width: 2, height: 14, background: C.bad }} />}
+          </div>
+          <span style={{ width: 120, textAlign: "right" }}>{capLine ? `${fmtUsd(g.risk)} / ${fmtUsd(caps.perGame)}` : fmtUsd(g.risk)}</span>
+        </div>
+      ))}
+      {capLine && rows.length > 0 && <div style={{ color: C.muted, fontSize: 11, marginTop: 6, textAlign: "right" }}><span style={{ display: "inline-block", width: 2, height: 10, background: C.bad, marginRight: 4, verticalAlign: "middle" }} />{fmtUsd(caps.perGame)} per-game cap</div>}
+    </div>
+  );
+}
+
 export default function SniperDashboard({ user }) {
   const [book, setBook] = useState("auto");
   const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("fills"); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
@@ -91,18 +123,7 @@ export default function SniperDashboard({ user }) {
               <div style={{ color: C.text2, fontSize: 12 }}>Running P&L <b style={{ color: r.runningPnl >= 0 ? C.good : C.bad }}>{fmtUsd(r.runningPnl)}</b></div>
             </div>
           </div>
-          {r.games.length > 0 && (
-            <div style={{ ...card, marginBottom: 14 }}>
-              <div style={h2}>Risk by game</div>
-              {r.games.slice(0, 12).map((g) => (
-                <div key={g.game} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, margin: "4px 0" }}>
-                  <span style={{ width: 190, color: C.text2 }}>{(data.gameLabels || {})[g.game] || g.game}</span>
-                  <div style={{ flex: 1, height: 8, background: "#222", borderRadius: 4 }}><div style={{ width: `${Math.min(100, (g.risk / caps.perGame) * 100)}%`, height: 8, background: g.risk >= caps.perGame * 0.9 ? C.bad : C.gold, borderRadius: 4 }} /></div>
-                  <span style={{ width: 120, textAlign: "right" }}>{fmtUsd(g.risk)} / {fmtUsd(caps.perGame)}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <RiskByGame r={r} caps={caps} labels={data.gameLabels || {}} />
           <div style={{ ...card, marginBottom: 14, overflowX: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={h2}>Quotes, fills & results</div><span style={{ flex: 1 }} />
               <label style={{ color: C.text2, fontSize: 12, cursor: "pointer" }}><input type="checkbox" checked={onlyMatched} onChange={(e) => setOnlyMatched(e.target.checked)} /> Matched only</label></div>
