@@ -62,13 +62,16 @@ function usePregame(d) {
 }
 function Simple({ d, today }) {
   const g = usePregame(d);
+  // Headline EV = pregame (gauge center); fall back to the saved baseline if the pregame view isn't available.
+  const s0 = d && d.sweat; const base = s0 && s0.started === true && Number.isFinite(Number(s0.baseline)) ? Number(s0.baseline) : null;
+  const headEv = g !== d ? g.ev : base != null ? base : d.ev;
   const range = typicalRange(g.hist);
   // One shared scale for both columns so a +$498 bar and a -$136 bar are drawn in proportion.
   const kref = kickoffRef(d); const top = topByGain(d, 5, kref); const bad = topByDrop(d, 5, kref);
   const mx = Math.max(...top.map((t) => Math.abs(t.gain)), ...bad.map((k) => Math.abs(k.drop)), 1);
   return (
     <div>
-      <div className="lead">{today ? todaySentence({ ...d, ev: g.ev }) : summarySentence({ ...d, ev: g.ev })}</div>
+      <div className="lead">{today ? todaySentence({ ...d, ev: headEv }) : summarySentence({ ...d, ev: headEv })}</div>
       {range && <div className="lead2">{today ? "Today's locks most likely land" : "Most weekends land"} between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
       <SweatMeter d={d} />
