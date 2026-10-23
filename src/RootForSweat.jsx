@@ -28,7 +28,8 @@ export function pregameRange(d, s, full = false) {
     const lp = (sn && sn.lockPre) || {}; const byT = Object.values(lp).sort((a, b) => String(b.t0).localeCompare(String(a.t0)));
     const simP = { ...preP }; for (const f of byT) Object.assign(simP, f.probs || {});
     const simPos = pos.map((p) => { const f = lp[String(p.id)]; return f ? { ...p, hit: f.pos.hit, miss: f.pos.miss } : p; });
-    const center = today ? null : lockedPregameEv(pos, preP, lp);
+    // Sniper page: Pregame = fill-time value of the open fills (server sends sweat.fixedBaseline).
+    const center = today ? null : s.fixedBaseline && Number.isFinite(Number(s.baseline)) ? Number(s.baseline) : lockedPregameEv(pos, preP, lp);
     const r = rootFor(simPos, simP, { histBins: 40, mcSamples: 20000, rng: seeded(11) });
     if (!r || !r.hist || !r.hist.bins || !r.hist.bins.length) return null;
     if (full) return { r, center };
