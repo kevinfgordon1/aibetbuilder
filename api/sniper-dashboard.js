@@ -43,7 +43,8 @@ async function pageAll(build, max = 20000) {
 }
 
 async function handler(req, res) {
-  if (req.method !== 'GET') return json(res, 405, { ok: false, error: 'GET only' });
+  const isHedge = req.query && (req.query.hedge === '1' || req.query.hedge === 1);
+  if (req.method !== 'GET' && !isHedge) return json(res, 405, { ok: false, error: 'GET only' });
   const auth = await requireOwner(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
   const env = deps.env || process.env;
@@ -56,6 +57,7 @@ async function handler(req, res) {
     const nowMs = deps.now();
     const since = new Date(nowMs - days * 864e5).toISOString();
     const db = deps.createClient(url, env.SUPABASE_SERVICE_KEY, clientOpts);
+    if (isHedge) return hedgeWrite(req, res, db, auth.user, nowMs);
     if (q.matched === '1' || q.matched === 1) return json(res, 200, await matched(db, env, nowMs));
     if (q.rootfor === '1' || q.rootfor === 1) return json(res, 200, await sniperRootFor(db, env, nowMs, q.check === '1'));
     const { data: sumRows, error: se } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').order('created_at', { ascending: false }).limit(1);
@@ -75,7 +77,14 @@ async function handler(req, res) {
     ]);
     const byId = new Map();
     for (const r of [...settledAll, ...recent, ...openRows]) byId.set(r.rfq_id, { ...(byId.get(r.rfq_id) || {}), ...r });
-    const all = [...byId.values()];
+    let all = [...byId.values()];
+    // Hedged open fills count at net worst-case loss (same as the sniper's caps once 20261023f is applied).
+    if (!dry) {
+      const Hg = await hedgeMod();
+      const hedges = await loadHedges(db, all.filter((r) => r.status === 'open' && Number(r.filled_contracts) > 0).map((r) => r.rfq_id));
+      all = all.map((r) => { const hs = Hg.activeHedges(hedges[r.rfq_id]); if (!hs.length || r.status !== 'open' || r.phase !== 'filled') return r;
+        const x = Hg.hedgeSummary({ n: Number(r.filled_contracts), risk: Number(r.filled_cost) + Number(r.filled_fee) }, hs); return { ...r, risk: x.netRisk, gross_risk: Number(r.risk), hedged: true }; });
+    }
     const todayKey = H.etDayKey(new Date(nowMs).toISOString());
     const risk = H.summarizeLedger(all, todayKey);
     const quotes = [...openRows, ...recent.filter((r) => r.status !== 'open')]
@@ -88,6 +97,69 @@ async function handler(req, res) {
     return json(res, 500, { ok: false, error: 'Could not load sniper data' });
   }
 }
+
+// Logged sportsbook hedges (sniper_hedges; service role only, Kevin only via requireOwner). Map rfq_id -> rows.
+async function loadHedges(db, ids) {
+  const out = {}; if (!ids.length) return out;
+  try {
+    const { data, error } = await db.from('sniper_hedges').select('id,rfq_id,book,american,stake,placed_at,notes,status,source,created_at,updated_at').in('rfq_id', ids.slice(0, 1000)).order('placed_at', { ascending: true });
+    if (error) return out;
+    for (const h of data || []) (out[h.rfq_id] || (out[h.rfq_id] = [])).push({ ...h, american: Number(h.american), stake: Number(h.stake) });
+  } catch (_) { /* optional: no hedges = unhedged */ }
+  return out;
+}
+// POST ?hedge=1 {rfqId, book, american, stake, placedAt?, notes?, source?} · PATCH ?hedge=1&id= {...} · DELETE ?hedge=1&id=
+async function hedgeWrite(req, res, db, user, nowMs) {
+  const q = req.query || {}; let b = req.body || {};
+  if (typeof b === 'string') { try { b = JSON.parse(b); } catch (_) { b = {}; } }
+  const patch = {};
+  if (b.book != null) { const v = String(b.book).trim(); if (!v || v.length > 40) return json(res, 400, { ok: false, error: 'Book is required (max 40 chars)' }); patch.book = v; }
+  if (b.american != null) { const a = Math.round(Number(b.american)); if (!Number.isFinite(a) || (a > -100 && a < 100)) return json(res, 400, { ok: false, error: 'American odds must be +100 or more, or -100 or less' }); patch.american = a; }
+  if (b.stake != null) { const v = Number(b.stake); if (!(v > 0) || v > 100000) return json(res, 400, { ok: false, error: 'Stake must be more than $0' }); patch.stake = Math.round(v * 100) / 100; }
+  if (b.placedAt != null) { const t = Date.parse(b.placedAt); if (!Number.isFinite(t)) return json(res, 400, { ok: false, error: 'Bad placed time' }); patch.placed_at = new Date(t).toISOString(); }
+  if (b.notes !== undefined) patch.notes = b.notes == null ? null : String(b.notes).slice(0, 500);
+  if (b.status != null) { if (!['active', 'void'].includes(b.status)) return json(res, 400, { ok: false, error: 'Bad status' }); patch.status = b.status; }
+  try {
+    if (req.method === 'POST') {
+      const rfq = String(b.rfqId || '');
+      if (!rfq || patch.book == null || patch.american == null || patch.stake == null) return json(res, 400, { ok: false, error: 'rfqId, book, american and stake are required' });
+      const { data: fill, error: fe } = await db.from('sniper_ledger').select('rfq_id,dry_run,filled_contracts').eq('rfq_id', rfq).limit(1);
+      if (fe) throw new Error(fe.message);
+      const f = fill && fill[0];
+      if (!f || f.dry_run || !(Number(f.filled_contracts) > 0)) return json(res, 400, { ok: false, error: 'Hedges can only be logged on real fills' });
+      const row = { rfq_id: rfq, status: 'active', source: b.source === 'book_arb' ? 'book_arb' : 'manual', created_by: user && user.id ? String(user.id) : null, ...patch };
+      const { data, error } = await db.from('sniper_hedges').insert(row).select('id');
+      if (error) throw new Error(error.message);
+      return json(res, 200, { ok: true, id: data && data[0] && data[0].id });
+    }
+    const id = String(q.id || b.id || '');
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json(res, 400, { ok: false, error: 'Hedge id required' });
+    if (req.method === 'PATCH') {
+      if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: 'Nothing to change' });
+      const { error } = await db.from('sniper_hedges').update({ ...patch, updated_at: new Date(nowMs).toISOString() }).eq('id', id);
+      if (error) throw new Error(error.message);
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'DELETE') {
+      const { error } = await db.from('sniper_hedges').delete().eq('id', id);
+      if (error) throw new Error(error.message);
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 405, { ok: false, error: 'POST, PATCH or DELETE' });
+  } catch (e) {
+    console.error('[sniper-hedges]', String((e && e.message) || e).slice(0, 200));
+    return json(res, 500, { ok: false, error: 'Could not save the hedge' });
+  }
+}
+// Shift engine positions by their hedges (hit += payout − stake, miss −= stake) so root-for / live EV include them.
+function hedgePositions(positions, hedges, Hg) {
+  for (const p of positions) {
+    const hs = Hg.activeHedges(hedges[p.id]); if (!hs.length) continue;
+    const x = Hg.hedgeSummary({ n: 0, risk: 0 }, hs);
+    p.hit += x.hitDelta; p.miss += x.missDelta; p.hedged = true;
+  }
+}
+const hedgeMod = () => import('../src/sniperHedge.js');
 
 // Matched (live filled) positions: Combo Locks-style performance + live needle via the root-for engine.
 async function kalshiMarkets(tickers) {
@@ -134,7 +206,11 @@ async function matched(db, env, nowMs) {
   const perf = S.perfStats(rows, legResults);
   // Live EV uses the same open fills and the same four-venue sniper leg fairs as "What to root for".
   const liveRows = rows.filter((r) => r.status === 'open' && Number(r.filled_contracts) > 0 && r.phase !== 'settled' && !r.settled_at);
+  const Hg = await hedgeMod();
+  const hedges = await loadHedges(db, rows.filter((r) => Number(r.filled_contracts) > 0).map((r) => r.rfq_id));
+  const hedgeOf = (r) => { const m = S.rowMoney(r); return Hg.hedgeSummary({ n: m.n, risk: m.risk, fair: m.fair, baseEv: m.ev }, hedges[r.rfq_id]); };
   const positions = S.enginePositions(liveRows, names);
+  hedgePositions(positions, hedges, Hg);
   let root = null; let sweat = null; let starts = {};
   if (positions.length) {
     const R = rootForApi(); const M = await R._helpers.loadMods();
@@ -145,7 +221,7 @@ async function matched(db, env, nowMs) {
     root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts, now: nowMs, kalshiAt: markets.kalshiAt, legFairFn });
     fillTimeFallback(root, liveRows, S);
     // Needle: pregame = expected profit at the fair we sold at; now = live engine EV.
-    const baseline = liveRows.reduce((a, r) => a + S.rowMoney(r).ev, 0);
+    const baseline = liveRows.reduce((a, r) => { const hg = hedgeOf(r); return a + (hg && hg.ev != null ? hg.ev : S.rowMoney(r).ev); }, 0);
     const started = Object.values(starts).some((t) => t && Date.parse(t) <= nowMs);
     sweat = { baseline, now: root.ev, started: true, preStarted: started };
     delete root.model;
@@ -180,12 +256,16 @@ async function matched(db, env, nowMs) {
     }
   } catch (_) { /* optional */ }
   const list = rows.map((r) => {
-    const m = S.rowMoney(r);
+    const m = S.rowMoney(r); const hg = hedgeOf(r);
     return { rfqId: r.rfq_id, status: S.matchedStatus(r), filledAt: r.updated_at || r.created_at, createdAt: r.created_at, settledAt: r.settled_at,
       legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), ...(lab.legInfo[k] ? { bet: lab.legInfo[k].bet, game: lab.legInfo[k].game } : {}), kickoff: kick(k) || (lab.legInfo[k] && lab.legInfo[k].kickoff) || null, result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
-      fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null, fee: r.filled_fee != null ? Number(r.filled_fee) : r.fee != null ? Number(r.fee) : null, quote: quoteAt[r.rfq_id] || null, bookArb: bookArb[r.rfq_id] || null };
+      fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null, fee: r.filled_fee != null ? Number(r.filled_fee) : r.fee != null ? Number(r.fee) : null, quote: quoteAt[r.rfq_id] || null, bookArb: bookArb[r.rfq_id] || null,
+      hedges: hedges[r.rfq_id] || [], hedge: hg, ...(hg && hg.ev != null ? { evUnhedged: m.ev, ev: hg.ev } : {}) };
   });
-  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat };
+  const hedgedList = list.filter((x) => x.hedge && x.status === 'open');
+  const hedgeTotals = { fills: hedgedList.length, locked: hedgedList.filter((x) => x.hedge.locked).length, stake: hedgedList.reduce((a, x) => a + x.hedge.stake, 0),
+    worst: hedgedList.reduce((a, x) => a + x.hedge.worst, 0), freed: hedgedList.reduce((a, x) => a + x.hedge.freed, 0) };
+  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat, hedgeTotals };
 }
 
 // "What to root for" (Combo Locks sheet) over live, filled, unsettled sniper positions. The sniper is the HOUSE
@@ -202,6 +282,9 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   const mk = await kalshiMarkets(tickers.filter((t) => /^KXNFLTD/.test(t)));
   const names = {}; for (const [t, m] of Object.entries(mk)) names[t] = m.title || m.yes_sub_title;
   const positions = S.enginePositions(rows, names);
+  const Hg = await hedgeMod();
+  const hedges = await loadHedges(db, rows.map((r) => r.rfq_id));
+  hedgePositions(positions, hedges, Hg);
   const L = legsMod || (legsMod = await import('../src/sniperLegLabels.js'));
   const legKeys = [...new Set(rows.flatMap((r) => r.legs || []))];
   const f = deps.fetch || fetch;
@@ -225,11 +308,13 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
     .sort((a, b) => String(a.start || '9').localeCompare(String(b.start || '9')));
   root.top = (root.top || []).map(deco);
   if (root.model && root.model.teamNames) for (const k of Object.keys(root.model.teamNames)) { const i = k.lastIndexOf(':'); root.model.teamNames[k] = nameOf(k.slice(0, i), k.slice(i + 1), root.model.teamNames[k]); }
-  const baseline = rows.reduce((a, r) => a + S.rowMoney(r).ev, 0);
-  fillTimeFallback(root, rows, S);
+  const evOf = (r) => { const m = S.rowMoney(r); const hg = Hg.hedgeSummary({ n: m.n, risk: m.risk, fair: m.fair, baseEv: m.ev }, hedges[r.rfq_id]); return hg && hg.ev != null ? hg.ev : m.ev; };
+  const baseline = rows.reduce((a, r) => a + evOf(r), 0);
+  fillTimeFallback(root, rows, S, evOf);
   const lockLabels = {}; for (const r of rows) lockLabels[r.rfq_id] = (r.legs || []).map((k) => L.legInfo(k, gm, names).bet).join(' + ');
   // Pregame = fill-time value of the open fills (sniper fair at quote time), not the live number again.
-  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true } };
+  const hedgedLocks = rows.filter((r) => Hg.activeHedges(hedges[r.rfq_id]).length).length;
+  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, hedgedLocks, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true } };
 }
 
 // Sniper leg fairs (src/sniperLegFair.js): $1,000 inverse bet across Kalshi + relay Polymarket US / Novig (TD /td)
@@ -291,10 +376,10 @@ async function collegeStarts(markets, positions, f) {
 
 // Fills with a leg that has no live price: keep them at their fill-time expected profit (a constant, so the
 // root for / against swings are unchanged) instead of leaving them out. Shifts EV, range and chart by that amount.
-function fillTimeFallback(root, rows, S) {
+function fillTimeFallback(root, rows, S, evOf = (r) => S.rowMoney(r).ev) {
   const ids = new Set((root.unpriced || []).map((u) => String(u.id)));
   if (!ids.size) { root.fillTimeLocks = 0; return; }
-  const add = rows.filter((r) => ids.has(String(r.rfq_id))).reduce((a, r) => a + S.rowMoney(r).ev, 0);
+  const add = rows.filter((r) => ids.has(String(r.rfq_id))).reduce((a, r) => a + evOf(r), 0);
   const sh = (x) => (Number.isFinite(Number(x)) ? Number(x) + add : x);
   root.ev = sh(root.ev); root.lo2 = sh(root.lo2); root.hi2 = sh(root.hi2);
   for (const k of ['best', 'worst', 'baseWorst']) if (root[k] && Number.isFinite(Number(root[k].pnl))) root[k] = { ...root[k], pnl: Number(root[k].pnl) + add };

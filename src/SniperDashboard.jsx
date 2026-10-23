@@ -84,6 +84,15 @@ export default function SniperDashboard({ user }) {
     } catch (e) { setErr(String(e.message || e)); } finally { setLoading(false); }
   }, [book]);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
+  // Hedge writes (Log / edit / void / delete) then reload so totals, root-for and caps reflect it.
+  const hedgeApi = useCallback(async (method, qs = "", body) => {
+    const c = supabase(); const { data: { session } } = await c.auth.getSession();
+    if (!session) throw new Error("Sign in required");
+    const r = await fetch(`/api/sniper-dashboard?hedge=1${qs}`, { method, headers: { accept: "application/json", "content-type": "application/json", authorization: "Bearer " + session.access_token }, body: body ? JSON.stringify(body) : undefined });
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    await load(); return j;
+  }, [load]);
 
   const s = data && data.status; const r = data && data.risk; const caps = (data && data.caps) || {};
   return (
@@ -107,7 +116,7 @@ export default function SniperDashboard({ user }) {
           <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
             {[["fills", "My Fills"], ["root", "What to root for"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
           </div>
-          {tab === "fills" ? <MyFills data={matched} /> : tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : <SniperMatched data={matched} />}
+          {tab === "fills" ? <MyFills data={matched} api={hedgeApi} /> : tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : <SniperMatched data={matched} />}
         </div>
       )}
       {data && (
