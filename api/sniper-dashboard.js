@@ -146,7 +146,7 @@ async function matched(db, env, nowMs) {
     sweat = { baseline, now: root.ev, started: true, preStarted: started };
     delete root.model;
   }
-  const kick = (k) => { const g = S.legMeta(k, names).gameKey; return starts[g] || null; };
+  const kick = (k) => { const g = S.legMeta(k, names).gameKey; const ev = String(k).split(':')[0].toUpperCase().split('-').slice(0, 2).join('-'); return starts[ev] || starts[g] || null; };
   const lab = await legLabels(rows.map((r) => ({ legs: r.legs || [] })), []);
   // Quote-time breakdown: the sniper's own "quoted" decision (legDetail = best venue, fair, depth per leg).
   const quoteAt = {};
