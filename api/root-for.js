@@ -16,7 +16,7 @@ async function loadMods() {
 }
 function defaultCreateClient(...args) { const { createClient } = require('@supabase/supabase-js'); return createClient(...args); }
 const KALSHI = 'https://api.elections.kalshi.com/trade-api/v2';
-const RELAY_FALLBACK = 'https://odds-relay-production-34da.up.railway.app';
+const RELAY_FALLBACK = 'https://kaygo-odds-relay.fly.dev';
 const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, fetch: (...a) => fetch(...a), now: () => Date.now() });
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };

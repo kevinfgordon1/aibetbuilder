@@ -205,7 +205,9 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   const gm = L.gamesFromEspn(boards.filter(Boolean));
   const R = rootForApi(); const M = await R._helpers.loadMods();
   const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
-  const root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts: markets.starts || {}, now: nowMs, kalshiAt: markets.kalshiAt });
+  await collegeStarts(markets, positions, deps.fetch || fetch);
+  const legFairFn = await sniperLegFairFn(db, env, rows, names, positions);
+  const root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts: markets.starts || {}, now: nowMs, kalshiAt: markets.kalshiAt, legFairFn });
   // plain-English labels: "NE @ CHI", ESPN kickoff first, TD outcomes as "X scores a TD" / "X doesn't score"
   const codeOf = (ev) => String(ev || '').toUpperCase().split('-')[1] || '';
   const espn = (ev) => gm[codeOf(ev)] || null;
@@ -220,10 +222,83 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   root.top = (root.top || []).map(deco);
   if (root.model && root.model.teamNames) for (const k of Object.keys(root.model.teamNames)) { const i = k.lastIndexOf(':'); root.model.teamNames[k] = nameOf(k.slice(0, i), k.slice(i + 1), root.model.teamNames[k]); }
   const baseline = rows.reduce((a, r) => a + S.rowMoney(r).ev, 0);
+  fillTimeFallback(root, rows, S);
   const lockLabels = {}; for (const r of rows) lockLabels[r.rfq_id] = (r.legs || []).map((k) => L.legInfo(k, gm, names).bet).join(' + ');
-  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, lockLabels, sweat: { baseline, now: root.ev, started: true } };
+  // Pregame = fill-time value of the open fills (sniper fair at quote time), not the live number again.
+  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true } };
+}
+
+// Sniper leg fairs (src/sniperLegFair.js): $1,000 inverse bet across Kalshi + relay Polymarket US / Novig (TD /td)
+// + ProphetX (relay board), falling back to the sniper's fill-time leg fair. Any feed failing just drops that venue.
+let legFairMod = null;
+async function sniperLegFairFn(db, env, rows, names, positions) {
+  const F = legFairMod || (legFairMod = await import('../src/sniperLegFair.js'));
+  const P = await import('../src/rootForPrices.js');
+  const f = deps.fetch || fetch;
+  const base = String(env.ODDS_RELAY_URL || env.VITE_ODDS_RELAY_URL || '').replace(/\/+$/, '');
+  const getJ = async (u) => { try { const r = await f(u, { headers: { accept: 'application/json' } }); return r.ok ? await r.json() : null; } catch (_) { return null; } };
+  const polledAt = deps.now();
+  let tdBooks = {}; let pxRelay = {};
+  if (base) {
+    const [h, tdPm, tdNv, kNfl, kCfb, pNfl, pCfb] = await Promise.all([
+      getJ(`${base}/health`), getJ(`${base}/td?venue=polymarket&league=NFL`), getJ(`${base}/td?venue=novig&league=NFL`),
+      getJ(`${base}/board?venue=kalshi&league=NFL`), getJ(`${base}/board?venue=kalshi&league=NCAAF`),
+      getJ(`${base}/board?venue=prophetx&league=NFL`), getJ(`${base}/board?venue=prophetx&league=NCAAF`),
+    ]);
+    tdBooks = F.indexTdRows({ polymarket: (tdPm && tdPm.markets) || [], novig: (tdNv && tdNv.markets) || [] }, names, polledAt);
+    const pxLive = /ws:up/.test(String((h && h.status && h.status.prophetx) || ''));
+    pxRelay = P.relayIndex({ kalshiBoard: [...((kNfl && kNfl.quotes) || []), ...((kCfb && kCfb.quotes) || [])], novig: F.prophetxAsNovig([...((pNfl && pNfl.quotes) || []), ...((pCfb && pCfb.quotes) || [])]), novigLive: pxLive, polledAt });
+  }
+  let stored = {};
+  try { // the fill's own quote-time leg fairs first; legs without one use the latest sniper quote that priced them
+    const ids = rows.map((r) => r.rfq_id);
+    const { data: own } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'quoted').in('rfq_id', ids).limit(2000);
+    const legsWanted = new Set(positions.flatMap((p) => p.legs.map((l) => String(l.ticker).toUpperCase())));
+    const since = new Date(polledAt - 24 * 3600e3).toISOString();
+    const { data: recent } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'quoted').gte('created_at', since).order('created_at', { ascending: false }).limit(5000);
+    const hit = (d) => ((d.details && d.details.legDetail) || []).some((l) => l && legsWanted.has(String(l.ticker).toUpperCase()));
+    stored = { ...F.storedLegFairs((recent || []).filter(hit)), ...F.storedLegFairs(own || []) };
+  } catch (_) { stored = {}; }
+  return F.makeSniperLegFair({ tdBooks, pxRelay, stored });
+}
+
+// College kickoffs from ESPN's FBS scoreboard. Kalshi NCAAF tickers carry the day BEFORE kickoff
+// (KXNCAAFGAME-26OCT23OREILL = Sat Oct 24) and the relay has no start for them, so without this every college
+// game lands in "Other days" and Today never sees it. Tries the ticker date and the next day.
+async function collegeStarts(markets, positions, f) {
+  const starts = markets.starts || (markets.starts = {});
+  const MON = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+  const evs = [...new Set(positions.flatMap((p) => p.legs.map((l) => String(l.ticker).toUpperCase().split('-').slice(0, 2).join('-'))))]
+    .filter((ev) => /^KXNCAAF/.test(ev) && !starts[ev]);
+  const want = {};
+  for (const ev of evs) { const m = /-(\d\d)([A-Z]{3})(\d\d)([A-Z]+)$/.exec(ev); if (!m || !MON[m[2]]) continue;
+    const t = Date.parse(`20${m[1]}-${MON[m[2]]}-${m[3]}T12:00:00Z`);
+    for (const d of [t, t + 864e5]) { const k = new Date(d).toISOString().slice(0, 10).replace(/-/g, ''); (want[k] = want[k] || []).push([ev, m[4]]); } }
+  await Promise.all(Object.entries(want).slice(0, 10).map(async ([date, list]) => {
+    try {
+      const r = await f(`https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?dates=${date}&groups=80&limit=300`, { headers: { accept: 'application/json' } });
+      if (!r.ok) return; const j = await r.json(); const by = {};
+      for (const e of j.events || []) { const c = ((e.competitions || [])[0] || {}).competitors || []; const a = c.find((x) => x.homeAway === 'away'), h = c.find((x) => x.homeAway === 'home');
+        if (a && h && Number.isFinite(Date.parse(e.date))) by[String(a.team.abbreviation + h.team.abbreviation).toUpperCase()] = new Date(Date.parse(e.date)).toISOString(); }
+      for (const [ev, teams] of list) if (!starts[ev] && by[teams]) starts[ev] = by[teams];
+    } catch (_) { /* no start: "Other days" */ }
+  }));
+}
+
+// Fills with a leg that has no live price: keep them at their fill-time expected profit (a constant, so the
+// root for / against swings are unchanged) instead of leaving them out. Shifts EV, range and chart by that amount.
+function fillTimeFallback(root, rows, S) {
+  const ids = new Set((root.unpriced || []).map((u) => String(u.id)));
+  if (!ids.size) { root.fillTimeLocks = 0; return; }
+  const add = rows.filter((r) => ids.has(String(r.rfq_id))).reduce((a, r) => a + S.rowMoney(r).ev, 0);
+  const sh = (x) => (Number.isFinite(Number(x)) ? Number(x) + add : x);
+  root.ev = sh(root.ev); root.lo2 = sh(root.lo2); root.hi2 = sh(root.hi2);
+  for (const k of ['best', 'worst', 'baseWorst']) if (root[k] && Number.isFinite(Number(root[k].pnl))) root[k] = { ...root[k], pnl: Number(root[k].pnl) + add };
+  if (root.hist && root.hist.bins) root.hist = { ...root.hist, bins: root.hist.bins.map((b) => ({ ...b, from: b.from + add, to: b.to + add })) };
+  root.fillTimeLocks = ids.size; root.fillTimeEv = add; root.locksPriced = Number(root.locksPriced || 0) + ids.size;
 }
 
 module.exports = handler;
 module.exports._setDeps = (patch) => { deps = { ...deps, ...patch }; };
 module.exports._resetDeps = () => { deps = freshDeps(); };
+module.exports._sniperRootFor = (...a) => sniperRootFor(...a);

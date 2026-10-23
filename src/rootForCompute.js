@@ -52,7 +52,7 @@ export function finalOutcome(last, outs = []) {
 
 // extraPositions: ready-made engine positions ({ id, label, legs:[{ticker, side, label, game}], hit, miss }) that are
 // not Combo Locks (the Sniper dashboard feeds its own filled positions through the same engine).
-export function computeRootFor({ parlays = [], fills = [], singles = [], submissions = null, kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {}, extraPositions = [] }) {
+export function computeRootFor({ parlays = [], fills = [], singles = [], submissions = null, kalshiBooks = {}, relay = {}, starts = {}, now = Date.now(), kalshiAt = now, opts = {}, finals = {}, extraPositions = [], legFairFn = null }) {
   const positions = [...extraPositions]; const skipped = []; let resting = 0;
   // same contract count as History P/L (only when the caller loaded submissions)
   const filledBy = submissions ? deskFillCounts(fills, submissions.filter(isConfirmedFillSubmission)).byParlay : null;
@@ -63,7 +63,7 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
     positions.push(...r.positions);
   }
   const px = { kalshiBooks, relay, now, kalshiAt };
-  const legInfo = {}; const fair = (ticker, side) => { const k = `${ticker}:${side}`; if (!(k in legInfo)) legInfo[k] = legFair({ ticker, side }, px); return legInfo[k]; };
+  const legInfo = {}; const fair = (ticker, side) => { const k = `${ticker}:${side}`; if (!(k in legInfo)) legInfo[k] = (legFairFn || legFair)({ ticker, side }, px); return legInfo[k]; };
   const games = {}; const gameName = (ev, team) => { const g = games[ev]; const r = legEvent({ ticker: `${ev}-${team}` }); const half = g && r.kind === "game" ? String(g).split(/\s+vs\.?\s+/i)[r.outcomes.indexOf(team)] : null; return half || team; };
 
   // ---- 1. which games get a spread nested into their moneyline (one team + one strike per game)
