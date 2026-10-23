@@ -35,7 +35,7 @@ function defaultCreateClient(...args) {
   return createClient(...args);
 }
 const freshDeps = () => ({ env: process.env, createClient: defaultCreateClient, lookupSeries: seriesFee._helpers.lookup, now: () => Date.now(), fetch: (...a) => fetch(...a) });
-const RELAY_FALLBACK = 'https://odds-relay-production-34da.up.railway.app';
+const RELAY_FALLBACK = 'https://kaygo-odds-relay.fly.dev';
 const KALSHI_API = 'https://api.elections.kalshi.com/trade-api/v2';
 let deps = freshDeps();
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } };
