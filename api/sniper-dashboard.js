@@ -70,11 +70,16 @@ async function handler(req, res) {
     }
     const dry = book !== 'live';
     // Open rows of any age + everything touched in the window (settlements count for running P&L).
-    const [openRows, recent, settledAll] = await Promise.all([
+    const [openRows, recent, settledAll, latest] = await Promise.all([
       pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', dry).eq('status', 'open').order('created_at', { ascending: false })),
-      pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', dry).gte('created_at', since).order('created_at', { ascending: false })),
-      pageAll(() => db.from('sniper_ledger').select('rfq_id,status,phase,risk,realized_pnl,settled_at,created_at,games,legs').eq('dry_run', dry).eq('phase', 'settled')),
+      // NBA volume (~35k ledger rows/hour) made the full 7-day scan hit the statement timeout.
+      // Only filled rows matter for risk/P&L; unfilled quotes are needed just for the latest-300 list.
+      pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', dry).gt('filled_contracts', 0).gte('created_at', since).order('created_at', { ascending: false })),
+      pageAll(() => db.from('sniper_ledger').select('rfq_id,status,phase,risk,realized_pnl,settled_at,created_at,games,legs,dry_run,filled_cost,filled_fee').eq('dry_run', dry).gt('filled_contracts', 0).eq('phase', 'settled')),
+      db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', dry).gte('created_at', since).order('created_at', { ascending: false }).limit(300)
+        .then(({ data, error }) => { if (error) throw new Error(error.message); return data || []; }),
     ]);
+    { const seen = new Set(recent.map((r) => r.rfq_id)); for (const r of latest) if (!seen.has(r.rfq_id)) recent.push(r); }
     const byId = new Map();
     for (const r of [...settledAll, ...recent, ...openRows]) byId.set(r.rfq_id, { ...(byId.get(r.rfq_id) || {}), ...r });
     let all = [...byId.values()];

@@ -5,7 +5,7 @@ const lib = require('./combo-probe-lib');
 function res() { const r = { code: 0, body: null, headers: {} }; r.setHeader = (k, v) => { r.headers[k] = v; }; r.status = (c) => { r.code = c; return r; }; r.json = (b) => { r.body = b; return r; }; return r; }
 function chain(rows) {
   const c = { _rows: rows };
-  for (const m of ['select', 'eq', 'gte', 'order']) c[m] = () => c;
+  for (const m of ['select', 'eq', 'gt', 'gte', 'order']) c[m] = () => c;
   c.limit = async () => ({ data: rows.slice(0, 1), error: null });
   c.range = async (a, b) => ({ data: rows.slice(a, b + 1), error: null });
   c.then = (f) => Promise.resolve({ count: 0, data: rows, error: null }).then(f);
