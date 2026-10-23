@@ -205,6 +205,7 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   const gm = L.gamesFromEspn(boards.filter(Boolean));
   const R = rootForApi(); const M = await R._helpers.loadMods();
   const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
+  await collegeStarts(markets, positions, deps.fetch || fetch);
   const legFairFn = await sniperLegFairFn(db, env, rows, names, positions);
   const root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts: markets.starts || {}, now: nowMs, kalshiAt: markets.kalshiAt, legFairFn });
   // plain-English labels: "NE @ CHI", ESPN kickoff first, TD outcomes as "X scores a TD" / "X doesn't score"
@@ -258,6 +259,29 @@ async function sniperLegFairFn(db, env, rows, names, positions) {
     stored = { ...F.storedLegFairs((recent || []).filter(hit)), ...F.storedLegFairs(own || []) };
   } catch (_) { stored = {}; }
   return F.makeSniperLegFair({ tdBooks, pxRelay, stored });
+}
+
+// College kickoffs from ESPN's FBS scoreboard. Kalshi NCAAF tickers carry the day BEFORE kickoff
+// (KXNCAAFGAME-26OCT23OREILL = Sat Oct 24) and the relay has no start for them, so without this every college
+// game lands in "Other days" and Today never sees it. Tries the ticker date and the next day.
+async function collegeStarts(markets, positions, f) {
+  const starts = markets.starts || (markets.starts = {});
+  const MON = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+  const evs = [...new Set(positions.flatMap((p) => p.legs.map((l) => String(l.ticker).toUpperCase().split('-').slice(0, 2).join('-'))))]
+    .filter((ev) => /^KXNCAAF/.test(ev) && !starts[ev]);
+  const want = {};
+  for (const ev of evs) { const m = /-(\d\d)([A-Z]{3})(\d\d)([A-Z]+)$/.exec(ev); if (!m || !MON[m[2]]) continue;
+    const t = Date.parse(`20${m[1]}-${MON[m[2]]}-${m[3]}T12:00:00Z`);
+    for (const d of [t, t + 864e5]) { const k = new Date(d).toISOString().slice(0, 10).replace(/-/g, ''); (want[k] = want[k] || []).push([ev, m[4]]); } }
+  await Promise.all(Object.entries(want).slice(0, 10).map(async ([date, list]) => {
+    try {
+      const r = await f(`https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard?dates=${date}&groups=80&limit=300`, { headers: { accept: 'application/json' } });
+      if (!r.ok) return; const j = await r.json(); const by = {};
+      for (const e of j.events || []) { const c = ((e.competitions || [])[0] || {}).competitors || []; const a = c.find((x) => x.homeAway === 'away'), h = c.find((x) => x.homeAway === 'home');
+        if (a && h && Number.isFinite(Date.parse(e.date))) by[String(a.team.abbreviation + h.team.abbreviation).toUpperCase()] = new Date(Date.parse(e.date)).toISOString(); }
+      for (const [ev, teams] of list) if (!starts[ev] && by[teams]) starts[ev] = by[teams];
+    } catch (_) { /* no start: "Other days" */ }
+  }));
 }
 
 module.exports = handler;
