@@ -178,24 +178,92 @@ export function FillBreakdown({ r }) {
 }
 
 // "My Fills": only real live fills (filled_contracts > 0) — what Kevin actually holds. No quotes.
-export function MyFills({ data }) {
+// Sortable columns (high → low first, click again to flip), Legs + First leg starts columns, and filters
+// (league, legs, filled date, parlay start date, min Exp. ROI). Summary cards and totals follow the filters.
+const LEAGUES = [[/^KXNCAAF/, "NCAAF"], [/^KXNFL/, "NFL"], [/^KXNCAAB/, "NCAAB"], [/^KXNBA/, "NBA"], [/^KXNHL/, "NHL"], [/^KXMLB/, "MLB"], [/^KXUFC/, "UFC"]];
+export const leagueOfLeg = (t) => { const s = String(t || "").toUpperCase(); for (const [re, n] of LEAGUES) if (re.test(s)) return n; return (s.replace(/^KX/, "").match(/^[A-Z]+?(?=GAME|TD|SPREAD|TOTAL|-|$)/) || ["Other"])[0] || "Other"; };
+export const leagueOfFill = (r) => { const s = [...new Set((r.legs || []).map((l) => leagueOfLeg(l.ticker)))]; return s.length > 1 ? "Multiple" : s[0] || "Other"; };
+export const firstStart = (r) => { const ts = (r.legs || []).map((l) => Date.parse(l.kickoff)).filter(Number.isFinite); return ts.length ? Math.min(...ts) : null; };
+const etYmd = (ms) => (ms == null ? null : new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
+const addDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+// Next Sat/Sun on or after today (ET).
+const nextDow = (today, dow) => { const d = new Date(`${today}T12:00:00Z`).getUTCDay(); return addDays(today, (dow - d + 7) % 7); };
+const expRoiOf = (r) => (r.edge != null && Number.isFinite(r.edge) ? r.edge : r.ev != null && r.risk > 0 ? r.ev / r.risk : null);
+const expProfitOf = (r) => (r.ev != null && Number.isFinite(r.ev) ? r.ev : expRoiOf(r) != null ? expRoiOf(r) * r.risk : 0);
+const SORTS = {
+  Filled: (r) => Date.parse(r.filledAt) || null, Legs: (r) => (r.legs || []).length, "First leg starts": firstStart,
+  Fair: (r) => r.fairYes, "We offer": (r) => r.soldYes, "Taker sees": (r) => r.soldYes, Contracts: (r) => Number(r.contracts),
+  Risk: (r) => r.risk, "To win": (r) => r.toWin, "Exp. ROI": expRoiOf, "P&L": (r) => r.pnl,
+};
+// Odds columns sort by payout (longest price first when "high → low"): lower implied prob = higher American odds.
+const ODDS_COLS = new Set(["Fair", "We offer", "Taker sees"]);
+export function applyFillFilters(rows, f, nowMs = Date.now()) {
+  const today = etYmd(nowMs);
+  const quick = { today: [today, today], tomorrow: [addDays(today, 1), addDays(today, 1)], sat: [nextDow(today, 6), nextDow(today, 6)], sun: [nextDow(today, 0), nextDow(today, 0)] }[f.startQuick];
+  const [sFrom, sTo] = quick || [f.startFrom, f.startTo];
+  return rows.filter((r) => {
+    if (f.league && leagueOfFill(r) !== f.league) return false;
+    if (f.legs && String(Math.min((r.legs || []).length, 5)) !== f.legs) return false;
+    const fd = etYmd(Date.parse(r.filledAt));
+    if (f.filledFrom && (!fd || fd < f.filledFrom)) return false;
+    if (f.filledTo && (!fd || fd > f.filledTo)) return false;
+    if (sFrom || sTo) { const sd = etYmd(firstStart(r)); if (!sd || (sFrom && sd < sFrom) || (sTo && sd > sTo)) return false; }
+    if (f.minRoi !== "" && f.minRoi != null && Number.isFinite(Number(f.minRoi))) { const x = expRoiOf(r); if (x == null || x * 100 < Number(f.minRoi)) return false; }
+    return true;
+  });
+}
+export function sortFills(rows, key, dir) {
+  const g = SORTS[key]; if (!g) return rows;
+  const sgn = (dir === "asc" ? 1 : -1) * (ODDS_COLS.has(key) ? -1 : 1);
+  return [...rows].sort((a, b) => { const x = g(a), y = g(b); const xn = x == null || !Number.isFinite(x), yn = y == null || !Number.isFinite(y);
+    if (xn || yn) return xn && yn ? 0 : xn ? 1 : -1; return (x - y) * sgn; });
+}
+const EMPTY_F = { league: "", legs: "", filledFrom: "", filledTo: "", startQuick: "", startFrom: "", startTo: "", minRoi: "" };
+export function MyFills({ data, nowMs }) {
   const [openId, setOpenId] = useState(null);
-  const rows = ((data && data.rows) || []).filter((r) => r.filled);
-  const sum = (f, xs = rows) => xs.reduce((a, r) => a + (Number(f(r)) || 0), 0);
+  const [sort, setSort] = useState({ key: "Filled", dir: "desc" });
+  const [f, setF] = useState(EMPTY_F);
+  const all = ((data && data.rows) || []).filter((r) => r.filled);
+  const leagues = useMemo(() => [...new Set(all.map(leagueOfFill))].sort((a, b) => (a === "Multiple") - (b === "Multiple") || a.localeCompare(b)), [all]);
+  const legCounts = useMemo(() => [...new Set(all.map((r) => Math.min((r.legs || []).length, 5)))].sort((a, b) => a - b), [all]);
+  const filtered = applyFillFilters(all, f, nowMs);
+  const rows = sortFills(filtered, sort.key, sort.dir);
+  const active = Object.keys(EMPTY_F).some((k) => f[k] !== "");
+  const sum = (fn, xs = rows) => xs.reduce((a, r) => a + (Number(fn(r)) || 0), 0);
   const open = rows.filter((r) => r.status === "open"); const won = rows.filter((r) => r.status === "won").length; const lost = rows.filter((r) => r.status === "lost").length;
   const pnl = sum((r) => r.pnl);
-  // Expected ROI after fees: ledger roi, else ev / risk. Totals are risk-weighted.
-  const expRoi = (r) => (r.edge != null && Number.isFinite(r.edge) ? r.edge : r.ev != null && r.risk > 0 ? r.ev / r.risk : null);
-  const expProfit = (r) => (r.ev != null && Number.isFinite(r.ev) ? r.ev : expRoi(r) != null ? expRoi(r) * r.risk : 0);
-  const withRoi = rows.filter((r) => expRoi(r) != null && r.risk > 0);
-  const totRisk = sum((r) => r.risk); const totEv = sum(expProfit);
-  const wRoi = withRoi.length ? sum((r) => expRoi(r) * r.risk, withRoi) / sum((r) => r.risk, withRoi) : null;
+  const withRoi = rows.filter((r) => expRoiOf(r) != null && r.risk > 0);
+  const totRisk = sum((r) => r.risk); const totEv = sum(expProfitOf);
+  const wRoi = withRoi.length ? sum((r) => expRoiOf(r) * r.risk, withRoi) / sum((r) => r.risk, withRoi) : null;
   const sRoi = (x) => (x == null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
-  if (!rows.length) return <div style={{ ...card, color: C.text2 }}>No real fills yet. Positions show here once Kalshi confirms a fill.</div>;
+  if (!all.length) return <div style={{ ...card, color: C.text2 }}>No real fills yet. Positions show here once Kalshi confirms a fill.</div>;
+  const set = (k) => (e) => setF((o) => ({ ...o, [k]: e.target.value, ...(k === "startFrom" || k === "startTo" ? { startQuick: "" } : {}) }));
+  const inp = { background: "#111", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 6px", fontSize: 12, colorScheme: "dark" };
+  const lab = { display: "flex", flexDirection: "column", gap: 3, color: C.text2, fontSize: 11 };
+  const chip = (on) => ({ ...inp, cursor: "pointer", background: on ? C.gold : "#1f1f1f", color: on ? "#17140f" : C.text, fontWeight: 700 });
+  const COLS = ["Filled", "Status", "Legs (bet · game · kickoff)", "Legs", "First leg starts", "Fair", "We offer", "Taker sees", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"];
+  const clickSort = (k) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === "desc" ? "asc" : "desc" } : { key: k, dir: "desc" }));
+  const scope = active ? ` · ${rows.length} of ${all.length} (filtered)` : "";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div data-testid="fills-filters" style={{ ...card, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+        <label style={lab}>League<select value={f.league} onChange={set("league")} style={inp}><option value="">All</option>{leagues.map((l) => <option key={l} value={l}>{l}</option>)}</select></label>
+        <label style={lab}>Legs<select value={f.legs} onChange={set("legs")} style={inp}><option value="">All</option>{legCounts.map((n) => <option key={n} value={String(n)}>{n >= 5 ? "5+" : n}</option>)}</select></label>
+        <label style={lab}>Filled from<input type="date" value={f.filledFrom} onChange={set("filledFrom")} style={inp} /></label>
+        <label style={lab}>Filled to<input type="date" value={f.filledTo} onChange={set("filledTo")} style={inp} /></label>
+        <div style={lab}>Parlay starts (first leg, ET)
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {[["today", "Today"], ["tomorrow", "Tomorrow"], ["sat", "Sat"], ["sun", "Sun"]].map(([k, l]) => <button key={k} type="button" onClick={() => setF((o) => ({ ...o, startQuick: o.startQuick === k ? "" : k, startFrom: "", startTo: "" }))} style={chip(f.startQuick === k)}>{l}</button>)}
+            <input type="date" value={f.startFrom} onChange={set("startFrom")} style={inp} aria-label="Starts from" />
+            <input type="date" value={f.startTo} onChange={set("startTo")} style={inp} aria-label="Starts to" />
+          </div>
+        </div>
+        <label style={lab}>Min Exp. ROI (%)<input type="number" step="0.5" value={f.minRoi} onChange={set("minRoi")} placeholder="e.g. 4" style={{ ...inp, width: 80 }} /></label>
+        {active && <button type="button" onClick={() => setF(EMPTY_F)} style={{ ...inp, cursor: "pointer" }}>Clear filters</button>}
+        <div style={{ color: C.muted, fontSize: 11, marginLeft: "auto" }}>{active ? `Showing ${rows.length} of ${all.length} fills · cards and totals reflect the filters` : `${all.length} fills`}</div>
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        <Stat label="Fills" value={String(rows.length)} sub={`${open.length} open · ${won}-${lost} settled`} />
+        <Stat label="Fills" value={String(rows.length)} sub={`${open.length} open · ${won}-${lost} settled${scope}`} />
         <Stat label="Contracts" value={sum((r) => r.contracts).toLocaleString("en-US", { maximumFractionDigits: 0 })} sub="total held (No side)" />
         <Stat label="Open risk" value={fmtUsd(sum((r) => r.risk, open))} sub={`To win ${fmtUsd(sum((r) => r.toWin, open))}`} />
         <Stat label="Total risked" value={fmtUsd(sum((r) => r.risk))} sub={`To win ${fmtUsd(sum((r) => r.toWin))}`} />
@@ -206,24 +274,28 @@ export function MyFills({ data }) {
         <div style={h2}>My fills (real money)</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Filled", "Status", "Legs (bet · game · kickoff)", "Fair", "We offer", "Taker sees", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
-            <tbody>{rows.map((r) => (<React.Fragment key={r.rfqId}>
+            <thead><tr>{COLS.map((x) => SORTS[x]
+              ? <th key={x} data-sort={x} onClick={() => clickSort(x)} title="Click to sort (high → low first)" style={{ ...th, cursor: "pointer", userSelect: "none", color: sort.key === x ? C.gold : C.text2 }}>{x}{sort.key === x ? (sort.dir === "desc" ? " ▼" : " ▲") : " ↕"}</th>
+              : <th key={x} style={th}>{x}</th>)}</tr></thead>
+            <tbody>{rows.length === 0 ? <tr><td colSpan={COLS.length} style={{ ...td, color: C.muted }}>No fills match these filters.</td></tr> : rows.map((r) => (<React.Fragment key={r.rfqId}>
               <tr onClick={() => setOpenId(openId === r.rfqId ? null : r.rfqId)} style={{ cursor: "pointer", background: openId === r.rfqId ? "#1d1a14" : undefined }}>
                 <td style={td}><span style={{ color: C.gold }}>{openId === r.rfqId ? "▾" : "▸"}</span> {etTime(r.filledAt)}</td>
                 <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}</td>
-                <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
+                <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}<div style={{ color: C.muted, fontSize: 11 }}>{leagueOfFill(r)}</div></td>
+                <td style={td}>{r.legs.length}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>{firstStart(r) != null ? etTime(new Date(firstStart(r)).toISOString()) : "—"}</td>
                 <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
                 <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}</td>
                 <td style={td} title="Buyer's odds after Kalshi taker fee">{fmtAmerican(takerSeesAmerican(r.soldYes, r.contracts))}</td>
                 <td style={td}>{Number(r.contracts).toFixed(0)}</td>
                 <td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
-                <td style={{ ...td, color: expRoi(r) > 0 ? C.good : C.text }} title={`Expected profit ${signed(expProfit(r))}`}>{sRoi(expRoi(r))}</td>
+                <td style={{ ...td, color: expRoiOf(r) > 0 ? C.good : C.text }} title={`Expected profit ${signed(expProfitOf(r))}`}>{sRoi(expRoiOf(r))}</td>
                 <td style={{ ...td, color: r.pnl == null ? C.muted : pnlColor(r.pnl) }}>{r.pnl == null ? "—" : signed(r.pnl)}</td>
               </tr>
-              {openId === r.rfqId && <tr><td colSpan={11} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} /></td></tr>}
+              {openId === r.rfqId && <tr><td colSpan={COLS.length} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} /></td></tr>}
             </React.Fragment>))}</tbody>
             <tfoot><tr>
-              <td style={{ ...td, fontWeight: 700 }} colSpan={6}>Total ({rows.length} fills)</td>
+              <td style={{ ...td, fontWeight: 700 }} colSpan={8}>Total ({rows.length} fills{active ? ", filtered" : ""})</td>
               <td style={{ ...td, fontWeight: 700 }}>{sum((r) => r.contracts).toFixed(0)}</td>
               <td style={{ ...td, fontWeight: 700 }}>{fmtUsd(totRisk)}</td><td style={{ ...td, fontWeight: 700 }}>{fmtUsd(sum((r) => r.toWin))}</td>
               <td style={{ ...td, fontWeight: 700, color: wRoi > 0 ? C.good : C.text }}>{sRoi(wRoi)}<div style={{ color: C.muted, fontSize: 11, fontWeight: 400 }}>exp. {signed(totEv)}</div></td>
