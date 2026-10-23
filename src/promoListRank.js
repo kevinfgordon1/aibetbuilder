@@ -8,6 +8,7 @@ import { applyBlendToLegs, depthCacheKey, venueHasDepthApi } from "./promoBookDe
 import { preferCompletePmHedge } from "./blendAskLadder.js";
 import { filterLowLiquidityPicks } from "./promoLiquidityFilter.js";
 import { filterPicksByTeamName } from "./promoTeamFilter.js";
+import { filterPicksByMinDepth } from "./promoMinDepth.js";
 
 export function overlayBlendedParlay(p, displayLegs, ctx, calcs) {
   const prev = p.legs || [];
@@ -32,7 +33,8 @@ export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, lad
   const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx, overlayParlayMetrics, laddersByKey)));
   const guarded = rankPicksAfterOppGuard(tagged);
   const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(guarded) : guarded;
-  const liquid = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
+  const liquidAll = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
+  const liquid = filterPicksByMinDepth(liquidAll, ctx.minLegDepth, laddersByKey);
   return filterPicksByTeamName(liquid, ctx.includeTeamTokens, ctx.excludeTeamTokens);
 }
 
