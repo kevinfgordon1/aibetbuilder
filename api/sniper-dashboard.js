@@ -137,6 +137,7 @@ async function matched(db, env, nowMs) {
   if (positions.length) {
     const R = rootForApi(); const M = await R._helpers.loadMods();
     const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
+    await collegeStarts(markets, positions, deps.fetch || fetch);
     starts = markets.starts || {};
     root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts, now: nowMs, kalshiAt: markets.kalshiAt });
     // Needle: pregame = expected profit at the fair we sold at; now = live engine EV.
