@@ -404,10 +404,16 @@ export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
       leg && leg.market,
     ].join("|");
     const levels = laddersByKey && laddersByKey[key];
-    const next = applyPmBlendToLeg(leg, levels, {
+    let next = applyPmBlendToLeg(leg, levels, {
       ...ctx,
       numLegs: ctx.numLegs != null ? ctx.numLegs : (legs || []).length,
     });
+    // Owner Min depth per leg: keep the cross-venue blended price when it is
+    // more conservative than the $500 walk (no-op when no minimum is set).
+    const md = leg && leg.minDepthBlend;
+    if (md && md.american != null && next && Number(next.bestOpp) > Number(md.american)) {
+      next = { ...next, bestOpp: md.american };
+    }
     if (next.pmBlend) blends[key] = next.pmBlend;
     return next;
   });
