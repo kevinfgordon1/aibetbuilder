@@ -403,7 +403,7 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
       `}</style>
       <h3>
         What to root for
-        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun} · ${d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
+        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun}${d.fillTimeLocks ? ` priced, ${d.fillTimeLocks} at fill-time value` : ""} · ${d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {open && <>
           <span className="seg" role="group" aria-label="Games">
@@ -427,11 +427,11 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
       {st.error && <div className="note neg">{st.error}</div>}
       {open && d && pickedDay && (pickedRow ? <DaySheet row={pickedRow} past /> : pickedRow === false ? (pv ? <FinalToday f={pv} d={base} past /> : <div className="note">No saved numbers for that day.</div>) : <div className="note">Loading that day…</div>)}
       {open && d && !pickedDay && base.empty && <DaySheet row={base.sweat.dayRow} past={String(base.sweat.dayRow.day).slice(0, 10) !== sheetDay(nowMsS)} />}
-      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 13, margin: "10px 0 0", color: "#fbbf24" }}>No games today ({todayDayLabel(nowMsS)}), showing all open locks. Today switches to the next day at 2 AM ET.</div>}
+      {open && d && !pickedDay && !base.empty && noToday && <div className="note" style={{ fontSize: 14, margin: "12px 0 4px" }}>No legs today affecting our expected profit ({todayDayLabel(nowMsS)}). Pick All to see every open {noun}. Today switches to the next day at 2 AM ET.</div>}
       {open && d && !pickedDay && !base.empty && showFinal && (todayRow ? <DaySheet row={todayRow} /> : <FinalToday f={fv} d={base} />)}
-      {open && d && !pickedDay && !base.empty && !showFinal && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
+      {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "simple" && (scope === "today" && tv ? <Simple d={tv.d} today={tv.info} />
         : <Simple d={{ ...base, sweat: scopeShown === "all" ? allSweat(base.sweat) : beyondSweat(base.sweat) }} />)}
-      {open && d && !pickedDay && !base.empty && !showFinal && view === "detailed" && (
+      {open && d && !pickedDay && !base.empty && !showFinal && !noToday && view === "detailed" && (
         <>
           {Object.keys(picks).length > 0 && (
             <div className="banner">
@@ -486,7 +486,7 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
           <div className="note">
             Chances come from the live inverse bet method: each leg is 1 minus the best opposing price with $500 of depth (fees included) across {Object.entries((d.legs || []).reduce((a, l) => { if (l.best) a[l.best] = (a[l.best] || 0) + 1; return a; }, {})).map(([v, n]) => `${VENUE[v] || v} (${n} legs)`).join(", ") || "—"}; ProphetX is off until its key is set. Chances are the raw inverted prices, not scaled. A team in many locks is one outcome, and both sides of a game can't both win. When locks hold both sides, the two raw chances add to a bit under 100%; the gap is treated as a slate where neither side's leg wins. Different games are independent. Where a game has a spread lock, its spread is nested inside the moneyline (covering implies winning), so spread and moneyline legs move together; totals stay independent of the winner (no live joint price to correlate them). Prices update in-game.
             {" "}{d.method === "exact" ? "Exact enumeration." : d.note}
-            {d.unpriced && d.unpriced.length ? ` ${d.unpriced.length} lock(s) left out: a leg had no live price with $500 depth (${d.unpriced.map((u) => u.leg).slice(0, 3).join(", ")}${d.unpriced.length > 3 ? "…" : ""}).` : ""}
+            {d.unpriced && d.unpriced.length ? d.fillTimeLocks ? ` ${d.fillTimeLocks} ${noun} counted at fill-time value (no live price with depth for ${d.unpriced.map((u) => u.leg).slice(0, 3).join(", ")}${d.unpriced.length > 3 ? "…" : ""}).` : ` ${d.unpriced.length} lock(s) left out: a leg had no live price with $500 depth (${d.unpriced.map((u) => u.leg).slice(0, 3).join(", ")}${d.unpriced.length > 3 ? "…" : ""}).` : ""}
             {d.resting ? ` Resting hedge orders (${Math.round(d.resting).toLocaleString()} contracts) count only once filled.` : ""}
           </div>
         </>

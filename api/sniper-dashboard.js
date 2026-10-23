@@ -222,6 +222,7 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   root.top = (root.top || []).map(deco);
   if (root.model && root.model.teamNames) for (const k of Object.keys(root.model.teamNames)) { const i = k.lastIndexOf(':'); root.model.teamNames[k] = nameOf(k.slice(0, i), k.slice(i + 1), root.model.teamNames[k]); }
   const baseline = rows.reduce((a, r) => a + S.rowMoney(r).ev, 0);
+  fillTimeFallback(root, rows, S);
   const lockLabels = {}; for (const r of rows) lockLabels[r.rfq_id] = (r.legs || []).map((k) => L.legInfo(k, gm, names).bet).join(' + ');
   // Pregame = fill-time value of the open fills (sniper fair at quote time), not the live number again.
   return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true } };
@@ -282,6 +283,19 @@ async function collegeStarts(markets, positions, f) {
       for (const [ev, teams] of list) if (!starts[ev] && by[teams]) starts[ev] = by[teams];
     } catch (_) { /* no start: "Other days" */ }
   }));
+}
+
+// Fills with a leg that has no live price: keep them at their fill-time expected profit (a constant, so the
+// root for / against swings are unchanged) instead of leaving them out. Shifts EV, range and chart by that amount.
+function fillTimeFallback(root, rows, S) {
+  const ids = new Set((root.unpriced || []).map((u) => String(u.id)));
+  if (!ids.size) { root.fillTimeLocks = 0; return; }
+  const add = rows.filter((r) => ids.has(String(r.rfq_id))).reduce((a, r) => a + S.rowMoney(r).ev, 0);
+  const sh = (x) => (Number.isFinite(Number(x)) ? Number(x) + add : x);
+  root.ev = sh(root.ev); root.lo2 = sh(root.lo2); root.hi2 = sh(root.hi2);
+  for (const k of ['best', 'worst', 'baseWorst']) if (root[k] && Number.isFinite(Number(root[k].pnl))) root[k] = { ...root[k], pnl: Number(root[k].pnl) + add };
+  if (root.hist && root.hist.bins) root.hist = { ...root.hist, bins: root.hist.bins.map((b) => ({ ...b, from: b.from + add, to: b.to + add })) };
+  root.fillTimeLocks = ids.size; root.fillTimeEv = add; root.locksPriced = Number(root.locksPriced || 0) + ids.size;
 }
 
 module.exports = handler;
