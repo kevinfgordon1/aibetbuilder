@@ -132,17 +132,20 @@ async function matched(db, env, nowMs) {
   const names = {}; const legResults = {};
   for (const [t, m] of Object.entries(mk)) { if (/^KXNFLTD-/.test(t)) names[t] = m.title || m.yes_sub_title; const res = String(m.result || '').toLowerCase(); if ((res === 'yes' || res === 'no') && /settled|finalized|determined/.test(String(m.status || ''))) legResults[t] = res; }
   const perf = S.perfStats(rows, legResults);
-  const positions = S.enginePositions(rows, names);
+  // Live EV uses the same open fills and the same four-venue sniper leg fairs as "What to root for".
+  const liveRows = rows.filter((r) => r.status === 'open' && Number(r.filled_contracts) > 0 && r.phase !== 'settled' && !r.settled_at);
+  const positions = S.enginePositions(liveRows, names);
   let root = null; let sweat = null; let starts = {};
   if (positions.length) {
     const R = rootForApi(); const M = await R._helpers.loadMods();
     const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
     await collegeStarts(markets, positions, deps.fetch || fetch);
     starts = markets.starts || {};
-    root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts, now: nowMs, kalshiAt: markets.kalshiAt });
+    const legFairFn = await sniperLegFairFn(db, env, liveRows, names, positions);
+    root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts, now: nowMs, kalshiAt: markets.kalshiAt, legFairFn });
+    fillTimeFallback(root, liveRows, S);
     // Needle: pregame = expected profit at the fair we sold at; now = live engine EV.
-    const open = rows.filter((r) => r.status === 'open');
-    const baseline = open.reduce((a, r) => a + S.rowMoney(r).ev, 0);
+    const baseline = liveRows.reduce((a, r) => a + S.rowMoney(r).ev, 0);
     const started = Object.values(starts).some((t) => t && Date.parse(t) <= nowMs);
     sweat = { baseline, now: root.ev, started: true, preStarted: started };
     delete root.model;
