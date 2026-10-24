@@ -5,7 +5,7 @@ import { curveModel, cdfAt, quantileOf, niceTicks, shortMoney } from "./rootForS
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const pc = (p) => (p * 100 < 1 && p > 0 ? "<1%" : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`);
 
-export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends", evLabel = null, todayLocks = false }) {
+export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "Your result ($)", worstWord = "worst case", unit = "weekends", evLabel = null, todayLocks = false, nowEv = null, nowLabel = "Now" }) {
   const wrap = useRef(null); const [W, setW] = useState(720); const [hx, setHx] = useState(null);
   useEffect(() => {
     const el = wrap.current; if (!el || typeof ResizeObserver === "undefined") return undefined;
@@ -91,6 +91,10 @@ export default function PnlCurve({ hist, worst, ev, pProfit, best, xLabel = "You
           <line x1={x(ev)} x2={x(ev)} y1={top - 2} y2={top + plotH} stroke="#f59e0b" strokeWidth="1.5" />
           {lab.evLeader && <line x1={x(ev)} x2={lab.evX + (lab.evAnchor === "end" ? 2 : -2)} y1={lab.evY - 4} y2={lab.evY - 4} stroke="#f59e0b" strokeWidth="1" />}
           <text x={lab.evX} y={lab.evY} fill="#fbbf24" fontSize="11" fontWeight="700" textAnchor={lab.evAnchor}>{lab.evText}</text>
+        </g>}
+        {nowEv != null && Number.isFinite(Number(nowEv)) && nowEv > m.xMin && nowEv < m.xMax && <g data-testid="now-marker">
+          <line x1={x(nowEv)} x2={x(nowEv)} y1={top + 18} y2={top + plotH} stroke="#93c5fd" strokeWidth="1" strokeDasharray="4 3" />
+          <text x={x(nowEv) + (x(nowEv) > W / 2 ? -4 : 4)} y={top + 30} fill="#93c5fd" fontSize="10" textAnchor={x(nowEv) > W / 2 ? "end" : "start"}>{nowLabel} {money(Number(nowEv))}</text>
         </g>}
         <line x1={padL} x2={W - padR} y1={top + plotH} y2={top + plotH} stroke="#374151" />
         {ticks.map((t) => <g key={t}><line x1={x(t)} x2={x(t)} y1={top + plotH} y2={top + plotH + 4} stroke="#4b5563" /><text x={x(t)} y={top + plotH + 17} fill="#9ca3af" fontSize="11" textAnchor="middle">{shortMoney(t)}</text></g>)}
