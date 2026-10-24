@@ -93,3 +93,36 @@ export function perfStats(rows, legResults = {}) {
     savedUs: legRows.filter((l) => l.result === "leg lost (good for us)").sort((a, b) => b.risk - a.risk).slice(0, 8),
   };
 }
+
+/** Needle history for the Sniper page (no saved snapshots needed): one row per fill day (ET, 2 AM rollover like Today).
+ *  pregame_ev = fill-time expected profit of that day's fills (fees included); live_ev = realized P&L of the settled fills
+ *  plus fill-time EV of fills still open; result = live_ev − pregame_ev (how settled fills ran vs expectation). */
+export function sniperNeedleHistory(rows, nowMs = Date.now()) {
+  const dayOf = (iso) => new Date(Date.parse(iso) - 2 * 3600e3).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const by = {};
+  for (const r of rows || []) {
+    if (!isMatched(r) || !(num(r.filled_contracts) > 0) || !r.created_at) continue;
+    const d = dayOf(r.created_at); const m = rowMoney(r);
+    const b = by[d] || (by[d] = { day: d, locks: 0, games: new Set(), pregame_ev: 0, live_ev: 0, settled: 0, open: 0, pnl: 0 });
+    b.locks++; const gs = Array.isArray(r.games) ? r.games : [];
+    for (const g of gs) b.games.add(String(g));
+    if (!gs.length) for (const k of r.legs || []) b.games.add(String(k).split(":")[0].split("-").slice(0, 2).join("-"));
+    b.pregame_ev += m.ev;
+    const settled = r.phase === "settled" || !!r.settled_at || r.status !== "open";
+    if (settled && r.realized_pnl != null) { b.settled++; b.pnl += num(r.realized_pnl); b.live_ev += num(r.realized_pnl); }
+    else { b.open++; b.live_ev += m.ev; }
+  }
+  const today = dayOf(new Date(nowMs).toISOString());
+  return Object.values(by).sort((a, b) => a.day.localeCompare(b.day)).map((b) => ({
+    day: b.day, locks: b.locks, games: b.games.size, pregame_ev: +b.pregame_ev.toFixed(2), live_ev: +b.live_ev.toFixed(2),
+    result: +(b.live_ev - b.pregame_ev).toFixed(2), pnl: +b.pnl.toFixed(2), settled: b.settled, open: b.open,
+    final: b.open === 0 && b.day < today, sniper: true }));
+}
+
+/** Fill day of a ledger row on the Today rollover (ET, 2 AM) — shared by the needle history and Results scopes. */
+export function sniperFillDay(iso) { return iso ? new Date(Date.parse(iso) - 2 * 3600e3).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : null; }
+/** Results scopes: perfStats per fill day (last 30 days) so the Results tab can switch Today / All / a past day. */
+export function perfByDay(rows, legResults = {}) {
+  const g = {}; for (const r of (rows || []).filter(isMatched)) { const d = sniperFillDay(r.created_at); if (d) (g[d] || (g[d] = [])).push(r); }
+  return Object.fromEntries(Object.keys(g).sort().reverse().slice(0, 30).map((d) => [d, perfStats(g[d], legResults)]));
+}

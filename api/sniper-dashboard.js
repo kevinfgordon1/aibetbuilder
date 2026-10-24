@@ -59,7 +59,7 @@ async function handler(req, res) {
     const db = deps.createClient(url, env.SUPABASE_SERVICE_KEY, clientOpts);
     if (isHedge) return hedgeWrite(req, res, db, auth.user, nowMs);
     if (q.matched === '1' || q.matched === 1) return json(res, 200, await matched(db, env, nowMs));
-    if (q.rootfor === '1' || q.rootfor === 1) return json(res, 200, await sniperRootFor(db, env, nowMs, q.check === '1'));
+    if (q.rootfor === '1' || q.rootfor === 1) return json(res, 200, await sniperRootFor(db, env, nowMs, q.check === '1', q.day ? String(q.day) : null));
     // Skips-by-hour is its own request so the slow 24h summary scan never holds up the page's first paint.
     if (q.skips === '1' || q.skips === 1) return json(res, 200, { ok: true, skips: H.skipsByHour(await loadSummaries(db, nowMs)) });
     const { data: sumRows, error: se } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').order('created_at', { ascending: false }).limit(1);
@@ -229,6 +229,7 @@ async function matched(db, env, nowMs) {
   const names = {}; const legResults = {};
   for (const [t, m] of Object.entries(mk)) { if (/^KXNFLTD-/.test(t)) names[t] = m.title || m.yes_sub_title; const res = String(m.result || '').toLowerCase(); if ((res === 'yes' || res === 'no') && /settled|finalized|determined/.test(String(m.status || ''))) legResults[t] = res; }
   const perf = S.perfStats(rows, legResults);
+  const perfDays = S.perfByDay(rows, legResults);
   // Live EV uses the same open fills and the same four-venue sniper leg fairs as "What to root for".
   const liveRows = rows.filter((r) => r.status === 'open' && Number(r.filled_contracts) > 0 && r.phase !== 'settled' && !r.settled_at);
   const Hg = await hedgeMod();
@@ -290,19 +291,24 @@ async function matched(db, env, nowMs) {
   const hedgedList = list.filter((x) => x.hedge && x.status === 'open');
   const hedgeTotals = { fills: hedgedList.length, locked: hedgedList.filter((x) => x.hedge.locked).length, stake: hedgedList.reduce((a, x) => a + x.hedge.stake, 0),
     worst: hedgedList.reduce((a, x) => a + x.hedge.worst, 0), freed: hedgedList.reduce((a, x) => a + x.hedge.freed, 0) };
-  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat, hedgeTotals };
+  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, perfDays, root, sweat, hedgeTotals };
 }
 
 // "What to root for" (Combo Locks sheet) over live, filled, unsettled sniper positions. The sniper is the HOUSE
 // (hit = all legs win = we lose our cost), so the engine's "root for" outcomes are the ones that beat the legs.
 // Same response shape as /api/root-for so src/RootFor.jsx renders it unchanged.
-async function sniperRootFor(db, env, nowMs, checkOnly) {
+async function sniperRootFor(db, env, nowMs, checkOnly, day) {
   const S = matchedMod || (matchedMod = await import('../src/sniperMatched.js'));
-  const rows = (await pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', false).eq('status', 'open').gt('filled_contracts', 0).order('created_at', { ascending: false })))
-    .filter((r) => r.phase !== 'settled' && !r.settled_at && S.isMatched(r));
-  if (checkOnly) return { ok: true, locks: rows.length, days: 0 };
+  // Every live filled row (open + settled) in one read on the filled partial index; open ones feed the engine,
+  // all of them feed the needle's date history (fill-time expected vs realized, per fill day).
+  const all = (await pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', false).gt('filled_contracts', 0).order('created_at', { ascending: false })))
+    .filter((r) => S.isMatched(r));
+  const history = S.sniperNeedleHistory(all, nowMs).reverse();
   const asOf = new Date(nowMs).toISOString();
-  if (!rows.length) return { ok: true, empty: true, locksTotal: 0, asOf };
+  if (day) return { ok: true, asOf, dayRow: history.find((h) => h.day === String(day).slice(0, 10)) || null, history };
+  const rows = all.filter((r) => r.status === 'open' && r.phase !== 'settled' && !r.settled_at);
+  if (checkOnly) return { ok: true, locks: rows.length, days: history.length };
+  if (!rows.length) return { ok: true, empty: true, locksTotal: 0, asOf, ...(history.length ? { sweat: { history, dayRow: history[0] } } : {}) };
   const tickers = [...new Set(rows.flatMap((r) => (r.legs || []).map((k) => String(k).split(':')[0].toUpperCase())))];
   const mk = await kalshiMarkets(tickers.filter((t) => /^KXNFLTD/.test(t)));
   const names = {}; for (const [t, m] of Object.entries(mk)) names[t] = m.title || m.yes_sub_title;
@@ -340,7 +346,7 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   const lockLabels = {}; for (const r of rows) lockLabels[r.rfq_id] = (r.legs || []).map((k) => L.legInfo(k, gm, names).bet).join(' + ');
   // Pregame = fill-time value of the open fills (sniper fair at quote time), not the live number again.
   const hedgedLocks = rows.filter((r) => Hg.activeHedges(hedges[r.rfq_id]).length).length;
-  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, hedgedLocks, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true, lockBaseline } };
+  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, hedgedLocks, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true, lockBaseline, history } };
 }
 
 // Sniper leg fairs (src/sniperLegFair.js): $1,000 inverse bet across Kalshi + relay Polymarket US / Novig (TD /td)
