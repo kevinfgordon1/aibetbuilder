@@ -35,9 +35,9 @@ import { SingleLegVenues } from "./SingleLegVenues";
 import { lockProfitWarning, lockProfile, signedMoney, moneyAbs, hedgeCap, decideAtFill as decideAtFillCore, lockKind, isFreeBetLock } from "./comboLockProfile";
 import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
-import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked } from "./comboLockHistory";
+import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked, matchedRfqCounts } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions";
 import { outcomeChrome } from "./comboLegResult";
 import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
@@ -1487,6 +1487,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const status = lockStatus({ parlay: p, filled: filledN, ceiling, kill: deskReady && !deskLoading ? kill : false });
     const out = outcomeChrome(lockOutcome(p, filledN), { filled: filledN > 0 });
     const matched = matchedCountText(p);
+    const quoteLine = lockQuoteFillLine(submissionsByParlay[p.id], { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, countedUnfilledQuotes: unfilledCounts[p.id] });
     const open = !!openParlays[p.id];
     const toggle = () => setOpenParlays((o) => {
       const next = !o[p.id];
@@ -1505,6 +1506,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         open={open}
         onToggle={toggle}
         bets={betsByParlay[p.id]}
+        quoteLine={quoteLine}
         hedgeNote={desk && desk.quoted > desk.fill.filled ? `Offered ${desk.quoted.toLocaleString("en-US")}, ${desk.fill.filled.toLocaleString("en-US")} confirmed filled` : ""}
         controls={<>
           <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />

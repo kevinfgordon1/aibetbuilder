@@ -164,3 +164,19 @@ console.log("comboLockSubmissions.test.js ok");
   livingLockSubmissionQueries(client, { userId: "u", parlayId: "a" });
   assert.equal(calls.filter(([k, c]) => k === "eq" && c === "user_id").length, 2);
 }
+
+{
+  const { lockQuoteFillLine } = await import("./comboLockSubmissions.js");
+  assert.equal(lockQuoteFillLine([], { fills: 0 }), "");
+  assert.equal(lockQuoteFillLine([{ status: "declined", skip_reason: "x" }]), "");
+  const rows = [
+    { id: 1, status: "filled", quote_id: "a" },
+    { id: 2, status: "unfilled", quote_id: "b" },
+    { id: 3, status: "unfilled", quote_id: "c" },
+    { id: 4, status: "declined", skip_reason: "game_started" },
+  ];
+  assert.equal(lockQuoteFillLine(rows, { fills: 1 }), "3 quotes · 1 fill");
+  assert.equal(lockQuoteFillLine(rows, { fills: 1, countedUnfilledQuotes: 30 }), "31 quotes · 1 fill");
+  assert.equal(lockQuoteFillLine([rows[1]], { fills: 0 }), "1 quote · 0 fills");
+  console.log("lockQuoteFillLine ok");
+}

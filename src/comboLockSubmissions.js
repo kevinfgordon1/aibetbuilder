@@ -132,3 +132,27 @@ export function notFilledTotal({ shown, loadedUnfilledQuotes, countedUnfilledQuo
   if (!Number.isFinite(c) || c <= l) return s;
   return s + (c - l);
 }
+
+// Yellow pill on each Combo Locks card ("25 quotes · 3 fills"), same chip as Miss tape.
+// Reuses rows the page already loaded (no extra query). quotes = quotes we posted for
+// the lock (filled + not filled); fills = fills that went through (Matched RFQs count).
+// Locks over the 400-row window use the head count of not-filled quotes already fetched.
+// Zero quotes → "" (no pill).
+export function lockQuoteFillLine(rows, { fills = 0, countedUnfilledQuotes } = {}) {
+  let quoted = 0;
+  let unfilledLoaded = 0;
+  for (const r of rows || []) {
+    if (!isLockQuoteRow(r)) continue;
+    const st = String(r.status || "").toLowerCase();
+    if (st === "shadow") continue;
+    quoted += 1;
+    if (st !== "filled") unfilledLoaded += 1;
+  }
+  const c = Number(countedUnfilledQuotes);
+  if (countedUnfilledQuotes != null && Number.isFinite(c) && c > unfilledLoaded) quoted += c - unfilledLoaded;
+  const f = Math.max(0, Number(fills) || 0);
+  quoted = Math.max(quoted, f);
+  if (!quoted) return "";
+  const n = (x) => x.toLocaleString("en-US");
+  return `${n(quoted)} quote${quoted === 1 ? "" : "s"} · ${n(f)} fill${f === 1 ? "" : "s"}`;
+}
