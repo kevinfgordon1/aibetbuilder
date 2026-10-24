@@ -1,3 +1,4 @@
+const { guardCron } = require('../lib/cron-auth');
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
 const { dropExcludedBooks } = require('../lib/odds-excluded-books');
 
@@ -256,6 +257,7 @@ async function buildExchangeBookmakers(sport, rawData) {
 // plus a handful of free exchange calls.
 // ─────────────────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
+  if (!(await guardCron(req, res))) return;
   try {
     const results = [];
     await Promise.all(FUTURES_SPORTS.map(async (sport) => {

@@ -1,3 +1,4 @@
+const { guardCron } = require('../lib/cron-auth');
 const { runEvParlayScan } = require('../lib/ev-parlay-scan-job');
 const { skipTelegramRequested } = require('../lib/ev-parlay-scan-flow');
 
@@ -15,6 +16,7 @@ const { skipTelegramRequested } = require('../lib/ev-parlay-scan-flow');
 // Builder book. Alerts @evparlaysbot when EV% > 3.
 // Telegram is sent before any ev_parlay_alerts upsert.
 module.exports = async (req, res) => {
+  if (!(await guardCron(req, res))) return;
   let sentSuccessfully = false;
   let payload = null;
   try {

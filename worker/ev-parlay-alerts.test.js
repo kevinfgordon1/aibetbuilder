@@ -139,7 +139,7 @@ async function run() {
     const kaygoSrc = fs.readFileSync(path.join(__dirname, "../api/telegram-webhook.js"), "utf8");
 
     assert.equal(pkg.scripts["ev-alerts"], "node worker/ev-parlay-alerts.js");
-    assert.ok(pkg.scripts.test.includes("worker/ev-parlay-alerts.test.js"));
+    assert.ok(pkg.scripts.test.includes("scripts/run-tests.cjs")); // runner globs worker/*.test.js
 
     assert.ok(workerSrc.includes("runEvParlayScan"));
     assert.ok(workerSrc.includes("EV_SCAN_INTERVAL_MS"));

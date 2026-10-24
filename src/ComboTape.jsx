@@ -227,9 +227,11 @@ export default function ComboTape({ user }) {
   }, [owner, user]);
 
   useEffect(() => { reload("full"); }, [reload]);
+  // Miss tape's quote-watcher is off, so no 20s polling of combo_submissions (audit Oct 24).
+  // Loads once on open; only re-polls (60s) while the tab is visible AND a lock is quoting.
   useEffect(() => {
     if (!poll) return undefined;
-    const t = setInterval(() => { reload("tick"); }, 20000);
+    const t = setInterval(() => { if (typeof document === "undefined" || document.visibilityState !== "hidden") reload("tick"); }, 60000);
     return () => clearInterval(t);
   }, [reload, poll]);
 
