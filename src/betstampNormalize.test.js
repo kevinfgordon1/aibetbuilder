@@ -1061,7 +1061,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   const envEx = fs.readFileSync(path.join(dir, "..", ".env.example"), "utf8");
   const vercel = fs.readFileSync(path.join(dir, "..", "vercel.json"), "utf8");
   assert.match(app, /import OddsBoard from "\.\/OddsBoard\.jsx"/);
-  assert.match(app, /import BetstampOddsBoard from "\.\/BetstampOddsBoard\.jsx"/);
+  assert.match(app, /const BetstampOddsBoard = lazy\(\(\) => import\("\.\/BetstampOddsBoard\.jsx"\)\)/);
   assert.match(app, /activeTab === "odds" && <OddsBoard/);
   assert.match(app, /activeTab === "oddsBetstamp" && canSeeNewOddsBoard\(user\)/);
   assert.match(app, /<BetstampOddsBoard user=\{user\}/);

@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo, useRef, useDeferredValue } from "react";
+import { useState, useEffect, useMemo, useRef, useDeferredValue, lazy, Suspense } from "react";
 import { createClient } from "@supabase/supabase-js";
-import ComboLocks from "./ComboLocks";
-import ComboTape from "./ComboTape";
-import SniperDashboard from "./SniperDashboard";
+const ComboLocks = lazy(() => import("./ComboLocks")); // owner/tester tab: own chunk (audit Oct 24)
+const ComboTape = lazy(() => import("./ComboTape")); // owner/tester tab: own chunk (audit Oct 24)
+const SniperDashboard = lazy(() => import("./SniperDashboard")); // owner/tester tab: own chunk (audit Oct 24)
 import RootFor from "./RootFor";
-import LiveTradingDesk from "./LiveTradingDesk";
+const LiveTradingDesk = lazy(() => import("./LiveTradingDesk")); // owner/tester tab: own chunk (audit Oct 24)
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
@@ -125,7 +125,7 @@ import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, f
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
-import BetstampOddsBoard from "./BetstampOddsBoard.jsx";
+const BetstampOddsBoard = lazy(() => import("./BetstampOddsBoard.jsx")); // New Odds Board: own chunk
 import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
 import { loadMinLegDepth, saveMinLegDepth, parseMinLegDepth, filterLegsByMinDepth, repriceLegsForMinDepth, MIN_LEG_DEPTH_LABEL } from "./promoMinDepth.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
@@ -3031,13 +3031,13 @@ export default function App() {
 
       {activeTab === "oddsBetstamp" && canSeeNewOddsBoard(user) && (
         <div style={{ padding: "20px 32px" }}>
-          <BetstampOddsBoard user={user} refreshKey={betstampRefreshKey} />
+          <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><BetstampOddsBoard user={user} refreshKey={betstampRefreshKey} /></Suspense>
         </div>
       )}
 
       {activeTab === "liveDesk" && canSeeOwnerTools(user) && (
         <div style={{ padding: "20px 32px" }}>
-          <LiveTradingDesk user={user} />
+          <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><LiveTradingDesk user={user} /></Suspense>
         </div>
       )}
 
@@ -3047,12 +3047,12 @@ export default function App() {
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
           {activeTab === "combo" && canSeeComboLocks(user) && <RootFor key={comboViewAs || "self"} user={user} viewAs={comboViewAs} />}
-          {activeTab === "combo" && canSeeComboLocks(user) && <ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} onViewAsChange={setComboViewAs} />}
+          {activeTab === "combo" && canSeeComboLocks(user) && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} onViewAsChange={setComboViewAs} /></Suspense>}
 
-          {activeTab === "missTape" && canSeeOwnerTools(user) && <ComboTape user={user} />}
+          {activeTab === "missTape" && canSeeOwnerTools(user) && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><ComboTape user={user} /></Suspense>}
 
 
-          {activeTab === "sniperDash" && canSeeOwnerTools(user) && <SniperDashboard user={user} />}
+          {activeTab === "sniperDash" && canSeeOwnerTools(user) && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><SniperDashboard user={user} /></Suspense>}
 
           {activeTab === "profile" && user && (
             <UserProfile
