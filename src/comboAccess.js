@@ -181,10 +181,10 @@ export const APP_HASH_TABS = Object.freeze({
   missTape: "missTape",
   miss: "missTape",
   "miss-tape": "missTape",
-  // Unhedged RFQs tab removed (Kevin, Oct 17): old #unhedged links open Combo Sniper (owner) or Promo (everyone else).
-  unhedged: "rawEdges",
-  rawEdges: "rawEdges",
-  "raw-edges": "rawEdges",
+  // Unhedged RFQs (Oct 17) and Combo Sniper (Oct 23) tabs removed: old links open the Sniper page (owner only).
+  unhedged: "sniperDash",
+  rawEdges: "sniperDash",
+  "raw-edges": "sniperDash",
   sniperDash: "sniperDash",
   "sniper-dashboard": "sniperDash",
   liveDesk: "liveDesk",
@@ -237,7 +237,6 @@ export function serializeAppHash({ tab = null, lockId = null, cardId = null } = 
   }
   if (resolved === "missTape") return "#missTape";
   if (resolved === "liveDesk") return "#live-trading-desk";
-  if (resolved === "rawEdges") return "#raw-edges";
   if (resolved === "sniperDash") return "#sniper-dashboard";
   if (resolved === "oddsBetstamp") return "#new-odds-board";
   return "#" + resolved;
@@ -298,7 +297,7 @@ export function resolveAppHash(parsed, user) {
       allowed: false,
     };
   }
-  if (tab === "missTape" || tab === "rawEdges" || tab === "sniperDash" || tab === "liveDesk") {
+  if (tab === "missTape" || tab === "sniperDash" || tab === "liveDesk") {
     if (canSeeOwnerTools(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }
