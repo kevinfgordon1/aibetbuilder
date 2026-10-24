@@ -76,11 +76,11 @@ export default function SniperDashboard({ user }) {
     try {
       const { data: { session } } = await c.auth.getSession();
       if (!session) { setErr("Sign in required"); return; }
+      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then(async (x) => { const m = await x.json().catch(() => null); if (m && m.ok) { setMatched(m); setMatchedErr(null); } else throw new Error((m && m.error) || `HTTP ${x.status}`); }).catch((e) => setMatchedErr(String((e && e.message) || e)));
       const r = await fetch(`/api/sniper-dashboard?book=${book}&days=7`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setData(j); setErr(null);
-      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then(async (x) => { const m = await x.json().catch(() => null); if (m && m.ok) { setMatched(m); setMatchedErr(null); } else throw new Error((m && m.error) || `HTTP ${x.status}`); }).catch((e) => setMatchedErr(String((e && e.message) || e)));
     } catch (e) { setErr(String(e.message || e)); } finally { setLoading(false); }
   }, [book]);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
@@ -122,9 +122,9 @@ export default function SniperDashboard({ user }) {
       )}
       {data && (
         <>
-          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote, at least {Math.round((caps.minEdge || 0) * 100)}% edge after fees, $1,000 depth per leg, NFL only, no repeat parlays.</div>
+          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, 4% other NFL, 5% college and NBA, 6% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-            <Meter label="Open risk" value={r.open} cap={caps.totalOpen} />
+            <Meter label="Open risk" value={r.open} cap={caps.totalOpen} note={`Max ${fmtUsd(caps.longDatedOpen)} on parlays settling more than 32h out`} />
             <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? ((data.gameLabels || {})[r.maxGame.game] || r.maxGame.game) : "No open games"} />
             <Meter label="Today's loss" value={r.dayLoss} cap={caps.dailyLoss} note={`P&L today ${fmtUsd(r.dayPnl)}`} />
             <div style={{ ...card, flex: "1 1 200px" }}>
