@@ -126,9 +126,9 @@ import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
 const BetstampOddsBoard = lazy(() => import("./BetstampOddsBoard.jsx")); // New Odds Board: own chunk
-import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
+import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, promoDepthNoticeKind, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
 import { loadMinLegDepth, saveMinLegDepth, parseMinLegDepth, filterLegsByMinDepth, repriceLegsForMinDepth, MIN_LEG_DEPTH_LABEL } from "./promoMinDepth.js";
-import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs } from "./promoBookDepth.js";
+import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs, unknownDepthKeys, DEPTH_UNKNOWN } from "./promoBookDepth.js";
 import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
 import { activePromoList, bestPromoCardId, promoPickCardId, resolveOptimizeFocusId } from "./promoOptimize.js";
 import { playerPropEmptyDetail, playerPropHiddenCounts } from "./promoPlayerPropHint.js";
@@ -1443,6 +1443,8 @@ function attachNoSweatLockToPick(p, nextStake) {
   return { ...p, lock, isGuaranteed: lock.valid };
 }
 
+// Retry schedule for venue depth reads that failed (rate limit, timeout).
+const DEPTH_RETRY_MS = [3000, 6000, 12000, 24000, 45000];
 function usePromoPageLadders(picks, pageSize, minLegDepth) {
   const wantedRef = useRef([]);
   const wantedKey = useMemo(() => {
@@ -1452,19 +1454,41 @@ function usePromoPageLadders(picks, pageSize, minLegDepth) {
     wantedRef.current = legs;
     return legs.map(depthCacheKey).join("\n");
   }, [picks, pageSize, minLegDepth]);
-  const [state, setState] = useState({ key: undefined, map: null });
+  const [state, setState] = useState({ key: undefined, map: null, attempt: 0 });
   useEffect(() => {
     const wanted = wantedRef.current;
     let cancelled = false;
     if (!wanted.length) {
-      setState({ key: wantedKey, map: {} });
+      setState({ key: wantedKey, map: {}, attempt: 0 });
       return undefined;
     }
     fetchPromoBookDepth(wanted).then((map) => {
-      if (!cancelled) setState({ key: wantedKey, map: map || {} });
+      if (!cancelled) setState({ key: wantedKey, map: map || {}, attempt: 0 });
     });
     return () => { cancelled = true; };
   }, [wantedKey]);
+  // Some venues could not be read: keep the map (good legs stay), and retry
+  // only the unknown legs with backoff instead of treating them as thin.
+  useEffect(() => {
+    if (state.key !== wantedKey || !state.map) return undefined;
+    const unknown = unknownDepthKeys(state.map);
+    if (!unknown.size || state.attempt >= DEPTH_RETRY_MS.length) return undefined;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      const retry = wantedRef.current.filter((l) => unknown.has(depthCacheKey(l)));
+      fetchPromoBookDepth(retry).then((more) => {
+        if (cancelled) return;
+        setState((prev) => {
+          if (prev.key !== wantedKey) return prev;
+          const merged = { ...prev.map, ...(more || {}) };
+          const still = unknownDepthKeys(more);
+          if (still.size) Object.defineProperty(merged, DEPTH_UNKNOWN, { value: still, enumerable: false });
+          return { key: wantedKey, map: merged, attempt: prev.attempt + 1 };
+        });
+      });
+    }, DEPTH_RETRY_MS[state.attempt]);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [state, wantedKey]);
   if (state.key !== wantedKey) return null;
   return state.map;
 }
@@ -2551,7 +2575,8 @@ export default function App() {
         ? (p) => attachFreeBetLock(p, stake)
         : (p) => attachBoostLockToPick(p, stake);
     const next = visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
-      rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders), depthWindow);
+      rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders), depthWindow,
+      { keysOfPick: (p) => collectPromoDepthLegs([p], minLegDepth).map(depthCacheKey) });
     // Window growth is not part of the key: a wider check keeps showing the
     // last good page until its ladders land.
     const filtersKey = depthFiltersKey + "|" + promoPage;
@@ -2564,10 +2589,17 @@ export default function App() {
     const size = nextPromoDepthWindow(depthWindow, promoPage, promoBaseLen);
     if (size > depthWindow) setDepthWindowState({ key: depthFiltersKey, size });
   }, [promoDepthRank, depthWindow, promoPage, promoBaseLen, depthFiltersKey]);
-  const promoDepthHiddenAll = !promoDepthRank.pending && promoDepthRank.visible.length === 0 && (promoDepthRank.hidden || 0) > 0
-    && (!promoDepthRank.needsWiderWindow || depthWindow >= Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX));
-  const promoDepthNotice = promoDepthRank.checking ? (
+  const promoDepthNoticeType = promoDepthNoticeKind(promoDepthRank, {
+    allChecked: !promoDepthRank.needsWiderWindow || depthWindow >= Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX),
+  });
+  const promoDepthHiddenAll = promoDepthNoticeType === "thin";
+  const promoDepthNotice = promoDepthNoticeType === "checking" ? (
     <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Checking market depth…</div>
+  ) : promoDepthNoticeType === "unavailable" ? (
+    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#93c5fd", marginBottom: 6 }}>Couldn't load market depth for {promoDepthRank.unknown} pick{promoDepthRank.unknown === 1 ? "" : "s"} — retrying…</div>
+      <div style={{ fontSize: 13, color: "#9ca3af" }}>One or more exchanges (Kalshi, Polymarket, Novig, ProphetX) didn't answer in time. These picks aren't marked thin; they'll show as soon as depth loads (retrying automatically), or set Liquidity to All to see them now.</div>
+    </div>
   ) : promoDepthHiddenAll ? (
     <div style={{ background: "rgba(245,158,11,0.05)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b", marginBottom: 6 }}>{promoDepthRank.hidden} pick{promoDepthRank.hidden === 1 ? "" : "s"} hidden by Hide low liquidity</div>
@@ -2575,7 +2607,7 @@ export default function App() {
     </div>
   ) : null;
   const promoRankedCount = promoDepthRank.checking ? promoBaseLen
-    : promoDepthRank.visible.length + promoDepthRank.rest.length + (promoDepthRank.hidden || 0);
+    : promoDepthRank.visible.length + promoDepthRank.rest.length + (promoDepthRank.hidden || 0) + (promoDepthRank.unknown || 0);
 
   const promoBusyForEmpty = promoLoading || waitForSoccerPm;
   const boostEmptyState = promoScanEmptyState({
