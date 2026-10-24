@@ -25,11 +25,11 @@ const lock = (over = {}) => ({
 });
 
 // ── pure helpers ──
-assert.equal(lc.LOCK_CHECK_WAIT_MS, 10_000);
+assert.equal(lc.LOCK_CHECK_WAIT_MS, 5_000);
 assert.equal(lc.PROBE_PAUSE_MAX_MS, 30_000);
 assert.equal(lc.PROBE_PAUSE_HOLD_MS, 25_000);
 assert.ok(lc.PROBE_PAUSE_HOLD_MS < lc.PROBE_PAUSE_MAX_MS, 'hold inside the worker backstop');
-assert.ok(lc.PAUSE_SETTLE_MAX_MS + lc.LOCK_CHECK_WAIT_MS + 3000 < lc.PROBE_PAUSE_HOLD_MS, 'settle + 10s collect fit in the hold');
+assert.ok(lc.PAUSE_SETTLE_MAX_MS + lc.LOCK_CHECK_WAIT_MS + 3000 < lc.PROBE_PAUSE_HOLD_MS, 'settle + 5s collect fit in the hold');
 assert.ok(handler.config.maxDuration >= 30);
 assert.equal(lc.lockCheckAccess(lock(), HIGGINS).ok, true);
 assert.equal(lc.lockCheckAccess(lock(), KENNY).status, 403, 'not your lock');
@@ -81,10 +81,10 @@ function setup({ parlay, liveSeq = [[]], kalshiOver = {}, setPauseErr = null, us
       if (method === 'GET' && path.endsWith('/communications/id')) return jsonRes(200, { communications_id: 'me' });
       if (method === 'POST' && path.endsWith('/communications/rfqs')) return jsonRes(201, { id: 'rfq-lc-1' });
       if (method === 'GET' && path.endsWith('/communications/quotes')) {
-        // A late seller arrives after 6s — must be caught because we keep collecting 10s.
+        // A late seller arrives after 3s — must be caught because we keep collecting 5s.
         const qs = [{ id: 'q-self', creator_id: 'me', no_bid_dollars: '0.99', status: 'open' },
           { id: 'q-a', creator_id: 'mm1', no_bid_dollars: '0.70', status: 'open' }];
-        if (now - calls.find((c) => c.path && c.path.endsWith('/communications/rfqs')).at >= 6000) qs.push({ id: 'q-late', creator_id: 'mm2', no_bid_dollars: '0.74', status: 'open' });
+        if (now - calls.find((c) => c.path && c.path.endsWith('/communications/rfqs')).at >= 3000) qs.push({ id: 'q-late', creator_id: 'mm2', no_bid_dollars: '0.74', status: 'open' });
         return jsonRes(200, { quotes: qs });
       }
       if (method === 'DELETE' && path.endsWith('/rfqs/rfq-lc-1')) return jsonRes(204, null);
@@ -96,7 +96,7 @@ function setup({ parlay, liveSeq = [[]], kalshiOver = {}, setPauseErr = null, us
 const call = async (body = { lockId: 'lock-1' }) => { const res = mockRes(); await handler({ method: 'POST', headers: { authorization: 'Bearer t' }, body }, res); return res.out; };
 
 (async () => {
-  // Tester (Higgins) on his own lock: his Vault key, never Kevin's env key; pause → settle → RFQ 10s → delete → resume.
+  // Tester (Higgins) on his own lock: his Vault key, never Kevin's env key; pause → settle → RFQ 5s → delete → resume.
   {
     const s = setup({ parlay: lock(), liveSeq: [['q-own-open'], ['q-own-open'], []] });
     const out = await call();
@@ -109,7 +109,7 @@ const call = async (body = { lockId: 'lock-1' }) => { const res = mockRes(); awa
     assert.equal(b.competitorCount, 2);
     assert.equal(b.ownQuotesExcluded, 1);
     assert.equal(b.makerRate, 0);
-    assert.ok(b.waitedMs >= 10_000, `collected full 10s, got ${b.waitedMs}`);
+    assert.ok(b.waitedMs >= 5_000, `collected full 5s, got ${b.waitedMs}`);
     assert.equal(b.pauseSettleMs, 2000);
     assert.ok(b.checkedAt);
     assert.deepEqual(s.db.map((d) => d[0]), ['pause', 'resume']);

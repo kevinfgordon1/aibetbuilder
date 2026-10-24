@@ -138,7 +138,7 @@ export function notFilledTotal({ shown, loadedUnfilledQuotes, countedUnfilledQuo
 // the lock (filled + not filled); fills = fills that went through (Matched RFQs count).
 // Locks over the 400-row window use the head count of not-filled quotes already fetched.
 // Zero quotes → "" (no pill).
-export function lockQuoteFillLine(rows, { fills = 0, countedUnfilledQuotes } = {}) {
+export function lockQuoteFillCounts(rows, { fills = 0, countedUnfilledQuotes } = {}) {
   let quoted = 0;
   let unfilledLoaded = 0;
   for (const r of rows || []) {
@@ -152,6 +152,11 @@ export function lockQuoteFillLine(rows, { fills = 0, countedUnfilledQuotes } = {
   if (countedUnfilledQuotes != null && Number.isFinite(c) && c > unfilledLoaded) quoted += c - unfilledLoaded;
   const f = Math.max(0, Number(fills) || 0);
   quoted = Math.max(quoted, f);
+  return { quoted, fills: f };
+}
+
+export function lockQuoteFillLine(rows, opts = {}) {
+  const { quoted, fills: f } = lockQuoteFillCounts(rows, opts);
   if (!quoted) return "";
   const n = (x) => x.toLocaleString("en-US");
   return `${n(quoted)} quote${quoted === 1 ? "" : "s"} · ${n(f)} fill${f === 1 ? "" : "s"}`;
