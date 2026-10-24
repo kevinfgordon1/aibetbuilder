@@ -128,7 +128,7 @@ export function BookArb({ a }) {
                 <tr key={l.ticker + l.side}>
                   <td style={cell}><b>{l.bet}</b><LeagueTag t={l.ticker} /><div style={{ color: C.muted, fontSize: 11 }}>{l.game}</div></td>
                   <td style={cell}>{d && d.fair != null ? <><b>{amer(d.fair)}</b> <span style={{ color: C.muted }}>({pct(d.fair, 1)})</span>
-                    <div style={{ color: C.muted, fontSize: 11 }}>Best opp: {d.venue ? <span style={{ color: C.gold }}>{vname(d.venue)}</span> : "—"}{fv && fv.fee != null ? ` · fee ${pct(fv.fee)}` : ""} · {d.depthUsd != null ? fmtUsd(d.depthUsd) : "—"} depth</div></> : <span style={{ color: C.muted }}>quote-time record not found</span>}</td>
+                    <div style={{ color: C.muted, fontSize: 11 }}>Best opp: {d.venue ? <span style={{ color: C.gold }}>{vname(d.venue)}</span> : "—"} {oppDepthLabel(d)}{fv && fv.fee != null ? ` · fee ${pct(fv.fee)}` : ""}</div></> : <span style={{ color: C.muted }}>quote-time record not found</span>}</td>
                   <td style={{ ...cell, color: C.muted }}>—</td>
                 </tr>
               );
