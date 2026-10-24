@@ -53,6 +53,19 @@ function chain(rows) {
   tables.sniper_ledger = [{ rfq_id: 'd1', dry_run: true, filled_contracts: 0 }];
   r = res(); await h({ method: 'POST', headers: { authorization: 'Bearer t' }, query: { hedge: '1' }, body: { rfqId: 'd1', book: 'FanDuel', american: 798, stake: 7.21 } }, r); assert.strictEqual(r.code, 400, 'dry/unfilled rejected');
   r = res(); await h({ method: 'POST', headers: { authorization: 'Bearer t' }, query: {} }, r); assert.strictEqual(r.code, 405, 'non-hedge POST still GET only');
+  // matched=1: two index-backed reads (filled + open accepted), no OR scan over the whole ledger; merged by rfq_id.
+  const calls = [];
+  const fill = { rfq_id: 'm1', dry_run: false, status: 'settled', phase: 'settled', filled_contracts: 10, legs: [], created_at: '2026-10-22T17:00:00Z' };
+  const acc = { rfq_id: 'm2', dry_run: false, status: 'open', phase: 'accepted', filled_contracts: 0, legs: [], created_at: '2026-10-24T01:00:00Z' };
+  const mchain = (t) => { const c = chain([]); const f = { gt: false, in: false };
+    c.or = () => { calls.push('or'); return c; }; c.gt = () => { f.gt = true; return c; }; c.in = () => { f.in = true; return c; };
+    c.range = async () => { if (t !== 'sniper_ledger') return { data: [], error: null }; calls.push(f.gt ? 'filled' : f.in ? 'pending' : 'other'); return { data: f.gt ? [fill] : f.in ? [acc, fill] : [], error: null }; };
+    return c; };
+  h._setDeps({ env: { SUPABASE_URL: 'u', SUPABASE_ANON_KEY: 'a', SUPABASE_SERVICE_KEY: 's' }, now: () => Date.now(), fetch: async () => ({ ok: false, json: async () => ({}) }),
+    createClient: () => ({ auth: { getUser: async () => ({ data: { user: owner } }) }, from: mchain }) });
+  r = res(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { matched: '1' } }, r);
+  assert.strictEqual(r.code, 200, JSON.stringify(r.body)); assert.ok(!calls.includes('or'), 'no OR scan'); assert.ok(calls.includes('filled') && calls.includes('pending'));
+  assert.deepStrictEqual(r.body.rows.map((x) => x.rfqId), ['m2', 'm1'], 'deduped, newest first');
   lib.isComboOwner = realIs; h._resetDeps();
   console.log('api/sniper-dashboard.test.js ok');
 })().catch((e) => { console.error(e); process.exit(1); });
