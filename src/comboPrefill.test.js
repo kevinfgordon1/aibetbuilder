@@ -1027,7 +1027,7 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.match(gone.unmatched[0].reason, /not on Combo Locks' pre-game slate/);
   assert.match(gone.unmatched[0].reason, /different game/);
   const started = mapPromoLegsToKalshi([leg("Philadelphia Flyers ML", "ML", "Pittsburgh Penguins @ Philadelphia Flyers")], { nhl: [] }, Date.parse("2026-09-30T23:45:00Z"));
-  assert.match(started.unmatched[0].reason, /already started — Combo Locks only quotes pre-game Kalshi NHL markets/);
+  assert.match(started.unmatched[0].reason, /already started \(kickoff [^)]* ET\) — Combo Locks only quotes pre-game Kalshi NHL markets/);
 
   // Two meetings of the same teams in a week (Flyers–Penguins 9/30 and 10/3-ish): nearest puck drop wins.
   const pitphi2 = kalshiGames._helpers.groupSportGames(mk("26OCT05PITPHI", "PIT", "PHI", "Pittsburgh", "Philadelphia", "PIT vs PHI (Oct 5)", "2026-10-06T02:30:00Z",
