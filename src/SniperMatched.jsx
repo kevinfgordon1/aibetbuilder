@@ -94,89 +94,57 @@ const ARB_WHY = {
 };
 export function BookArb({ a }) {
   const box = { background: "#111", border: `1px solid ${C.border}`, borderRadius: 8, padding: 10 };
-  const am = (x) => (x == null ? "—" : fmtAmerican(x));
-  if (!a) return <div style={box}><div style={{ ...h2, marginBottom: 4 }}>Sportsbook hedge</div><div style={{ color: C.muted, fontSize: 12 }}>Not checked yet for this fill.</div></div>;
-  const best = a.books && a.books[0];
-  const pre = (x) => (x == null ? "—" : `${x > 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
+  const tile = { background: "#151515", border: `1px solid ${C.border}`, borderRadius: 8, padding: "6px 10px", flex: "1 1 170px", minWidth: 0 };
+  const step = { fontSize: 12, padding: "2px 0", color: C.text };
+  const cell = { ...td, padding: "5px 8px", fontSize: 12 };
+  const vname = (k) => (VENUES.find(([x]) => x === k) || [k, k || "—"])[1];
+  const roiTxt = roi == null ? "—" : `${roi > 0 ? "+" : ""}${(roi * 100).toFixed(1)}%`;
+  const anyOther = legs.some(({ d }) => d && d.venues && typeof d.venues === "object");
   return (
-    <div data-testid="book-arb" style={box}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <div style={{ ...h2, marginBottom: 6 }}>Sportsbook hedge {best && best.arb ? <span style={{ color: C.good }}>· ARB at {best.label}</span> : null}</div>
-        <div style={{ color: C.muted, fontSize: 11 }}>checked {etTime(a.at)} · alert only, never bets</div>
-      </div>
-      {!a.hedgeable ? <div style={{ fontSize: 12 }}>{ARB_WHY[a.reason] || `Not hedgeable (${a.reason}).`}</div> : (
-        <>
-          <div style={{ fontSize: 12, marginBottom: 6 }}>We sold at <b>{am(a.soldAmerican)}</b>. A book has to pay longer than that for an arb.{a.sgp ? <span style={{ color: C.gold }}> Same-game legs: books price correlation themselves, so these are estimates — check the book's own parlay price.</span> : null}</div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Book", ...a.legs.map((l, i) => `Leg ${i + 1}`), "Parlay", "Hedge bet", "Locked profit", "ROI"].map((x) => <th key={x} style={{ ...th, fontSize: 11, padding: "4px 6px" }}>{x}</th>)}</tr></thead>
-            <tbody>{a.books.map((b) => (
-              <tr key={b.book}>
-                <td style={{ ...td, padding: "4px 6px", fontWeight: b.arb ? 700 : 400, color: b.arb ? C.good : C.text }}>{b.label}</td>
-                {a.legs.map((l) => <td key={l.ticker} style={{ ...td, padding: "4px 6px" }}>{am(l.prices[b.book])}</td>)}
-                <td style={{ ...td, padding: "4px 6px", fontWeight: 700 }}>{am(b.american)}</td>
-                <td style={{ ...td, padding: "4px 6px" }}>{b.arb ? fmtUsd(b.stake) : "—"}</td>
-                <td style={{ ...td, padding: "4px 6px", color: pnlColor(b.locked) }}>{signed(b.locked)}</td>
-                <td style={{ ...td, padding: "4px 6px", color: pnlColor(b.locked) }}>{pre(b.roi)}</td>
-              </tr>))}</tbody>
-          </table>
-          <div style={{ color: C.muted, fontSize: 11, marginTop: 6 }}>Parlay = product of the book's leg odds (decimal). Hedge bet = contracts ÷ book decimal, so the profit is the same whether the parlay hits or misses. Negative = the book is shorter than our price (no arb).</div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// Expanded "why this fill is +EV" card: per-leg inverse-bet inputs recorded at quote time + parlay math.
-const VENUES = [["kalshi", "Kalshi"], ["polymarket", "Polymarket"], ["novig", "Novig"], ["prophetx", "ProphetX"]];
-const amer = (p) => (p > 0 && p < 1 ? fmtAmerican(americanFromProb(p)) : "—");
-export function FillBreakdown({ r, api }) {
-  const q = r.quote || {};
-  const det = {}; for (const l of q.legDetail || []) det[`${String(l.ticker).toUpperCase()}:${l.side}`] = l;
-  const legs = r.legs.map((l) => ({ l, d: det[`${String(l.ticker).toUpperCase()}:${l.side}`] || null }));
-  const probs = legs.map((x) => (x.d && x.d.fair != null ? x.d.fair : null));
-  const prod = probs.every((p) => p != null) ? probs.reduce((a, p) => a * p, 1) : null;
-  const fair = prod != null ? prod : r.fairYes; const sold = r.soldYes; const n = Number(r.contracts) || 0;
-  const fee = r.fee != null ? r.fee : q.fee != null ? q.fee : 0;
-  const risk = r.risk; const ev = (sold - fair) * n - fee; const roi = risk > 0 ? ev / risk : null;
-  const box = { background: "#111", border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, flex: "1 1 280px" };
-  const step = { fontSize: 12, padding: "3px 0", color: C.text };
-  return (
-    <div data-testid="fill-breakdown" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "6px 2px 10px" }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {legs.map(({ l, d }, i) => {
-          const vp = d && d.venues && typeof d.venues === "object" ? d.venues : null;
-          return (
-            <div key={l.ticker + l.side} style={box}>
-              <div style={{ color: C.gold, fontWeight: 700, fontSize: 13 }}>Leg {i + 1}: {l.bet}</div>
-              <div style={{ color: C.muted, fontSize: 11, marginBottom: 6 }}>{l.game}{l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</div>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead><tr>{["Venue", "Opposing price", "Fee", ""].map((x) => <th key={x} style={{ ...th, fontSize: 11, padding: "4px 6px" }}>{x}</th>)}</tr></thead>
-                <tbody>{VENUES.map(([k, name]) => {
-                  const v = vp && vp[k]; const best = d && d.venue === k;
-                  const price = v && (v.price ?? v.american ?? v.p);
-                  return (<tr key={k}><td style={{ ...td, padding: "4px 6px", fontWeight: best ? 700 : 400, color: best ? C.gold : C.text }}>{name}</td>
-                    <td style={{ ...td, padding: "4px 6px" }}>{v ? (typeof price === "number" && Math.abs(price) >= 100 ? fmtAmerican(price) : typeof price === "number" ? amer(price) : "—") : best ? <span>used (price not stored)</span> : <span style={{ color: C.muted }}>not captured</span>}</td>
-                    <td style={{ ...td, padding: "4px 6px", color: C.muted }}>{v && v.fee != null ? pct(v.fee) : "not captured"}</td>
-                    <td style={{ ...td, padding: "4px 6px", color: C.gold }}>{best ? "best" : ""}</td></tr>);
-                })}</tbody>
-              </table>
-              {d ? (
-                <div style={{ fontSize: 12, marginTop: 6 }}>Fair leg probability <b>{pct(d.fair, 1)}</b> ({amer(d.fair)}) after the best venue's fee · depth {d.depthUsd != null ? fmtUsd(d.depthUsd) : "—"} · source {d.venue || "—"}</div>
-              ) : <div style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>The sniper's quote-time record for this leg wasn't found.</div>}
-              {!vp && d && <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>The sniper only stored the winning venue for this quote; the other venues' prices weren't recorded.</div>}
-            </div>
-          );
-        })}
+    <div data-testid="fill-breakdown" style={{ display: "flex", flexDirection: "column", gap: 8, padding: "6px 2px 10px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {legs.map(({ l, d }) => (
+          <div key={l.ticker + l.side} data-testid="leg-tile" style={tile}>
+            <div style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.bet}<LeagueTag t={l.ticker} /></div>
+            <div style={{ color: C.muted, fontSize: 11 }}>{l.game}{l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</div>
+            <div style={{ color: C.gold, fontWeight: 700, fontSize: 14, marginTop: 2 }}>{d && d.fair != null ? amer(d.fair) : "—"}</div>
+          </div>
+        ))}
       </div>
       <div style={box}>
-        <div style={{ ...h2, marginBottom: 6 }}>Parlay math</div>
-        <div style={step}>1. Fair parlay = {probs.map((p) => (p != null ? pct(p, 1) : "?")).join(" × ")} = <b>{pct(fair, 2)}</b> ({amer(fair)})</div>
-        <div style={step}>2. We sold the parlay at <b>{pct(sold, 1)}</b> ({amer(sold)}); we hold the No side at {amer(1 - sold)}</div>
-        <div style={step}>3. Kalshi fees: {fmtUsd(fee)}{q.makerRate != null ? ` (maker rate ${pct(q.makerRate, 2)})` : ""}</div>
-        <div style={step}>4. Risk = (1 − {sold.toFixed(3)}) × {n.toFixed(0)} contracts = <b>{fmtUsd(risk)}</b> to win {fmtUsd(r.toWin)}</div>
-        <div style={step}>5. Expected value = ({sold.toFixed(3)} − {fair.toFixed(4)}) × {n.toFixed(0)} − {fmtUsd(fee)} fees = <b style={{ color: pnlColor(ev) }}>{signed(ev)}</b></div>
-        <div style={step}>6. Expected ROI = {signed(ev)} ÷ {fmtUsd(risk)} = <b style={{ color: C.good }}>{roi == null ? "—" : `${roi > 0 ? "+" : ""}${(roi * 100).toFixed(1)}%`}</b>{r.edge != null ? <span style={{ color: C.muted }}> (sniper logged {(r.edge * 100).toFixed(1)}%)</span> : null}</div>
-        <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>Fair leg prices use the inverse bet method: the best opposing price across Kalshi, Polymarket, Novig and ProphetX, each net of its own fee.</div>
+        <div data-testid="fill-summary" style={{ display: "flex", flexWrap: "wrap", gap: 18, fontSize: 13, marginBottom: 8 }}>
+          <span>Fair: <b>{amer(fair)}</b></span>
+          <span>We offer: <b style={{ color: C.gold }}>{amer(sold)}</b></span>
+          <span>Taker sees: <b>{fmtAmerican(takerSeesAmerican(r.soldYes, r.contracts))}</b></span>
+          <span>EV: <b style={{ color: pnlColor(ev) }}>{signed(ev)}</b></span>
+          <span>Exp ROI: <b style={{ color: pnlColor(ev) }}>{roiTxt}</b>{r.edge != null ? <span style={{ color: C.muted, fontSize: 11 }}> (sniper logged {(r.edge * 100).toFixed(1)}%)</span> : null}</span>
+        </div>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Leg", "True win prob (best opp)", "Our price / odds"].map((x) => <th key={x} style={{ ...th, fontSize: 11, padding: "4px 8px" }}>{x}</th>)}</tr></thead>
+          <tbody>
+            {legs.map(({ l, d }) => {
+              const vp = d && d.venues && typeof d.venues === "object" ? d.venues : null; const fv = vp && d.venue ? vp[d.venue] : null;
+              return (
+                <tr key={l.ticker + l.side}>
+                  <td style={cell}><b>{l.bet}</b><LeagueTag t={l.ticker} /><div style={{ color: C.muted, fontSize: 11 }}>{l.game}</div></td>
+                  <td style={cell}>{d && d.fair != null ? <><b>{amer(d.fair)}</b> <span style={{ color: C.muted }}>({pct(d.fair, 1)})</span>
+                    <div style={{ color: C.muted, fontSize: 11 }}>Best opp: {d.venue ? <span style={{ color: C.gold }}>{vname(d.venue)}</span> : "—"}{fv && fv.fee != null ? ` · fee ${pct(fv.fee)}` : ""} · {d.depthUsd != null ? fmtUsd(d.depthUsd) : "—"} depth</div></> : <span style={{ color: C.muted }}>quote-time record not found</span>}</td>
+                  <td style={{ ...cell, color: C.muted }}>—</td>
+                </tr>
+              );
+            })}
+            <tr data-testid="parlay-total">
+              <td style={{ ...cell, fontWeight: 700 }}>Parlay Total</td>
+              <td style={cell}><b>{amer(fair)}</b> <span style={{ color: C.muted }}>({pct(fair, 2)})</span></td>
+              <td style={cell}><b style={{ color: C.gold }}>{amer(sold)}</b> · edge <b style={{ color: pnlColor(ev) }}>{roiTxt}</b></td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{ marginTop: 8 }}>
+          <div style={step}>Win: {fmtUsd(r.toWin)} if the parlay misses · Risk: <b>{fmtUsd(risk)}</b> ({n.toFixed(0)} contracts × (1 − {sold.toFixed(3)}))</div>
+          <div style={step}>EV = ({sold.toFixed(3)} − {fair.toFixed(4)}) × {n.toFixed(0)} − {fmtUsd(fee)} Kalshi fees{q.makerRate != null ? ` (maker ${pct(q.makerRate, 2)})` : ""} = <b style={{ color: pnlColor(ev) }}>{signed(ev)}</b> · ÷ risk = <b style={{ color: pnlColor(ev) }}>{roiTxt}</b></div>
+        </div>
+        <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>{anyOther ? "" : "Other venues' prices weren't recorded for this quote. "}True win prob uses the inverse bet method: best opposing price across Kalshi, Polymarket, Novig and ProphetX, each net of its own fee.</div>
       </div>
       {api ? <HedgePanel r={r} api={api} /> : null}
       <BookArb a={r.bookArb} />
@@ -187,7 +155,6 @@ export function FillBreakdown({ r, api }) {
 // "My Fills": only real live fills (filled_contracts > 0) — what Kevin actually holds. No quotes.
 // Sortable columns (high → low first, click again to flip), Legs + First leg starts columns, and filters
 // (league, legs, filled date, parlay start date, min Exp. ROI). Summary cards and totals follow the filters.
-const LeagueTag = ({ t }) => <span data-testid="leg-league" style={{ fontSize: 10, fontWeight: 700, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, padding: "0 4px", marginLeft: 6, verticalAlign: 1 }}>{leagueOfLeg(t)}</span>;
 export const firstStart = (r) => { const ts = (r.legs || []).map((l) => Date.parse(l.kickoff)).filter(Number.isFinite); return ts.length ? Math.min(...ts) : null; };
 const etYmd = (ms) => (ms == null ? null : new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
 const addDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
