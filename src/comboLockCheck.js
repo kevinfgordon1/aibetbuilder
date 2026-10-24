@@ -51,9 +51,9 @@ export function lockCheckView(result, parlay) {
 }
 
 // ── Auto check after missed quotes ───────────────────────────────────────────
-// Kevin: on locks that aren't getting filled, run Check market price after every 10 missed
+// Kevin: on locks that aren't getting filled, run Check market price after every 20 missed
 // quotes (quotes with no fill) to see whether we're the best price. Suggestion only.
-export const AUTO_CHECK_EVERY_MISSED = 10;
+export const AUTO_CHECK_EVERY_MISSED = 20; // Kevin (Oct 24): was 10
 
 const fmtAm = (a) => (a == null || !Number.isFinite(Number(a)) ? "—" : Number(a) > 0 ? `+${Number(a)}` : `${Number(a)}`);
 

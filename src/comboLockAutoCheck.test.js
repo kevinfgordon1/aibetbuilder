@@ -4,18 +4,19 @@ import { topPriceSuggestion, autoCheckDue, missedQuotes, lockPriceAdvice, LOCK_C
 import { lockQuoteFillCounts } from "./comboLockSubmissions.js";
 
 assert.equal(LOCK_CHECK_SECONDS, 5);
-assert.equal(AUTO_CHECK_EVERY_MISSED, 10);
+assert.equal(AUTO_CHECK_EVERY_MISSED, 20);
 
 // missed = quotes − fills
 assert.equal(missedQuotes({ quoted: 19, fills: 0 }), 19);
 assert.equal(missedQuotes({ quoted: 3, fills: 5 }), 0);
 assert.equal(missedQuotes(null), 0);
 
-// fires after 10 missed, then once per 10 new
-assert.equal(autoCheckDue({ missed: 9 }), false);
-assert.equal(autoCheckDue({ missed: 10 }), true);
-assert.equal(autoCheckDue({ missed: 19, lastMissed: 10 }), false);
-assert.equal(autoCheckDue({ missed: 20, lastMissed: 10 }), true);
+// fires after 20 missed, then once per 20 new
+assert.equal(autoCheckDue({ missed: 10 }), false);
+assert.equal(autoCheckDue({ missed: 19 }), false);
+assert.equal(autoCheckDue({ missed: 20 }), true);
+assert.equal(autoCheckDue({ missed: 39, lastMissed: 20 }), false);
+assert.equal(autoCheckDue({ missed: 40, lastMissed: 20 }), true);
 // never while a check runs, paused, unavailable, or in cooldown
 assert.equal(autoCheckDue({ missed: 20, busy: true }), false);
 assert.equal(autoCheckDue({ missed: 20, paused: true }), false);

@@ -497,7 +497,7 @@ export function LockCard({ quoteLine = "", priceAlert = null, hedgeNote = "", fe
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
       {quoteLine ? <div className="num" style={{ fontSize: 13, marginTop: 6 }}><span className="chip warn">{quoteLine}</span></div> : null}
-      {priceAlert && priceAlert.kind === "behind" ? <div className="num" data-testid="lock-price-alert" style={{ fontSize: 13, marginTop: 6 }}><span className="chip warn" title="From the last Check market price (runs automatically after every 10 missed quotes). Suggestion only — your price is not changed.">{priceAlert.text}</span></div> : null}
+      {priceAlert && priceAlert.kind === "behind" ? <div className="num" data-testid="lock-price-alert" style={{ fontSize: 13, marginTop: 6 }}><span className="chip warn" title="From the last Check market price (runs automatically after every 20 missed quotes). Suggestion only — your price is not changed.">{priceAlert.text}</span></div> : null}
       {priceAlert && priceAlert.kind === "best" ? <div className="muted" data-testid="lock-price-best" style={{ fontSize: 12, marginTop: 4 }}>{priceAlert.text}</div> : null}
       {hedgeNote ? <div className="lk-hnote" title="The rest weren't taken, or haven't gone through yet.">{hedgeNote}</div> : null}
       <div className="lk-hint">{status.hint}</div>
