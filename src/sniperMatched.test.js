@@ -23,3 +23,12 @@ assert.strictEqual(s.byMarket.find((g) => g.key === "ML + TD").lost, 1);
 assert.strictEqual(s.beatUs[0].bet, "SF to beat ATL"); assert.strictEqual(matchedStatus(rows[1]), "won");
 assert.strictEqual(perfStats([]).total.n, 0);
 console.log("sniperMatched.test.js ok");
+
+// fillTimeOf: fill decision time, else created_at; never updated_at (settlement bumps it).
+{
+  const { fillTimeOf } = await import("./sniperMatched.js");
+  const row = { created_at: "2026-10-23T07:16:56Z", updated_at: "2026-10-24T23:14:08Z" };
+  assert.strictEqual(fillTimeOf(row, "2026-10-23T07:17:12Z"), "2026-10-23T07:17:12Z");
+  assert.strictEqual(fillTimeOf(row, null), "2026-10-23T07:16:56Z");
+  assert.strictEqual(fillTimeOf(row, "2026-10-23T12:00:00Z"), "2026-10-23T07:16:56Z");
+}
