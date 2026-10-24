@@ -99,7 +99,7 @@ async function handler(req, res) {
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300).map(H.quoteRow);
     // Skips-by-hour loads separately (?skips=1); see loadSummaries.
     const labels = await legLabels(quotes, [...risk.games, ...risk.filledGames]);
-    return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: null, ...labels });
+    return json(res, 200, { ok: true, book, status, caps: H.capsFrom(sumRows && sumRows[0]), risk, quotes, skips: null, ...labels });
   } catch (e) {
     console.error('[sniper-dashboard]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not load sniper data' });

@@ -1,5 +1,6 @@
 // Pure helpers for the owner-only Sniper dashboard (api/sniper-dashboard.js + SniperDashboard.jsx).
-// Mirrors the live sniper (fly/sniper.toml). Keep in sync when caps change.
+// Fallback only: the sniper publishes its effective caps on each summary heartbeat (details.caps),
+// and capsFrom() prefers those. These defaults mirror fly/sniper.toml for an older sniper build.
 export const CAPS = { totalOpen: 10000, longDatedOpen: 5000, perGame: 1500, perLeg: 750, dailyLoss: 10000, dailyNewRisk: 10000, perQuoteRisk: 200, minEdge: 0.04, depthGame: 2000, depthTd: 1000 };
 
 export function americanFromProb(p) {
@@ -89,6 +90,20 @@ export function skipsByHour(summaries, top = 8) {
   const reasons = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, top).map(([r]) => r);
   return { reasons, hours: [...hours.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([hour, h]) => ({ hour, ...Object.fromEntries(reasons.map((r) => [r, h[r] || 0])) })) };
 }
+
+/** Effective caps: heartbeat values (after env overrides) win over the CAPS defaults. */
+export function capsFrom(summary) {
+  const live = summary && summary.details && summary.details.caps;
+  const out = { ...CAPS, source: "defaults" };
+  if (live && typeof live === "object") {
+    for (const [k, v] of Object.entries(live)) if (Number.isFinite(Number(v))) out[k] = Number(v);
+    out.source = "sniper";
+  }
+  return out;
+}
+
+/** "Today" for the sniper's daily caps = since midnight ET (same day the sniper's daily stop uses). */
+export const SNIPER_DAY_NOTE = "Today = since midnight ET, the same day the sniper's daily caps reset.";
 
 export function statusFrom(summary, nowMs) {
   if (!summary) return { mode: "unknown", halted: false, lastSummaryAt: null, stale: true, kickoffs: null };

@@ -138,13 +138,13 @@ export default function SniperDashboard({ user }) {
       {!data && !err && <div style={{ color: C.muted, margin: "10px 0" }}>Loading caps and quotes…</div>}
       {data && (
         <>
-          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, 5% other NFL, 6% college and NBA, 7% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.</div>
+          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, {Math.round((caps.minEdgeLines ?? 0.05) * 100)}% other NFL, {Math.round((caps.minEdgeNcaaf ?? 0.06) * 100)}% college, {Math.round((caps.minEdgeNba ?? 0.06) * 100)}% NBA, {Math.round((caps.minEdgeTd ?? 0.07) * 100)}% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.{caps.source === "defaults" ? " (Default caps: this sniper build doesn't report its live settings yet.)" : ""}</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <Meter label="Open risk" value={r.open} cap={caps.totalOpen} note={`Max ${fmtUsd(caps.longDatedOpen)} on parlays settling more than 32h out`} />
             <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? ((data.gameLabels || {})[r.maxGame.game] || r.maxGame.game) : "No open games"} />
-            <Meter label="Today's loss" value={r.dayLoss} cap={caps.dailyLoss} note={`P&L today ${fmtUsd(r.dayPnl)}`} />
+            <Meter label="Today's loss" value={r.dayLoss} cap={caps.dailyLoss} note={`P&L today ${fmtUsd(r.dayPnl)} · since midnight ET`} />
             <div style={{ ...card, flex: "1 1 200px" }}>
-              <div style={{ color: C.text2, fontSize: 12 }}>Risk opened today</div>
+              <div style={{ color: C.text2, fontSize: 12 }} title="Since midnight ET, the same day the sniper's daily caps reset. Fill-day history uses a 2 AM ET rollover.">Risk opened today</div>
               <div style={{ fontSize: 20, fontWeight: 700, margin: "4px 0" }}>{fmtUsd(r.dayRisk)}</div>
               <div style={{ color: C.text2, fontSize: 12 }}>Running P&L <b style={{ color: r.runningPnl >= 0 ? C.good : C.bad }}>{fmtUsd(r.runningPnl)}</b></div>
             </div>
