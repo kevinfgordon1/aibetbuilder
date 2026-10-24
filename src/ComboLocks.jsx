@@ -708,7 +708,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       ]);
       // SECONDARY reads, started at the same time.
       const extraP = Promise.allSettled([
-        supabase.from("combo_submissions").select("*").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
+        supabase.from("combo_submissions").select("id,is_live,status,order_id,created_at,label,fill_american,venue,market_ticker,contracts,worst_lock").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
         // Paged: PostgREST returns at most 1,000 rows, and Kevin has 1,268 filled/live rows. The cap
         // dropped the oldest confirmed fills, so 13 Aug/Sep locks lost contracts and History P/L
@@ -716,10 +716,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         fetchAllRows(() => supabase.from("combo_submissions").select("id,parlay_id,contracts,status,is_live,order_id,quote_id,venue,fill_american,cancel_requested_at,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }).order("id", { ascending: false }), { expectedRows: pageHintRef.current.booked }),
         // How many RFQs matched each parlay (from the read-only watcher).
         supabase.from("combo_match_counts").select("*"),
-        // What happened to each quote we posted (accepted / executed / lost + latency + fill reconcile).
-        supabase.from("quote_outcomes").select("*").order("updated_at", { ascending: false }).limit(200),
-        // Every RFQ that matched a parlay — for the per-lock drilldown.
-        supabase.from("combo_matches").select("*").order("matched_at", { ascending: false }).limit(400),
+        // quote_outcomes / combo_matches reads removed (audit Oct 24): both tables have RLS on and
+        // no browser policy, so they always returned 0 rows while costing two queries per poll.
+        Promise.resolve({ data: null, error: null }),
+        Promise.resolve({ data: null, error: null }),
         supabase.from("combo_parlay_bets").select("*").eq("user_id", user.id),
       ]);
       const coreRes = (await coreP).map(comboSettledQuery);
@@ -807,7 +807,9 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       const mcRows = takeList(mcRes);
       if (mcRows) {
         const mcMap = {};
-        mcRows.forEach((r) => { mcMap[r.parlay_id] = r; });
+        // Only this user's locks (defense in depth on top of the view's own filter / RLS).
+        const mine = new Set([...(parlaysRef.current || []), ...((archivedRowsRef.current && archivedRowsRef.current.rows) || [])].map((p) => p && p.id).filter(Boolean));
+        mcRows.forEach((r) => { if (mine.has(r.parlay_id)) mcMap[r.parlay_id] = r; });
         setMatchCounts(mcMap);
       }
       const ocRows = takeList(ocRes);
@@ -1012,7 +1014,15 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, [prefill, gamesReady, games, gameIdx, loadGames]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
-  useEffect(() => { const t = setInterval(() => { reload(); }, 20000); return () => clearInterval(t); }, [reload]);
+  // Paused while the tab is hidden (audit Oct 24: background tabs were ~10 reads / 20s each);
+  // refreshes once as soon as the tab is visible again.
+  useEffect(() => {
+    const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+    const t = setInterval(() => { if (!hidden()) reload(); }, 20000);
+    const onVis = () => { if (!hidden()) reload(); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(t); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis); };
+  }, [reload]);
   useEffect(() => {
     if (!focusLockId) return;
     setOpenParlays((o) => ({ ...o, [focusLockId]: true, ["hist-" + focusLockId]: true, ["arch-" + focusLockId]: true }));

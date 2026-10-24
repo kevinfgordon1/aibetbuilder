@@ -1,4 +1,5 @@
 'use strict';
+const { guardCron } = require('../lib/cron-auth');
 
 // Vercel cron, every 5 minutes. Three jobs in one invocation:
 //   NFL anytime touchdown (1+), games kicking off within 72 hours.
@@ -40,6 +41,7 @@ function sideJobSummary(job, fallbackError) {
 
 async function handler(req, res, deps) {
   const d = deps || {};
+  if (!d.skipAuth && !(await guardCron(req, res, d.authDeps))) return;
   const runNfl = d.runNfl || runPlayerPropsJob;
   const runMlb = d.runMlb || runPlayerHrJob;
   const runNhl = d.runNhl || runPlayerGoalJob;

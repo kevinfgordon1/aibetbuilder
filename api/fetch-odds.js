@@ -1,3 +1,4 @@
+const { guardCron } = require('../lib/cron-auth');
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
 const { createNovigDirect } = require('../lib/novig-direct');
 const { guardSportData, logOutlierFlags, readConfig } = require('../lib/odds-outlier-guard');
@@ -24,6 +25,7 @@ const {
 // Optional ?sports= / ?featuredOnly=1 for a shorter manual refresh.
 
 module.exports = async (req, res) => {
+  if (!(await guardCron(req, res))) return;
   try {
     const query = req.query || {};
     const sports = parseRequestedSports(query.sports);

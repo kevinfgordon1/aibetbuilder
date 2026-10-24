@@ -228,7 +228,7 @@ assert.match(locksSrc, /submissions/);
 assert.match(settleSrc, /filledById && filledById\[row\.id\]\) > 0/);
 assert.match(settleSrc, /\(archived \|\| \[\]\)\.forEach/);
 assert.match(locksSrc, /RiskProfile/);
-assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[p\.id\], \{ parlay: p \}\)\}/);
+assert.match(locksSrc, /<QuoteHistory history=\{withNotFilledTotal\(quoteHistory\(attemptsByParlay\[p\.id\], \{ parlay: p \}\), p\.id\)\}/);
 assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
 assert.doesNotMatch(locksSrc, /AttemptHistory|MatchedRfqTable/);
 assert.match(settleSrc, /espn-scores/);
