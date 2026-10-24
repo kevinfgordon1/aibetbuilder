@@ -53,11 +53,11 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
 {
   assert.equal(
     formatTrueOddsBookLine({ odds: -120, bookLabel: "Novig", size: 1250 }),
-    "-120 on Novig · $1,250 currently available"
+    "-120 on Novig · $1,042 depth (to win)"
   );
   assert.equal(
     formatTrueOddsBookLine({ odds: 105, bookLabel: "ProphetX", size: 80 }),
-    "+105 on ProphetX · $80 currently available"
+    "+105 on ProphetX · $84 depth (to win)"
   );
   assert.equal(
     formatTrueOddsBookLine({ odds: -120, bookLabel: "Novig" }),
@@ -83,7 +83,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
 // ── depth trail: next 1–2 worse levels; no depth → empty (top line unchanged)
 {
   const top = formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 });
-  assert.equal(top, "+104 on ProphetX · $54 currently available");
+  assert.equal(top, "+104 on ProphetX · $56 depth (to win)");
   assert.equal(formatDepthTrail(null, { topAmerican: 104 }), "");
   assert.equal(formatDepthTrail([], { topAmerican: 104 }), "");
   assert.equal(formatDepthTrail([{ american: 104, size: 54 }], { topAmerican: 104 }), "", "top-only book → no trail");
@@ -92,11 +92,11 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
       [{ american: 104, size: 54 }, { american: 100, size: 420 }, { american: -105, size: 1100 }],
       { topAmerican: 104 },
     ),
-    "then +100 · $420 · then -105 · $1,100",
+    "then +100 · $420 · then -105 · $1,048",
   );
   assert.equal(
     formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 }),
-    "+104 on ProphetX · $54 currently available",
+    "+104 on ProphetX · $56 depth (to win)",
     "adding depth must not change the top line",
   );
   const rest = restLevelsFromLadder(
@@ -128,7 +128,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(line.odds, 125);
   assert.notEqual(line.odds, 200, "true-odds line uses VWAP, not thin top");
   assert.equal(line.text, "+125 on Kalshi · blended to $500 payout");
-  assert.equal(line.secondary, "top +200 · $100 currently available");
+  assert.equal(line.secondary, "top +200 · $200 depth (to win)");
   const short = formatTrueOddsWithBlend({
     odds: 150,
     bookLabel: "Polymarket",
@@ -140,7 +140,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
     short.text,
     "+150 on Polymarket · blended · $75 of $500 payout available",
   );
-  assert.equal(short.secondary, "top +150 · $50 currently available");
+  assert.equal(short.secondary, "top +150 · $75 depth (to win)");
   const empty = formatTrueOddsWithBlend({
     odds: 104,
     bookLabel: "Kalshi",
@@ -148,7 +148,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
     levels: [],
   });
   assert.equal(empty.odds, 104);
-  assert.equal(empty.text, "+104 on Kalshi · $54 currently available");
+  assert.equal(empty.text, "+104 on Kalshi · $56 depth (to win)");
   assert.equal(empty.blend, null);
   const trail = formatDepthTrail(levels, { topAmerican: 200 });
   assert.equal(trail, "then +100 · $400");
@@ -168,7 +168,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   });
   assert.equal(hedgeLine.odds, -220);
   assert.match(hedgeLine.text, /blended to \$333\.33 hedge/);
-  assert.equal(hedgeLine.secondary, "top -200 · $100 currently available");
+  assert.equal(hedgeLine.secondary, "top -200 · $50 depth (to win)");
   assert.equal(hedgeLine.lowLiquidity, false);
 
   // Ole Miss: −111 · $1,896 top alone covers $500 profit — no blend tag
@@ -181,7 +181,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   assert.equal(oleMiss.odds, -111);
   assert.equal(oleMiss.blend.complete, true);
   assert.equal(oleMiss.blend.flag, "");
-  assert.equal(oleMiss.text, "-111 on Novig · $1,896 currently available");
+  assert.equal(oleMiss.text, "-111 on Novig · $1,708 depth (to win)");
   assert.doesNotMatch(oleMiss.text, /blended/);
   assert.equal(oleMiss.secondary, "");
 
@@ -197,7 +197,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
       lowLiquidity: false,
     },
   });
-  assert.equal(topOnlyHedge.text, "-200 on Kalshi · $400 currently available");
+  assert.equal(topOnlyHedge.text, "-200 on Kalshi · $200 depth (to win)");
   assert.doesNotMatch(topOnlyHedge.text, /blended/);
   assert.equal(topOnlyHedge.secondary, "");
   const shortHedge = formatTrueOddsWithBlend({
@@ -233,7 +233,7 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
   );
   assert.equal(
     sized,
-    "Best opp: +163 on Underdog Predict · $80 currently available · Colorado Rockies ML",
+    "Best opp: +163 on Underdog Predict · $130 depth (to win) · Colorado Rockies ML",
   );
   assert.notEqual(sized, "+163 on Underdog Predict · $80 currently available");
 }

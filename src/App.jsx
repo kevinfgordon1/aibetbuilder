@@ -1664,7 +1664,7 @@ export default function App() {
   const [promoTeamExclude, setPromoTeamExclude] = useState("");
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
   const [user, setUser] = useState(null);
-  // Owner-only "Min depth per leg" ($ stake at the best opposing price). 0 = off.
+  // Owner-only "Min depth per leg" ($ potential PROFIT at the best opposing prices, not stake). 0 = off.
   const [minLegDepthInput, setMinLegDepthInput] = useState("");
   useEffect(() => {
     const v = canSeeOwnerTools(user) ? loadMinLegDepth(user) : 0;
@@ -3217,7 +3217,7 @@ export default function App() {
                               )}
                               {b.bestOppBook && (
                                 <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>
-                                  {b.sameBookFallback ? "Opp side on" : "Best opp on"}: {getBookLabel(b.bestOppBook)} @ {formatOdds(b.bestOpp)}{formatAvailableSizeClause(b.bestOppSize)}
+                                  {b.sameBookFallback ? "Opp side on" : "Best opp on"}: {getBookLabel(b.bestOppBook)} @ {formatOdds(b.bestOpp)}{formatAvailableSizeClause(b.bestOppSize, b.bestOpp)}
                                   {adjustmentNote && <span style={{ color: "#06b6d4", marginLeft: 4 }}>({adjustmentNote})</span>}
                                 </div>
                               )}
@@ -3467,7 +3467,7 @@ export default function App() {
                         </button>
                       </>)}
                       {canSeeOwnerTools(user) && controlBox(<>
-                        <label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until this much $ is filled, and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label>
+                        <label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until the opposing bets can win this much $ (depth = potential profit, not stake: $3,000 at −200 = $1,500), and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label>
                         <span style={{ color: "#6b7280", fontSize: 12 }}>$</span>
                         <input data-testid="promo-min-leg-depth" type="text" inputMode="numeric" placeholder="off" value={minLegDepthInput}
                           onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setMinLegDepthInput(v); saveMinLegDepth(user, v); }}

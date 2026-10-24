@@ -2,7 +2,9 @@
 //
 // BLENDED depth: walk the opposing price levels across every depth venue
 // (Kalshi / Polymarket / Novig / ProphetX), best fee-adjusted American first,
-// adding up $ stake (sizes are $ stake, see lib/book-depth.js) until the
+// adding up potential PROFIT (Kevin: depth = what the bet can win, not the
+// stake; sizes are $ stake, see lib/book-depth.js, so each level counts
+// size × (1 − p) / p, e.g. $3,000 at −200 = $1,500 depth) until the
 // minimum is reached. Prices are already net of each venue's own fee
 // (Novig pregame $0, Polymarket US maker $0, ProphetX 2%, Kalshi series fee),
 // exactly as the inverse method sees them. If the minimum is reachable the
@@ -12,7 +14,7 @@
 // Sportsbook-best legs (no depth feed) drop while a minimum is set.
 // 0 / blank = off: nothing here runs and the inverse method is untouched.
 
-import { resolvePmBookLevels, isPmBlendVenue, blendAskLadderToStake, americanToImpliedProb } from "./blendAskLadder.js";
+import { resolvePmBookLevels, isPmBlendVenue, blendAskLadderToPayout, americanToImpliedProb } from "./blendAskLadder.js";
 import { oppQuoteLooksInverted, quoteLooksWrongSideOf } from "./promoOppGuard.js";
 import { depthCacheKey } from "./promoBookDepth.js";
 
@@ -45,7 +47,10 @@ export function saveMinLegDepth(user, value, storage = globalThis.localStorage) 
   } catch { /* private mode */ }
 }
 
-// $ stake at the top American band of the best opposing venue, or null when
+import { profitAtAmerican } from "./depthProfit.js";
+export { profitAtAmerican };
+
+// Potential profit ($) at the top American band of the best opposing venue, or null when
 // unknown (sportsbook / no ladder / no bestOppSize).
 export function topBandDepthUsd(leg, levels) {
   if (!leg || !isPmBlendVenue(leg.bestOppBook)) return null;
@@ -55,7 +60,7 @@ export function topBandDepthUsd(leg, levels) {
   let size = 0;
   for (const lvl of ladder) {
     if (lvl.american !== topAm) break;
-    size += lvl.size;
+    size += profitAtAmerican(lvl.size, lvl.american);
   }
   return size;
 }
@@ -103,28 +108,30 @@ export function crossVenueLadder(leg, levels, laddersByKey, keyOf) {
   return out;
 }
 
-// { american, stakeFilled, venues, levelsUsed, complete } or null (drop).
+// { american, stakeFilled, profitFilled, venues, levelsUsed, complete } or null (drop).
+// `minDepth`, `available` and `target` are potential PROFIT in $.
 export function blendLegToMinDepth(leg, minDepth, levels, laddersByKey, keyOf = depthCacheKey) {
   const min = parseMinLegDepth(minDepth);
   if (!min || !leg || !isPmBlendVenue(leg.bestOppBook)) return null;
   const ladder = crossVenueLadder(leg, levels, laddersByKey, keyOf);
   if (!ladder.length) return null;
-  const total = ladder.reduce((s, l) => s + l.size, 0);
+  const total = ladder.reduce((s, l) => s + profitAtAmerican(l.size, l.american), 0);
   if (total + 0.5 < min) return { complete: false, available: total };
-  const blend = blendAskLadderToStake(ladder, { targetStake: min });
+  const blend = blendAskLadderToPayout(ladder, { targetPayout: min });
   if (!blend || !blend.complete || blend.american == null) return { complete: false, available: total };
   let left = min;
   const venues = [];
   for (const l of ladder) {
     if (left <= 1e-9) break;
-    const take = Math.min(l.size, left);
+    const take = Math.min(profitAtAmerican(l.size, l.american), left);
+    if (!(take > 0)) continue;
     left -= take;
     if (!venues.includes(l.book)) venues.push(l.book);
   }
   // Never better than the best quote (rounding guard).
   const top = ladder[0].american;
   const american = blend.american > top ? top : blend.american;
-  return { complete: true, american, top, topBook: ladder[0].book, stakeFilled: blend.stakeFilled, venues, levelsUsed: blend.levelsUsed, available: total, target: min };
+  return { complete: true, american, top, topBook: ladder[0].book, stakeFilled: blend.stakeFilled, profitFilled: min, venues, levelsUsed: blend.levelsUsed, available: total, target: min };
 }
 
 export function legMeetsMinDepth(leg, minDepth, levels, laddersByKey) {

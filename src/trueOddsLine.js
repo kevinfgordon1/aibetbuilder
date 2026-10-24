@@ -1,3 +1,4 @@
+import { depthFromStake } from "./depthProfit.js";
 // Shared true-odds / best-opp book line: price + book + optional exchange size.
 // Size is never invented — only `size` (direct Kalshi/Polymarket) or `bet_limit`
 // (The Odds API includeBetLimits) when a finite positive number is present.
@@ -63,7 +64,14 @@ export function formatAvailableDollars(size) {
   return `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
-export function formatAvailableSizeClause(size) {
+// `size` is $ stake at `american`. With a price, shows DEPTH = potential profit
+// (Kevin: $3,000 at −200 = $1,500 depth). Without one, falls back to the raw $.
+export function formatAvailableSizeClause(size, american) {
+  const depth = american != null ? depthFromStake(size, american) : null;
+  if (depth != null) {
+    const d = formatAvailableDollars(depth);
+    return d ? ` · ${d} depth (to win)` : "";
+  }
   const dollars = formatAvailableDollars(size);
   return dollars ? ` · ${dollars} currently available` : "";
 }
@@ -71,7 +79,7 @@ export function formatAvailableSizeClause(size) {
 export function formatTrueOddsBookLine({ odds, bookLabel, size, blendFlag } = {}) {
   const book = bookLabel || "Book";
   const flag = blendFlag ? ` · ${blendFlag}` : "";
-  return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size)}${flag}`;
+  return `${formatAmericanOdds(odds)} on ${book}${formatAvailableSizeClause(size, odds)}${flag}`;
 }
 
 export function labelBestOppLine(lineText, selection) {
@@ -117,8 +125,9 @@ export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: 
     if (odds != null && Number(odds) !== 0 && isFinite(Number(odds))) {
       bits.push(`top ${formatAmericanOdds(odds)}`);
     }
-    const dollars = formatAvailableDollars(size);
-    if (dollars) bits.push(`${dollars} currently available`);
+    const depth = depthFromStake(size, odds);
+    const dollars = formatAvailableDollars(depth != null ? depth : size);
+    if (dollars) bits.push(depth != null ? `${dollars} depth (to win)` : `${dollars} currently available`);
     secondary = bits.join(" · ");
   }
   if (!secondary && !formatAvailableDollars(size) && !displayAsBlend && blendIn === null && levels !== undefined && !(Array.isArray(levels) && levels.length)) {
@@ -162,7 +171,7 @@ export function formatDepthTrail(levels, { topAmerican, max = 2 } = {}) {
   if (!rest.length) return "";
   return rest
     .map((l) => {
-      const dollars = formatAvailableDollars(l.size);
+      const dollars = formatAvailableDollars(depthFromStake(l.size, l.american));
       return dollars ? `then ${formatAmericanOdds(l.american)} · ${dollars}` : null;
     })
     .filter(Boolean)

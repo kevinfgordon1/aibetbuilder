@@ -32,7 +32,7 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
 
 {
   const top = formatTrueOddsBookLine({ odds: 104, bookLabel: "ProphetX", size: 54 });
-  assert.equal(top, "+104 on ProphetX · $54 currently available");
+  assert.equal(top, "+104 on ProphetX · $56 depth (to win)");
   assert.equal(formatDepthTrail([], { topAmerican: 104 }), "", "no depth → unchanged (no trail)");
 }
 

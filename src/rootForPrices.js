@@ -1,7 +1,7 @@
 // Live inverse bet fairs per leg for "What to root for" (same method as Combo Sniper / noboost pm-live):
-//   leg fair = 1 − (fee-included $500 VWAP to buy the OPPOSITE side), best venue wins.
+//   leg fair = 1 − (fee-included VWAP to buy the OPPOSITE side until it can win $500), best venue wins.
 // Venues: Kalshi public orderbooks (every leg), Polymarket US + Novig from our odds-relay
-// (NFL / NCAAF moneylines), ProphetX (off until a key is set). Stale (>15s) or < $500 depth → dropped.
+// (NFL / NCAAF moneylines), ProphetX (off until a key is set). Stale (>15s) or < $500 depth (potential profit, not stake) → dropped.
 import { legEvent } from "./rootForEngine.js";
 
 export const DEPTH_USD = 500;
@@ -18,20 +18,24 @@ export function american(p) {
   return p >= 0.5 ? -Math.round((100 * p) / (1 - p)) : Math.round((100 * (1 - p)) / p);
 }
 
-/** levels [[price, contracts]] → fee-included VWAP for $usd, or { fail }. */
+/** levels [[price, contracts]] → fee-included VWAP until the bet can win $usd of PROFIT, or { fail }.
+ *  Depth = potential profit, not stake (Kevin): a contract bought at fee-included cost c wins 1 − c,
+ *  so $3,000 at −200 (c ≈ 0.667) is $1,500 of depth. */
 export function walk(levels, venue, usd = DEPTH_USD) {
   const fee = FEES[venue];
   const lv = (levels || []).filter(([p, q]) => p > 0 && p < 1 && q > 0).sort((a, b) => a[0] - b[0]);
   if (!lv.length) return { fail: "no_ask" };
-  let spent = 0, got = 0;
+  let spent = 0, got = 0, profit = 0;
   const top = lv[0][0] + fee(lv[0][0]);
   for (const [p, q] of lv) {
     const c = p + fee(p);
-    const take = Math.min(q, (usd - spent) / c);
-    spent += take * c; got += take;
-    if (spent >= usd - 1e-9) return { vwap: spent / got, top };
+    const per = 1 - c;
+    if (!(per > 0)) continue;
+    const take = Math.min(q, (usd - profit) / per);
+    spent += take * c; got += take; profit += take * per;
+    if (profit >= usd - 1e-9) return { vwap: spent / got, top, stakeUsd: spent, profitUsd: profit };
   }
-  return { fail: "depth", top, depthUsd: spent };
+  return { fail: "depth", top, depthUsd: profit };
 }
 
 /** Kalshi orderbook_fp (BIDS) → ask ladders for yes and no. */
