@@ -149,7 +149,18 @@ export function pickBestAmericanQuote(quotes, { allBooks } = {}) {
     best: best.price,
     bestBook: best.book,
     bestSize: best.size ?? null,
+    // Every depth venue's (fee-adjusted) quote that passed the same guards,
+    // best-first. Only used by the owner-only blended Min depth per leg.
+    venues: depthVenueQuotes(pool),
   };
+}
+
+const DEPTH_QUOTE_VENUES = new Set(["kalshi", "polymarket", "novig", "prophetx"]);
+export function depthVenueQuotes(pool) {
+  return (pool || [])
+    .filter((q) => DEPTH_QUOTE_VENUES.has(String(q.book || "").toLowerCase()))
+    .map((q) => ({ book: q.book, american: Number(q.price), size: q.size ?? null }))
+    .sort((a, b) => b.american - a.american);
 }
 
 export function resolveOppWithSideGuard({
@@ -157,6 +168,7 @@ export function resolveOppWithSideGuard({
   trustedBook,
   trustedCount,
   trustedSize,
+  trustedVenues,
   sameBookOpp,
   sameBookKey,
   sameBookSize,
@@ -169,6 +181,7 @@ export function resolveOppWithSideGuard({
       bestOppBook: trustedBook,
       bestOppCount: trustedCount,
       bestOppSize: trustedSize ?? null,
+      ...(Array.isArray(trustedVenues) && trustedVenues.length ? { bestOppVenues: trustedVenues } : {}),
       sameBookFallback: false,
     };
   }

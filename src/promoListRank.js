@@ -8,7 +8,7 @@ import { applyBlendToLegs, depthCacheKey, venueHasDepthApi } from "./promoBookDe
 import { preferCompletePmHedge } from "./blendAskLadder.js";
 import { filterLowLiquidityPicks } from "./promoLiquidityFilter.js";
 import { filterPicksByTeamName } from "./promoTeamFilter.js";
-import { filterPicksByMinDepth } from "./promoMinDepth.js";
+import { applyMinDepthToPick, minDepthAltVenueLegs, parseMinLegDepth } from "./promoMinDepth.js";
 
 export function overlayBlendedParlay(p, displayLegs, ctx, calcs) {
   const prev = p.legs || [];
@@ -29,21 +29,33 @@ function attachPmBlendToPick(p, ctx, overlayParlayMetrics, laddersByKey) {
   return { ...next, legs: displayLegs };
 }
 
+// Min depth per leg (owner-only): reprice each leg to its cross-venue blended
+// price for the minimum, recompute the parlay EV, or drop the pick.
+function attachMinDepthToPick(p, ctx, overlayParlayMetrics, laddersByKey) {
+  if (!parseMinLegDepth(ctx.minLegDepth)) return p;
+  const next = applyMinDepthToPick(p, ctx.minLegDepth, laddersByKey);
+  if (!next) return null;
+  return { ...overlayParlayMetrics(p, next.legs, ctx), legs: next.legs };
+}
+
 export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, laddersByKey) {
-  const tagged = (picks || []).map((p) => attachLock(attachPmBlendToPick(p, ctx, overlayParlayMetrics, laddersByKey)));
+  const tagged = (picks || [])
+    .map((p) => attachMinDepthToPick(attachPmBlendToPick(p, ctx, overlayParlayMetrics, laddersByKey), ctx, overlayParlayMetrics, laddersByKey))
+    .filter(Boolean)
+    .map((p) => attachLock(p));
   const guarded = rankPicksAfterOppGuard(tagged);
   const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(guarded) : guarded;
   const liquidAll = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
-  const liquid = filterPicksByMinDepth(liquidAll, ctx.minLegDepth, laddersByKey);
-  return filterPicksByTeamName(liquid, ctx.includeTeamTokens, ctx.excludeTeamTokens);
+  return filterPicksByTeamName(liquidAll, ctx.includeTeamTokens, ctx.excludeTeamTokens);
 }
 
 // PM legs on the visible page. Sportsbooks are skipped (no depth API).
-export function collectPromoDepthLegs(picks) {
+export function collectPromoDepthLegs(picks, minLegDepth) {
   const out = [];
   const seen = new Set();
   for (const p of picks || []) {
-    for (const leg of (p && p.legs) || []) {
+    const legs = (p && p.legs) || [];
+    for (const leg of legs.concat(minDepthAltVenueLegs(legs, minLegDepth))) {
       if (!venueHasDepthApi(leg && leg.bestOppBook)) continue;
       const key = depthCacheKey(leg);
       if (!key || seen.has(key)) continue;
