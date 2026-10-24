@@ -1,11 +1,11 @@
 // Pending-lock "Check market price": pause the lock's own quotes, RFQ the lock's
-// combo on the lock owner's key for a full 10s, report the best competing quote.
+// combo on the lock owner's key for a full 5s, report the best competing quote.
 // Pure helpers (no I/O) so the flow is testable; I/O lives in combo-probe.js.
 'use strict';
 
-const LOCK_CHECK_WAIT_MS = 10_000;        // Kevin: collect for 10s "to be safe"
+const LOCK_CHECK_WAIT_MS = 5_000;         // Kevin (Oct 24): "It can be as quick as 5 seconds"
 const LOCK_CHECK_COOLDOWN_MS = 60_000;    // per user
-// Hold written on the lock (settle ≤6s + market + 10s collect + delete ≈ 19s fits).
+// Hold written on the lock (settle ≤6s + market + 5s collect + delete ≈ 14s fits).
 const PROBE_PAUSE_HOLD_MS = 25_000;
 // combo-worker's hard backstop: it ignores a probe pause older than this.
 const PROBE_PAUSE_MAX_MS = 30_000;

@@ -37,7 +37,7 @@ import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked, matchedRfqCounts } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, lockQuoteFillCounts, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions";
 import { outcomeChrome } from "./comboLegResult";
 import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
@@ -53,7 +53,7 @@ import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SE
 import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
-import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
+import { lockCheckAvailable, lockCheckView, lockPriceAdvice, autoCheckDue, missedQuotes, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
 import { fillsPlan, nextFillsCache } from "./comboFillsIncremental.js";
 import { fetchAllRows } from "./comboPaging";
 import { archivedRowsNeedRefetch, archivedSubsPlan, nextArchivedSubsCache } from "./comboHistoryCache";
@@ -131,41 +131,90 @@ const MODE_LABEL = {
 };
 // Per-lock pause: off = the worker stops quoting this lock (Kalshi + Polymarket) and cancels its
 // open quotes. Independent of the kill switch. Fills/history are kept.
-// Pending-lock "Check market price": pauses this lock ~15s, RFQs on the owner's own key for 10s.
-function LockMarketCheck({ parlay, user, supabase }) {
+// Pending-lock "Check market price": pauses this lock briefly, RFQs on the owner's own key for 5s.
+// Also runs automatically after every 10 missed quotes (quotes with no fill) so the card can
+// say whether we're the best market price. Suggestion only — never changes the price.
+const AUTO_CHECK_KEY = (id) => "cl-autochk:" + id;
+const readAutoState = (id) => {
+  try { return JSON.parse(window.localStorage.getItem(AUTO_CHECK_KEY(id)) || "null") || {}; } catch (_) { return {}; }
+};
+const writeAutoState = (id, v) => {
+  try { window.localStorage.setItem(AUTO_CHECK_KEY(id), JSON.stringify(v)); } catch (_) { /* private mode */ }
+};
+// One check at a time across all cards (the server allows one per user per minute anyway).
+let lockCheckInFlight = false;
+let lockCheckNotBefore = 0;
+
+function LockMarketCheck({ parlay, user, supabase, counts, onResult }) {
   const avail = lockCheckAvailable(parlay, user);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
-  if (!avail.show) return null;
-  const run = async (e) => {
+  const [auto, setAuto] = useState(false);
+  const missed = missedQuotes(counts);
+  const run = useCallback(async (e, { isAuto = false } = {}) => {
     if (e) e.stopPropagation();
-    if (busy || avail.disabled) return;
+    if (busy || avail.disabled || lockCheckInFlight) return;
+    lockCheckInFlight = true;
     setBusy(true);
-    setResult(null);
+    setAuto(isAuto);
+    if (!isAuto) setResult(null);
+    let d = null;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session && session.access_token;
-      if (!token) { setResult({ ok: false, error: "Sign in required" }); return; }
+      if (!token) { d = { ok: false, error: "Sign in required" }; return; }
       const r = await fetch("/api/combo-probe", {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json", authorization: "Bearer " + token },
         body: JSON.stringify({ lockId: parlay.id }),
       });
-      let d = null;
       try { d = await r.json(); } catch (_) { d = null; }
-      setResult(d && typeof d === "object" ? d : { ok: false, error: `Check failed (${r.status})` });
+      if (!d || typeof d !== "object") d = { ok: false, error: `Check failed (${r.status})` };
+      if (r.status === 429) {
+        lockCheckNotBefore = Date.now() + (Number(d.retryAfterMs) || 60_000);
+        d = { ...d, rateLimited: true };
+      }
     } catch (err) {
-      setResult({ ok: false, error: String(err && err.message || err) });
+      d = { ok: false, error: String(err && err.message || err) };
     } finally {
+      lockCheckInFlight = false;
       setBusy(false);
+      // A rate-limited auto check is silent and retried later; it doesn't count as a check.
+      if (isAuto && d && d.rateLimited) return;
+      if (isAuto) writeAutoState(parlay.id, { lastMissed: missed, result: d && d.ok ? d : null });
+      if (!isAuto || (d && d.ok)) setResult(d);
+      if (onResult && d && d.ok) onResult(parlay.id, d);
     }
-  };
+  }, [busy, avail.disabled, supabase, parlay.id, missed, onResult]);
+
+  // Restore the last auto-check result so the alert survives a reload.
+  useEffect(() => {
+    const st = readAutoState(parlay.id);
+    if (st.result && onResult) onResult(parlay.id, st.result);
+  }, [parlay.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (typeof document !== "undefined" && document.hidden) return;
+    const st = readAutoState(parlay.id);
+    const due = autoCheckDue({
+      missed,
+      lastMissed: Math.min(Number(st.lastMissed) || 0, missed), // counts can shrink (window) → re-baseline
+      busy: busy || lockCheckInFlight,
+      paused: isLockPaused(parlay) || parlay.active === false,
+      available: avail.show && !avail.disabled && (counts ? counts.fills : 0) === 0,
+      nowMs: Date.now(),
+      notBeforeMs: lockCheckNotBefore,
+    });
+    if (due) run(null, { isAuto: true });
+  }, [missed]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!avail.show) return null;
   const v = lockCheckView(result, parlay);
   const tone = v && (v.kind === "win" ? "#6ee7b7" : v.kind === "lose" ? "#fca5a5" : v.kind === "error" ? "#fca5a5" : "#c3c6cc");
   return (
     <div className="lock-check" data-testid="lock-market-check">
-      <button className="btn mini" disabled={busy || avail.disabled} title={avail.disabled ? avail.reason : LOCK_CHECK_TITLE} onClick={run}>
-        {busy ? LOCK_CHECK_BUSY_LABEL : "Check market price"}
+      <button className="btn mini" disabled={busy || avail.disabled} title={avail.disabled ? avail.reason : LOCK_CHECK_TITLE} onClick={(e) => run(e)}>
+        {busy ? (auto ? "Auto-checking market…" : LOCK_CHECK_BUSY_LABEL) : "Check market price"}
       </button>
       {avail.disabled && <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{avail.reason}</span>}
       {v && v.kind !== "error" && (
@@ -1423,6 +1472,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   };
   // Per-lock pause. Persisted in combo_parlays.paused; combo-worker polls it (~5s). Owner RLS applies.
   const [pauseBusy, setPauseBusy] = useState({});
+  const [checkResults, setCheckResults] = useState({}); // lockId → last Check market price result
+  const onCheckResult = useCallback((id, r) => setCheckResults((m) => ({ ...m, [id]: r })), []);
   const setParlayPaused = async (id, paused) => {
     setPauseBusy((b) => ({ ...b, [id]: true }));
     setParlays((prev) => prev.map((p) => (p.id === id ? { ...p, paused } : p)));
@@ -1511,7 +1562,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const status = lockStatus({ parlay: p, filled: filledN, ceiling, kill: deskReady && !deskLoading ? kill : false });
     const out = outcomeChrome(lockOutcome(p, filledN), { filled: filledN > 0 });
     const matched = matchedCountText(p);
-    const quoteLine = lockQuoteFillLine(submissionsByParlay[p.id], { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, countedUnfilledQuotes: unfilledCounts[p.id] });
+    const qfOpts = { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, countedUnfilledQuotes: unfilledCounts[p.id] };
+    const quoteLine = lockQuoteFillLine(submissionsByParlay[p.id], qfOpts);
+    const quoteCounts = lockQuoteFillCounts(submissionsByParlay[p.id], qfOpts);
+    const advice = !filledSection && p.user_id === user.id ? lockPriceAdvice(checkResults[p.id], p, { feeRate: feeOn ? COMBO_FEE_RATE : 0 }) : null;
     const open = !!openParlays[p.id];
     const toggle = () => setOpenParlays((o) => {
       const next = !o[p.id];
@@ -1531,10 +1585,11 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         onToggle={toggle}
         bets={betsByParlay[p.id]}
         quoteLine={quoteLine}
+        priceAlert={advice}
         hedgeNote={desk && desk.quoted > desk.fill.filled ? `Offered ${desk.quoted.toLocaleString("en-US")}, ${desk.fill.filled.toLocaleString("en-US")} confirmed filled` : ""}
         controls={<>
           <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
-          {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} />}
+          {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} counts={quoteCounts} onResult={onCheckResult} />}
           {p.active !== false && <ChangePriceButton parlay={p} supabase={supabase} feesEnabled={p.user_id === user.id ? feeOn : !!feesByUserId[p.user_id]} onDone={reload} />}
         </>}
       >

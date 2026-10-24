@@ -514,6 +514,8 @@ async function runLockCheck({ parlay, creds }) {
       bestNoBid: best.bestNoBid,
       bestYesBid: best.bestYesBid,
       bestAmerican: best.bestAmerican,
+      // One tick better than the best competing NO bid, as a fill_american (seller side).
+      suggestFillAmerican: best.suggestFillAmerican,
       quoteCount: poll.quotes.length,
       competitorCount: best.usableQuoteCount,
       ownQuotesExcluded: poll.quotes.length - competitors.length,
