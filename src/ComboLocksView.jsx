@@ -456,7 +456,7 @@ export function MergedTag({ bets }) {
  * sell price and how much is hedged, then a small "Your original bet" reminder.
  * Everything else lives behind Details (children).
  */
-export function LockCard({ hedgeNote = "", feeRate = 0, parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
+export function LockCard({ quoteLine = "", hedgeNote = "", feeRate = 0, parlay, status, profile, filled = 0, ceiling, overText = "", open, onToggle, controls, children, bets }) {
   const s = betSummary(parlay) || {};
   const cap = Number(ceiling) > 0 ? Number(ceiling) : Number(parlay && parlay.max_contracts) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((Number(filled || 0) / cap) * 100)) : 0;
@@ -496,6 +496,7 @@ export function LockCard({ hedgeNote = "", feeRate = 0, parlay, status, profile,
         <Fact k="Hedged" v={`${pct}%`} s={cap > 0 ? `${countText(filled)} of ${countText(cap)}${overText} contracts` : "size not set"} />
       </div>
       <div className="bar thin"><div className="bar-fill" style={{ width: pct + "%" }} /></div>
+      {quoteLine ? <div className="num" style={{ fontSize: 13, marginTop: 6 }}><span className="chip warn">{quoteLine}</span></div> : null}
       {hedgeNote ? <div className="lk-hnote" title="The rest weren't taken, or haven't gone through yet.">{hedgeNote}</div> : null}
       <div className="lk-hint">{status.hint}</div>
       </div>
