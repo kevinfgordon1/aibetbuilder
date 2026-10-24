@@ -28,6 +28,12 @@ function chain(rows) {
   assert.strictEqual(r.body.book, 'dry'); assert.strictEqual(r.body.status.mode, 'dry');
   assert.strictEqual(r.body.risk.open, 42); assert.strictEqual(r.body.quotes[0].fairAmerican, 300);
   assert.strictEqual(r.headers['Cache-Control'], 'no-store');
+  // Summary (skips) scan timing out must not take down the page.
+  const realFrom = (t) => { const c = chain(tables[t] || []); if (t === 'sniper_decisions') c.range = async () => ({ data: null, error: { message: 'canceling statement due to statement timeout' } }); return c; };
+  h._setDeps({ env: { SUPABASE_URL: 'u', SUPABASE_ANON_KEY: 'a', SUPABASE_SERVICE_KEY: 's' }, now: () => Date.now(),
+    createClient: () => ({ auth: { getUser: async () => ({ data: { user: owner } }) }, from: realFrom }) });
+  r = res(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: {} }, r);
+  assert.strictEqual(r.code, 200, 'summary timeout is non-fatal: ' + JSON.stringify(r.body)); assert.strictEqual(r.body.risk.open, 42);
   // Hedge writes: owner only, validated, real fills only.
   const writes = [];
   const wchain = (t) => { const c = chain(tables[t] || []); c.in = () => c; c.insert = (row) => { writes.push(['insert', t, row]); return { select: async () => ({ data: [{ id: 'h1' }], error: null }) }; };
