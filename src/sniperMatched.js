@@ -118,3 +118,11 @@ export function sniperNeedleHistory(rows, nowMs = Date.now()) {
     result: +(b.live_ev - b.pregame_ev).toFixed(2), pnl: +b.pnl.toFixed(2), settled: b.settled, open: b.open,
     final: b.open === 0 && b.day < today, sniper: true }));
 }
+
+/** Fill day of a ledger row on the Today rollover (ET, 2 AM) — shared by the needle history and Results scopes. */
+export function sniperFillDay(iso) { return iso ? new Date(Date.parse(iso) - 2 * 3600e3).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : null; }
+/** Results scopes: perfStats per fill day (last 30 days) so the Results tab can switch Today / All / a past day. */
+export function perfByDay(rows, legResults = {}) {
+  const g = {}; for (const r of (rows || []).filter(isMatched)) { const d = sniperFillDay(r.created_at); if (d) (g[d] || (g[d] = [])).push(r); }
+  return Object.fromEntries(Object.keys(g).sort().reverse().slice(0, 30).map((d) => [d, perfStats(g[d], legResults)]));
+}

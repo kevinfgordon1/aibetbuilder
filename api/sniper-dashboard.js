@@ -229,6 +229,7 @@ async function matched(db, env, nowMs) {
   const names = {}; const legResults = {};
   for (const [t, m] of Object.entries(mk)) { if (/^KXNFLTD-/.test(t)) names[t] = m.title || m.yes_sub_title; const res = String(m.result || '').toLowerCase(); if ((res === 'yes' || res === 'no') && /settled|finalized|determined/.test(String(m.status || ''))) legResults[t] = res; }
   const perf = S.perfStats(rows, legResults);
+  const perfDays = S.perfByDay(rows, legResults);
   // Live EV uses the same open fills and the same four-venue sniper leg fairs as "What to root for".
   const liveRows = rows.filter((r) => r.status === 'open' && Number(r.filled_contracts) > 0 && r.phase !== 'settled' && !r.settled_at);
   const Hg = await hedgeMod();
@@ -290,7 +291,7 @@ async function matched(db, env, nowMs) {
   const hedgedList = list.filter((x) => x.hedge && x.status === 'open');
   const hedgeTotals = { fills: hedgedList.length, locked: hedgedList.filter((x) => x.hedge.locked).length, stake: hedgedList.reduce((a, x) => a + x.hedge.stake, 0),
     worst: hedgedList.reduce((a, x) => a + x.hedge.worst, 0), freed: hedgedList.reduce((a, x) => a + x.hedge.freed, 0) };
-  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, root, sweat, hedgeTotals };
+  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, perfDays, root, sweat, hedgeTotals };
 }
 
 // "What to root for" (Combo Locks sheet) over live, filled, unsettled sniper positions. The sniper is the HOUSE

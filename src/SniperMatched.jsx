@@ -8,6 +8,8 @@ import EvBars from "./RootForEvBars";
 import { topByGain, topByDrop } from "./rootForSimple";
 import { americanFromProb, fmtAmerican, fmtUsd , takerSeesAmerican } from "./sniperDashboard.js";
 import HedgePanel, { hedgeLabel } from "./SniperHedges";
+import { perfStats, sniperFillDay } from "./sniperMatched.js";
+const EMPTY_PERF = perfStats([]);
 
 const C = { surface: "#181818", head: "#1f1f1f", border: "#2a2a2a", gold: "#bc9e66", text: "#e4e0d8", text2: "#a8a49c", muted: "#8a8a8a", good: "#7cc49a", bad: "#d88c84", warn: "#e0a04a" };
 const card = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 };
@@ -313,7 +315,12 @@ export function MyFills({ data, nowMs, api }) {
 
 export default function SniperMatched({ data }) {
   const [filter, setFilter] = useState("all");
-  const rows = useMemo(() => (data && data.rows ? data.rows.filter((r) => filter === "all" || (filter === "open" ? r.status === "open" || r.status === "confirming" : r.status === filter)) : []), [data, filter]);
+  // Today / All / a past fill day (ET, 2 AM rollover), like Combo Locks' results.
+  const [scope, setScope] = useState("all");
+  const todayKey = sniperFillDay(new Date().toISOString());
+  const days = Object.keys((data && data.perfDays) || {});
+  const dayKey = scope === "today" ? todayKey : scope.startsWith("day:") ? scope.slice(4) : null;
+  const rows = useMemo(() => (data && data.rows ? data.rows.filter((r) => (!dayKey || sniperFillDay(r.createdAt) === dayKey) && (filter === "all" || (filter === "open" ? r.status === "open" || r.status === "confirming" : r.status === filter))) : []), [data, filter, dayKey]);
   if (!data) return null;
   if (data.empty) {
     return (
@@ -324,18 +331,28 @@ export default function SniperMatched({ data }) {
       </div>
     );
   }
-  const p = data.perf; const t = p.total; const root = data.root;
+  const p = dayKey ? (data.perfDays && data.perfDays[dayKey]) || EMPTY_PERF : data.perf; const t = p.total; const root = dayKey ? null : data.root;
+  const scopeRows = dayKey ? data.rows.filter((r) => sniperFillDay(r.createdAt) === dayKey) : data.rows;
   const d = root ? { ...root, asOf: data.asOf, sweat: data.sweat } : null;
   const tdNames = {}; for (const r of data.rows) for (const l of r.legs) if (l.type === "td") tdNames[l.ticker] = { who: l.bet.replace(/ anytime TD.*$/, ""), game: `${l.game}${l.kickoff ? "" : ""}` };
   return (
     <div data-testid="sniper-matched" style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}><h2 style={{ ...h2, fontSize: 18, margin: 0 }}>Matched</h2><span style={{ color: C.muted, fontSize: 12 }}>Live filled sniper positions. We're the house: we win when any leg loses.</span></div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}><h2 style={{ ...h2, fontSize: 18, margin: 0 }}>Matched</h2><span style={{ color: C.muted, fontSize: 12 }}>Live filled sniper positions. We're the house: we win when any leg loses.</span>
+        <span style={{ flex: 1 }} />
+        <span data-testid="results-scope" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {[["today", "Today"], ["all", "All"]].map(([k, l]) => <button key={k} onClick={() => setScope(k)} style={{ background: scope === k ? C.gold : C.head, color: scope === k ? "#17140f" : C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+          {days.filter((x) => x < todayKey).length > 0 && <select aria-label="Past day" value={scope.startsWith("day:") ? scope.slice(4) : ""} onChange={(e) => setScope(e.target.value ? `day:${e.target.value}` : "all")} style={{ background: scope.startsWith("day:") ? C.gold : C.head, color: scope.startsWith("day:") ? "#17140f" : C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "3px 6px", fontSize: 12 }}>
+            <option value="">Past day…</option>
+            {days.filter((x) => x < todayKey).map((x) => <option key={x} value={x}>{new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${x}T12:00:00Z`))}</option>)}
+          </select>}
+        </span></div>
+      {dayKey && <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>Showing fills made {scope === "today" ? "today" : "on " + dayKey} (ET, day rolls at 2 AM): {t.n} fill{t.n === 1 ? "" : "s"}.{root ? "" : " The live needle covers every open position, so it shows under All; see What to root for → Past day for a day's needle."}</div>}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <Stat label="Record" value={`${t.won}-${t.lost}${t.void ? `-${t.void}` : ""}`} sub={`${t.open} open · ${t.n} matched`} />
         <Stat label="P&L (settled)" value={signed(t.pnl)} color={pnlColor(t.pnl)} sub={`Expected ${signed(t.settledEv)}`} />
         <Stat label="ROI" value={pct(t.roi)} sub={`on ${fmtUsd(t.settledRisk)} risked`} />
         <Stat label="Win rate" value={pct(t.winRate)} sub={`Expected ${t.won + t.lost ? pct(t.expectedWins / (t.won + t.lost + t.void)) : "—"}`} />
-        <Stat label="Open risk" value={fmtUsd(data.rows.filter((r) => r.status === "open").reduce((a, r) => a + r.risk, 0))} sub={`To win ${fmtUsd(data.rows.filter((r) => r.status === "open").reduce((a, r) => a + r.toWin, 0))}`} />
+        <Stat label="Open risk" value={fmtUsd(scopeRows.filter((r) => r.status === "open").reduce((a, r) => a + r.risk, 0))} sub={`To win ${fmtUsd(scopeRows.filter((r) => r.status === "open").reduce((a, r) => a + r.toWin, 0))}`} />
         <Stat label="Expected (all)" value={signed(t.ev)} sub="Σ edge at the fair we sold at" />
       </div>
       {d && (
