@@ -4,7 +4,7 @@
 // page with those ladders so ★ BEST PICK is index 0 of the EV on the card.
 
 import { rankPicksAfterOppGuard } from "./promoOppGuard.js";
-import { applyBlendToLegs, depthCacheKey, venueHasDepthApi } from "./promoBookDepth.js";
+import { applyBlendToLegs, depthCacheKey, venueHasDepthApi, unknownDepthKeys } from "./promoBookDepth.js";
 import { preferCompletePmHedge } from "./blendAskLadder.js";
 import { filterLowLiquidityPicks } from "./promoLiquidityFilter.js";
 import { filterPicksByTeamName } from "./promoTeamFilter.js";
@@ -74,7 +74,10 @@ export function collectPromoDepthLegs(picks, minLegDepth) {
 // visible page from the rest of the checked window so the page never shows
 // "Show more (N remaining)" with zero cards. `hidden` = checked picks the
 // depth walk removed; `needsWiderWindow` asks the caller to check more.
-export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage, windowSize) {
+// opts.keysOfPick(p) → depth keys the pick needs. Picks the depth walk drops
+// while one of their keys is in unknownDepthKeys(laddersByKey) (venue could
+// not be read) count as `unknown`, not `hidden`: we do not know they are thin.
+export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage, windowSize, opts = {}) {
   const list = Array.isArray(ranked) ? ranked : [];
   const size = Math.max(0, pageSize | 0);
   const win = Math.min(list.length, Math.max(size, windowSize | 0));
@@ -88,10 +91,21 @@ export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage,
   const ok = Array.isArray(passed) ? passed : [];
   const visible = ok.slice(0, size);
   const rest = ok.slice(size).concat(unchecked);
+  const dropped = Math.max(0, head.length - ok.length);
+  let unknown = 0;
+  const unknownKeys = unknownDepthKeys(laddersByKey);
+  if (dropped > 0 && unknownKeys.size && typeof opts.keysOfPick === "function") {
+    const touch = head.filter((p) => (opts.keysOfPick(p) || []).some((k) => unknownKeys.has(k)));
+    if (touch.length) {
+      const okTouch = rankPage(touch, laddersByKey);
+      unknown = Math.min(dropped, Math.max(0, touch.length - (Array.isArray(okTouch) ? okTouch.length : 0)));
+    }
+  }
   return {
     visible,
     rest,
-    hidden: Math.max(0, head.length - ok.length),
+    hidden: dropped - unknown,
+    unknown,
     pending: false,
     needsWiderWindow: visible.length < size && unchecked.length > 0,
   };
@@ -116,6 +130,17 @@ export function holdDepthRankWhilePending(next, laddersByKey, prev, filtersKey) 
 
 // First load with Hide low liquidity on: raw top-of-book picks would show,
 // then most vanish when ladders land. Show nothing (pending) instead.
+// Notice to show under the list. "thin" only when every dropped pick was
+// actually measured below the bar; "unavailable" when venue reads failed.
+export function promoDepthNoticeKind(rank, { allChecked = true } = {}) {
+  if (!rank) return null;
+  if (rank.checking) return "checking";
+  if (rank.pending || (rank.visible && rank.visible.length > 0)) return null;
+  if ((rank.unknown || 0) > 0) return "unavailable";
+  if ((rank.hidden || 0) > 0 && allChecked) return "thin";
+  return null;
+}
+
 export function maskUncheckedWhileHidingThin(rank, hideLowLiquidity) {
   if (!rank || !rank.pending || !hideLowLiquidity) return rank;
   return { ...rank, visible: [], rest: [], checking: true };
