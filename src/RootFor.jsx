@@ -205,6 +205,11 @@ function todaySweat(base, pos, evNow, nowMs) {
   if (dr && Number.isFinite(Number(dr.pregame_ev)) && Number.isFinite(Number(dr.live_ev))) {
     return { ...s, started: true, baseline: Number(dr.pregame_ev), now: Number(dr.live_ev), dayResult: Number(dr.result) };
   }
+  // Sniper page: Pregame = fill-time value per fill; scope it (and Now) to today's fills.
+  if (s.fixedBaseline && s.lockBaseline) {
+    const ids = pos.map((p) => String(p.id));
+    return { ...s, now: evNow, baseline: ids.reduce((a, id) => a + (Number(s.lockBaseline[id]) || 0), 0) };
+  }
   if (!s.frozen || !base.model) return s;
   const evs = new Set(pos.flatMap((p) => p.legs.map((l) => l.event)));
   const frozen = Object.fromEntries(Object.entries(s.frozen).filter(([ev]) => evs.has(ev)));
@@ -227,7 +232,7 @@ function todayView(base, nowMs) {
   const s0 = base.sweat || {}; const fin = new Set(((s0.tu && s0.tu.finished) || s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === todayDay(nowMs)));
   const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
   return {
-    d: { ...base, ...r, sweat: todaySweat(base, pos, r.ev, nowMs), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
+    d: { ...base, ...r, model: { ...base.model, positions: pos }, sweat: todaySweat(base, pos, r.ev, nowMs), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
     info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
   };
 }

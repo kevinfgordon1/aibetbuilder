@@ -69,18 +69,18 @@ function RiskByGame({ r, caps, labels }) {
 
 export default function SniperDashboard({ user }) {
   const [book, setBook] = useState("auto");
-  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [matchedErr, setMatchedErr] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("fills"); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [matchedErr, setMatchedErr] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("root"); const [showQuotes, setShowQuotes] = useState(() => { try { return localStorage.getItem("sniperQuotesOpen") === "1"; } catch { return false; } }); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
   const load = useCallback(async () => {
     const c = supabase(); if (!c) { setErr("Supabase not configured"); return; }
     setLoading(true);
     try {
       const { data: { session } } = await c.auth.getSession();
       if (!session) { setErr("Sign in required"); return; }
+      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then(async (x) => { const m = await x.json().catch(() => null); if (m && m.ok) { setMatched(m); setMatchedErr(null); } else throw new Error((m && m.error) || `HTTP ${x.status}`); }).catch((e) => setMatchedErr(String((e && e.message) || e)));
       const r = await fetch(`/api/sniper-dashboard?book=${book}&days=7`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setData(j); setErr(null);
-      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then(async (x) => { const m = await x.json().catch(() => null); if (m && m.ok) { setMatched(m); setMatchedErr(null); } else throw new Error((m && m.error) || `HTTP ${x.status}`); }).catch((e) => setMatchedErr(String((e && e.message) || e)));
     } catch (e) { setErr(String(e.message || e)); } finally { setLoading(false); }
   }, [book]);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
@@ -115,16 +115,16 @@ export default function SniperDashboard({ user }) {
       {matched && (
         <div>
           <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
-            {[["fills", "My Fills"], ["root", "What to root for"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
+            {[["root", "What to root for"], ["fills", "My Fills"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
           </div>
           {tab === "fills" ? <MyFills data={matched} api={hedgeApi} /> : tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : <SniperMatched data={matched} />}
         </div>
       )}
       {data && (
         <>
-          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote, at least {Math.round((caps.minEdge || 0) * 100)}% edge after fees, $1,000 depth per leg, NFL only, no repeat parlays.</div>
+          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, 4% other NFL, 5% college and NBA, 6% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
-            <Meter label="Open risk" value={r.open} cap={caps.totalOpen} />
+            <Meter label="Open risk" value={r.open} cap={caps.totalOpen} note={`Max ${fmtUsd(caps.longDatedOpen)} on parlays settling more than 32h out`} />
             <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? ((data.gameLabels || {})[r.maxGame.game] || r.maxGame.game) : "No open games"} />
             <Meter label="Today's loss" value={r.dayLoss} cap={caps.dailyLoss} note={`P&L today ${fmtUsd(r.dayPnl)}`} />
             <div style={{ ...card, flex: "1 1 200px" }}>
@@ -135,9 +135,9 @@ export default function SniperDashboard({ user }) {
           </div>
           <RiskByGame r={r} caps={caps} labels={data.gameLabels || {}} />
           <div style={{ ...card, marginBottom: 14, overflowX: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={h2}>Quotes, fills & results</div><span style={{ flex: 1 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ ...h2, cursor: "pointer", userSelect: "none" }} onClick={() => setShowQuotes((v) => { const n = !v; try { localStorage.setItem("sniperQuotesOpen", n ? "1" : "0"); } catch { /* ignore */ } return n; })} data-testid="sniper-quotes-toggle">{showQuotes ? "\u25BE" : "\u25B8"} Quotes, fills & results</div><span style={{ flex: 1 }} />
               <label style={{ color: C.text2, fontSize: 12, cursor: "pointer" }}><input type="checkbox" checked={onlyMatched} onChange={(e) => setOnlyMatched(e.target.checked)} /> Matched only</label></div>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            {showQuotes && <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr>{["Time", "Status", "Legs", "Fair", "We offer", "Taker sees", "Edge", "Size", "Risk", "Fill", "Result / P&L"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
               <tbody>
                 {(onlyMatched ? data.quotes.filter((q) => q.filledContracts > 0 || ["filled", "won", "lost", "accepted"].includes(q.state)) : data.quotes).length === 0 && <tr><td style={{ ...td, color: C.muted }} colSpan={11}>No quotes in the last 7 days.</td></tr>}
@@ -157,7 +157,7 @@ export default function SniperDashboard({ user }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table>}
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ ...card, flex: "1 1 320px" }}>

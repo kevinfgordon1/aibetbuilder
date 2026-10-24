@@ -335,12 +335,13 @@ async function sniperRootFor(db, env, nowMs, checkOnly) {
   root.top = (root.top || []).map(deco);
   if (root.model && root.model.teamNames) for (const k of Object.keys(root.model.teamNames)) { const i = k.lastIndexOf(':'); root.model.teamNames[k] = nameOf(k.slice(0, i), k.slice(i + 1), root.model.teamNames[k]); }
   const evOf = (r) => { const m = S.rowMoney(r); const hg = Hg.hedgeSummary({ n: m.n, risk: m.risk, fair: m.fair, baseEv: m.ev }, hedges[r.rfq_id]); return hg && hg.ev != null ? hg.ev : m.ev; };
-  const baseline = rows.reduce((a, r) => a + evOf(r), 0);
+  const lockBaseline = {}; for (const r of rows) lockBaseline[r.rfq_id] = evOf(r);
+  const baseline = Object.values(lockBaseline).reduce((a, x) => a + x, 0);
   fillTimeFallback(root, rows, S, evOf);
   const lockLabels = {}; for (const r of rows) lockLabels[r.rfq_id] = (r.legs || []).map((k) => L.legInfo(k, gm, names).bet).join(' + ');
   // Pregame = fill-time value of the open fills (sniper fair at quote time), not the live number again.
   const hedgedLocks = rows.filter((r) => Hg.activeHedges(hedges[r.rfq_id]).length).length;
-  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, hedgedLocks, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true } };
+  return { ok: true, house: true, asOf, relayNote: markets.relayNote, ...root, locksTotal: rows.length, hedgedLocks, lockLabels, sweat: { baseline, now: root.ev, started: true, fixedBaseline: true, lockBaseline } };
 }
 
 // Sniper leg fairs (src/sniperLegFair.js): $1,000 inverse bet across Kalshi + relay Polymarket US / Novig (TD /td)
