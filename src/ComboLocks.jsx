@@ -54,6 +54,7 @@ import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } 
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
 import { lockCheckAvailable, lockCheckView, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
+import { fillsPlan, nextFillsCache } from "./comboFillsIncremental.js";
 import { fetchAllRows } from "./comboPaging";
 import { archivedRowsNeedRefetch, archivedSubsPlan, nextArchivedSubsCache } from "./comboHistoryCache";
 import { americanFromNoPrice, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
@@ -682,6 +683,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const archivedGenRef = useRef(0); // bumped by user actions; a read started before one is not cached
   // Last row counts, so multi-page reads request their pages in parallel.
   const pageHintRef = useRef({ fills: 0, booked: 0 });
+  const fillsCacheRef = useRef(null); // { userId, rows, maxRecorded, fullAt } for incremental combo_fills reads
   const loadDesk = useCallback(async () => {
     if (!owner) return;
     try {
@@ -689,6 +691,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       // History needs archived locks). All fast (p95 < 0.4s). The slow reads below run in parallel
       // but no longer hold the lists behind "Loading locks…".
       const archivedGen = archivedGenRef.current;
+      if (fillsCacheRef.current && fillsCacheRef.current.userId !== user.id) fillsCacheRef.current = null;
+      const fillsPlanNow = fillsPlan(fillsCacheRef.current, Date.now());
       let archivedFromCache = !archivedRowsNeedRefetch(archivedRowsRef.current, null);
       const coreP = Promise.allSettled([
         // All LIVING parlays (not yet archived), whether the worker is actively watching them
@@ -704,7 +708,12 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         // REAL combo fills (maker + taker). deskFillCounts sums maker/lock fills only;
         // taker rows are fetched so their order_ids claim filled submissions and cannot
         // inflate "Hedged so far" with quoted contracts.
-        fetchAllRows(() => supabase.from("combo_fills").select("parlay_id,count,is_combo,is_taker,outcome_side,action,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee").eq("user_id", user.id).eq("is_combo", true).order("recorded_at", { ascending: true }).order("id", { ascending: true }), { expectedRows: pageHintRef.current.fills }),
+        // Incremental between full reads (src/comboFillsIncremental.js): only rows recorded since the newest one held.
+        fetchAllRows(() => {
+          let q = supabase.from("combo_fills").select("id,parlay_id,count,is_combo,is_taker,outcome_side,action,ticker,raw,fill_id,order_id,kalshi_created_time,recorded_at,no_price,yes_price,fee").eq("user_id", user.id).eq("is_combo", true);
+          if (!fillsPlanNow.full) q = q.gte("recorded_at", fillsPlanNow.since);
+          return q.order("recorded_at", { ascending: true }).order("id", { ascending: true });
+        }, { expectedRows: fillsPlanNow.full ? pageHintRef.current.fills : 0 }),
       ]);
       // SECONDARY reads, started at the same time.
       const extraP = Promise.allSettled([
@@ -785,7 +794,12 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       } else if (archivedRows && archivedRowsRef.current && livingIdsNow) {
         archivedRowsRef.current = { ...archivedRowsRef.current, livingIds: livingIdsNow };
       }
-      const fillRows = takeList(fillsRes);
+      const fillDelta = takeList(fillsRes);
+      let fillRows = null;
+      if (fillDelta) {
+        fillsCacheRef.current = { ...nextFillsCache(fillsCacheRef.current, fillsPlanNow, fillDelta, Date.now()), userId: user.id };
+        fillRows = fillsCacheRef.current.rows;
+      }
       if (fillRows) pageHintRef.current.fills = fillRows.length;
       if (fillRows) setComboFills(fillRows);
       // ONE fills write per poll, from combo_fills (+ confirmed submissions). It used to be written
@@ -972,7 +986,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   useEffect(() => { loadGames(); }, [loadGames]);
   // User actions (save, merge, archive, restore, delete, pause) can change archived rows, so they
   // drop the cached History list; only the 20s poll reuses it.
-  const reloadAll = useCallback(() => { archivedGenRef.current += 1; archivedRowsRef.current = null; return reload(); }, [reload]);
+  const reloadAll = useCallback(() => { archivedGenRef.current += 1; archivedRowsRef.current = null; fillsCacheRef.current = null; return reload(); }, [reload]);
   useEffect(() => { reload(); }, [reload]);
   // Apply a Promo Builder prefill once live (or sample) games are in. Prefill is
   // App state and is cleared when leaving this tab — do not insert into Supabase.

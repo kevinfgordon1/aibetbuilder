@@ -3,7 +3,7 @@ const { runEvParlayScan } = require('../lib/ev-parlay-scan-job');
 const { skipTelegramRequested } = require('../lib/ev-parlay-scan-flow');
 
 // Optional manual HTTP test. NOT on a Vercel cron — production scans run on
-// the Railway worker (npm run ev-alerts). This handler keeps the short Vercel
+// the Fly worker (npm run ev-alerts). This handler keeps the short Vercel
 // timeouts (25s odds_cache) so a hung PostgREST read cannot hold a serverless
 // invocation for minutes.
 //

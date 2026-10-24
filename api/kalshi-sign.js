@@ -2,7 +2,7 @@
 // Same message + padding as combo-worker kalshi-auth.js (timestamp + METHOD +
 // /trade-api/v2/... path, no query). Do not clone the worker HTTP pool.
 //
-// Env (same names as Railway combo-worker):
+// Env (same names as the combo-worker (Fly)):
 //   KALSHI_KEY_ID
 //   Kalshi_combo_key  or  KALSHI_PRIVATE_KEY
 'use strict';
