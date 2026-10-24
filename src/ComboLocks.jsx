@@ -132,7 +132,7 @@ const MODE_LABEL = {
 // Per-lock pause: off = the worker stops quoting this lock (Kalshi + Polymarket) and cancels its
 // open quotes. Independent of the kill switch. Fills/history are kept.
 // Pending-lock "Check market price": pauses this lock briefly, RFQs on the owner's own key for 5s.
-// Also runs automatically after every 10 missed quotes (quotes with no fill) so the card can
+// Also runs automatically at 10 missed quotes, then every 20 after (quotes with no fill) so the card can
 // say whether we're the best market price. Suggestion only — never changes the price.
 const AUTO_CHECK_KEY = (id) => "cl-autochk:" + id;
 const readAutoState = (id) => {
