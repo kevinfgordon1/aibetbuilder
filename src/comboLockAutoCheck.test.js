@@ -1,21 +1,26 @@
 import assert from "node:assert/strict";
 import { quotedYesPrice } from "./buyerOdds.js";
-import { topPriceSuggestion, autoCheckDue, missedQuotes, lockPriceAdvice, LOCK_CHECK_SECONDS, AUTO_CHECK_EVERY_MISSED } from "./comboLockCheck.js";
+import { topPriceSuggestion, autoCheckDue, missedQuotes, lockPriceAdvice, LOCK_CHECK_SECONDS, AUTO_CHECK_FIRST_MISSED, AUTO_CHECK_EVERY_MISSED } from "./comboLockCheck.js";
 import { lockQuoteFillCounts } from "./comboLockSubmissions.js";
 
 assert.equal(LOCK_CHECK_SECONDS, 5);
-assert.equal(AUTO_CHECK_EVERY_MISSED, 10);
+assert.equal(AUTO_CHECK_FIRST_MISSED, 10);
+assert.equal(AUTO_CHECK_EVERY_MISSED, 20);
 
 // missed = quotes − fills
 assert.equal(missedQuotes({ quoted: 19, fills: 0 }), 19);
 assert.equal(missedQuotes({ quoted: 3, fills: 5 }), 0);
 assert.equal(missedQuotes(null), 0);
 
-// fires after 10 missed, then once per 10 new
+// first at 10 missed, then every 20 after (30, 50, 70…)
 assert.equal(autoCheckDue({ missed: 9 }), false);
 assert.equal(autoCheckDue({ missed: 10 }), true);
-assert.equal(autoCheckDue({ missed: 19, lastMissed: 10 }), false);
-assert.equal(autoCheckDue({ missed: 20, lastMissed: 10 }), true);
+assert.equal(autoCheckDue({ missed: 20, lastMissed: 10 }), false, "old every-10 cadence is gone");
+assert.equal(autoCheckDue({ missed: 29, lastMissed: 10 }), false);
+assert.equal(autoCheckDue({ missed: 30, lastMissed: 10 }), true, "lock checked at 10 next checks at 30");
+assert.equal(autoCheckDue({ missed: 49, lastMissed: 30 }), false);
+assert.equal(autoCheckDue({ missed: 50, lastMissed: 30 }), true);
+assert.equal(autoCheckDue({ missed: 70, lastMissed: 50 }), true);
 // never while a check runs, paused, unavailable, or in cooldown
 assert.equal(autoCheckDue({ missed: 20, busy: true }), false);
 assert.equal(autoCheckDue({ missed: 20, paused: true }), false);

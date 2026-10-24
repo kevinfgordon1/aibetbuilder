@@ -51,9 +51,10 @@ export function lockCheckView(result, parlay) {
 }
 
 // ── Auto check after missed quotes ───────────────────────────────────────────
-// Kevin: on locks that aren't getting filled, run Check market price after every 10 missed
-// quotes (quotes with no fill) to see whether we're the best price. Suggestion only.
-export const AUTO_CHECK_EVERY_MISSED = 10;
+// Kevin: on locks that aren't getting filled, run Check market price at 10 missed quotes
+// (quotes with no fill), then every 20 after (30, 50, 70…). Suggestion only.
+export const AUTO_CHECK_FIRST_MISSED = 10;
+export const AUTO_CHECK_EVERY_MISSED = 20;
 
 const fmtAm = (a) => (a == null || !Number.isFinite(Number(a)) ? "—" : Number(a) > 0 ? `+${Number(a)}` : `${Number(a)}`);
 
@@ -65,8 +66,9 @@ export function missedQuotes(counts) {
 
 /**
  * Should the card fire an automatic market check now?
- * Fires once per AUTO_CHECK_EVERY_MISSED new missed quotes since the last auto check
- * (lastMissed = missed count when the last auto check ran; 0 the first time), never while
+ * First check at AUTO_CHECK_FIRST_MISSED missed quotes, then once per AUTO_CHECK_EVERY_MISSED
+ * new missed quotes since the last auto check (lastMissed = missed count when the last auto
+ * check ran; 0 = never checked), never while
  * a check (manual or auto) is running, never on a paused/inactive lock, and not before
  * notBeforeMs (server cooldown / backoff).
  */
@@ -75,7 +77,9 @@ export function autoCheckDue({ missed, lastMissed = 0, busy = false, paused = fa
   if (notBeforeMs && nowMs < notBeforeMs) return false;
   const m = Number(missed) || 0;
   const last = Math.max(0, Number(lastMissed) || 0);
-  return m >= AUTO_CHECK_EVERY_MISSED && m - last >= AUTO_CHECK_EVERY_MISSED;
+  if (m < AUTO_CHECK_FIRST_MISSED) return false;
+  if (last === 0) return true;
+  return m - last >= AUTO_CHECK_EVERY_MISSED;
 }
 
 /**
