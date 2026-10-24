@@ -115,6 +115,19 @@ function NeedleHistory({ rows }) {
   const asc = [...rows].sort((a, b) => String(a.day).localeCompare(String(b.day)));
   let run = 0; const withRun = asc.map((r) => { run += Number(r.result) || 0; return { ...r, run }; }).reverse();
   const dl = (d) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${d}T12:00:00Z`));
+  if (rows[0] && rows[0].sniper) return (
+    <details className="touched needle-hist" open>
+      <summary>Needle by fill day <span className="sub">· vs expected <b className={run >= 0 ? "pos" : "neg"}>{sMoney(run)}</b> over {asc.length} day{asc.length === 1 ? "" : "s"}</span></summary>
+      <table style={{ width: "100%", fontSize: 12.5, marginTop: 6 }}>
+        <thead><tr><th style={{ textAlign: "left" }}>Day</th><th className="num">Fills</th><th className="num">Pregame expected</th><th className="num">Realized P&L</th><th className="num">Needle (vs expected)</th><th className="num">Running</th></tr></thead>
+        <tbody>{withRun.map((r) => (
+          <tr key={r.day}><td>{dl(r.day)}{r.open ? <span className="sub"> · {r.open} open</span> : ""}</td><td className="num">{r.locks}</td><td className="num">{sMoney(Number(r.pregame_ev) || 0)}</td>
+            <td className={`num ${Number(r.pnl) >= 0 ? "pos" : "neg"}`}>{r.settled ? sMoney(Number(r.pnl) || 0) : "—"}</td>
+            <td className={`num ${Number(r.result) >= 0 ? "pos" : "neg"}`}>{sMoney(Number(r.result) || 0)}</td><td className={`num ${r.run >= 0 ? "pos" : "neg"}`}>{sMoney(r.run)}</td></tr>))}</tbody>
+      </table>
+      <div className="sub" style={{ fontSize: 11.5, marginTop: 4 }}>Each day = fills made that day (ET, rolls at 2 AM). Pregame = fill-time expected profit (fees included). Needle = realized P&L minus pregame for the settled fills; open fills count at their pregame value until they settle. Pick a day in "Past day…" to see its needle.</div>
+    </details>
+  );
   return (
     <details className="touched needle-hist" open>
       <summary>How your games ran vs fair odds <span className="sub">· total <b className={run >= 0 ? "pos" : "neg"}>{sMoney(run)}</b> over {asc.length} day{asc.length === 1 ? "" : "s"}</span></summary>
@@ -168,7 +181,7 @@ export function DaySheet({ row, past = false }) {
   const label = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" }).format(new Date(`${day}T12:00:00Z`));
   const pre = Number(row.pregame_ev), live = Number(row.live_ev); const result = Number.isFinite(Number(row.result)) ? Number(row.result) : live - pre;
   const sn = row.snap || null; const positions = sn && sn.positions ? Object.values(sn.positions) : [];
-  const approx = !sn || !sn.lockPre || !Object.keys(sn.lockPre).length;
+  const approx = !row.sniper && (!sn || !sn.lockPre || !Object.keys(sn.lockPre).length);
   // settled results (snap.final, from Kalshi) → what these locks actually made; legs still live count at last price
   const fin = (sn && sn.final) || {}; const lastP = { ...((sn && sn.last) || {}), ...fin };
   const settledPos = positions.filter((p) => lockDecided(p, fin)); const openN = new Set(positions.filter((p) => !settledPos.includes(p)).map((p) => String(p.id))).size;
@@ -178,7 +191,8 @@ export function DaySheet({ row, past = false }) {
   return (
     <div>
       <div className="lead">{label}{row.final ? " — final" : past ? " (still in progress when last saved)" : ""}: <b className={result >= 0 ? "pos" : "neg"}>{sMoney(result)}</b> vs the pregame expectation.</div>
-      <div className="lead2">{row.games} game{row.games === 1 ? "" : "s"} across {row.locks} lock{row.locks === 1 ? "" : "s"} · pregame {sMoney(pre)} → {row.final ? "final" : "latest"} {sMoney(live)}{past ? ` · saved ${etStamp(row.updated_at)}` : ""}.</div>
+      <div className="lead2">{row.games} game{row.games === 1 ? "" : "s"} across {row.locks} {row.sniper ? "fill" : "lock"}{row.locks === 1 ? "" : "s"} · pregame {sMoney(pre)} → {row.final ? "final" : "latest"} {sMoney(live)}{past ? ` · saved ${etStamp(row.updated_at)}` : ""}.</div>
+      {row.sniper && <div className="lead2" style={{ fontSize: 15 }}>Realized P&L on {row.settled} settled fill{row.settled === 1 ? "" : "s"}: <b className={Number(row.pnl) >= 0 ? "pos" : "neg"}>{sMoney(Number(row.pnl) || 0)}</b>{row.open ? <span className="sub"> · {row.open} fill{row.open === 1 ? "" : "s"} still open, counted at fill-time expected value</span> : null}. <span className="sub">Pregame = fill-time expected profit of the fills made that day (sniper fair at the quote, fees included); final = realized P&L.</span></div>}
       {actual != null && <div className="lead2" style={{ fontSize: 15 }}>Actual P/L for these locks{openN ? ` (settled so far, ${openN} lock${openN === 1 ? "" : "s"} still live)` : ""}: <b className={actual >= 0 ? "pos" : "neg"}>{sMoney(actual)}</b> <span className="sub">· sportsbook result + hedge fills for every lock touching this day (unfilled cash parlays count their lost stake); can differ from History P/L by a few dollars (fees, rounding).</span></div>}
       {approx && <div className="note" style={{ color: "#fbbf24" }}>Baseline approximate: this day was saved before per-lock first-kickoff baselines existed, so it uses each game's kickoff numbers{sn ? "" : " (no leg detail saved for this day)"}.</div>}
       <SweatMeter d={d} legs={!!sn} liveCol={false} />
@@ -196,7 +210,8 @@ function pastDayView(base, day) {
   const label = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "short", day: "numeric" }).format(new Date(`${day}T12:00:00Z`));
   return { row: r, pre, live, result: Number.isFinite(Number(r.result)) ? Number(r.result) : live - pre, dayLabel: label };
 }
-const pastDays = (base, nowMs) => ((base && base.sweat && base.sweat.history) || []).map((h) => String(h.day).slice(0, 10)).filter((x) => x < sheetDay(nowMs)).sort().reverse();
+// Sniper history rows are fill days on the 2 AM ET Today rollover; Combo Locks rows keep the 11 AM sheet day.
+const pastDays = (base, nowMs) => ((base && base.sweat && base.sweat.history) || []).filter((h) => String(h.day).slice(0, 10) < (h.sniper ? todayDay(nowMs) : sheetDay(nowMs))).map((h) => String(h.day).slice(0, 10)).sort().reverse();
 
 function todaySweat(base, pos, evNow, nowMs) {
   const s = base && base.sweat; if (!s) return s;

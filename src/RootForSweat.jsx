@@ -193,7 +193,7 @@ export default function SweatMeter({ d, legs = true, liveCol = true }) {
         <div>Now <b>{money(now)}</b> expected</div>
         {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
         {hasH && <div className="sub" style={{ fontSize: 11.5 }}>{pre ? "Pregame likely range" : "Dotted lines: likely range"} (±2 SD) {money(m2)} to {money(p2)}</div>}
-        {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> from games played</div>}
+        {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> {s.fixedBaseline ? "since the fills (games played + price moves)" : "from games played"}</div>}
         {started && pre && pre.countedLegs > 0 && <div className="sub" data-testid="rf-saved-legs" style={{ fontSize: 11.5 }}>Kickoff numbers: <b>{pre.savedLegs}</b> of {pre.countedLegs} legs from prices saved before kickoff{pre.estimatedLegs ? `, ${pre.estimatedLegs} estimated` : ""}{pre.countedLegs - pre.savedLegs - pre.estimatedLegs > 0 ? `, ${pre.countedLegs - pre.savedLegs - pre.estimatedLegs} from live prices at kickoff` : ""}.</div>}
         {started && s.source && Object.values(s.source).includes("kickoff") && <div className="sub" style={{ fontSize: 11.5 }}>Some starting points are Kalshi prices at kickoff (saved history).</div>}
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}

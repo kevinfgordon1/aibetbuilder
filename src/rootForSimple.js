@@ -91,7 +91,7 @@ export function summarySentence(d) {
   if (!d) return "";
   const top = topByGain(d, 1)[0] || (d.top && d.top[0]);
   const started = !!(d.sweat && d.sweat.started === true);
-  const ev = Number(d.ev); const tail = started ? " today" : "";
+  const ev = Number(d.ev); const tail = started && !(d.sweat && d.sweat.fixedBaseline) ? " today" : started ? " on these open fills" : "";
   const head = ev >= 0 ? `You're expected to make about ${sMoney(ev)}${tail}.` : `You're expected to lose about ${money0(ev)}${tail}.`;
   return top ? `${head} Biggest game: ${top.game} (root for ${top.name}).` : head;
 }
