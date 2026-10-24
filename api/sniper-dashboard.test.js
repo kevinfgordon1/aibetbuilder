@@ -6,6 +6,7 @@ function res() { const r = { code: 0, body: null, headers: {} }; r.setHeader = (
 function chain(rows) {
   const c = { _rows: rows };
   for (const m of ['select', 'eq', 'gt', 'gte', 'order']) c[m] = () => c;
+  c.eq = (k, v) => { if (k === 'dry_run') rows = rows.filter((r) => r.dry_run === undefined || r.dry_run === v); return c; };
   c.limit = async () => ({ data: rows.slice(0, 1), error: null });
   c.range = async (a, b) => ({ data: rows.slice(a, b + 1), error: null });
   c.then = (f) => Promise.resolve({ count: 0, data: rows, error: null }).then(f);
@@ -28,12 +29,17 @@ function chain(rows) {
   assert.strictEqual(r.body.book, 'dry'); assert.strictEqual(r.body.status.mode, 'dry');
   assert.strictEqual(r.body.risk.open, 42); assert.strictEqual(r.body.quotes[0].fairAmerican, 300);
   assert.strictEqual(r.headers['Cache-Control'], 'no-store');
+  assert.strictEqual(r.body.skips, null, 'main request no longer waits on the skips scan');
+  r = res(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { skips: '1' } }, r);
+  assert.strictEqual(r.code, 200); assert.deepStrictEqual(r.body.skips.reasons, ['scope_not_nfl_ml']);
   // Summary (skips) scan timing out must not take down the page.
   const realFrom = (t) => { const c = chain(tables[t] || []); if (t === 'sniper_decisions') c.range = async () => ({ data: null, error: { message: 'canceling statement due to statement timeout' } }); return c; };
   h._setDeps({ env: { SUPABASE_URL: 'u', SUPABASE_ANON_KEY: 'a', SUPABASE_SERVICE_KEY: 's' }, now: () => Date.now(),
     createClient: () => ({ auth: { getUser: async () => ({ data: { user: owner } }) }, from: realFrom }) });
   r = res(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: {} }, r);
   assert.strictEqual(r.code, 200, 'summary timeout is non-fatal: ' + JSON.stringify(r.body)); assert.strictEqual(r.body.risk.open, 42);
+  r = res(); await h({ method: 'GET', headers: { authorization: 'Bearer t' }, query: { skips: '1' } }, r);
+  assert.strictEqual(r.code, 200); assert.deepStrictEqual(r.body.skips.hours, [], 'skips timeout returns empty, not an error');
   // Hedge writes: owner only, validated, real fills only.
   const writes = [];
   const wchain = (t) => { const c = chain(tables[t] || []); c.in = () => c; c.insert = (row) => { writes.push(['insert', t, row]); return { select: async () => ({ data: [{ id: 'h1' }], error: null }) }; };

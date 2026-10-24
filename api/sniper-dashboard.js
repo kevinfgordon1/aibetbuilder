@@ -60,13 +60,16 @@ async function handler(req, res) {
     if (isHedge) return hedgeWrite(req, res, db, auth.user, nowMs);
     if (q.matched === '1' || q.matched === 1) return json(res, 200, await matched(db, env, nowMs));
     if (q.rootfor === '1' || q.rootfor === 1) return json(res, 200, await sniperRootFor(db, env, nowMs, q.check === '1'));
+    // Skips-by-hour is its own request so the slow 24h summary scan never holds up the page's first paint.
+    if (q.skips === '1' || q.skips === 1) return json(res, 200, { ok: true, skips: H.skipsByHour(await loadSummaries(db, nowMs)) });
     const { data: sumRows, error: se } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').order('created_at', { ascending: false }).limit(1);
     if (se) throw new Error(se.message);
     const status = H.statusFrom(sumRows && sumRows[0], nowMs);
     let book = String(q.book || 'auto');
     if (book === 'auto') {
-      const { count } = await db.from('sniper_ledger').select('rfq_id', { count: 'exact', head: true }).eq('dry_run', false);
-      book = count > 0 || status.mode === 'live' ? 'live' : 'dry';
+      // Existence check, not count: an exact count over the 500k-row live ledger runs past the statement timeout.
+      const { data: anyLive } = await db.from('sniper_ledger').select('rfq_id').eq('dry_run', false).limit(1);
+      book = (anyLive && anyLive.length > 0) || status.mode === 'live' ? 'live' : 'dry';
     }
     const dry = book !== 'live';
     // Open rows of any age + everything touched in the window (settlements count for running P&L).
@@ -94,13 +97,9 @@ async function handler(req, res) {
     const risk = H.summarizeLedger(all, todayKey);
     const quotes = [...openRows, ...recent.filter((r) => r.status !== 'open')]
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300).map(H.quoteRow);
-    // Skips-by-hour is best effort: sniper_decisions has no action index yet (~421k rows after NBA), so the
-    // 24h summary scan can hit the statement timeout. Never let it take down the whole page; cap the wait.
-    const [sums, labels] = await Promise.all([
-      loadSummaries(db, nowMs),
-      legLabels(quotes, [...risk.games, ...risk.filledGames]),
-    ]);
-    return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: H.skipsByHour(sums), ...labels });
+    // Skips-by-hour loads separately (?skips=1); see loadSummaries.
+    const labels = await legLabels(quotes, [...risk.games, ...risk.filledGames]);
+    return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: null, ...labels });
   } catch (e) {
     console.error('[sniper-dashboard]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not load sniper data' });
@@ -368,10 +367,14 @@ async function sniperLegFairFn(db, env, rows, names, positions) {
   let stored = {};
   try { // the fill's own quote-time leg fairs first; legs without one use the latest sniper quote that priced them
     const ids = rows.map((r) => r.rfq_id);
-    const { data: own } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'quoted').in('rfq_id', ids).limit(2000);
+    // Only legDetail is needed; the full details JSON (~1.2 KB/row) made the 24h read ~6 MB and ~2s+.
+    const slim = (rs) => (rs || []).map((d) => ({ created_at: d.created_at, details: { legDetail: d.legDetail } }));
+    const { data: ownRaw } = await db.from('sniper_decisions').select('created_at,legDetail:details->legDetail').eq('action', 'quoted').in('rfq_id', ids).limit(2000);
+    const own = slim(ownRaw);
     const legsWanted = new Set(positions.flatMap((p) => p.legs.map((l) => String(l.ticker).toUpperCase())));
     const since = new Date(polledAt - 24 * 3600e3).toISOString();
-    const { data: recent } = await db.from('sniper_decisions').select('created_at,details').eq('action', 'quoted').gte('created_at', since).order('created_at', { ascending: false }).limit(5000);
+    const { data: recentRaw } = await db.from('sniper_decisions').select('created_at,legDetail:details->legDetail').eq('action', 'quoted').gte('created_at', since).order('created_at', { ascending: false }).limit(5000);
+    const recent = slim(recentRaw);
     const hit = (d) => ((d.details && d.details.legDetail) || []).some((l) => l && legsWanted.has(String(l.ticker).toUpperCase()));
     stored = { ...F.storedLegFairs((recent || []).filter(hit)), ...F.storedLegFairs(own || []) };
   } catch (_) { stored = {}; }
