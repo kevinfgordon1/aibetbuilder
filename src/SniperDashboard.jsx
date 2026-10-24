@@ -1,6 +1,6 @@
 // Sniper dashboard — owner-only (canSeeOwnerTools). Read-only view of the isolated Combo Sniper
 // service (sniper_ledger / sniper_decisions) via /api/sniper-dashboard. No trading controls.
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { fmtAmerican, fmtUsd, takerSeesAmerican } from "./sniperDashboard.js";
 import SniperMatched, { MyFills } from "./SniperMatched";
@@ -69,7 +69,8 @@ function RiskByGame({ r, caps, labels }) {
 
 export default function SniperDashboard({ user }) {
   const [book, setBook] = useState("auto");
-  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [matchedErr, setMatchedErr] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("root"); const [showQuotes, setShowQuotes] = useState(() => { try { return localStorage.getItem("sniperQuotesOpen") === "1"; } catch { return false; } }); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [matchedErr, setMatchedErr] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("root"); const [showQuotes, setShowQuotes] = useState(() => { try { return localStorage.getItem("sniperQuotesOpen") === "1"; } catch { return false; } }); const [err, setErr] = useState(null); const [skips, setSkips] = useState(null); const [loading, setLoading] = useState(false);
+  const skipsAt = useRef(0);
   const load = useCallback(async () => {
     const c = supabase(); if (!c) { setErr("Supabase not configured"); return; }
     setLoading(true);
@@ -77,6 +78,8 @@ export default function SniperDashboard({ user }) {
       const { data: { session } } = await c.auth.getSession();
       if (!session) { setErr("Sign in required"); return; }
       fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then(async (x) => { const m = await x.json().catch(() => null); if (m && m.ok) { setMatched(m); setMatchedErr(null); } else throw new Error((m && m.error) || `HTTP ${x.status}`); }).catch((e) => setMatchedErr(String((e && e.message) || e)));
+      // Skips scan is slow on the big decisions table: refresh it every 5 min, not every 30s, and never block on it.
+      if (Date.now() - skipsAt.current > 300000) { skipsAt.current = Date.now(); fetch(`/api/sniper-dashboard?skips=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then((x) => x.json()).then((k) => { if (k && k.ok && k.skips) setSkips(k.skips); }).catch(() => {}); }
       const r = await fetch(`/api/sniper-dashboard?book=${book}&days=7`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -110,16 +113,17 @@ export default function SniperDashboard({ user }) {
         <button onClick={load} disabled={loading} style={{ background: C.gold, color: "#17140f", border: 0, borderRadius: 6, padding: "5px 12px", fontWeight: 700, cursor: "pointer" }}>{loading ? "…" : "Refresh"}</button>
       </div>
       {err && <div style={{ ...card, color: C.bad, marginBottom: 12 }}>{err}</div>}
-      {!data && !err && <div style={{ color: C.muted }}>Loading…</div>}
+
       {matchedErr && <div style={{ ...card, color: C.bad, marginBottom: 12 }} data-testid="sniper-matched-error">Couldn't load My Fills / What to root for{matched ? " (showing last good data)" : ""}: {matchedErr}. It retries on the next refresh.</div>}
-      {matched && (
+      {(
         <div>
           <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
             {[["root", "What to root for"], ["fills", "My Fills"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
           </div>
-          {tab === "fills" ? <MyFills data={matched} api={hedgeApi} /> : tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : <SniperMatched data={matched} />}
+          {tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : !matched ? <div style={{ color: C.muted, marginBottom: 12 }}>{matchedErr ? "" : "Loading fills…"}</div> : tab === "fills" ? <MyFills data={matched} api={hedgeApi} /> : <SniperMatched data={matched} />}
         </div>
       )}
+      {!data && !err && <div style={{ color: C.muted, margin: "10px 0" }}>Loading caps and quotes…</div>}
       {data && (
         <>
           <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, 4% other NFL, 5% college and NBA, 6% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.</div>
@@ -174,11 +178,11 @@ export default function SniperDashboard({ user }) {
             </div>
             <div style={{ ...card, flex: "2 1 480px", overflowX: "auto" }}>
               <div style={h2}>Why it skipped (last 24h, per hour)</div>
-              {data.skips.hours.length === 0 ? <div style={{ color: C.muted, fontSize: 12 }}>No summaries yet.</div> : (
+              {!skips ? <div style={{ color: C.muted, fontSize: 12 }}>Loading… (may stay empty until the decisions index is built)</div> : skips.hours.length === 0 ? <div style={{ color: C.muted, fontSize: 12 }}>No summaries yet.</div> : (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr><th style={th}>Hour (ET)</th>{data.skips.reasons.map((x) => <th key={x} style={th}>{x.replace(/_/g, " ")}</th>)}</tr></thead>
-                  <tbody>{[...data.skips.hours].reverse().slice(0, 24).map((h) => (
-                    <tr key={h.hour}><td style={td}>{h.hour.slice(5)}</td>{data.skips.reasons.map((x) => <td key={x} style={{ ...td, color: h[x] ? C.text : C.muted }}>{h[x].toLocaleString()}</td>)}</tr>
+                  <thead><tr><th style={th}>Hour (ET)</th>{skips.reasons.map((x) => <th key={x} style={th}>{x.replace(/_/g, " ")}</th>)}</tr></thead>
+                  <tbody>{[...skips.hours].reverse().slice(0, 24).map((h) => (
+                    <tr key={h.hour}><td style={td}>{h.hour.slice(5)}</td>{skips.reasons.map((x) => <td key={x} style={{ ...td, color: h[x] ? C.text : C.muted }}>{h[x].toLocaleString()}</td>)}</tr>
                   ))}</tbody>
                 </table>
               )}
