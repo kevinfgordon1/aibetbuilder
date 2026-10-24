@@ -69,7 +69,7 @@ function RiskByGame({ r, caps, labels }) {
 
 export default function SniperDashboard({ user }) {
   const [book, setBook] = useState("auto");
-  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("fills"); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [matchedErr, setMatchedErr] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("fills"); const [err, setErr] = useState(null); const [loading, setLoading] = useState(false);
   const load = useCallback(async () => {
     const c = supabase(); if (!c) { setErr("Supabase not configured"); return; }
     setLoading(true);
@@ -80,7 +80,7 @@ export default function SniperDashboard({ user }) {
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       setData(j); setErr(null);
-      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then((x) => x.json()).then((m) => { if (m && m.ok) setMatched(m); }).catch(() => {});
+      fetch(`/api/sniper-dashboard?matched=1`, { headers: { accept: "application/json", authorization: "Bearer " + session.access_token } }).then(async (x) => { const m = await x.json().catch(() => null); if (m && m.ok) { setMatched(m); setMatchedErr(null); } else throw new Error((m && m.error) || `HTTP ${x.status}`); }).catch((e) => setMatchedErr(String((e && e.message) || e)));
     } catch (e) { setErr(String(e.message || e)); } finally { setLoading(false); }
   }, [book]);
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, [load]);
@@ -111,6 +111,7 @@ export default function SniperDashboard({ user }) {
       </div>
       {err && <div style={{ ...card, color: C.bad, marginBottom: 12 }}>{err}</div>}
       {!data && !err && <div style={{ color: C.muted }}>Loading…</div>}
+      {matchedErr && <div style={{ ...card, color: C.bad, marginBottom: 12 }} data-testid="sniper-matched-error">Couldn't load My Fills / What to root for{matched ? " (showing last good data)" : ""}: {matchedErr}. It retries on the next refresh.</div>}
       {matched && (
         <div>
           <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>

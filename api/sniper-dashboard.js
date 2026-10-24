@@ -215,7 +215,15 @@ async function legLabels(quotes, games) {
 }
 async function matched(db, env, nowMs) {
   const S = matchedMod || (matchedMod = await import('../src/sniperMatched.js'));
-  const rows = (await pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', false).or('filled_contracts.gt.0,phase.eq.accepted,phase.eq.filled,phase.eq.settled').order('created_at', { ascending: false }))).filter(S.isMatched);
+  // Two index-backed reads instead of one OR over the whole ledger (500k+ rows after NBA; that timed out and hid
+  // My Fills / What to root for): every filled row (partial index sniper_ledger_filled_created_idx, full history),
+  // plus open accepted-but-not-yet-filled rows (sniper_ledger_open_idx). Merged by rfq_id, newest first.
+  const [filledRows, pendingRows] = await Promise.all([
+    pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', false).gt('filled_contracts', 0).order('created_at', { ascending: false })),
+    pageAll(() => db.from('sniper_ledger').select(LEDGER_COLS).eq('dry_run', false).eq('status', 'open').in('phase', ['accepted', 'filled', 'settled']).order('created_at', { ascending: false })),
+  ]);
+  const byId = new Map(); for (const r of [...filledRows, ...pendingRows]) if (!byId.has(r.rfq_id)) byId.set(r.rfq_id, r);
+  const rows = [...byId.values()].filter(S.isMatched).sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
   if (!rows.length) return { ok: true, empty: true, asOf: new Date(nowMs).toISOString(), rows: [] };
   const tickers = [...new Set(rows.flatMap((r) => (r.legs || []).map((k) => String(k).split(':')[0].toUpperCase())))];
   const mk = await kalshiMarkets(tickers);
