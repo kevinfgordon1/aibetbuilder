@@ -90,9 +90,6 @@
     "api/underdog-predict.js": {
       "maxDuration": 60
     },
-    "api/raw-parlay-edges.js": {
-      "maxDuration": 300
-    },
     "api/combo-auto-settle.js": {
       "maxDuration": 60
     }
