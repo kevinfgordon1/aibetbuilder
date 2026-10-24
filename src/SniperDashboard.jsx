@@ -138,7 +138,7 @@ export default function SniperDashboard({ user }) {
       {!data && !err && <div style={{ color: C.muted, margin: "10px 0" }}>Loading caps and quotes…</div>}
       {data && (
         <>
-          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, 4% other NFL, 5% college and NBA, 6% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.</div>
+          <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>Showing the {data.book === "live" ? "live" : "test-mode"} book. Rules: max {fmtUsd(caps.perQuoteRisk)} risk per quote; min edge after fees {Math.round((caps.minEdge || 0) * 100)}% moneylines, 5% other NFL, 6% college and NBA, 7% TDs; depth per leg {fmtUsd(caps.depthGame)} game lines / {fmtUsd(caps.depthTd)} TDs (measured as potential profit); NFL, college football and NBA; no repeat parlays.</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <Meter label="Open risk" value={r.open} cap={caps.totalOpen} note={`Max ${fmtUsd(caps.longDatedOpen)} on parlays settling more than 32h out`} />
             <Meter label="Biggest game" value={r.maxGame ? r.maxGame.risk : 0} cap={caps.perGame} note={r.maxGame ? ((data.gameLabels || {})[r.maxGame.game] || r.maxGame.game) : "No open games"} />

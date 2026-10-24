@@ -1,6 +1,6 @@
 // Pure helpers for the owner-only Sniper dashboard (api/sniper-dashboard.js + SniperDashboard.jsx).
 // Mirrors the live sniper (fly/sniper.toml). Keep in sync when caps change.
-export const CAPS = { totalOpen: 10000, longDatedOpen: 5000, perGame: 1500, perLeg: 750, dailyLoss: 10000, dailyNewRisk: 10000, perQuoteRisk: 200, minEdge: 0.03, depthGame: 2000, depthTd: 1000 };
+export const CAPS = { totalOpen: 10000, longDatedOpen: 5000, perGame: 1500, perLeg: 750, dailyLoss: 10000, dailyNewRisk: 10000, perQuoteRisk: 200, minEdge: 0.04, depthGame: 2000, depthTd: 1000 };
 
 export function americanFromProb(p) {
   const x = Number(p);
