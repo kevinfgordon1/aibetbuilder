@@ -164,7 +164,7 @@ const nextDow = (today, dow) => { const d = new Date(`${today}T12:00:00Z`).getUT
 const expRoiOf = (r) => (r.hedge && r.hedge.ev != null && r.risk > 0 ? r.hedge.ev / r.risk : r.edge != null && Number.isFinite(r.edge) ? r.edge : r.ev != null && r.risk > 0 ? r.ev / r.risk : null);
 const expProfitOf = (r) => (r.ev != null && Number.isFinite(r.ev) ? r.ev : expRoiOf(r) != null ? expRoiOf(r) * r.risk : 0);
 const SORTS = {
-  Filled: (r) => Date.parse(r.filledAt) || null, Legs: (r) => (r.legs || []).length, "First leg starts": firstStart,
+  Filled: (r) => Date.parse(r.filledAt) || null, Settled: (r) => Date.parse(r.settledAt) || null, Legs: (r) => (r.legs || []).length, "First leg starts": firstStart,
   Fair: (r) => r.fairYes, "We offer": (r) => r.soldYes, "Taker sees": (r) => r.soldYes, Contracts: (r) => Number(r.contracts),
   Risk: (r) => r.risk, "To win": (r) => r.toWin, "Exp. ROI": expRoiOf, "P&L": (r) => r.pnl,
 };
@@ -214,7 +214,7 @@ export function MyFills({ data, nowMs, api }) {
   const inp = { background: "#111", color: C.text, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 6px", fontSize: 12, colorScheme: "dark" };
   const lab = { display: "flex", flexDirection: "column", gap: 3, color: C.text2, fontSize: 11 };
   const chip = (on) => ({ ...inp, cursor: "pointer", background: on ? C.gold : "#1f1f1f", color: on ? "#17140f" : C.text, fontWeight: 700 });
-  const COLS = ["Filled", "Status", "Legs (bet · game · kickoff)", "Legs", "First leg starts", "Fair", "We offer", "Taker sees", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"];
+  const COLS = ["Filled", "Settled", "Status", "Legs (bet · game · kickoff)", "Legs", "First leg starts", "Fair", "We offer", "Taker sees", "Contracts", "Risk", "To win", "Exp. ROI", "P&L"];
   const clickSort = (k) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === "desc" ? "asc" : "desc" } : { key: k, dir: "desc" }));
   const scope = active ? ` · ${rows.length} of ${all.length} (filtered)` : "";
   return (
@@ -254,6 +254,7 @@ export function MyFills({ data, nowMs, api }) {
             <tbody>{rows.length === 0 ? <tr><td colSpan={COLS.length} style={{ ...td, color: C.muted }}>No fills match these filters.</td></tr> : rows.map((r) => (<React.Fragment key={r.rfqId}>
               <tr onClick={() => setOpenId(openId === r.rfqId ? null : r.rfqId)} style={{ cursor: "pointer", background: openId === r.rfqId ? "#1d1a14" : undefined }}>
                 <td style={td}><span style={{ color: C.gold }}>{openId === r.rfqId ? "▾" : "▸"}</span> {etTime(r.filledAt)}</td>
+                <td data-testid="fill-settled" style={{ ...td, whiteSpace: "nowrap", color: r.settledAt ? C.text : C.muted }}>{r.settledAt ? etTime(r.settledAt) : "—"}</td>
                 <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}{r.hedge ? <div data-testid="hedged-badge" style={{ color: r.hedge.locked ? C.good : C.gold, fontSize: 11, textTransform: "none" }}>Hedged · {hedgeLabel(r.hedge)}</div> : null}{api && r.status === "open" && !r.hedge ? <div><button type="button" onClick={(e) => { e.stopPropagation(); setOpenId(r.rfqId); }} style={{ marginTop: 3, background: "#1f1f1f", color: C.gold, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, padding: "2px 6px", cursor: "pointer", textTransform: "none" }}>Log hedge</button></div> : null}</td>
                 <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}<LeagueTag t={l.ticker} /></div>)}{leaguesOfFill(r).length > 1 ? <div style={{ color: C.muted, fontSize: 11 }}>Mixed</div> : null}</td>
                 <td style={td}>{r.legs.length}</td>
@@ -269,7 +270,7 @@ export function MyFills({ data, nowMs, api }) {
               {openId === r.rfqId && <tr><td colSpan={COLS.length} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} api={api} /></td></tr>}
             </React.Fragment>))}</tbody>
             <tfoot><tr>
-              <td style={{ ...td, fontWeight: 700 }} colSpan={8}>Total ({rows.length} fills{active ? ", filtered" : ""})</td>
+              <td style={{ ...td, fontWeight: 700 }} colSpan={9}>Total ({rows.length} fills{active ? ", filtered" : ""})</td>
               <td style={{ ...td, fontWeight: 700 }}>{sum((r) => r.contracts).toFixed(0)}</td>
               <td style={{ ...td, fontWeight: 700 }}>{fmtUsd(totRisk)}</td><td style={{ ...td, fontWeight: 700 }}>{fmtUsd(sum((r) => r.toWin))}</td>
               <td style={{ ...td, fontWeight: 700, color: wRoi > 0 ? C.good : C.text }}>{sRoi(wRoi)}<div style={{ color: C.muted, fontSize: 11, fontWeight: 400 }}>exp. {signed(totEv)}</div></td>

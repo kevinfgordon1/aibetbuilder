@@ -126,3 +126,12 @@ export function perfByDay(rows, legResults = {}) {
   const g = {}; for (const r of (rows || []).filter(isMatched)) { const d = sniperFillDay(r.created_at); if (d) (g[d] || (g[d] = [])).push(r); }
   return Object.fromEntries(Object.keys(g).sort().reverse().slice(0, 30).map((d) => [d, perfStats(g[d], legResults)]));
 }
+
+// Real fill time for a ledger row: the recorded fill decision (first book_arb, written right after the fill) when it
+// sits within 10 min of row creation, else created_at. Never updated_at — the settler bumps it at settlement.
+export function fillTimeOf(row, decisionAt) {
+  const c = Date.parse(row && row.created_at);
+  const d = Date.parse(decisionAt);
+  if (Number.isFinite(d) && (!Number.isFinite(c) || (d >= c - 60e3 && d <= c + 10 * 60e3))) return decisionAt;
+  return (row && row.created_at) || null;
+}
