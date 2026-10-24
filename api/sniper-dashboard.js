@@ -94,13 +94,26 @@ async function handler(req, res) {
     const risk = H.summarizeLedger(all, todayKey);
     const quotes = [...openRows, ...recent.filter((r) => r.status !== 'open')]
       .sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 300).map(H.quoteRow);
-    const sums = await pageAll(() => db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').gte('created_at', new Date(nowMs - 24 * 3600e3).toISOString()).order('created_at', { ascending: true }), 2000);
-    const labels = await legLabels(quotes, [...risk.games, ...risk.filledGames]);
+    // Skips-by-hour is best effort: sniper_decisions has no action index yet (~421k rows after NBA), so the
+    // 24h summary scan can hit the statement timeout. Never let it take down the whole page; cap the wait.
+    const [sums, labels] = await Promise.all([
+      loadSummaries(db, nowMs),
+      legLabels(quotes, [...risk.games, ...risk.filledGames]),
+    ]);
     return json(res, 200, { ok: true, book, status, caps: H.CAPS, risk, quotes, skips: H.skipsByHour(sums), ...labels });
   } catch (e) {
     console.error('[sniper-dashboard]', String((e && e.message) || e).slice(0, 200));
     return json(res, 500, { ok: false, error: 'Could not load sniper data' });
   }
+}
+
+const SUMMARY_WAIT_MS = 4000;
+async function loadSummaries(db, nowMs) {
+  const q = pageAll(() => db.from('sniper_decisions').select('created_at,details').eq('action', 'summary').gte('created_at', new Date(nowMs - 24 * 3600e3).toISOString()).order('created_at', { ascending: true }), 2000)
+    .catch((e) => { console.warn('[sniper-dashboard] summaries skipped:', String((e && e.message) || e).slice(0, 120)); return []; });
+  let t;
+  const timeout = new Promise((r) => { t = setTimeout(() => { console.warn('[sniper-dashboard] summaries skipped: slow'); r([]); }, SUMMARY_WAIT_MS); });
+  try { return await Promise.race([q, timeout]); } finally { clearTimeout(t); }
 }
 
 // Logged sportsbook hedges (sniper_hedges; service role only, Kevin only via requireOwner). Map rfq_id -> rows.
