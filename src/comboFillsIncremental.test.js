@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import { fillsPlan, nextFillsCache, mergeFills } from "./comboFillsIncremental.js";
+assert.equal(fillsPlan(null, 0).full, true);
+const c1 = nextFillsCache(null, { full: true }, [{ id: 2, recorded_at: "2026-10-24T01:00:00Z" }, { id: 1, recorded_at: "2026-10-24T00:00:00Z" }], 1000);
+assert.deepEqual(c1.rows.map((r) => r.id), [1, 2]);
+assert.equal(c1.maxRecorded, "2026-10-24T01:00:00Z");
+const p = fillsPlan(c1, 2000);
+assert.equal(p.full, false); assert.equal(p.since, "2026-10-24T01:00:00Z");
+const c2 = nextFillsCache(c1, p, [{ id: 2, recorded_at: "2026-10-24T01:00:00Z", count: 5 }, { id: 3, recorded_at: "2026-10-24T02:00:00Z" }], 2000);
+assert.deepEqual(c2.rows.map((r) => r.id), [1, 2, 3]);
+assert.equal(c2.rows[1].count, 5, "newer copy wins");
+assert.equal(c2.fullAt, 1000);
+assert.equal(fillsPlan(c2, 1000 + 120000).full, true, "full re-read every 2 min");
+assert.equal(mergeFills([], []).length, 0);
+console.log("comboFillsIncremental.test.js ok");
