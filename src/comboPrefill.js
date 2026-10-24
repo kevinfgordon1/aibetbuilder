@@ -906,7 +906,38 @@ function promoMatchupLabel(leg) {
 // promo leg can fail here even when Kalshi still lists the event as open.
 // Prefer "already started" when Odds API commence_time is in the past; never
 // invent a map onto a different game.
-export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames = [], startedGames = []) {
+// Later games on the slate for EITHER team of the leg (e.g. ASU vs BYU next
+// week when the leg was K-State @ ASU today). Used only to warn, never to map.
+// Team identity = the longest slate label that prefixes the leg's team name,
+// so "Arizona State Sun Devils" is Arizona St., never Arizona.
+function slateTeamOf(name, canonLabels) {
+  const n = ncaafCanonName(name);
+  let best = "";
+  for (const c of canonLabels) {
+    if ((n === c || n.startsWith(c + " ")) && c.length > best.length) best = c;
+  }
+  return best;
+}
+export function oneTeamOtherGames(leg, slate, nowMs = Date.now()) {
+  const sport = promoSportOf(leg);
+  const [away, home] = splitAt(leg?.game);
+  if (sport !== "ncaaf" || !away || !home) return [];
+  const pool = (slate || []).filter((g) => g.sport === sport && !(Date.parse(g.startTime) <= nowMs));
+  const labelsOf = (g) => (g.markets?.side || []).map((m) => ncaafCanonName(m.label)).filter(Boolean);
+  const all = new Set(pool.flatMap(labelsOf));
+  const teams = [slateTeamOf(away, all), slateTeamOf(home, all)].filter(Boolean);
+  if (!teams.length) return [];
+  const hits = [];
+  for (const g of pool) {
+    if (!labelsOf(g).some((l) => teams.includes(l))) continue;
+    const ms = Date.parse(g.startTime);
+    hits.push(`${g.title || g.key} (${Number.isFinite(ms) ? etDay(ms) : g.date || g.key})`);
+    if (hits.length >= 2) break;
+  }
+  return hits;
+}
+
+export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames = [], startedGames = [], slate = []) {
   const label = COMBO_SPORT_LABEL[sport] || String(sport || "").toUpperCase();
   const matchup = promoMatchupLabel(leg);
   // The feed dropped this game at its start (exact puck drop / tip-off) and the leg
@@ -919,9 +950,10 @@ export function noMatchingGameReason(leg, sport, nowMs = Date.now(), otherGames 
   const startMs = Date.parse(leg?.commence_time);
   const started = Number.isFinite(startMs) && startMs <= nowMs;
   if (started) {
-    return matchup
-      ? `${matchup} already started — Combo Locks only quotes pre-game Kalshi ${label} markets`
-      : `game already started — Combo Locks only quotes pre-game Kalshi ${label} markets`;
+    const at = etDay(startMs, { hour: "numeric", minute: "2-digit" });
+    const base = `${matchup || "this game"} already started (kickoff ${at} ET) — Combo Locks only quotes pre-game Kalshi ${label} markets`;
+    const others = oneTeamOtherGames(leg, slate, nowMs);
+    return others.length ? `${base}. ${others.join(" / ")} ${others.length === 1 ? "is a different game" : "are different games"} — don't pick ${others.length === 1 ? "it" : "them"} for this leg` : base;
   }
   if (otherGames.length) {
     const when = otherGames.map((g) => {
@@ -955,7 +987,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now(), start
     }
     const game = matchKalshiGame(leg, flat);
     if (!game) {
-      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs, otherStartGames(leg, flat), startedFlat)));
+      unmatched.push(unmatchedEntry(leg, noMatchingGameReason(leg, sport, nowMs, otherStartGames(leg, flat), startedFlat, flat)));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }
