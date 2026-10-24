@@ -67,6 +67,18 @@ function RiskByGame({ r, caps, labels }) {
   );
 }
 
+// Keeps a crash in one tab from blanking the whole page: shows an error card instead.
+class TabBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err) { console.error("[sniper-tab]", String((err && err.message) || err).slice(0, 200)); }
+  componentDidUpdate(prev) { if (prev.tab !== this.props.tab && this.state.err) this.setState({ err: null }); }
+  render() {
+    if (this.state.err) return <div style={{ ...card, color: C.bad, marginBottom: 12 }} data-testid="sniper-tab-error">This tab hit an error and couldn't render: {String((this.state.err && this.state.err.message) || this.state.err)}. The rest of the page still works; try another tab or Refresh.</div>;
+    return this.props.children;
+  }
+}
+
 export default function SniperDashboard({ user }) {
   const [book, setBook] = useState("auto");
   const [data, setData] = useState(null); const [matched, setMatched] = useState(null); const [matchedErr, setMatchedErr] = useState(null); const [onlyMatched, setOnlyMatched] = useState(false); const [tab, setTab] = useState("root"); const [showQuotes, setShowQuotes] = useState(() => { try { return localStorage.getItem("sniperQuotesOpen") === "1"; } catch { return false; } }); const [err, setErr] = useState(null); const [skips, setSkips] = useState(null); const [loading, setLoading] = useState(false);
@@ -120,7 +132,7 @@ export default function SniperDashboard({ user }) {
           <div style={{ display: "flex", gap: 6, margin: "0 0 10px" }}>
             {[["root", "What to root for"], ["fills", "My Fills"], ["results", "Results"]].map(([k, l]) => <button key={k} onClick={() => setTab(k)} style={{ background: tab === k ? C.gold : "#1f1f1f", color: tab === k ? "#17140f" : C.text, border: "1px solid #2a2a2a", borderRadius: 6, padding: "5px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>)}
           </div>
-          {tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : !matched ? <div style={{ color: C.muted, marginBottom: 12 }}>{matchedErr ? "" : "Loading fills…"}</div> : tab === "fills" ? <MyFills data={matched} api={hedgeApi} /> : <SniperMatched data={matched} />}
+          <TabBoundary tab={tab}>{tab === "root" ? <RootFor user={user} apiUrl="/api/sniper-dashboard?rootfor=1" noun="fills" defaultOpen /> : !matched ? <div style={{ color: C.muted, marginBottom: 12 }}>{matchedErr ? "" : "Loading fills…"}</div> : tab === "fills" ? <MyFills data={matched} api={hedgeApi} /> : <SniperMatched data={matched} />}</TabBoundary>
         </div>
       )}
       {!data && !err && <div style={{ color: C.muted, margin: "10px 0" }}>Loading caps and quotes…</div>}
