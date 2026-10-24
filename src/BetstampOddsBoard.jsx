@@ -1,4 +1,5 @@
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import { TAKER_FEE_LEGEND } from "./venueTakerFee.js";
 import {
@@ -243,8 +244,9 @@ function RowAge({ game }) {
   );
 }
 
-function LiquidityCue({ size, inline = false }) {
-  const label = fmtBoardSize(size);
+function LiquidityCue({ size, price, inline = false }) {
+  // Depth = potential profit at this price, not stake ($3,000 at −200 = $1.5k).
+  const label = fmtBoardSize(price != null ? depthFromStake(size, price) : size);
   if (!label) return null;
   return (
     <span data-liq={label} style={{ fontSize: 9, color: "var(--nob-muted)", fontWeight: 500, lineHeight: 1.15, display: inline ? "inline" : "block" }}>
@@ -297,7 +299,7 @@ const OddsSide = memo(function OddsSide({ price, rawPrice, size, line, books, al
         {showBestMark && price != null && book && (
           <BestBookName book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
-        <LiquidityCue size={size} inline />
+        <LiquidityCue size={size} price={price} inline />
       </div>
       {rawPrice != null && !suspended && (
         <div
