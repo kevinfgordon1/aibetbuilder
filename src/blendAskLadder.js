@@ -38,6 +38,7 @@ export const PM_BLEND_VENUES = new Set(["kalshi", "polymarket", "novig", "prophe
 export const LOW_LIQUIDITY_LABEL = "Low liquidity";
 const COMPLETE_EPS = 0.5;
 
+import { formatMinDepthBlendFlag } from "./promoMinDepth.js";
 export function isPmBlendVenue(bookKey) {
   return PM_BLEND_VENUES.has(String(bookKey || "").toLowerCase());
 }
@@ -393,6 +394,34 @@ export function preBlendStoredLadderLegs(legs, ctx = {}) {
   });
 }
 
+// Owner Min depth per leg: when the cross-venue blend to the minimum is more
+// conservative than the $500 walk, it IS the fair. Set bestOpp (EV) and the
+// pmBlend price (True Win Prob / Edge column / Best opp line read
+// trueOppAmerican → pmBlend.american) so every view uses the same blend.
+export function applyMinDepthOverlay(next, md) {
+  if (!next || !md || md.american == null || !md.complete) return next;
+  const mdAm = Number(md.american);
+  const cur = trueOppAmerican(next);
+  if (cur != null && cur <= mdAm) {
+    return Number(next.bestOpp) > mdAm ? { ...next, bestOpp: mdAm } : next;
+  }
+  return {
+    ...next,
+    bestOpp: Number(next.bestOpp) > mdAm || !isFinite(Number(next.bestOpp)) ? mdAm : next.bestOpp,
+    lowLiquidity: false,
+    pmBlend: {
+      ...(next.pmBlend || {}),
+      american: mdAm,
+      complete: true,
+      thinTop: false,
+      lowLiquidity: false,
+      levelsUsed: md.levelsUsed,
+      minDepth: md,
+      flag: formatMinDepthBlendFlag(md),
+    },
+  };
+}
+
 export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
   const blends = {};
   const displayLegs = (legs || []).map((leg) => {
@@ -410,10 +439,7 @@ export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
     });
     // Owner Min depth per leg: keep the cross-venue blended price when it is
     // more conservative than the $500 walk (no-op when no minimum is set).
-    const md = leg && leg.minDepthBlend;
-    if (md && md.american != null && next && Number(next.bestOpp) > Number(md.american)) {
-      next = { ...next, bestOpp: md.american };
-    }
+    next = applyMinDepthOverlay(next, leg && leg.minDepthBlend);
     if (next.pmBlend) blends[key] = next.pmBlend;
     return next;
   });

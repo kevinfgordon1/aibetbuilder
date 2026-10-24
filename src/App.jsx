@@ -143,6 +143,7 @@ import {
   preBlendStoredLadderLegs,
   pickHasLowLiquidity,
   trueOppAmerican,
+  applyMinDepthOverlay,
   LOW_LIQUIDITY_LABEL,
 } from "./blendAskLadder.js";
 
@@ -1573,7 +1574,10 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
   const ladder = (Array.isArray(liveLadder) && liveLadder.length)
     ? liveLadder
     : (Array.isArray(leg.bestOppLevels) && leg.bestOppLevels.length ? leg.bestOppLevels : liveLadder);
-  const blendedLeg = applyPmBlendToLeg(leg, Array.isArray(liveLadder) && liveLadder.length ? liveLadder : null, blendCtx || {});
+  const blendedLeg = applyMinDepthOverlay(
+    applyPmBlendToLeg(leg, Array.isArray(liveLadder) && liveLadder.length ? liveLadder : null, blendCtx || {}),
+    leg.minDepthBlend,
+  );
   const line = formatTrueOddsWithBlend({
     odds: quotedOppAmerican(leg) ?? leg.bestOpp,
     bookLabel,

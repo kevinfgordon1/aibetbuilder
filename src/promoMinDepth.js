@@ -121,17 +121,21 @@ export function blendLegToMinDepth(leg, minDepth, levels, laddersByKey, keyOf = 
   if (!blend || !blend.complete || blend.american == null) return { complete: false, available: total };
   let left = min;
   const venues = [];
+  const parts = [];
   for (const l of ladder) {
     if (left <= 1e-9) break;
     const take = Math.min(profitAtAmerican(l.size, l.american), left);
     if (!(take > 0)) continue;
     left -= take;
     if (!venues.includes(l.book)) venues.push(l.book);
+    const last = parts[parts.length - 1];
+    if (last && last.book === l.book && last.american === l.american) last.profit += take;
+    else parts.push({ book: l.book, american: l.american, profit: take });
   }
   // Never better than the best quote (rounding guard).
   const top = ladder[0].american;
   const american = blend.american > top ? top : blend.american;
-  return { complete: true, american, top, topBook: ladder[0].book, stakeFilled: blend.stakeFilled, profitFilled: min, venues, levelsUsed: blend.levelsUsed, available: total, target: min };
+  return { complete: true, american, top, topBook: ladder[0].book, stakeFilled: blend.stakeFilled, profitFilled: min, venues, parts, levelsUsed: blend.levelsUsed, available: total, target: min };
 }
 
 export function legMeetsMinDepth(leg, minDepth, levels, laddersByKey) {
@@ -208,4 +212,16 @@ export function minDepthAltVenueLegs(legs, minDepth) {
     }
   }
   return out;
+}
+
+const VENUE_LABELS = { novig: "Novig", kalshi: "Kalshi", polymarket: "Polymarket", prophetx: "ProphetX" };
+const fmtAm = (n) => (n > 0 ? `+${n}` : `${n}`);
+const fmtUsd = (n) => `$${Math.round(n).toLocaleString("en-US")}`;
+
+// "blended to $2,000 to win (Novig +336 $649, then Novig +317 $1,351)"
+export function formatMinDepthBlendFlag(md) {
+  if (!md || !md.complete || md.target == null) return "";
+  const parts = Array.isArray(md.parts) ? md.parts : [];
+  const trail = parts.map((p, i) => `${i ? "then " : ""}${VENUE_LABELS[p.book] || p.book} ${fmtAm(p.american)} ${fmtUsd(p.profit)}`).join(", ");
+  return `blended to ${fmtUsd(md.target)} to win${trail ? ` (${trail})` : ""}`;
 }
