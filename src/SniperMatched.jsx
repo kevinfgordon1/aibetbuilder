@@ -15,6 +15,7 @@ export { leagueOfLeg, leaguesOfFill, leagueOfFill, fillMatchesLeague, pregameVie
 const EMPTY_PERF = perfStats([]);
 
 const C = { surface: "#181818", head: "#1f1f1f", border: "#2a2a2a", gold: "#bc9e66", text: "#e4e0d8", text2: "#a8a49c", muted: "#8a8a8a", good: "#7cc49a", bad: "#d88c84", warn: "#e0a04a" };
+const LeagueTag = ({ t }) => <span data-testid="leg-league" style={{ fontSize: 10, fontWeight: 700, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, padding: "0 4px", marginLeft: 6, verticalAlign: 1 }}>{leagueOfLeg(t)}</span>;
 const card = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 };
 const h2 = { color: C.gold, fontSize: 14, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", margin: "0 0 10px" };
 const th = { textAlign: "left", padding: "6px 8px", color: C.text2, fontWeight: 600, fontSize: 12, borderBottom: `1px solid ${C.border}`, background: C.head, whiteSpace: "nowrap" };
