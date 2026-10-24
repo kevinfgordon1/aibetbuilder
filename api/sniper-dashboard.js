@@ -281,17 +281,30 @@ async function matched(db, env, nowMs) {
       }
     }
   } catch (_) { /* optional */ }
+  // EV drift tracker: closing leg fairs snapshotted by the sniper at kickoff (combo-worker sniper/close-snapshot.js,
+  // table sniper_leg_close — migration 20261024b). One small primary-key IN read; missing table = closeTable:false.
+  const closes = {}; let closeTable = true;
+  try {
+    const keys = [...new Set(rows.filter((r) => Number(r.filled_contracts) > 0).flatMap((r) => (r.legs || []).map((k) => { const [t, sd] = String(k).split(':'); return `${t.toUpperCase()}:${sd || 'yes'}`; })))].slice(0, 1500);
+    for (let i = 0; i < keys.length; i += 300) {
+      const { data, error } = await db.from('sniper_leg_close').select('leg_key,fair_yes,venue,kickoff_at,captured_at').in('leg_key', keys.slice(i, i + 300));
+      if (error) { closeTable = false; break; }
+      for (const c of data || []) closes[c.leg_key] = { fair: c.fair_yes != null ? Number(c.fair_yes) : null, venue: c.venue || null, at: c.captured_at, kickoff: c.kickoff_at };
+    }
+  } catch (_) { closeTable = false; }
+  const legKey = (k) => { const [t, sd] = String(k).split(':'); return `${t.toUpperCase()}:${sd || 'yes'}`; };
+  const fillLeg = (id, k) => { const q = quoteAt[id]; const [t, sd] = String(k).split(':'); const l = q && (q.legDetail || []).find((x) => String(x.ticker).toUpperCase() === t.toUpperCase() && (x.side || 'yes') === (sd || 'yes')); return l || null; };
   const list = rows.map((r) => {
     const m = S.rowMoney(r); const hg = hedgeOf(r);
     return { rfqId: r.rfq_id, status: S.matchedStatus(r), filledAt: r.updated_at || r.created_at, createdAt: r.created_at, settledAt: r.settled_at,
-      legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), ...(lab.legInfo[k] ? { bet: lab.legInfo[k].bet, game: lab.legInfo[k].game } : {}), kickoff: kick(k) || (lab.legInfo[k] && lab.legInfo[k].kickoff) || null, result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
+      legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), ...(lab.legInfo[k] ? { bet: lab.legInfo[k].bet, game: lab.legInfo[k].game } : {}), kickoff: kick(k) || (lab.legInfo[k] && lab.legInfo[k].kickoff) || null, fillFair: (fillLeg(r.rfq_id, k) || {}).fair ?? null, fillVenue: (fillLeg(r.rfq_id, k) || {}).venue || null, close: closes[legKey(k)] || null, result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
       fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null, fee: r.filled_fee != null ? Number(r.filled_fee) : r.fee != null ? Number(r.fee) : null, quote: quoteAt[r.rfq_id] || null, bookArb: bookArb[r.rfq_id] || null,
       hedges: hedges[r.rfq_id] || [], hedge: hg, ...(hg && hg.ev != null ? { evUnhedged: m.ev, ev: hg.ev } : {}) };
   });
   const hedgedList = list.filter((x) => x.hedge && x.status === 'open');
   const hedgeTotals = { fills: hedgedList.length, locked: hedgedList.filter((x) => x.hedge.locked).length, stake: hedgedList.reduce((a, x) => a + x.hedge.stake, 0),
     worst: hedgedList.reduce((a, x) => a + x.hedge.worst, 0), freed: hedgedList.reduce((a, x) => a + x.hedge.freed, 0) };
-  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, perfDays, root, sweat, hedgeTotals };
+  return { ok: true, empty: false, asOf: new Date(nowMs).toISOString(), rows: list, perf, perfDays, root, sweat, hedgeTotals, closeTable };
 }
 
 // "What to root for" (Combo Locks sheet) over live, filled, unsettled sniper positions. The sniper is the HOUSE

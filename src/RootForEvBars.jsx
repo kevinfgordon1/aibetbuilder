@@ -5,7 +5,7 @@ import { lossWinSplit, curveCaption } from "./rootForSimple";
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
 const P = (p) => `${Math.round(p * 100)}%`;
 
-export default function EvBars({ hist, ev, pProfit, worst }) {
+export default function EvBars({ hist, ev, pProfit, worst, nowEv = null }) {
   const pLoss = pProfit != null ? 1 - pProfit : undefined;
   const s = lossWinSplit(hist, Number(ev), pLoss, worst);
   if (!s) return null;
@@ -32,7 +32,7 @@ export default function EvBars({ hist, ev, pProfit, worst }) {
           <div className="sub" style={{ marginTop: 4 }}>Wide = how often. Tall = how much. Green area ({money(s.winArea)}) minus red area ({money(s.lossArea).replace("−", "")}) = your expected profit <b style={{ color: "#fbbf24" }}>{money(Number(ev))}</b>.</div>
         </div>
       </div>
-      <div style={{ fontSize: 15, color: "#e5e7eb", marginTop: 6 }}>{curveCaption(s.pLoss, Number(ev))}</div>
+      <div style={{ fontSize: 15, color: "#e5e7eb", marginTop: 6 }}>{curveCaption(s.pLoss, Number(ev))}{nowEv != null && Number.isFinite(Number(nowEv)) ? <span data-testid="evbars-now" style={{ fontSize: 12, color: "#93c5fd", marginLeft: 8 }}>Now (live prices) {money(Number(nowEv))}</span> : null}</div>
     </div>
   );
 }

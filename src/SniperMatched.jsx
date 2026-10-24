@@ -9,6 +9,9 @@ import { topByGain, topByDrop } from "./rootForSimple";
 import { americanFromProb, fmtAmerican, fmtUsd , takerSeesAmerican } from "./sniperDashboard.js";
 import HedgePanel, { hedgeLabel } from "./SniperHedges";
 import { perfStats, sniperFillDay } from "./sniperMatched.js";
+import { driftSummary, fillDrift } from "./sniperDrift.js";
+import { leagueOfLeg, leaguesOfFill, leagueOfFill, fillMatchesLeague, pregameView } from "./sniperLeague.js";
+export { leagueOfLeg, leaguesOfFill, leagueOfFill, fillMatchesLeague, pregameView };
 const EMPTY_PERF = perfStats([]);
 
 const C = { surface: "#181818", head: "#1f1f1f", border: "#2a2a2a", gold: "#bc9e66", text: "#e4e0d8", text2: "#a8a49c", muted: "#8a8a8a", good: "#7cc49a", bad: "#d88c84", warn: "#e0a04a" };
@@ -184,9 +187,7 @@ export function FillBreakdown({ r, api }) {
 // "My Fills": only real live fills (filled_contracts > 0) — what Kevin actually holds. No quotes.
 // Sortable columns (high → low first, click again to flip), Legs + First leg starts columns, and filters
 // (league, legs, filled date, parlay start date, min Exp. ROI). Summary cards and totals follow the filters.
-const LEAGUES = [[/^KXNCAAF/, "NCAAF"], [/^KXNFL/, "NFL"], [/^KXNCAAB/, "NCAAB"], [/^KXNBA/, "NBA"], [/^KXNHL/, "NHL"], [/^KXMLB/, "MLB"], [/^KXUFC/, "UFC"]];
-export const leagueOfLeg = (t) => { const s = String(t || "").toUpperCase(); for (const [re, n] of LEAGUES) if (re.test(s)) return n; return (s.replace(/^KX/, "").match(/^[A-Z]+?(?=GAME|TD|SPREAD|TOTAL|-|$)/) || ["Other"])[0] || "Other"; };
-export const leagueOfFill = (r) => { const s = [...new Set((r.legs || []).map((l) => leagueOfLeg(l.ticker)))]; return s.length > 1 ? "Multiple" : s[0] || "Other"; };
+const LeagueTag = ({ t }) => <span data-testid="leg-league" style={{ fontSize: 10, fontWeight: 700, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 4, padding: "0 4px", marginLeft: 6, verticalAlign: 1 }}>{leagueOfLeg(t)}</span>;
 export const firstStart = (r) => { const ts = (r.legs || []).map((l) => Date.parse(l.kickoff)).filter(Number.isFinite); return ts.length ? Math.min(...ts) : null; };
 const etYmd = (ms) => (ms == null ? null : new Date(ms).toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
 const addDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -206,7 +207,7 @@ export function applyFillFilters(rows, f, nowMs = Date.now()) {
   const quick = { today: [today, today], tomorrow: [addDays(today, 1), addDays(today, 1)], sat: [nextDow(today, 6), nextDow(today, 6)], sun: [nextDow(today, 0), nextDow(today, 0)] }[f.startQuick];
   const [sFrom, sTo] = quick || [f.startFrom, f.startTo];
   return rows.filter((r) => {
-    if (f.league && leagueOfFill(r) !== f.league) return false;
+    if (!fillMatchesLeague(r, f.league)) return false;
     if (f.legs && String(Math.min((r.legs || []).length, 5)) !== f.legs) return false;
     const fd = etYmd(Date.parse(r.filledAt));
     if (f.filledFrom && (!fd || fd < f.filledFrom)) return false;
@@ -228,7 +229,7 @@ export function MyFills({ data, nowMs, api }) {
   const [sort, setSort] = useState({ key: "Filled", dir: "desc" });
   const [f, setF] = useState(EMPTY_F);
   const all = ((data && data.rows) || []).filter((r) => r.filled);
-  const leagues = useMemo(() => [...new Set(all.map(leagueOfFill))].sort((a, b) => (a === "Multiple") - (b === "Multiple") || a.localeCompare(b)), [all]);
+  const leagues = useMemo(() => { const s = [...new Set(all.flatMap(leaguesOfFill))].sort((a, b) => a.localeCompare(b)); return all.some((r) => leaguesOfFill(r).length > 1) ? [...s, "Mixed"] : s; }, [all]);
   const legCounts = useMemo(() => [...new Set(all.map((r) => Math.min((r.legs || []).length, 5)))].sort((a, b) => a - b), [all]);
   const filtered = applyFillFilters(all, f, nowMs);
   const rows = sortFills(filtered, sort.key, sort.dir);
@@ -286,7 +287,7 @@ export function MyFills({ data, nowMs, api }) {
               <tr onClick={() => setOpenId(openId === r.rfqId ? null : r.rfqId)} style={{ cursor: "pointer", background: openId === r.rfqId ? "#1d1a14" : undefined }}>
                 <td style={td}><span style={{ color: C.gold }}>{openId === r.rfqId ? "▾" : "▸"}</span> {etTime(r.filledAt)}</td>
                 <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}{r.hedge ? <div data-testid="hedged-badge" style={{ color: r.hedge.locked ? C.good : C.gold, fontSize: 11, textTransform: "none" }}>Hedged · {hedgeLabel(r.hedge)}</div> : null}{api && r.status === "open" && !r.hedge ? <div><button type="button" onClick={(e) => { e.stopPropagation(); setOpenId(r.rfqId); }} style={{ marginTop: 3, background: "#1f1f1f", color: C.gold, border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 11, padding: "2px 6px", cursor: "pointer", textTransform: "none" }}>Log hedge</button></div> : null}</td>
-                <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}<div style={{ color: C.muted, fontSize: 11 }}>{leagueOfFill(r)}</div></td>
+                <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}<LeagueTag t={l.ticker} /></div>)}{leaguesOfFill(r).length > 1 ? <div style={{ color: C.muted, fontSize: 11 }}>Mixed</div> : null}</td>
                 <td style={td}>{r.legs.length}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>{firstStart(r) != null ? etTime(new Date(firstStart(r)).toISOString()) : "—"}</td>
                 <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
@@ -294,7 +295,7 @@ export function MyFills({ data, nowMs, api }) {
                 <td style={td} title="Buyer's odds after Kalshi taker fee">{fmtAmerican(takerSeesAmerican(r.soldYes, r.contracts))}</td>
                 <td style={td}>{Number(r.contracts).toFixed(0)}</td>
                 <td style={td}>{fmtUsd(r.risk)}</td><td style={td}>{fmtUsd(r.toWin)}</td>
-                <td style={{ ...td, color: expRoiOf(r) > 0 ? C.good : C.text }} title={`Expected profit ${signed(expProfitOf(r))}`}>{sRoi(expRoiOf(r))}{r.hedge ? <div style={{ color: C.muted, fontSize: 11 }}>{r.hedge.locked ? `locked ${signed(r.hedge.worst)}` : `exp. ${signed(expProfitOf(r))}`}</div> : null}</td>
+                <td style={{ ...td, color: expRoiOf(r) > 0 ? C.good : C.text }} title={`Expected profit ${signed(expProfitOf(r))}`}>{sRoi(expRoiOf(r))}{(() => { const dr = fillDrift(r); return dr ? <div data-testid="fill-drift" style={{ fontSize: 11, color: dr.status === "closed" ? pnlColor(dr.drift) : C.muted }} title={dr.status === "closed" ? `EV at fill ${signed(dr.evFill)} → at close ${signed(dr.evClose)}` : `${dr.closed}/${dr.legs} legs have a closing price`}>{dr.status === "closed" ? `close ${signed(dr.evClose)} · drift ${dr.driftPts > 0 ? "+" : ""}${dr.driftPts.toFixed(1)} pts` : "no close"}</div> : null; })()}{r.hedge ? <div style={{ color: C.muted, fontSize: 11 }}>{r.hedge.locked ? `locked ${signed(r.hedge.worst)}` : `exp. ${signed(expProfitOf(r))}`}</div> : null}</td>
                 <td style={{ ...td, color: r.pnl == null ? C.muted : pnlColor(r.pnl) }}>{r.pnl == null ? "—" : signed(r.pnl)}</td>
               </tr>
               {openId === r.rfqId && <tr><td colSpan={COLS.length} style={{ ...td, background: "#141414" }}><FillBreakdown r={r} api={api} /></td></tr>}
@@ -313,6 +314,28 @@ export function MyFills({ data, nowMs, api }) {
   );
 }
 
+
+// EV drift tracker card: EV at fill vs EV at close (leg fairs snapshotted at kickoff), Today / All / Past day.
+function DriftCard({ rows, closeTable }) {
+  const s = useMemo(() => driftSummary(rows || []), [rows]);
+  const fmtPts = (x) => (x == null || !Number.isFinite(x) ? "—" : `${x > 0 ? "+" : ""}${x.toFixed(1)} pts`);
+  return (
+    <div data-testid="drift-card" style={{ ...card, marginBottom: 12 }}>
+      <div style={h2}>EV drift · fill → close (kickoff)</div>
+      {closeTable === false ? <div style={{ color: C.muted, fontSize: 12 }}>Closing prices aren't being recorded yet (needs the sniper_leg_close table + sniper deploy). Every fill shows “no close” until then.</div> : null}
+      {s.warn ? <div data-testid="drift-warn" style={{ background: "#3b1212", border: `1px solid ${C.bad}`, color: "#fecaca", borderRadius: 6, padding: "6px 10px", fontSize: 13, margin: "6px 0" }}>⚠ Last {s.rolling.n} closed fills drifted {fmtPts(s.rolling.pts)} on average (worse than {s.warnPts} pts). Prices are moving against fills before kickoff — possible adverse selection.</div> : null}
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, margin: "6px 0" }}>
+        <div>Avg drift <b style={{ color: pnlColor(s.total.pts || 0) }}>{fmtPts(s.total.pts)}</b> <span style={{ color: C.muted }}>ROI</span></div>
+        <div>Total drift <b style={{ color: pnlColor(s.total.usd) }}>{signed(s.total.usd)}</b></div>
+        <div style={{ color: C.muted }}>{s.total.n} with close · {s.noClose} no close{s.rolling.n ? ` · last ${s.rolling.n}: ${fmtPts(s.rolling.pts)}` : ""}</div>
+      </div>
+      {s.total.n > 0 && <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>{Object.entries(s.breakdown).map(([g, xs]) => (
+        <table key={g} style={{ borderCollapse: "collapse", flex: "1 1 200px" }}><thead><tr>{[g, "Fills", "Avg", "$"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+          <tbody>{xs.map((x) => <tr key={x.key}><td style={td}>{x.key}</td><td style={td}>{x.n}</td><td style={{ ...td, color: pnlColor(x.pts || 0) }}>{fmtPts(x.pts)}</td><td style={{ ...td, color: pnlColor(x.usd) }}>{signed(x.usd)}</td></tr>)}</tbody></table>
+      ))}</div>}
+    </div>
+  );
+}
 export default function SniperMatched({ data }) {
   const [filter, setFilter] = useState("all");
   // Today / All / a past fill day (ET, 2 AM rollover), like Combo Locks' results.
@@ -355,15 +378,17 @@ export default function SniperMatched({ data }) {
         <Stat label="Open risk" value={fmtUsd(scopeRows.filter((r) => r.status === "open").reduce((a, r) => a + r.risk, 0))} sub={`To win ${fmtUsd(scopeRows.filter((r) => r.status === "open").reduce((a, r) => a + r.toWin, 0))}`} />
         <Stat label="Expected (all)" value={signed(t.ev)} sub="Σ edge at the fair we sold at" />
       </div>
+      <DriftCard rows={(scopeRows || []).filter((r) => r.filled !== false)} closeTable={data.closeTable} />
       {d && (
         <div style={{ ...card, marginBottom: 12, background: "#111" }}>
           <div style={h2}>Live needle · open positions</div>
           <SweatMeter d={d} legs={false} liveCol={false} />
+          {(() => { const pg = pregameView(root, d.sweat && d.sweat.baseline) || { ev: root.ev, now: null, hist: root.hist, worst: root.worst, best: root.best, pProfit: root.pProfit }; return <>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: "2 1 420px" }}><PnlCurve hist={root.hist} worst={root.worst} ev={root.ev} pProfit={root.pProfit} best={root.best} xLabel="Sniper result on open positions ($)" unit="slates" /></div>
-            <div style={{ flex: "1 1 280px" }}><EvBars hist={root.hist} ev={root.ev} pProfit={root.pProfit} worst={root.worst} /></div>
+            <div style={{ flex: "2 1 420px" }}><PnlCurve hist={pg.hist} worst={pg.worst} ev={pg.ev} pProfit={pg.pProfit} best={pg.best} nowEv={pg.now} evLabel={pg.now != null ? `Expected at fill ${signed(pg.ev)}` : null} xLabel="Sniper result on open positions ($)" unit="slates" /></div>
+            <div style={{ flex: "1 1 280px" }}><EvBars hist={pg.hist} ev={pg.ev} pProfit={pg.pProfit} worst={pg.worst} nowEv={pg.now} /></div>
           </div>
-          <div style={{ color: C.muted, fontSize: 11, marginTop: 6 }}>Best case {signed(root.best && root.best.pnl)} · worst case {signed(root.worst && root.worst.pnl)} · chance of profit {pct(root.pProfit, 0)}</div>
+          <div style={{ color: C.muted, fontSize: 11, marginTop: 6 }}>Centered on expected at fill {signed(pg.ev)}{pg.now != null ? ` · now at live prices ${signed(pg.now)}` : ""} · best case {signed(pg.best && pg.best.pnl)} · worst case {signed(pg.worst && pg.worst.pnl)} · chance of profit {pct(pg.pProfit, 0)}</div></>; })()}
         </div>
       )}
       {d && (
@@ -407,7 +432,7 @@ export default function SniperMatched({ data }) {
             <tr key={r.rfqId}>
               <td style={td}>{etTime(r.filledAt)}</td>
               <td style={{ ...td, color: statusColor[r.status] || C.text, fontWeight: 700, textTransform: "capitalize" }}>{r.status}{r.hedge ? <div data-testid="hedged-badge" style={{ color: r.hedge.locked ? C.good : C.gold, fontSize: 11, textTransform: "none" }}>Hedged · {hedgeLabel(r.hedge)}</div> : null}</td>
-              <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : l.date ? ` · ${l.date}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}</div>)}</td>
+              <td style={td}>{r.legs.map((l) => <div key={l.ticker + l.side}>{l.bet} <span style={{ color: C.muted }}>· {l.game}{String(l.game).includes("·") ? "" : l.kickoff ? ` · ${etTime(l.kickoff)}` : l.date ? ` · ${l.date}` : ""}</span>{l.result ? <span style={{ color: l.result === l.side ? C.bad : C.good }}> · {l.result === l.side ? "hit" : "missed"}</span> : null}<LeagueTag t={l.ticker} /></div>)}</td>
               <td style={td}>{fmtAmerican(americanFromProb(r.fairYes))}</td>
               <td style={{ ...td, color: C.gold }}>{fmtAmerican(americanFromProb(r.soldYes))}<div style={{ color: C.muted, fontSize: 11 }}>we hold No {fmtAmerican(americanFromProb(1 - r.soldYes))}</div></td>
               <td style={td} title="Buyer's odds after Kalshi taker fee">{fmtAmerican(takerSeesAmerican(r.soldYes, r.contracts))}</td>
