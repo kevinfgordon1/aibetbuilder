@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { binarySideName, tickerLabel } from "./rootForSideName.js";
+assert.equal(binarySideName("KXNFLTOTAL-26OCT25SFATL-51", "yes"), "Over 50.5");
+assert.equal(binarySideName("KXNFLTOTAL-26OCT25SFATL-51", "no"), "Under 50.5");
+assert.equal(binarySideName("KXNFLSPREAD-26OCT25NYGHOU-HOU10", "yes"), "HOU −9.5");
+assert.equal(binarySideName("KXNFLSPREAD-26OCT25NYGHOU-HOU10", "no"), "Not HOU −9.5");
+assert.equal(tickerLabel("KXNFLTD-26OCT18NONYG-NOKMILLER5-1"), "K. Miller (NO) 1+ TD");
+assert.equal(binarySideName("KXNFLTD-26OCT18NONYG-NOKMILLER5-1", "yes"), "K. Miller 1+ TD");
+assert.equal(binarySideName("KXNFLTD-26OCT18NONYG-NOKMILLER5-1", "no"), "No K. Miller TD");
+assert.equal(binarySideName("KXNFLGAME-26OCT25NYGHOU", "yes"), null);
+console.log("rootForSideName tests ok");

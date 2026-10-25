@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves, finishedCarry } from "./rootForSweat.js";
+import { anchorWhatIf, slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves, finishedCarry } from "./rootForSweat.js";
 assert.equal(slateKey(Date.parse("2026-10-16T23:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T02:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T16:00:00Z")), "2026-10-20");
@@ -103,6 +103,10 @@ console.log("rootForSweat tests ok");
   assert.equal(g.leader, "H"); assert.ok(Math.abs(g.ifFinal - ((0.5 * 1000 + 0.5 * -100) - now)) < 1e-9); // +220
   assert.equal(g.flip, "J"); assert.ok(Math.abs(g.ifFlip - (-100 - now)) < 1e-9); // −330
   assert.ok(Math.abs(0.6 * g.ifFinal + 0.4 * g.ifFlip) < 1e-9); // probability-weighted what-ifs net to zero
+  // totals = expected profit with that leg final and every other leg at live odds; leader's chance exposed
+  assert.ok(Math.abs(r.nowEv - now) < 1e-9);
+  assert.ok(Math.abs(g.ifFinalTotal - (0.5 * 1000 + 0.5 * -100)) < 1e-9); assert.ok(Math.abs(g.ifFlipTotal - -100) < 1e-9);
+  assert.equal(g.leaderP, 0.6); assert.equal(g.flipP, 0.4);
 }
 // spread game: "if final" for team S keeps its margin buckets' split; flip = the other team (not a bucket)
 {
@@ -111,6 +115,14 @@ console.log("rootForSweat tests ok");
   const g = r.legs[0]; const now = 0.3 * 1000 + 0.7 * -100;
   assert.equal(g.leader, "S"); assert.ok(Math.abs(g.ifFinal - (0.5 * 1000 + 0.5 * -100 - now)) < 1e-9);
   assert.equal(g.flip, "O"); assert.ok(Math.abs(g.ifFlip - (-100 - now)) < 1e-9);
+}
+// what-if totals = page headline "Now $X expected" + change (headline counts settled locks the leg model doesn't)
+{
+  const pos = [{ id: "a", legs: [{ event: "G", allowed: ["H"] }], hit: 1000, miss: -100 }];
+  const r = liveLegMoves(pos, { G: { H: 0.6, J: 0.4 } }, { G: { H: 0.5, J: 0.5 } }, {});
+  const headline = 12345.67; const [g] = anchorWhatIf(r.legs, headline);
+  assert.equal(g.ifFinalTotal, headline + g.ifFinal); assert.equal(g.ifFlipTotal, headline + g.ifFlip);
+  assert.equal(anchorWhatIf(r.legs, undefined)[0].ifFinalTotal, r.nowEv + r.legs[0].ifFinal); // no headline → leg-model total
 }
 // adaptPregame: drop "neither" (rescale), sum buckets into a team, refuse a split it can't make, ignore late rows
 {
