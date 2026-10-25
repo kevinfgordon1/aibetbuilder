@@ -1,4 +1,5 @@
 // "What to root for": joint P&L across ALL of Kevin's open Combo Locks.
+import { expandAllowed } from "./rootForBuckets.js";
 //
 // Each lock = sportsbook parlay + hedge contracts sold on the combo (Kalshi / Polymarket).
 //   hit  (every leg wins): book.hit  + hedge.received − hedge.filled   ($1 per sold contract)
@@ -73,7 +74,7 @@ export function rootFor(locks, probs, { nodeBudget = DEFAULT_NODE_BUDGET, mcSamp
   for (const lk of locks || []) {
     const req = new Map(); let impossible = false;
     for (const leg of lk.legs || []) {
-      const r = legEvent(leg);
+      const r0 = legEvent(leg); const r = { ...r0, allowed: expandAllowed(r0.allowed, probs && probs[r0.event]) };
       if (!evMap.has(r.event)) evMap.set(r.event, { id: r.event, kind: r.kind, outcomes: [...r.outcomes], touch: 0 });
       const prev = req.get(r.event);
       const next = prev ? new Set(r.allowed.filter((o) => prev.has(o))) : new Set(r.allowed);

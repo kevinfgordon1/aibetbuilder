@@ -1,3 +1,4 @@
+import { expandAllowed } from "./rootForBuckets.js";
 // Sweat meter: live expected profit vs a "pregame" expected profit.
 //
 // Each game is locked at its OWN kickoff. Storage: public.root_for_pregame_probs, one row per
@@ -28,7 +29,7 @@ export function expectedProfit(positions = [], probs = {}) {
   let ev = 0;
   for (const p of positions) {
     const by = {};
-    for (const l of p.legs) by[l.event] = by[l.event] ? by[l.event].filter((o) => l.allowed.includes(o)) : [...l.allowed];
+    for (const l of p.legs) { const al = expandAllowed(l.allowed, probs[l.event]); by[l.event] = by[l.event] ? by[l.event].filter((o) => al.includes(o)) : [...al]; }
     let P = 1;
     for (const [e, al] of Object.entries(by)) { const dist = probs[e]; if (!dist) { P = NaN; break; } P *= al.reduce((a, o) => a + (dist[o] || 0), 0); }
     if (Number.isFinite(P)) ev += P * p.hit + (1 - P) * p.miss;
@@ -196,7 +197,7 @@ export function lockedPregameEv(positions, preP, lockPre) {
 // A lock is decided once any settled leg lost (it can't win any more) or every leg settled.
 export function lockDecided(p, final = {}) {
   let all = true;
-  for (const l of p.legs || []) { const f = final[l.event]; if (!f) { all = false; continue; } if (!(l.allowed || []).some((o) => f[o] === 1)) return true; }
+  for (const l of p.legs || []) { const f = final[l.event]; if (!f) { all = false; continue; } if (!expandAllowed(l.allowed || [], f).some((o) => f[o] === 1)) return true; }
   return all;
 }
 
@@ -204,7 +205,7 @@ export function lockDecided(p, final = {}) {
 // the day's snapshot), else expected profit at the given chances.
 export function dayLockValue(p, probs = {}, final = {}) {
   let all = true;
-  for (const l of p.legs || []) { const f = final[l.event]; if (!f) { all = false; continue; } if (!(l.allowed || []).some((o) => f[o] === 1)) return Number(p.miss) || 0; }
+  for (const l of p.legs || []) { const f = final[l.event]; if (!f) { all = false; continue; } if (!expandAllowed(l.allowed || [], f).some((o) => f[o] === 1)) return Number(p.miss) || 0; }
   return all ? Number(p.hit) || 0 : expectedProfit([p], probs);
 }
 export const dayValue = (positions = [], probs = {}, final = {}) => positions.reduce((a, p) => a + dayLockValue(p, probs, final), 0);
