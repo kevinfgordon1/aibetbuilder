@@ -122,21 +122,22 @@ function LiveLegs({ d, part = "live", headline }) {
   return (
     <div className="livelegs" data-noclick style={{ flex: "1 1 300px", minWidth: 0, borderLeft: "1px solid #1f2937", paddingLeft: 14 }}>
       <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
-      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Live legs moving the needle <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· change in expected profit since kickoff</span></div>
+      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>What you're rooting for <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· impact so far (since kickoff) and what's still at stake · biggest swing first</span></div>
       {!shown.length ? <div className="sub" style={{ fontSize: 13, padding: "10px 0" }}>No legs are live right now. Once a game you're in kicks off, its push on the needle shows up here.</div>
         : shown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
-          // label = the side currently LEADING and its live price, so "if final" clearly means that side
-          const lead = l.leader != null ? sideName(l.event, l.leader) : (e.rootForName || e.game || l.event); const am = american(l.leaderP);
-          const flipNm = l.flip != null ? sideName(l.event, l.flip) : null;
+          // headline = the side Kevin is ROOTING FOR (its win helps most); leader + live price in small text
+          const root = l.root != null ? sideName(l.event, l.root) : (e.rootForName || e.game || l.event);
+          const lead = l.leader != null ? sideName(l.event, l.leader) : null; const am = american(l.leaderP);
+          const won = (l.root != null && l.root === l.leader);
           return (
-            <div key={l.event} style={{ margin: "6px 0" }}>
-              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{lead}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}{am != null ? `leading, live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
-                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
+            <div key={l.event} style={{ margin: "8px 0" }}>
+              <div style={{ fontSize: 12.5, marginBottom: 2 }}>Root for: <b>{root}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}{lead && am != null ? `${won ? "leading" : `${lead} leading`}, live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }} title="Impact so far: change in expected profit since kickoff">
+                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 120px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
+                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{pos ? "helping" : "hurting"} {money(l.move)}</span>
               </div>
-              {Number.isFinite(l.ifFinalTotal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Total expected profit if this leg ended now with that side winning, every other leg at the live odds (change from now in parentheses)">
-                if {lead} {verb(l.event)}: <b>{total(l.ifFinalTotal)}</b> <small>({money(l.ifFinal)})</small>{Number.isFinite(l.ifFlipTotal) ? <> · if {flipNm} {verb(l.event)}: <b>{total(l.ifFlipTotal)}</b> <small>({money(l.ifFlip)})</small></> : null}
+              {Number.isFinite(l.rootIfTotal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Stakes: change and resulting total expected profit if this leg ended now, every other leg at the live odds">
+                if {root} {verb(l.event)}: <b className={l.rootIf >= 0 ? "pos" : "neg"}>{money(l.rootIf)}</b> → {total(l.rootIfTotal)}{Number.isFinite(l.notIfTotal) ? <> · if not: <b className={l.notIf >= 0 ? "pos" : "neg"}>{money(l.notIf)}</b> → {total(l.notIfTotal)}</> : null}
               </div>}
             </div>); })}
     </div>

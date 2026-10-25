@@ -90,8 +90,18 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
     // leaderP/flipP = that side's current chance (team = sum of its margin buckets)
     if (ranked[0]) { l.leader = ranked[0][0]; l.leaderP = ranked[0][1]; l.ifFinal = ifWins(ranked[0][0]); l.ifFinalTotal = nowEv + l.ifFinal; }
     if (ranked[1]) { l.flip = ranked[1][0]; l.flipP = ranked[1][1]; l.ifFlip = ifWins(ranked[1][0]); l.ifFlipTotal = nowEv + l.ifFlip; }
+    // Root for (Kevin, Oct 25 2:32 PM): the side whose win helps most; "if not" = that side loses (its buckets → 0,
+    // the other outcomes keep their relative chances). stakes = the swing between the two.
+    if (ranked.length) {
+      const best = ranked.map(([t, p]) => ({ t, p, v: ifWins(t) })).sort((a, b) => b.v - a.v)[0];
+      const rest = Object.keys(d).filter((k) => k !== "__neither" && k.split(/[<>]=?/)[0] !== best.t); const z = rest.reduce((a, k) => a + d[k], 0);
+      const notD = Object.fromEntries(Object.keys(d).map((k) => [k, rest.includes(k) ? (z > 0 ? d[k] / z : 1 / rest.length) : 0]));
+      l.root = best.t; l.rootP = best.p; l.rootIf = best.v; l.rootIfTotal = nowEv + best.v;
+      if (rest.length) { l.notIf = expectedProfit(positions, { ...probs, [l.event]: notD }) - nowEv; l.notIfTotal = nowEv + l.notIf; l.stakes = l.rootIf - l.notIf; }
+    }
   }
-  legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
+  // sorted by stakes (biggest swing still to play for first); falls back to impact so far
+  legs.sort((a, b) => (Number(b.stakes) || 0) - (Number(a.stakes) || 0) || Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
   return { legs, done, settled, total: prev - pregame, nowEv };
 }
 
@@ -107,7 +117,8 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
 // total = headline + that leg's change, so the line always matches the number on screen.
 export function anchorWhatIf(legs = [], headline) {
   const h = Number(headline); if (!Number.isFinite(h)) return legs;
-  return legs.map((l) => ({ ...l, ...(Number.isFinite(l.ifFinal) ? { ifFinalTotal: h + l.ifFinal } : {}), ...(Number.isFinite(l.ifFlip) ? { ifFlipTotal: h + l.ifFlip } : {}) }));
+  return legs.map((l) => ({ ...l, ...(Number.isFinite(l.ifFinal) ? { ifFinalTotal: h + l.ifFinal } : {}), ...(Number.isFinite(l.ifFlip) ? { ifFlipTotal: h + l.ifFlip } : {}),
+    ...(Number.isFinite(l.rootIf) ? { rootIfTotal: h + l.rootIf } : {}), ...(Number.isFinite(l.notIf) ? { notIfTotal: h + l.notIf } : {}) }));
 }
 export const FINISHED_KEEP_MS = 12 * 3600 * 1000;
 // keep(ev, endedMs, day) picks which finished games count; default = ended within keepMs (All).
