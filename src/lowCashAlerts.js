@@ -8,6 +8,9 @@ export const USER_ALERTS_TABLE = "combo_user_alerts";
 export const USER_ALERTS_POLL_MS = 60_000;
 export const LOCATION_EXPIRED_MESSAGE = "Kalshi is rejecting your Combo Locks quotes because your location verification expired. Open the Kalshi app or website and verify your location to resume quoting.";
 // Kinds shown app-wide (right after sign-in, on every tab), not just on Combo Locks.
+// Kalshi documents no direct deep link to its location check (verified Oct 25 2026);
+// this opens Kalshi account settings, where users re-verify (or the app prompts on open).
+export const KALSHI_VERIFY_URL = "https://kalshi.com/account/settings";
 export const GLOBAL_ALERT_KINDS = new Set(["location_expired", "custom"]);
 export function globalUserAlerts(rows, userId) {
   return openUserAlerts(rows).filter((a) => a.userId === userId && GLOBAL_ALERT_KINDS.has(a.kind));
@@ -55,6 +58,7 @@ export function lowCashText(a, { owner = false } = {}) {
       body: owner
         ? "Kalshi is rejecting their Combo Locks quotes because their location verification expired. They need to verify their location in the Kalshi app or website."
         : LOCATION_EXPIRED_MESSAGE,
+      cta: owner ? null : { label: "Verify on Kalshi", href: KALSHI_VERIFY_URL },
     };
   }
   if (a.kind === "custom") {

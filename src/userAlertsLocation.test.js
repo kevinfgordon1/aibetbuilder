@@ -6,4 +6,6 @@ assert.equal(globalUserAlerts([row()], "u2").length, 0);
 assert.equal(globalUserAlerts([row({ read_at: "x" }), row({ id: "b", resolved_at: "x" }), row({ id: "c", kind: "low_cash" })], "u1").length, 0);
 assert.equal(lowCashText({ kind: "location_expired" }).body, LOCATION_EXPIRED_MESSAGE);
 assert.deepEqual(lowCashText({ kind: "custom", title: "Hi", body: "B" }), { title: "Hi", body: "B" });
+assert.equal(lowCashText({ kind: "location_expired" }).cta.label, "Verify on Kalshi");
+assert.equal(lowCashText({ kind: "location_expired" }, { owner: true }).cta, null);
 console.log("userAlertsLocation ok");

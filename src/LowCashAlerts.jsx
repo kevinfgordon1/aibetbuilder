@@ -34,6 +34,7 @@ export function LowCashBanner({ supabase, user, initialRows = null }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700 }}>{t.title}</div>
         <div style={{ marginTop: 3, lineHeight: 1.45 }}>{t.body}</div>
+        {t.cta && <a href={t.cta.href} target="_blank" rel="noopener noreferrer" className="btn mini" style={{ marginTop: 6, display: "inline-block" }}>{t.cta.label}</a>}
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
           {first.createdAt ? `Since ${etTime(first.createdAt)}` : ""}
           {more > 0 ? ` · ${more} more lock${more === 1 ? "" : "s"} affected` : ""}
@@ -88,6 +89,7 @@ export function UserAlertsBanner({ supabase, user, initialRows = null }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#f3f4f6" }}>{t.title}</div>
               {t.body && <div style={{ fontSize: 12, color: "#c7cbd3", marginTop: 3, lineHeight: 1.45 }}>{t.body}</div>}
+              {t.cta && <a href={t.cta.href} target="_blank" rel="noopener noreferrer" data-testid="user-alert-cta" style={{ display: "inline-block", marginTop: 8, background: "#f59e0b", color: "#111", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, textDecoration: "none" }}>{t.cta.label}</a>}
             </div>
             <button type="button" onClick={() => dismiss([a.id])} aria-label={`Dismiss: ${t.title}`} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "#d1d5db", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
           </div>
