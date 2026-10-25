@@ -103,6 +103,12 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
 // days = [{ day, snap, updatedAt }]. Ended = snap.lastAt; older snaps without it fall back to
 // min(row updated_at, kickoff + 4h). Later legs of a kept lock use current prices when priced (else their own
 // last live chances); a kept lock with a leg priced nowhere, or a leg in a forgotten game, is left out.
+// What-if totals anchored to the page's headline "Now $X expected" (which also counts settled / kept locks):
+// total = headline + that leg's change, so the line always matches the number on screen.
+export function anchorWhatIf(legs = [], headline) {
+  const h = Number(headline); if (!Number.isFinite(h)) return legs;
+  return legs.map((l) => ({ ...l, ...(Number.isFinite(l.ifFinal) ? { ifFinalTotal: h + l.ifFinal } : {}), ...(Number.isFinite(l.ifFlip) ? { ifFlipTotal: h + l.ifFlip } : {}) }));
+}
 export const FINISHED_KEEP_MS = 12 * 3600 * 1000;
 // keep(ev, endedMs, day) picks which finished games count; default = ended within keepMs (All).
 // Today & beyond passes keep = finished game belongs to today's sheet day (any age).

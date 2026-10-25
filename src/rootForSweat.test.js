@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves, finishedCarry } from "./rootForSweat.js";
+import { anchorWhatIf, slateKey, expectedProfit, pregameBaseline, gaugeFrac, outcomeSig, liveLegMoves, finishedCarry } from "./rootForSweat.js";
 assert.equal(slateKey(Date.parse("2026-10-16T23:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T02:00:00Z")), "2026-10-13");
 assert.equal(slateKey(Date.parse("2026-10-20T16:00:00Z")), "2026-10-20");
@@ -115,6 +115,14 @@ console.log("rootForSweat tests ok");
   const g = r.legs[0]; const now = 0.3 * 1000 + 0.7 * -100;
   assert.equal(g.leader, "S"); assert.ok(Math.abs(g.ifFinal - (0.5 * 1000 + 0.5 * -100 - now)) < 1e-9);
   assert.equal(g.flip, "O"); assert.ok(Math.abs(g.ifFlip - (-100 - now)) < 1e-9);
+}
+// what-if totals = page headline "Now $X expected" + change (headline counts settled locks the leg model doesn't)
+{
+  const pos = [{ id: "a", legs: [{ event: "G", allowed: ["H"] }], hit: 1000, miss: -100 }];
+  const r = liveLegMoves(pos, { G: { H: 0.6, J: 0.4 } }, { G: { H: 0.5, J: 0.5 } }, {});
+  const headline = 12345.67; const [g] = anchorWhatIf(r.legs, headline);
+  assert.equal(g.ifFinalTotal, headline + g.ifFinal); assert.equal(g.ifFlipTotal, headline + g.ifFlip);
+  assert.equal(anchorWhatIf(r.legs, undefined)[0].ifFinalTotal, r.nowEv + r.legs[0].ifFinal); // no headline → leg-model total
 }
 // adaptPregame: drop "neither" (rescale), sum buckets into a team, refuse a split it can't make, ignore late rows
 {

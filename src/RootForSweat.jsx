@@ -2,7 +2,7 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 // Sheet passes its loading flag down so the pill under the gauge can say "refreshing…".
 export const PillLoading = React.createContext(false);
-import { gaugeFrac, liveLegMoves, lockedPregameEv } from "./rootForSweat";
+import { gaugeFrac, liveLegMoves, lockedPregameEv, anchorWhatIf } from "./rootForSweat";
 import { american } from "./rootForPrices";
 import { tickerLabel, binarySideName } from "./rootForSideName.js";
 import { quantileOf } from "./rootForSimple";
@@ -79,7 +79,7 @@ export function UpdatedPill({ asOf, loading }) {
 }
 
 // Preview: in-play legs moving the needle (signed $ share of now − pregame), one shared scale.
-function LiveLegs({ d, part = "live" }) {
+function LiveLegs({ d, part = "live", headline }) {
   const s = d.sweat || {}; const model = d.model || {};
   const kept = (s.kept || []).filter((p) => !s.keptIds || s.keptIds.includes(String(p.id)));
   const positions = d.livePos || [...(model.positions || []), ...kept];
@@ -101,7 +101,7 @@ function LiveLegs({ d, part = "live" }) {
   const sideName = (ev, side) => (side === "yes" || side === "no" ? binarySideName(ev, side) : null) || (model.teamNames || {})[`${ev}:${side}`] || (((meta[ev] || {}).outcomes || []).find((o) => o.outcome === side) || {}).name || (side === "yes" || side === "no" ? `${tickerLabel(ev) || ev} ${side === "yes" ? "Yes" : "No"}` : side);
   const verb = (ev) => (/^(yes|no)$/.test(Object.keys(probs[ev] || {}).find((o) => o !== "__neither") || "") ? "hits" : "wins");
   const total = (n) => (n < 0 ? "−$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
-  const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
+  const shown = anchorWhatIf(legs, headline).filter((l) => Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
   if (part === "done") return !doneShown.length ? null : (
     <div className="donelegs" data-noclick style={{ alignSelf: "stretch", width: "100%", borderTop: "1px solid #1f2937", paddingTop: 8, marginTop: 4 }}>
@@ -199,7 +199,7 @@ export default function SweatMeter({ d, legs = true, liveCol = true }) {
         {started && s.since && <div className="sub" style={{ fontSize: 11.5, color: "#fbbf24" }}>Some games have no pregame number: measured since {etTime(s.since)} ET.</div>}
         
       </div>
-      {legs && liveCol && started && base != null && <LiveLegs d={d} />}
+      {legs && liveCol && started && base != null && <LiveLegs d={d} headline={now} />}
     </div>
   );
 }
