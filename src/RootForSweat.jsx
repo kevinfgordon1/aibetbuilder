@@ -138,6 +138,9 @@ function LiveLegs({ d, part = "live" }) {
                 <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
                 <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
               </div>
+              {Number.isFinite(l.ifFinal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Change in expected profit vs now if this leg ended now as it stands (the leader wins), every other leg at current prices; 'if it flips' = the runner-up wins instead">
+                if final: <b className={l.ifFinal >= 0 ? "pos" : "neg"}>{money(l.ifFinal)}</b>{Number.isFinite(l.ifFlip) ? <> · if it flips: <b className={l.ifFlip >= 0 ? "pos" : "neg"}>{money(l.ifFlip)}</b></> : null}
+              </div>}
             </div>); })}
     </div>
   );

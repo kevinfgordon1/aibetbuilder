@@ -76,6 +76,19 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
     // authoritative finals only (a 98% in-play price is not a final)
     if (finished.has(ev)) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
   }
+  // what-if per live leg (Kevin, Oct 25): EV with this leg settled as currently leading (1/0), every other leg at
+  // current prices, minus current EV; plus the same if the runner-up wins instead ("if it flips").
+  const nowEv = expectedProfit(positions, probs);
+  // Spread games split a team into margin buckets ("MIN>=7"/"MIN<7"): grouped by team, the winning team's buckets
+  // keep their current split (the margin is still open), the rest go to 0.
+  for (const l of legs) {
+    const d = probs[l.event]; const team = {};
+    for (const [o, p] of Object.entries(d)) if (o !== "__neither") { const t = o.split(/[<>]=?/)[0]; team[t] = (team[t] || 0) + p; }
+    const ranked = Object.entries(team).sort((a, b) => b[1] - a[1]);
+    const ifWins = (t) => expectedProfit(positions, { ...probs, [l.event]: Object.fromEntries(Object.keys(d).map((k) => [k, k !== "__neither" && k.split(/[<>]=?/)[0] === t ? (team[t] > 0 ? d[k] / team[t] : 1) : 0])) }) - nowEv;
+    if (ranked[0]) { l.leader = ranked[0][0]; l.ifFinal = ifWins(ranked[0][0]); }
+    if (ranked[1]) { l.flip = ranked[1][0]; l.ifFlip = ifWins(ranked[1][0]); }
+  }
   legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
   return { legs, done, settled, total: prev - pregame };
 }
