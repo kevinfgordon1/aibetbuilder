@@ -13,12 +13,13 @@ export function tickerLabel(ev) {
 }
 
 // Plain market meaning of a binary side for the what-if line: totals → "Over 50.5" / "Under 50.5", spreads →
-// "SF −3.5" / "Not SF −3.5", TD props → "K. Miller 1+ TD" / "No K. Miller TD". null when the ticker isn't recognized.
-export function binarySideName(ev, side) {
+// "Houston covers −10.5" / "Houston doesn't cover −10.5", TD props → "K. Miller 1+ TD" / "No K. Miller TD". null when the ticker isn't recognized.
+// teamName(abbr) → full name where the needle has one (e.g. "HOU" → "Houston").
+export function binarySideName(ev, side, teamName = null) {
   const m = String(ev).match(/^KX[A-Z]*?(TD|TOTAL|SPREAD)-\d{2}[A-Z]{3}\d{2}([A-Z]+)-(.+)$/); if (!m) return null;
   const [, kind, , tail] = m; const yes = side === "yes";
   if (kind === "TOTAL" && /^\d+$/.test(tail)) return `${yes ? "Over" : "Under"} ${Number(tail) - 0.5}`;
-  if (kind === "SPREAD") { const x = tail.match(/^([A-Z]+?)(\d+)$/); if (x) return `${yes ? "" : "Not "}${x[1]} −${Number(x[2]) - 0.5}`; }
+  if (kind === "SPREAD") { const x = tail.match(/^([A-Z]+?)(\d+)$/); if (x) { const tm = (teamName && teamName(x[1])) || x[1]; return `${tm} ${yes ? "covers" : "doesn't cover"} −${Number(x[2]) - 0.5}`; } }
   if (kind === "TD") { const l = tickerLabel(ev); if (l) { const nm = l.replace(/\s*\([A-Z]+\)\s*/, " ").replace(/\s+\d+\+ TD$/, "").trim(); return yes ? l.replace(/\s*\([A-Z]+\)/, "") : `No ${nm} TD`; } }
   return null;
 }

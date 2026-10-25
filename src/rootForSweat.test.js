@@ -124,6 +124,21 @@ console.log("rootForSweat tests ok");
   assert.equal(g.ifFinalTotal, headline + g.ifFinal); assert.equal(g.ifFlipTotal, headline + g.ifFlip);
   assert.equal(anchorWhatIf(r.legs, undefined)[0].ifFinalTotal, r.nowEv + r.legs[0].ifFinal); // no headline → leg-model total
 }
+// root for = the side whose win helps most (not necessarily the leader); if not = it loses; sorted by stakes
+{
+  const pos = [{ id: "a", legs: [{ event: "G", allowed: ["J"] }], hit: 1000, miss: -100 }, { id: "b", legs: [{ event: "K", allowed: ["k"] }], hit: 100, miss: -10 }];
+  const P = { G: { H: 0.6, J: 0.4 }, K: { k: 0.5, m: 0.5 } }; const r = liveLegMoves(pos, P, P, {});
+  const now = 0.4 * 1000 + 0.6 * -100 + 0.5 * 100 + 0.5 * -10; const g = r.legs[0];
+  assert.equal(g.event, "G"); // bigger swing first
+  assert.equal(g.leader, "H"); assert.equal(g.root, "J"); assert.equal(g.rootP, 0.4);
+  assert.ok(Math.abs(g.rootIf - (1000 + 45 - now)) < 1e-9); assert.ok(Math.abs(g.notIf - (-100 + 45 - now)) < 1e-9);
+  assert.ok(Math.abs(g.stakes - 1100) < 1e-9);
+  const [a] = anchorWhatIf(r.legs, 5000); assert.equal(a.rootIfTotal, 5000 + g.rootIf); assert.equal(a.notIfTotal, 5000 + g.notIf);
+  // spread: rooting for S >=7 leg → root S (buckets keep split); if not → O
+  const sp = [{ id: "s", legs: [{ event: "S1", allowed: ["S>=7"] }], hit: 1000, miss: -100 }];
+  const q = liveLegMoves(sp, { S1: { "S>=7": 0.3, "S<7": 0.3, O: 0.4 } }, { S1: { "S>=7": 0.3, "S<7": 0.3, O: 0.4 } }, {}).legs[0];
+  assert.equal(q.root, "S"); assert.ok(Math.abs(q.notIf - (-100 - (0.3 * 1000 + 0.7 * -100))) < 1e-9);
+}
 // adaptPregame: drop "neither" (rescale), sum buckets into a team, refuse a split it can't make, ignore late rows
 {
   const { adaptPregame } = await import("./rootForSweat.js");
