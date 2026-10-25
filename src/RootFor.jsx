@@ -31,9 +31,8 @@ const oneIn = (p) => (p > 0 ? `about 1 in ${Math.round(1 / p).toLocaleString("en
 const am = (a) => (a == null ? "—" : (a > 0 ? "+" : "") + Math.round(a));
 const amFromP = (p) => (!(p > 0 && p < 1) ? null : p >= 0.5 ? -100 * p / (1 - p) : 100 * (1 - p) / p);
 const etStamp = (iso) => new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) + " ET";
-// Sunday Oct 18, 2026 only: 2-minute refresh. Reverts to 10 min after 11:59 PM ET (Oct 19 04:00 UTC) with no deploy.
-const FAST_UNTIL = Date.parse("2026-10-19T04:00:00Z");
-export const refreshMs = (now = Date.now()) => (now < FAST_UNTIL ? 2 : 10) * 60 * 1000;
+import { refreshMs } from "./rootForRefresh.js";
+export { refreshMs };
 const tStart = (iso) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit" }) + " ET" : "");
 
 // condition one game on a team winning (keep its outcomes) or losing (drop them), renormalized
@@ -306,10 +305,10 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
   }, []);
   // fetch only once the sheet is shown
   useEffect(() => { if (open && can && !initialData && !st.data && !st.loading) load(); }, [open, can]); // eslint-disable-line react-hooks/exhaustive-deps
-  // live: reprice every 10 minutes (2 min on Oct 18, 2026 ET) while the tab is visible (in-game prices included). No alerts.
+  // live: reprice every 5 minutes (2 min on Oct 18, 2026 ET) while the tab is visible (in-game prices included). No alerts.
   useEffect(() => {
     if (!open || !can || initialData) return undefined;
-    // tick every 15s and reload once refreshMs() has passed, so the cadence flips back to 10 min at midnight ET without a remount
+    // tick every 15s and reload once refreshMs() has passed, so the cadence flips back to 5 min at midnight ET without a remount
     let last = Date.now();
     const id = setInterval(() => { if (Date.now() - last >= refreshMs() - 1000 && (typeof document === "undefined" || document.visibilityState !== "hidden")) { last = Date.now(); load(); } }, 15000);
     return () => clearInterval(id);
