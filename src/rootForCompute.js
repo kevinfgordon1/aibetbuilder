@@ -111,7 +111,13 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
   };
   const resolved = positions.map((pos) => ({ ...pos, legs: pos.legs.map(resolve) }));
   // spread games: make sure the moneyline outcome list is the refined one for every leg
-  for (const pos of resolved) for (const l of pos.legs) if (spreadOf[l.event]) l.outcomes = evOutcomes[l.event];
+  // ...and re-split any moneyline leg resolved as a plain team ("DET") into that team's buckets ("DET>=4","DET<4")
+  for (const pos of resolved) for (const l of pos.legs) {
+    const sp = spreadOf[l.event]; if (!sp || l.kind !== "game") continue;
+    l.outcomes = evOutcomes[l.event];
+    const parts = { [sp.team]: [`${sp.team}>=${sp.k}`, `${sp.team}<${sp.k}`] };
+    l.allowed = [...new Set(l.allowed.flatMap((o) => parts[o] || [o]))];
+  }
 
   // ---- 3. raw inverse chances per event (no scaling); residual "neither" keeps sides exclusive
   const probs = {}; const shown = {}; const unpricedEv = new Set(); const clamps = []; const finalEv = {};
