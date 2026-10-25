@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { etTime } from "./comboBalances";
-import { USER_ALERTS_POLL_MS, dismissUserAlerts, fetchOpenUserAlerts, lowCashText, openAlertsByUser, openUserAlerts } from "./lowCashAlerts.js";
+import { USER_ALERTS_POLL_MS, dismissUserAlerts, fetchOpenUserAlerts, lowCashText, openAlertsByUser, openUserAlerts, globalUserAlerts } from "./lowCashAlerts.js";
 
 /** Open low-cash alert rows (raw), re-read every minute. userId=null = all RLS allows (owner). */
 export function useUserAlertRows(supabase, userId, enabled = true) {
@@ -37,7 +37,7 @@ export function LowCashBanner({ supabase, user, initialRows = null }) {
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
           {first.createdAt ? `Since ${etTime(first.createdAt)}` : ""}
           {more > 0 ? ` · ${more} more lock${more === 1 ? "" : "s"} affected` : ""}
-          {" · Clears on its own once your cash covers it."}
+          {first.kind === "custom" ? "" : first.kind === "location_expired" ? " · Clears on its own once your quotes go through again." : " · Clears on its own once your cash covers it."}
         </div>
       </div>
       <button type="button" className="btn mini" onClick={() => dismiss(list.map((a) => a.id))} aria-label="Dismiss low cash alert">Dismiss</button>
@@ -68,4 +68,31 @@ export function lowCashChip(alerts) {
   if (!alerts || !alerts.length) return null;
   const short = alerts.reduce((s, a) => s + (Number(a.shortfallUsd) || 0), 0);
   return <span className="chip warn" style={{ marginTop: 3, display: "inline-block" }} title={lowCashText(alerts[0], { owner: true }).body}>{alerts.some((x) => x.kind === "no_credits") ? "Out of credits" : "Low cash"}{short > 0 ? ` · ~$${short.toFixed(2)} short` : ""}</span>;
+}
+
+/** App-wide banner (all tabs, shown on sign-in): this user's location / custom alerts. */
+export function UserAlertsBanner({ supabase, user, initialRows = null }) {
+  const live = useUserAlertRows(supabase, user && user.id, !!user && !initialRows);
+  const rows = initialRows || live.rows;
+  const [hidden, setHidden] = useState([]);
+  const list = user ? globalUserAlerts(rows, user.id).filter((a) => !hidden.includes(a.id)) : [];
+  if (!list.length) return null;
+  const dismiss = (ids) => { setHidden((h) => h.concat(ids)); if (!initialRows) dismissUserAlerts(supabase, ids); };
+  return (
+    <div data-testid="user-alerts-banner" style={{ padding: "12px 32px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+      {list.map((a) => {
+        const t = lowCashText(a);
+        return (
+          <div key={a.id} role="alert" style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "10px 14px", background: "rgba(245,158,11,0.12)", borderLeft: "3px solid #f59e0b", borderRadius: 8 }}>
+            <span aria-hidden="true" style={{ fontSize: 16, lineHeight: "20px" }}>⚠️</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#f3f4f6" }}>{t.title}</div>
+              {t.body && <div style={{ fontSize: 12, color: "#c7cbd3", marginTop: 3, lineHeight: 1.45 }}>{t.body}</div>}
+            </div>
+            <button type="button" onClick={() => dismiss([a.id])} aria-label={`Dismiss: ${t.title}`} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "#d1d5db", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Dismiss</button>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
