@@ -86,11 +86,13 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
     for (const [o, p] of Object.entries(d)) if (o !== "__neither") { const t = o.split(/[<>]=?/)[0]; team[t] = (team[t] || 0) + p; }
     const ranked = Object.entries(team).sort((a, b) => b[1] - a[1]);
     const ifWins = (t) => expectedProfit(positions, { ...probs, [l.event]: Object.fromEntries(Object.keys(d).map((k) => [k, k !== "__neither" && k.split(/[<>]=?/)[0] === t ? (team[t] > 0 ? d[k] / team[t] : 1) : 0])) }) - nowEv;
-    if (ranked[0]) { l.leader = ranked[0][0]; l.ifFinal = ifWins(ranked[0][0]); }
-    if (ranked[1]) { l.flip = ranked[1][0]; l.ifFlip = ifWins(ranked[1][0]); }
+    // ifFinal/ifFlip = change vs now; *Total = the resulting total expected profit (what the needle would read);
+    // leaderP/flipP = that side's current chance (team = sum of its margin buckets)
+    if (ranked[0]) { l.leader = ranked[0][0]; l.leaderP = ranked[0][1]; l.ifFinal = ifWins(ranked[0][0]); l.ifFinalTotal = nowEv + l.ifFinal; }
+    if (ranked[1]) { l.flip = ranked[1][0]; l.flipP = ranked[1][1]; l.ifFlip = ifWins(ranked[1][0]); l.ifFlipTotal = nowEv + l.ifFlip; }
   }
   legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
-  return { legs, done, settled, total: prev - pregame };
+  return { legs, done, settled, total: prev - pregame, nowEv };
 }
 
 // All view: finished games stay counted at their LAST live chances (same as Today) for 12 hours after the game

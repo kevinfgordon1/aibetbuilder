@@ -4,6 +4,7 @@ import React, { useContext, useEffect, useMemo, useState } from "react";
 export const PillLoading = React.createContext(false);
 import { gaugeFrac, liveLegMoves, lockedPregameEv } from "./rootForSweat";
 import { american } from "./rootForPrices";
+import { tickerLabel, binarySideName } from "./rootForSideName.js";
 import { quantileOf } from "./rootForSimple";
 import { rootFor } from "./rootForEngine";
 
@@ -59,18 +60,7 @@ export function savedLegCounts(lp) {
 }
 // Finished binary legs (props/totals/spreads) lose their names when they drop off the board: saved names first,
 // else read the Kalshi ticker ("KXNFLTD-26OCT18NONYG-NOKMILLER5-1" → "K. Miller (NO) 1+ TD").
-const NFL = ["ARI","ATL","BAL","BUF","CAR","CHI","CIN","CLE","DAL","DEN","DET","GB","HOU","IND","JAC","JAX","KC","LAC","LAR","LV","MIA","MIN","NE","NO","NYG","NYJ","PHI","PIT","SEA","SF","TB","TEN","WAS"];
-const splitGame = (g) => { for (const a of NFL) if (g.startsWith(a) && NFL.includes(g.slice(a.length))) return `${a}@${g.slice(a.length)}`; return g; };
-const titleCase = (x) => x.charAt(0) + x.slice(1).toLowerCase();
-export function tickerLabel(ev) {
-  const m = String(ev).match(/^KX[A-Z]*?(TD|TOTAL|SPREAD|GAME)-\d{2}[A-Z]{3}\d{2}([A-Z]+)(?:-(.+))?$/); if (!m) return null;
-  const [, kind, game, tail = ""] = m; const g = splitGame(game);
-  if (kind === "TOTAL" && /^\d+$/.test(tail)) return `Over ${Number(tail) - 0.5} ${g}`;
-  if (kind === "SPREAD") { const s = tail.match(/^([A-Z]+?)(\d+)$/); if (s) return `${s[1]} −${Number(s[2]) - 0.5} (${g})`; }
-  if (kind === "TD") { const s = tail.match(/^([A-Z]+?)([A-Z])([A-Z]+)\d+-(\d+)$/); if (s) { const team = NFL.find((a) => game.includes(a) && tail.startsWith(a) && /^[A-Z]{2,}/.test(tail.slice(a.length))) || s[1];
-    const rest = tail.slice(team.length).replace(/\d+-\d+$/, ""); return `${rest.charAt(0)}. ${titleCase(rest.slice(1))} (${team}) ${s[4]}+ TD`; } }
-  return null;
-}
+export { tickerLabel, binarySideName };
 
 const etTime = (iso) => new Date(iso).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const money = (n) => (n < 0 ? "−$" : n > 0 ? "+$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
@@ -107,6 +97,10 @@ function LiveLegs({ d, part = "live" }) {
     const nm2 = nm === w && saved && saved[w] ? saved[w] : nm;
     return /^(Not: |Over |Under )/.test(nm2) ? `${nm2} — hit` : `${nm2} won`;
   };
+  // side names for the what-if line: team / "Over 44.5" / "Not: …" (spread buckets are grouped by team upstream)
+  const sideName = (ev, side) => (side === "yes" || side === "no" ? binarySideName(ev, side) : null) || (model.teamNames || {})[`${ev}:${side}`] || (((meta[ev] || {}).outcomes || []).find((o) => o.outcome === side) || {}).name || (side === "yes" || side === "no" ? `${tickerLabel(ev) || ev} ${side === "yes" ? "Yes" : "No"}` : side);
+  const verb = (ev) => (/^(yes|no)$/.test(Object.keys(probs[ev] || {}).find((o) => o !== "__neither") || "") ? "hits" : "wins");
+  const total = (n) => (n < 0 ? "−$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
   const shown = legs.filter((l) => Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
   if (part === "done") return !doneShown.length ? null : (
@@ -130,16 +124,19 @@ function LiveLegs({ d, part = "live" }) {
       <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
       <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Live legs moving the needle <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· change in expected profit since kickoff</span></div>
       {!shown.length ? <div className="sub" style={{ fontSize: 13, padding: "10px 0" }}>No legs are live right now. Once a game you're in kicks off, its push on the needle shows up here.</div>
-        : shown.map((l) => { const e = meta[l.event] || {}; const pk = e.rootFor; const p = pk && probs[l.event] ? probs[l.event][pk] : null; const am = american(p); const pos = l.move >= 0;
+        : shown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
+          // label = the side currently LEADING and its live price, so "if final" clearly means that side
+          const lead = l.leader != null ? sideName(l.event, l.leader) : (e.rootForName || e.game || l.event); const am = american(l.leaderP);
+          const flipNm = l.flip != null ? sideName(l.event, l.flip) : null;
           return (
             <div key={l.event} style={{ margin: "6px 0" }}>
-              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{e.rootForName || e.game || l.event}</b> <span className="sub">{e.game && e.rootForName ? `${e.game} · ` : ""}{am != null ? `live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
+              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{lead}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}{am != null ? `leading, live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
                 <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
               </div>
-              {Number.isFinite(l.ifFinal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Change in expected profit vs now if this leg ended now as it stands (the leader wins), every other leg at current prices; 'if it flips' = the runner-up wins instead">
-                if final: <b className={l.ifFinal >= 0 ? "pos" : "neg"}>{money(l.ifFinal)}</b>{Number.isFinite(l.ifFlip) ? <> · if it flips: <b className={l.ifFlip >= 0 ? "pos" : "neg"}>{money(l.ifFlip)}</b></> : null}
+              {Number.isFinite(l.ifFinalTotal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Total expected profit if this leg ended now with that side winning, every other leg at the live odds (change from now in parentheses)">
+                if {lead} {verb(l.event)}: <b>{total(l.ifFinalTotal)}</b> <small>({money(l.ifFinal)})</small>{Number.isFinite(l.ifFlipTotal) ? <> · if {flipNm} {verb(l.event)}: <b>{total(l.ifFlipTotal)}</b> <small>({money(l.ifFlip)})</small></> : null}
               </div>}
             </div>); })}
     </div>

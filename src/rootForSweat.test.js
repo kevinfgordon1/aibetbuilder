@@ -103,6 +103,10 @@ console.log("rootForSweat tests ok");
   assert.equal(g.leader, "H"); assert.ok(Math.abs(g.ifFinal - ((0.5 * 1000 + 0.5 * -100) - now)) < 1e-9); // +220
   assert.equal(g.flip, "J"); assert.ok(Math.abs(g.ifFlip - (-100 - now)) < 1e-9); // −330
   assert.ok(Math.abs(0.6 * g.ifFinal + 0.4 * g.ifFlip) < 1e-9); // probability-weighted what-ifs net to zero
+  // totals = expected profit with that leg final and every other leg at live odds; leader's chance exposed
+  assert.ok(Math.abs(r.nowEv - now) < 1e-9);
+  assert.ok(Math.abs(g.ifFinalTotal - (0.5 * 1000 + 0.5 * -100)) < 1e-9); assert.ok(Math.abs(g.ifFlipTotal - -100) < 1e-9);
+  assert.equal(g.leaderP, 0.6); assert.equal(g.flipP, 0.4);
 }
 // spread game: "if final" for team S keeps its margin buckets' split; flip = the other team (not a bucket)
 {
