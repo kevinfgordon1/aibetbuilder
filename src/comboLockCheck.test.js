@@ -42,3 +42,14 @@ assert.equal(lockCheckView(null, lock), null);
 import { LOCK_CHECK_BUSY_LABEL } from "./comboLockCheck.js";
 assert.equal(LOCK_CHECK_BUSY_LABEL, "Checking… your quotes are off for ~15s");
 console.log("comboLockCheck.test.js ok");
+
+// Partly filled locks keep Check market price while active with contracts left.
+{
+  const { lockCheckOnCard } = await import("./comboLockCheck.js");
+  const p = { id: "p", user_id: "u1", active: true };
+  assert.equal(lockCheckOnCard({ parlay: p, user: me, filledSection: false, left: 0 }), true);
+  assert.equal(lockCheckOnCard({ parlay: p, user: me, filledSection: true, left: 3 }), true);
+  assert.equal(lockCheckOnCard({ parlay: p, user: me, filledSection: true, left: 0 }), false);
+  assert.equal(lockCheckOnCard({ parlay: { ...p, active: false }, user: me, filledSection: true, left: 3 }), false);
+  assert.equal(lockCheckOnCard({ parlay: p, user: { id: "x" }, filledSection: true, left: 3 }), false);
+}

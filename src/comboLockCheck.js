@@ -141,3 +141,12 @@ export function lockPriceAdvice(result, parlay, { feeRate = 0 } = {}) {
   out.text = text;
   return out;
 }
+
+/** Should a card show Check market price / price advice? Waiting locks always;
+ * filled-section locks only when owned, still active, and contracts remain. */
+export function lockCheckOnCard({ parlay, user, filledSection, left }) {
+  if (!filledSection) return true;
+  if (!parlay || !user || parlay.user_id !== user.id) return false;
+  if (parlay.active === false) return false;
+  return Number(left) > 0;
+}

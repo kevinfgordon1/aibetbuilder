@@ -53,7 +53,7 @@ import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SE
 import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
-import { lockCheckAvailable, lockCheckView, lockPriceAdvice, autoCheckDue, missedQuotes, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
+import { lockCheckAvailable, lockCheckView, lockPriceAdvice, lockCheckOnCard, autoCheckDue, missedQuotes, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
 import { fillsPlan, nextFillsCache } from "./comboFillsIncremental.js";
 import { fetchAllRows } from "./comboPaging";
 import { archivedRowsNeedRefetch, archivedSubsPlan, nextArchivedSubsCache } from "./comboHistoryCache";
@@ -201,7 +201,7 @@ function LockMarketCheck({ parlay, user, supabase, counts, onResult }) {
       lastMissed: Math.min(Number(st.lastMissed) || 0, missed), // counts can shrink (window) → re-baseline
       busy: busy || lockCheckInFlight,
       paused: isLockPaused(parlay) || parlay.active === false,
-      available: avail.show && !avail.disabled && (counts ? counts.fills : 0) === 0,
+      available: avail.show && !avail.disabled,
       nowMs: Date.now(),
       notBeforeMs: lockCheckNotBefore,
     });
@@ -1565,7 +1565,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const qfOpts = { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, countedUnfilledQuotes: unfilledCounts[p.id] };
     const quoteLine = lockQuoteFillLine(submissionsByParlay[p.id], qfOpts);
     const quoteCounts = lockQuoteFillCounts(submissionsByParlay[p.id], qfOpts);
-    const advice = !filledSection && p.user_id === user.id ? lockPriceAdvice(checkResults[p.id], p, { feeRate: feeOn ? COMBO_FEE_RATE : 0 }) : null;
+    const showCheck = lockCheckOnCard({ parlay: p, user, filledSection, left: desk && desk.fill ? desk.fill.left : 0 });
+    const advice = showCheck && p.user_id === user.id ? lockPriceAdvice(checkResults[p.id], p, { feeRate: feeOn ? COMBO_FEE_RATE : 0 }) : null;
     const open = !!openParlays[p.id];
     const toggle = () => setOpenParlays((o) => {
       const next = !o[p.id];
@@ -1589,7 +1590,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         hedgeNote={desk && desk.quoted > desk.fill.filled ? `Offered ${desk.quoted.toLocaleString("en-US")}, ${desk.fill.filled.toLocaleString("en-US")} confirmed filled` : ""}
         controls={<>
           <PauseToggle parlay={p} onToggle={setParlayPaused} busy={!!pauseBusy[p.id]} />
-          {!filledSection && <LockMarketCheck parlay={p} user={user} supabase={supabase} counts={quoteCounts} onResult={onCheckResult} />}
+          {showCheck && <LockMarketCheck parlay={p} user={user} supabase={supabase} counts={quoteCounts} onResult={onCheckResult} />}
           {p.active !== false && <ChangePriceButton parlay={p} supabase={supabase} feesEnabled={p.user_id === user.id ? feeOn : !!feesByUserId[p.user_id]} onDone={reload} />}
         </>}
       >
