@@ -206,14 +206,15 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
 }
 
-/** Last live chances of recently seen games (daily needle snapshots, last 2 days; market facts, same for every user).
- * A finished game stops being priced; computeRootFor counts it at its final result (outcome >= 95%) from these. */
+/** Settled results of recently seen games (daily needle snapshots' snap.final, last 2 days; market facts, same for every
+ * user). snap.final is filled only from Kalshi markets whose status is finalized/settled/determined (resolveFinal),
+ * never from a last live price: a 95%+ in-play price or a game that is momentarily unpriced is NOT final. */
 async function loadFinals(client, now) {
   try {
     const lo = new Date(now - 2 * 86400000).toISOString().slice(0, 10);
-    const { data, error } = await client.from('root_for_needle_days').select('day,last:snap->last').gte('day', lo).order('day', { ascending: true });
+    const { data, error } = await client.from('root_for_needle_days').select('day,final:snap->final').gte('day', lo).order('day', { ascending: true });
     if (error) throw error;
-    const out = {}; for (const r of data || []) Object.assign(out, (r && r.last) || {});
+    const out = {}; for (const r of data || []) Object.assign(out, (r && r.final) || {});
     return out;
   } catch (e) { console.error('[root-for] finals unavailable:', String((e && e.message) || e).slice(0, 120)); return {}; }
 }
