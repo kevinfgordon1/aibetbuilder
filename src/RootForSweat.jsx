@@ -98,8 +98,8 @@ function LiveLegs({ d, part = "live", headline }) {
     return /^(Not: |Over |Under )/.test(nm2) ? `${nm2} — hit` : `${nm2} won`;
   };
   // side names for the what-if line: team / "Over 44.5" / "Not: …" (spread buckets are grouped by team upstream)
-  const sideName = (ev, side) => (side === "yes" || side === "no" ? binarySideName(ev, side) : null) || (model.teamNames || {})[`${ev}:${side}`] || (((meta[ev] || {}).outcomes || []).find((o) => o.outcome === side) || {}).name || (side === "yes" || side === "no" ? `${tickerLabel(ev) || ev} ${side === "yes" ? "Yes" : "No"}` : side);
-  const verb = (ev) => (/^(yes|no)$/.test(Object.keys(probs[ev] || {}).find((o) => o !== "__neither") || "") ? "hits" : "wins");
+  const sideName = (ev, side) => (side === "yes" || side === "no" ? binarySideName(ev, side, (t) => (model.teamNames || {})[`${String(ev).split("-").slice(0, 2).join("-").replace(/SPREAD-/, "GAME-")}:${t}`]) : null) || (model.teamNames || {})[`${ev}:${side}`] || (((meta[ev] || {}).outcomes || []).find((o) => o.outcome === side) || {}).name || (side === "yes" || side === "no" ? `${tickerLabel(ev) || ev} ${side === "yes" ? "Yes" : "No"}` : side);
+  const verb = (ev) => (/SPREAD-/.test(String(ev)) ? "" : /^(yes|no)$/.test(Object.keys(probs[ev] || {}).find((o) => o !== "__neither") || "") ? "hits" : "wins");
   const total = (n) => (n < 0 ? "−$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
   const shown = anchorWhatIf(legs, headline).filter((l) => Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
@@ -137,7 +137,7 @@ function LiveLegs({ d, part = "live", headline }) {
                 <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{pos ? "helping" : "hurting"} {money(l.move)}</span>
               </div>
               {Number.isFinite(l.rootIfTotal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Stakes: change and resulting total expected profit if this leg ended now, every other leg at the live odds">
-                if {root} {verb(l.event)}: <b className={l.rootIf >= 0 ? "pos" : "neg"}>{money(l.rootIf)}</b> → {total(l.rootIfTotal)}{Number.isFinite(l.notIfTotal) ? <> · if not: <b className={l.notIf >= 0 ? "pos" : "neg"}>{money(l.notIf)}</b> → {total(l.notIfTotal)}</> : null}
+                if {root}{verb(l.event) ? ` ${verb(l.event)}` : ""}: <b className={l.rootIf >= 0 ? "pos" : "neg"}>{money(l.rootIf)}</b> → {total(l.rootIfTotal)}{Number.isFinite(l.notIfTotal) ? <> · if not: <b className={l.notIf >= 0 ? "pos" : "neg"}>{money(l.notIf)}</b> → {total(l.notIfTotal)}</> : null}
               </div>}
             </div>); })}
     </div>
