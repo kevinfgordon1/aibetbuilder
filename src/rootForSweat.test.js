@@ -33,7 +33,7 @@ assert.equal(gaugeFrac(99999, -4000, 2600, 15000), 1);
   const want = expectedProfit(ps, live) - expectedProfit(ps, fz);
   assert.ok(Math.abs(r.total - want) < 1e-9);
   assert.ok(Math.abs(r.legs.reduce((a, l) => a + l.move, 0) + r.settled - want) < 1e-9);
-  assert.deepEqual(r.legs.map((l) => l.event), ["B", "A"]);
+  assert.deepEqual(r.legs.map((l) => l.event), ["B", "A", "C"]); // C at 99% in play is NOT final (no authoritative result)
   assert.equal(liveLegMoves(ps, live, {}, {}).legs.length, 0);
 }
 // All view: finished games kept at last live chances for 12h after they end, then forgotten
@@ -45,18 +45,25 @@ assert.equal(gaugeFrac(99999, -4000, 2600, 15000), 1);
   const probs = { G: { g: 0.6, h: 0.4 } }; const frozen = { G: { g: 0.5, h: 0.5 } };
   const snap = { positions: { L1, L2, L3 }, last: { F: { f: 0.97, x: 0.03 }, OLD: { o: 0.99, p: 0.01 }, G: { g: 0.55, h: 0.45 } },
     lastAt: { F: new Date(now - 2 * H).toISOString(), OLD: new Date(now - 13 * H).toISOString() }, frozen: { F: { f: 0.4, x: 0.6 }, OLD: { o: 0.5, p: 0.5 }, G: frozen.G } };
+  // Oct 25 regression: unpriced but not settled on Kalshi -> still live (stale), carried at last live chances
+  const r0 = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap, updatedAt: new Date(now).toISOString() }], now });
+  assert.deepEqual(r0.finished, []); assert.deepEqual(r0.stale, ["F"]); assert.deepEqual(r0.kept.map((p) => p.id), ["L1"]);
+  assert.ok(Math.abs(r0.nowAdd - (0.97 * 0.6 * 1000 + (1 - 0.97 * 0.6) * -100)) < 1e-9);
+  assert.equal(liveLegMoves([L2, ...r0.kept], { ...r0.last, ...probs }, { ...r0.frozen, ...frozen }, {}, new Set(r0.finished)).done.length, 0);
+  // settled (snap.final from Kalshi finalized/settled/determined) -> finished, counted at its actual result
+  snap.final = { F: { f: 1, x: 0 } };
   const r = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap, updatedAt: new Date(now).toISOString() }], now });
   assert.deepEqual(r.finished, ["F"]);
   assert.deepEqual(r.kept.map((p) => p.id), ["L1"]); // L2 is live (not double counted), L3's game is forgotten
-  // L1 Now: F at last live 0.97, G at current 0.6; Pregame: F at kickoff 0.4, G at kickoff 0.5
-  assert.ok(Math.abs(r.nowAdd - (0.97 * 0.6 * 1000 + (1 - 0.97 * 0.6) * -100)) < 1e-9);
+  // L1 Now: F at its settled result 1, G at current 0.6; Pregame: F at kickoff 0.4, G at kickoff 0.5
+  assert.ok(Math.abs(r.nowAdd - (1 * 0.6 * 1000 + (1 - 0.6) * -100)) < 1e-9);
   assert.ok(Math.abs(r.baseAdd - (0.4 * 0.5 * 1000 + (1 - 0.4 * 0.5) * -100)) < 1e-9);
   assert.equal(r.finishedDay.F, "2026-10-18");
   // 12h later F is forgotten too: L1 leaves both Now and Pregame
   const r2 = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap, updatedAt: new Date(now).toISOString() }], now: now + 11 * H });
   assert.equal(r2.kept.length, 0); assert.equal(r2.nowAdd, 0); assert.equal(r2.baseAdd, 0);
   // older snaps without lastAt: ended = min(row updated_at, kickoff + 4h)
-  const old = { ...snap, lastAt: undefined };
+  const old = { ...snap, lastAt: undefined, final: { F: { f: 1, x: 0 }, OLD: { o: 1, p: 0 } } };
   const r3 = finishedCarry({ positions: [L2], probs, frozen, days: [{ day: "2026-10-18", snap: old, updatedAt: new Date(now).toISOString() }], kickoffs: { F: new Date(now - 20 * H).toISOString() }, now });
   assert.ok(!r3.finished.includes("F")); assert.ok(r3.finished.includes("OLD")); // F kicked off 20h ago → ended ~16h ago; OLD falls back to updated_at
   // chart: kept finished game goes to the "Finished games" line and everything still sums to now − pregame
@@ -87,6 +94,23 @@ console.log("rootForSweat tests ok");
   const pos = [{ id: "a", legs: [{ event: "G", allowed: ["H"] }], hit: 100, miss: -10 }];
   const r = liveLegMoves(pos, { G: { H: 1, J: 0 } }, { G: { H: 0.5, J: 0.5 } }, {}, new Set(["G"]));
   assert.equal(r.legs.length, 0); assert.equal(r.done.length, 1); assert.equal(Math.round(r.done[0].move), 55);
+}
+// live legs: "if final" / "if it flips" = EV with that leg settled (others at current prices) − current EV
+{
+  const pos = [{ id: "a", legs: [{ event: "G", allowed: ["H"] }, { event: "K", allowed: ["k"] }], hit: 1000, miss: -100 }];
+  const P = { G: { H: 0.6, J: 0.4 }, K: { k: 0.5, m: 0.5 } }; const r = liveLegMoves(pos, P, { G: { H: 0.5, J: 0.5 }, K: P.K }, {});
+  const g = r.legs.find((l) => l.event === "G"); const now = 0.3 * 1000 + 0.7 * -100; // 230
+  assert.equal(g.leader, "H"); assert.ok(Math.abs(g.ifFinal - ((0.5 * 1000 + 0.5 * -100) - now)) < 1e-9); // +220
+  assert.equal(g.flip, "J"); assert.ok(Math.abs(g.ifFlip - (-100 - now)) < 1e-9); // −330
+  assert.ok(Math.abs(0.6 * g.ifFinal + 0.4 * g.ifFlip) < 1e-9); // probability-weighted what-ifs net to zero
+}
+// spread game: "if final" for team S keeps its margin buckets' split; flip = the other team (not a bucket)
+{
+  const pos = [{ id: "s", legs: [{ event: "G", allowed: ["S>=7"] }], hit: 1000, miss: -100 }];
+  const P = { G: { "S>=7": 0.3, "S<7": 0.3, O: 0.4 } }; const r = liveLegMoves(pos, P, { G: { "S>=7": 0.2, "S<7": 0.3, O: 0.5 } }, {});
+  const g = r.legs[0]; const now = 0.3 * 1000 + 0.7 * -100;
+  assert.equal(g.leader, "S"); assert.ok(Math.abs(g.ifFinal - (0.5 * 1000 + 0.5 * -100 - now)) < 1e-9);
+  assert.equal(g.flip, "O"); assert.ok(Math.abs(g.ifFlip - (-100 - now)) < 1e-9);
 }
 // adaptPregame: drop "neither" (rescale), sum buckets into a team, refuse a split it can't make, ignore late rows
 {

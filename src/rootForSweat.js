@@ -73,7 +73,21 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
   const legs = []; const done = []; let settled = 0;
   for (const ev of evs) {
     cur = { ...cur, [ev]: probs[ev] }; const v = expectedProfit(positions, cur); const move = v - prev; prev = v;
-    if (finished.has(ev) || Math.max(...Object.values(probs[ev])) >= 0.98) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
+    // authoritative finals only (a 98% in-play price is not a final)
+    if (finished.has(ev)) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
+  }
+  // what-if per live leg (Kevin, Oct 25): EV with this leg settled as currently leading (1/0), every other leg at
+  // current prices, minus current EV; plus the same if the runner-up wins instead ("if it flips").
+  const nowEv = expectedProfit(positions, probs);
+  // Spread games split a team into margin buckets ("MIN>=7"/"MIN<7"): grouped by team, the winning team's buckets
+  // keep their current split (the margin is still open), the rest go to 0.
+  for (const l of legs) {
+    const d = probs[l.event]; const team = {};
+    for (const [o, p] of Object.entries(d)) if (o !== "__neither") { const t = o.split(/[<>]=?/)[0]; team[t] = (team[t] || 0) + p; }
+    const ranked = Object.entries(team).sort((a, b) => b[1] - a[1]);
+    const ifWins = (t) => expectedProfit(positions, { ...probs, [l.event]: Object.fromEntries(Object.keys(d).map((k) => [k, k !== "__neither" && k.split(/[<>]=?/)[0] === t ? (team[t] > 0 ? d[k] / team[t] : 1) : 0])) }) - nowEv;
+    if (ranked[0]) { l.leader = ranked[0][0]; l.ifFinal = ifWins(ranked[0][0]); }
+    if (ranked[1]) { l.flip = ranked[1][0]; l.ifFlip = ifWins(ranked[1][0]); }
   }
   legs.sort((a, b) => Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
   return { legs, done, settled, total: prev - pregame };
@@ -92,7 +106,7 @@ export const FINISHED_KEEP_MS = 12 * 3600 * 1000;
 // Today & beyond passes keep = finished game belongs to today's sheet day (any age).
 export function finishedCarry({ positions = [], probs = {}, frozen = {}, days = [], kickoffs = {}, now = Date.now(), keepMs = FINISHED_KEEP_MS, keep = null }) {
   const live = new Set(positions.map((p) => String(p.id)));
-  const seen = {}; const last = {}; const fz = {}; const ended = {}; const dayOf = {};
+  const seen = {}; const last = {}; const fz = {}; const ended = {}; const dayOf = {}; const decided = {};
   for (const r of days) {
     const sn = r && r.snap; if (!sn) continue;
     const upd = Date.parse(r.updatedAt || "") || now;
@@ -104,15 +118,22 @@ export function finishedCarry({ positions = [], probs = {}, frozen = {}, days = 
       ended[ev] = Number.isFinite(at) ? at : Math.min(upd, Number.isFinite(ko) ? ko + 4 * 3600 * 1000 : upd);
     }
     Object.assign(fz, sn.frozen || {});
+    Object.assign(decided, sn.final || {}); // authoritative: Kalshi market settled/determined (resolveSnapFinals)
   }
-  const finished = Object.keys(last).filter((ev) => !probs[ev] && fz[ev] && (keep ? keep(ev, ended[ev], dayOf[ev]) : now - ended[ev] <= keepMs));
-  const lastP = Object.fromEntries(finished.map((ev) => [ev, last[ev]]));
-  const frozenFinished = Object.fromEntries(finished.map((ev) => [ev, fz[ev]]));
+  // carried = not priced right now (game over OR a momentary gap: thin in-play book, failed fetch, stale relay).
+  // Being unpriced is NOT proof a game is over (Oct 25: live 1 PM NFL games showed "final" at 1:33 because one
+  // request couldn't price them). Only an authoritative settled result (snap.final) makes a game "finished";
+  // the rest are carried at their last live chances so EV stays continuous, and listed as stale (still live).
+  const carried = Object.keys(last).filter((ev) => !probs[ev] && fz[ev] && (keep ? keep(ev, ended[ev], dayOf[ev]) : now - ended[ev] <= keepMs));
+  const finished = carried.filter((ev) => decided[ev]);
+  const stale = carried.filter((ev) => !decided[ev]);
+  const lastP = Object.fromEntries(carried.map((ev) => [ev, decided[ev] || last[ev]]));
+  const frozenFinished = Object.fromEntries(carried.map((ev) => [ev, fz[ev]]));
   const nowP = { ...lastP, ...probs };
   const preP = { ...nowP, ...frozenFinished, ...frozen };
   const ok = (p) => p.legs.every((l) => nowP[l.event] && preP[l.event]);
   const kept = Object.entries(seen).filter(([id, p]) => !live.has(id) && p && Array.isArray(p.legs) && ok(p)).map(([, p]) => p);
-  return { kept, last: lastP, frozen: frozenFinished, finished, finishedDay: Object.fromEntries(finished.map((ev) => [ev, dayOf[ev]])),
+  return { kept, last: lastP, frozen: frozenFinished, finished, stale, finishedDay: Object.fromEntries(carried.map((ev) => [ev, dayOf[ev]])),
     endedAt: Object.fromEntries(finished.map((ev) => [ev, new Date(ended[ev]).toISOString()])), nowAdd: expectedProfit(kept, nowP), baseAdd: expectedProfit(kept, preP) };
 }
 
