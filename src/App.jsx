@@ -23,6 +23,7 @@ import {
 } from "./promoTypes.js";
 import { loadProfilePrefs, saveProfilePrefs, defaultProfilePrefs, persistProfilePrefsRemote, DEFAULT_PROFILE_SPORTS } from "./userProfile";
 import WhatsNewModal from "./WhatsNewModal";
+import { UserAlertsBanner } from "./LowCashAlerts";
 import { AppAlertsBanner, AppAlertsBell, AppAlertsBoundary, useAppAlerts } from "./AppAlerts";
 import { fetchActiveAnnouncement, shouldShowWhatsNew } from "./whatsNew";
 import { shouldShowKennethOddsBoardAlert, kennethOddsBoardAnnouncement, KENNETH_ODDS_BOARD_ALERT_ID } from "./targetedAlerts";
@@ -2996,6 +2997,11 @@ export default function App() {
       <AppAlertsBoundary>
         <AppAlertsBanner state={appAlerts} open={appAlertsOpen} />
       </AppAlertsBoundary>
+      {user && activeTab !== "combo" && (
+        <AppAlertsBoundary>
+          <UserAlertsBanner supabase={supabase} user={user} />
+        </AppAlertsBoundary>
+      )}
 
       <div className="app-tabs" style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <a href={tabHash("promo")} style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>

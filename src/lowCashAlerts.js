@@ -6,7 +6,13 @@
 
 export const USER_ALERTS_TABLE = "combo_user_alerts";
 export const USER_ALERTS_POLL_MS = 60_000;
-const COLS = "id,user_id,kind,venue,parlay_id,lock_label,need_usd,available_usd,shortfall_usd,skipped_count,created_at,read_at,resolved_at";
+export const LOCATION_EXPIRED_MESSAGE = "Kalshi is rejecting your Combo Locks quotes because your location verification expired. Open the Kalshi app or website and verify your location to resume quoting.";
+// Kinds shown app-wide (right after sign-in, on every tab), not just on Combo Locks.
+export const GLOBAL_ALERT_KINDS = new Set(["location_expired", "custom"]);
+export function globalUserAlerts(rows, userId) {
+  return openUserAlerts(rows).filter((a) => a.userId === userId && GLOBAL_ALERT_KINDS.has(a.kind));
+}
+const COLS = "id,user_id,kind,venue,title,body,parlay_id,lock_label,need_usd,available_usd,shortfall_usd,skipped_count,created_at,read_at,resolved_at";
 
 function money(n) {
   const v = Number(n);
@@ -22,6 +28,8 @@ export function normalizeUserAlert(raw) {
     kind: String(raw.kind || "low_cash"),
     venue: raw.venue === "polymarket" ? "polymarket" : "kalshi",
     parlayId: raw.parlay_id || null,
+    title: raw.title ? String(raw.title) : "",
+    body: raw.body ? String(raw.body) : "",
     lockLabel: raw.lock_label ? String(raw.lock_label) : "",
     needUsd: raw.need_usd != null ? Number(raw.need_usd) : null,
     availableUsd: raw.available_usd != null ? Number(raw.available_usd) : null,
@@ -41,6 +49,17 @@ export function lowCashText(a, { owner = false } = {}) {
   // owner=true: Kevin reading someone else's alert in All users.
   const your = owner ? "their" : "your";
   const you = owner ? "They're" : "You're";
+  if (a.kind === "location_expired") {
+    return {
+      title: "Verify your location on Kalshi",
+      body: owner
+        ? "Kalshi is rejecting their Combo Locks quotes because their location verification expired. They need to verify their location in the Kalshi app or website."
+        : LOCATION_EXPIRED_MESSAGE,
+    };
+  }
+  if (a.kind === "custom") {
+    return { title: a.title || "Message from aibetbuilder", body: a.body || "" };
+  }
   if (a.kind === "no_credits") {
     return {
       title: "Add credits to keep quoting",
