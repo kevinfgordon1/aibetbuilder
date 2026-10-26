@@ -10,7 +10,17 @@ export const PROFILE_PREFS_KEY = "aibetbuilder.profilePrefs";
 export const PROFILE_PREFS_META_KEY = "aibetbuilderPrefs";
 
 // First-time / unsaved prefs only. Saved sports win once the user customizes.
-export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"];
+export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba"];
+// Pre-NBA default. Saved prefs that still equal exactly this set (and were saved
+// before the v2 defaults) get NBA added once; any custom selection is kept as-is.
+export const LEGACY_PROFILE_SPORTS_V1 = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"];
+export const PROFILE_SPORTS_DEFAULTS_VERSION = 2;
+
+function isLegacyDefaultSports(sports) {
+  if (!Array.isArray(sports) || sports.length !== LEGACY_PROFILE_SPORTS_V1.length) return false;
+  const set = new Set(sports);
+  return LEGACY_PROFILE_SPORTS_V1.every((k) => set.has(k));
+}
 export const DEFAULT_PROFILE_BOOK = "draftkings";
 
 export function profilePrefsStorageKey(userId) {
@@ -35,6 +45,7 @@ export function defaultProfilePrefs() {
   return {
     displayName: "",
     sports: DEFAULT_PROFILE_SPORTS.slice(),
+    sportsDefaultsVersion: PROFILE_SPORTS_DEFAULTS_VERSION,
     promoBook: DEFAULT_PROFILE_BOOK,
     seenAnnouncementId: "",
     seenTargetedAlertId: "",
@@ -46,6 +57,7 @@ export function persistableProfilePrefs(prefs) {
   return {
     displayName: next.displayName,
     sports: next.sports,
+    sportsDefaultsVersion: PROFILE_SPORTS_DEFAULTS_VERSION,
     promoBook: next.promoBook,
     seenAnnouncementId: next.seenAnnouncementId,
     seenTargetedAlertId: next.seenTargetedAlertId,
@@ -57,7 +69,10 @@ export function mergeProfilePrefSources(local, remote) {
   const b = remote && typeof remote === "object" ? remote : {};
   const out = { ...a };
   if (typeof b.displayName === "string" && b.displayName.trim()) out.displayName = b.displayName;
-  if (Array.isArray(b.sports) && b.sports.length) out.sports = b.sports;
+  if (Array.isArray(b.sports) && b.sports.length) {
+    out.sports = b.sports;
+    out.sportsDefaultsVersion = b.sportsDefaultsVersion;
+  }
   if (typeof b.promoBook === "string" && b.promoBook) out.promoBook = b.promoBook;
   if (typeof b.seenAnnouncementId === "string" && b.seenAnnouncementId.trim()) {
     out.seenAnnouncementId = b.seenAnnouncementId.trim();
@@ -95,7 +110,12 @@ function sanitizeSports(sports, allowedKeys) {
 export function normalizeProfilePrefs(raw, { allowedSports, allowedBooks } = {}) {
   const base = defaultProfilePrefs();
   const src = raw && typeof raw === "object" ? raw : {};
-  const sports = sanitizeSports(src.sports, allowedSports);
+  let sports = sanitizeSports(src.sports, allowedSports);
+  const savedVersion = Number(src.sportsDefaultsVersion) || 1;
+  if (savedVersion < PROFILE_SPORTS_DEFAULTS_VERSION && isLegacyDefaultSports(sports)) {
+    const allowed = allowedSports instanceof Set ? allowedSports : new Set(allowedSports || []);
+    sports = DEFAULT_PROFILE_SPORTS.filter((k) => !allowed.size || allowed.has(k));
+  }
   const book = typeof src.promoBook === "string" ? src.promoBook : base.promoBook;
   const books = allowedBooks instanceof Set ? allowedBooks : new Set(allowedBooks || []);
   const seen = typeof src.seenAnnouncementId === "string" ? src.seenAnnouncementId.trim() : "";
@@ -103,6 +123,7 @@ export function normalizeProfilePrefs(raw, { allowedSports, allowedBooks } = {})
   return {
     displayName: typeof src.displayName === "string" ? src.displayName.trim() : "",
     sports,
+    sportsDefaultsVersion: PROFILE_SPORTS_DEFAULTS_VERSION,
     promoBook: books.size && !books.has(book) ? DEFAULT_PROFILE_BOOK : (book || DEFAULT_PROFILE_BOOK),
     seenAnnouncementId: seen,
     seenTargetedAlertId: seenTargeted,

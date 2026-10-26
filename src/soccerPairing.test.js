@@ -324,7 +324,7 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   assert.doesNotMatch(app, /label: "EPL"[\s\S]{0,80}togglePromoSport/);
   assert.doesNotMatch(app, /label: "MLS"[\s\S]{0,80}togglePromoSport/);
   const profile = fs.readFileSync(path.join(dir, "userProfile.js"), "utf8");
-  assert.match(profile, /DEFAULT_PROFILE_SPORTS = \["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"\]/);
+  assert.match(profile, /DEFAULT_PROFILE_SPORTS = \["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba"\]/);
   const fetchJob = fs.readFileSync(path.join(dir, "../lib/odds-fetch-job.js"), "utf8");
   assert.match(fetchJob, /h2h,h2h_lay,spreads,totals/);
   assert.match(fetchJob, /Do not pull alt props/);
