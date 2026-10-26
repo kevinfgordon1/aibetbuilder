@@ -19,7 +19,7 @@ import {
   profilePrefsStorageKey,
 } from "./userProfile.js";
 
-const allowedSports = new Set(["baseball_mlb", "americanfootball_ncaaf", "americanfootball_nfl"]);
+const allowedSports = new Set(["baseball_mlb", "americanfootball_ncaaf", "americanfootball_nfl", "basketball_nba"]);
 const allowedBooks = new Set(["draftkings", "fanduel"]);
 
 const googleUser = {
@@ -44,7 +44,17 @@ assert.deepEqual(DEFAULT_PROFILE_SPORTS, [
   "baseball_mlb",
   "americanfootball_nfl",
   "americanfootball_ncaaf",
+  "basketball_nba",
 ]);
+{
+  // Saved legacy default (pre-NBA) gets NBA once; custom picks untouched.
+  const legacy = normalizeProfilePrefs({ sports: ["americanfootball_nfl", "baseball_mlb", "americanfootball_ncaaf"] }, { allowedSports, allowedBooks });
+  assert.deepEqual(legacy.sports, DEFAULT_PROFILE_SPORTS);
+  const custom = normalizeProfilePrefs({ sports: ["americanfootball_nfl"] }, { allowedSports, allowedBooks });
+  assert.deepEqual(custom.sports, ["americanfootball_nfl"]);
+  const resaved = normalizeProfilePrefs({ sports: ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"], sportsDefaultsVersion: 2 }, { allowedSports, allowedBooks });
+  assert.deepEqual(resaved.sports, ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"]);
+}
 assert.deepEqual(defaultProfilePrefs().sports, DEFAULT_PROFILE_SPORTS);
 assert.equal(defaultProfilePrefs().promoBook, DEFAULT_PROFILE_BOOK);
 assert.equal(defaultProfilePrefs().seenAnnouncementId, "");
