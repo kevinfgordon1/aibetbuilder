@@ -53,7 +53,7 @@ import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SE
 import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
 import { fillBeatsMarket, formatProbeNote, probeDisabled, probeUiState, CONNECT_KALSHI_LABEL } from "./comboProbe";
-import { lockCheckAvailable, lockCheckView, lockPriceAdvice, lockCheckOnCard, autoCheckDue, missedQuotes, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
+import { lockCheckAvailable, lockCheckView, lockPriceAdvice, lockCheckOnCard, autoCheckDue, missedQuotes, serverAutoCheckOn, serverAutoCheckResult, LOCK_CHECK_BUSY_LABEL, LOCK_CHECK_TITLE } from "./comboLockCheck";
 import { fillsPlan, nextFillsCache } from "./comboFillsIncremental.js";
 import { fetchAllRows } from "./comboPaging";
 import { archivedRowsNeedRefetch, archivedSubsPlan, nextArchivedSubsCache } from "./comboHistoryCache";
@@ -142,6 +142,7 @@ const writeAutoState = (id, v) => {
   try { window.localStorage.setItem(AUTO_CHECK_KEY(id), JSON.stringify(v)); } catch (_) { /* private mode */ }
 };
 // One check at a time across all cards (the server allows one per user per minute anyway).
+const SERVER_AUTO_CHECK = serverAutoCheckOn(import.meta.env);
 let lockCheckInFlight = false;
 let lockCheckNotBefore = 0;
 
@@ -193,7 +194,16 @@ function LockMarketCheck({ parlay, user, supabase, counts, onResult }) {
     if (st.result && onResult) onResult(parlay.id, st.result);
   }, [parlay.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Worker-saved auto check (auto_check_* columns). Missing columns → undefined → nothing shown.
+  const serverRes = serverAutoCheckResult(parlay);
   useEffect(() => {
+    if (!serverRes) return;
+    setResult((cur) => (cur && !cur.server && cur.checkedAt && Date.parse(cur.checkedAt) > Date.parse(serverRes.checkedAt) ? cur : serverRes));
+    if (onResult) onResult(parlay.id, serverRes);
+  }, [parlay.id, parlay.auto_check_at]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (SERVER_AUTO_CHECK) return; // the worker runs it (combo-worker COMBO_AUTO_CHECK)
     if (typeof document !== "undefined" && document.hidden) return;
     const st = readAutoState(parlay.id);
     const due = autoCheckDue({
