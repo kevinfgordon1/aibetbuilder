@@ -36,6 +36,26 @@ async function requireUser(req) {
   return { ok: true, user, owner: lib.isComboOwner(user) };
 }
 
+/** The hourly auto-archive cron stamps archived_at at starts_at (the lock's FIRST kickoff) + 6h, so a lock whose
+ *  later legs (SNF/MNF) haven't finished drops out of "open" mid-slate. Bring such auto-archived, unsettled locks
+ *  back for root-for (manual History moves, archived well before first kickoff + 6h, stay out). */
+const AUTO_ARCHIVE_MS = 6 * 3600000; const AUTO_LOOKBACK_MS = 48 * 3600000;
+function autoArchivedStillOpen(p, now) {
+  if (!p || !p.archived_at || p.merged_into_id || p.settled_at || p.underlying_settled_at) return false;
+  const a = Date.parse(p.archived_at), st = Date.parse(p.starts_at);
+  if (!Number.isFinite(a) || !Number.isFinite(st)) return false;
+  return a >= st + AUTO_ARCHIVE_MS - 120000 && now - a <= AUTO_LOOKBACK_MS;
+}
+async function loadAutoArchived(client, cols, userId) {
+  const now = deps.now(); const since = new Date(now - AUTO_LOOKBACK_MS).toISOString();
+  let q = client.from('combo_parlays').select(cols + ',archived_at,merged_into_id,settled_at,underlying_settled_at');
+  if (userId) q = q.eq('user_id', userId);
+  const { data, error } = await q.gte('archived_at', since).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null).limit(3000);
+  if (error) return [];
+  return (data || []).filter((p) => autoArchivedStillOpen(p, now)).map(({ archived_at, merged_into_id, settled_at, underlying_settled_at, ...rest }) => rest);
+}
+const mergeLocks = (a, b) => { const seen = new Set(a.map((p) => p.id)); return [...a, ...b.filter((p) => !seen.has(p.id))]; };
+
 /** Count of the user's open locks (same filters as loadLocks). */
 async function countLocks(client, userId) {
   if (!userId) throw new Error('no user');
@@ -55,7 +75,8 @@ async function loadLocks(client, userId) {
     .eq('user_id', userId).is('archived_at', null).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null)
     .limit(1000);
   if (error) throw error;
-  return { parlays: parlays || [], ...(await loadLockChildren(client, (parlays || []).map((p) => p.id))) };
+  const all = mergeLocks(parlays || [], await loadAutoArchived(client, LOCK_COLS, userId));
+  return { parlays: all, ...(await loadLockChildren(client, all.map((p) => p.id))) };
 }
 /** fills, single orders and filled submissions (History P/L's contract count) for these lock ids. */
 async function loadLockChildren(client, ids) {
@@ -558,7 +579,7 @@ async function needleCron(client, env) {
   const { data: rows, error } = await client.from('combo_parlays').select(LOCK_COLS + ',user_id')
     .is('archived_at', null).is('merged_into_id', null).is('settled_at', null).is('underlying_settled_at', null).limit(3000);
   if (error) throw error;
-  const plan = A.planUsers(rows || [], await savedKickoffs(client, now), now);
+  const plan = A.planUsers(mergeLocks(rows || [], await loadAutoArchived(client, LOCK_COLS + ',user_id', null)), await savedKickoffs(client, now), now);
   const turn = Math.floor(now / 300000);
   const order = (xs) => { const o = xs.filter((x) => x.uid === lib.OWNER_USER_ID); const r = xs.filter((x) => x.uid !== lib.OWNER_USER_ID).sort((a, b) => a.uid.localeCompare(b.uid)); const k = r.length ? turn % r.length : 0; return [...o, ...r.slice(k), ...r.slice(0, k)]; };
   const live = order(plan.live); const done = new Set(); const skipped = [];
@@ -655,5 +676,6 @@ async function handler(req, res) {
 
 module.exports = handler;
 module.exports.config = { maxDuration: 60 };
+module.exports._autoArchivedStillOpen = autoArchivedStillOpen;
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
 module.exports._helpers = { needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };
