@@ -53,3 +53,12 @@ assert.ok(behind.profit && Number.isFinite(behind.profit.hit), "profit at the su
 const best = lockPriceAdvice({ ok: true, bestNoBid: 0.85, bestAmerican: 587, suggestFillAmerican: 636, makerRate: 0.035 }, lock);
 assert.equal(best.kind, "best");
 console.log("comboLockAutoCheck ok");
+
+// Server-side auto check (auto_check_* columns)
+import { serverAutoCheckOn, serverAutoCheckResult } from "./comboLockCheck.js";
+assert.equal(serverAutoCheckOn({}), false);
+assert.equal(serverAutoCheckOn({ VITE_COMBO_SERVER_AUTO_CHECK: "1" }), true);
+assert.equal(serverAutoCheckResult({ id: "x" }), null); // column missing
+assert.equal(serverAutoCheckResult({ auto_check_at: "2026-10-26T21:00:00Z", auto_check_result: "error" }), null);
+const sr = serverAutoCheckResult({ auto_check_at: "2026-10-26T21:00:00Z", auto_check_result: "lose", auto_check_best_no_bid: "0.945", auto_check_best_american: 1718, auto_check_competitors: 1, combo_ticker: "KXMVE-1" });
+assert.equal(sr.ok, true); assert.equal(sr.bestAmerican, 1718); assert.equal(sr.bestNoBid, 0.945); assert.equal(sr.competitorCount, 1);

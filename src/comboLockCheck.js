@@ -150,3 +150,22 @@ export function lockCheckOnCard({ parlay, user, filledSection, left }) {
   if (parlay.active === false) return false;
   return Number(left) > 0;
 }
+
+// ── Server-side auto check (combo-worker COMBO_AUTO_CHECK) ───────────────────
+// When VITE_COMBO_SERVER_AUTO_CHECK=1 the worker runs the 10-then-every-20 check and saves
+// auto_check_* on the lock; the card stops running its own browser check and shows the saved one.
+export const serverAutoCheckOn = (env) => /^(1|true|yes|on)$/i.test(String((env && env.VITE_COMBO_SERVER_AUTO_CHECK) || ""));
+
+/** Saved worker result → the same shape as /api/combo-probe (null when none / column missing / error). */
+export function serverAutoCheckResult(parlay) {
+  if (!parlay || !parlay.auto_check_at || parlay.auto_check_result === "error") return null;
+  const n = (x) => (x == null || !Number.isFinite(Number(x)) ? null : Number(x));
+  return {
+    ok: true, auto: true, server: true,
+    checkedAt: parlay.auto_check_at,
+    bestNoBid: n(parlay.auto_check_best_no_bid),
+    bestAmerican: n(parlay.auto_check_best_american),
+    competitorCount: n(parlay.auto_check_competitors) || 0,
+    marketTicker: parlay.combo_ticker || null,
+  };
+}
