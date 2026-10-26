@@ -135,3 +135,45 @@ export function fillTimeOf(row, decisionAt) {
   if (Number.isFinite(d) && (!Number.isFinite(c) || (d >= c - 60e3 && d <= c + 10 * 60e3))) return decisionAt;
   return (row && row.created_at) || null;
 }
+
+// ---- Decided / live breakdown (Oct 26) ----------------------------------------------------------
+// The ledger only settles a fill when Kalshi settles the whole combo market, and only while the
+// sniper process runs its settle loop. So a parlay whose leg already lost (we win) or whose legs
+// all already hit (we lose) can sit "open" for days. This classifies every unsettled fill from the
+// per-leg Kalshi results so the dashboard shows pending P&L next to settled P&L.
+//   settled     phase 'settled' (realized_pnl from the ledger, matches Kalshi's combo result)
+//   busted      any leg lost → we win toWin (pending settlement)
+//   allHit      every leg won → we lose our cost (pending settlement)
+//   live        legs still pending
+export function sportOf(legs) {
+  const s = new Set((legs || []).map((k) => { const t = String(k).toUpperCase(); return t.startsWith("KXNCAAF") ? "CFB" : t.startsWith("KXNBA") ? "NBA" : t.startsWith("KXNFL") ? "NFL" : "Other"; }));
+  return s.size === 1 ? [...s][0] : [...s].sort().join("+");
+}
+export function positionState(r, legResults = {}) {
+  if (r.phase === "settled" || r.settled_at) return { state: "settled", pending: [], won: [], lost: [] };
+  const won = []; const lost = []; const pending = [];
+  for (const k of r.legs || []) {
+    const [t, sd] = String(k).split(":"); const res = legResults[String(t).toUpperCase()]; const side = (sd || "yes").toLowerCase();
+    if (res === "yes" || res === "no") (res === side ? won : lost).push(k); else pending.push(k);
+  }
+  return { state: lost.length ? "busted" : pending.length ? "live" : "allHit", pending, won, lost };
+}
+export function positionBreakdown(rows, legResults = {}) {
+  const blank = () => ({ n: 0, cost: 0, pnl: 0, maxWin: 0 });
+  const totals = { settled: blank(), busted: blank(), allHit: blank(), live: blank() };
+  const bySport = {}; const byDay = {}; const positions = [];
+  for (const r of rows || []) {
+    if (r.dry_run || !(num(r.filled_contracts) > 0)) continue;
+    const m = rowMoney(r); const ps = positionState(r, legResults);
+    const pnl = ps.state === "settled" ? num(r.realized_pnl) : ps.state === "busted" ? m.toWin : ps.state === "allHit" ? -m.risk : 0;
+    const add = (o) => { const b = o[ps.state]; b.n += 1; b.cost += m.risk; b.pnl += pnl; b.maxWin += ps.state === "live" ? m.toWin : 0; };
+    add(totals);
+    const sp = sportOf(r.legs); add(bySport[sp] || (bySport[sp] = { settled: blank(), busted: blank(), allHit: blank(), live: blank() }));
+    const d = etDay(r.created_at) || "?"; add(byDay[d] || (byDay[d] = { settled: blank(), busted: blank(), allHit: blank(), live: blank() }));
+    if (ps.state !== "settled") positions.push({ rfqId: r.rfq_id, state: ps.state, sport: sp, createdAt: r.created_at, legs: r.legs || [], pending: ps.pending, lost: ps.lost, cost: m.risk, maxWin: m.toWin, maxLoss: m.risk, pendingPnl: pnl, soldYes: m.sold });
+  }
+  const order = { allHit: 0, busted: 1, live: 2 };
+  positions.sort((a, b) => order[a.state] - order[b.state] || (a.createdAt < b.createdAt ? -1 : 1));
+  const decided = totals.settled.pnl + totals.busted.pnl + totals.allHit.pnl;
+  return { totals, decidedPnl: decided, bySport, byDay, positions };
+}

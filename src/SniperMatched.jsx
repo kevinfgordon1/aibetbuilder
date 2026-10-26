@@ -6,6 +6,7 @@ import SweatMeter from "./RootForSweat";
 import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import { topByGain, topByDrop } from "./rootForSimple";
+import SniperBreakdown from "./SniperBreakdown.jsx";
 import { americanFromProb, fmtAmerican, fmtUsd , takerSeesAmerican } from "./sniperDashboard.js";
 import HedgePanel, { hedgeLabel } from "./SniperHedges";
 import { perfStats, sniperFillDay } from "./sniperMatched.js";
@@ -339,6 +340,7 @@ export default function SniperMatched({ data }) {
           </select>}
         </span></div>
       {dayKey && <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>Showing fills made {scope === "today" ? "today" : "on " + dayKey} (ET, day rolls at 2 AM): {t.n} fill{t.n === 1 ? "" : "s"}.{root ? "" : " The live needle covers every open position, so it shows under All; see What to root for → Past day for a day's needle."}</div>}
+      {!dayKey && <SniperBreakdown data={data} />}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <Stat label="Record" value={`${t.won}-${t.lost}${t.void ? `-${t.void}` : ""}`} sub={`${t.open} open · ${t.n} matched`} />
         <Stat label="P&L (settled)" value={signed(t.pnl)} color={pnlColor(t.pnl)} sub={`Expected ${signed(t.settledEv)}`} />
