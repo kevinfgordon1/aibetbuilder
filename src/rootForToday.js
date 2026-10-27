@@ -64,3 +64,11 @@ export function todayDistribution(model, events, { samples = 20000, bins = 32, s
   return { ev: sum / samples, hist: { bins: b, samples, tailP: 0 }, worst: { pnl: lo, p: atMin / samples }, best: { pnl: hi }, pProfit: 1 - below / samples, touched: pos.length, events: evs.length };
 }
 export const todayDayLabel = (nowMs) => sheetDayLabel(nowMs, todayDay(nowMs));
+
+// "19 unpriced (prices stale)": locks left out of every number because a leg has no usable price right now.
+const UNPRICED_WHY = { stale: "prices stale", thin: "books too thin", no_book: "no market" };
+export function unpricedText(count, reasons) {
+  if (!count) return "";
+  const why = Object.entries(reasons || {}).sort((a, b) => b[1] - a[1]).map(([k, n]) => (Object.keys(reasons).length > 1 ? `${n} ${UNPRICED_WHY[k] || k}` : UNPRICED_WHY[k] || k)).join(", ");
+  return `${count} unpriced${why ? ` (${why})` : ""}, not counted`;
+}

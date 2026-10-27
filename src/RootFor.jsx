@@ -7,7 +7,7 @@ import EvBars from "./RootForEvBars";
 import SweatMeter, { PillLoading, pregameView } from "./RootForSweat";
 import { expectedProfit, lockDecided, dayValue } from "./rootForSweat";
 import { createClient } from "@supabase/supabase-js";
-import { todayEvents, touchedLocks, sheetDayLabel, sheetDay, todayDay, todayDayLabel } from "./rootForToday";
+import { todayEvents, touchedLocks, sheetDayLabel, sheetDay, todayDay, todayDayLabel, unpricedText } from "./rootForToday";
 import { summarySentence, kickoffRef, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
@@ -153,7 +153,7 @@ function NeedleHistory({ rows }) {
 function TouchedLocks({ today }) {
   return (
     <details className="touched">
-      <summary>Today ({today.dayLabel}): {today.games} game{today.games === 1 ? "" : "s"} touch <b>{today.locks.length}</b> of {today.total} open locks</summary>
+      <summary>Today ({today.dayLabel}): {today.games} game{today.games === 1 ? "" : "s"} touch <b>{today.locks.length}</b> of {today.total} priced open locks{today.unpriced ? <span style={{ color: "#f59e0b" }}> · {today.unpriced}</span> : null}</summary>
       <ul>{today.locks.map((l) => <li key={l.id}>{l.label || "Lock"} <span className="sub">· {l.legs.length} legs, {l.todayLegs} today</span></li>)}</ul>
     </details>
   );
@@ -256,7 +256,7 @@ function todayView(base, nowMs) {
   const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
   return {
     d: { ...base, ...r, model: { ...base.model, positions: pos }, sweat: todaySweat(base, pos, r.ev, nowMs), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
-    info: { games: evs.size, locks, total: (base.model.positions || []).length, dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
+    info: { games: evs.size, locks, total: (base.model.positions || []).length, unpriced: unpricedText(base.unpricedCount, base.unpricedReasons), dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
   };
 }
 
@@ -434,7 +434,7 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
       `}</style>
       <h3>
         What to root for
-        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun}${d.fillTimeLocks ? ` priced, ${d.fillTimeLocks} at fill-time value` : ""} · ${d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
+        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun}${d.fillTimeLocks ? ` priced, ${d.fillTimeLocks} at fill-time value` : ""}${d.unpricedCount ? ` · ${unpricedText(d.unpricedCount, d.unpricedReasons)}` : ""} · ${d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {open && <>
           <span className="seg" role="group" aria-label="Games">

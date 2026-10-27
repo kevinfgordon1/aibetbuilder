@@ -121,13 +121,16 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
 
   // ---- 3. raw inverse chances per event (no scaling); residual "neither" keeps sides exclusive
   const probs = {}; const shown = {}; const unpricedEv = new Set(); const clamps = []; const finalEv = {};
+  // why an event has no price: 'stale' (only old books), 'thin' (books too shallow / failed walk), 'no_book' (no source)
+  const unpricedWhy = {};
+  const whyNone = (...fs) => { const src = fs.flatMap((x) => (x && x.sources) || []); if (src.some((x) => x.reason === "stale")) return "stale"; return src.length ? "thin" : "no_book"; };
   // finished game (no live price): count it at its final result (1 = winner, 0 = rest) instead of dropping its locks
   const settle = (ev, outs) => { const w = finalOutcome(finals[ev], outs); if (w == null) return false; probs[ev] = Object.fromEntries(outs.map((o) => [o, o === w ? 1 : 0])); finalEv[ev] = w; return true; };
   for (const [ev, outs] of Object.entries(evOutcomes)) {
     if (evKind[ev] === "binary") {
       const held = new Set(); for (const pos of resolved) for (const l of pos.legs) if (l.event === ev) held.add(l.allowed[0]);
       const py = held.has("yes") ? fair(ev, "yes").p : null; const pn = held.has("no") ? fair(ev, "no").p : null;
-      if (py == null && pn == null) { if (!settle(ev, outs)) unpricedEv.add(ev); continue; }
+      if (py == null && pn == null) { if (!settle(ev, outs)) { unpricedEv.add(ev); unpricedWhy[ev] = whyNone(held.has("yes") ? fair(ev, "yes") : null, held.has("no") ? fair(ev, "no") : null); } continue; }
       probs[ev] = py != null && pn != null ? (py + pn > 1 ? { yes: py / (py + pn), no: pn / (py + pn), [NEITHER]: 0 } : { yes: py, no: pn, [NEITHER]: 1 - py - pn }) : py != null ? { yes: py, no: 1 - py } : { yes: 1 - pn, no: pn };
       continue;
     }
@@ -139,7 +142,7 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
     else if (held.has(b) && !held.has(a) && rb != null) { pb = rb; pa = 1 - rb; }
     else if (ra != null) { pa = ra; pb = 1 - ra; }
     else if (rb != null) { pb = rb; pa = 1 - rb; }
-    else { if (!settle(ev, outs)) unpricedEv.add(ev); continue; }
+    else { if (!settle(ev, outs)) { unpricedEv.add(ev); unpricedWhy[ev] = whyNone(fair(`${ev}-${a}`, "yes"), fair(`${ev}-${b}`, "yes")); } continue; }
     shown[`${ev}:${a}`] = pa; shown[`${ev}:${b}`] = pb;
     const sp = spreadOf[ev];
     if (!sp) { probs[ev] = { [a]: pa, [b]: pb, ...(pn > 0 ? { [NEITHER]: pn } : {}) }; continue; }
@@ -147,14 +150,17 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
     let big;
     if (sp.sides.has("yes")) { const y = fair(sp.ticker, "yes").p; big = y; }
     if (big == null && sp.sides.has("no")) { const n = fair(sp.ticker, "no").p; if (n != null) big = pS - (n - pO); }
-    if (big == null) { if (!settle(ev, outs)) unpricedEv.add(ev); continue; }
+    if (big == null) { if (!settle(ev, outs)) { unpricedEv.add(ev); unpricedWhy[ev] = whyNone(fair(sp.ticker, "yes"), fair(sp.ticker, "no")); } continue; }
     if (big > pS || big < 0) { clamps.push(ev); big = Math.min(pS, Math.max(0, big)); }
     probs[ev] = { [`${S}>=${sp.k}`]: big, [`${S}<${sp.k}`]: pS - big, [O]: pO, ...(pn > 0 ? { [NEITHER]: pn } : {}) };
     shown[`${ev}:${S}>=${sp.k}`] = big;
   }
   // a lock needs every event priced
   const priced = []; const unpriced = [];
-  for (const pos of resolved) { const bad = pos.legs.find((l) => unpricedEv.has(l.event)); if (bad) unpriced.push({ id: pos.id, label: pos.label, leg: bad.label || bad.event, hit: pos.hit, miss: pos.miss }); else priced.push(pos); }
+  for (const pos of resolved) { const bad = pos.legs.find((l) => unpricedEv.has(l.event)); if (bad) unpriced.push({ id: pos.id, label: pos.label, leg: bad.label || bad.event, reason: unpricedWhy[bad.event] || "no_book", hit: pos.hit, miss: pos.miss }); else priced.push(pos); }
+  // locks only (single-leg hedge positions are not counted), grouped by reason, for the page text
+  const unpricedLocks = unpriced.filter((u) => !String(u.id).includes(":"));
+  const unpricedReasons = {}; for (const u of unpricedLocks) unpricedReasons[u.reason] = (unpricedReasons[u.reason] || 0) + 1;
 
   const res = rootFor(priced, probs, { ...opts, histBins: opts.histBins || 32 });
   const nameOf = (event, outcome) => {
@@ -183,7 +189,7 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
     top: res.top.map(decorate),
     baseWorst: res.worst,
     legs: Object.entries(legInfo).map(([k, f]) => ({ key: k, p: f.p, american: f.american, best: f.best, oppAmerican: f.oppAmerican })),
-    locksPriced: priced.filter((x) => !x.single).length, locksTotal: parlays.length, unpriced, skipped, resting,
+    locksPriced: priced.filter((x) => !x.single).length, locksTotal: parlays.length, unpriced, unpricedCount: unpricedLocks.length, unpricedReasons, skipped, resting,
     finals: finalEv, spreadGames: Object.keys(spreadOf), spreadClamps: clamps, notes,
     model: { finals: finalEv, positions: priced.map(({ id, legs, hit, miss }) => ({ id, legs: legs.map(({ event, kind, outcomes, allowed }) => ({ event, kind, outcomes, allowed })), hit, miss })), probs, groups, teamNames, shown },
   };
