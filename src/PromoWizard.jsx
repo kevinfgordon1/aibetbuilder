@@ -9,7 +9,7 @@ export default function PromoWizard({ books, promoTypes, initial, onApply, onSki
   const [boost, setBoost] = useState(initial.boostPct);
   const [stake, setStake] = useState(initial.stake);
   const [legs, setLegs] = useState(initial.numLegs);
-  const chip = (on) => ({ padding: "10px 16px", borderRadius: 10, border: "1px solid " + (on ? "#3b82f6" : "rgba(255,255,255,0.1)"), background: on ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.03)", color: on ? "#93c5fd" : "#d1d5db", fontWeight: 600, fontSize: 14, cursor: "pointer" });
+  const chip = (on) => ({ padding: "10px 16px", borderRadius: 10, border: "1px solid " + (on ? "#d4af37" : "rgba(255,255,255,0.1)"), background: on ? "rgba(212,175,55,0.14)" : "rgba(255,255,255,0.03)", color: on ? "#f5d76e" : "#d1d5db", fontWeight: 600, fontSize: 14, cursor: "pointer" });
   const input = { width: 110, background: "#12131a", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "#e8eaed", padding: "10px 12px", fontSize: 16, fontWeight: 600 };
   const steps = [
     { t: "What promo did you get?", body: (
@@ -31,9 +31,9 @@ export default function PromoWizard({ books, promoTypes, initial, onApply, onSki
   ];
   const last = step === steps.length - 1;
   return (
-    <div data-promo-wizard="true" style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.10), rgba(16,185,129,0.08))", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 14, padding: "20px 22px", marginBottom: 20 }}>
+    <div data-promo-wizard="true" style={{ background: "#141414", border: "1px solid #6b5a1e", borderRadius: 14, padding: "20px 22px", marginBottom: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#60a5fa", textTransform: "uppercase", letterSpacing: 1 }}>Quick setup · Step {step + 1} of {steps.length}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#d4af37", textTransform: "uppercase", letterSpacing: 1 }}>Quick setup · Step {step + 1} of {steps.length}</div>
         <button type="button" onClick={onSkip} style={{ background: "none", border: "none", color: "#6b7280", fontSize: 13, cursor: "pointer" }}>Skip</button>
       </div>
       <div style={{ fontSize: 20, fontWeight: 700, color: "#e8eaed", marginBottom: 14 }}>{steps[step].t}</div>
@@ -41,8 +41,8 @@ export default function PromoWizard({ books, promoTypes, initial, onApply, onSki
       <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
         {step > 0 && <button type="button" onClick={() => setStep(step - 1)} style={chip(false)}>Back</button>}
         <button type="button" onClick={() => (last ? onApply({ promoType: type, promoBook: book, boostPct: boost, stake, numLegs: legs }) : setStep(step + 1))}
-          style={{ ...chip(true), background: "linear-gradient(135deg,#10b981,#0ea5e9)", color: "#06110d", border: "none" }}>
-          {last ? "Show my best bets →" : "Next →"}
+          style={{ ...chip(true), background: "#d4af37", color: "#0b0b0c", border: "none" }}>
+          {last ? "Show my best bets" : "Next"}
         </button>
       </div>
     </div>

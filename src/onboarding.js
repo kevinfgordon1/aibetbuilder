@@ -3,6 +3,7 @@
 
 export const FOOTER_DISCLAIMER = "Tools and estimates only, not betting advice. Results not guaranteed. 21+, bet responsibly.";
 export const WIZARD_DONE_KEY = "abb_promo_wizard_done_v1";
+export const ABOUT_PHOTO_URL = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_ABOUT_PHOTO_URL) || "";
 export const DEMO_VIDEO_URL = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_DEMO_VIDEO_URL) || "";
 
 function hasSupabaseSession(storage) {

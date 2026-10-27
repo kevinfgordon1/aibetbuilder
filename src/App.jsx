@@ -3350,7 +3350,7 @@ export default function App() {
               <div data-example-banner="true" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
                 <span style={{ fontSize: 13, color: "#fbbf24", fontWeight: 700 }}>Example results: 30% DraftKings profit boost, $100 stake.</span>
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>EV = estimated average profit over many bets; any single bet can lose. <a href="/learn" style={{ color: "#60a5fa" }}>What do these mean?</a></span>
-                <button type="button" data-try-boost="true" onClick={() => setWizardOpen(true)} style={{ marginLeft: "auto", background: "linear-gradient(135deg,#10b981,#0ea5e9)", color: "#06110d", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Try it with your boost →</button>
+                <button type="button" data-try-boost="true" onClick={() => setWizardOpen(true)} style={{ marginLeft: "auto", background: "#d4af37", color: "#0b0b0c", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Try it with your boost</button>
               </div>
             )}
               <button
