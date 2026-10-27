@@ -1,7 +1,7 @@
 'use strict';
 
 // GET /api/underdog-predict — Underdog phone prices for Promo and the
-// New Odds Board. Indexes NFL, CFB (app sport NCAAF), and MLB moneylines,
+// New Odds Board. Indexes NFL, CFB (app sport NCAAF), MLB, NHL, and NBA moneylines,
 // spreads, and totals from /v1/lobbies/content/lines (Team Picks
 // PickemStat pills, phone PE). A market with no prediction quote is omitted.
 // An aged moneyline side whose price still equals Kalshi's current yes
@@ -50,7 +50,7 @@ function queryParam(req, name) {
 // ?fresh=1 (with live=1) is the odds relay's single shared poller: 1s edge
 // bust bucket and 1s memory cache instead of 5s / 5s. ?sport=NCAAF[,NFL]
 // polls just those leagues (4 Underdog requests per sport on the first poll,
-// 3 after, instead of 16 for all four sports).
+// 3 after, instead of 20 for all five sports).
 async function handler(req, res, deps) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');

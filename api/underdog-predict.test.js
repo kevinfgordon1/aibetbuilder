@@ -300,7 +300,7 @@ function linesFor(sport) {
   }
 
   {
-    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB', 'NHL']);
+    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB', 'NHL', 'NBA']);
     assert.equal(SPORT_BY_UNDERDOG_ID.NFL, 'NFL');
     assert.equal(SPORT_BY_UNDERDOG_ID.CFB, 'NCAAF');
     assert.equal(SPORT_BY_UNDERDOG_ID.MLB, 'MLB');
@@ -1026,6 +1026,15 @@ function linesFor(sport) {
       ],
     }), 'NFL');
     assert.equal(scheduled[0].live, false);
+  }
+
+  {
+    // NBA (checked live 2026-10-27, BKN @ BOS match 212004): pill ids from
+    // match_grouped_lines; spread pill is "Margin of Victory".
+    assert.equal(MONEYLINE_FILTER_IDS.NBA, '90b34c5b-48d1-45d9-95dc-22cf0040a482');
+    assert.equal(SPREAD_FILTER_IDS.NBA, '43642591-6015-44fd-8459-ecd2b3ddb6c6');
+    assert.equal(TOTAL_FILTER_IDS.NBA, '187d7a65-ed66-4b6e-a7e9-3efefa7ce8ca');
+    assert.equal(SPORT_BY_UNDERDOG_ID.NBA, 'NBA');
   }
 
   {
