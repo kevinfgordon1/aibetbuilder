@@ -1122,8 +1122,7 @@ function LandingFull({ onBack }) {
 
       <div className="lf-nav">
         <div className="lf-brand" onClick={onBack} title="Back to preview">
-          <div className="lf-logo">B</div>
-          <div className="lf-bn">AI Bet Builder</div>
+          <div className="lf-bn" aria-label="AI Bet Builder" style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 22, fontWeight: 800, letterSpacing: -0.3, color: "#f4efe2" }}>aibet<span style={{ color: "#d4af37" }}>builder</span></div>
         </div>
         <button className="lf-navcta" onClick={focusSignIn}>Sign in</button>
       </div>
@@ -1185,8 +1184,8 @@ function LandingFull({ onBack }) {
       </div></section>
 
       <div className="lf-footer">
-        <div className="lf-brand" onClick={onBack}><div className="lf-logo" style={{ width: 30, height: 30, fontSize: 16, borderRadius: 8 }}>B</div>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>AI Bet Builder</span></div>
+        <div className="lf-brand" onClick={onBack}>
+          <span aria-label="AI Bet Builder" style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 17, fontWeight: 800, letterSpacing: -0.3, color: "#f4efe2" }}>aibet<span style={{ color: "#d4af37" }}>builder</span></span></div>
         <SiteFooterLinks />
         <span className="muted">An analytics tool, not betting advice</span>
       </div>
