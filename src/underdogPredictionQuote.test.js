@@ -390,6 +390,8 @@ const giantsOption = {
     ["UL Monroe Warhawks", "South Alabama Jaguars", "Louisiana-Monroe Warhawks", "South Alabama Jaguars"],
     ["McNeese State Cowboys", "LSU Tigers", "McNeese Cowboys", "LSU Tigers"],
     ["Southern Mississippi Golden Eagles", "Troy Trojans", "Southern Miss Golden Eagles", "Troy Trojans"],
+    // 2026-10-27: odds feeds "Sam Houston State", Underdog "Sam Houston".
+    ["Sam Houston State Bearkats", "Kennesaw State Owls", "Sam Houston Bearkats", "Kennesaw State Owls"],
   ];
   for (const [oddsAway, oddsHome, udAway, udHome] of cases) {
     const hit = findUnderdogPhoneGame(phone(udAway, udHome, [{ market: "h2h", name: udAway, american: 120 }]), oddsAway, oddsHome, "2026-10-03T19:30:00Z");
@@ -403,6 +405,11 @@ const giantsOption = {
   assert.equal(
     findUnderdogPhoneGame(phone("Southern Miss Golden Eagles", "Troy Trojans", []), "Mississippi State Bulldogs", "Troy Trojans", "2026-10-03T19:30:00Z"),
     null,
+  );
+  assert.equal(
+    findUnderdogPhoneGame(phone("Sam Houston Bearkats", "Kennesaw State Owls", []), "Houston Cougars", "Kennesaw State Owls", "2026-10-03T19:30:00Z"),
+    null,
+    "Houston is not Sam Houston",
   );
 }
 
