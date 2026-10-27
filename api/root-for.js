@@ -171,6 +171,48 @@ async function espnStarts(evs, starts, getJ) {
   }));
 }
 
+// ── Canonical game schedule (lib/game-schedule.js, public.game_schedule written by combo-worker's schedule sync) ──
+// One answer for "when does this game start" for every league. Read from Supabase; any league/day the table doesn't
+// have yet (migration not run, sync behind) is pulled live from ESPN's public scoreboard (bounded), so start times
+// never depend on the relay or Kalshi's placeholder clocks.
+const GS = require('../lib/game-schedule');
+/** Each leg's own saved start (combo_parlays.legs[].starts_at), keyed by Kalshi event. Multi-game locks included. */
+function legStarts(parlays) {
+  const out = {};
+  for (const p of parlays || []) for (const l of (p && p.legs) || []) {
+    const t = Date.parse(l && l.starts_at); if (!l || !l.ticker || !Number.isFinite(t)) continue;
+    const ev = String(l.ticker).toUpperCase().split('-').slice(0, 2).join('-'); if (!(ev in out)) out[ev] = new Date(t).toISOString();
+  }
+  return out;
+}
+const { loadSchedule } = require('../lib/game-schedule-store');
+/** Final pass: canonical official time wins; else the older chain's value (venue / lock / Kalshi), else the leg's own
+ *  saved start, else ticker date only. Every leg without a verified time is listed in startWarnings (never dropped). */
+function applySchedule(events, starts, games, legStart, lockStart) {
+  const info = {}; const startDates = {}; const startWarnings = [];
+  for (const ev of events) {
+    const p = GS.parseEvent(ev);
+    const r = GS.resolveStart(ev, games, { venue: starts[ev] ? { [ev]: starts[ev] } : {}, lockStart: legStart[ev] || lockStart[ev.split('-')[1]] || null });
+    if (r.verified || r.iso) starts[ev] = r.iso;
+    if (p) startDates[ev] = r.iso ? GS.etDate(r.startMs) : p.date;
+    info[ev] = { source: r.source, verified: r.verified };
+    if (!r.verified) startWarnings.push({ event: ev, source: r.source, warn: r.warn });
+  }
+  return { info, startDates, startWarnings };
+}
+
+/** Legs with no verified start still count on their game day: perEvent[].startDate from the schedule (never dropped),
+ *  plus the list of unverified legs so the page can warn instead of silently leaving them out. */
+function markStartDates(out, mk) {
+  const d = (mk && mk.startDates) || {};
+  for (const e of (out && out.perEvent) || []) {
+    if (!e || !e.event) continue; const ev = String(e.event).split('-').slice(0, 2).join('-');
+    const day = d[ev] || d[ev.replace(/(TOTAL|SPREAD)-/, 'GAME-')]; if (day) e.startDate = day;
+  }
+  if (out) out.startWarnings = (mk && mk.startWarnings) || [];
+  return out;
+}
+
 /** Live books: Kalshi orderbooks for every needed ticker + relay boards (NFL, NCAAF). */
 async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   const tickers = M.tickersNeeded(parlays);
@@ -224,7 +266,13 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   await Promise.all(missing.filter((ev) => !(ev in starts)).slice(0, 40).map(async (ev) => {
     try { const j = await getJ(`${KALSHI}/events/${encodeURIComponent(ev)}`); const m = (j.markets || [])[0] || {}; const t = m.expected_expiration_time || m.close_time; if (/FOOTBALL|NFL|NCAAF/i.test(ev) && lockStart[ev.split('-')[1]]) { starts[ev] = lockStart[ev.split('-')[1]]; return; } if (t && /FOOTBALL|NFL|NCAAF/i.test(ev) && isPlaceholderStart(t)) { starts[ev] = null; return; } if (t) starts[ev] = new Date(Date.parse(t) - 3 * 3600 * 1000).toISOString(); } catch (_) { /* no start: "Other days" */ }
   }));
-  return { kalshiBooks, kalshiAt, relay, relayNote, starts, tickers: tickers.length };
+  // Canonical schedule last, so it overrides every guess above (and fills legs nothing above knew about).
+  const events = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))];
+  let sched = { games: [], from: 'none' };
+  try { sched = await loadSchedule(events, env, f); } catch (_) { /* fall through: warnings below say which legs are unverified */ }
+  const { info: startInfo, startDates, startWarnings } = applySchedule(events, starts, sched.games, legStarts(parlays), lockStart);
+  if (startWarnings.length) console.warn('[root-for] legs without a verified start time:', startWarnings.map((w) => `${w.event}(${w.source})`).join(', '));
+  return { kalshiBooks, kalshiAt, relay, relayNote, starts, startInfo, startDates, startWarnings, scheduleFrom: sched.from, tickers: tickers.length };
 }
 
 /** Settled results of recently seen games (daily needle snapshots' snap.final, last 2 days; market facts, same for every
@@ -594,7 +642,7 @@ async function needleCron(client, env) {
       if (Date.now() - t0 > CRON_BUDGET_MS) { skipped.push(u.uid); continue; }
       try {
         const ids = new Set(u.locks.map((p) => p.id)); const mine = (xs) => xs.filter((x) => ids.has(x.parlay_id));
-        const out = M.computeRootFor({ parlays: u.locks, fills: mine(kids.fills), singles: mine(kids.singles), submissions: mine(kids.submissions), kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals });
+        const out = M.computeRootFor({ parlays: u.locks, fills: mine(kids.fills), singles: mine(kids.singles), submissions: mine(kids.submissions), kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals }); markStartDates(out, mk);
         await sweatBaseline(client, out, now, u.uid); await settleDays(client, u.uid, now, sd); // today: needleDay inside sweatBaseline
         done.add(u.uid);
       } catch (e) { console.error('[root-for] cron user failed:', String((e && e.message) || e).slice(0, 120)); }
@@ -662,7 +710,7 @@ async function handler(req, res) {
     }
     const mk = await loadMarkets(M, parlays, env);
     const now = deps.now();
-    const out = M.computeRootFor({ parlays, fills, singles, submissions, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) });
+    const out = M.computeRootFor({ parlays, fills, singles, submissions, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) }); markStartDates(out, mk);
     // Live needle for every Combo Locks user (Kevin, Oct 19): baselines + day rows are per user (uid); the
     // pregame-probs rows it reads/writes are per game (market facts, the same for everyone).
     const sweat = await sweatBaseline(client, out, now, uid);
@@ -678,4 +726,4 @@ module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._autoArchivedStillOpen = autoArchivedStillOpen;
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };
+module.exports._helpers = { markStartDates, loadSchedule, applySchedule, legStarts, needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };

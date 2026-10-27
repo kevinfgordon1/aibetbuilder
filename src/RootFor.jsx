@@ -59,6 +59,14 @@ function usePregame(d) {
   const pg = useMemo(() => pregameView(d), [d && d.asOf, d && d.sweat && d.sweat.baseline, d && d.sweat && d.sweat.dayResult, d && d.sweat && (d.sweat.keptIds || []).length, d && d.locksPriced, d && d.model && (d.model.positions || []).length]); // eslint-disable-line react-hooks/exhaustive-deps
   return pg ? { ...d, ...pg } : d;
 }
+// Legs whose game has no verified start time (canonical schedule miss). They are still counted on their game day;
+// this just says so instead of leaving them out silently.
+export function StartTimeWarning({ list }) {
+  const xs = Array.isArray(list) ? list.filter((w) => w && w.event) : [];
+  if (!xs.length) return null;
+  const names = xs.slice(0, 4).map((w) => String(w.event).split("-")[1] || w.event).join(", ");
+  return <div className="lead2" style={{ color: "#f5d76e" }}>⚠ {xs.length === 1 ? "1 game has" : `${xs.length} games have`} no verified start time ({names}{xs.length > 4 ? ", …" : ""}). They're still counted on their game day.</div>;
+}
 function Simple({ d, today }) {
   const g = usePregame(d);
   // Headline EV = pregame (gauge center); fall back to the saved baseline if the pregame view isn't available.
@@ -73,6 +81,7 @@ function Simple({ d, today }) {
       <div className="lead">{today ? todaySentence({ ...d, ev: headEv }) : summarySentence({ ...d, ev: headEv })}</div>
       {range && <div className="lead2">{today ? "Today's locks most likely land" : "Most weekends land"} between <b className="neg">{sMoney(range.lo)}</b> and <b className="pos">{sMoney(range.hi)}</b>.</div>}
       {today && <TouchedLocks today={today} />}
+      <StartTimeWarning list={d && d.startWarnings} />
       <SweatMeter d={d} />
       <NeedleHistory rows={d.sweat && d.sweat.history} />
       <div className="pair">
