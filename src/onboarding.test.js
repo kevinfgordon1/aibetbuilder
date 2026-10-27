@@ -41,3 +41,13 @@ test("lock share card: legs, hedged outcome, no user fields, no guaranteed wordi
   const fb = buildShareCardModel({ kind: "promo", promoType: "freebet", stake: 100, guaranteedCash: 70, legs: ["A"] });
   assert.doesNotMatch(shareCardBottomLine(fb), /guaranteed/);
 });
+
+test("wizard skips existing accounts", () => {
+  const now = Date.parse("2026-10-27T12:00:00Z");
+  const old = { id: "u1", created_at: "2026-01-01T00:00:00Z" };
+  const fresh = { id: "u2", created_at: "2026-10-27T10:00:00Z" };
+  assert.equal(shouldShowWizard({ storage: mem(), activeTab: "promo", user: old, now }), false);
+  assert.equal(shouldShowWizard({ storage: mem(), activeTab: "promo", user: fresh, now }), true);
+  assert.equal(shouldShowWizard({ storage: mem({ [WIZARD_DONE_KEY + ":u2"]: "1" }), activeTab: "promo", user: fresh, now }), false);
+  assert.equal(shouldShowWizard({ storage: mem({ "sb-x-auth-token": "t" }), activeTab: "promo" }), false);
+});
