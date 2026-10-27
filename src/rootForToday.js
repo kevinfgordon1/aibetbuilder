@@ -23,7 +23,12 @@ export function todayDay(nowMs) { return etDate(nowMs - TODAY_ROLLOVER_HOUR_ET *
 // A game's day: its ET kickoff date, with after-midnight kickoffs (before 5 AM ET) counted to the night before.
 export function gameDay(startMs) { return etDate(startMs - 5 * H); }
 export function todayEvents(perEvent = [], nowMs, today = sheetDay(nowMs)) { const out = new Set();
-  for (const e of perEvent) if (e && e.event && e.start && gameDay(Date.parse(e.start)) === today) out.add(e.event);
+  for (const e of perEvent) {
+    if (!e || !e.event) continue;
+    // Verified (or best-known) start first; a leg with no start time still counts on its schedule/ticker game day.
+    const day = e.start ? gameDay(Date.parse(e.start)) : (e.startDate || null);
+    if (day === today) out.add(e.event);
+  }
   return out;
 }
 // "Fri Oct 16" for the sheet day.

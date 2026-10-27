@@ -565,6 +565,25 @@ function markComboEligible(games, sideSeries, eventSet) {
   }));
 }
 
+const GS = require('../lib/game-schedule');
+const { loadSchedule } = require('../lib/game-schedule-store');
+async function applyCanonicalStarts(sports, started, nowMs, load = loadSchedule) {
+  const evOf = (sport, g) => `${(MARKET_SERIES[sport] || {}).side}-${g.key}`.toUpperCase();
+  const events = []; for (const [sport, list] of Object.entries(sports)) for (const g of list || []) events.push(evOf(sport, g));
+  const { games } = await load(events, process.env);
+  for (const [sport, list] of Object.entries(sports)) {
+    const keep = [];
+    for (const g of list || []) {
+      const r = GS.resolveStart(evOf(sport, g), games);
+      if (!r.verified) { keep.push({ ...g, startVerified: false }); continue; }
+      if (r.state === 'in' || r.state === 'post' || r.startMs <= nowMs) { (started[sport] = started[sport] || []).push({ key: g.key, title: g.title, date: g.date, startTime: r.iso, startExact: true, sport, kickoffSource: 'official' }); continue; }
+      keep.push({ ...g, startTime: r.iso, startExact: true, startVerified: true, kickoffSource: 'official' });
+    }
+    sports[sport] = keep;
+  }
+  return sports;
+}
+
 async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=120');
@@ -592,6 +611,9 @@ async function handler(req, res) {
       if (games.started && games.started.length) started[sport] = games.started.map((g) => ({ ...g, sport }));
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
+    // Canonical schedule (official league times, lib/game-schedule): fixes every game's start, and a game the
+    // official schedule says already started moves to `started` (never offered as quotable).
+    try { await applyCanonicalStarts(sports, started, Date.now()); } catch (_) { /* keep Kalshi-derived times */ }
     // Never let the CDN keep a slate with a sport missing for 3 minutes.
     if (failed.length) res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, started, ...(failed.length ? { failed } : {}) });
@@ -608,6 +630,7 @@ module.exports.SOCCER_SPORTS = SOCCER_SPORTS;
 module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports.FOOTBALL_OCCURRENCE_OFFSET_MS = FOOTBALL_OCCURRENCE_OFFSET_MS;
 module.exports._helpers = {
+  applyCanonicalStarts,
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
   groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, espnMatchFor, fetchEspnFootball, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
