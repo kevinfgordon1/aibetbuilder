@@ -566,12 +566,18 @@ function markComboEligible(games, sideSeries, eventSet) {
 }
 
 const GS = require('../lib/game-schedule');
-const { loadSchedule } = require('../lib/game-schedule-store');
-async function applyCanonicalStarts(sports, started, nowMs, load = loadSchedule) {
+const { loadSchedule, loadScheduleWithin, SCHEDULE_BUDGET_MS } = require('../lib/game-schedule-store');
+// Official start times on top of Kalshi's. Time-boxed (budgetMs, default 1.5 s): a slow table/ESPN load, or running out
+// of time mid-way, leaves the remaining sports on their Kalshi-derived times, so the game list (and the Promo Builder ->
+// Combo Locks prefill that waits on it) is never held up by the schedule.
+async function applyCanonicalStarts(sports, started, nowMs, load = loadSchedule, budgetMs = SCHEDULE_BUDGET_MS, clock = Date.now) {
+  const deadline = clock() + budgetMs;
   const evOf = (sport, g) => `${(MARKET_SERIES[sport] || {}).side}-${g.key}`.toUpperCase();
   const events = []; for (const [sport, list] of Object.entries(sports)) for (const g of list || []) events.push(evOf(sport, g));
-  const { games } = await load(events, process.env);
+  const { games, from } = await loadScheduleWithin(events, process.env, undefined, budgetMs, load);
+  if (from === 'timeout') return sports;
   for (const [sport, list] of Object.entries(sports)) {
+    if (clock() > deadline) break; // out of time: this and later sports keep Kalshi times
     const keep = [];
     for (const g of list || []) {
       const r = GS.resolveStart(evOf(sport, g), games);
