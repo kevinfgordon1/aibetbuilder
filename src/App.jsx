@@ -15,7 +15,7 @@ import { evEmptyState } from "./evEmptyState.js";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
 import PromoWizard from "./PromoWizard.jsx";
 import InfoTip from "./InfoTip.jsx";
-import { diagnoseEmptyPromo, initialWizardOpen, markWizardDone } from "./onboarding.js";
+import { diagnoseEmptyPromo, initialWizardOpen, markWizardDone, wizardOpenForUser } from "./onboarding.js";
 import SignInPanel from "./SignInOptions.jsx";
 import { authCallbackError, bootAppHash, restoreAuthReturnUrl } from "./signIn.js";
 import {
@@ -1697,11 +1697,17 @@ export default function App() {
   // First-run guided setup (new visitors) — also opened by ?wizard=1 or the "Try it with your boost" button.
   const [wizardOpen, setWizardOpen] = useState(() => (typeof window === "undefined" ? false : initialWizardOpen(window, parseAppHash)));
   const [wizardApplied, setWizardApplied] = useState(false);
+  const wizardExplicit = useRef(typeof window !== "undefined" && new URLSearchParams(window.location.search).get("wizard") === "1");
+  const [user, setUser] = useState(null);
   const closeWizard = () => {
     setWizardOpen(false);
-    if (typeof window !== "undefined") markWizardDone(window);
+    if (typeof window !== "undefined") markWizardDone(window, user);
   };
-  const [user, setUser] = useState(null);
+  // Once auth resolves, re-apply the new-user rule (unless opened on purpose).
+  useEffect(() => {
+    if (!user || wizardExplicit.current || typeof window === "undefined") return;
+    setWizardOpen(wizardOpenForUser(window, parseAppHash, user));
+  }, [user && user.id]);
   // Owner-only "Min depth per leg" ($ potential PROFIT at the best opposing prices, not stake). 0 = off.
   const [minLegDepthInput, setMinLegDepthInput] = useState("");
   useEffect(() => {
@@ -2620,7 +2626,7 @@ export default function App() {
   });
   const promoDepthHiddenAll = promoDepthNoticeType === "thin";
   const promoDepthNotice = promoDepthNoticeType === "checking" ? (
-    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Checking market depth<InfoTip k="depth" />…</div>
+    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Checking market <InfoTip k="depth">depth</InfoTip>…</div>
   ) : promoDepthNoticeType === "unavailable" ? (
     <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#f5d76e", marginBottom: 6 }}>Couldn't load market depth for {promoDepthRank.unknown} pick{promoDepthRank.unknown === 1 ? "" : "s"} — retrying…</div>
@@ -3353,6 +3359,11 @@ export default function App() {
                 <button type="button" data-try-boost="true" onClick={() => setWizardOpen(true)} style={{ marginLeft: "auto", background: "#d4af37", color: "#0b0b0c", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Try it with your boost</button>
               </div>
             )}
+              {!wizardOpen && (
+                <div style={{ textAlign: "right", marginBottom: 6 }}>
+                  <button type="button" data-quick-setup-link="true" onClick={() => { wizardExplicit.current = true; setWizardOpen(true); }} style={{ background: "none", border: "none", padding: 0, color: "#d4af37", fontFamily: "Inter, sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}>Quick setup</button>
+                </div>
+              )}
               <button
                 type="button"
                 className="promo-controls-summary"
@@ -3547,7 +3558,7 @@ export default function App() {
                         ))}
                       </>)}
                       {controlBox(<>
-                        <label style={labelStyle}>Markets</label><InfoTip k="markets" />
+                        <InfoTip k="markets"><label style={labelStyle}>Markets</label></InfoTip>
                         {MARKET_SCOPES.map(opt => (
                           <button key={opt.val} type="button" aria-pressed={isMarketScopeSelected(marketScope, opt.val)} onClick={() => setMarketScope(prev => toggleMarketScope(prev, opt.val))} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: isMarketScopeSelected(marketScope, opt.val) ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: isMarketScopeSelected(marketScope, opt.val) ? "#d4af37" : "#6b7280" }}>
                             {opt.label}
@@ -3555,7 +3566,7 @@ export default function App() {
                         ))}
                       </>)}
                       {controlBox(<>
-                        <label style={labelStyle}>Liquidity</label><InfoTip k="liquidity" />
+                        <InfoTip k="liquidity"><label style={labelStyle}>Liquidity</label></InfoTip>
                         <button type="button" onClick={() => setHideLowLiquidity(false)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: !hideLowLiquidity ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: !hideLowLiquidity ? "#d4af37" : "#6b7280" }}>
                           {LIQUIDITY_FILTER_ALL_LABEL}
                         </button>
@@ -3564,7 +3575,7 @@ export default function App() {
                         </button>
                       </>)}
                       {canSeeOwnerTools(user) && controlBox(<>
-                        <label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until the opposing bets can win this much $ (depth = potential profit, not stake: $3,000 at −200 = $1,500), and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label><InfoTip k="depth" />
+                        <InfoTip k="depth"><label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until the opposing bets can win this much $ (depth = potential profit, not stake: $3,000 at −200 = $1,500), and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label></InfoTip>
                         <span style={{ color: "#6b7280", fontSize: 12 }}>$</span>
                         <input data-testid="promo-min-leg-depth" type="text" inputMode="numeric" placeholder="off" value={minLegDepthInput}
                           onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setMinLegDepthInput(v); saveMinLegDepth(user, v); }}
@@ -3686,8 +3697,8 @@ export default function App() {
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             {promoType === "boost" && <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>}
-                            <span>True Odds<InfoTip k="trueOdds" />: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV<InfoTip k="ev" />: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
+                            <span><InfoTip k="trueOdds">True Odds</InfoTip>: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
+                            <span><InfoTip k="ev">EV</InfoTip>: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
@@ -3842,8 +3853,8 @@ export default function App() {
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
                             <span>On a loss: <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash</span>
-                            <span>True Odds<InfoTip k="trueOdds" />: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV<InfoTip k="ev" />: <strong style={{ color: evColor }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
+                            <span><InfoTip k="trueOdds">True Odds</InfoTip>: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
+                            <span><InfoTip k="ev">EV</InfoTip>: <strong style={{ color: evColor }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
@@ -4038,7 +4049,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>Game: <strong style={{ color: "#e8eaed" }}>{leg?.game}</strong></span>
                                 <span>Conversion: <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></span>
-                                <span>EV<InfoTip k="ev" />: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
+                                <span><InfoTip k="ev">EV</InfoTip>: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
                             </>
                           ) : (
@@ -4047,8 +4058,8 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
-                                <span>True Odds<InfoTip k="trueOdds" />: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                                <span>EV<InfoTip k="ev" />: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
+                                <span><InfoTip k="trueOdds">True Odds</InfoTip>: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
+                                <span><InfoTip k="ev">EV</InfoTip>: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
                               {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={false} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>

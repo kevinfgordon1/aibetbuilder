@@ -8,6 +8,9 @@ import {
   xPostIntentUrl,
 } from "./shareCard";
 
+// Hidden on Promo Builder for now (Kevin wants it back later). Flip to true to restore.
+export const SHOW_POST_ON_X = false;
+
 const btn = {
   display: "inline-flex",
   alignItems: "center",
@@ -94,7 +97,7 @@ export default function ShareCardActions({
           <GuestLock locked={locked} /> Share
         </button>
       )}
-      {showImage && model && (
+      {showImage && model && (SHOW_POST_ON_X || tab !== "promo") && (
         <a
           href={locked ? undefined : xPostIntentUrl({ text: shareTweetText(model), url })}
           target="_blank"

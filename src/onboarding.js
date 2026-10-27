@@ -33,9 +33,24 @@ export function pickTopLevelPage(loc, storage) {
   return "landing";
 }
 
-export function shouldShowWizard({ storage, activeTab, hasDeepLink }) {
+export const NEW_ACCOUNT_MS = 24 * 60 * 60 * 1000;
+export const wizardUserKey = (id) => `${WIZARD_DONE_KEY}:${id}`;
+
+// Auto-show rule: never for anyone with a saved session (existing accounts go
+// straight to the full builder). A signed-in user only auto-sees it when the
+// account is <24h old and they have not finished/skipped it before.
+export function shouldShowWizard({ storage, activeTab, hasDeepLink, user, now = Date.now() }) {
   if (activeTab !== "promo" || hasDeepLink) return false;
-  try { return !(storage && storage.getItem(WIZARD_DONE_KEY)); } catch { return false; }
+  try {
+    if (storage && storage.getItem(WIZARD_DONE_KEY)) return false;
+    if (user) {
+      if (user.user_metadata && user.user_metadata.promo_wizard_done) return false;
+      if (storage && storage.getItem(wizardUserKey(user.id))) return false;
+      const created = Date.parse(user.created_at || "");
+      return Number.isFinite(created) && now - created < NEW_ACCOUNT_MS;
+    }
+    return !hasSupabaseSession(storage);
+  } catch { return false; }
 }
 
 const DEFAULT_SPORTS_LABEL = "default sports";
@@ -82,8 +97,17 @@ export function initialWizardOpen(win, parseHash) {
     return shouldShowWizard({ storage: win.localStorage, activeTab: route.tab || "promo", hasDeepLink: Boolean(route.cardId) });
   } catch { return false; }
 }
-export function markWizardDone(win) {
-  try { win.localStorage.setItem(WIZARD_DONE_KEY, "1"); } catch { /* ignore */ }
+export function wizardOpenForUser(win, parseHash, user) {
+  try {
+    const route = parseHash(win.location.hash) || {};
+    return shouldShowWizard({ storage: win.localStorage, activeTab: route.tab || "promo", hasDeepLink: Boolean(route.cardId), user });
+  } catch { return false; }
+}
+export function markWizardDone(win, user) {
+  try {
+    win.localStorage.setItem(WIZARD_DONE_KEY, "1");
+    if (user && user.id) win.localStorage.setItem(wizardUserKey(user.id), "1");
+  } catch { /* ignore */ }
 }
 
 export const TIP_TEXT = Object.freeze({
