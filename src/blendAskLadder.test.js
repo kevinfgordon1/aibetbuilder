@@ -94,8 +94,9 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.match(cardinals.pmBlend.flag, /of \$500 payout available/);
 }
 
-// Thin top cannot clear Hide low liquidity by walking into worse depth.
-// Top +200 / $100 only funds $200 of $500 profit — low liquidity, keep quote.
+// Kevin 2026-10-27: within ONE venue a thin top blends with the deeper
+// levels behind it. Top +200 / $100 funds $200; +100 / $400 funds the rest
+// → covered, priced at the walked VWAP (worse than the top), not dropped.
 {
   const walked = applyPmBlendToLeg(
     { dk: 200, bestOpp: 200, bestOppBook: "kalshi", bestOppSize: 100 },
@@ -105,17 +106,16 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     ],
     { promoType: "boost", numLegs: 1, stake: 100, boostPct: 100 },
   );
-  assert.equal(walked.lowLiquidity, true, "thin top stays low liquidity despite deep L2");
+  assert.equal(walked.lowLiquidity, false, "thin top + deep L2 in the same venue covers $500");
   assert.equal(walked.bestOppQuoted, 200);
-  assert.equal(walked.bestOpp, 200, "do not replace quote with deep VWAP when top is thin");
-  assert.equal(walked.pmBlend.mode, "payout");
-  assert.equal(walked.pmBlend.thinTop, true);
-  assert.equal(walked.pmBlend.complete, false);
-  assert.match(walked.pmBlend.flag, /of \$500 payout available/);
-  assert.doesNotMatch(walked.pmBlend.flag, /blended to \$500/);
+  assert.equal(walked.bestOpp, 125, "priced at the in-venue VWAP");
+  assert.equal(walked.pmBlend.complete, true);
+  assert.equal(walked.pmBlend.venue, "kalshi");
+  assert.match(walked.pmBlend.flag, /blended to \$500/);
 }
 
-// Endries-style Kalshi No: $64 top + fat worse level must not claim $500.
+// Endries-style Kalshi No: $64 top + $23,832 one tick worse in the same
+// venue covers $500 profit → kept, priced at the walked VWAP.
 {
   const endries = applyPmBlendToLeg(
     {
@@ -131,11 +131,8 @@ assert.equal(isPmBlendVenue("draftkings"), false);
     null,
     { promoType: "boost", numLegs: 3 },
   );
-  assert.equal(endries.lowLiquidity, true);
-  assert.equal(endries.bestOpp, -2038);
-  assert.equal(endries.pmBlend.thinTop, true);
-  assert.match(endries.pmBlend.flag, /\$3 of \$500/);
-  assert.doesNotMatch(endries.pmBlend.flag, /blended to \$500/);
+  assert.equal(endries.lowLiquidity, false);
+  assert.ok(endries.bestOpp <= -2038 && endries.bestOpp >= -2042);
 }
 
 // Deep top alone still clears the bar (no thin-top tag).
@@ -307,7 +304,7 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   assert.equal(fdUnknown.pmBlend, null);
 }
 
-// ── Profit Boost: thin top stays quoted + lowLiquidity (no deep VWAP laundering)
+// ── Profit Boost: thin top blends with same-venue depth; EV uses the VWAP
 {
   const raw = {
     dk: 150,
@@ -327,10 +324,10 @@ assert.equal(isPmBlendVenue("draftkings"), false);
   const { displayLegs } = applyPmBlendToLegs([raw], {
     ["kalshi|mlb|A @ B|B ML|ML"]: levels,
   }, { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30 });
-  assert.equal(displayLegs[0].lowLiquidity, true);
-  assert.equal(displayLegs[0].bestOpp, 200, "thin top keeps quoted opp");
-  assert.equal(trueOppAmerican(displayLegs[0]), 200);
-  assert.match(displayLegs[0].pmBlend.flag, /of \$500 payout available/);
+  assert.equal(displayLegs[0].lowLiquidity, false);
+  assert.equal(displayLegs[0].bestOpp, 125, "priced at the in-venue VWAP, not the thin top");
+  assert.equal(trueOppAmerican(displayLegs[0]), 125);
+  assert.match(displayLegs[0].pmBlend.flag, /blended to \$500/);
 }
 
 // Deep top that alone funds $500 still clears (no thin-top flag).
@@ -525,3 +522,58 @@ console.log("blendAskLadder.test.js ok");
   assert.equal(blendDidWalk(worse, -104), true);
   assert.equal(formatBlendedPayoutFlag(worse, -104), "blended to $500 payout");
 }
+
+// ── Per-venue Hide low liquidity (Kevin 2026-10-27): one hedge, one account.
+{
+  const { filterLowLiquidityLegs } = await import("./promoLiquidityFilter.js");
+  const { attachFreeBetLock } = await import("./promoFreeBet.js");
+  // Troy +1070: ProphetX −1224 has $12; Kalshi −1236 has $1.63M.
+  const troy = {
+    dk: 1070, bestOpp: -1224, bestOppBook: "prophetx", bestOppSize: 12,
+    sport: "americanfootball_ncaaf", game: "Troy Trojans @ James Madison Dukes", name: "Troy Trojans ML", bestOppName: "James Madison Dukes ML", market: "ML",
+    bestOppVenues: [
+      { book: "prophetx", american: -1224, size: 12 },
+      { book: "novig", american: -1233, size: 38477 },
+      { book: "polymarket", american: -1235, size: 18 },
+      { book: "kalshi", american: -1236, size: 1630787 },
+    ],
+  };
+  const t = applyPmBlendToLeg(troy, null, { promoType: "freebet", numLegs: 1 });
+  assert.equal(t.lowLiquidity, false, "thin best price is not grounds to drop");
+  assert.equal(t.bestOppBook, "novig", "best-priced venue that covers alone (Novig $38k covers $500 profit)");
+  assert.equal(t.hedgeVenueFrom, "prophetx");
+  assert.ok(t.pmBlend.skippedVenues.includes("prophetx") && t.pmBlend.skippedVenues.includes("polymarket"));
+  // With Novig thin too, Kalshi (−1236, $1.63M) carries the hedge.
+  const troyK = { ...troy, bestOppVenues: troy.bestOppVenues.map((v) => (v.book === "novig" ? { ...v, size: 20 } : v)) };
+  const k = applyPmBlendToLeg(troyK, null, { promoType: "freebet", numLegs: 1 });
+  assert.equal(k.bestOppBook, "kalshi");
+  assert.equal(k.bestOpp, -1236);
+  const lock = attachFreeBetLock({ legs: [k] }, 100).lock;
+  assert.ok(Math.abs(lock.guaranteedCash - 80.2) < 0.3, `Troy ≈ $80 on Kalshi (got ${lock.guaranteedCash})`);
+  const pool = filterLowLiquidityLegs([troyK], true, { promoType: "freebet", numLegs: 1 });
+  assert.equal(pool.length, 1, "Troy kept with Hide low liquidity ON");
+  assert.equal(pool[0].bestOppBook, "kalshi", "scan pool ranks on the venue that can fill");
+
+  // Two venues each thin, jointly sufficient → dropped (no cross-venue blend).
+  // −200: $500 profit needs $1,000 stake. $600 + $600 would cover only together.
+  const split = {
+    dk: 180, bestOpp: -200, bestOppBook: "kalshi", bestOppSize: 600,
+    sport: "nfl", game: "A @ B", name: "A ML", bestOppName: "B ML", market: "ML",
+    bestOppVenues: [{ book: "kalshi", american: -200, size: 600 }, { book: "novig", american: -205, size: 600 }],
+  };
+  const sp = applyPmBlendToLeg(split, null, { promoType: "freebet", numLegs: 1 });
+  assert.equal(sp.lowLiquidity, true, "two thin venues are not added together");
+  assert.equal(sp.bestOppBook, "kalshi");
+  assert.equal(filterLowLiquidityLegs([split], true, {}).length, 0);
+  assert.equal(filterLowLiquidityLegs([split], false, {}).length, 1, "filter off keeps it");
+  // A live Novig ladder deep enough on its own rescues it.
+  const live = applyPmBlendToLeg(split, null, { laddersByKey: { "novig|nfl|A @ B|B ML|ML": [{ american: -205, size: 600 }, { american: -210, size: 900 }] } });
+  assert.equal(live.lowLiquidity, false);
+  assert.equal(live.bestOppBook, "novig");
+
+  // Truly no depth anywhere → dropped.
+  const none = { dk: 300, bestOpp: -350, bestOppBook: "kalshi", bestOppSize: 0, bestOppVenues: [{ book: "polymarket", american: -360, size: 0 }] };
+  assert.equal(applyPmBlendToLeg(none, null, {}).lowLiquidity, true);
+  assert.equal(filterLowLiquidityLegs([none], true, {}).length, 0);
+}
+console.log("per-venue liquidity ok");

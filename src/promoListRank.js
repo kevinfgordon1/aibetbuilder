@@ -50,12 +50,15 @@ export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, lad
 }
 
 // PM legs on the visible page. Sportsbooks are skipped (no depth API).
-export function collectPromoDepthLegs(picks, minLegDepth) {
+// Other venues' ladders are fetched too when a minimum is set or Hide low
+// liquidity is on (each venue is checked on its own ladder).
+export function collectPromoDepthLegs(picks, minLegDepth, hideLowLiquidity = false) {
   const out = [];
   const seen = new Set();
   for (const p of picks || []) {
     const legs = (p && p.legs) || [];
-    for (const leg of legs.concat(minDepthAltVenueLegs(legs, minLegDepth))) {
+    const alt = minDepthAltVenueLegs(legs, parseMinLegDepth(minLegDepth) ? minLegDepth : (hideLowLiquidity ? 1 : 0));
+    for (const leg of legs.concat(alt)) {
       if (!venueHasDepthApi(leg && leg.bestOppBook)) continue;
       const key = depthCacheKey(leg);
       if (!key || seen.has(key)) continue;

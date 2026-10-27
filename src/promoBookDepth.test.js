@@ -60,11 +60,10 @@ assert.equal(legsNeedingDepth([pinLeg]).length, 0);
       { american: 100, size: 400 },
     ],
   });
-  // Thin top ($100 at +200) cannot clear Hide low liquidity via deeper L2.
-  assert.equal(over.displayLegs[0].bestOpp, 104, "thin top keeps quoted opp");
-  assert.equal(over.displayLegs[0].lowLiquidity, true);
-  assert.match(over.blends[depthCacheKey(pxLeg)].flag, /of \$500 payout available/);
-  assert.doesNotMatch(over.blends[depthCacheKey(pxLeg)].flag, /blended to \$500/);
+  // Kevin 2026-10-27: a thin top blends with deeper levels in the SAME
+  // venue. The live ladder covers $500 → kept at the in-venue VWAP.
+  assert.equal(over.displayLegs[0].lowLiquidity, false);
+  assert.equal(over.displayLegs[0].bestOpp, 125, "in-venue VWAP of the live ladder");
 
   const kevin = {
     dk: 200,

@@ -91,9 +91,12 @@ function parlay(id, lead, tag, promoType) {
 }
 
 const ladders = {
+  // Whole venue is thin ($15 + $100): no single venue covers $500 profit.
+  // (A thin top with deep same-venue depth behind it now blends and stays —
+  // Kevin 2026-10-27 — so this ladder is short all the way down.)
   [depthCacheKey(thinKalshi)]: [
     { american: 200, size: 15 },
-    { american: 102, size: 20000 },
+    { american: 102, size: 100 },
   ],
 };
 
@@ -125,7 +128,7 @@ function assertPostBlendOrder(promoType) {
   assert.equal(waiting.rest[0].id, "C");
 
   const page = visiblePromoAfterDepth(base, 5, ladders, rankPage(ctx));
-  // Real ladder top is only $15 — Hide low liquidity drops A entirely.
+  // Real ladder is only $115 deep — Hide low liquidity drops A entirely.
   assert.deepEqual(page.visible.map((p) => p.id), ["B", "C"], `${promoType}: thin-top A hidden after depth`);
   assert.equal(page.visible[0].id, "B", `${promoType}: BEST PICK is the liquid book`);
   for (let i = 1; i < page.visible.length; i++) {
