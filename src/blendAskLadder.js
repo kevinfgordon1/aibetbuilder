@@ -417,7 +417,7 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
     bestOpp: blend.american,
     bestOppSize: topSize,
     bestOppLevels: undefined,
-    hedgeVenueFrom: String(leg.bestOppBook).toLowerCase(),
+    hedgeVenueFrom: leg.hedgeVenueFrom || String(leg.bestOppBook).toLowerCase(),
     lowLiquidity: false,
     pmBlend,
   };
@@ -440,6 +440,20 @@ export function preBlendStoredLadderLegs(legs, ctx = {}) {
 // trueOppAmerican → pmBlend.american) so every view uses the same blend.
 export function applyMinDepthOverlay(next, md) {
   if (!next || !md || md.american == null || !md.complete) return next;
+  // Min depth picked a different single venue (per-venue rule): the hedge
+  // and its price live there, whatever the $500 walk picked.
+  if (md.venue && String(next.bestOppBook || "").toLowerCase() !== md.venue) {
+    const mdAm = Number(md.american);
+    return {
+      ...next,
+      bestOppBook: md.venue,
+      bestOppQuoted: md.top != null ? md.top : next.bestOppQuoted,
+      ...(md.topSize != null ? { bestOppSize: md.topSize, bestOppLevels: undefined } : {}),
+      bestOpp: mdAm,
+      lowLiquidity: false,
+      pmBlend: { ...(next.pmBlend || {}), american: mdAm, complete: true, thinTop: false, lowLiquidity: false, venue: md.venue, levelsUsed: md.levelsUsed, minDepth: md, flag: formatMinDepthBlendFlag(md) },
+    };
+  }
   const mdAm = Number(md.american);
   const cur = trueOppAmerican(next);
   if (cur != null && cur <= mdAm) {

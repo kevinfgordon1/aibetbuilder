@@ -31,40 +31,62 @@ assert.equal(legMeetsMinDepth(thin, 1500, [{ american: 120, size: 2100 }]), true
 // best venue ladder walks deeper levels now (blended within the venue)
 assert.equal(legMeetsMinDepth(thin, 1500, [{ american: 120, size: 300 }, { american: 110, size: 5000 }]), true);
 
-// cross-venue blend: Kalshi +120 $300 thin, Novig +115 $3,000, ProphetX +105 $4,000
+// PER-VENUE (Kevin 2026-10-27, one hedge = one account): Kalshi +120 $300
+// ($360 profit), Novig +115 $3,000 ($3,450), ProphetX +105 $4,000 ($4,200).
 const multi = { ...thin, dk: -130, bestOppVenues: [
   { book: "kalshi", american: 120, size: 300 },
   { book: "novig", american: 115, size: 3000 },
   { book: "prophetx", american: 105, size: 4000 },
   { book: "polymarket", american: 118, size: null },
 ] };
-const b = blendLegToMinDepth(multi, 5000);
+const b = blendLegToMinDepth(multi, 3000);
 assert.equal(b.complete, true);
-assert.deepEqual(b.venues, ["kalshi", "novig", "prophetx"]);
-assert.ok(b.american < 120 && b.american > 105, `blended ${b.american}`);
-// profit walk: $360 (300@+120) + $3,450 (3000@+115) + $1,190 from +105 (stake 1,133.33)
-const stake = 300 + 3000 + 1190 / 1.05;
-const vw = stake / (stake + 5000);
-assert.equal(b.american, Math.round((100 * (1 - vw)) / vw));
-assert.equal(b.profitFilled, 5000);
-assert.equal(blendLegToMinDepth(multi, 9000).complete, false, "$8,010 total profit < $9,000");
-assert.equal(legMeetsMinDepth(multi, 9000), false);
-const re = applyMinDepthToLeg(multi, 5000);
-assert.equal(re.bestOpp, b.american);
-assert.equal(re.bestOppQuoted, 120);
-assert.equal(applyMinDepthToLeg(multi, 9000), null);
-// sportsbook-best still drops
-assert.equal(applyMinDepthToLeg({ ...book, bestOppVenues: multi.bestOppVenues }, 100), null);
+assert.equal(b.venue, "novig", "best-priced venue that covers $3,000 alone");
+assert.deepEqual(b.venues, ["novig"], "one venue, never summed");
+assert.equal(b.american, 115);
+assert.ok(b.skippedVenues.includes("kalshi"));
+assert.equal(blendLegToMinDepth(multi, 4000).venue, "prophetx", "only ProphetX covers $4,000 alone");
+assert.equal(blendLegToMinDepth(multi, 4000).american, 105);
+// $5,000: jointly $8,010 but no single venue → dropped.
+const short5 = blendLegToMinDepth(multi, 5000);
+assert.equal(short5.complete, false, "venues are not summed");
+assert.ok(Math.abs(short5.available - 4200) < 1e-6, "available = deepest single venue");
+assert.equal(legMeetsMinDepth(multi, 5000), false);
+assert.equal(applyMinDepthToLeg(multi, 5000), null);
+// Two venues each short, jointly sufficient → dropped.
+const pair = { ...thin, dk: -130, bestOppBook: "kalshi", bestOpp: 100, bestOppSize: 1200, bestOppVenues: [
+  { book: "kalshi", american: 100, size: 1200 },
+  { book: "novig", american: 100, size: 1200 },
+] };
+assert.equal(legMeetsMinDepth(pair, 2000), false, "$1,200 + $1,200 only together");
+assert.deepEqual(filterLegsByMinDepth([pair], 2000), []);
+assert.equal(legMeetsMinDepth(pair, 1200), true);
+// Leg moves to the covering venue.
+const re = applyMinDepthToLeg(multi, 3000);
+assert.equal(re.bestOppBook, "novig");
+assert.equal(re.bestOpp, 115);
+assert.equal(re.bestOppQuoted, 115);
+assert.equal(re.hedgeVenueFrom, "kalshi");
+// Sportsbook-best falls back to the exchange venues instead of dropping.
+const sbk = applyMinDepthToLeg({ ...book, dk: -130, bestOppVenues: multi.bestOppVenues }, 3000);
+assert.equal(sbk.bestOppBook, "novig");
+assert.equal(sbk.bestOpp, 115);
+assert.equal(sbk.hedgeVenueFrom, "fanduel");
+assert.equal(applyMinDepthToLeg({ ...book, dk: -130, bestOppVenues: multi.bestOppVenues }, 5000), null, "no exchange covers alone → drop");
+assert.equal(applyMinDepthToLeg(book, 100), null, "sportsbook with no exchange quotes still drops");
 // wrong-side junk quote ignored
 const junk = { ...multi, bestOppVenues: [...multi.bestOppVenues, { book: "polymarket", american: -900, size: 99999 }] };
 assert.equal(blendLegToMinDepth(junk, 9000).complete, false);
 
-// live alt-venue ladder replaces the feed top-of-book quote
+// live alt-venue ladder replaces the feed top-of-book quote (within that venue)
 const novigKey = depthCacheKey(venueDepthLeg(multi, "novig"));
-assert.equal(blendLegToMinDepth(multi, 9000, null, { [novigKey]: [{ american: 115, size: 3000 }, { american: 112, size: 2000 }] }).complete, true);
-assert.equal(minDepthAltVenueLegs([multi], 5000).length, 3, "novig + prophetx + polymarket ladders fetched");
+const liveNovig = blendLegToMinDepth(multi, 9000, null, { [novigKey]: [{ american: 115, size: 3000 }, { american: 112, size: 5000 }] });
+assert.equal(liveNovig.complete, true, "$3,450 + $5,600 on Novig alone");
+assert.equal(liveNovig.venue, "novig");
+assert.equal(minDepthAltVenueLegs([multi], 3000).length, 3, "novig + prophetx + polymarket ladders fetched");
+assert.equal(minDepthAltVenueLegs([{ ...book, bestOppVenues: multi.bestOppVenues }], 3000).length, 4, "sportsbook-best: every exchange venue");
 assert.equal(minDepthAltVenueLegs([multi], 0).length, 0);
-assert.ok(collectPromoDepthLegs([{ legs: [multi] }], 5000).length > collectPromoDepthLegs([{ legs: [multi] }]).length);
+assert.ok(collectPromoDepthLegs([{ legs: [multi] }], 3000).length > collectPromoDepthLegs([{ legs: [multi] }]).length);
 
 // card blend cannot undo the min-depth price
 const shown = applyPmBlendToLegs([{ ...re, bestOppSize: 300 }], {}, {}).displayLegs[0];
@@ -79,11 +101,12 @@ assert.equal(filterPicksByMinDepth(picks, 1500, { [depthCacheKey(thin)]: [{ amer
 
 // rankPromoPicks reprices and recomputes EV via overlay
 let overlaid = 0;
-const ranked = rankPromoPicks([{ legs: [multi], ev: 10 }], { minLegDepth: 5000, numLegs: 1 }, (x) => x, (pk, legs) => { overlaid++; return { ...pk, ev: 1, legs }; }, {});
+const ranked = rankPromoPicks([{ legs: [multi], ev: 10 }], { minLegDepth: 3000, numLegs: 1 }, (x) => x, (pk, legs) => { overlaid++; return { ...pk, ev: 1, legs }; }, {});
 assert.equal(ranked.length, 1);
-assert.equal(ranked[0].legs[0].minDepthBlend.target, 5000);
+assert.equal(ranked[0].legs[0].minDepthBlend.target, 3000);
+assert.equal(ranked[0].legs[0].bestOppBook, "novig");
 assert.ok(overlaid >= 1);
-assert.equal(rankPromoPicks([{ legs: [multi] }], { minLegDepth: 9000, numLegs: 1 }, (x) => x, (pk) => pk, {}).length, 0);
+assert.equal(rankPromoPicks([{ legs: [multi] }], { minLegDepth: 5000, numLegs: 1 }, (x) => x, (pk) => pk, {}).length, 0);
 
 // venues plumbing from the odds feed
 const q = pickBestAmericanQuote([{ price: 120, book: "kalshi", size: 300 }, { price: 115, book: "novig", size: 3000 }, { price: 110, book: "fanduel" }]);
@@ -99,4 +122,4 @@ saveMinLegDepth(u, "2000", store);
 assert.equal(loadMinLegDepth(u, store), 2000);
 saveMinLegDepth(u, "", store);
 assert.equal(loadMinLegDepth(u, store), 0);
-console.log("promoMinDepth ok", { single: 120, blended: b.american });
+console.log("promoMinDepth ok", { venue: b.venue, american: b.american });
