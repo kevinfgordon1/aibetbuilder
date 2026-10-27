@@ -1130,7 +1130,7 @@ function LandingFull({ onBack }) {
       <section className="lf-hero"><div className="wrap">
         <div className="lf-eyebrow"><span className="lf-dot"></span> Live odds from 20+ books &amp; exchanges</div>
         <h1>Make your sportsbook<br /><span className="lf-grad">promos actually pay.</span></h1>
-        <p className="lf-sub">AI Bet Builder finds the highest-EV boosts, builds the optimal parlay to hit them, and turns free bets — singles or parlays — into EV-ranked plays. 1-leg free bets still convert to locked cash.</p>
+        <p className="lf-sub">aibetbuilder finds the highest-EV boosts, builds the optimal parlay to hit them, and turns free bets — singles or parlays — into EV-ranked plays. 1-leg free bets still convert to locked cash.</p>
         <div className="lf-ctarow" style={{ display: "block" }}>
           <SignInPanel id="lf-signin" supabaseClient={supabase} />
           <p className="lf-trust" style={{ textAlign: "center", margin: "14px 0 0" }}>No credit card · No bank account linking</p>
