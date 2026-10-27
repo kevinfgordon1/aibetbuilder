@@ -5,3 +5,7 @@ dist/
 *.log
 .env.local
 .env*.local
+
+# Firebase config files (Kevin adds locally; not committed)
+android/app/google-services.json
+ios/App/App/GoogleService-Info.plist

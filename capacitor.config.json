@@ -1,0 +1,10 @@
+{
+  "appId": "io.aibetbuilder.app",
+  "appName": "aibetbuilder",
+  "webDir": "dist",
+  "server": { "androidScheme": "https" },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 1200, "backgroundColor": "#0b0b0c", "showSpinner": false, "androidScaleType": "CENTER_CROP" },
+    "PushNotifications": { "presentationOptions": ["badge", "sound", "alert"] }
+  }
+}
