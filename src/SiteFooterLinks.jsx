@@ -1,4 +1,5 @@
 import { GAMBLER_TEL, SITE_FOOTER_LINKS } from "./siteLinks.js";
+import { FOOTER_DISCLAIMER } from "./onboarding.js";
 
 const linkStyle = { color: "#9ca3af", textDecoration: "none", fontWeight: 600, padding: "4px 2px" };
 
@@ -10,6 +11,7 @@ export default function SiteFooterLinks({ align = "center" }) {
           <a key={l.href} href={l.href} style={linkStyle}>{l.label}</a>
         ))}
       </nav>
+      <div data-footer-disclaimer="true" style={{ color: "#9ca3af", textAlign: "center" }}>{FOOTER_DISCLAIMER}</div>
       <div style={{ color: "#9ca3af" }}>
         21+ only. Gambling problem? Call <a href={GAMBLER_TEL} style={{ color: "#d1d5db", fontWeight: 700, textDecoration: "none" }}>1-800-GAMBLER</a>.
       </div>

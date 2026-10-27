@@ -49,6 +49,9 @@ import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn, feeGateNote, feeS
 import { isLockPaused, pauseUpdate, isMissingPausedColumn, pauseToggleTitle, PAUSE_SQL_HINT } from "./comboLockPause";
 import { ChangePriceButton } from "./ComboLockOrders";
 import ComboLockSubmitted from "./ComboLockSubmitted";
+import ShareCardActions from "./ShareCardActions.jsx";
+import { buildLockShareModel } from "./shareCard";
+import { plainLeg as plainLockLeg } from "./comboLockView";
 import { buyerSeesAfterFees, buyerSeesLabel, sellerKeeps, youKeepLabel, BUYER_SEES_TITLE, FALLBACK_MAKER_RATE, makerRateForTicker, loadSeriesFees } from "./buyerOdds.js";
 import { buildLockSubmittedToast, buildLockSubmitError, buildSingleLegConfirm } from "./comboLockSubmitted";
 import { absoluteShareUrl, copyTextToClipboard } from "./shareCard";
@@ -1605,6 +1608,11 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         </>}
       >
         <DetailBlock title="The legs"><LegList legs={p.legs} /></DetailBlock>
+        {filledN > 0 && (
+          <div data-lock-share="true" style={{ margin: "4px 0 10px" }}>
+            <ShareCardActions tab="combo" url="https://www.aibetbuilder.io" model={buildLockShareModel(p, lockProfile(p, filledN, { feeRate: feeOn ? COMBO_FEE_RATE : 0 }), { legName: (l) => plainLockLeg(l).text })} />
+          </div>
+        )}
         {singleLegOf(p) ? <DetailBlock title="Resting hedge"><SingleLegVenues parlayId={p.id} supabase={supabase} /></DetailBlock> : null}
         {out && out.kind !== "pending" && <div className="chips" style={{ marginBottom: 8 }}><OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} /></div>}
         <QuoteHistory history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={canSeeOwnerTools(user) ? watcherNote(p.id) : ""} />

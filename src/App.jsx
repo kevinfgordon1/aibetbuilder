@@ -13,6 +13,8 @@ import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, guestActionNeedsSignIn, promoControlSummary } from "./guestAccess.js";
 import { evEmptyState } from "./evEmptyState.js";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
+import PromoWizard from "./PromoWizard.jsx";
+import { diagnoseEmptyPromo, initialWizardOpen, markWizardDone } from "./onboarding.js";
 import SignInPanel from "./SignInOptions.jsx";
 import { authCallbackError, bootAppHash, restoreAuthReturnUrl } from "./signIn.js";
 import {
@@ -1692,6 +1694,13 @@ export default function App() {
   const [promoTeamInclude, setPromoTeamInclude] = useState("");
   const [promoTeamExclude, setPromoTeamExclude] = useState("");
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
+  // First-run guided setup (new visitors) — also opened by ?wizard=1 or the "Try it with your boost" button.
+  const [wizardOpen, setWizardOpen] = useState(() => (typeof window === "undefined" ? false : initialWizardOpen(window, parseAppHash)));
+  const [wizardApplied, setWizardApplied] = useState(false);
+  const closeWizard = () => {
+    setWizardOpen(false);
+    if (typeof window !== "undefined") markWizardDone(window);
+  };
   const [user, setUser] = useState(null);
   // Owner-only "Min depth per leg" ($ potential PROFIT at the best opposing prices, not stake). 0 = off.
   const [minLegDepthInput, setMinLegDepthInput] = useState("");
@@ -2361,9 +2370,21 @@ export default function App() {
     hiddenCount: excludedPromoLegs.size,
     hideLowLiquidity: dropThinPoolLegs,
   });
-  const promoEmptyWhyEl = promoEmptyWhy.length > 0 && (
+  const promoEmptyDiag = diagnoseEmptyPromo({ minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, includeTeam: promoTeamInclude, excludeTeam: promoTeamExclude, dateRange: promoDateRange, sportsCount: promoSports.size });
+  const resetPromoFilters = () => {
+    setMinFinalOdds(""); setMaxFinalOdds(""); setMinLegOdds(""); setMaxLegOdds("");
+    setPromoTeamInclude(""); setPromoTeamExclude("");
+    setPromoDateRange(DEFAULT_PROMO_DATE_RANGE);
+    if (promoSports.size === 0) setPromoSports(new Set(DEFAULT_PROMO_SPORT_KEYS));
+  };
+  const promoEmptyWhyEl = (promoEmptyWhy.length > 0 || promoEmptyDiag.length > 0) && (
     <div data-testid="promo-empty-why" style={{ fontSize: 13, color: "#d1d5db", marginTop: 10, maxWidth: 480, marginLeft: "auto", marginRight: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+      {promoEmptyDiag.length > 0 && <div style={{ fontWeight: 700, color: "#e8eaed" }}>Likely cause:</div>}
+      {promoEmptyDiag.map((d) => <div key={d.key} data-empty-cause={d.key}>{d.text}</div>)}
       {promoEmptyWhy.map((t) => <div key={t}>{t}</div>)}
+      {promoEmptyDiag.length > 0 && (
+        <div><button type="button" data-reset-filters="true" onClick={resetPromoFilters} style={{ marginTop: 6, background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", borderRadius: 8, color: "#60a5fa", padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Reset filters</button></div>
+      )}
     </div>
   );
 
@@ -3004,9 +3025,19 @@ export default function App() {
       )}
 
       <div className="app-tabs" style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <a href={tabHash("promo")} style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
-        <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
-        <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
+        <a href={tabHash("promo")} title="Start here: find the best bet for your boost or free bet" style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
+        {(canSeeComboLocks(user) || canSeeOwnerTools(user)) ? (
+          <>
+            <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
+            <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
+          </>
+        ) : (
+          <>
+            <a data-guard-allow="true" href={tabHash("odds")} title="Compare one game's prices across every book" style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
+            <a href={tabHash("ev")} title="Advanced: every bet priced better than our fair-odds estimate" style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>ADVANCED</span></a>
+            <a href="/learn" data-tab-learn="true" title="What EV, true odds, ML/SPR/TT and the other terms mean" style={tabStyle("__learn")}>Learn</a>
+          </>
+        )}
         {canSeeComboLocks(user) && (
           <a href={tabHash("combo")} style={tabStyle("combo")} onClick={onNavTabClick("combo")}>Combo Locks</a>
         )}
@@ -3298,6 +3329,30 @@ export default function App() {
 
           {activeTab === "promo" && (
             <div data-promo-type={promoType}>
+            {wizardOpen && (
+              <PromoWizard
+                books={ALL_BOOKS}
+                promoTypes={PROMO_TYPES}
+                initial={{ promoType, promoBook, boostPct, stake, numLegs }}
+                onSkip={closeWizard}
+                onApply={(v) => {
+                  setPromoType(v.promoType);
+                  setPromoBook(v.promoBook);
+                  if (Number.isFinite(v.boostPct)) setBoostPct(v.boostPct);
+                  if (Number.isFinite(v.stake) && v.stake > 0) setStake(v.stake);
+                  if (v.numLegs) setNumLegs(v.numLegs);
+                  setWizardApplied(true);
+                  closeWizard();
+                }}
+              />
+            )}
+            {!wizardOpen && !wizardApplied && !user && promoType === DEFAULT_PROMO_TYPE && promoBook === PROMO_DEFAULT_BOOK && boostPct === 30 && stake === 100 && (
+              <div data-example-banner="true" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+                <span style={{ fontSize: 13, color: "#fbbf24", fontWeight: 700 }}>Example results: 30% DraftKings profit boost, $100 stake.</span>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>EV = estimated average profit over many bets; any single bet can lose. <a href="/learn" style={{ color: "#60a5fa" }}>What do these mean?</a></span>
+                <button type="button" data-try-boost="true" onClick={() => setWizardOpen(true)} style={{ marginLeft: "auto", background: "linear-gradient(135deg,#10b981,#0ea5e9)", color: "#06110d", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>Try it with your boost →</button>
+              </div>
+            )}
               <button
                 type="button"
                 className="promo-controls-summary"
@@ -3464,7 +3519,7 @@ export default function App() {
                     }}
                   >
                     {!promoFiltersOpen && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>Filters</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>More options</span>
                     )}
                     <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
                     {!promoFiltersOpen && (
