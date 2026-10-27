@@ -67,7 +67,7 @@ function reasonColor(row) {
   if (bucket === "filled" || (row && row.skipFill === "filled")) return "#6ee7b7";
   if (bucket === "outbid") return "#fca5a5";
   if (bucket === "too_slow" || bucket === "oversized") return "#fcd34d";
-  if (bucket === "awaiting" || bucket === "open") return "#93c5fd";
+  if (bucket === "awaiting" || bucket === "open") return "#f5d76e";
   return "#9aa3b2";
 }
 
@@ -319,17 +319,17 @@ export default function ComboTape({ user }) {
         .cl .num{font-variant-numeric:tabular-nums}
         .cl .parlay{border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px;margin-bottom:10px;background:rgba(255,255,255,0.02)}
         .cl .chip{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:#c3c6cc}
-        .cl .chip.fill{background:rgba(59,130,246,.15);color:#93c5fd}
+        .cl .chip.fill{background:rgba(212,175,55,.15);color:#f5d76e}
         .cl .chip.warn{background:rgba(245,158,11,.15);color:#fcd34d}
         .cl .chip.ok{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.loss{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .chip.settle-win{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.settle-lose{background:rgba(248,113,113,.14);color:#fca5a5}
-        .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#93c5fd}
+        .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#f5d76e}
         .cl .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
         .cl .chip.btn{cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font:inherit;font-size:12px;font-weight:600}
-        .cl .chip.btn.on{background:rgba(59,130,246,.2);color:#93c5fd;border-color:rgba(59,130,246,.35)}
+        .cl .chip.btn.on{background:rgba(212,175,55,.2);color:#f5d76e;border-color:rgba(212,175,55,.35)}
         .cl .chip.btn.venue-kalshi.on{background:rgba(6,182,212,.2);color:#67e8f9;border-color:rgba(6,182,212,.35)}
         .cl .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
@@ -342,7 +342,7 @@ export default function ComboTape({ user }) {
         .cl .bar{height:7px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:6px}
         .cl .bar-fill{height:100%;background:#34d399;border-radius:999px}
         .cl .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:6px 10px;border-radius:8px;cursor:pointer}
-        .cl .btn.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+        .cl .btn.on{background:#d4af37;border-color:#d4af37;color:#fff}
         .cl .empty{color:#6b7280;font-size:14px;padding:8px 2px}
         .cl .muted{color:#6b7280}
         .cl .note{font-size:13px;padding:8px 10px;border-radius:8px;margin-top:8px}

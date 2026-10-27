@@ -457,7 +457,7 @@ function DeskChips({ desk, thin }) {
   if (!skip && !loss && !(desk.awaiting && !thin)) return null;
   return (
     <div className={"desk" + (thin ? " thin" : "")}>
-      {desk.awaiting && !thin && <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#93c5fd" }} title="An offer is out for this parlay, but no buyer has taken it yet.">Offer out · waiting for a buyer</span>}
+      {desk.awaiting && !thin && <span className="chip" style={{ background: "rgba(147,197,253,.18)", color: "#f5d76e" }} title="An offer is out for this parlay, but no buyer has taken it yet.">Offer out · waiting for a buyer</span>}
       {skip && <span className="chip skip num" title="Matched RFQ the worker did not quote. Oversized RFQs are skipped (Kalshi makers cannot partial-fill).">Last skip: {plainAttemptLabel(skip.text)}</span>}
       {loss && <span className="chip loss num" title="Last lost quote. Tape-matched no_purchase / outbid rows show the inferred clearing price.">Last miss: {plainAttemptLabel(loss.text)}</span>}
     </div>
@@ -1641,10 +1641,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         .cl .gcombo-list{position:absolute;z-index:50;left:0;right:0;top:calc(100% + 4px);max-height:300px;overflow-y:auto;margin:0;padding:4px;list-style:none;background:#12141a;border:1px solid rgba(255,255,255,0.16);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.5)}
         .cl .gcombo-list li{padding:7px 9px;border-radius:6px;cursor:pointer;color:#e8eaed;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cl .gcombo-list li.hi{background:rgba(255,255,255,0.08)}.cl .gcombo-list li.sel{color:#7cc4ff}.cl .gcombo-list li.gcombo-empty{color:#9aa0a6;cursor:default}
         .cl .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer}
-        .cl .btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}.cl .btn.mini{padding:6px 10px;font-size:13px}.cl .btn.danger{color:#f87171;border-color:rgba(248,113,113,.4)}
+        .cl .btn.primary{background:#d4af37;border-color:#d4af37;color:#fff}.cl .btn.mini{padding:6px 10px;font-size:13px}.cl .btn.danger{color:#f87171;border-color:rgba(248,113,113,.4)}
         .cl .num{font-variant-numeric:tabular-nums}
         .cl .parlay{border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px;margin-bottom:10px;background:rgba(255,255,255,0.02)}
-        .cl .chip{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:#c3c6cc}.cl .chip.fill{background:rgba(59,130,246,.15);color:#93c5fd}
+        .cl .chip{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:#c3c6cc}.cl .chip.fill{background:rgba(212,175,55,.15);color:#f5d76e}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px;font-variant-numeric:tabular-nums}
         .cl .merged-list{list-style:none;margin:6px 0 0;padding:0}
         .cl .merged-list li{font-size:13px;color:#c3c6cc;padding:2px 0}
@@ -1664,14 +1664,14 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         .cl td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.06);font-variant-numeric:tabular-nums}
         .cl .st{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
         .cl .st.shadow{background:rgba(255,255,255,.08);color:#9aa3b2}.cl .st.filled{background:rgba(16,185,129,.15);color:#6ee7b7}.cl .st.unfilled{background:rgba(245,158,11,.12);color:#fcd34d}.cl .st.declined{background:rgba(248,113,113,.12);color:#fca5a5}
-        .cl .st.real{background:rgba(139,92,246,.22);color:#c4b5fd}.cl .st.test{background:rgba(255,255,255,.06);color:#8a8f98}
+        .cl .st.real{background:rgba(184,147,42,.22);color:#f5d76e}.cl .st.test{background:rgba(255,255,255,.06);color:#8a8f98}
         .cl .switch{position:relative;width:46px;height:26px;border-radius:999px;background:#3a3d46;cursor:pointer;border:none}
         .cl .switch .knob{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
         .cl .switch.on{background:#ef4444}.cl .switch.on .knob{left:23px}
         .cl .switch:disabled{opacity:.45;cursor:wait}
         .cl .empty{color:#6b7280;font-size:14px;padding:8px 2px}
         .cl .empty.loading{display:flex;align-items:center;gap:8px}
-        .cl .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.15);border-top-color:#93c5fd;border-radius:50%;animation:cl-spin .7s linear infinite;flex:0 0 auto}
+        .cl .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.15);border-top-color:#f5d76e;border-radius:50%;animation:cl-spin .7s linear infinite;flex:0 0 auto}
         @keyframes cl-spin{to{transform:rotate(360deg)}}
         .cl .bar{height:7px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:2px}
         .cl .bar.thin{height:4px}
@@ -1684,14 +1684,14 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         .cl .chip.loss{background:rgba(248,113,113,.14);color:#fca5a5}
         .cl .chip.settle-win{background:rgba(16,185,129,.15);color:#6ee7b7}
         .cl .chip.settle-lose{background:rgba(248,113,113,.14);color:#fca5a5}
-        .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#93c5fd}
+        .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#f5d76e}
         .cl .chip.settle-push{background:rgba(251,191,36,.14);color:#fcd34d}
         .cl .chip.src{background:rgba(255,255,255,.05);color:#9aa3b2}
         .cl .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
         .cl .outcome-pair{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
         .cl .arch-head{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:0}
-        .cl .arch-caret{color:#93c5fd;font-size:14px;width:12px}
+        .cl .arch-caret{color:#f5d76e;font-size:14px;width:12px}
         .cl .arch-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:#8a8f98}
         .cl .hist-detail-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
         .cl .sb td{border-bottom:none}
@@ -1714,7 +1714,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         .cl .parlay.paused > *:not(.plhead){opacity:.45}
         .cl .parlay.paused .plhead > *:not(.pl-keep):not(.btn){opacity:.5}
         .cl .parlay.arch-open{border-color:rgba(147,197,253,.28)}
-        .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#93c5fd;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
+        .cl .info{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(147,197,253,.2);color:#f5d76e;font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,'Times New Roman',serif;cursor:pointer;position:relative;vertical-align:middle;user-select:none}
         .cl .info::after{content:attr(data-tip);position:absolute;bottom:150%;left:50%;transform:translateX(-50%);width:250px;background:#0c1016;color:#d7dbe2;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:9px 11px;font-size:12px;font-weight:400;font-style:normal;line-height:1.45;text-align:left;white-space:normal;opacity:0;pointer-events:none;transition:opacity .12s;z-index:30;box-shadow:0 6px 20px rgba(0,0,0,.4)}
         .cl .info::before{content:"";position:absolute;bottom:150%;left:50%;transform:translate(-50%,90%);border:6px solid transparent;border-top-color:#0c1016;opacity:0;transition:opacity .12s;z-index:31}
         .cl .info:hover::after,.cl .info:focus::after,.cl .info:hover::before,.cl .info:focus::before{opacity:1}
@@ -2011,7 +2011,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             ) : (
               <div className="tbl-wrap"><table><thead><tr><th>When (ET)</th><th>Lock</th><th>You offered</th><th>Outcome</th><th>Why (if missed)</th><th>Speed vs window</th><th>Confirmed fill</th></tr></thead>
                 <tbody>{outcomes.map((o) => {
-                  const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "filled"], accepted: ["rgba(147,197,253,.18)", "#93c5fd", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "missed"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "waiting"] };
+                  const map = { executed: ["rgba(16,185,129,.15)", "#6ee7b7", "filled"], accepted: ["rgba(147,197,253,.18)", "#f5d76e", "accepted"], lost: ["rgba(248,113,113,.14)", "#fca5a5", "missed"], posted: ["rgba(255,255,255,.06)", "#9aa3b2", "waiting"] };
                   const [bg, col, lbl] = map[o.outcome] || map.posted;
                   const whyMap = { outbid: "outbid: a better price won", too_slow: "too slow: window closed first", no_taker: "buyer took no one", no_purchase: "request closed with no fill", unknown: "unknown" };
                   const why = o.outcome === "lost" ? plainAttemptLabel(formatLoss(o) || (o.loss_reason ? (whyMap[o.loss_reason] || o.loss_reason) : "checking…")) : "—";

@@ -10,7 +10,7 @@ import {
 } from "./appAlerts.js";
 
 const SEV = {
-  info: { bar: "#3b82f6", bg: "rgba(59,130,246,0.10)", dot: "#60a5fa" },
+  info: { bar: "#d4af37", bg: "rgba(212,175,55,0.10)", dot: "#e6c65c" },
   warn: { bar: "#f59e0b", bg: "rgba(245,158,11,0.10)", dot: "#fbbf24" },
   error: { bar: "#ef4444", bg: "rgba(239,68,68,0.12)", dot: "#f87171" },
 };

@@ -12,6 +12,7 @@ export default function SiteFooterLinks({ align = "center" }) {
         ))}
       </nav>
       <div data-footer-disclaimer="true" style={{ color: "#9ca3af", textAlign: "center" }}>{FOOTER_DISCLAIMER}</div>
+      <div style={{ color: "#6b7280" }}>© Kaygosports, LLC</div>
       <div style={{ color: "#9ca3af" }}>
         21+ only. Gambling problem? Call <a href={GAMBLER_TEL} style={{ color: "#d1d5db", fontWeight: 700, textDecoration: "none" }}>1-800-GAMBLER</a>.
       </div>

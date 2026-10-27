@@ -85,3 +85,11 @@ export function initialWizardOpen(win, parseHash) {
 export function markWizardDone(win) {
   try { win.localStorage.setItem(WIZARD_DONE_KEY, "1"); } catch { /* ignore */ }
 }
+
+export const TIP_TEXT = Object.freeze({
+  ev: "Expected value: what this bet averages over many tries. Any single bet can still lose.",
+  trueOdds: "Our fair-price estimate with the sportsbook's margin removed, from sharper books and exchanges.",
+  markets: "ML = moneyline (who wins). SPR = spread (win by more than a number). TT = team total (one team's points, over/under).",
+  liquidity: "How much money an exchange will take at that price. Hiding low liquidity drops bets you can only place small.",
+  depth: "How big a bet the market can take at this price, shown as potential profit.",
+});

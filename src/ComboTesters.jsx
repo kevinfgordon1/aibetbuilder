@@ -33,7 +33,7 @@ const TESTERS_CSS = `
 .cl .tst .tst-howto{margin:10px 0;padding:10px 12px;border:1px solid rgba(147,197,253,.25);border-radius:10px;background:rgba(147,197,253,.05)}
 .cl .tst .tst-howto summary{cursor:pointer;font-weight:700;font-size:13.5px;color:#dbeafe}
 .cl .tst .tst-howto ol{margin:8px 0 6px;padding-left:22px;display:grid;gap:6px;font-size:13px;line-height:1.45;color:#d1d5db}
-.cl .tst .tst-howto li::marker{color:#93c5fd;font-weight:700}
+.cl .tst .tst-howto li::marker{color:#f5d76e;font-weight:700}
 .cl .tst .tst-safe{font-size:12.5px;color:#34d399;margin-top:4px}
 .cl .tst .tst-cap{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:8px;font-size:12.5px;color:#b6bac2}
 .cl .tst .tst-cap .tst-cap-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}

@@ -771,8 +771,8 @@ function fitFont(ctx, text, maxWidth, fontFn, weight, size, minSize) {
 
 function drawLogo(ctx, x, y, size) {
   const g = ctx.createLinearGradient(x, y, x + size, y + size);
-  g.addColorStop(0, "#3b82f6");
-  g.addColorStop(1, "#8b5cf6");
+  g.addColorStop(0, "#d4af37");
+  g.addColorStop(1, "#b8932a");
   fillRound(ctx, x, y, size, size, size * 0.24, g);
   ctx.fillStyle = "#ffffff";
   ctx.font = sans("800", Math.round(size * 0.6));
@@ -805,7 +805,7 @@ export function paintShareCard(ctx, model, w, h) {
   const bad = "#f87171";
 
   // Background: site dark + soft blue/purple glow.
-  ctx.fillStyle = "#0a0b0f";
+  ctx.fillStyle = "#0b0b0c";
   ctx.fillRect(0, 0, W, H);
   const wash = ctx.createLinearGradient(0, 0, W, H);
   wash.addColorStop(0, "rgba(212,175,55,0.16)");
@@ -890,9 +890,9 @@ export function paintShareCard(ctx, model, w, h) {
       ctx.textAlign = "left";
     };
     step(L.step1, {
-      bg: "rgba(139,92,246,0.10)",
-      border: "rgba(139,92,246,0.40)",
-      labelColor: "#c4b5fd",
+      bg: "rgba(184,147,42,0.10)",
+      border: "rgba(184,147,42,0.40)",
+      labelColor: "#f5d76e",
       label: "STEP 1 · USE YOUR " + (stake != null ? "$" + Math.round(stake) + " " : "") + "FREE BET AT " + String(m.bookLabel || "YOUR BOOK").toUpperCase(),
       title: leg.name,
       sub1: [leg.market, leg.game].filter(Boolean).join(" · "),
@@ -959,7 +959,7 @@ export function paintShareCard(ctx, model, w, h) {
       const my = L.list + legs.length * row.h;
       ctx.fillStyle = "rgba(255,255,255,0.07)";
       ctx.fillRect(PAD + 24, my, inner - 48, 1);
-      ctx.fillStyle = "#93c5fd";
+      ctx.fillStyle = "#f5d76e";
       ctx.font = sans("700", 22);
       ctx.textBaseline = "middle";
       ctx.fillText("+" + layout.more + " more " + (layout.more === 1 ? "leg" : "legs") + " on aibetbuilder.io", PAD + 28, my + 33);

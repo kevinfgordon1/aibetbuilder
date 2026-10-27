@@ -129,9 +129,6 @@ export default function MarketingLanding() {
           {ABOUT_PHOTO_URL && <img data-about-photo="true" src={ABOUT_PHOTO_URL} alt="Kevin Gordon" style={{ width: 160, height: 160, objectFit: "cover", borderRadius: 8, border: "1px solid " + GOLD }} />}
           <div style={{ flex: 1, minWidth: 280, maxWidth: 680 }}>
             <h2 style={{ ...S.h2, marginBottom: 14 }}>Built by Kevin Gordon, a bettor in New Jersey.</h2>
-            <p data-about-story="true" style={{ fontSize: 16, color: "#bdb6a4", lineHeight: 1.7, margin: "0 0 12px" }}>
-              [Story placeholder — Kevin will write why he built this and how he uses it.]
-            </p>
             <p style={{ fontSize: 14, color: "#8a8473", margin: 0 }}>aibetbuilder is operated by Kaygosports, LLC.</p>
           </div>
         </div>

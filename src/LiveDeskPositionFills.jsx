@@ -20,7 +20,7 @@ function Tag({ children, tone }) {
   const tones = {
     green: ["rgba(16,185,129,0.12)", "rgba(16,185,129,0.4)", "#6ee7b7"],
     gray: ["rgba(255,255,255,0.04)", "rgba(255,255,255,0.12)", "#9ca3af"],
-    blue: ["rgba(59,130,246,0.12)", "rgba(59,130,246,0.35)", "#93c5fd"],
+    blue: ["rgba(212,175,55,0.12)", "rgba(212,175,55,0.35)", "#f5d76e"],
   };
   const [bg, bd, fg] = tones[tone] || tones.gray;
   return <span style={{ display: "inline-block", marginLeft: 4, padding: "0 5px", borderRadius: 999, fontSize: 10, fontWeight: 800, background: bg, border: "1px solid " + bd, color: fg, whiteSpace: "nowrap" }}>{children}</span>;
@@ -54,7 +54,7 @@ export default function LiveDeskPositionFills({ row, panelId, loadFills, refresh
       {state.error && (
         <div style={{ fontSize: 12, color: "#fcd34d" }}>
           {state.error}{" "}
-          <button type="button" onClick={() => setNonce((n) => n + 1)} style={{ background: "none", border: "none", color: "#93c5fd", cursor: "pointer", fontSize: 12, padding: 0, textDecoration: "underline" }}>Retry</button>
+          <button type="button" onClick={() => setNonce((n) => n + 1)} style={{ background: "none", border: "none", color: "#f5d76e", cursor: "pointer", fontSize: 12, padding: 0, textDecoration: "underline" }}>Retry</button>
         </div>
       )}
       {rec && (

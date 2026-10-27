@@ -32,7 +32,7 @@ export default function EvBars({ hist, ev, pProfit, worst, nowEv = null }) {
           <div className="sub" style={{ marginTop: 4 }}>Wide = how often. Tall = how much. Green area ({money(s.winArea)}) minus red area ({money(s.lossArea).replace("−", "")}) = your expected profit <b style={{ color: "#fbbf24" }}>{money(Number(ev))}</b>.</div>
         </div>
       </div>
-      <div style={{ fontSize: 15, color: "#e5e7eb", marginTop: 6 }}>{curveCaption(s.pLoss, Number(ev))}{nowEv != null && Number.isFinite(Number(nowEv)) ? <span data-testid="evbars-now" style={{ fontSize: 12, color: "#93c5fd", marginLeft: 8 }}>Now (live prices) {money(Number(nowEv))}</span> : null}</div>
+      <div style={{ fontSize: 15, color: "#e5e7eb", marginTop: 6 }}>{curveCaption(s.pLoss, Number(ev))}{nowEv != null && Number.isFinite(Number(nowEv)) ? <span data-testid="evbars-now" style={{ fontSize: 12, color: "#f5d76e", marginLeft: 8 }}>Now (live prices) {money(Number(nowEv))}</span> : null}</div>
     </div>
   );
 }

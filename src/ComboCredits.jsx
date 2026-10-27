@@ -20,16 +20,16 @@ const CREDITS_CSS = `
 .cl .crd p{margin:6px 0;color:#b6bac2;font-size:13px;line-height:1.45}
 .cl .crd .crd-presets{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .cl .crd .crd-preset{min-width:64px;padding:8px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.03);color:#e8eaed;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
-.cl .crd .crd-preset.on{border-color:#60a5fa;background:rgba(59,130,246,.18);color:#dbeafe}
+.cl .crd .crd-preset.on{border-color:#e6c65c;background:rgba(212,175,55,.18);color:#dbeafe}
 .cl .crd .crd-preset:disabled{opacity:.5;cursor:not-allowed}
-.cl .crd .crd-go{padding:9px 14px;border-radius:10px;border:0;background:#2563eb;color:#fff;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
+.cl .crd .crd-go{padding:9px 14px;border-radius:10px;border:0;background:#b8932a;color:#fff;font:inherit;font-weight:700;font-size:14px;cursor:pointer}
 .cl .crd .crd-actions{display:flex;gap:8px;flex-wrap:wrap}
 .cl .crd .crd-go.alt{background:#0f766e}
 .cl .crd .crd-go:disabled{background:#3a3d46;color:#9aa3b2;cursor:not-allowed}
 .cl .crd .crd-note{font-size:12.5px;color:#fcd34d;margin-top:6px}
 .cl .crd .crd-note.ok{color:#6ee7b7}
 .cl .crd .crd-hist{margin-top:10px;font-size:12.5px}
-.cl .crd .crd-hist summary{cursor:pointer;color:#93c5fd;font-weight:600}
+.cl .crd .crd-hist summary{cursor:pointer;color:#f5d76e;font-weight:600}
 .cl .crd .crd-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)}
 .cl .crd .crd-row .pos{color:#6ee7b7}.cl .crd .crd-row .neg{color:#fca5a5}
 .cl .crd .crd-allow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
@@ -38,7 +38,7 @@ const CREDITS_CSS = `
 .cl .crd .crd-box .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
 .cl .crd .crd-box .s{font-size:12px;color:#9aa3b2}
 .cl .crd .crd-meter{height:6px;border-radius:4px;background:rgba(255,255,255,0.08);overflow:hidden;margin-top:6px}
-.cl .crd .crd-meter>i{display:block;height:100%;background:#60a5fa}
+.cl .crd .crd-meter>i{display:block;height:100%;background:#e6c65c}
 .cl .crd .crd-gate{border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.08);color:#fde68a;border-radius:10px;padding:8px 10px;font-size:13px;margin:8px 0}
 @media (max-width:600px){.cl .crd .crd-allow{grid-template-columns:1fr}}
 @media (max-width:600px){.cl .crd .crd-preset{flex:1 1 calc(50% - 8px)}.cl .crd .crd-go{width:100%}}

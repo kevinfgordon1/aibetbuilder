@@ -77,7 +77,7 @@ const label = {
 const field = {
   width: "100%",
   boxSizing: "border-box",
-  background: "#0a0b0f",
+  background: "#0b0b0c",
   border: "1px solid rgba(255,255,255,0.12)",
   borderRadius: 8,
   color: "#f8fafc",
@@ -120,7 +120,7 @@ class DeskErrorBoundary extends React.Component {
         <button
           type="button"
           onClick={() => this.setState({ error: null })}
-          style={{ marginTop: 12, background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          style={{ marginTop: 12, background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 8, color: "#f5d76e", padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
         >Try again</button>
       </div>
     );
@@ -134,8 +134,8 @@ function Chip({ on, children, onClick, disabled }) {
       disabled={disabled}
       onClick={onClick}
       style={{
-        background: on ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.04)",
-        border: on ? "1px solid rgba(59,130,246,0.55)" : "1px solid rgba(255,255,255,0.1)",
+        background: on ? "rgba(212,175,55,0.18)" : "rgba(255,255,255,0.04)",
+        border: on ? "1px solid rgba(212,175,55,0.55)" : "1px solid rgba(255,255,255,0.1)",
         color: on ? "#e0f2fe" : "#d1d5db",
         borderRadius: 8,
         padding: "8px 12px",
@@ -701,7 +701,7 @@ function LiveTradingDeskView({ user }) {
         <button
           type="button"
           onClick={() => load(slug, { silent: !!board })}
-          style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 8, color: "#93c5fd", padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          style={{ background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 8, color: "#f5d76e", padding: "8px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
         >Refresh</button>
       </div>
 
@@ -737,8 +737,8 @@ function LiveTradingDeskView({ user }) {
                   onClick={() => selectPosition(row)}
                   style={{ display: "block", width: "100%",
                     textAlign: "left",
-                    background: on ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.03)",
-                    border: on ? "1px solid rgba(59,130,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
+                    background: on ? "rgba(212,175,55,0.12)" : "rgba(255,255,255,0.03)",
+                    border: on ? "1px solid rgba(212,175,55,0.45)" : "1px solid rgba(255,255,255,0.08)",
                     borderRadius: 10,
                     padding: "10px 12px",
                     color: "#e8eaed",
@@ -767,7 +767,7 @@ function LiveTradingDeskView({ user }) {
                     aria-expanded={expanded}
                     aria-controls={panelId}
                     onClick={() => setOpenFills((m) => ({ ...m, [rowKey]: !m[rowKey] }))}
-                    style={{ marginTop: 4, background: "none", border: "none", color: "#93c5fd", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}
+                    style={{ marginTop: 4, background: "none", border: "none", color: "#f5d76e", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "2px 0" }}
                   >{expanded ? "▾ Hide fills" : "▸ Show fills"}</button>
                 ) : null}
                 {expanded ? <LiveDeskPositionFills row={row} panelId={panelId} loadFills={loadPositionFills} /> : null}
@@ -918,7 +918,7 @@ function LiveTradingDeskView({ user }) {
               </details>
             )}
 
-            <div style={{ marginTop: 14, padding: "12px 12px", borderRadius: 10, background: "#0a0b0f", border: "1px solid rgba(255,255,255,0.08)", minHeight: 64 }}>
+            <div style={{ marginTop: 14, padding: "12px 12px", borderRadius: 10, background: "#0b0b0c", border: "1px solid rgba(255,255,255,0.08)", minHeight: 64 }}>
               {!market && <div style={{ color: "#9ca3af", fontSize: 13 }}>Pick an NFL game. The rest uses that game’s moneyline.</div>}
               {market && !String(american).trim() && (
                 <div style={{ color: "#9ca3af", fontSize: 13 }}>Type American odds. The desk snaps to the Polymarket tick in your favor and shows that price before you rest it.</div>
@@ -941,7 +941,7 @@ function LiveTradingDeskView({ user }) {
                     <div style={{ fontSize: 12, color: "#fcd34d", marginTop: 6 }}>{protectOverCapNote(MAX_SIZE_DOLLARS)}</div>
                   )}
                   {protect && protectReady && !protectOverCap && (
-                    <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 6 }}>
+                    <div style={{ fontSize: 12, color: "#f5d76e", marginTop: 6 }}>
                       Bet Protect armed. Cancel if this rest is more than {protectXParsed.cents}¢ through the new mid, then re-rest {protectYParsed.cents}¢ better (buy lower / sell higher) and snap the tick in your favor. Shown as American odds.
                     </div>
                   )}
@@ -971,7 +971,7 @@ function LiveTradingDeskView({ user }) {
               style={{
                 marginTop: 14,
                 width: "100%",
-                background: canSubmit ? "#2563eb" : "rgba(255,255,255,0.06)",
+                background: canSubmit ? "#b8932a" : "rgba(255,255,255,0.06)",
                 color: canSubmit ? "#fff" : "#6b7280",
                 border: "none",
                 borderRadius: 10,
@@ -1017,7 +1017,7 @@ function LiveTradingDeskView({ user }) {
                     return <div className="desk-order-tags" style={{ fontSize: 12, color, marginTop: 4, fontWeight: 700 }}>{orderTagLine(tags, order.action)}</div>;
                   })()}
                   {order.protect && order.protect.on && (
-                    <div style={{ fontSize: 11, color: "#93c5fd", marginTop: 4 }}>
+                    <div style={{ fontSize: 11, color: "#f5d76e", marginTop: 4 }}>
                       Bet Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
                       {order.protect.count > 0 ? " · improved " + order.protect.count + "×" : ""}
                       {order.protect.status === "pending_rereset" ? " · re-rest retrying" : ""}
