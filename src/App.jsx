@@ -1846,6 +1846,12 @@ export default function App() {
     return () => { cancelled = true; };
   }, [user && user.id]);
 
+  // Native app only (Capacitor): register for push alerts once signed in. No-op on the web.
+  useEffect(() => {
+    if (!user || !user.id || typeof window === "undefined" || !window.Capacitor) return;
+    import("./native/push.js").then((m) => m.registerPushForUser(supabase, user)).catch(() => {});
+  }, [user && user.id]);
+
   useEffect(() => {
     if (authLoading) return;
     const applyHash = () => {

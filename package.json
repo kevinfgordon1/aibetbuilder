@@ -9,16 +9,27 @@
     "preview": "vite preview",
     "ev-alerts": "node worker/ev-parlay-alerts.js",
     "test": "node scripts/run-tests.cjs",
-    "build:player-td-cjs": "node scripts/build-player-td-cjs.js"
+    "build:player-td-cjs": "node scripts/build-player-td-cjs.js",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:assets": "npx capacitor-assets generate --iconBackgroundColor '#0b0b0c' --splashBackgroundColor '#0b0b0c' --splashBackgroundColorDark '#0b0b0c'",
+    "cap:ios": "npm run cap:sync && npx cap open ios",
+    "cap:android": "npm run cap:sync && npx cap open android"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/push-notifications": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/assets": "^3.0.5"
   }
 }
