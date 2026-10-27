@@ -13,6 +13,9 @@ import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, guestActionNeedsSignIn, promoControlSummary } from "./guestAccess.js";
 import { evEmptyState } from "./evEmptyState.js";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
+import PromoWizard from "./PromoWizard.jsx";
+import InfoTip from "./InfoTip.jsx";
+import { diagnoseEmptyPromo, initialWizardOpen, markWizardDone } from "./onboarding.js";
 import SignInPanel from "./SignInOptions.jsx";
 import { authCallbackError, bootAppHash, restoreAuthReturnUrl } from "./signIn.js";
 import {
@@ -193,8 +196,8 @@ const ALL_BOOKS = [
   { key: "betonlineag", label: "BetOnline", color: "#10b981", bg: "rgba(16,185,129,0.15)", logo: null },
   { key: "bookmaker", label: "Bookmaker", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
   { key: "pinnacle", label: "Pinnacle", color: "#c9a227", bg: "rgba(201,162,39,0.15)", logo: "https://www.pinnacle.com/favicon.ico" },
-  { key: "lowvig", label: "LowVig", color: "#8b5cf6", bg: "rgba(139,92,246,0.15)", logo: null },
-  { key: "betus", label: "BetUS", color: "#3b82f6", bg: "rgba(59,130,246,0.15)", logo: null },
+  { key: "lowvig", label: "LowVig", color: "#b8932a", bg: "rgba(184,147,42,0.15)", logo: null },
+  { key: "betus", label: "BetUS", color: "#d4af37", bg: "rgba(212,175,55,0.15)", logo: null },
   { key: "betanysports", label: "BetAnything", color: "#14b8a6", bg: "rgba(20,184,166,0.15)", logo: null },
   { key: "kalshi", label: "Kalshi", color: "#06b6d4", bg: "rgba(6,182,212,0.15)", logo: "https://kalshi.com/favicon.ico", exchange: true },
   { key: "novig", label: "Novig", color: "#a855f7", bg: "rgba(168,85,247,0.15)", logo: null, exchange: true },
@@ -394,9 +397,9 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
           type="button"
           aria-expanded={open}
           onClick={e => { e.stopPropagation(); toggle(); }}
-          style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.45)", cursor: "pointer", transition: "all 0.15s" }}
-          onMouseEnter={e => { e.currentTarget.style.background = "rgba(139,92,246,0.3)"; e.currentTarget.style.color = "#c4b5fd"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = open ? "rgba(139,92,246,0.22)" : "rgba(139,92,246,0.14)"; e.currentTarget.style.color = "#a78bfa"; }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, fontFamily: "'DM Sans', sans-serif", background: open ? "rgba(184,147,42,0.22)" : "rgba(184,147,42,0.14)", color: "#e6c65c", border: "1px solid rgba(184,147,42,0.45)", cursor: "pointer", transition: "all 0.15s" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(184,147,42,0.3)"; e.currentTarget.style.color = "#f5d76e"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = open ? "rgba(184,147,42,0.22)" : "rgba(184,147,42,0.14)"; e.currentTarget.style.color = "#e6c65c"; }}
         >
           <span>🔒</span>
           <span>
@@ -409,7 +412,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
       </div>
 
       {open && (
-        <div style={{ marginTop: 12, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 10, padding: "16px" }}
+        <div style={{ marginTop: 12, background: "rgba(184,147,42,0.04)", border: "1px solid rgba(184,147,42,0.2)", borderRadius: 10, padding: "16px" }}
           onClick={e => e.stopPropagation()}>
           <div style={{ fontSize: 12.5, color: "#9ca3af", marginBottom: 14 }}>
             Place both bets now. Whatever happens in the game, you keep <strong style={{ color: "#10b981" }}>{explainer.lockedText}</strong>.
@@ -417,14 +420,14 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
 
           <div style={{ marginBottom: 12 }}>
             <div style={stepLabel}>{step1Label}</div>
-            <div style={{ ...cardRow, background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)" }}>
+            <div style={{ ...cardRow, background: "rgba(184,147,42,0.06)", border: "1px solid rgba(184,147,42,0.2)" }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</div>
                 <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{joinPromoLegSubtitle(leg, [promoOddsText, formatET(leg.commence_time)])}<DaysAwayWarning commence_time={leg.commence_time} /></div>
                 <UnderdogStaleOddsChip leg={leg} />
               </div>
               <div style={{ textAlign: "right", flex: "0 0 auto" }}>
-                <div style={{ ...mono, fontWeight: 700, color: "#a78bfa", fontSize: 16 }}>{usd(stakeN)}</div>
+                <div style={{ ...mono, fontWeight: 700, color: "#e6c65c", fontSize: 16 }}>{usd(stakeN)}</div>
                 <div style={{ fontSize: 11, color: "#9ca3af" }}>{isFreeBet ? "free bet" : "cash stake"}</div>
                 {isFinite(promoPays) && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{isFreeBet ? "wins" : "pays"} <span style={{ ...mono, color: "#e8eaed" }}>{usd(promoPays)}</span></div>}
               </div>
@@ -467,8 +470,8 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
             ))}
           </div>
 
-          <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(139,92,246,0.06)", borderRadius: 8, border: "1px solid rgba(139,92,246,0.15)", lineHeight: 1.6 }}>
-            <strong style={{ color: "#a78bfa" }}>Bottom line:</strong>{" "}
+          <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(184,147,42,0.06)", borderRadius: 8, border: "1px solid rgba(184,147,42,0.15)", lineHeight: 1.6 }}>
+            <strong style={{ color: "#e6c65c" }}>Bottom line:</strong>{" "}
             {isFreeBet ? (
               <>Place a ${stakeN} free bet on <strong style={{ color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</strong> and {usd(hedgeStake)} cash on <strong style={{ color: "#e8eaed" }}>{leg.bestOppName}</strong>. You walk away with <strong style={{ color: "#10b981" }}>{usd(locked)}</strong> guaranteed — that's a {((lock.conversionRate ?? 0) * 100).toFixed(1)}% conversion of the free bet's face value into real cash.</>
             ) : isNoSweat ? (
@@ -999,7 +1002,7 @@ function EVBadge({ ev }) {
 
 function SportBadge({ sport }) {
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { baseball_mlb: "#3b82f6", americanfootball_nfl: "#8b5cf6", americanfootball_ncaaf: "#a78bfa", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16" };
+  const colors = { baseball_mlb: "#d4af37", americanfootball_nfl: "#b8932a", americanfootball_ncaaf: "#e6c65c", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
       {s?.label || sport}
@@ -1047,8 +1050,8 @@ function LandingFull({ onBack }) {
   return (
     <div className="lf-root">
       <style>{`
-        .lf-root { font-family: 'DM Sans', sans-serif; background: #0a0b0f; color: #e8eaed; overflow-x: hidden; min-height: 100vh; }
-        .lf-bar { position: relative; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 11px 46px; font-size: 13px; color: #dbeafe; text-align: center; background: linear-gradient(90deg, rgba(59,130,246,0.22), rgba(139,92,246,0.22)); border-bottom: 1px solid rgba(99,102,241,0.35); }
+        .lf-root { font-family: 'DM Sans', sans-serif; background: #0b0b0c; color: #e8eaed; overflow-x: hidden; min-height: 100vh; }
+        .lf-bar { position: relative; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 11px 46px; font-size: 13px; color: #dbeafe; text-align: center; background: linear-gradient(90deg, rgba(212,175,55,0.22), rgba(184,147,42,0.22)); border-bottom: 1px solid rgba(201,162,39,0.35); }
         .lf-bar strong { color: #fff; font-weight: 700; }
         .lf-bar-cta { background: #fff; color: #1f2937; border: none; border-radius: 7px; padding: 5px 13px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
         .lf-bar-x { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #a5b4fc; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px; }
@@ -1056,23 +1059,23 @@ function LandingFull({ onBack }) {
         .lf-root section { position: relative; z-index: 1; }
         .lf-nav { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 16px 40px; background: rgba(10,11,15,0.7); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); }
         .lf-brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
-        .lf-logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg,#3b82f6,#8b5cf6); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 800; }
+        .lf-logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg,#d4af37,#b8932a); display: flex; align-items: center; justify-content: center; font-size: 19px; font-weight: 800; }
         .lf-bn { font-size: 17px; font-weight: 700; letter-spacing: -0.4px; }
         .lf-navcta { background: #fff; color: #111; border: none; border-radius: 9px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
         .lf-hero { text-align: center; padding: 84px 24px 60px; }
-        .lf-hero::before { content: ""; position: absolute; top: -10%; left: 50%; transform: translateX(-50%); width: 900px; height: 600px; background: radial-gradient(closest-side, rgba(59,130,246,0.18), rgba(139,92,246,0.10) 45%, transparent 70%); filter: blur(20px); z-index: -1; }
-        .lf-eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #a5b4fc; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); border-radius: 999px; padding: 6px 14px; margin-bottom: 24px; }
+        .lf-hero::before { content: ""; position: absolute; top: -10%; left: 50%; transform: translateX(-50%); width: 900px; height: 600px; background: radial-gradient(closest-side, rgba(212,175,55,0.18), rgba(184,147,42,0.10) 45%, transparent 70%); filter: blur(20px); z-index: -1; }
+        .lf-eyebrow { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: #a5b4fc; background: rgba(201,162,39,0.12); border: 1px solid rgba(201,162,39,0.25); border-radius: 999px; padding: 6px 14px; margin-bottom: 24px; }
         .lf-dot { width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981; }
         .lf-root h1 { font-size: 60px; line-height: 1.03; font-weight: 800; letter-spacing: -1.9px; }
-        .lf-grad { background: linear-gradient(135deg,#60a5fa,#a78bfa); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .lf-grad { background: linear-gradient(135deg,#e6c65c,#e6c65c); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
         .lf-sub { font-size: 19px; line-height: 1.55; color: #9ca3af; max-width: 660px; margin: 22px auto 34px; }
         .lf-ctarow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center; }
-        .lf-google { background: #fff; color: #1f2937; border: none; border-radius: 12px; padding: 15px 28px; font-size: 15px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 11px; font-family: inherit; box-shadow: 0 10px 40px rgba(59,130,246,0.15); }
+        .lf-google { background: #fff; color: #1f2937; border: none; border-radius: 12px; padding: 15px 28px; font-size: 15px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 11px; font-family: inherit; box-shadow: 0 10px 40px rgba(212,175,55,0.15); }
         .lf-trust { font-size: 13px; color: #6b7280; }
         .lf-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 1px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; overflow: hidden; margin: 44px auto 0; max-width: 900px; }
         .lf-stat { background: #0c0d12; padding: 22px 16px; text-align: center; }
         .lf-stat .n { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
-        .lf-stat .n.g { color: #10b981; } .lf-stat .n.b { color: #60a5fa; } .lf-stat .n.p { color: #a78bfa; }
+        .lf-stat .n.g { color: #10b981; } .lf-stat .n.b { color: #e6c65c; } .lf-stat .n.p { color: #e6c65c; }
         .lf-stat .l { font-size: 12px; color: #6b7280; margin-top: 4px; }
         .lf-sec { padding: 76px 0; }
         .lf-sechead { text-align: center; margin-bottom: 48px; }
@@ -1081,15 +1084,15 @@ function LandingFull({ onBack }) {
         .lf-sechead p { font-size: 16px; color: #9ca3af; margin-top: 12px; max-width: 560px; margin-left: auto; margin-right: auto; }
         .lf-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 18px; }
         .lf-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; }
-        .lf-card .ic { width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 21px; margin-bottom: 16px; background: rgba(59,130,246,0.12); }
+        .lf-card .ic { width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 21px; margin-bottom: 16px; background: rgba(212,175,55,0.12); }
         .lf-card h3 { font-size: 19px; font-weight: 700; margin-bottom: 9px; }
         .lf-card p { font-size: 14px; color: #8a8f98; line-height: 1.6; }
         .lf-green { background: rgba(16,185,129,0.12) !important; }
-        .lf-purple { background: rgba(139,92,246,0.14) !important; }
+        .lf-purple { background: rgba(184,147,42,0.14) !important; }
         .lf-amber { background: rgba(245,158,11,0.14) !important; }
         .lf-steps { display: grid; grid-template-columns: repeat(3,1fr); gap: 20px; }
         .lf-step { text-align: center; padding: 8px; }
-        .lf-step .num { width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; background: linear-gradient(135deg,#3b82f6,#8b5cf6); }
+        .lf-step .num { width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 16px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; background: linear-gradient(135deg,#d4af37,#b8932a); }
         .lf-step h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
         .lf-step p { font-size: 14px; color: #8a8f98; line-height: 1.55; }
         .lf-faq { max-width: 760px; margin: 0 auto; }
@@ -1097,7 +1100,7 @@ function LandingFull({ onBack }) {
         .lf-qa h4 { font-size: 15px; font-weight: 700; margin-bottom: 7px; }
         .lf-qa p { font-size: 14px; color: #8a8f98; line-height: 1.55; }
         .lf-closing { text-align: center; padding: 80px 24px; }
-        .lf-closingbox { max-width: 720px; margin: 0 auto; background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(139,92,246,0.10)); border: 1px solid rgba(99,102,241,0.25); border-radius: 24px; padding: 56px 40px; }
+        .lf-closingbox { max-width: 720px; margin: 0 auto; background: linear-gradient(135deg, rgba(212,175,55,0.12), rgba(184,147,42,0.10)); border: 1px solid rgba(201,162,39,0.25); border-radius: 24px; padding: 56px 40px; }
         .lf-closing h2 { font-size: 36px; font-weight: 800; letter-spacing: -0.8px; margin-bottom: 14px; }
         .lf-closing p { font-size: 16px; color: #9ca3af; margin-bottom: 30px; }
         .lf-footer { border-top: 1px solid rgba(255,255,255,0.06); padding: 28px 40px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
@@ -1321,7 +1324,7 @@ function PromoParlayLegChips({ legs, isExpanded, onExclude }) {
           );
         })}
         {!isExpanded && legs.length > 3 && (
-          <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: "#93c5fd" }}>
+          <div style={{ background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.2)", borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 700, color: "#f5d76e" }}>
             +{legs.length - 3} more
           </div>
         )}
@@ -1692,6 +1695,13 @@ export default function App() {
   const [promoTeamInclude, setPromoTeamInclude] = useState("");
   const [promoTeamExclude, setPromoTeamExclude] = useState("");
   const [promoFiltersOpen, setPromoFiltersOpen] = useState(false);
+  // First-run guided setup (new visitors) — also opened by ?wizard=1 or the "Try it with your boost" button.
+  const [wizardOpen, setWizardOpen] = useState(() => (typeof window === "undefined" ? false : initialWizardOpen(window, parseAppHash)));
+  const [wizardApplied, setWizardApplied] = useState(false);
+  const closeWizard = () => {
+    setWizardOpen(false);
+    if (typeof window !== "undefined") markWizardDone(window);
+  };
   const [user, setUser] = useState(null);
   // Owner-only "Min depth per leg" ($ potential PROFIT at the best opposing prices, not stake). 0 = off.
   const [minLegDepthInput, setMinLegDepthInput] = useState("");
@@ -2361,9 +2371,21 @@ export default function App() {
     hiddenCount: excludedPromoLegs.size,
     hideLowLiquidity: dropThinPoolLegs,
   });
-  const promoEmptyWhyEl = promoEmptyWhy.length > 0 && (
+  const promoEmptyDiag = diagnoseEmptyPromo({ minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, includeTeam: promoTeamInclude, excludeTeam: promoTeamExclude, dateRange: promoDateRange, sportsCount: promoSports.size });
+  const resetPromoFilters = () => {
+    setMinFinalOdds(""); setMaxFinalOdds(""); setMinLegOdds(""); setMaxLegOdds("");
+    setPromoTeamInclude(""); setPromoTeamExclude("");
+    setPromoDateRange(DEFAULT_PROMO_DATE_RANGE);
+    if (promoSports.size === 0) setPromoSports(new Set(DEFAULT_PROMO_SPORT_KEYS));
+  };
+  const promoEmptyWhyEl = (promoEmptyWhy.length > 0 || promoEmptyDiag.length > 0) && (
     <div data-testid="promo-empty-why" style={{ fontSize: 13, color: "#d1d5db", marginTop: 10, maxWidth: 480, marginLeft: "auto", marginRight: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+      {promoEmptyDiag.length > 0 && <div style={{ fontWeight: 700, color: "#e8eaed" }}>Likely cause:</div>}
+      {promoEmptyDiag.map((d) => <div key={d.key} data-empty-cause={d.key}>{d.text}</div>)}
       {promoEmptyWhy.map((t) => <div key={t}>{t}</div>)}
+      {promoEmptyDiag.length > 0 && (
+        <div><button type="button" data-reset-filters="true" onClick={resetPromoFilters} style={{ marginTop: 6, background: "rgba(212,175,55,0.15)", border: "1px solid rgba(212,175,55,0.4)", borderRadius: 8, color: "#e6c65c", padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Reset filters</button></div>
+      )}
     </div>
   );
 
@@ -2599,10 +2621,10 @@ export default function App() {
   });
   const promoDepthHiddenAll = promoDepthNoticeType === "thin";
   const promoDepthNotice = promoDepthNoticeType === "checking" ? (
-    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Checking market depth…</div>
+    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center", fontSize: 13, color: "#9ca3af" }}>Checking market depth<InfoTip k="depth" />…</div>
   ) : promoDepthNoticeType === "unavailable" ? (
-    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#93c5fd", marginBottom: 6 }}>Couldn't load market depth for {promoDepthRank.unknown} pick{promoDepthRank.unknown === 1 ? "" : "s"} — retrying…</div>
+    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#f5d76e", marginBottom: 6 }}>Couldn't load market depth for {promoDepthRank.unknown} pick{promoDepthRank.unknown === 1 ? "" : "s"} — retrying…</div>
       <div style={{ fontSize: 13, color: "#9ca3af" }}>One or more exchanges (Kalshi, Polymarket, Novig, ProphetX) didn't answer in time. These picks aren't marked thin; they'll show as soon as depth loads (retrying automatically), or set Liquidity to All to see them now.</div>
     </div>
   ) : promoDepthHiddenAll ? (
@@ -2832,7 +2854,7 @@ export default function App() {
     padding: "10px 20px", cursor: "pointer", fontSize: 14, fontWeight: 600,
     color: activeTab === tab ? "#f0f0f0" : "#6b7280",
     background: "none", border: "none",
-    borderBottom: activeTab === tab ? "2px solid #3b82f6" : "2px solid transparent",
+    borderBottom: activeTab === tab ? "2px solid #d4af37" : "2px solid transparent",
     transition: "all 0.2s",
     textDecoration: "none",
     display: "inline-block",
@@ -2872,10 +2894,11 @@ export default function App() {
   }
 
   return (
-    <div className="app-root" style={{ minHeight: "100vh", background: "#0a0b0f", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
+    <div className="app-root" style={{ minHeight: "100vh", background: "#0b0b0c", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .signin-short { display: none; }
+        [data-wizard-open="true"] > :not([data-promo-wizard]) { display: none !important; }
         .promo-controls-summary { display: none; }
         .promo-controls-body { display: block; }
         .ev-k { display: none; }
@@ -2883,8 +2906,8 @@ export default function App() {
         .guest-explainer {
           display: flex; align-items: center; gap: 14px;
           padding: 10px 14px; border-radius: 12px;
-          background: linear-gradient(90deg, rgba(59,130,246,0.16), rgba(139,92,246,0.14));
-          border: 1px solid rgba(99,102,241,0.32);
+          background: linear-gradient(90deg, rgba(212,175,55,0.16), rgba(184,147,42,0.14));
+          border: 1px solid rgba(201,162,39,0.32);
           color: #dbeafe; font-size: 13.5px; line-height: 1.45;
         }
         .guest-explainer p { margin: 0; flex: 1; }
@@ -2930,7 +2953,7 @@ export default function App() {
             text-align: left;
           }
           .promo-controls-summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .promo-controls-edit { flex: 0 0 auto; color: #93c5fd; font-weight: 700; }
+          .promo-controls-edit { flex: 0 0 auto; color: #f5d76e; font-weight: 700; }
           .promo-controls-body { display: none; }
           .promo-controls-body.is-open { display: block; }
           .ev-list { background: transparent !important; border: none !important; display: flex; flex-direction: column; gap: 10px; }
@@ -2945,8 +2968,7 @@ export default function App() {
 
       <div data-guard-allow="true" className="app-header" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div className="app-brand" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div className="app-logo" style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 }}>B</div>
-          <div className="app-brand-name" style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>AI Bet Builder</div>
+          <div className="app-brand-name" aria-label="AI Bet Builder" style={{ fontFamily: "'Fraunces', Georgia, serif", fontSize: 22, fontWeight: 800, letterSpacing: -0.3, color: "#f4efe2" }}>aibet<span style={{ color: "#d4af37" }}>builder</span></div>
         </div>
         <div className="app-header-actions" style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {(fetchedAt || activeTab === "oddsBetstamp") && (
@@ -2966,9 +2988,9 @@ export default function App() {
                 title={activeTab === "oddsBetstamp"
                   ? "Re-pull Polymarket, Kalshi, and Underdog for New Odds Board."
                   : "Re-read the odds cache (updated every 5 min). Does not call The Odds API."}
-                style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: 6, color: "#3b82f6", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: (activeTab !== "oddsBetstamp" && refreshBusy) ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: (activeTab !== "oddsBetstamp" && refreshBusy) ? 0.6 : 1, transition: "all 0.2s" }}
-                onMouseEnter={e => { if (activeTab === "oddsBetstamp" || !refreshBusy) e.currentTarget.style.background = "rgba(59,130,246,0.2)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(59,130,246,0.1)"; }}
+                style={{ background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 6, color: "#d4af37", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: (activeTab !== "oddsBetstamp" && refreshBusy) ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: (activeTab !== "oddsBetstamp" && refreshBusy) ? 0.6 : 1, transition: "all 0.2s" }}
+                onMouseEnter={e => { if (activeTab === "oddsBetstamp" || !refreshBusy) e.currentTarget.style.background = "rgba(212,175,55,0.2)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(212,175,55,0.1)"; }}
               >
                 <span style={{ display: "inline-block", animation: (activeTab !== "oddsBetstamp" && refreshBusy) ? "spin 1s linear infinite" : "none" }}>↻</span>
                 {(activeTab !== "oddsBetstamp" && refreshBusy) ? "Refreshing" : "Refresh"}
@@ -3004,9 +3026,19 @@ export default function App() {
       )}
 
       <div className="app-tabs" style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <a href={tabHash("promo")} style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
-        <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
-        <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
+        <a href={tabHash("promo")} title="Start here: find the best bet for your boost or free bet" style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
+        {(canSeeComboLocks(user) || canSeeOwnerTools(user)) ? (
+          <>
+            <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
+            <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
+          </>
+        ) : (
+          <>
+            <a data-guard-allow="true" href={tabHash("odds")} title="Compare one game's prices across every book" style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
+            <a href={tabHash("ev")} title="Advanced: every bet priced better than our fair-odds estimate" style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>ADVANCED</span></a>
+            <a href="/learn" data-tab-learn="true" title="What EV, true odds, ML/SPR/TT and the other terms mean" style={tabStyle("__learn")}>Learn</a>
+          </>
+        )}
         {canSeeComboLocks(user) && (
           <a href={tabHash("combo")} style={tabStyle("combo")} onClick={onNavTabClick("combo")}>Combo Locks</a>
         )}
@@ -3039,7 +3071,7 @@ export default function App() {
       )}
 
       {routeNotice && (
-        <div data-guard-allow="true" style={{ margin: "12px 32px 0", padding: "12px 16px", borderRadius: 10, background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div data-guard-allow="true" style={{ margin: "12px 32px 0", padding: "12px 16px", borderRadius: 10, background: "rgba(212,175,55,0.08)", border: "1px solid rgba(212,175,55,0.25)", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <span>{routeNotice === "signin" ? "Sign in to open this link." : "You don’t have access to this page."}</span>
           {routeNotice === "signin" && !user && (
             <button type="button" onClick={() => askSignIn("Sign in to open this link.")} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign in</button>
@@ -3066,7 +3098,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => { fetchOdds({ forceRefresh: true }); logEvent(user, 'odds_refreshed', { trigger: 'retry' }); }}
-            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.4)", borderRadius: 8, color: "#60a5fa", padding: "10px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            style={{ background: "rgba(212,175,55,0.15)", border: "1px solid rgba(212,175,55,0.4)", borderRadius: 8, color: "#e6c65c", padding: "10px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
           >Retry</button>
         </div>
       )}
@@ -3152,7 +3184,7 @@ export default function App() {
                 {controlBox(<>
                   <label style={labelStyle}>Date</label>
                   {DATE_RANGES.map(opt => (
-                    <button key={opt.val} onClick={() => { setEvDateRange(opt.val); setExpandedEV(null); }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: evDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: evDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
+                    <button key={opt.val} onClick={() => { setEvDateRange(opt.val); setExpandedEV(null); }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: evDateRange === opt.val ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: evDateRange === opt.val ? "#d4af37" : "#6b7280" }}>
                       {opt.label}
                     </button>
                   ))}
@@ -3187,7 +3219,7 @@ export default function App() {
                             setExpandedEV(null);
                             window.gtag?.("event", "ev_empty_action", { action: empty.action.label });
                           }}
-                          style={{ marginTop: 16, padding: "10px 18px", minHeight: 40, borderRadius: 8, border: "1px solid rgba(59,130,246,0.45)", background: "rgba(59,130,246,0.18)", color: "#93c5fd", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ marginTop: 16, padding: "10px 18px", minHeight: 40, borderRadius: 8, border: "1px solid rgba(212,175,55,0.45)", background: "rgba(212,175,55,0.18)", color: "#f5d76e", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           {empty.action.label} →
                         </button>
@@ -3235,7 +3267,7 @@ export default function App() {
                             <span style={{ fontSize: 11, color: "#6b7280" }}>{b.market} — {b.game}</span>
                           </div>
                           <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>{formatET(b.commence_time)}</div>
-                          <div style={{ fontSize: 11, color: "#3b82f6", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
+                          <div style={{ fontSize: 11, color: "#d4af37", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ breakdown"}</div>
                           <div style={{ marginTop: 8 }}>
                             <ShareCardActions tab="ev" cardId={evId} model={evShareModel} showImage={b.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                           </div>
@@ -3297,7 +3329,31 @@ export default function App() {
           )}
 
           {activeTab === "promo" && (
-            <div data-promo-type={promoType}>
+            <div data-promo-type={promoType} data-wizard-open={wizardOpen ? "true" : undefined}>
+            {wizardOpen && (
+              <PromoWizard
+                books={ALL_BOOKS}
+                promoTypes={PROMO_TYPES}
+                initial={{ promoType, promoBook, boostPct, stake, numLegs }}
+                onSkip={closeWizard}
+                onApply={(v) => {
+                  setPromoType(v.promoType);
+                  setPromoBook(v.promoBook);
+                  if (Number.isFinite(v.boostPct)) setBoostPct(v.boostPct);
+                  if (Number.isFinite(v.stake) && v.stake > 0) setStake(v.stake);
+                  if (v.numLegs) setNumLegs(v.numLegs);
+                  setWizardApplied(true);
+                  closeWizard();
+                }}
+              />
+            )}
+            {!wizardOpen && !wizardApplied && !user && promoType === DEFAULT_PROMO_TYPE && promoBook === PROMO_DEFAULT_BOOK && boostPct === 30 && stake === 100 && (
+              <div data-example-banner="true" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+                <span style={{ fontSize: 13, color: "#fbbf24", fontWeight: 700 }}>Example results: 30% DraftKings profit boost, $100 stake.</span>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>EV = estimated average profit over many bets; any single bet can lose. <a href="/learn" style={{ color: "#e6c65c" }}>What do these mean?</a></span>
+                <button type="button" data-try-boost="true" onClick={() => setWizardOpen(true)} style={{ marginLeft: "auto", background: "#d4af37", color: "#0b0b0c", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Try it with your boost</button>
+              </div>
+            )}
               <button
                 type="button"
                 className="promo-controls-summary"
@@ -3332,7 +3388,7 @@ export default function App() {
                         choosePromoType(opt.val);
                         window.gtag?.('event', 'promo_type_changed', { promo_type: opt.val });
                         logEvent(user, 'promo_type_changed', { promo_type: opt.val });
-                      }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#8b5cf6" : "#6b7280" }}>
+                      }} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoType === opt.val ? "rgba(184,147,42,0.2)" : "rgba(255,255,255,0.05)", color: promoType === opt.val ? "#b8932a" : "#6b7280" }}>
                         {opt.label}
                       </button>
                     ))}
@@ -3380,7 +3436,7 @@ export default function App() {
                   {isParlayPromo && controlBox(<>
                     <label style={labelStyle}>Legs</label>
                     {[1, 2, 3].map(n => (
-                      <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#3b82f6" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
+                      <button key={n} onClick={() => setNumLegs(n)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: numLegs === n ? "#d4af37" : "rgba(255,255,255,0.05)", color: numLegs === n ? "#fff" : "#6b7280" }}>{n}</button>
                     ))}
                     {numLegs > 3 && (
                       <>
@@ -3390,7 +3446,7 @@ export default function App() {
                           onClick={() => setNumLegs(n => Math.max(3, n - 1))}
                           style={{ padding: "4px 8px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#9ca3af", lineHeight: 1 }}
                         >−</button>
-                        <span style={{ padding: "4px 8px", borderRadius: 6, background: "#3b82f6", color: "#fff", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
+                        <span style={{ padding: "4px 8px", borderRadius: 6, background: "#d4af37", color: "#0b0b0c", fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: "center" }}>{numLegs}</span>
                       </>
                     )}
                     {numLegs < MAX_PROMO_LEGS && (
@@ -3417,9 +3473,9 @@ export default function App() {
                         fontWeight: 800,
                         cursor: optimizeBusy ? "wait" : "pointer",
                         letterSpacing: 0.4,
-                        background: "linear-gradient(135deg, #10b981 0%, #3b82f6 100%)",
-                        color: "#fff",
-                        boxShadow: "0 0 0 1px rgba(16,185,129,0.35), 0 8px 20px rgba(59,130,246,0.25)",
+                        background: "#d4af37",
+                        color: "#0b0b0c",
+                        boxShadow: "none",
                         opacity: optimizeBusy ? 0.75 : 1,
                       }}
                     >{optimizeBusy ? "Optimizing…" : "Optimize!"}</button>
@@ -3430,7 +3486,7 @@ export default function App() {
                         onClick={() => setExcludedPromoLegs(new Set())}
                         title="Bring back the legs you X'd out"
                         style={{ marginLeft: 8, padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "#9ca3af", fontSize: 12, cursor: "pointer", whiteSpace: "nowrap" }}
-                      >{excludedPromoLegs.size} hidden · <span style={{ color: "#60a5fa", fontWeight: 700 }}>Restore</span></button>
+                      >{excludedPromoLegs.size} hidden · <span style={{ color: "#e6c65c", fontWeight: 700 }}>Restore</span></button>
                     )}
                   </>)}
                 </div>
@@ -3464,9 +3520,9 @@ export default function App() {
                     }}
                   >
                     {!promoFiltersOpen && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>Filters</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280" }}>More options</span>
                     )}
-                    <span style={{ fontSize: 10, color: promoFiltersOpen ? "#3b82f6" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
+                    <span style={{ fontSize: 10, color: promoFiltersOpen ? "#d4af37" : "#6b7280", lineHeight: 1 }}>{promoFiltersOpen ? "▲" : "▼"}</span>
                     {!promoFiltersOpen && (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", lineHeight: 1.2 }}>
                         {formatPromoFilterSummary({ promoSports, promoDateRange, marketScope, promoType, minFinalOdds, maxFinalOdds, minLegOdds, maxLegOdds, numLegs, hideLowLiquidity, includeTeamTokens: summaryIncludeTokens, excludeTeamTokens: summaryExcludeTokens })}
@@ -3478,7 +3534,7 @@ export default function App() {
                       {controlBox(<>
                         <label style={labelStyle}>Sports</label>
                         {SPORT_CHIPS.map(s => (
-                          <button key={s.id} onClick={() => togglePromoSport(s)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: sportChipSelected(s, promoSports) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: sportChipSelected(s, promoSports) ? "#3b82f6" : "#6b7280" }}>
+                          <button key={s.id} onClick={() => togglePromoSport(s)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: sportChipSelected(s, promoSports) ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: sportChipSelected(s, promoSports) ? "#d4af37" : "#6b7280" }}>
                             {s.label}
                           </button>
                         ))}
@@ -3486,30 +3542,30 @@ export default function App() {
                       {controlBox(<>
                         <label style={labelStyle}>Date</label>
                         {DATE_RANGES.map(opt => (
-                          <button key={opt.val} onClick={() => setPromoDateRange(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoDateRange === opt.val ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: promoDateRange === opt.val ? "#3b82f6" : "#6b7280" }}>
+                          <button key={opt.val} onClick={() => setPromoDateRange(opt.val)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: promoDateRange === opt.val ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: promoDateRange === opt.val ? "#d4af37" : "#6b7280" }}>
                             {opt.label}
                           </button>
                         ))}
                       </>)}
                       {controlBox(<>
-                        <label style={labelStyle}>Markets</label>
+                        <label style={labelStyle}>Markets</label><InfoTip k="markets" />
                         {MARKET_SCOPES.map(opt => (
-                          <button key={opt.val} type="button" aria-pressed={isMarketScopeSelected(marketScope, opt.val)} onClick={() => setMarketScope(prev => toggleMarketScope(prev, opt.val))} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: isMarketScopeSelected(marketScope, opt.val) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: isMarketScopeSelected(marketScope, opt.val) ? "#3b82f6" : "#6b7280" }}>
+                          <button key={opt.val} type="button" aria-pressed={isMarketScopeSelected(marketScope, opt.val)} onClick={() => setMarketScope(prev => toggleMarketScope(prev, opt.val))} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: isMarketScopeSelected(marketScope, opt.val) ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: isMarketScopeSelected(marketScope, opt.val) ? "#d4af37" : "#6b7280" }}>
                             {opt.label}
                           </button>
                         ))}
                       </>)}
                       {controlBox(<>
-                        <label style={labelStyle}>Liquidity</label>
-                        <button type="button" onClick={() => setHideLowLiquidity(false)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: !hideLowLiquidity ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: !hideLowLiquidity ? "#3b82f6" : "#6b7280" }}>
+                        <label style={labelStyle}>Liquidity</label><InfoTip k="liquidity" />
+                        <button type="button" onClick={() => setHideLowLiquidity(false)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: !hideLowLiquidity ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: !hideLowLiquidity ? "#d4af37" : "#6b7280" }}>
                           {LIQUIDITY_FILTER_ALL_LABEL}
                         </button>
-                        <button type="button" onClick={() => setHideLowLiquidity(true)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: hideLowLiquidity ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: hideLowLiquidity ? "#3b82f6" : "#6b7280" }}>
+                        <button type="button" onClick={() => setHideLowLiquidity(true)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: hideLowLiquidity ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: hideLowLiquidity ? "#d4af37" : "#6b7280" }}>
                           {HIDE_LOW_LIQUIDITY_LABEL}
                         </button>
                       </>)}
                       {canSeeOwnerTools(user) && controlBox(<>
-                        <label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until the opposing bets can win this much $ (depth = potential profit, not stake: $3,000 at −200 = $1,500), and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label>
+                        <label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until the opposing bets can win this much $ (depth = potential profit, not stake: $3,000 at −200 = $1,500), and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label><InfoTip k="depth" />
                         <span style={{ color: "#6b7280", fontSize: 12 }}>$</span>
                         <input data-testid="promo-min-leg-depth" type="text" inputMode="numeric" placeholder="off" value={minLegDepthInput}
                           onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setMinLegDepthInput(v); saveMinLegDepth(user, v); }}
@@ -3519,7 +3575,7 @@ export default function App() {
                       {controlBox(<>
                         <label style={labelStyle}>Matching books</label>
                         {PROMO_BOOKS.filter(b => trustedVisible.has(b.key)).map(b => (
-                          <button key={b.key} onClick={() => toggleMatchingBook(b.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: matchingBookKeys.has(b.key) ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.05)", color: matchingBookKeys.has(b.key) ? "#3b82f6" : "#6b7280" }}>
+                          <button key={b.key} onClick={() => toggleMatchingBook(b.key)} style={{ padding: "5px 12px", borderRadius: 6, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", background: matchingBookKeys.has(b.key) ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.05)", color: matchingBookKeys.has(b.key) ? "#d4af37" : "#6b7280" }}>
                             {b.label}
                           </button>
                         ))}
@@ -3578,8 +3634,8 @@ export default function App() {
                     </div>
                   )}
                   {boostLikeEmptyState === "scanning" && (
-                    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", marginBottom: 8 }}>scanning…</div>
+                    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#d4af37", marginBottom: 8 }}>scanning…</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
@@ -3610,7 +3666,7 @@ export default function App() {
                       legs: p.legs,
                     });
                     return (
-                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(212,175,55,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : promoId);
                           if (!isExpanded) {
@@ -3621,7 +3677,7 @@ export default function App() {
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
+                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#d4af37" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
@@ -3631,8 +3687,8 @@ export default function App() {
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             {promoType === "boost" && <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>}
-                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
+                            <span>True Odds<InfoTip k="trueOdds" />: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
+                            <span>EV<InfoTip k="ev" />: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
 
@@ -3727,8 +3783,8 @@ export default function App() {
                     </div>
                   )}
                   {noSweatEmptyState === "scanning" && (
-                    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", marginBottom: 8 }}>scanning…</div>
+                    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#d4af37", marginBottom: 8 }}>scanning…</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking parlays — boost and stake stay usable.</div>
                     </div>
                   )}
@@ -3760,7 +3816,7 @@ export default function App() {
                       legs: p.legs,
                     });
                     return (
-                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(59,130,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(59,130,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(212,175,55,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(212,175,55,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedPromo(isExpanded ? null : promoId);
                           if (!isExpanded) {
@@ -3771,7 +3827,7 @@ export default function App() {
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#3b82f6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
+                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#d4af37" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? "★ Best Pick" : `Option ${i + 1}`}</div>
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
@@ -3787,8 +3843,8 @@ export default function App() {
                             <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                             <span>Win: <strong style={{ color: "#10b981" }}>+${p.winProfit.toFixed(0)}</strong></span>
                             <span>On a loss: <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit ≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash</span>
-                            <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                            <span>EV: <strong style={{ color: evColor }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
+                            <span>True Odds<InfoTip k="trueOdds" />: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
+                            <span>EV<InfoTip k="ev" />: <strong style={{ color: evColor }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
                           </div>
                           {isSingle && <PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live={false} levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
@@ -3881,8 +3937,8 @@ export default function App() {
                     </div>
                   )}
                   {freeBetEmptyState === "scanning" && (
-                    <div style={{ background: "rgba(59,130,246,0.04)", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#3b82f6", marginBottom: 8 }}>scanning…</div>
+                    <div style={{ background: "rgba(212,175,55,0.04)", border: "1px solid rgba(212,175,55,0.15)", borderRadius: 12, padding: "32px 24px", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#d4af37", marginBottom: 8 }}>scanning…</div>
                       <div style={{ fontSize: 13, color: "#9ca3af" }}>Ranking free-bet parlays — Free Bet $ stays usable.</div>
                     </div>
                   )}
@@ -3926,7 +3982,7 @@ export default function App() {
                       legs: p.legs,
                     });
                     return (
-                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(139,92,246,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(139,92,246,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
+                      <div id={"pick-" + promoId} style={{ ...PROMO_CARD_LAYER_STYLE, background: i === 0 ? "rgba(184,147,42,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(184,147,42,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, overflow: "hidden", cursor: "pointer" }}
                         onClick={() => {
                           setExpandedFreeBet(isExpanded ? null : promoId);
                           if (!isExpanded) {
@@ -3937,7 +3993,7 @@ export default function App() {
                         <div style={{ padding: "20px 24px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#8b5cf6" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
+                              <div style={{ width: 28, height: 28, borderRadius: 8, background: i === 0 ? "#b8932a" : "rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: i === 0 ? "#fff" : "#6b7280" }}>{i + 1}</div>
                               <div style={{ fontSize: 11, fontWeight: 600, color: "#8a8f98", textTransform: "uppercase", letterSpacing: 1 }}>{i === 0 ? (showLock ? "★ Best Conversion" : "★ Best Pick") : `Option ${i + 1}`}</div>
                               <LowLiquidityFlag show={pickHasLowLiquidity(overlay.displayLegs)} />
                             </div>
@@ -3955,8 +4011,8 @@ export default function App() {
                           {showLock ? (
                             <>
                               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-                                <div style={{ background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 8, padding: "10px 14px" }}>
-                                  <div style={{ fontSize: 11, color: "#8b5cf6", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Free Bet On</div>
+                                <div style={{ background: "rgba(184,147,42,0.06)", border: "1px solid rgba(184,147,42,0.2)", borderRadius: 8, padding: "10px 14px" }}>
+                                  <div style={{ fontSize: 11, color: "#b8932a", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Free Bet On</div>
                                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
                                     <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{formatPromoLegTitle(leg)}</div>
                                     <ExcludeLegButton leg={leg} onExclude={excludePromoLeg} />
@@ -3983,7 +4039,7 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>Game: <strong style={{ color: "#e8eaed" }}>{leg?.game}</strong></span>
                                 <span>Conversion: <strong style={{ color: "#10b981" }}>{((lock?.conversionRate ?? 0) * 100).toFixed(1)}%</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
+                                <span>EV<InfoTip k="ev" />: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
                             </>
                           ) : (
@@ -3992,8 +4048,8 @@ export default function App() {
                               <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
                                 <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
                                 <span>Win: <strong style={{ color: "#10b981" }}>+${(p.winProfit ?? 0).toFixed(0)}</strong></span>
-                                <span>True Odds: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
-                                <span>EV: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
+                                <span>True Odds<InfoTip k="trueOdds" />: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
+                                <span>EV<InfoTip k="ev" />: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong></span>
                               </div>
                               {isSingle && <PromoTrueOddsSubline leg={hedgeLeg || leg} live={false} levels={overlay.ladders[depthCacheKey(leg)]} blendCtx={overlay.ctx} style={{ fontSize: 11, marginTop: 6 }} />}
                             </>

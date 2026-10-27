@@ -108,7 +108,7 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
           display: inline-flex; align-items: center; justify-content: center; gap: 10px;
         }
         .sip-btn:disabled { opacity: 0.6; cursor: wait; }
-        .sip-google { background: #fff; color: #1f2937; box-shadow: 0 10px 40px rgba(59,130,246,0.15); }
+        .sip-google { background: #fff; color: #1f2937; box-shadow: 0 10px 40px rgba(212,175,55,0.15); }
         .sip-x { background: #0f1419; color: #fff; border: 1px solid rgba(255,255,255,0.16); }
         .sip-facebook { background: #1877F2; color: #fff; }
         .sip-or { display: flex; align-items: center; gap: 10px; color: #6b7280; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
@@ -120,7 +120,7 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
           font: inherit; font-size: 15px;
         }
         .sip-email:focus { outline: 2px solid rgba(96,165,250,0.55); border-color: transparent; }
-        .sip-send { background: rgba(59,130,246,0.16); color: #dbeafe; border: 1px solid rgba(96,165,250,0.45); }
+        .sip-send { background: rgba(212,175,55,0.16); color: #dbeafe; border: 1px solid rgba(96,165,250,0.45); }
         .sip-msg { margin: 0; font-size: 15px; line-height: 1.45; font-weight: 700; }
         /* Two classes so this beats .signin-modal p (gray, 14px) in the popup. */
         .sip-msg.sip-error {
@@ -138,7 +138,7 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
         .sip-sent strong { display: block; color: #fff; font-size: 16px; margin-bottom: 4px; }
         .sip-sent p { margin: 0; font-size: 13px; line-height: 1.45; color: #a7f3d0; }
         .sip-again {
-          margin-top: 8px; background: none; border: none; padding: 0; color: #93c5fd;
+          margin-top: 8px; background: none; border: none; padding: 0; color: #f5d76e;
           font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
         }
       `}</style>

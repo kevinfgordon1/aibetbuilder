@@ -10,6 +10,25 @@ const PROMO_TYPES = new Set(["boost", "nopromo", "nosweat", "freebet"]);
 
 /** Default Promo type when the hash has no share/deep-link cardId. */
 export const DEFAULT_PROMO_TYPE = "boost";
+export const SHARE_CARD_DISCLAIMER = "Tools and estimates only, not betting advice. Results not guaranteed. 21+, bet responsibly.";
+
+/** X (Twitter) post intent with the share link. No usernames or balances. */
+export function xPostIntentUrl({ text = "", url = "" } = {}) {
+  const q = new URLSearchParams();
+  if (text) q.set("text", text);
+  if (url) q.set("url", url);
+  return "https://x.com/intent/post?" + q.toString();
+}
+
+export function shareTweetText(model = {}) {
+  const m = model || {};
+  const legs = (m.legs || []).map((l) => (l.name || "") + (l.odds ? " " + l.odds : "")).filter(Boolean);
+  const head = m.kind === "lock" ? "Combo Lock filled" : (shareCardPromoLine(m) || shareCardHeadline(m) || "Pick");
+  const res = shareCardResult(m);
+  const parts = [head + ":", legs.slice(0, 4).join(" / ")];
+  if (res && res.headline) parts.push("(" + res.headline + ", est.)");
+  return parts.filter(Boolean).join(" ").replace(/guarantee(d)?|risk[- ]free/gi, "est.").slice(0, 230);
+}
 
 export function fnv1a36(str) {
   let h = 2166136261;
@@ -366,7 +385,7 @@ export function shareCardBottomLine(model = {}) {
   }
   if (model.promoType === "freebet") {
     const cash = finiteNum(model.guaranteedCash);
-    if (cash != null) return "Walk away with $" + cash.toFixed(2) + " guaranteed from the free bet.";
+    if (cash != null) return "Hedged estimate: about $" + cash.toFixed(2) + " either way from the free bet.";
     return ev ? "Expected profit " + ev + stakeBit + "." : "";
   }
   if (model.promoType === "boost" || model.promoType === "nopromo") {
@@ -403,7 +422,7 @@ export function shareCardMetaChips(model = {}) {
   if (m.promoType === "freebet") {
     const conv = finiteNum(m.conversionRate);
     const cash = finiteNum(m.guaranteedCash);
-    if (cash != null) chips.push("$" + cash.toFixed(2) + " locked");
+    if (cash != null) chips.push("$" + cash.toFixed(2) + " hedged");
     if (conv != null) chips.push((conv * 100).toFixed(1) + "% conversion");
     else if (finiteNum(m.winProfit) != null) chips.push("win +$" + Math.round(m.winProfit));
   }
@@ -453,11 +472,19 @@ export function shareCardResult(model = {}) {
   const m = model || {};
   const stake = finiteNum(m.stake);
   const stakeTxt = stake != null ? "$" + Math.round(stake) : "";
+  if (m.kind === "lock") {
+    const hit = finiteNum(m.lockHit), miss = finiteNum(m.lockMiss);
+    if (hit != null && miss != null) {
+      const lo = Math.min(hit, miss);
+      return { headline: "Hedged: " + formatSignedMoney(lo) + " or better", sub: "est. " + formatSignedMoney(hit) + " if it hits · " + formatSignedMoney(miss) + " if it misses", positive: lo >= 0 };
+    }
+    return { headline: "Combo Lock filled", sub: "hedged on an exchange", positive: true };
+  }
   const cash = finiteNum(m.guaranteedCash);
   if (m.promoType === "freebet" && cash != null && m.hedge) {
     const conv = finiteNum(m.conversionRate);
     return {
-      headline: wholeOrCents(cash) + " guaranteed",
+      headline: wholeOrCents(cash) + " hedged",
       sub: (stakeTxt ? "from a " + stakeTxt + " free bet" : "from a free bet") + (conv != null ? " · " + (conv * 100).toFixed(0) + "% converted to cash" : ""),
       positive: true,
     };
@@ -607,7 +634,7 @@ export function buildShareCardModel({
   const type = PROMO_TYPES.has(promoType) ? promoType : null;
   const marketLabel = formatShareMarket(market) || (formattedLegs[0] && formattedLegs[0].market) || "";
   return {
-    kind: kind === "ev" ? "ev" : "promo",
+    kind: kind === "ev" ? "ev" : kind === "lock" ? "lock" : "promo",
     badge: String(badge || "PICK"),
     promoType: type,
     promoLabel: formatSharePromoType(type),
@@ -662,12 +689,9 @@ function mono(weight, size) {
   return weight + " " + size + "px 'JetBrains Mono', ui-monospace, monospace";
 }
 
-function accentFor(model) {
-  if (model.kind === "ev") return { fill: "#10b981", soft: "rgba(16,185,129,0.16)", border: "rgba(16,185,129,0.28)" };
-  if (model.promoType === "freebet" || model.promoType === "nosweat") {
-    return { fill: "#8b5cf6", soft: "rgba(139,92,246,0.16)", border: "rgba(139,92,246,0.30)" };
-  }
-  return { fill: "#3b82f6", soft: "rgba(59,130,246,0.16)", border: "rgba(59,130,246,0.28)" };
+function accentFor() {
+  // Black/gold card theme for every card type.
+  return { fill: "#d4af37", soft: "rgba(212,175,55,0.14)", border: "rgba(212,175,55,0.45)" };
 }
 
 function roundedRectPath(ctx, x, y, w, h, r) {
@@ -747,8 +771,8 @@ function fitFont(ctx, text, maxWidth, fontFn, weight, size, minSize) {
 
 function drawLogo(ctx, x, y, size) {
   const g = ctx.createLinearGradient(x, y, x + size, y + size);
-  g.addColorStop(0, "#3b82f6");
-  g.addColorStop(1, "#8b5cf6");
+  g.addColorStop(0, "#d4af37");
+  g.addColorStop(1, "#b8932a");
   fillRound(ctx, x, y, size, size, size * 0.24, g);
   ctx.fillStyle = "#ffffff";
   ctx.font = sans("800", Math.round(size * 0.6));
@@ -781,12 +805,12 @@ export function paintShareCard(ctx, model, w, h) {
   const bad = "#f87171";
 
   // Background: site dark + soft blue/purple glow.
-  ctx.fillStyle = "#0a0b0f";
+  ctx.fillStyle = "#0b0b0c";
   ctx.fillRect(0, 0, W, H);
   const wash = ctx.createLinearGradient(0, 0, W, H);
-  wash.addColorStop(0, "rgba(59,130,246,0.20)");
+  wash.addColorStop(0, "rgba(212,175,55,0.16)");
   wash.addColorStop(0.45, "rgba(10,11,15,0)");
-  wash.addColorStop(1, "rgba(139,92,246,0.20)");
+  wash.addColorStop(1, "rgba(212,175,55,0.10)");
   ctx.fillStyle = wash;
   ctx.fillRect(0, 0, W, H);
 
@@ -809,7 +833,7 @@ export function paintShareCard(ctx, model, w, h) {
   const bw = Math.ceil(ctx.measureText(badge).width) + 36;
   fillRound(ctx, PAD, L.badge, bw, 44, 22, accent.soft);
   strokeRound(ctx, PAD, L.badge, bw, 44, 22, accent.border, 1.5);
-  ctx.fillStyle = m.kind === "ev" ? good : (m.promoType === "freebet" || m.promoType === "nosweat") ? "#c4b5fd" : "#93c5fd";
+  ctx.fillStyle = "#f5d76e";
   ctx.textBaseline = "middle";
   ctx.fillText(badge, PAD + 18, L.badge + 23);
   ctx.textBaseline = "alphabetic";
@@ -866,9 +890,9 @@ export function paintShareCard(ctx, model, w, h) {
       ctx.textAlign = "left";
     };
     step(L.step1, {
-      bg: "rgba(139,92,246,0.10)",
-      border: "rgba(139,92,246,0.40)",
-      labelColor: "#c4b5fd",
+      bg: "rgba(184,147,42,0.10)",
+      border: "rgba(184,147,42,0.40)",
+      labelColor: "#f5d76e",
       label: "STEP 1 · USE YOUR " + (stake != null ? "$" + Math.round(stake) + " " : "") + "FREE BET AT " + String(m.bookLabel || "YOUR BOOK").toUpperCase(),
       title: leg.name,
       sub1: [leg.market, leg.game].filter(Boolean).join(" · "),
@@ -892,7 +916,7 @@ export function paintShareCard(ctx, model, w, h) {
     fillRound(ctx, PAD, L.keep, inner, 76, 14, "rgba(16,185,129,0.12)");
     ctx.fillStyle = "#d1fae5";
     ctx.textBaseline = "middle";
-    const keep = "Either way, you keep " + wholeOrCents(m.guaranteedCash) + " in cash.";
+    const keep = "Either way, an estimated " + wholeOrCents(m.guaranteedCash) + " in cash.";
     ctx.fillText(fitFont(ctx, keep, inner - 48, sans, "700", 30, 20), PAD + 24, L.keep + 39);
     ctx.textBaseline = "alphabetic";
   } else {
@@ -935,7 +959,7 @@ export function paintShareCard(ctx, model, w, h) {
       const my = L.list + legs.length * row.h;
       ctx.fillStyle = "rgba(255,255,255,0.07)";
       ctx.fillRect(PAD + 24, my, inner - 48, 1);
-      ctx.fillStyle = "#93c5fd";
+      ctx.fillStyle = "#f5d76e";
       ctx.font = sans("700", 22);
       ctx.textBaseline = "middle";
       ctx.fillText("+" + layout.more + " more " + (layout.more === 1 ? "leg" : "legs") + " on aibetbuilder.io", PAD + 28, my + 33);
@@ -963,13 +987,15 @@ export function paintShareCard(ctx, model, w, h) {
   // Footer.
   ctx.fillStyle = "rgba(255,255,255,0.08)";
   ctx.fillRect(PAD, L.footer, inner, 1);
+  ctx.fillStyle = "#d1d5db";
+  ctx.fillText(fitFont(ctx, SHARE_CARD_DISCLAIMER, inner, sans, "600", 21, 15), PAD, L.footer + 40);
   ctx.fillStyle = "#9ca3af";
-  ctx.font = sans("600", 21);
-  ctx.fillText("21+ · Gambling problem? Call 1-800-GAMBLER", PAD, L.footer + 58);
+  ctx.font = sans("600", 19);
+  ctx.fillText("Gambling problem? Call 1-800-GAMBLER", PAD, L.footer + 78);
   ctx.textAlign = "right";
-  ctx.fillStyle = "#6b7280";
-  ctx.font = sans("500", 19);
-  ctx.fillText("Odds change. Check your book.", W - PAD, L.footer + 58);
+  ctx.fillStyle = "#d4af37";
+  ctx.font = sans("700", 22);
+  ctx.fillText("aibetbuilder.io", W - PAD, L.footer + 78);
   ctx.textAlign = "left";
 }
 
@@ -1053,4 +1079,19 @@ export async function shareOrDownloadCard({ model, url, title } = {}) {
   if (model) return downloadShareCardPng(model, fileName);
   if (url) return copyTextToClipboard(url);
   return "unavailable";
+}
+
+/** Share model for a filled Combo Lock: legs (American odds), promo, hedged
+ * outcome. No username, account or balance fields. */
+export function buildLockShareModel(parlay = {}, profile = null, { legName = null } = {}) {
+  const p = parlay || {};
+  const legs = (p.legs || []).filter(Boolean).map((l) => {
+    const name = legName ? legName(l) : String((l && (l.label || l.name || l.team)) || "").trim();
+    return name ? { name, market: "", game: "", odds: formatShareAmerican(l && (l.american != null ? l.american : l.odds)), time: "" } : null;
+  }).filter(Boolean);
+  const kind = String(p.bet_kind || p.kind || "").toLowerCase();
+  const promoType = kind === "freebet" ? "freebet" : (finiteNum(p.boost_pct) ? "boost" : null);
+  const cur = profile && profile.current;
+  const m = buildShareCardModel({ kind: "promo", badge: "COMBO LOCK FILLED", promoType, bookLabel: p.sportsbook || "", boostPct: p.boost_pct, parlayOdds: formatShareAmerican(p.parlay_american), legs: [] });
+  return { ...m, kind: "lock", legs, lockHit: cur ? finiteNum(cur.hit) : null, lockMiss: cur ? finiteNum(cur.miss) : null };
 }

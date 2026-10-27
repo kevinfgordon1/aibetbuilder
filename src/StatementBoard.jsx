@@ -19,7 +19,7 @@ import {
 export const STATEMENT_BOARD_CSS = `
   .sb .filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 14px}
   .sb .filters .chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 8px;font:inherit;font-size:12px;font-weight:600;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#9ca3af;cursor:pointer}
-  .sb .filters .chip.on{background:rgba(59,130,246,.2);color:#93c5fd;border-color:rgba(59,130,246,.35)}
+  .sb .filters .chip.on{background:rgba(212,175,55,.2);color:#f5d76e;border-color:rgba(212,175,55,.35)}
   .sb .search{flex:1;min-width:160px;max-width:260px;width:auto;padding:6px 10px;margin:0;border:1px solid rgba(255,255,255,0.12);border-radius:8px;background:#12141a;color:#e8eaed;font:inherit}
   .sb .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer}
   .sb .btn:disabled{opacity:.45;cursor:default}
@@ -36,7 +36,7 @@ export const STATEMENT_BOARD_CSS = `
   .sb td{padding:8px;border-top:1px solid rgba(255,255,255,0.06);vertical-align:top}
   .sb .stmt-row{cursor:pointer}
   .sb .stmt-row:hover td{background:rgba(255,255,255,0.03)}
-  .sb .stmt-row:focus{outline:2px solid rgba(59,130,246,0.45);outline-offset:-2px}
+  .sb .stmt-row:focus{outline:2px solid rgba(212,175,55,0.45);outline-offset:-2px}
   .sb .stmt-row.open td{background:rgba(147,197,253,.06)}
   .sb .stmt-title{font-weight:600;color:#e8eaed}
   .sb .stmt-sub{font-size:12px;margin-top:3px;line-height:1.4}

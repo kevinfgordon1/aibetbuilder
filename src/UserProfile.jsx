@@ -113,9 +113,9 @@ export default function UserProfile({
         .up textarea{min-height:110px;resize:vertical}
         .up .btn{border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#e8eaed;font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer}
         .up .btn:disabled{opacity:.45;cursor:default}
-        .up .btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+        .up .btn.primary{background:#d4af37;border-color:#d4af37;color:#fff}
         .up .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#9ca3af;font-size:12px;font-weight:600;cursor:pointer}
-        .up .chip.on{background:rgba(59,130,246,0.18);border-color:rgba(59,130,246,0.45);color:#93c5fd}
+        .up .chip.on{background:rgba(212,175,55,0.18);border-color:rgba(212,175,55,0.45);color:#f5d76e}
         .up .muted{color:#6b7280;font-size:13px;line-height:1.5}
       `}</style>
 
@@ -123,7 +123,7 @@ export default function UserProfile({
         {ident.avatar ? (
           <img src={ident.avatar} alt="" style={{ width: 64, height: 64, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.12)", objectFit: "cover" }} />
         ) : (
-          <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#3b82f6,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 22 }}>{initials}</div>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#d4af37,#b8932a)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 22 }}>{initials}</div>
         )}
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.4 }}>{name}</div>

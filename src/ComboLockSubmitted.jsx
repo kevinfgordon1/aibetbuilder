@@ -51,16 +51,16 @@ export default function ComboLockSubmitted({ toast, onClose }) {
         .cls-card h2{margin:0 36px 12px 0;font-size:20px;font-weight:700;letter-spacing:-.3px;line-height:1.25}
         .cls-legs{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:6px}
         .cls-legs li{padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);font-size:14px;font-weight:600;line-height:1.35}
-        .cls-fill{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.28)}
-        .cls-fill .k{font-size:12px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.4px}
+        .cls-fill{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(212,175,55,.12);border:1px solid rgba(212,175,55,.28)}
+        .cls-fill .k{font-size:12px;font-weight:700;color:#f5d76e;text-transform:uppercase;letter-spacing:.4px}
         .cls-fill .v{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;color:#e8eaed}
         .cls-note{margin:0 0 14px;font-size:14px;line-height:1.5;color:#9ca3af}
         .cls-err-msg{margin:0 0 14px;font-size:14px;line-height:1.5;color:#fecaca}
         .cls-x{position:absolute;top:10px;right:10px;width:36px;height:36px;border:none;border-radius:10px;background:transparent;color:#9ca3af;font-size:22px;line-height:1;cursor:pointer}
         .cls-x:hover,.cls-x:focus-visible{background:rgba(255,255,255,.08);color:#e8eaed;outline:none}
         .cls-actions{display:flex;justify-content:flex-end}
-        .cls-ok{background:#3b82f6;border:1px solid #3b82f6;color:#fff;font:inherit;font-weight:700;font-size:14px;padding:10px 18px;border-radius:10px;cursor:pointer;min-height:44px}
-        .cls-ok:hover,.cls-ok:focus-visible{background:#2563eb;outline:none}
+        .cls-ok{background:#d4af37;border:1px solid #d4af37;color:#fff;font:inherit;font-weight:700;font-size:14px;padding:10px 18px;border-radius:10px;cursor:pointer;min-height:44px}
+        .cls-ok:hover,.cls-ok:focus-visible{background:#b8932a;outline:none}
         .cls-card.err .cls-ok{background:#ef4444;border-color:#ef4444}
         .cls-card.err .cls-ok:hover,.cls-card.err .cls-ok:focus-visible{background:#dc2626}
       `}</style>

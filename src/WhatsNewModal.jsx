@@ -62,7 +62,7 @@ export default function WhatsNewModal({ announcement, onDismiss }) {
       <style>{`
         .wn{position:fixed;inset:0;z-index:80;background:rgba(6,7,10,.72);display:flex;align-items:center;justify-content:center;padding:24px;font-family:'DM Sans',sans-serif}
         .wn-dialog{width:min(440px,100%);background:#12141a;color:#e8eaed;border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 24px 64px rgba(0,0,0,.45);padding:22px 22px 18px;position:relative}
-        .wn-kicker{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:#60a5fa;margin:0 0 8px}
+        .wn-kicker{font-size:11px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:#e6c65c;margin:0 0 8px}
         .wn h2{margin:0 28px 10px 0;font-size:20px;font-weight:700;letter-spacing:-.3px}
         .wn .wn-body{margin:0 0 18px;font-size:14px;line-height:1.55;color:#9ca3af}
         .wn .wn-body p{margin:0 0 10px}
@@ -70,10 +70,10 @@ export default function WhatsNewModal({ announcement, onDismiss }) {
         .wn .wn-x{position:absolute;top:12px;right:12px;width:32px;height:32px;border:none;border-radius:8px;background:transparent;color:#9ca3af;font-size:20px;line-height:1;cursor:pointer}
         .wn .wn-x:hover,.wn .wn-x:focus-visible{background:rgba(255,255,255,.06);color:#e8eaed;outline:none}
         .wn .wn-actions{display:flex;justify-content:flex-end;align-items:center;gap:10px}
-        .wn .wn-cta{color:#93c5fd;font-size:13px;font-weight:600;text-decoration:none}
+        .wn .wn-cta{color:#f5d76e;font-size:13px;font-weight:600;text-decoration:none}
         .wn .wn-cta:hover{text-decoration:underline}
-        .wn .wn-gotit{background:#3b82f6;border:1px solid #3b82f6;color:#fff;font:inherit;font-weight:700;font-size:13px;padding:9px 16px;border-radius:8px;cursor:pointer}
-        .wn .wn-gotit:hover,.wn .wn-gotit:focus-visible{background:#2563eb;outline:none}
+        .wn .wn-gotit{background:#d4af37;border:1px solid #d4af37;color:#fff;font:inherit;font-weight:700;font-size:13px;padding:9px 16px;border-radius:8px;cursor:pointer}
+        .wn .wn-gotit:hover,.wn .wn-gotit:focus-visible{background:#b8932a;outline:none}
       `}</style>
       <div
         ref={dialogRef}

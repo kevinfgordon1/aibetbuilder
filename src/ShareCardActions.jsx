@@ -4,6 +4,8 @@ import {
   absoluteShareUrl,
   copyTextToClipboard,
   shareOrDownloadCard,
+  shareTweetText,
+  xPostIntentUrl,
 } from "./shareCard";
 
 const btn = {
@@ -31,9 +33,10 @@ export default function ShareCardActions({
   origin,
   locked = false,
   onLocked,
+  url: urlOverride = "",
 }) {
   const [status, setStatus] = useState("");
-  const url = absoluteShareUrl({
+  const url = urlOverride || absoluteShareUrl({
     origin: origin || (typeof window !== "undefined" ? window.location.origin : ""),
     tab,
     cardId,
@@ -88,8 +91,21 @@ export default function ShareCardActions({
       </button>
       {showImage && model && (
         <button type="button" onClick={onImage} style={btn} title={locked ? "Sign in to share an image" : "Download or share a PNG card"}>
-          <GuestLock locked={locked} /> Share image
+          <GuestLock locked={locked} /> Share
         </button>
+      )}
+      {showImage && model && (
+        <a
+          href={locked ? undefined : xPostIntentUrl({ text: shareTweetText(model), url })}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-post-x="true"
+          onClick={(e) => { e.stopPropagation(); if (locked) { e.preventDefault(); onLocked?.("post-x"); } }}
+          style={{ ...btn, textDecoration: "none" }}
+          title={locked ? "Sign in to post" : "Post this pick on X (attach the saved image)"}
+        >
+          <GuestLock locked={locked} /> Post on X
+        </a>
       )}
       {status && <span style={{ fontSize: 11, color: "#10b981", fontWeight: 600 }}>{status}</span>}
     </div>

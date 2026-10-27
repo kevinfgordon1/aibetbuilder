@@ -483,7 +483,7 @@ console.log("shareCard.test.js ok");
     hedge: { stake: 1045, bookLabel: "FanDuel", odds: -950, selection: "Missouri State +17.5", payout: 1140 },
     legs: [{ name: "WKU -17.5", market: "SPR", game: "MOST @ WKU", dk: 1140 }],
   });
-  assert.equal(shareCardResult(fbLock).headline, "$95 guaranteed");
+  assert.equal(shareCardResult(fbLock).headline, "$95 hedged");
   assert.match(shareCardResult(fbLock).sub, /from a \$100 free bet · 95% converted to cash/);
   assert.equal(fbLock.hedge.odds, "-950");
   assert.equal(shareCardLayout(fbLock).steps, true);

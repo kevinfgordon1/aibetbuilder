@@ -91,8 +91,8 @@ export const BETSTAMP_EXTRA_BOARD_BOOKS = Object.freeze([
   { id: 500, key: "betrivers", label: "BetRivers (Kambi)", color: "#f59e0b", bg: "rgba(245,158,11,0.15)", logo: null },
   { id: 105, key: "bet105", label: "Bet105", color: "#38bdf8", bg: "rgba(56,189,248,0.15)", logo: null },
   { id: 614, key: "betus", label: "BetUS", color: "#ef4444", bg: "rgba(239,68,68,0.15)", logo: null },
-  { id: 700, key: "thescore", label: "theScore Bet", color: "#60a5fa", bg: "rgba(96,165,250,0.15)", logo: null },
-  { id: 850, key: "hardrockbet", label: "Hard Rock", color: "#a78bfa", bg: "rgba(167,139,250,0.15)", logo: null },
+  { id: 700, key: "thescore", label: "theScore Bet", color: "#e6c65c", bg: "rgba(96,165,250,0.15)", logo: null },
+  { id: 850, key: "hardrockbet", label: "Hard Rock", color: "#e6c65c", bg: "rgba(167,139,250,0.15)", logo: null },
 ]);
 
 for (const b of BETSTAMP_EXTRA_BOARD_BOOKS) {

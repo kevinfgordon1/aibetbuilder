@@ -396,7 +396,7 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
         .rootfor .note{color:#9ca3af;font-size:12px;margin-top:6px}
         .rootfor .wi{padding:2px 7px;margin-right:4px;font-size:11px}.rootfor .wi.won{background:#065f46;border-color:#10b981}.rootfor .wi.lost{background:#7f1d1d;border-color:#ef4444}
         .rootfor .banner{background:#1e293b;border:1px solid #f59e0b;border-radius:8px;padding:6px 10px;margin:8px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-        .rootfor .slot td{background:#111827;color:#93c5fd;font-weight:600;font-size:12px}
+        .rootfor .slot td{background:#111827;color:#f5d76e;font-weight:600;font-size:12px}
         .rootfor .seg{display:inline-flex;border:1px solid #374151;border-radius:8px;overflow:hidden}.rootfor .seg button{border:0;border-radius:0;background:transparent;color:#9ca3af}.rootfor .seg button.on{background:#f59e0b;color:#111827;font-weight:600}
         .rootfor .lead{font-size:18px;font-weight:600;line-height:1.35;margin:12px 0 2px}.rootfor .lead2{color:#cbd5e1;font-size:14px;margin:0 0 12px}
         .rootfor .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:6px 0 14px}

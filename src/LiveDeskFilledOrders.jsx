@@ -40,7 +40,7 @@ function Badge({ children, tone }) {
     green: { bg: "rgba(16,185,129,0.12)", bd: "rgba(16,185,129,0.4)", fg: "#6ee7b7" },
     amber: { bg: "rgba(245,158,11,0.12)", bd: "rgba(245,158,11,0.4)", fg: "#fcd34d" },
     gray: { bg: "rgba(255,255,255,0.04)", bd: "rgba(255,255,255,0.12)", fg: "#9ca3af" },
-    blue: { bg: "rgba(59,130,246,0.12)", bd: "rgba(59,130,246,0.35)", fg: "#93c5fd" },
+    blue: { bg: "rgba(212,175,55,0.12)", bd: "rgba(212,175,55,0.35)", fg: "#f5d76e" },
   };
   const t = tones[tone] || tones.gray;
   return (
@@ -79,7 +79,7 @@ export default function LiveDeskFilledOrders({ fills, stale, failed, note, style
               aria-pressed={on}
               onClick={() => pickMode(id)}
               title={id === "desk" ? "Fills tagged Desk (orders rested from this desk, incl. Bet Protect)" : "Every fill, incl. Combo Locks hedge fills tagged Combo"}
-              style={{ padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer", background: on ? "rgba(59,130,246,0.18)" : "rgba(255,255,255,0.04)", border: "1px solid " + (on ? "rgba(59,130,246,0.5)" : "rgba(255,255,255,0.12)"), color: on ? "#bfdbfe" : "#9ca3af" }}
+              style={{ padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer", background: on ? "rgba(212,175,55,0.18)" : "rgba(255,255,255,0.04)", border: "1px solid " + (on ? "rgba(212,175,55,0.5)" : "rgba(255,255,255,0.12)"), color: on ? "#bfdbfe" : "#9ca3af" }}
             >{label} <span style={{ opacity: 0.7 }}>{count}</span></button>
           );
         })}

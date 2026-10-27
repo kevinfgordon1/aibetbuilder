@@ -211,7 +211,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
 
   const champRow = (key, name, isNo, priceMap, rowBest, hideNameBorder, sizeMap, bestBooks, bestSize) => (
     <tr key={key} style={{ background: isNo ? "rgba(239,68,68,0.05)" : "transparent" }}>
-      <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: isNo ? "#0f0a0b" : "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", borderBottom: hideNameBorder ? "none" : "1px solid rgba(255,255,255,0.03)", fontSize: 13, fontWeight: 600, color: isNo ? "#9ca3af" : "#e8eaed" }}>
+      <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: isNo ? "#0f0a0b" : "#0b0b0c", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", borderBottom: hideNameBorder ? "none" : "1px solid rgba(255,255,255,0.03)", fontSize: 13, fontWeight: 600, color: isNo ? "#9ca3af" : "#e8eaed" }}>
         {name}{isNo && <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 8, fontSize: 11 }}>NO</span>}
       </td>
       {champBooks.map((b) => {
@@ -259,9 +259,9 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
             gap: 6px;
             padding: 6px 12px;
             border-radius: 6px;
-            border: 1px solid rgba(59,130,246,0.35);
-            background: rgba(59,130,246,0.12);
-            color: #93c5fd;
+            border: 1px solid rgba(212,175,55,0.35);
+            background: rgba(212,175,55,0.12);
+            color: #f5d76e;
             font-size: 12px;
             font-weight: 700;
             cursor: pointer;
@@ -273,7 +273,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
       `}</style>
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {(sportChips || []).map((s) => (
-          <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "#3b82f6" : "rgba(255,255,255,0.05)", color: boardSport === s.id ? "#fff" : "#6b7280" }}>
+          <button key={s.id} onClick={() => setBoardSport(s.id)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === s.id ? "#d4af37" : "rgba(255,255,255,0.05)", color: boardSport === s.id ? "#fff" : "#6b7280" }}>
             {s.label}
           </button>
         ))}
@@ -281,7 +281,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
       <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8eaed", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         {["ml", "spr", "tot", "champ"].map((m) => (
-          <button key={m} onClick={() => setMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#3b82f6" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
+          <button key={m} onClick={() => setMarket(m)} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: market === m ? "#d4af37" : "rgba(255,255,255,0.05)", color: market === m ? "#fff" : "#6b7280" }}>
             {m === "ml" ? "Moneyline" : m === "spr" ? "Spread" : m === "tot" ? "Totals" : "Championship"}
           </button>
         ))}
@@ -296,7 +296,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
         <div className={"odds-book-toggles" + (booksOpen ? " is-open" : "")}>
           <div className="odds-book-divider" style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
           {boardBooks.map((b) => (
-            <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#3b82f6" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(59,130,246,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
+            <button key={b.key} onClick={() => toggleBook(b.key)} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", background: selectedBooks.has(b.key) ? "rgba(212,175,55,0.15)" : "rgba(255,255,255,0.03)", color: selectedBooks.has(b.key) ? "#d4af37" : "#4b5563", border: selectedBooks.has(b.key) ? "1px solid rgba(212,175,55,0.3)" : "1px solid rgba(255,255,255,0.06)" }}>
               {b.label}
             </button>
           ))}
@@ -346,15 +346,15 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
             )}
             {Object.entries(grouped).map(([dateKey, dateGames]) => (
               <>
-                <tr key={dateKey + "_h"} style={{ background: "rgba(59,130,246,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{dateKey}</td>
+                <tr key={dateKey + "_h"} style={{ background: "rgba(212,175,55,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#d4af37" }}>{dateKey}</td>
                 </tr>
                 {dateGames.map((game, gi) => {
                   const { bestAway, bestHome, bestDraw } = getBestForGame(game, deferredMarket, deferredSelectedBooks, allBooks);
                   const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
                   return (
                     <tr key={gi} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                      <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0a0b0f", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
+                      <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0b0b0c", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                         <div style={{ padding: "8px 16px 4px" }}>
                           <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>{new Date(game.commence_time).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} ET</div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 6 }}>{game.away}</div>
