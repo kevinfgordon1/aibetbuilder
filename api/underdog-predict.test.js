@@ -27,8 +27,10 @@ const {
   sportScaffoldUrl,
 } = require('../lib/underdog-lobby');
 
-const PHONE_EXPERIENCE_ID = '018e1234-5678-9abc-def0-123456789009';
-const STICKER_EXPERIENCE_ID = 'b34dfd93-d0e8-4da3-8bf4-45c15c548dec';
+// 2026-10-27: b34dfd93 is the experience the phone prices (Troy +1070,
+// Nets +490); 018e1234 serves a stale/wider book (Troy +835, Nets +456).
+const PHONE_EXPERIENCE_ID = 'b34dfd93-d0e8-4da3-8bf4-45c15c548dec';
+const STALE_EXPERIENCE_ID = '018e1234-5678-9abc-def0-123456789009';
 
 function mockRes() {
   return {
@@ -260,14 +262,14 @@ function linesFor(sport) {
   {
     assert.equal(DEFAULT_STATE_CONFIG_ID, 'f8996742-f10c-4d32-955a-dcbcaa5dc5c0');
     assert.equal(DEFAULT_PRODUCT_EXPERIENCE_ID, PHONE_EXPERIENCE_ID);
-    assert.notEqual(DEFAULT_PRODUCT_EXPERIENCE_ID, STICKER_EXPERIENCE_ID);
+    assert.notEqual(DEFAULT_PRODUCT_EXPERIENCE_ID, STALE_EXPERIENCE_ID);
     assert.equal(DEFAULT_CLIENT_VERSION, '20260918170103');
     const cfg = readConfig({});
     const url = matchGroupedLinesUrl(cfg, 178911);
     assert.match(url, /\/v1\/lobbies\/content\/match_grouped_lines\?/);
     assert.match(url, /match_id=178911/);
     assert.match(url, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
-    assert.doesNotMatch(url, new RegExp(STICKER_EXPERIENCE_ID));
+    assert.doesNotMatch(url, new RegExp(STALE_EXPERIENCE_ID));
     assert.doesNotMatch(url, /betstamp|book_ids=196/);
     const linesUrl = contentLinesUrl(cfg, 'CFB', MONEYLINE_FILTER_IDS.CFB);
     assert.match(linesUrl, /\/v1\/lobbies\/content\/lines\?/);
@@ -280,7 +282,7 @@ function linesFor(sport) {
     assert.match(linesUrl, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
     assert.match(linesUrl, new RegExp(`state_config_id=${DEFAULT_STATE_CONFIG_ID}`));
     assert.doesNotMatch(linesUrl, /\/v1\/over_under_lines/);
-    assert.doesNotMatch(linesUrl, new RegExp(STICKER_EXPERIENCE_ID));
+    assert.doesNotMatch(linesUrl, new RegExp(STALE_EXPERIENCE_ID));
     assert.doesNotMatch(linesUrl, /betstamp|book_ids=196/);
     const scaffoldUrl = sportScaffoldUrl(cfg, 'NFL');
     assert.match(scaffoldUrl, /\/v1\/lobbies\/scaffolds\/sports\?/);
@@ -412,8 +414,52 @@ function linesFor(sport) {
     assert.equal(calls[0].headers.accept, 'application/json');
     assert.equal(calls[0].headers['client-type'], 'web');
     assert.equal(calls[0].headers['client-version'], '20260918170103');
-    assert.ok(!calls.some((c) => /betstamp|over_under_lines|match_grouped_lines/i.test(c.url)));
-    assert.ok(!calls.some((c) => c.url.includes(STICKER_EXPERIENCE_ID)));
+    assert.ok(!calls.some((c) => /betstamp|over_under_lines/i.test(c.url)));
+    // Moneylines try the grouped game list first (404 here), then the pill.
+    const grouped = calls.filter((c) => c.url.includes('match_grouped_lines'));
+    assert.ok(grouped.some((c) => sportOf(c.url) === 'CFB' && /filter_type=MarketGroup/.test(c.url)));
+    assert.ok(grouped.some((c) => sportOf(c.url) === 'NFL' && /market_categories%5B%5D=core/.test(c.url)));
+    assert.ok(grouped.every((c) => /match_limit=250/.test(c.url)));
+    assert.ok(!calls.some((c) => c.url.includes(STALE_EXPERIENCE_ID)));
+  }
+
+  {
+    // Grouped list carries the moneylines: no moneyline pill call needed.
+    const { groupedLinesUrl, GROUPED_MATCH_LIMIT } = require('../lib/underdog-lobby');
+    assert.ok(GROUPED_MATCH_LIMIT >= 200, 'CFB had 115 games; the lobby default 100 truncates');
+    const cfg = readConfig({});
+    const cfbUrl = groupedLinesUrl(cfg, 'CFB');
+    assert.match(cfbUrl, /\/v1\/lobbies\/content\/match_grouped_lines\?/);
+    assert.match(cfbUrl, new RegExp(`filter_id=${TEAM_PICKS_MARKET_GROUP}`));
+    assert.match(cfbUrl, /filter_type=MarketGroup/);
+    assert.match(cfbUrl, /match_limit=250/);
+    assert.match(cfbUrl, new RegExp(`product_experience_id=${PHONE_EXPERIENCE_ID}`));
+    const nbaUrl = groupedLinesUrl(cfg, 'NBA');
+    assert.match(nbaUrl, /market_categories%5B%5D=core/);
+    assert.doesNotMatch(nbaUrl, /filter_type=MarketGroup/);
+    const calls = [];
+    const fetchFn = async (url) => {
+      calls.push(String(url));
+      const sport = sportOf(url);
+      if (String(url).includes('match_grouped_lines')) {
+        if (sport === 'CFB') return jsonRes(200, cfbLines);
+        if (sport === 'NFL') return jsonRes(200, nflLines);
+        return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+      }
+      if (String(url).includes('/lobbies/scaffolds/sports')) return jsonRes(200, { sections: [] });
+      if (String(url).includes('/lobbies/content/lines')) {
+        if (sport === 'MLB' && filterOf(url) === MONEYLINE_FILTER_IDS.MLB) return jsonRes(200, mlbLines);
+        return jsonRes(200, { games: {}, appearances: {}, over_under_lines: {} });
+      }
+      return jsonRes(404, {});
+    };
+    const res = mockRes();
+    await handler({ method: 'GET' }, res, { env: {}, cache: new Map(), fetchFn });
+    assert.equal(res.body.games.length, 3);
+    assert.equal(res.body.games.find((g) => g.matchId === 224202).lines.find((l) => l.name === 'Ole Miss Rebels').american, 127);
+    const pillMl = calls.filter((u) => u.includes('/lobbies/content/lines') && [MONEYLINE_FILTER_IDS.CFB, MONEYLINE_FILTER_IDS.NFL].includes(filterOf(u)));
+    assert.equal(pillMl.length, 0, 'grouped moneylines found: no pill fallback for CFB/NFL');
+    assert.ok(calls.some((u) => u.includes('/lobbies/content/lines') && filterOf(u) === MONEYLINE_FILTER_IDS.MLB), 'empty grouped MLB falls back to the pill');
   }
 
   {
@@ -578,8 +624,9 @@ function linesFor(sport) {
     assert.equal(lineCalls.filter((url) => sportOf(url) === 'CFB' && filterOf(url) === SPREAD_FILTER_IDS.CFB).length, 1);
     assert.ok(!lineCalls.some((url) => filterOf(url) === 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'));
     assert.ok(calls.every((url) => url.includes(PHONE_EXPERIENCE_ID)));
-    assert.ok(!calls.some((url) => url.includes(STICKER_EXPERIENCE_ID)));
-    assert.ok(!calls.some((url) => /betstamp|book_ids=196|match_grouped_lines/.test(url)));
+    assert.ok(!calls.some((url) => url.includes(STALE_EXPERIENCE_ID)));
+    assert.ok(!calls.some((url) => /betstamp|book_ids=196/.test(url)));
+    assert.ok(calls.filter((url) => url.includes('match_grouped_lines')).every((url) => /match_limit=250/.test(url)));
   }
 
   {
@@ -648,7 +695,7 @@ function linesFor(sport) {
     const apiSrc = fs.readFileSync(path.join(root, 'api/underdog-predict.js'), 'utf8');
     assert.doesNotMatch(lobbySrc, /require\(['"]\.\.\/src\//);
     assert.doesNotMatch(apiSrc, /require\(['"]\.\.\/src\//);
-    assert.doesNotMatch(lobbySrc, new RegExp(`product_experience_id:\\s*'${STICKER_EXPERIENCE_ID}'`));
+    assert.doesNotMatch(lobbySrc, new RegExp(`product_experience_id:\\s*'${STALE_EXPERIENCE_ID}'`));
     // Vercel Node does not enable require(esm). This is the boot path that
     // returned FUNCTION_INVOCATION_FAILED when the lobby required src/.
     const loaded = spawnSync(process.execPath, [

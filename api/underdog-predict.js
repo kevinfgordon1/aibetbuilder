@@ -18,9 +18,9 @@
 // on that game stay. A normal −110 / −110 pair stays. Phone PE only.
 // Defaults (override with server env, never VITE_):
 //   UNDERDOG_STATE_CONFIG_ID=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
-//   UNDERDOG_PRODUCT_EXPERIENCE_ID=018e1234-5678-9abc-def0-123456789009
+//   UNDERDOG_PRODUCT_EXPERIENCE_ID=b34dfd93-d0e8-4da3-8bf4-45c15c548dec
 //   UNDERDOG_CLIENT_VERSION=20260918170103
-// The other experience id returns the sticker (+252). A failed fetch
+// The old 018e1234 experience id serves a stale/wider book. A failed fetch
 // yields games: [] so callers omit the line. Never Betstamp book 196.
 
 const { fetchUnderdogPhone } = require('../lib/underdog-lobby');

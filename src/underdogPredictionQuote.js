@@ -1,9 +1,10 @@
 // Underdog first-party prediction prices (the phone), distinct from
 // odds.fantasy and from Betstamp book 196.
 //
-// Live capture, match_id 178911 (NYG @ LAR), 2026-09-21:
+// Live capture, match_id 178911 (NYG @ LAR), 2026-09-21 (then on the old
+// 018e1234 experience; the phone experience is now b34dfd93-d0e8-4da3-8bf4-45c15c548dec):
 //   GET /v1/lobbies/content/match_grouped_lines
-//       product_experience_id=018e1234-5678-9abc-def0-123456789009
+//       product_experience_id=b34dfd93-d0e8-4da3-8bf4-45c15c548dec
 //       state_config_id=f8996742-f10c-4d32-955a-dcbcaa5dc5c0
 //       client-version: 20260918170103, client-type: web
 //   Giants odds.prediction { american:+245, decimal:3.45, probability:27 }
@@ -11,8 +12,8 @@
 // Prices live on over_under_lines options, not on the scaffold.
 // /v1/lobbies/scaffolds/matches returns sections only — no americans.
 // Do not parse a phone price from a scaffold body.
-// product_experience_id b34dfd93-d0e8-4da3-8bf4-45c15c548dec is the
-// sticker (+252). Do not substitute it for the phone id above.
+// 2026-10-27: b34dfd93-d0e8-4da3-8bf4-45c15c548dec is the phone
+// (Troy +1070, Nets +490). The old 018e1234-… id is a stale/wider book.
 // Prefer odds.prediction.american. Use american_price only when a
 // prediction object is present and its american is blank. Never read
 // odds.fantasy for Promo or the board.
@@ -231,6 +232,9 @@ const UNDERDOG_TEAM_ALIASES = new Map([
   ["ul monroe warhawks", "louisiana monroe warhawks"],
   ["mcneese state cowboys", "mcneese cowboys"],
   ["southern mississippi golden eagles", "southern miss golden eagles"],
+  // Odds feeds say "Sam Houston State", Underdog says "Sam Houston" (the
+  // "state" qualifier blocks teamsLikelySame). Missed 2026-10-27.
+  ["sam houston state bearkats", "sam houston bearkats"],
 ]);
 
 function aliasedTeamName(raw) {
