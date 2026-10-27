@@ -1,17 +1,19 @@
 // Promo Builder "Min depth per leg" (owner-only, canSeeOwnerTools).
 //
-// BLENDED depth: walk the opposing price levels across every depth venue
-// (Kalshi / Polymarket / Novig / ProphetX), best fee-adjusted American first,
+// PER-VENUE depth (Kevin, 2026-10-27: a hedge is placed in ONE account, so
+// venues are never summed). Each depth venue (Kalshi / Polymarket / Novig /
+// ProphetX) walks its OWN opposing ladder, best fee-adjusted American first,
 // adding up potential PROFIT (Kevin: depth = what the bet can win, not the
 // stake; sizes are $ stake, see lib/book-depth.js, so each level counts
 // size × (1 − p) / p, e.g. $3,000 at −200 = $1,500 depth) until the
 // minimum is reached. Prices are already net of each venue's own fee
-// (Novig pregame $0, Polymarket US maker $0, ProphetX 2%, Kalshi series fee),
-// exactly as the inverse method sees them. If the minimum is reachable the
-// leg stays and its opposing price becomes the depth-weighted (VWAP) blend
-// of the levels walked — never better than the best quote. Only when total
-// blendable depth across venues is below the minimum is the leg dropped.
-// Sportsbook-best legs (no depth feed) drop while a minimum is set.
+// (Novig pregame $0, Polymarket US maker $0, ProphetX 2%, Kalshi series fee).
+// Venues that cannot reach the minimum alone are discarded; the leg is
+// priced at the best (highest VWAP) venue that can, and moves to that venue.
+// Only when no single venue reaches the minimum is the leg dropped — two
+// venues that reach it only together do not count.
+// Sportsbook-best legs (no depth feed) fall back to the exchange venues
+// quoting the same side (bestOppVenues) instead of dropping.
 // 0 / blank = off: nothing here runs and the inverse method is untouched.
 
 import { resolvePmBookLevels, isPmBlendVenue, blendAskLadderToPayout, americanToImpliedProb } from "./blendAskLadder.js";
@@ -74,68 +76,96 @@ export function venueDepthLeg(leg, book) {
   return { ...leg, bestOppBook: book, bestOppLevels: undefined, bestOppSize: undefined, pmBlend: undefined };
 }
 
-// Combined ladder across venues: best venue's full ladder (live → stored →
-// top-of-book size), plus every other depth venue's live ladder when loaded,
-// else its feed top-of-book quote. Levels on the wrong side of the quoted
-// best (or that would invert the leg) are ignored.
-export function crossVenueLadder(leg, levels, laddersByKey, keyOf) {
-  if (!leg || !isPmBlendVenue(leg.bestOppBook)) return [];
+// One ladder per depth venue. A PM best venue uses its live → stored →
+// top-of-book ladder; every other depth venue in bestOppVenues uses its live
+// ladder when loaded, else its feed top-of-book quote. Levels on the wrong
+// side of the quoted best (or that would invert the leg) are ignored.
+// Sportsbook-best legs get only the exchange venues (fallback).
+export function venueLadders(leg, levels, laddersByKey, keyOf) {
+  if (!leg) return [];
   const quoted = Number(quotedOpp(leg));
-  const out = [];
-  const push = (book, lvls) => {
+  const clean = (lvls) => {
+    const out = [];
     for (const l of lvls || []) {
       const american = Number(l && l.american);
       const size = Number(l && l.size);
       if (!isFinite(american) || american === 0 || !(size > 0)) continue;
       if (isFinite(quoted) && quoted !== 0 && quoteLooksWrongSideOf(quoted, american)) continue;
       if (oppQuoteLooksInverted(leg.dk, american)) continue;
-      out.push({ book, american, size });
+      out.push({ american, size });
     }
+    return out.sort((x, y) => y.american - x.american);
   };
-  const bestBook = String(leg.bestOppBook).toLowerCase();
-  push(bestBook, resolvePmBookLevels(leg, levels));
-  const seen = new Set([bestBook]);
+  const bestBook = String(leg.bestOppBook || "").toLowerCase();
+  const out = [];
+  const seen = new Set();
+  if (isPmBlendVenue(bestBook)) {
+    out.push({ book: bestBook, levels: clean(resolvePmBookLevels(leg, levels)), best: true });
+    seen.add(bestBook);
+  }
   for (const v of Array.isArray(leg.bestOppVenues) ? leg.bestOppVenues : []) {
-    const book = String(v && v.book || "").toLowerCase();
+    const book = String((v && v.book) || "").toLowerCase();
     if (!isPmBlendVenue(book) || seen.has(book)) continue;
     seen.add(book);
     const alt = venueDepthLeg(leg, book);
     const live = laddersByKey && keyOf ? laddersByKey[keyOf(alt)] : null;
-    if (Array.isArray(live) && live.length) push(book, live);
-    else push(book, [{ american: v.american, size: v.size }]);
+    out.push({ book, levels: clean(Array.isArray(live) && live.length ? live : [{ american: v.american, size: v.size }]), best: false });
   }
-  out.sort((a, b) => b.american - a.american);
   return out;
 }
 
-// { american, stakeFilled, profitFilled, venues, levelsUsed, complete } or null (drop).
-// `minDepth`, `available` and `target` are potential PROFIT in $.
+// Back-compat: every venue's levels in one list (display / diagnostics only;
+// never summed for the minimum).
+export function crossVenueLadder(leg, levels, laddersByKey, keyOf) {
+  const out = [];
+  for (const v of venueLadders(leg, levels, laddersByKey, keyOf)) for (const l of v.levels) out.push({ book: v.book, ...l });
+  return out.sort((a, b) => b.american - a.american);
+}
+
+// { complete, american, venue, top, topBook, stakeFilled, profitFilled,
+//   venues, parts, levelsUsed, available, target, skippedVenues } or
+// { complete: false, available } / null. `minDepth`, `available` and
+// `target` are potential PROFIT in $; `available` is the deepest single
+// venue (venues are never summed).
 export function blendLegToMinDepth(leg, minDepth, levels, laddersByKey, keyOf = depthCacheKey) {
   const min = parseMinLegDepth(minDepth);
-  if (!min || !leg || !isPmBlendVenue(leg.bestOppBook)) return null;
-  const ladder = crossVenueLadder(leg, levels, laddersByKey, keyOf);
-  if (!ladder.length) return null;
-  const total = ladder.reduce((s, l) => s + profitAtAmerican(l.size, l.american), 0);
-  if (total + 0.5 < min) return { complete: false, available: total };
-  const blend = blendAskLadderToPayout(ladder, { targetPayout: min });
-  if (!blend || !blend.complete || blend.american == null) return { complete: false, available: total };
+  if (!min || !leg) return null;
+  const venues = venueLadders(leg, levels, laddersByKey, keyOf).filter((v) => v.levels.length);
+  if (!venues.length) return null;
+  let best = null;
+  let deepest = 0;
+  const skippedVenues = [];
+  for (const v of venues) {
+    const total = v.levels.reduce((s, l) => s + profitAtAmerican(l.size, l.american), 0);
+    deepest = Math.max(deepest, total);
+    if (total + 0.5 < min) { skippedVenues.push(v.book); continue; }
+    const blend = blendAskLadderToPayout(v.levels, { targetPayout: min });
+    if (!blend || !blend.complete || blend.american == null) { skippedVenues.push(v.book); continue; }
+    const top = v.levels[0].american;
+    const american = blend.american > top ? top : blend.american; // never better than the venue's best
+    if (!best || american > best.american) best = { v, blend, american, top, total };
+  }
+  if (!best) return { complete: false, available: deepest, skippedVenues };
+  const { v, blend, american, top, total } = best;
   let left = min;
-  const venues = [];
   const parts = [];
-  for (const l of ladder) {
+  for (const l of v.levels) {
     if (left <= 1e-9) break;
     const take = Math.min(profitAtAmerican(l.size, l.american), left);
     if (!(take > 0)) continue;
     left -= take;
-    if (!venues.includes(l.book)) venues.push(l.book);
     const last = parts[parts.length - 1];
-    if (last && last.book === l.book && last.american === l.american) last.profit += take;
-    else parts.push({ book: l.book, american: l.american, profit: take });
+    if (last && last.american === l.american) last.profit += take;
+    else parts.push({ book: v.book, american: l.american, profit: take });
   }
-  // Never better than the best quote (rounding guard).
-  const top = ladder[0].american;
-  const american = blend.american > top ? top : blend.american;
-  return { complete: true, american, top, topBook: ladder[0].book, stakeFilled: blend.stakeFilled, profitFilled: min, venues, parts, levelsUsed: blend.levelsUsed, available: total, target: min };
+  let topSize = 0;
+  for (const l of v.levels) { if (l.american !== top) break; topSize += l.size; }
+  return {
+    complete: true, american, venue: v.book, venueIsBest: !!v.best, top, topSize, topBook: v.book,
+    stakeFilled: blend.stakeFilled, profitFilled: min, venues: [v.book], parts,
+    levelsUsed: blend.levelsUsed, available: total, target: min,
+    skippedVenues: skippedVenues.filter((b) => b !== v.book),
+  };
 }
 
 export function legMeetsMinDepth(leg, minDepth, levels, laddersByKey) {
@@ -153,6 +183,21 @@ export function applyMinDepthToLeg(leg, minDepth, levels, laddersByKey) {
   if (!min) return leg;
   const b = blendLegToMinDepth(leg, min, levels, laddersByKey);
   if (!b || !b.complete) return null;
+  const sameVenue = String(leg.bestOppBook || "").toLowerCase() === b.venue;
+  if (!sameVenue) {
+    // The hedge moves to the one venue that covers the minimum alone
+    // (thin best venue, or sportsbook-best fallback to an exchange).
+    return {
+      ...leg,
+      bestOppBook: b.venue,
+      bestOppQuoted: b.top,
+      bestOpp: b.american,
+      bestOppSize: b.topSize,
+      bestOppLevels: undefined,
+      hedgeVenueFrom: leg.hedgeVenueFrom || String(leg.bestOppBook || "").toLowerCase(),
+      minDepthBlend: { ...b, impliedProb: americanToImpliedProb(b.american) },
+    };
+  }
   const cur = Number(leg.bestOpp);
   const next = isFinite(cur) && cur !== 0 && cur < b.american ? cur : b.american;
   return {
@@ -163,7 +208,7 @@ export function applyMinDepthToLeg(leg, minDepth, levels, laddersByKey) {
   };
 }
 
-// Scan pool: drop legs that cannot fill the minimum across venues.
+// Scan pool: drop legs no single venue can fill to the minimum.
 export function filterLegsByMinDepth(legs, minDepth) {
   const list = Array.isArray(legs) ? legs : [];
   if (!parseMinLegDepth(minDepth)) return list;
@@ -199,12 +244,13 @@ export function filterPicksByMinDepth(picks, minDepth, laddersByKey) {
 }
 
 // Extra ladders to fetch for the visible page: the same selection on each
-// other depth venue. Only when a minimum is set.
+// other depth venue (all exchange venues for a sportsbook-best leg). Only
+// when a minimum is set.
 export function minDepthAltVenueLegs(legs, minDepth) {
   if (!parseMinLegDepth(minDepth)) return [];
   const out = [];
   for (const l of legs || []) {
-    if (!l || !isPmBlendVenue(l.bestOppBook)) continue;
+    if (!l) continue;
     for (const v of Array.isArray(l.bestOppVenues) ? l.bestOppVenues : []) {
       const book = String(v && v.book || "").toLowerCase();
       if (!isPmBlendVenue(book) || book === String(l.bestOppBook).toLowerCase()) continue;
@@ -218,7 +264,8 @@ const VENUE_LABELS = { novig: "Novig", kalshi: "Kalshi", polymarket: "Polymarket
 const fmtAm = (n) => (n > 0 ? `+${n}` : `${n}`);
 const fmtUsd = (n) => `$${Math.round(n).toLocaleString("en-US")}`;
 
-// "blended to $2,000 to win (Novig +336 $649, then Novig +317 $1,351)"
+// "blended to $2,000 to win (Novig +336 $649, then Novig +317 $1,351)" —
+// always one venue now (venues are never summed).
 export function formatMinDepthBlendFlag(md) {
   if (!md || !md.complete || md.target == null) return "";
   const parts = Array.isArray(md.parts) ? md.parts : [];

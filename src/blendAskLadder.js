@@ -6,12 +6,12 @@
 //   and No Sweat. "Payout" in UI copy is this profit, not face/total return
 //   (stake + win). Incomplete walk → lowLiquidity. Sportsbooks never flag.
 //
-// Top-of-book gate (Hide low liquidity):
-//   The best American price band alone must also fund $500 profit. Deeper,
-//   worse levels may still shape VWAP when the top is deep enough, but a
-//   thin top (e.g. $64 on a -2000 No) cannot clear Hide low liquidity by
-//   walking into junk/resting depth behind it — and must not claim
-//   "blended to $500 payout".
+// Per-venue gate (Hide low liquidity, Kevin 2026-10-27):
+//   A hedge is placed in one account, so venues are never blended together.
+//   Each venue walks its own fee-adjusted ladder to $500 profit; a venue
+//   that cannot cover it alone is discarded and the hedge is priced on the
+//   best venue that can (see applyPmBlendToLeg). A thin best price (Troy:
+//   ProphetX $12) no longer drops the leg when another venue covers alone.
 //
 // Lock math is separate: requiredBoostHedgeStake / freebet / nosweat hedge $
 //   still describe the perfect-lock stake for Guaranteed Profit. That is not
@@ -317,69 +317,109 @@ export function trueOppAmerican(leg) {
   return Number.isFinite(n) && n !== 0 ? n : null;
 }
 
+// One venue's opposing ladder for this selection. The best venue uses the
+// live ladder → stored ladder → top-of-book size (resolvePmBookLevels).
+// Other venues use their live ladder from ctx.laddersByKey when the page
+// fetched it, else their feed top-of-book quote (bestOppVenues). Prices
+// are already net of each venue's own fee (Novig pregame $0, Polymarket US
+// maker $0, ProphetX 2%, Kalshi series fee). Levels on the wrong side of
+// the quoted best, or that would invert the leg, are ignored.
+function venueKey(leg, book) {
+  return [book, leg.sport, leg.game, leg.bestOppName || leg.name, leg.market].join("|");
+}
+
+export function pmVenueLadders(leg, levels, ctx = {}) {
+  if (!leg || !isPmBlendVenue(leg.bestOppBook)) return [];
+  const quoted = Number(leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp);
+  const clean = (lvls) => normalizeLevels(lvls).filter((l) =>
+    !(isFinite(quoted) && quoted !== 0 && quoteLooksWrongSideOf(quoted, l.american))
+    && !oppQuoteLooksInverted(leg.dk, l.american));
+  const bestBook = String(leg.bestOppBook).toLowerCase();
+  const out = [{ book: bestBook, levels: clean(resolvePmBookLevels(leg, levels)), best: true }];
+  const seen = new Set([bestBook]);
+  const ladders = ctx && ctx.laddersByKey;
+  for (const v of Array.isArray(leg.bestOppVenues) ? leg.bestOppVenues : []) {
+    const book = String((v && v.book) || "").toLowerCase();
+    if (!isPmBlendVenue(book) || seen.has(book)) continue;
+    seen.add(book);
+    const live = ladders ? ladders[venueKey(leg, book)] : null;
+    const lvls = Array.isArray(live) && live.length ? live : [{ american: v.american, size: v.size }];
+    out.push({ book, levels: clean(lvls), best: false });
+  }
+  return out;
+}
+
+// Hide low liquidity (Kevin, 2026-10-27): a hedge is placed in ONE account,
+// so venues are never blended together. Each venue walks its own
+// fee-adjusted ladder (levels within that venue blend) to the $500-profit
+// bar. Venues that cannot cover it alone are discarded; the hedge and EV are
+// priced on the best (highest VWAP American) venue that can. The leg is
+// low liquidity only when no single venue covers the bar — two thin venues
+// that would only cover it together do not count.
+// Troy +1070 (2026-10-27): ProphetX −1224 with $12 is discarded; Kalshi
+// −1236 with $1.63M covers alone → hedge on Kalshi, ≈ $80 free-bet cash.
 export function applyPmBlendToLeg(leg, levels, ctx = {}) {
   if (!leg || !isPmBlendVenue(leg.bestOppBook)) {
     return { ...leg, lowLiquidity: false, pmBlend: null };
   }
   const quoted = leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp;
-  const book = resolvePmBookLevels(leg, levels);
-  // Empty ladder and missing/invalid bestOppSize: no proven $500-profit
-  // fill. Rank + Hide-low-liquidity must not treat this as OK —
-  // the live depth overlay would later badge LOW LIQUIDITY.
-  if (!book.length) {
-    return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
+  const venues = pmVenueLadders(leg, levels, ctx);
+  const tried = [];
+  let chosen = null;
+  for (const v of venues) {
+    if (!v.levels.length) { tried.push({ book: v.book, covered: false, profitFilled: 0 }); continue; }
+    const blend = blendAskLadderToPayout(v.levels);
+    if (!blend || blend.american == null) { tried.push({ book: v.book, covered: false, profitFilled: 0 }); continue; }
+    const ok = blend.complete
+      && !oppQuoteLooksInverted(leg.dk, blend.american)
+      && !quoteLooksWrongSideOf(quoted, blend.american);
+    tried.push({ book: v.book, covered: ok, top: v.levels[0].american, profitFilled: blend.payoutFilled, american: blend.american });
+    if (ok && (!chosen || blend.american > chosen.blend.american)) chosen = { venue: v, blend };
   }
+  const skippedVenues = tried.filter((t) => !t.covered).map((t) => t.book);
 
-  // 1-leg boost / freebet / nosweat use the same $500 inverse-payout walk
-  // as multi-leg. Hedge $ stays on lock math (quoted opp), not this bar.
-  const blend = blendAskLadderToPayout(book);
-
-  if (!blend || blend.american == null) {
-    return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
-  }
-
-  // Hide low liquidity: top American band must fund $500 profit alone.
-  // Deeper levels must not launder a $64 top into "blended to $500".
-  const topOk = topBandCoversTarget(book);
-  if (!topOk) {
-    const topAm = book[0].american;
-    const topBand = book.filter((l) => l.american === topAm);
-    const topBlend = blendAskLadderToPayout(topBand) || blend;
+  if (!chosen) {
+    // No single venue covers $500 profit. Keep the quoted best on the card
+    // and report the best venue's own shortfall.
+    const best = venues[0];
+    const partial = best && best.levels.length ? blendAskLadderToPayout(best.levels) : null;
+    if (!partial || partial.american == null) {
+      return { ...leg, bestOppQuoted: quoted, lowLiquidity: true, pmBlend: null };
+    }
     const thin = {
-      ...topBlend,
+      ...partial,
       complete: false,
       lowLiquidity: true,
       thinTop: true,
-      topProfitFilled: topBlend.payoutFilled,
-      // Keep full-ladder VWAP off the card when the top cannot clear the bar.
+      topProfitFilled: partial.payoutFilled,
       american: quoted,
       impliedProb: americanToImpliedProb(quoted),
+      venues: tried,
       flag: undefined,
     };
     thin.flag = formatBlendedPayoutFlag(thin, quoted);
-    if (oppQuoteLooksInverted(leg.dk, thin.american) || quoteLooksWrongSideOf(quoted, thin.american)) {
-      return { ...leg, bestOppQuoted: quoted, bestOpp: quoted, lowLiquidity: true, pmBlend: null };
-    }
-    return {
-      ...leg,
-      bestOppQuoted: quoted,
-      bestOpp: quoted,
-      lowLiquidity: true,
-      pmBlend: thin,
-    };
+    return { ...leg, bestOppQuoted: quoted, bestOpp: quoted, lowLiquidity: true, pmBlend: thin };
   }
 
-  // Wrong-side depth (favorite ladder walked as the dog inverse) must not
-  // replace a sane quoted opp with +2000-class "true" odds.
-  if (oppQuoteLooksInverted(leg.dk, blend.american) || quoteLooksWrongSideOf(quoted, blend.american)) {
-    return { ...leg, bestOppQuoted: quoted, bestOpp: quoted, lowLiquidity: !!blend.lowLiquidity, pmBlend: null };
+  const { venue, blend } = chosen;
+  const top = venue.levels[0].american;
+  const pmBlend = { ...blend, venue: venue.book, venues: tried, skippedVenues };
+  if (venue.best) {
+    return { ...leg, bestOppQuoted: quoted, bestOpp: blend.american, lowLiquidity: false, pmBlend };
   }
+  // Hedge moves to the venue that can fill it alone.
+  let topSize = 0;
+  for (const l of venue.levels) { if (l.american !== top) break; topSize += l.size; }
   return {
     ...leg,
-    bestOppQuoted: quoted,
+    bestOppBook: venue.book,
+    bestOppQuoted: top,
     bestOpp: blend.american,
-    lowLiquidity: !!blend.lowLiquidity,
-    pmBlend: blend,
+    bestOppSize: topSize,
+    bestOppLevels: undefined,
+    hedgeVenueFrom: leg.hedgeVenueFrom || String(leg.bestOppBook).toLowerCase(),
+    lowLiquidity: false,
+    pmBlend,
   };
 }
 
@@ -400,6 +440,20 @@ export function preBlendStoredLadderLegs(legs, ctx = {}) {
 // trueOppAmerican → pmBlend.american) so every view uses the same blend.
 export function applyMinDepthOverlay(next, md) {
   if (!next || !md || md.american == null || !md.complete) return next;
+  // Min depth picked a different single venue (per-venue rule): the hedge
+  // and its price live there, whatever the $500 walk picked.
+  if (md.venue && String(next.bestOppBook || "").toLowerCase() !== md.venue) {
+    const mdAm = Number(md.american);
+    return {
+      ...next,
+      bestOppBook: md.venue,
+      bestOppQuoted: md.top != null ? md.top : next.bestOppQuoted,
+      ...(md.topSize != null ? { bestOppSize: md.topSize, bestOppLevels: undefined } : {}),
+      bestOpp: mdAm,
+      lowLiquidity: false,
+      pmBlend: { ...(next.pmBlend || {}), american: mdAm, complete: true, thinTop: false, lowLiquidity: false, venue: md.venue, levelsUsed: md.levelsUsed, minDepth: md, flag: formatMinDepthBlendFlag(md) },
+    };
+  }
   const mdAm = Number(md.american);
   const cur = trueOppAmerican(next);
   if (cur != null && cur <= mdAm) {
@@ -435,6 +489,7 @@ export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
     const levels = laddersByKey && laddersByKey[key];
     let next = applyPmBlendToLeg(leg, levels, {
       ...ctx,
+      laddersByKey: laddersByKey || ctx.laddersByKey,
       numLegs: ctx.numLegs != null ? ctx.numLegs : (legs || []).length,
     });
     // Owner Min depth per leg: keep the cross-venue blended price when it is

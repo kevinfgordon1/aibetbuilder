@@ -1449,15 +1449,15 @@ function attachNoSweatLockToPick(p, nextStake) {
 
 // Retry schedule for venue depth reads that failed (rate limit, timeout).
 const DEPTH_RETRY_MS = [3000, 6000, 12000, 24000, 45000];
-function usePromoPageLadders(picks, pageSize, minLegDepth) {
+function usePromoPageLadders(picks, pageSize, minLegDepth, hideLowLiquidity) {
   const wantedRef = useRef([]);
   const wantedKey = useMemo(() => {
     const list = Array.isArray(picks) ? picks : [];
     const n = Math.min(list.length, Math.max(0, pageSize | 0));
-    const legs = collectPromoDepthLegs(list.slice(0, n), minLegDepth);
+    const legs = collectPromoDepthLegs(list.slice(0, n), minLegDepth, hideLowLiquidity);
     wantedRef.current = legs;
     return legs.map(depthCacheKey).join("\n");
-  }, [picks, pageSize, minLegDepth]);
+  }, [picks, pageSize, minLegDepth, hideLowLiquidity]);
   const [state, setState] = useState({ key: undefined, map: null, attempt: 0 });
   useEffect(() => {
     const wanted = wantedRef.current;
@@ -2594,7 +2594,7 @@ export default function App() {
   // below the page when a wider date window adds many thin-but-shiny combos.
   const depthWindow = Math.max(promoPage, Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX),
     depthWindowState.key === depthFiltersKey ? depthWindowState.size : 0);
-  const pageLadders = usePromoPageLadders(activePromoBase, depthWindow, minLegDepth);
+  const pageLadders = usePromoPageLadders(activePromoBase, depthWindow, minLegDepth, hideLowLiquidity);
   const promoDepthRank = useMemo(() => {
     const ctx = promoType === "nosweat"
       ? { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
@@ -2608,7 +2608,7 @@ export default function App() {
         : (p) => attachBoostLockToPick(p, stake);
     const next = visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
       rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders), depthWindow,
-      { keysOfPick: (p) => collectPromoDepthLegs([p], minLegDepth).map(depthCacheKey) });
+      { keysOfPick: (p) => collectPromoDepthLegs([p], minLegDepth, hideLowLiquidity).map(depthCacheKey) });
     // Window growth is not part of the key: a wider check keeps showing the
     // last good page until its ladders land.
     const filtersKey = depthFiltersKey + "|" + promoPage;

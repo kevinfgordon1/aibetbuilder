@@ -39,3 +39,17 @@ test("subline path (applyPmBlendToLeg + overlay) shows the same blend", () => {
   const b = applyMinDepthOverlay(applyPmBlendToLeg(md, levels, { numLegs: 5 }), md.minDepthBlend);
   assert.equal(trueOppAmerican(b), 323);
 });
+
+test("per-venue: overlay moves the hedge to the min-depth venue with that venue's size", () => {
+  // $500 walk prefers Kalshi −564 ($4,974 ≈ $882 profit); only Novig −567
+  // ($18,261 ≈ $3,220) covers $2,000 alone → the card hedges on Novig.
+  const fiu = { dk: 490, bestOppBook: "novig", bestOpp: -567, bestOppQuoted: -567, bestOppSize: 18261, sport: "americanfootball_ncaaf", game: "FIU @ Liberty", name: "FIU ML", bestOppName: "Liberty ML", market: "ML",
+    bestOppVenues: [{ book: "prophetx", american: -561, size: 53 }, { book: "kalshi", american: -564, size: 4974 }, { book: "novig", american: -567, size: 18261 }] };
+  const md = applyMinDepthToLeg(fiu, 2000, null, {});
+  assert.equal(md.bestOppBook, "novig");
+  const d = applyPmBlendToLegs([md], {}, { numLegs: 1, promoType: "freebet" }).displayLegs[0];
+  assert.equal(d.bestOppBook, "novig");
+  assert.equal(d.bestOpp, -567);
+  assert.equal(d.bestOppSize, 18261);
+  assert.ok(applyMinDepthToLeg(d, 2000, null, {}), "stable on a second pass");
+});
