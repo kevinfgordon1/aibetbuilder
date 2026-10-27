@@ -185,7 +185,7 @@ function legStarts(parlays) {
   }
   return out;
 }
-const { loadSchedule } = require('../lib/game-schedule-store');
+const { loadSchedule, loadScheduleWithin } = require('../lib/game-schedule-store');
 /** Final pass: canonical official time wins; else the older chain's value (venue / lock / Kalshi), else the leg's own
  *  saved start, else ticker date only. Every leg without a verified time is listed in startWarnings (never dropped). */
 function applySchedule(events, starts, games, legStart, lockStart) {
@@ -312,7 +312,8 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   // Canonical schedule last, so it overrides every guess above (and fills legs nothing above knew about).
   const events = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))];
   let sched = { games: [], from: 'none' };
-  try { sched = await loadSchedule(events, env, f); } catch (_) { /* fall through: warnings below say which legs are unverified */ }
+  // Time-boxed (1.5 s): past it, legs keep the older chain's times (venue / lock / Kalshi) and are listed as unverified.
+  try { sched = await loadScheduleWithin(events, env, f); } catch (_) { /* fall through: warnings below say which legs are unverified */ }
   const { info: startInfo, startDates, startWarnings } = applySchedule(events, starts, sched.games, legStarts(parlays), lockStart);
   if (startWarnings.length) console.warn('[root-for] legs without a verified start time:', startWarnings.map((w) => `${w.event}(${w.source})`).join(', '));
   // Kalshi orderbooks LAST (right before pricing), then the relay index (its Novig sanity check reads the books).
