@@ -213,28 +213,73 @@ function markStartDates(out, mk) {
   return out;
 }
 
-/** Live books: Kalshi orderbooks for every needed ticker + relay boards (NFL, NCAAF). */
-async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
-  const tickers = M.tickersNeeded(parlays);
+/** Live books: Kalshi orderbooks for every needed ticker + relay boards (NFL, NCAAF).
+ *  Oct 27 2026: a slow odds relay (10 s per call) made every Kalshi book older than STALE_MS by pricing time, so 19 of
+ *  Kevin's 20 locks silently dropped ("1 of 20"). Now: every relay call has its own timeout (RELAY_TIMEOUT_MS, 2.5 s)
+ *  and they run in parallel; Kalshi orderbooks are fetched LAST, right before pricing (refreshBooks / freshBooks). */
+const RELAY_TIMEOUT_MS = 2500;
+const BOOK_REFRESH_MS = 8000; // books older than this at pricing time are refetched once (STALE_MS is 15 s)
+async function fetchKalshiBooks(M, tickers, f, now) {
   const kalshiBooks = {};
   const getJ = async (u) => { const r = await f(u, { headers: { accept: 'application/json' } }); if (!r.ok) throw new Error(`${r.status} ${u.slice(0, 80)}`); return r.json(); };
   await Promise.all(Array.from({ length: Math.ceil(tickers.length / 100) }, (_, i) => tickers.slice(i * 100, i * 100 + 100)).map(async (chunk) => {
     const j = await getJ(`${KALSHI}/markets/orderbooks?${chunk.map((t) => `tickers=${encodeURIComponent(t)}`).join('&')}`);
     for (const ob of j.orderbooks || []) { const t = String(ob.ticker || ob.market_ticker || '').toUpperCase(); if (t) kalshiBooks[t] = M.kalshiAsks(ob); }
   }));
-  const kalshiAt = now();
+  return { kalshiBooks, kalshiAt: now() };
+}
+/** Refetch the Kalshi books of a loadMarkets result in place (same tickers) and re-stamp kalshiAt. */
+async function refreshBooks(M, mk, f = deps.fetch, now = deps.now) {
+  const b = await fetchKalshiBooks(M, mk.bookTickers || [], f, now);
+  mk.kalshiBooks = b.kalshiBooks; mk.kalshiAt = b.kalshiAt; mk.bookRefreshes = (mk.bookRefreshes || 0) + 1;
+  return mk;
+}
+/** Right before pricing: books older than BOOK_REFRESH_MS are refetched once. Never throws (old books kept). */
+async function freshBooks(M, mk, f = deps.fetch, now = deps.now) {
+  if (!mk || mk.bookRefreshes || now() - mk.kalshiAt <= BOOK_REFRESH_MS) return mk;
+  try { await refreshBooks(M, mk, f, now); } catch (e) { console.error('[root-for] book refresh failed:', String((e && e.message) || e).slice(0, 120)); }
+  return mk;
+}
+/** Price, and if any lock is unpriced only because its Kalshi books went stale, refetch the books once and re-price. */
+async function priceWithRetry(M, mk, args, f = deps.fetch, now = deps.now) {
+  await freshBooks(M, mk, f, now);
+  const run = () => M.computeRootFor({ ...args, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, kalshiAt: mk.kalshiAt });
+  let out = run();
+  if (!mk.retried && (out.unpriced || []).some((u) => u.reason === 'stale')) {
+    mk.retried = true;
+    try { await refreshBooks(M, mk, f, now); out = run(); } catch (e) { console.error('[root-for] stale retry failed:', String((e && e.message) || e).slice(0, 120)); }
+  }
+  out.bookAgeMs = Math.max(0, Math.round((args.now != null ? args.now : now()) - mk.kalshiAt));
+  return out;
+}
+async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
+  const tickers = M.tickersNeeded(parlays);
+  const getJ = async (u) => { const r = await f(u, { headers: { accept: 'application/json' } }); if (!r.ok) throw new Error(`${r.status} ${u.slice(0, 80)}`); return r.json(); };
+  // relay calls: own timeout each (a hung relay costs at most RELAY_TIMEOUT_MS, not 10 s+ per call)
+  const relayMs = Number(env.ROOTFOR_RELAY_TIMEOUT_MS) || RELAY_TIMEOUT_MS;
+  const getRelay = (u) => new Promise((resolve, reject) => {
+    const ac = typeof AbortController === 'function' ? new AbortController() : null;
+    const tm = setTimeout(() => { if (ac) ac.abort(); reject(new Error(`timeout ${relayMs}ms`)); }, relayMs);
+    Promise.resolve().then(() => f(u, { headers: { accept: 'application/json' }, ...(ac ? { signal: ac.signal } : {}) }))
+      .then((r) => { if (!r.ok) throw new Error(`${r.status} ${u.slice(0, 80)}`); return r.json(); })
+      .then((j) => { clearTimeout(tm); resolve(j); }, (e) => { clearTimeout(tm); reject(e); });
+  });
   const base = String(env.ODDS_RELAY_URL || env.VITE_ODDS_RELAY_URL || RELAY_FALLBACK).replace(/\/+$/, '');
-  let relay = {}; const relayNote = []; const starts = {}; const lockStart = lockStarts(parlays);
+  const relayNote = []; const starts = {}; const lockStart = lockStarts(parlays);
+  const boards = { kalshi: [], polymarket: [], novig: [] };
+  const leagueOf = new Map(); // quote -> league it was fetched under (matching rules differ for NFL / college)
+  let h = null; let polledAt = now();
+  // health + all six boards in parallel
+  await Promise.all([
+    getRelay(`${base}/health`).then((j) => { h = j; }, (e) => { relayNote.push(`relay health: ${String(e.message).slice(0, 60)}`); }),
+    ...['NFL', 'NCAAF'].flatMap((lg) => Object.keys(boards).map(async (v) => {
+      try { const j = await getRelay(`${base}/board?venue=${v}&league=${lg}`); const qs = j.quotes || []; for (const q of qs) if (q && typeof q === 'object') leagueOf.set(q, lg); boards[v].push(...qs); } catch (e) { relayNote.push(`${v} ${lg}: ${String(e.message).slice(0, 60)}`); }
+    })),
+  ]);
+  polledAt = now();
   try {
-    const h = await getJ(`${base}/health`);
-    const polledAt = now();
     const nv = (h && h.novig) || {};
-    const novigLive = /ws:up/.test(String((h.status || {}).novig || '')) && Number(nv.lastWsMsgAt) > 0 && polledAt - Number(nv.lastWsMsgAt) < 15000;
-    const boards = { kalshi: [], polymarket: [], novig: [] };
-    const leagueOf = new Map(); // quote -> league it was fetched under (matching rules differ for NFL / college)
-    await Promise.all(['NFL', 'NCAAF'].flatMap((lg) => Object.keys(boards).map(async (v) => {
-      try { const j = await getJ(`${base}/board?venue=${v}&league=${lg}`); const qs = j.quotes || []; for (const q of qs) if (q && typeof q === 'object') leagueOf.set(q, lg); boards[v].push(...qs); } catch (e) { relayNote.push(`${v} ${lg}: ${String(e.message).slice(0, 60)}`); }
-    })));
+    const novigLive = !!h && /ws:up/.test(String((h.status || {}).novig || '')) && Number(nv.lastWsMsgAt) > 0 && polledAt - Number(nv.lastWsMsgAt) < 15000;
     // Kalshi's board start is often a date-only placeholder (e.g. 03:00Z = 11 PM ET on the ticker date, even for
     // Saturday games). Prefer the real kickoff from Polymarket / Novig for the same matchup; a Kalshi-only placeholder
     // time is treated as unknown (no time shown, not counted as Today).
@@ -252,9 +297,7 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
       const k2 = boardKey(leagueOf.get(q), q.away, q.home);
       starts[ev] = real[matchKey(q.away, q.home)] || (k2 && real[k2]) || lockStart[ev.split('-')[1]] || null;
     }
-    const tNow = now(); const started = new Set(Object.entries(starts).filter(([, t]) => t && Date.parse(t) <= tNow).map(([ev]) => ev));
-    relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive, polledAt, started, kalshiBooks, kalshiAt });
-    for (const d of relay.droppedNovig || []) relayNote.push(`novig ${d.event}-${d.team} ignored (${d.reason}${d.ref != null ? `, ${d.novig} vs ${d.ref}` : ''})`);
+    boards.novigLive = novigLive;
   } catch (e) { relayNote.push(`relay: ${String(e.message).slice(0, 80)}`); }
   // start times for games the relay doesn't carry (e.g. NHL): Kalshi market close/expected times
   const missing = [...new Set(tickers.map((t) => t.split('-').slice(0, 2).join('-')))].filter((ev) => !(ev in starts));
@@ -272,7 +315,15 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
   try { sched = await loadSchedule(events, env, f); } catch (_) { /* fall through: warnings below say which legs are unverified */ }
   const { info: startInfo, startDates, startWarnings } = applySchedule(events, starts, sched.games, legStarts(parlays), lockStart);
   if (startWarnings.length) console.warn('[root-for] legs without a verified start time:', startWarnings.map((w) => `${w.event}(${w.source})`).join(', '));
-  return { kalshiBooks, kalshiAt, relay, relayNote, starts, startInfo, startDates, startWarnings, scheduleFrom: sched.from, tickers: tickers.length };
+  // Kalshi orderbooks LAST (right before pricing), then the relay index (its Novig sanity check reads the books).
+  const { kalshiBooks, kalshiAt } = await fetchKalshiBooks(M, tickers, f, now);
+  let relay = {};
+  try {
+    const tNow = now(); const started = new Set(Object.entries(starts).filter(([, t]) => t && Date.parse(t) <= tNow).map(([ev]) => ev));
+    relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive: !!boards.novigLive, polledAt, started, kalshiBooks, kalshiAt });
+    for (const d of relay.droppedNovig || []) relayNote.push(`novig ${d.event}-${d.team} ignored (${d.reason}${d.ref != null ? `, ${d.novig} vs ${d.ref}` : ''})`);
+  } catch (e) { relayNote.push(`relay index: ${String(e.message).slice(0, 80)}`); }
+  return { kalshiBooks, kalshiAt, bookTickers: tickers, relay, relayNote, starts, startInfo, startDates, startWarnings, scheduleFrom: sched.from, tickers: tickers.length };
 }
 
 /** Settled results of recently seen games (daily needle snapshots' snap.final, last 2 days; market facts, same for every
@@ -642,7 +693,7 @@ async function needleCron(client, env) {
       if (Date.now() - t0 > CRON_BUDGET_MS) { skipped.push(u.uid); continue; }
       try {
         const ids = new Set(u.locks.map((p) => p.id)); const mine = (xs) => xs.filter((x) => ids.has(x.parlay_id));
-        const out = M.computeRootFor({ parlays: u.locks, fills: mine(kids.fills), singles: mine(kids.singles), submissions: mine(kids.submissions), kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals }); markStartDates(out, mk);
+        const out = await priceWithRetry(M, mk, { parlays: u.locks, fills: mine(kids.fills), singles: mine(kids.singles), submissions: mine(kids.submissions), now: deps.now(), finals }); markStartDates(out, mk);
         await sweatBaseline(client, out, now, u.uid); await settleDays(client, u.uid, now, sd); // today: needleDay inside sweatBaseline
         done.add(u.uid);
       } catch (e) { console.error('[root-for] cron user failed:', String((e && e.message) || e).slice(0, 120)); }
@@ -709,8 +760,9 @@ async function handler(req, res) {
       return json(res, 200, { ok: true, empty: true, locksTotal: 0, ...(history.length ? { asOf: new Date(deps.now()).toISOString(), sweat: { history, dayRow: latest } } : {}) });
     }
     const mk = await loadMarkets(M, parlays, env);
+    const finals = await loadFinals(client, deps.now());
     const now = deps.now();
-    const out = M.computeRootFor({ parlays, fills, singles, submissions, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, now, kalshiAt: mk.kalshiAt, finals: await loadFinals(client, now) }); markStartDates(out, mk);
+    const out = await priceWithRetry(M, mk, { parlays, fills, singles, submissions, now, finals }); markStartDates(out, mk);
     // Live needle for every Combo Locks user (Kevin, Oct 19): baselines + day rows are per user (uid); the
     // pregame-probs rows it reads/writes are per game (market facts, the same for everyone).
     const sweat = await sweatBaseline(client, out, now, uid);
@@ -726,4 +778,4 @@ module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._autoArchivedStillOpen = autoArchivedStillOpen;
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { markStartDates, loadSchedule, applySchedule, legStarts, needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };
+module.exports._helpers = { priceWithRetry, freshBooks, refreshBooks, fetchKalshiBooks, RELAY_TIMEOUT_MS, markStartDates, loadSchedule, applySchedule, legStarts, needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };
