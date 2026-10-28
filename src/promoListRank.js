@@ -49,6 +49,63 @@ export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, lad
   return filterPicksByTeamName(liquidAll, ctx.includeTeamTokens, ctx.excludeTeamTokens);
 }
 
+// Scan pool at the live depth price (Kevin, 2026-10-28: Moneylines alone
+// showed +$36.35 while Main + Moneylines showed +$34.02). The scan used to
+// rank combos on stored / feed top-of-book ladders, keep the top 1,000, trim
+// to 150, and only then walk live ladders. Live depth can move a leg's price
+// either way, so the combo that is best after depth could sit outside that
+// cut — and a bigger pool (Main adds spreads and totals) pushes it out more.
+// Pricing every pool leg with the SAME per-leg depth walk rankPromoPicks
+// uses (each venue on its own ladder, $500 payout walk, then Min depth per
+// leg) makes scan EV = card EV, so the exact scan is monotonic: a superset of
+// legs can never show a worse Best Pick. Returns the input unchanged while
+// ladders are still loading (null). A leg whose venue read failed
+// (unknownDepthKeys) keeps its stored price instead of being dropped as thin.
+export function depthPricePoolLegs(legs, ctx, laddersByKey) {
+  const list = Array.isArray(legs) ? legs : [];
+  if (laddersByKey == null) return list;
+  const unknown = unknownDepthKeys(laddersByKey);
+  const identity = (p, displayLegs) => ({ ...p, legs: displayLegs });
+  const out = [];
+  for (const leg of list) {
+    if (!leg) continue;
+    const keys = collectPromoDepthLegs([{ legs: [leg] }], ctx.minLegDepth, ctx.hideLowLiquidity).map(depthCacheKey);
+    // Not fetched (over the pool budget) or the venue read failed: keep the
+    // stored price, exactly as before this change.
+    if (keys.some((k) => unknown.has(k) || !Object.prototype.hasOwnProperty.call(laddersByKey, k))) { out.push(leg); continue; }
+    const one = { legs: [leg] };
+    const blended = attachPmBlendToPick(one, { ...ctx, numLegs: ctx.numLegs }, identity, laddersByKey);
+    const priced = attachMinDepthToPick(blended, ctx, identity, laddersByKey);
+    if (!priced) continue; // no single venue fills Min depth per leg
+    const next = priced.legs[0];
+    if (ctx.hideLowLiquidity && next.lowLiquidity) continue;
+    out.push(next);
+  }
+  return out;
+}
+
+// Pool legs to depth-check before the scan, best single-leg edge first,
+// until POOL_DEPTH_MAX_KEYS venue ladders (one /api/book-depth POST per 8).
+// A full NBA Main + Moneylines slate is ~200 keys; the visible-page fetch
+// already reads most of them, and the 45 s cache shares them.
+export const POOL_DEPTH_MAX_KEYS = 400;
+export function poolDepthPicks(legs, minLegDepth, hideLowLiquidity, edgeOf, maxKeys = POOL_DEPTH_MAX_KEYS) {
+  const list = (Array.isArray(legs) ? legs : []).filter(Boolean);
+  const order = typeof edgeOf === "function"
+    ? list.map((l, i) => ({ l, i, e: Number(edgeOf(l)) || 0 })).sort((a, b) => (b.e - a.e) || (a.i - b.i)).map((x) => x.l)
+    : list;
+  const out = [];
+  const seen = new Set();
+  for (const leg of order) {
+    const keys = collectPromoDepthLegs([{ legs: [leg] }], minLegDepth, hideLowLiquidity).map(depthCacheKey);
+    const fresh = keys.filter((k) => !seen.has(k));
+    if (seen.size + fresh.length > maxKeys) continue;
+    for (const k of fresh) seen.add(k);
+    out.push({ legs: [leg] });
+  }
+  return out;
+}
+
 // PM legs on the visible page. Sportsbooks are skipped (no depth API).
 // Other venues' ladders are fetched too when a minimum is set or Hide low
 // liquidity is on (each venue is checked on its own ladder).

@@ -113,7 +113,7 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.match(app, /soccerBlocksPromoPool\(/);
   assert.match(app, /parsedPromoLegOddsBounds\(/);
   assert.match(app, /preferExistingPromoBoard\(/);
-  assert.match(app, /\[promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey\]/);
+  assert.match(app, /\[promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, currentPromoScanKey\]/);
   assert.match(app, /const scanBoostForKey = effectiveBoostPct\(promoType, scanBoostPct\)/);
   assert.match(app, /if \(!shouldCommitPromoScan\(/);
   assert.match(app, /if \(err\?\.name === "AbortError"\) \{/);
