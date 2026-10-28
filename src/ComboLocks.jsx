@@ -1940,7 +1940,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         {filledKind === "loading" ? <div className="card empty loading"><span className="spin" aria-hidden="true" />Loading locks…</div>
           : filledKind === "empty" ? <div className="card empty">Nothing filled yet. A lock moves here once a trader actually takes your offer (a quote nobody took doesn't count).</div>
           : filledParlays.map((p) => renderLock(p, { filledSection: true }))}
-        {realUnattr > 0 && canSeeOwnerTools(user) && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>{realUnattr} filled contract{realUnattr === 1 ? "" : "s"} couldn't be matched to a specific lock. They're counted, just not shown on a card.</div>}
+        {Math.round(realUnattr) > 0 && canSeeOwnerTools(user) && <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 6 }}>{Math.round(realUnattr).toLocaleString("en-US")} filled contract{Math.round(realUnattr) === 1 ? "" : "s"} couldn't be matched to a specific lock. They're counted, just not shown on a card.</div>}
       </div>
 
       <SectionHead id="cl-history" title="History" count={archivedKind === "rows" ? historyStatement.lines.length : null} sub="Locks whose games are over, newest first. Tap a row for the details." />

@@ -26,3 +26,15 @@ assert.equal(r.rowPatch.l, undefined);
 const g = browserGetJson(async () => ({ ok: false, json: async () => ({ markets: { x: 1 } }) }));
 assert.equal(await g("/api/kalshi-games?tickers=x"), null);
 console.log("comboAutoSettle tests passed");
+
+{ // settled lock still on the live list moves to History
+  const row = { id: "a", active: true, paused: true, archived_at: null, combo_ticker: "KXMVE-X", kalshi_result: "yes", kalshi_status: "determined", settled_at: "2026-10-25T15:57:35Z", legs: [] };
+  const { rowPatch } = await planSettlementPatches({ living: [row], archived: [], fills: [], filledById: { a: 4493 } }, { getJson: async () => null, now: () => Date.parse("2026-10-28T00:00:00Z") });
+  assert.equal(rowPatch.a.active, false);
+  assert.equal(rowPatch.a.archived_at, "2026-10-28T00:00:00.000Z");
+}
+{ // filled lock with only legs settled stays live (waits on Kalshi)
+  const row = { id: "b", active: true, archived_at: null, combo_ticker: "KXMVE-Y", underlying_result: "won", legs: [] };
+  const { rowPatch } = await planSettlementPatches({ living: [row], archived: [], fills: [], filledById: { b: 10 } }, { getJson: async () => null, now: () => 0 });
+  assert.ok(!rowPatch.b || !rowPatch.b.archived_at);
+}
