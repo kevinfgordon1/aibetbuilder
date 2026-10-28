@@ -439,7 +439,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
             <div style={{ ...cardRow, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)" }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{leg.bestOppName}</div>
-                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{[formatPromoLegGame(leg), formatOdds(hedgeOdds ?? leg.bestOpp)].filter(Boolean).join(" · ")}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{[formatPromoLegGame(leg), formatOdds(hedgeOdds ?? leg.bestOpp), formatET(leg.commence_time)].filter(Boolean).join(" · ")}<DaysAwayWarning commence_time={leg.commence_time} /></div>
                 {hedgeLines.map((line, k) => <div key={k} style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{line}</div>)}
                 {hedgeExtra}
               </div>
@@ -4052,6 +4052,7 @@ export default function App() {
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{joinPromoLegSubtitle(leg, [activePromoBookData.label])}</span>
                                     <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: leg?.dk > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(leg?.dk)}</span>
                                   </div>
+                                  <PromoLegStartTime commence_time={leg?.commence_time} />
                                   <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${fbAmount} free bet</div>
                                   <UnderdogStaleOddsChip leg={leg} />
                                 </div>
@@ -4063,6 +4064,7 @@ export default function App() {
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{getBookLabel(leg?.bestOppBook)}</span>
                                     <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: (quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp) > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)}</span>
                                   </div>
+                                  <PromoLegStartTime commence_time={leg?.commence_time} />
                                   <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${(lock?.hedgeStake ?? 0).toFixed(2)} hedge stake</div>
                                   {adjustmentNote && <div style={{ fontSize: 10, color: "#06b6d4", marginTop: 2 }}>({adjustmentNote})</div>}
                                 </div>
