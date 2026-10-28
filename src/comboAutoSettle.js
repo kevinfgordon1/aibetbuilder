@@ -48,7 +48,8 @@ export async function planSettlementPatches({ living, archived, fills, outcomes,
   });
   // Unfilled locks often have no combo ticker. Still stamp risk won / risk lost
   // from Kalshi single-game legs or ESPN — do not wait for a combo market.
-  if (!candidates.length && !foundTickers.length && !needUnderlying.length) return empty();
+  if (!candidates.length && !foundTickers.length && !needUnderlying.length
+    && !(living || []).some((r) => r && !r.archived_at && !r.merged_into_id && isFinalLock(r, (filledById && filledById[r.id]) || 0))) return empty();
   const tickers = [...new Set(candidates.map((c) => c.ticker))];
   const livePatch = {};
   const rowPatch = {};
@@ -111,7 +112,28 @@ export async function planSettlementPatches({ living, archived, fills, outcomes,
       rowPatch[row.id] = next;
     }
   }
+  // A lock whose Kalshi combo market is final (or, with no fills, whose legs are
+  // final) is done: stop the worker watching it and move it to History, so the
+  // card stops showing live "If it hits / misses".
+  const nowIso = new Date(now()).toISOString();
+  for (const row of living || []) {
+    if (!row || row.archived_at || row.merged_into_id) continue;
+    const next = rowPatch[row.id] || {};
+    const merged = { ...row, ...next };
+    if (!isFinalLock(merged, (filledById && filledById[row.id]) || 0)) continue;
+    next.active = false;
+    next.archived_at = nowIso;
+    rowPatch[row.id] = next;
+  }
   return { rowPatch, livePatch, idle: false };
+}
+
+/** True when a lock can no longer change: Kalshi settled it, or it never filled and its legs settled. */
+export function isFinalLock(row, filled = 0) {
+  if (!row) return false;
+  if (row.kalshi_result === "yes" || row.kalshi_result === "no") return true;
+  const u = row.underlying_result;
+  return !(filled > 0) && (u === "won" || u === "lost" || u === "push");
 }
 
 /** Browser getJson: same fetch + headers the page always used. */

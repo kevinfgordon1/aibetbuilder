@@ -132,6 +132,7 @@ async function writePatch(client, userId, id, patch) {
   let q = client.from('combo_parlays').update(patch).eq('id', id).eq('user_id', userId);
   if ('kalshi_result' in patch) q = q.or('kalshi_result.is.null,kalshi_result.not.in.(yes,no)');
   else if ('underlying_result' in patch) q = q.or('underlying_result.is.null,underlying_result.not.in.(won,lost,push)');
+  else if ('archived_at' in patch) q = q.is('archived_at', null);
   else q = q.is('combo_ticker', null);
   const r = await q.select('id');
   if (r.error) throw r.error;
