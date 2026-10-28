@@ -133,7 +133,7 @@ const BetstampOddsBoard = lazy(() => import("./BetstampOddsBoard.jsx")); // New 
 import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, promoDepthNoticeKind, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
 import { loadMinLegDepth, saveMinLegDepth, parseMinLegDepth, filterLegsByMinDepth, repriceLegsForMinDepth, MIN_LEG_DEPTH_LABEL } from "./promoMinDepth.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs, unknownDepthKeys, DEPTH_UNKNOWN } from "./promoBookDepth.js";
-import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs } from "./promoListRank.js";
+import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs, depthPricePoolLegs, poolDepthPicks } from "./promoListRank.js";
 import { activePromoList, bestPromoCardId, promoPickCardId, resolveOptimizeFocusId } from "./promoOptimize.js";
 import { playerPropEmptyDetail, playerPropHiddenCounts } from "./promoPlayerPropHint.js";
 import {
@@ -2414,7 +2414,7 @@ export default function App() {
     return playerPropHiddenCounts({ unfiltered, matched, liquid });
   }, [scanMarketScope, waitForSoccerPm, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, excludedPromoLegs, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, dropThinPoolLegs, promoType, scanNumLegs]);
 
-  const parlayLegPool = useMemo(() => {
+  const parlayLegPoolStored = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
     // Free bet / boost / no promo run the exact search over EVERY leg, so
     // no cap: a top-N-by-edge cap is what let NCAAF legs push out the
@@ -2428,6 +2428,26 @@ export default function App() {
     const seen = new Set(pinned);
     return pinned.concat(capped.filter((l) => !seen.has(l)));
   }, [promoLegs, isParlayPromo, includeTeamTokens, scanPromoDateRange, promoType]);
+
+  // Price every scan-pool leg at its live depth price BEFORE the scan (same
+  // per-leg walk the cards use), so scan EV = card EV and a wider Markets /
+  // Sports / Date pick can never show a worse Best Pick. Before this the scan
+  // ranked on stored / top-of-book ladders and only the top 150 got the live
+  // walk, so Main + Moneylines (+$34.02) lost the Moneylines-only +$36.35.
+  const poolDepthList = useMemo(
+    () => (isParlayPromo
+      ? poolDepthPicks(parlayLegPoolStored, minLegDepth, dropThinPoolLegs, (l) => ourTrueProb(l.bestOpp) * dkDecimal(l.dk))
+      : []),
+    [parlayLegPoolStored, isParlayPromo, minLegDepth, dropThinPoolLegs],
+  );
+  const poolLadders = usePromoPageLadders(poolDepthList, poolDepthList.length, minLegDepth, dropThinPoolLegs);
+  const poolDepthPending = isParlayPromo && poolDepthList.length > 0 && poolLadders == null;
+  const parlayLegPool = useMemo(
+    () => (isParlayPromo
+      ? depthPricePoolLegs(parlayLegPoolStored, { promoType, numLegs: scanNumLegs, hideLowLiquidity: dropThinPoolLegs, minLegDepth }, poolLadders)
+      : parlayLegPoolStored),
+    [parlayLegPoolStored, isParlayPromo, promoType, scanNumLegs, dropThinPoolLegs, minLegDepth, poolLadders],
+  );
 
   const currentPromoScanKey = useMemo(
     () => promoScanInputKey({
@@ -2460,11 +2480,12 @@ export default function App() {
       promoLoading,
       soccerBlocks: waitForSoccerPm,
     });
-    if (!slateReady) {
+    if (!slateReady || poolDepthPending) {
       // Bump gen so a 1-leg scan that already resolved cannot commit into
       // this not-ready window (abort is only checked at yield / completion).
+      // Pool ladders still loading: wait, so the scan ranks on live depth.
       promoScanGen.current += 1;
-      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm));
+      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm || poolDepthPending));
       return;
     }
     const gen = ++promoScanGen.current;
@@ -2518,7 +2539,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
