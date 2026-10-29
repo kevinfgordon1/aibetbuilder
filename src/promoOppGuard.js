@@ -53,6 +53,28 @@ export function quoteLooksAbsurdVsReference(reference, candidate, edge = ABSURD_
   return Math.abs(pa - pb) >= edge;
 }
 
+// A live depth ladder whose BEST ask beats the feed's quoted best price by
+// 20+ points of implied probability is not this market's book: a wrong-game
+// match or a closed market's leftover asks. Blackhawks ML (2026-10-29): feed
+// Polymarket +134 (≈43%), ladder from the closed MLB Tigers/Cubs market
+// +426/+2244/+9256 (≤19%) → Red Wings "true" −337 vs BetMGM −160. Deeper
+// levels being WORSE than the quote is normal; better by this much is not.
+export const LADDER_TOP_MAX_IMPROVE = 0.20;
+
+export function ladderTopLooksRogue(quoted, levels, maxImprove = LADDER_TOP_MAX_IMPROVE) {
+  const pq = impliedFromAmerican(quoted);
+  if (pq == null) return false;
+  let top = null;
+  for (const l of levels || []) {
+    const a = Number(l && l.american);
+    if (!isFinite(a) || a === 0) continue;
+    if (top == null || a > top) top = a;
+  }
+  const pt = impliedFromAmerican(top);
+  if (pt == null) return false;
+  return pq - pt >= maxImprove;
+}
+
 // Opposite-side Yes quotes whose implieds do not sum to a 2-way (~1).
 // WKU +8628 (p≈0.011) vs Underdog −107 (p≈0.517) is 0.53 — not one contract.
 export function twoWayQuotesLookIncoherent(a, b, min = TWO_WAY_SUM_MIN, max = TWO_WAY_SUM_MAX) {
