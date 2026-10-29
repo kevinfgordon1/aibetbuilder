@@ -180,7 +180,7 @@ export default function SniperDashboard({ user }) {
               <div style={h2}>Daily P&L</div>
               {r.days.length === 0 ? <div style={{ color: C.muted, fontSize: 12 }}>Nothing settled yet.</div> : (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr>{["Day", "W-L", "P&L", "Running"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
+                  <thead><tr>{["Settled (ET)", "W-L", "P&L", "Running"].map((x) => <th key={x} style={th}>{x}</th>)}</tr></thead>
                   <tbody>{[...r.days].reverse().map((d) => (
                     <tr key={d.day}><td style={td}>{d.day}</td><td style={td}>{d.wins}-{d.losses}</td>
                       <td style={{ ...td, color: d.pnl >= 0 ? C.good : C.bad }}>{fmtUsd(d.pnl)}</td><td style={{ ...td, color: d.running >= 0 ? C.good : C.bad }}>{fmtUsd(d.running)}</td></tr>

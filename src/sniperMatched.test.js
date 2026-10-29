@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { legMeta, enginePositions, perfStats, rowMoney, isMatched, matchedStatus } from "./sniperMatched.js";
+import { legMeta, enginePositions, perfStats, rowMoney, isMatched, matchedStatus, isOpenRisk, isDecided, distinctGameCount } from "./sniperMatched.js";
 import { rootFor } from "./rootForEngine.js";
 assert.deepStrictEqual([legMeta("KXNFLGAME-26OCT25CINBAL-CIN:yes").bet, legMeta("KXNFLGAME-26OCT25CINBAL-CIN:yes").game], ["CIN to beat BAL", "CIN vs BAL"]);
 const td = legMeta("KXNFLTD-26OCT25CINBAL-BALNVANNETT81-1:no", { "KXNFLTD-26OCT25CINBAL-BALNVANNETT81-1": "Nick Vannett: 1+ touchdowns" });
@@ -22,6 +22,19 @@ assert.strictEqual(s.curve.length, 2); assert.ok(Math.abs(s.curve[1].pnl - -0.6)
 assert.strictEqual(s.byMarket.find((g) => g.key === "ML + TD").lost, 1);
 assert.strictEqual(s.beatUs[0].bet, "SF to beat ATL"); assert.strictEqual(matchedStatus(rows[1]), "won");
 assert.strictEqual(perfStats([]).total.n, 0);
+// a fill whose leg already lost (or whose legs all won) is decided, not open
+const decidedResults = { "KXNFLGAME-26OCT25CINBAL-CIN": "no", "KXNFLGAME-26OCT26DALPHI-DAL": "yes" };
+const busted = { ...fill, rfq_id: "bust", legs: ["KXNFLGAME-26OCT25CINBAL-CIN:yes", "KXNFLGAME-26OCT25SFATL-SF:yes"] };
+const allHit = { ...fill, rfq_id: "hit", legs: ["KXNFLGAME-26OCT26DALPHI-DAL:yes"] };
+const still = { ...fill, rfq_id: "still", legs: ["KXNFLGAME-26OCT26DALPHI-DAL:yes", "KXNFLGAME-26NOV01PHIWAS-WAS:yes"] };
+assert.equal(isDecided(busted, decidedResults), true);
+assert.equal(isOpenRisk(busted, decidedResults), false);
+assert.equal(matchedStatus(busted, decidedResults), "decided");
+assert.equal(isDecided(allHit, decidedResults), true);
+assert.equal(isOpenRisk(still, decidedResults), true, "a won leg with one still pending stays open");
+const ds = perfStats([still, busted, allHit], decidedResults);
+assert.equal(ds.total.open, 1); assert.equal(ds.total.decided, 2);
+assert.equal(distinctGameCount(["KXNFLGAME-26OCT26DALPHI", "KXNFLTD-26OCT26DALPHI-DALCDLAMB88-1", "KXNFLTOTAL-26OCT26DALPHI-45", "KXNFLGAME-26NOV01PHIWAS"]), 2);
 console.log("sniperMatched.test.js ok");
 
 // fillTimeOf: fill decision time, else created_at; never updated_at (settlement bumps it).

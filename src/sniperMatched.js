@@ -30,9 +30,29 @@ export function rowMoney(r) {
   return { n, risk, toWin, ev, fair, sold };
 }
 export function isMatched(r) { return !r.dry_run && (num(r.filled_contracts) > 0 || r.phase === "accepted" || r.phase === "filled" || r.phase === "settled"); }
-export function matchedStatus(r) {
-  if (r.phase === "settled") { const p = num(r.realized_pnl); return p > 0 ? "won" : p < 0 ? "lost" : "void"; }
+export function matchedStatus(r, legResults) {
+  if (r.phase === "settled" || r.settled_at) { const p = num(r.realized_pnl); return p > 0 ? "won" : p < 0 ? "lost" : "void"; }
+  if (legResults && isDecided(r, legResults)) return "decided";
   return r.phase === "accepted" ? "confirming" : "open";
+}
+/** Any leg already lost, or every leg already won: the fill is decided and is not open risk. */
+export function isDecided(r, legResults = {}) {
+  const st = positionState(r, legResults).state;
+  return st === "busted" || st === "allHit";
+}
+/** Filled, unsettled, and still undecided (a won leg with something left to play is still open). */
+export function isOpenRisk(r, legResults = {}) {
+  if (!r || r.dry_run || r.status !== "open" || r.phase === "settled" || r.settled_at) return false;
+  if (!(num(r.filled_contracts) > 0)) return false;
+  return positionState(r, legResults).state === "live";
+}
+/** Kalshi event id or ticker → game code (26OCT26DALPHI). TD / spread / total share a game's code. */
+export function gameCode(id) {
+  const p = String(id || "").toUpperCase().split(":")[0].split("-");
+  return p.length >= 2 && p[1] ? p[1] : p[0] || "";
+}
+export function distinctGameCount(ids) {
+  return new Set((ids || []).map(gameCode).filter(Boolean)).size;
 }
 
 /** open filled rows → engine positions (hit = all legs win = −risk; miss = +toWin). */
@@ -47,12 +67,14 @@ const bucketOf = (r) => { const k = (r.legs || []).length; return k <= 2 ? "2 le
 const marketOf = (r) => { const t = new Set((r.legs || []).map((k) => legMeta(k).type)); return t.size > 1 ? "ML + TD" : t.has("td") ? "TD only" : "ML only"; };
 const etDay = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : null);
 
-function agg(list) {
-  const s = { n: list.length, won: 0, lost: 0, void: 0, open: 0, risk: 0, toWin: 0, pnl: 0, settledRisk: 0, ev: 0, settledEv: 0 };
+function agg(list, legResults) {
+  const s = { n: list.length, won: 0, lost: 0, void: 0, open: 0, decided: 0, risk: 0, toWin: 0, pnl: 0, settledRisk: 0, ev: 0, settledEv: 0 };
   for (const r of list) {
-    const m = rowMoney(r); const st = matchedStatus(r);
+    const m = rowMoney(r); const st = matchedStatus(r, legResults);
     s.risk += m.risk; s.toWin += m.toWin; s.ev += m.ev;
-    if (st === "won" || st === "lost" || st === "void") { s[st] += 1; s.pnl += num(r.realized_pnl); s.settledRisk += m.risk; s.settledEv += m.ev; } else s.open += 1;
+    if (st === "won" || st === "lost" || st === "void") { s[st] += 1; s.pnl += num(r.realized_pnl); s.settledRisk += m.risk; s.settledEv += m.ev; }
+    else if (st === "decided") s.decided += 1;
+    else s.open += 1;
   }
   s.roi = s.settledRisk > 0 ? s.pnl / s.settledRisk : null;
   s.winRate = s.won + s.lost > 0 ? s.won / (s.won + s.lost) : null;
@@ -62,17 +84,17 @@ function agg(list) {
 /** legResults: { TICKER: 'yes'|'no' } settled leg outcomes (Kalshi). */
 export function perfStats(rows, legResults = {}) {
   const m = (rows || []).filter(isMatched).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
-  const total = agg(m);
+  const total = agg(m, legResults);
   // expected win rate on settled = Σ P(parlay misses) at fill-time fair
   const settled = m.filter((r) => r.phase === "settled");
   total.expectedWins = settled.reduce((a, r) => a + (1 - num(r.fair_yes)), 0);
   let cum = 0, cumEv = 0;
   const curve = settled.slice().sort((a, b) => (a.settled_at < b.settled_at ? -1 : 1)).map((r) => { cum += num(r.realized_pnl); cumEv += rowMoney(r).ev; return { at: r.settled_at, pnl: cum, ev: cumEv }; });
-  const group = (fn) => { const g = new Map(); for (const r of m) { const k = fn(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); } return [...g.entries()].map(([key, list]) => ({ key, ...agg(list) })).sort((a, b) => (a.key < b.key ? -1 : 1)); };
+  const group = (fn) => { const g = new Map(); for (const r of m) { const k = fn(r); if (!g.has(k)) g.set(k, []); g.get(k).push(r); } return [...g.entries()].map(([key, list]) => ({ key, ...agg(list, legResults) })).sort((a, b) => (a.key < b.key ? -1 : 1)); };
   // per leg (ticker+side) across matched positions; we root AGAINST each leg
   const legs = new Map();
   for (const r of m) {
-    const mm = rowMoney(r); const st = matchedStatus(r);
+    const mm = rowMoney(r); const st = matchedStatus(r, legResults);
     for (const k of r.legs || []) {
       const x = legMeta(k); const key = `${x.ticker}:${x.side}`;
       const L = legs.get(key) || { key, bet: x.bet, game: x.game, market: x.market, positions: 0, risk: 0, open: 0, won: 0, lost: 0, pnl: 0, result: null };
