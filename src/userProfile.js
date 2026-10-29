@@ -10,10 +10,15 @@ export const PROFILE_PREFS_KEY = "aibetbuilder.profilePrefs";
 export const PROFILE_PREFS_META_KEY = "aibetbuilderPrefs";
 
 // First-time / unsaved prefs only. Saved sports win once the user customizes.
-export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba"];
+// MLB dropped and NHL added for the 2026 offseason (MLB season over).
+export const DEFAULT_PROFILE_SPORTS = ["americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba", "icehockey_nhl"];
 // Pre-NBA default. Saved prefs that still equal exactly this set (and were saved
 // before the v2 defaults) get NBA added once; any custom selection is kept as-is.
 export const LEGACY_PROFILE_SPORTS_V1 = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"];
+// The v2 default (v1 + NBA). Legacy v1 saves still upgrade to exactly this set;
+// they do not pick up the new NHL/no-MLB first-time default. Saved prefs are
+// never rewritten by a default change on their own.
+export const PROFILE_SPORTS_V2 = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba"];
 export const PROFILE_SPORTS_DEFAULTS_VERSION = 2;
 
 function isLegacyDefaultSports(sports) {
@@ -114,7 +119,7 @@ export function normalizeProfilePrefs(raw, { allowedSports, allowedBooks } = {})
   const savedVersion = Number(src.sportsDefaultsVersion) || 1;
   if (savedVersion < PROFILE_SPORTS_DEFAULTS_VERSION && isLegacyDefaultSports(sports)) {
     const allowed = allowedSports instanceof Set ? allowedSports : new Set(allowedSports || []);
-    sports = DEFAULT_PROFILE_SPORTS.filter((k) => !allowed.size || allowed.has(k));
+    sports = PROFILE_SPORTS_V2.filter((k) => !allowed.size || allowed.has(k));
   }
   const book = typeof src.promoBook === "string" ? src.promoBook : base.promoBook;
   const books = allowedBooks instanceof Set ? allowedBooks : new Set(allowedBooks || []);

@@ -1,6 +1,7 @@
 // Promo Builder Markets Extra Filter.
 // Session-only (same as date / odds bounds). Multi-select: the scope is an
-// array of MARKET_SCOPES values. ["all"] (the default) means no filter.
+// array of MARKET_SCOPES values. ["all"] means no filter. The Promo Builder
+// starts on ["main"] (DEFAULT_MARKET_SCOPE); clicking All still clears to ["all"].
 // Main is non-alt game lines only (no player props); ML is h2h only.
 // Specific picks combine as a union, e.g. ["main", "props"] = main game
 // lines plus player props (NFL anytime TD + MLB 1+ HR + NHL anytime goal),
@@ -14,7 +15,10 @@ export const MARKET_SCOPES = [
   { val: "props", label: "Player Props" },
 ];
 
-export const DEFAULT_MARKET_SCOPE = Object.freeze(["all"]);
+// No-filter scope: what the All chip selects and what normalize falls back to.
+export const ALL_MARKET_SCOPE = Object.freeze(["all"]);
+// Initial Promo Builder selection (session-only, not saved to the profile).
+export const DEFAULT_MARKET_SCOPE = Object.freeze(["main"]);
 
 const SPECIFIC_SCOPES = MARKET_SCOPES.map((o) => o.val).filter((v) => v !== "all");
 
@@ -35,9 +39,9 @@ export function isPlayerPropLeg(leg) {
 export function normalizeMarketScope(scope) {
   const raw = Array.isArray(scope) ? scope : (typeof scope === "string" && scope ? [scope] : []);
   const picked = new Set(raw.filter((v) => typeof v === "string"));
-  if (picked.has("all")) return [...DEFAULT_MARKET_SCOPE];
+  if (picked.has("all")) return [...ALL_MARKET_SCOPE];
   const out = SPECIFIC_SCOPES.filter((v) => picked.has(v));
-  return out.length ? out : [...DEFAULT_MARKET_SCOPE];
+  return out.length ? out : [...ALL_MARKET_SCOPE];
 }
 
 export function isAllMarketScope(scope) {
@@ -61,7 +65,7 @@ export function scopeHasExplicitProps(scope) {
 // off; deselecting the last specific chip falls back to All.
 export function toggleMarketScope(scope, val) {
   const cur = normalizeMarketScope(scope);
-  if (val === "all") return [...DEFAULT_MARKET_SCOPE];
+  if (val === "all") return [...ALL_MARKET_SCOPE];
   if (!SPECIFIC_SCOPES.includes(val)) return cur;
   const specific = cur.filter((v) => v !== "all");
   const next = specific.includes(val) ? specific.filter((v) => v !== val) : [...specific, val];

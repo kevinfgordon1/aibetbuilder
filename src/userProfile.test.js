@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   PROFILE_PREFS_KEY,
   DEFAULT_PROFILE_SPORTS,
+  PROFILE_SPORTS_V2,
   DEFAULT_PROFILE_BOOK,
   identityFromUser,
   defaultProfilePrefs,
@@ -19,7 +20,7 @@ import {
   profilePrefsStorageKey,
 } from "./userProfile.js";
 
-const allowedSports = new Set(["baseball_mlb", "americanfootball_ncaaf", "americanfootball_nfl", "basketball_nba"]);
+const allowedSports = new Set(["baseball_mlb", "americanfootball_ncaaf", "americanfootball_nfl", "basketball_nba", "icehockey_nhl"]);
 const allowedBooks = new Set(["draftkings", "fanduel"]);
 
 const googleUser = {
@@ -40,16 +41,21 @@ const googleUser = {
   assert.equal(ident.provider, "google");
 }
 
+// MLB offseason default: no MLB, NHL on.
 assert.deepEqual(DEFAULT_PROFILE_SPORTS, [
-  "baseball_mlb",
   "americanfootball_nfl",
   "americanfootball_ncaaf",
   "basketball_nba",
+  "icehockey_nhl",
 ]);
+assert.ok(!DEFAULT_PROFILE_SPORTS.includes("baseball_mlb"));
 {
   // Saved legacy default (pre-NBA) gets NBA once; custom picks untouched.
   const legacy = normalizeProfilePrefs({ sports: ["americanfootball_nfl", "baseball_mlb", "americanfootball_ncaaf"] }, { allowedSports, allowedBooks });
-  assert.deepEqual(legacy.sports, DEFAULT_PROFILE_SPORTS);
+  assert.deepEqual(legacy.sports, PROFILE_SPORTS_V2);
+  // A saved v2 default is kept as saved (MLB stays) — default changes never rewrite saved prefs.
+  const savedV2 = normalizeProfilePrefs({ sports: PROFILE_SPORTS_V2.slice(), sportsDefaultsVersion: 2 }, { allowedSports, allowedBooks });
+  assert.deepEqual(savedV2.sports, PROFILE_SPORTS_V2);
   const custom = normalizeProfilePrefs({ sports: ["americanfootball_nfl"] }, { allowedSports, allowedBooks });
   assert.deepEqual(custom.sports, ["americanfootball_nfl"]);
   const resaved = normalizeProfilePrefs({ sports: ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"], sportsDefaultsVersion: 2 }, { allowedSports, allowedBooks });
