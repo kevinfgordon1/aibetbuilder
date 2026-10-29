@@ -17,7 +17,7 @@
 // 0 / blank = off: nothing here runs and the inverse method is untouched.
 
 import { resolvePmBookLevels, isPmBlendVenue, blendAskLadderToPayout, americanToImpliedProb } from "./blendAskLadder.js";
-import { oppQuoteLooksInverted, quoteLooksWrongSideOf } from "./promoOppGuard.js";
+import { oppQuoteLooksInverted, quoteLooksWrongSideOf, ladderTopLooksRogue } from "./promoOppGuard.js";
 import { depthCacheKey } from "./promoBookDepth.js";
 
 export const MIN_LEG_DEPTH_LABEL = "Min depth per leg";
@@ -100,7 +100,8 @@ export function venueLadders(leg, levels, laddersByKey, keyOf) {
   const out = [];
   const seen = new Set();
   if (isPmBlendVenue(bestBook)) {
-    out.push({ book: bestBook, levels: clean(resolvePmBookLevels(leg, levels)), best: true });
+    const lv = clean(resolvePmBookLevels(leg, levels));
+    out.push({ book: bestBook, levels: ladderTopLooksRogue(quoted, lv) ? [] : lv, best: true });
     seen.add(bestBook);
   }
   for (const v of Array.isArray(leg.bestOppVenues) ? leg.bestOppVenues : []) {
@@ -109,7 +110,8 @@ export function venueLadders(leg, levels, laddersByKey, keyOf) {
     seen.add(book);
     const alt = venueDepthLeg(leg, book);
     const live = laddersByKey && keyOf ? laddersByKey[keyOf(alt)] : null;
-    out.push({ book, levels: clean(Array.isArray(live) && live.length ? live : [{ american: v.american, size: v.size }]), best: false });
+    const lv = clean(Array.isArray(live) && live.length ? live : [{ american: v.american, size: v.size }]);
+    out.push({ book, levels: ladderTopLooksRogue(Number(v.american), lv) ? [] : lv, best: false });
   }
   return out;
 }

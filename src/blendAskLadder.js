@@ -31,7 +31,7 @@
 // more than one price level (or VWAP ≠ top). A deep top that fills alone
 // is not a blend — omit the tag. Shortfall copy still always shows.
 
-import { oppQuoteLooksInverted, quoteLooksWrongSideOf } from "./promoOppGuard.js";
+import { oppQuoteLooksInverted, quoteLooksWrongSideOf, ladderTopLooksRogue } from "./promoOppGuard.js";
 
 export const TARGET_PAYOUT_USD = 500;
 export const PM_BLEND_VENUES = new Set(["kalshi", "polymarket", "novig", "prophetx"]);
@@ -334,8 +334,11 @@ export function pmVenueLadders(leg, levels, ctx = {}) {
   const clean = (lvls) => normalizeLevels(lvls).filter((l) =>
     !(isFinite(quoted) && quoted !== 0 && quoteLooksWrongSideOf(quoted, l.american))
     && !oppQuoteLooksInverted(leg.dk, l.american));
+  // Whole ladder dropped (not trimmed) when its top beats the venue's own
+  // quote by 20+ pts: it belongs to another market, so none of it is real.
+  const sane = (lvls, ref) => (ladderTopLooksRogue(ref, lvls) ? [] : lvls);
   const bestBook = String(leg.bestOppBook).toLowerCase();
-  const out = [{ book: bestBook, levels: clean(resolvePmBookLevels(leg, levels)), best: true }];
+  const out = [{ book: bestBook, levels: sane(clean(resolvePmBookLevels(leg, levels)), quoted), best: true }];
   const seen = new Set([bestBook]);
   const ladders = ctx && ctx.laddersByKey;
   for (const v of Array.isArray(leg.bestOppVenues) ? leg.bestOppVenues : []) {
@@ -344,7 +347,7 @@ export function pmVenueLadders(leg, levels, ctx = {}) {
     seen.add(book);
     const live = ladders ? ladders[venueKey(leg, book)] : null;
     const lvls = Array.isArray(live) && live.length ? live : [{ american: v.american, size: v.size }];
-    out.push({ book, levels: clean(lvls), best: false });
+    out.push({ book, levels: sane(clean(lvls), Number(v.american)), best: false });
   }
   return out;
 }
