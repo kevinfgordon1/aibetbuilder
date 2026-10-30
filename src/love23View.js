@@ -14,14 +14,20 @@ export const FLAG_TEXT = Object.freeze({
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  horizon: 100,
-  drift: -0.02,
-  sd: 1,
+  weeks: 8,        // weeks left in the promo, incl. this one
+  bpw: 30,         // planned hedged love23 bets per week
+  drift: -0.02,    // love23 EV per planned bet (fraction of stake)
+  sd: 1,           // per-bet SD x max bet
+  cap: 10000,      // weekly loss discounted at 50% (unconfirmed)
+  credit: "",      // weekly loss stop (love23 credit), blank = none
   maxBet: 500,
   confirm: 0.015,
-  n: "",
+  carry: "",       // override carry-forward balance (blank = ledger)
+  weekNet: "",     // override love23 net so far this week (blank = ledger)
   flagged: false,
 });
+
+export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export function fmtAmerican(a) {
   const n = Number(a);
@@ -74,21 +80,32 @@ export function gameLabel(game) {
 export function picksQuery(settings) {
   const s = { ...DEFAULT_SETTINGS, ...(settings || {}) };
   const q = new URLSearchParams({ view: "picks" });
-  q.set("horizon", String(s.horizon));
-  q.set("drift", String(s.drift));
-  q.set("sd", String(s.sd));
+  for (const k of ["weeks", "bpw", "drift", "sd", "cap", "confirm"]) q.set(k, String(s[k]));
   q.set("maxBet", String(Math.min(500, Number(s.maxBet) || 500)));
-  q.set("confirm", String(s.confirm));
-  if (s.n !== "" && s.n != null && Number.isFinite(Number(s.n))) q.set("n", String(Number(s.n)));
+  for (const k of ["credit", "carry", "weekNet"]) {
+    if (s[k] !== "" && s[k] != null && Number.isFinite(Number(s[k]))) q.set(k, String(Number(s[k])));
+  }
   if (s.flagged) q.set("flagged", "1");
   return q.toString();
 }
 
-/** Progress bar copy toward the $10k loss trigger. */
-export function triggerProgress(ledger, trigger = 10000) {
-  if (!ledger) return { pct: 0, text: "—" };
-  const loss = Number(ledger.lossTowardTrigger) || 0;
-  const up = Number(ledger.rolledForwardProfit) || 0;
-  if (up > 0) return { pct: 0, text: `Up ${fmtMoney(up)} (rolled forward): ${fmtMoney(up + trigger)} of losses to the next rebate` };
-  return { pct: Math.min(1, loss / trigger), text: `${fmtMoney(loss)} of ${fmtMoney(trigger)} toward the next ${fmtMoney(trigger / 2)} rebate` };
+/** "Tue Oct 27 – Tue Nov 3" for a week starting YYYY-MM-DD. */
+export function weekLabel(start, end) {
+  const f = (iso) => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    return `${WEEKDAYS[d.getUTCDay()]} ${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${d.getUTCDate()}`;
+  };
+  return end ? `${f(start)} – ${f(end)}` : f(start);
+}
+
+/** One-line description of a week's settlement. */
+export function settlementText(st) {
+  if (!st) return "—";
+  if (st.net >= 0) return st.net === 0 ? "Even week" : `Win ${fmtMoney(st.net)} kept; carry → ${fmtMoney(st.carryAfter)}`;
+  const parts = [];
+  if (st.absorbed > 0) parts.push(`${fmtMoney(st.absorbed)} from carry at full`);
+  if (st.rebatable > 0) parts.push(`${fmtMoney(st.rebatable)} at 50%`);
+  const past = -st.net - st.absorbed - st.rebatable;
+  if (past > 0.005) parts.push(`${fmtMoney(past)} past the cap at full`);
+  return `Owe ${fmtMoney(st.owed)} (${parts.join(", ")}); saved ${fmtMoney(st.rebate)}`;
 }

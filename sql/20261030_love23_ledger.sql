@@ -1,4 +1,5 @@
 -- love23 loss-rebate tracker (api/love23-rebate.js). Kevin runs this once.
+-- Weekly (Tue-Tue) settlement; see lib/love23-ledger.js for how kinds are used.
 -- Service-key access only: RLS on, no policies (anon/authenticated cannot read).
 
 create table if not exists public.love23_daily (
@@ -10,7 +11,7 @@ create table if not exists public.love23_daily (
 
 create table if not exists public.love23_ledger (
   id uuid primary key default gen_random_uuid(),
-  kind text not null check (kind in ('hedge', 'adjust', 'rebate_paid')),
+  kind text not null check (kind in ('hedge', 'adjust', 'carry', 'settlement')),
   created_at timestamptz not null default now(),
   settled_at timestamptz,
   game text,

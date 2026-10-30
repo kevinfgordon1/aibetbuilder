@@ -2,18 +2,20 @@
 // Live Trading Desk). RECOMMENDATIONS ONLY: this route never calls a love23
 // wager endpoint (lib/love23-client.js refuses every wager path outright).
 //
-// GET  /api/love23-rebate?view=picks[&n=&horizon=&drift=&sd=&maxBet=&confirm=&flagged=1]
+// GET  /api/love23-rebate?view=picks[&weeks=&bpw=&drift=&sd=&cap=&credit=&carry=&weekNet=&maxBet=&confirm=&flagged=1]
 //        love23 schedule (cached 30s, backoff on errors) x odds_cache / event_odds_cache
-//        -> ranked hedged picks with EV incl. rebate. n = running love23 net since the
-//        last settlement (defaults to the ledger value).
+//        -> ranked hedged picks with EV incl. the weekly rebate. carry / weekNet
+//        default to the ledger (carry entering this Tue-Tue week, love23 net so far).
+//        weeks = weeks left in the promo incl. this one, bpw = planned bets per week.
 // GET  /api/love23-rebate?view=account
 //        balance, limits, open + settled wagers (settled days are upserted into
 //        love23_daily so the ledger outlives the API's 1-week window), ledger summary.
 // POST { op: "hedge-add", game, market, venue, side, american, stake, note?, love23Ticket? }
 // POST { op: "hedge-settle", id, result: "won"|"lost"|"push"|"void", pnl? }
 // POST { op: "hedge-delete", id }
-// POST { op: "adjust", pnl, note? }        opening love23 net / manual correction
-// POST { op: "rebate-paid", pnl, note? }    rebate cash actually received
+// POST { op: "adjust", pnl, note? }        love23 net correction (counts in this week)
+// POST { op: "carry", pnl, note? }         opening carry-forward balance at promo start
+// POST { op: "settlement", pnl, note? }    weekly cash actually settled (+ received, - paid)
 //
 // Env: LOVE23_USERNAME, LOVE23_PASSWORD (Kevin sets these), optional LOVE23_PROMO_START
 // (YYYY-MM-DD), LOVE23_API_BASE. Supabase: SUPABASE_URL + SUPABASE_SERVICE_KEY.
@@ -25,6 +27,7 @@ const { parseSchedule, DEFAULT_LEAGUE_IDS, SPORT_KEYS } = require('../lib/love23
 const { evaluateAll, rankPicks, VENUE_LABEL } = require('../lib/love23-optimizer');
 const { computeLedger, settledDailyFromApi } = require('../lib/love23-ledger');
 const R = require('../lib/love23-rebate');
+const Wk = require('../lib/love23-weekly');
 
 let access = null;
 let accessPromise = null;
@@ -93,14 +96,28 @@ function numParam(q, key, fallback, { min = -Infinity, max = Infinity } = {}) {
 }
 
 function cfgFromQuery(q) {
+  const D = R.DEFAULT_CONFIG;
+  const credit = numParam(q, 'credit', null, { min: 0, max: 1e7 });
   return {
     maxBet: numParam(q, 'maxBet', 500, { min: 1, max: 500 }),
-    horizonBets: numParam(q, 'horizon', R.DEFAULT_CONFIG.horizonBets, { min: 0, max: 5000 }),
-    futureDriftPct: numParam(q, 'drift', R.DEFAULT_CONFIG.futureDriftPct, { min: -0.2, max: 0.2 }),
-    futureSdMult: numParam(q, 'sd', R.DEFAULT_CONFIG.futureSdMult, { min: 0.1, max: 5 }),
-    confirmPts: numParam(q, 'confirm', R.DEFAULT_CONFIG.confirmPts, { min: 0.001, max: 0.2 }),
-    rebateRate: numParam(q, 'rate', R.DEFAULT_CONFIG.rebateRate, { min: 0, max: 1 }),
-    trigger: numParam(q, 'trigger', R.DEFAULT_CONFIG.trigger, { min: 100, max: 1e6 }),
+    weeksLeft: numParam(q, 'weeks', D.weeksLeft, { min: 1, max: 52 }),
+    betsPerWeek: numParam(q, 'bpw', D.betsPerWeek, { min: 0, max: 2000 }),
+    futureDriftPct: numParam(q, 'drift', D.futureDriftPct, { min: -0.2, max: 0.2 }),
+    futureSdMult: numParam(q, 'sd', D.futureSdMult, { min: 0.1, max: 5 }),
+    confirmPts: numParam(q, 'confirm', D.confirmPts, { min: 0.001, max: 0.2 }),
+    rebateRate: numParam(q, 'rate', D.rebateRate, { min: 0, max: 1 }),
+    weeklyLossCap: numParam(q, 'cap', D.weeklyLossCap, { min: 0, max: 1e7 }),
+    weekStartDow: numParam(q, 'dow', D.weekStartDow, { min: 0, max: 6 }),
+    creditLimit: credit && credit > 0 ? credit : null,
+  };
+}
+
+function stateOverrides(q, ledgerState) {
+  const has = (k) => q[k] != null && q[k] !== '';
+  return {
+    carry: has('carry') ? numParam(q, 'carry', 0, { min: 0 }) : (ledgerState ? ledgerState.carry : 0),
+    weekNet: has('weekNet') ? numParam(q, 'weekNet', 0) : (ledgerState ? ledgerState.weekNet : 0),
+    source: has('carry') || has('weekNet') ? 'query' : (ledgerState ? 'ledger' : 'default'),
   };
 }
 
@@ -117,8 +134,8 @@ async function loadOdds(db, nowMs) {
   return { odds, events, error: null };
 }
 
-async function loadLedger(db, promoStart, cfg) {
-  if (!db) return { ledger: computeLedger({ promoStart, cfg }), entries: [], daily: [], error: 'Supabase service key not configured' };
+async function loadLedger(db, promoStart, cfg, nowMs, atRisk = 0) {
+  if (!db) return { ledger: computeLedger({ promoStart, cfg, nowMs, atRisk }), entries: [], daily: [], error: 'Supabase service key not configured' };
   const [d, e] = await Promise.all([
     db.from('love23_daily').select('date,win_loss').order('date', { ascending: true }),
     db.from('love23_ledger').select('*').order('created_at', { ascending: false }).limit(500),
@@ -126,7 +143,7 @@ async function loadLedger(db, promoStart, cfg) {
   const err = (d.error || e.error) ? 'Run sql/20261030_love23_ledger.sql in Supabase (love23_daily / love23_ledger missing?)' : null;
   const daily = (d.data || []).map((r) => ({ date: r.date, winLoss: Number(r.win_loss) }));
   const entries = e.data || [];
-  return { ledger: computeLedger({ daily, entries, promoStart, cfg }), entries, daily, error: err };
+  return { ledger: computeLedger({ daily, entries, promoStart, cfg, nowMs, atRisk }), entries, daily, error: err };
 }
 
 function pickView(r) {
@@ -189,21 +206,45 @@ async function handlePicks(req, res) {
   }
   const [{ odds, events, error: oddsError }, led] = await Promise.all([
     loadOdds(db, nowMs),
-    q.n != null && q.n !== '' ? Promise.resolve(null) : loadLedger(db, deps.promoStart(), cfg),
+    loadLedger(db, deps.promoStart(), cfg, nowMs),
   ]);
-  const N = q.n != null && q.n !== '' ? numParam(q, 'n', 0) : (led ? led.ledger.N : 0);
+  const st = stateOverrides(q, led && !led.error ? led.ledger.state : null);
+  const ctx = Wk.buildContext({ state: st, cfg, nowMs });
   const { games, selections } = parseSchedule(sched.data);
-  const rows = evaluateAll({ selections, games, odds, events, state: { N }, cfg, nowMs });
+  const rows = evaluateAll({ selections, games, odds, events, state: { ...st, ctx }, cfg, nowMs });
   const flagged = q.flagged === '1' || q.flagged === 'true';
   const ranked = rankPicks(rows, { includeFlagged: flagged });
   const counts = rows.reduce((acc, r) => {
     for (const f of r.flags || []) acc[f] = (acc[f] || 0) + 1;
     return acc;
   }, {});
+  const outlook = Wk.weekOutlook(ctx);
+  const cleanTop = ranked.filter((r) => !r.flags.includes('next_week')).slice(0, Math.max(1, ctx.betsLeftThisWeek || 1));
+  const avgLock = cleanTop.length ? cleanTop.reduce((s2, r) => s2 + r.hedge.lockedPnl, 0) / cleanTop.length : null;
+  // One bet per game side is enough for the plan; repeat lines (alts) would overstate depth.
+  const seenGames = new Set();
+  const planPicks = ranked.filter((r) => !r.flags.includes('next_week'))
+    .filter((r) => (seenGames.has(r.sel.gameLink) ? false : (seenGames.add(r.sel.gameLink), true)))
+    .map((r) => ({ p: r.fairP, win: r.stake * (R.americanToDecimal(r.sel.american) - 1), risk: r.risk, lock: r.hedge.lockedPnl }));
+  const plan = Wk.planTable({ picks: planPicks, cfg, carry: st.carry });
   res.status(200).json({
     picks: ranked.slice(0, 60).map(pickView),
     totals: { love23Lines: selections.length, evaluated: rows.filter((r) => !r.skipped).length, ranked: ranked.length, flags: counts },
-    state: { N, source: q.n != null && q.n !== '' ? 'query' : 'ledger' },
+    state: { carry: st.carry, weekNet: st.weekNet, source: st.source },
+    weekly: {
+      weekStart: Wk.weekStartOf(Wk.etDate(nowMs), cfg.weekStartDow),
+      betsLeftThisWeek: ctx.betsLeftThisWeek,
+      weeksLeft: cfg.weeksLeft,
+      plannedWeekMu: ctx.weekMu,
+      plannedWeekSd: ctx.weekSd,
+      pThisWeekPastCarry: outlook.pPastCarry,
+      expectedRebateThisWeek: outlook.expectedRebateThisWeek,
+      expectedOwedThisWeek: outlook.expectedOwedThisWeek,
+      expectedRebateRestOfPromo: outlook.expectedRebateTotal,
+      avgLockTopPicks: avgLock,
+      plan,
+      note: 'Rebate values assume the plan in config (bets/week at max bet, drift, SD) for the rest of the promo, hedged so only love23 P&L drives the rebate.',
+    },
     config: cfg,
     meta: {
       love23FetchedAt: new Date(sched.fetchedAt).toISOString(),
@@ -237,7 +278,7 @@ async function handleAccount(req, res) {
   }
   const daily = settledDailyFromApi(settled.data);
   const persistError = await persistDaily(db, daily);
-  const led = await loadLedger(db, deps.promoStart(), cfg);
+  const led = await loadLedger(db, deps.promoStart(), cfg, deps.now(), Number(bal.data && bal.data.atRisk) || 0);
   const p = prof.data || {};
   res.status(200).json({
     balance: bal.data || null,
@@ -296,10 +337,11 @@ async function handlePost(req, res) {
     res.status(200).json({ ok: true });
     return;
   }
-  if (op === 'adjust' || op === 'rebate-paid') {
+  if (op === 'adjust' || op === 'carry' || op === 'settlement') {
     const pnl = Number(body.pnl);
     if (!Number.isFinite(pnl)) { res.status(400).json({ error: 'pnl (number) required' }); return; }
-    const { data, error } = await db.from('love23_ledger').insert({ kind: op === 'adjust' ? 'adjust' : 'rebate_paid', pnl, note: str(body.note, 500) }).select().single();
+    if (op === 'carry' && pnl < 0) { res.status(400).json({ error: 'carry is a profit balance (>= 0)' }); return; }
+    const { data, error } = await db.from('love23_ledger').insert({ kind: op, pnl, note: str(body.note, 500) }).select().single();
     if (error) { res.status(500).json({ error: error.message }); return; }
     res.status(200).json({ entry: data });
     return;

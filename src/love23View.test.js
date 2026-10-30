@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fmtAmerican, fmtMoney, selectionLabel, hedgeLabel, picksQuery, triggerProgress } from "./love23View.js";
+import { fmtAmerican, fmtMoney, selectionLabel, hedgeLabel, picksQuery, weekLabel, settlementText } from "./love23View.js";
 
 test("American odds and money formatting", () => {
   assert.equal(fmtAmerican(161), "+161");
@@ -17,14 +17,16 @@ test("selection and hedge labels", () => {
   assert.equal(hedgeLabel({ venueLabel: "Novig", outcome: "Detroit Lions", point: -3, american: -118 }), "Novig: Detroit Lions -3 -118");
 });
 
-test("picks query clamps max bet and passes N only when set", () => {
-  const q = new URLSearchParams(picksQuery({ maxBet: 900, n: "" }));
+test("picks query clamps max bet and passes overrides only when set", () => {
+  const q = new URLSearchParams(picksQuery({ maxBet: 900, carry: "" }));
   assert.equal(q.get("maxBet"), "500");
-  assert.equal(q.has("n"), false);
-  assert.equal(new URLSearchParams(picksQuery({ n: "-2500" })).get("n"), "-2500");
+  assert.equal(q.has("carry"), false);
+  assert.equal(q.get("bpw"), "30");
+  assert.equal(new URLSearchParams(picksQuery({ carry: "2500", weekNet: "-1000" })).get("weekNet"), "-1000");
 });
 
-test("trigger progress copy", () => {
-  assert.equal(triggerProgress({ lossTowardTrigger: 2500, rolledForwardProfit: 0 }).pct, 0.25);
-  assert.match(triggerProgress({ lossTowardTrigger: 0, rolledForwardProfit: 1200 }).text, /rolled forward/);
+test("week label and settlement text", () => {
+  assert.equal(weekLabel("2026-10-27", "2026-11-03"), "Tue Oct 27 – Tue Nov 3");
+  assert.equal(settlementText({ net: -15000, absorbed: 10000, rebatable: 5000, rebate: 2500, owed: 12500 }), "Owe $12,500.00 ($10,000.00 from carry at full, $5,000.00 at 50%); saved $2,500.00");
+  assert.match(settlementText({ net: 10000, carryAfter: 10000 }), /carry → \$10,000/);
 });

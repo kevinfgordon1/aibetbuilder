@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import { canSeeOwnerTools } from "./comboAccess";
 import {
   LOVE23_REFRESH_MS, FLAG_TEXT, DEFAULT_SETTINGS, fmtAmerican, fmtMoney, fmtPct,
-  selectionLabel, hedgeLabel, gameLabel, picksQuery, triggerProgress,
+  selectionLabel, hedgeLabel, gameLabel, picksQuery, weekLabel, settlementText,
 } from "./love23View";
 
 let sb = null;
@@ -44,7 +44,7 @@ const td = { padding: "6px 8px", fontSize: 12, color: "#e5e7eb", borderBottom: "
 const btn = { background: "rgba(212,175,55,0.15)", border: "1px solid rgba(212,175,55,0.4)", borderRadius: 8, color: "#e6c65c", padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 const pos = (v) => ({ color: Number(v) > 0 ? "#4ade80" : Number(v) < 0 ? "#f87171" : "#e5e7eb" });
 
-const SETTINGS_KEY = "love23Rebate:settings:v1";
+const SETTINGS_KEY = "love23Rebate:settings:v2";
 function loadSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; } catch (_) { return { ...DEFAULT_SETTINGS }; }
 }
@@ -63,28 +63,31 @@ function AccountPanel({ account, error, onReload }) {
   if (error) return <div style={card}><b>Account</b><div style={{ color: "#fca5a5", marginTop: 8 }}>{error}</div></div>;
   if (!account) return <div style={card}>Loading love23 account…</div>;
   const l = account.ledger || {};
-  const prog = triggerProgress(l);
+  const cur = l.current || {};
+  const now = cur.ifEndedNow;
+  const worst = cur.ifOpenBetsLose;
   const b = account.balance || {};
   return (
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <b>Promo tracker</b>
+        <b>This week · {cur.start ? weekLabel(cur.start, cur.end) : "—"}</b>
         <button type="button" style={btn} onClick={onReload}>Refresh</button>
       </div>
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 14 }}>
-        <Stat title="love23 net (promo)" value={fmtMoney(l.love23Net, { sign: true })} color={pos(l.love23Net).color} sub={account.promoStart ? `since ${account.promoStart}` : "all tracked days"} />
-        <Stat title="Since last settlement" value={fmtMoney(l.N, { sign: true })} color={pos(l.N).color} sub={`${fmtMoney(l.distanceToTrigger)} more losses to trigger`} />
-        <Stat title="Rolled-forward profit" value={fmtMoney(l.rolledForwardProfit)} />
-        <Stat title="Rebates earned / paid" value={`${fmtMoney(l.rebatesEarned)} / ${fmtMoney(l.rebatesPaid)}`} sub={`${l.settlements || 0} settlement(s); if closed now (partial, unconfirmed): ${fmtMoney(l.partialIfClosedNow)}`} />
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12 }}>
+        <Stat title="love23 net this week" value={fmtMoney(l.weekNet, { sign: true })} color={pos(l.weekNet).color} sub={`${fmtMoney(b.atRisk)} still at risk`} />
+        <Stat title="Carry-forward balance" value={fmtMoney(l.carry)} sub="profit cushion: absorbs losses at full value" />
+        <Stat title="Projected settlement (week ends now)" value={now ? (now.net >= 0 ? `+${fmtMoney(now.credited)}` : `−${fmtMoney(now.owed)}`) : "—"} color={now ? pos(now.net).color : undefined} sub={settlementText(now)} />
+        <Stat title="If open bets all lose" value={worst ? (worst.net >= 0 ? `+${fmtMoney(worst.credited)}` : `−${fmtMoney(worst.owed)}`) : "—"} sub={worst ? `saved ${fmtMoney(worst.rebate)}` : ""} />
+      </div>
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+        <Stat title="love23 net (promo)" value={fmtMoney(l.love23Net, { sign: true })} color={pos(l.love23Net).color} sub={account.promoStart ? `since ${account.promoStart}` : "all tracked weeks"} />
+        <Stat title="Saved by the promo (closed weeks)" value={fmtMoney(l.rebatesEarned)} />
         <Stat title="Hedge P&L (settled)" value={fmtMoney(l.hedgePnl, { sign: true })} color={pos(l.hedgePnl).color} sub={`${fmtMoney(l.hedgeOpenStake)} open`} />
-        <Stat title="Combined" value={fmtMoney(l.combinedNet, { sign: true })} color={pos(l.combinedNet).color} sub="love23 + hedges + rebates earned" />
+        <Stat title="Combined" value={fmtMoney(l.combinedNet, { sign: true })} color={pos(l.combinedNet).color} sub="love23 + discounts + hedges" />
+        <Stat title="Closed weeks: due vs recorded" value={fmtMoney(l.balanceDue, { sign: true })} sub="+ love23 owes the client, − client owes" />
       </div>
-      <div style={{ height: 10, background: "#1f2937", borderRadius: 6, overflow: "hidden" }}>
-        <div style={{ width: `${Math.round(prog.pct * 100)}%`, height: "100%", background: "#d4af37" }} />
-      </div>
-      <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6 }}>{prog.text}</div>
       <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 10 }}>
-        Balance: credit {fmtMoney(b.credit)} · available {fmtMoney(b.available)} · at risk {fmtMoney(b.atRisk)} · free play {fmtMoney(b.freePlay)} · this week {fmtMoney(b.thisWeek, { sign: true })}
+        Balance: credit {fmtMoney(b.credit)} · available {fmtMoney(b.available)} · this week {fmtMoney(b.thisWeek, { sign: true })} · last week {fmtMoney(b.lastWeek, { sign: true })} · free play {fmtMoney(b.freePlay)}
         {account.limits && account.limits.maxWager != null && <> · max bet {fmtMoney(account.limits.maxWager)}</>}
       </div>
       {account.errors && (account.errors.ledger || account.errors.persist) && (
@@ -94,16 +97,91 @@ function AccountPanel({ account, error, onReload }) {
   );
 }
 
+function WeeksTable({ ledger }) {
+  const weeks = (ledger && ledger.weeks) || [];
+  if (!weeks.length) return null;
+  return (
+    <div style={card}>
+      <b>Weekly settlements (Tue–Tue)</b>
+      <div style={{ overflowX: "auto", marginTop: 8 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%" }}>
+          <thead><tr>{["Week", "love23 net", "Carry in", "From carry", "At 50%", "Saved", "Owed / won", "Carry out", "Hedge P&L", "Cash recorded", ""].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {[...weeks].reverse().map((w) => (
+              <tr key={w.start}>
+                <td style={{ ...td, fontFamily: "inherit" }}>{weekLabel(w.start, w.end)}</td>
+                <td style={{ ...td, ...pos(w.net) }}>{fmtMoney(w.net, { sign: true })}</td>
+                <td style={td}>{fmtMoney(w.carryBefore)}</td>
+                <td style={td}>{fmtMoney(w.absorbed)}</td>
+                <td style={td}>{fmtMoney(w.rebatable)}</td>
+                <td style={{ ...td, color: "#4ade80" }}>{fmtMoney(w.rebate)}</td>
+                <td style={{ ...td, ...pos(w.net) }}>{w.net >= 0 ? `+${fmtMoney(w.credited)}` : `−${fmtMoney(w.owed)}`}</td>
+                <td style={td}>{fmtMoney(w.carryAfter)}</td>
+                <td style={{ ...td, ...pos(w.hedgePnl) }}>{fmtMoney(w.hedgePnl, { sign: true })}</td>
+                <td style={td}>{fmtMoney(w.settlementsRecorded, { sign: true })}</td>
+                <td style={{ ...td, fontFamily: "inherit", color: "#9ca3af" }}>{w.closed ? "settled" : "open"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PlanPanel({ weekly }) {
+  if (!weekly) return null;
+  return (
+    <div style={card}>
+      <b>Plan outlook</b>
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", margin: "10px 0" }}>
+        <Stat title="P(this week ends past carry)" value={`${Math.round(weekly.pThisWeekPastCarry * 100)}%`} sub={`${weekly.betsLeftThisWeek} planned bets left this week`} />
+        <Stat title="Expected saving this week" value={fmtMoney(weekly.expectedRebateThisWeek)} />
+        <Stat title="Expected saving, rest of promo" value={fmtMoney(weekly.expectedRebateRestOfPromo)} sub={`${weekly.weeksLeft} week(s) incl. this one`} />
+        <Stat title="Planned weekly love23 SD" value={fmtMoney(weekly.plannedWeekSd)} sub={`mean ${fmtMoney(weekly.plannedWeekMu, { sign: true })}`} />
+      </div>
+      {weekly.plan && weekly.plan.length > 0 && (
+        <table style={{ borderCollapse: "collapse" }}>
+          <thead><tr>{["Bets / week", "Avg lock / bet", "Saving / wk", "Lock / wk", "EV / wk", "SD (promo)", "P(week past carry)"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {weekly.plan.map((r) => (
+              <tr key={r.betsPerWeek}>
+                <td style={td}>{r.betsPerWeek}</td>
+                <td style={{ ...td, ...pos(r.avgLock) }}>{fmtMoney(r.avgLock, { sign: true })}</td>
+                <td style={td}>{fmtMoney(r.rebatePerWeek)}</td>
+                <td style={{ ...td, ...pos(r.lockPerWeek) }}>{fmtMoney(r.lockPerWeek, { sign: true })}</td>
+                <td style={{ ...td, fontWeight: 700, ...pos(r.evPerWeek) }}>{fmtMoney(r.evPerWeek, { sign: true })}</td>
+                <td style={td}>{fmtMoney(r.sdPromo)}</td>
+                <td style={td}>{Math.round(r.pWeekPastCarry * 100)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>
+        Simulated with today&apos;s best N hedged picks (one per game) repeated each week from the current carry. Only love23 losses are discounted; hedges lock P&amp;L, so the saving is an option on weekly love23 variance. A winning week builds carry, which cancels later savings until it is lost back.
+      </div>
+    </div>
+  );
+}
+
 function Settings({ s, setS }) {
   const set = (k) => (e) => setS({ ...s, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const F = ({ k, t, title, ...rest }) => (
+    <label title={title}><span style={lbl}>{t}</span><input style={inp} type="number" value={s[k]} onChange={set(k)} {...rest} /></label>
+  );
   return (
-    <div style={{ ...card, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-      <label><span style={lbl}>Max bet ($)</span><input style={inp} type="number" max={500} value={s.maxBet} onChange={set("maxBet")} /></label>
-      <label title="Bets the client will still place before the promo ends. 0 = value each bet as if it were the last."><span style={lbl}>Bets left in promo</span><input style={inp} type="number" value={s.horizon} onChange={set("horizon")} /></label>
-      <label title="Expected love23 result per future bet, as a fraction of stake (vig drag)."><span style={lbl}>Future drift / bet</span><input style={inp} type="number" step="0.005" value={s.drift} onChange={set("drift")} /></label>
-      <label title="Future per-bet standard deviation as a multiple of max bet (~1 at even odds)."><span style={lbl}>Future SD × max bet</span><input style={inp} type="number" step="0.1" value={s.sd} onChange={set("sd")} /></label>
-      <label title="Pinnacle vs prediction-market fair must agree within this (probability)."><span style={lbl}>Confirm within</span><input style={inp} type="number" step="0.005" value={s.confirm} onChange={set("confirm")} /></label>
-      <label title="Override the running love23 net since the last settlement (blank = ledger)."><span style={lbl}>Net since settlement</span><input style={inp} type="number" placeholder="ledger" value={s.n} onChange={set("n")} /></label>
+    <div style={{ ...card, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+      {F({ k: "weeks", t: "Weeks left (incl. this)", title: "Weeks left in the promo including this one." })}
+      {F({ k: "bpw", t: "Bets / week", title: "Planned hedged love23 bets per week at max bet." })}
+      {F({ k: "maxBet", t: "Max bet ($)", max: 500 })}
+      {F({ k: "drift", t: "love23 EV / bet", step: "0.005", title: "Expected love23 result per planned bet as a fraction of stake." })}
+      {F({ k: "sd", t: "SD × max bet", step: "0.1", title: "Per-bet SD as a multiple of max bet (~1 at even odds)." })}
+      {F({ k: "cap", t: "Weekly cap ($ loss)", title: "Loss discounted at 50% per week (assumed $10k = $5k off)." })}
+      {F({ k: "credit", t: "Credit limit (stop)", placeholder: "none", title: "Weekly loss stop: love23 stops taking bets past credit + carry." })}
+      {F({ k: "carry", t: "Carry override", placeholder: "ledger" })}
+      {F({ k: "weekNet", t: "Week net override", placeholder: "ledger" })}
+      {F({ k: "confirm", t: "Confirm within", step: "0.005", title: "Pinnacle vs prediction-market fair must agree within this (probability)." })}
       <label style={{ display: "flex", alignItems: "end", gap: 8, fontSize: 12, color: "#d1d5db" }}><input type="checkbox" checked={!!s.flagged} onChange={set("flagged")} />Show held-back picks</label>
     </div>
   );
@@ -115,13 +193,13 @@ function PicksTable({ data, onLogHedge }) {
   return (
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        <b>Best picks (EV incl. rebate) · {picks.length} shown of {data.totals ? data.totals.ranked : 0}</b>
+        <b>Best picks (EV incl. weekly discount) · {picks.length} shown of {data.totals ? data.totals.ranked : 0}</b>
         <span style={{ fontSize: 11, color: "#6b7280" }}>
-          love23 {new Date(data.meta.love23FetchedAt).toLocaleTimeString()}{data.meta.love23Stale ? " (stale, backing off)" : ""} · net since settlement {fmtMoney(data.state.N, { sign: true })} ({data.state.source})
+          love23 {new Date(data.meta.love23FetchedAt).toLocaleTimeString()}{data.meta.love23Stale ? " (stale, backing off)" : ""} · carry {fmtMoney(data.state.carry)} · week net {fmtMoney(data.state.weekNet, { sign: true })} ({data.state.source})
         </span>
       </div>
       <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>
-        Recommendations only. Bet on love23 by hand; hedge on Kalshi, Polymarket, Novig or ProphetX at the price shown (fees in). Locked P&L is the same whichever side wins; Total = locked + rebate value.
+        Recommendations only. Bet on love23 by hand; hedge on Kalshi, Polymarket, Novig or ProphetX at the price shown (fees in). Locked P&L is the same whichever side wins; Rebate = change in expected weekly discounts from adding the bet to the plan; Total = locked + rebate. next_week = settles in next week's Tue–Tue period.
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -204,8 +282,9 @@ function LedgerEntries({ entries, onChanged }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
         <input style={{ ...inp, width: 120 }} placeholder="amount" value={amt} onChange={(e) => setAmt(e.target.value)} />
         <input style={{ ...inp, width: 220 }} placeholder="note" value={note} onChange={(e) => setNote(e.target.value)} />
-        <button type="button" style={btn} onClick={() => act({ op: "rebate-paid", pnl: Number(amt), note })}>Record rebate received</button>
-        <button type="button" style={btn} onClick={() => act({ op: "adjust", pnl: Number(amt), note })} title="Opening love23 net before tracking, or a correction">Adjust love23 net</button>
+        <button type="button" style={btn} onClick={() => act({ op: "settlement", pnl: Number(amt), note })} title="Cash actually settled for a week: + client received, − client paid">Record weekly settlement</button>
+        <button type="button" style={btn} onClick={() => act({ op: "carry", pnl: Number(amt), note })} title="Profit cushion already on the account at promo start">Set opening carry</button>
+        <button type="button" style={btn} onClick={() => act({ op: "adjust", pnl: Number(amt), note })} title="Correction to love23 net, counted in this week">Adjust love23 net</button>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -289,10 +368,12 @@ export default function Love23Rebate({ user }) {
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20 }}>love23 loss rebate</h2>
       <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 16 }}>
-        50% of net losses back at each −$10,000 (=$5,000), profits roll forward, $500 max bet, no commission on football. Fair: Pinnacle no-vig, confirmed by prediction markets. Preview: recommendations only.
+        Weekly Tue–Tue: a losing week costs 50% (up to $10k of loss discounted), a winning week is kept and carries forward at full value against later losses. $500 max bet, no commission on football. Fair: Pinnacle no-vig, confirmed by prediction markets. Preview: recommendations only.
       </div>
       <AccountPanel account={account} error={accountErr} onReload={loadAccount} />
+      <WeeksTable ledger={account && account.ledger} />
       <Settings s={settings} setS={setSettings} />
+      {picks && <PlanPanel weekly={picks.weekly} />}
       {picksErr ? <div style={{ ...card, color: "#fca5a5" }}>{picksErr}</div> : (
         <PicksTable data={picks} onLogHedge={(p) => setDraft({
           game: gameLabel(p.game), side: `${selectionLabel(p)} (love23 ${fmtAmerican(p.love23American)})`,

@@ -66,9 +66,13 @@ test('picks view ranks hedged picks in American odds', async () => {
     now: () => now,
   });
   const res = mockRes();
-  await handler({ method: 'GET', query: { view: 'picks', n: '-2000' }, headers: {} }, res);
+  await handler({ method: 'GET', query: { view: 'picks', carry: '1500', weekNet: '-2000' }, headers: {} }, res);
   assert.equal(res.code, 200, JSON.stringify(res.body));
-  assert.equal(res.body.state.N, -2000);
+  assert.equal(res.body.state.carry, 1500);
+  assert.equal(res.body.state.weekNet, -2000);
+  assert.equal(res.body.state.source, 'query');
+  assert.equal(typeof res.body.weekly.expectedRebateThisWeek, 'number');
+  assert.ok(res.body.weekly.pThisWeekPastCarry >= 0 && res.body.weekly.pThisWeekPastCarry <= 1);
   assert.ok(res.body.picks.length >= 1);
   const p = res.body.picks[0];
   assert.equal(p.hedge.venue, 'novig');
@@ -81,9 +85,12 @@ test('picks view ranks hedged picks in American odds', async () => {
 });
 
 test('query config is clamped (max bet never above $500)', () => {
-  const c = handler.cfgFromQuery({ maxBet: '5000', horizon: '-3', rate: '2' });
+  const c = handler.cfgFromQuery({ maxBet: '5000', weeks: '-3', rate: '2', cap: '7500', credit: '0' });
   assert.equal(c.maxBet, 500);
-  assert.equal(c.horizonBets, 0);
+  assert.equal(c.weeksLeft, 1);
+  assert.equal(c.weeklyLossCap, 7500);
+  assert.equal(c.creditLimit, null);
+  assert.equal(c.weekStartDow, 2);
   assert.equal(c.rebateRate, 1);
 });
 
