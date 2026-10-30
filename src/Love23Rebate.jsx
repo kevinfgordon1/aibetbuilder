@@ -44,7 +44,7 @@ const td = { padding: "6px 8px", fontSize: 12, color: "#e5e7eb", borderBottom: "
 const btn = { background: "rgba(212,175,55,0.15)", border: "1px solid rgba(212,175,55,0.4)", borderRadius: 8, color: "#e6c65c", padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" };
 const pos = (v) => ({ color: Number(v) > 0 ? "#4ade80" : Number(v) < 0 ? "#f87171" : "#e5e7eb" });
 
-const SETTINGS_KEY = "love23Rebate:settings:v2";
+const SETTINGS_KEY = "love23Rebate:settings:v3";
 function loadSettings() {
   try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") }; } catch (_) { return { ...DEFAULT_SETTINGS }; }
 }
@@ -178,7 +178,7 @@ function Settings({ s, setS }) {
       {F({ k: "drift", t: "love23 EV / bet", step: "0.005", title: "Expected love23 result per planned bet as a fraction of stake." })}
       {F({ k: "sd", t: "SD × max bet", step: "0.1", title: "Per-bet SD as a multiple of max bet (~1 at even odds)." })}
       {F({ k: "cap", t: "Weekly cap ($ loss)", title: "Loss discounted at 50% per week (assumed $10k = $5k off)." })}
-      {F({ k: "credit", t: "Credit limit (stop)", placeholder: "none", title: "Weekly loss stop: love23 stops taking bets past credit + carry." })}
+      {F({ k: "credit", t: "Credit limit (stop)", title: "Weekly loss stop: love23 stops taking bets past credit + carry. 0 = none." })}
       {F({ k: "carry", t: "Carry override", placeholder: "ledger" })}
       {F({ k: "weekNet", t: "Week net override", placeholder: "ledger" })}
       {F({ k: "confirm", t: "Confirm within", step: "0.005", title: "Pinnacle vs prediction-market fair must agree within this (probability)." })}
@@ -368,7 +368,7 @@ export default function Love23Rebate({ user }) {
     <div>
       <h2 style={{ margin: "0 0 4px", fontSize: 20 }}>love23 loss rebate</h2>
       <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 16 }}>
-        Weekly Tue–Tue: a losing week costs 50% (up to $10k of loss discounted), a winning week is kept and carries forward at full value against later losses. $500 max bet, no commission on football. Fair: Pinnacle no-vig, confirmed by prediction markets. Preview: recommendations only.
+        Weekly Tue–Tue: a losing week costs 50% of the first $10k of loss (past that, in full); a winning week is paid in cash and still carries forward at full value against later losses. Weekly loss stop: $5k credit. $500 max bet, no commission on football. Fair: Pinnacle no-vig, confirmed by prediction markets. Preview: recommendations only.
       </div>
       <AccountPanel account={account} error={accountErr} onReload={loadAccount} />
       <WeeksTable ledger={account && account.ledger} />

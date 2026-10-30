@@ -91,6 +91,8 @@ test('query config is clamped (max bet never above $500)', () => {
   assert.equal(c.weeklyLossCap, 7500);
   assert.equal(c.creditLimit, null);
   assert.equal(c.weekStartDow, 2);
+  assert.equal(handler.cfgFromQuery({}).creditLimit, 5000);
+  assert.equal(handler.cfgFromQuery({}).weeklyLossCap, 10000);
   assert.equal(c.rebateRate, 1);
 });
 

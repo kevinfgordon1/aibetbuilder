@@ -22,6 +22,7 @@ test("picks query clamps max bet and passes overrides only when set", () => {
   assert.equal(q.get("maxBet"), "500");
   assert.equal(q.has("carry"), false);
   assert.equal(q.get("bpw"), "30");
+  assert.equal(q.get("credit"), "5000");
   assert.equal(new URLSearchParams(picksQuery({ carry: "2500", weekNet: "-1000" })).get("weekNet"), "-1000");
 });
 

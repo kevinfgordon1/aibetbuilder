@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   drift: -0.02,    // love23 EV per planned bet (fraction of stake)
   sd: 1,           // per-bet SD x max bet
   cap: 10000,      // weekly loss discounted at 50% (unconfirmed)
-  credit: "",      // weekly loss stop (love23 credit), blank = none
+  credit: 5000,    // weekly loss stop (love23 credit); 0 = none
   maxBet: 500,
   confirm: 0.015,
   carry: "",       // override carry-forward balance (blank = ledger)

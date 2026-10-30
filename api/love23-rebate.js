@@ -97,7 +97,7 @@ function numParam(q, key, fallback, { min = -Infinity, max = Infinity } = {}) {
 
 function cfgFromQuery(q) {
   const D = R.DEFAULT_CONFIG;
-  const credit = numParam(q, 'credit', null, { min: 0, max: 1e7 });
+  const credit = numParam(q, 'credit', D.creditLimit, { min: 0, max: 1e7 }); // 0 = no stop
   return {
     maxBet: numParam(q, 'maxBet', 500, { min: 1, max: 500 }),
     weeksLeft: numParam(q, 'weeks', D.weeksLeft, { min: 1, max: 52 }),
