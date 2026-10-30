@@ -1838,6 +1838,15 @@ export default function App() {
       });
       setProfilePrefs(loaded);
       setProfilePrefsReady(true);
+      // One-time Promo sports defaults migration: stamp the new version on the
+      // saved device prefs and the Supabase profile so it never re-runs.
+      if (loaded.sportsDefaultsStale) {
+        const migrated = saveProfilePrefs(user, loaded, {
+          allowedSports: new Set(SPORT_KEYS),
+          allowedBooks: new Set(ALL_BOOKS.map((b) => b.key)),
+        });
+        persistProfilePrefsRemote(supabase, user, migrated);
+      }
       setWhatsNewSessionDismissed(false);
       setTargetedAlertSessionDismissed(false);
       if (loaded.sports && loaded.sports.length) setPromoSports(new Set(loaded.sports));

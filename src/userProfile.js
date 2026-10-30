@@ -10,17 +10,39 @@ export const PROFILE_PREFS_KEY = "aibetbuilder.profilePrefs";
 export const PROFILE_PREFS_META_KEY = "aibetbuilderPrefs";
 
 // First-time / unsaved prefs only. Saved sports win once the user customizes.
-export const DEFAULT_PROFILE_SPORTS = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba"];
-// Pre-NBA default. Saved prefs that still equal exactly this set (and were saved
-// before the v2 defaults) get NBA added once; any custom selection is kept as-is.
+// MLB dropped and NHL added for the 2026 offseason (MLB season over).
+export const DEFAULT_PROFILE_SPORTS = ["americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba", "icehockey_nhl"];
+// Old first-time defaults. A saved sports list that still equals exactly one of
+// these (order-insensitive) and was saved before the v3 defaults is switched to
+// DEFAULT_PROFILE_SPORTS once; any custom selection is kept as-is.
+// v1: pre-NBA default.
 export const LEGACY_PROFILE_SPORTS_V1 = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf"];
-export const PROFILE_SPORTS_DEFAULTS_VERSION = 2;
+// v2: v1 + NBA (the in-season MLB default).
+export const PROFILE_SPORTS_V2 = ["baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf", "basketball_nba"];
+export const LEGACY_DEFAULT_SPORTS_SETS = Object.freeze([LEGACY_PROFILE_SPORTS_V1, PROFILE_SPORTS_V2]);
+// Bumped to 3 for the MLB-offseason default. The version is the once-per-user
+// flag: every save stamps the current version, so a list saved at v3 (even one
+// that matches an old default) is never migrated again.
+export const PROFILE_SPORTS_DEFAULTS_VERSION = 3;
 
-function isLegacyDefaultSports(sports) {
-  if (!Array.isArray(sports) || sports.length !== LEGACY_PROFILE_SPORTS_V1.length) return false;
-  const set = new Set(sports);
-  return LEGACY_PROFILE_SPORTS_V1.every((k) => set.has(k));
+function uniqueSportKeys(sports) {
+  return Array.isArray(sports) ? [...new Set(sports.filter((k) => typeof k === "string" && k))] : [];
 }
+
+// Exact, order-insensitive match against an old default. Compared on the raw
+// saved list (before allowed-sport filtering) so a stale key can't make a
+// custom pick look like a default or vice versa.
+export function isLegacyDefaultSports(sports) {
+  const keys = uniqueSportKeys(sports);
+  if (!keys.length) return false;
+  const set = new Set(keys);
+  return LEGACY_DEFAULT_SPORTS_SETS.some((legacy) => legacy.length === set.size && legacy.every((k) => set.has(k)));
+}
+
+function savedSportsVersion(src) {
+  return Number(src && src.sportsDefaultsVersion) || 1;
+}
+
 export const DEFAULT_PROFILE_BOOK = "draftkings";
 
 export function profilePrefsStorageKey(userId) {
@@ -69,7 +91,11 @@ export function mergeProfilePrefSources(local, remote) {
   const b = remote && typeof remote === "object" ? remote : {};
   const out = { ...a };
   if (typeof b.displayName === "string" && b.displayName.trim()) out.displayName = b.displayName;
-  if (Array.isArray(b.sports) && b.sports.length) {
+  // Remote sports win, unless this device already holds a newer defaults
+  // version (e.g. the one-time migration saved locally but the Supabase write
+  // failed) — then an older remote list must not undo it.
+  if (Array.isArray(b.sports) && b.sports.length
+    && !(Array.isArray(a.sports) && a.sports.length && savedSportsVersion(a) > savedSportsVersion(b))) {
     out.sports = b.sports;
     out.sportsDefaultsVersion = b.sportsDefaultsVersion;
   }
@@ -111,10 +137,12 @@ export function normalizeProfilePrefs(raw, { allowedSports, allowedBooks } = {})
   const base = defaultProfilePrefs();
   const src = raw && typeof raw === "object" ? raw : {};
   let sports = sanitizeSports(src.sports, allowedSports);
-  const savedVersion = Number(src.sportsDefaultsVersion) || 1;
-  if (savedVersion < PROFILE_SPORTS_DEFAULTS_VERSION && isLegacyDefaultSports(sports)) {
+  if (savedSportsVersion(src) < PROFILE_SPORTS_DEFAULTS_VERSION && isLegacyDefaultSports(src.sports)) {
+    // One-time switch: v1 (pre-NBA) and v2 (MLB/NFL/NCAAF/NBA) defaults both go
+    // straight to the current default, never to an intermediate MLB set.
     const allowed = allowedSports instanceof Set ? allowedSports : new Set(allowedSports || []);
-    sports = DEFAULT_PROFILE_SPORTS.filter((k) => !allowed.size || allowed.has(k));
+    const next = DEFAULT_PROFILE_SPORTS.filter((k) => !allowed.size || allowed.has(k));
+    if (next.length) sports = next;
   }
   const book = typeof src.promoBook === "string" ? src.promoBook : base.promoBook;
   const books = allowedBooks instanceof Set ? allowedBooks : new Set(allowedBooks || []);
@@ -150,7 +178,18 @@ export function loadProfilePrefs(user, { storage, allowedSports, allowedBooks } 
   }
   const remote = user && user.user_metadata && user.user_metadata[PROFILE_PREFS_META_KEY];
   const merged = mergeProfilePrefSources(parsed, remote);
-  return seedProfilePrefs(user, merged, { allowedSports, allowedBooks });
+  const prefs = seedProfilePrefs(user, merged, { allowedSports, allowedBooks });
+  // Saved prefs (local or Supabase) on an older defaults version: the caller
+  // should persist the normalized result once, to both stores, so the version
+  // flag sticks and the one-time migration never re-runs.
+  const hasSaved = Boolean(parsed && typeof parsed === "object") || Boolean(remote && typeof remote === "object");
+  prefs.sportsDefaultsStale = hasSaved && profilePrefsSourcesStale(parsed, remote);
+  return prefs;
+}
+
+function profilePrefsSourcesStale(local, remote) {
+  const stale = (src) => Boolean(src && typeof src === "object") && savedSportsVersion(src) < PROFILE_SPORTS_DEFAULTS_VERSION;
+  return stale(local) || stale(remote);
 }
 
 export function saveProfilePrefs(user, prefs, { storage, allowedSports, allowedBooks } = {}) {

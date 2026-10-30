@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   MARKET_SCOPES,
   DEFAULT_MARKET_SCOPE,
+  ALL_MARKET_SCOPE,
   isMoneylineLeg,
   normalizeMarketScope,
   toggleMarketScope,
@@ -121,7 +122,9 @@ const legs = [
 
 // ── normalize / migrate old single string values
 {
-  assert.deepEqual([...DEFAULT_MARKET_SCOPE], ["all"]);
+  // Promo Builder starts on Main; All is still the no-filter fallback.
+  assert.deepEqual([...DEFAULT_MARKET_SCOPE], ["main"]);
+  assert.deepEqual([...ALL_MARKET_SCOPE], ["all"]);
   assert.deepEqual(normalizeMarketScope("all"), ["all"]);
   assert.deepEqual(normalizeMarketScope("main"), ["main"]);
   assert.deepEqual(normalizeMarketScope("props"), ["props"]);
