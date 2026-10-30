@@ -64,6 +64,9 @@
     "api/live-trading-desk.js": {
       "maxDuration": 15
     },
+    "api/love23-rebate.js": {
+      "maxDuration": 30
+    },
     "api/desk-protect-sweep.js": {
       "maxDuration": 15
     },

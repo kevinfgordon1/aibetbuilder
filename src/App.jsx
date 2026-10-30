@@ -5,6 +5,7 @@ const ComboTape = lazy(() => import("./ComboTape")); // owner/tester tab: own ch
 const SniperDashboard = lazy(() => import("./SniperDashboard")); // owner/tester tab: own chunk (audit Oct 24)
 import RootFor from "./RootFor";
 const LiveTradingDesk = lazy(() => import("./LiveTradingDesk")); // owner/tester tab: own chunk (audit Oct 24)
+const Love23Rebate = lazy(() => import("./Love23Rebate")); // owner-only love23 rebate optimizer (preview)
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
@@ -1948,7 +1949,7 @@ export default function App() {
       setFocusLockId(null);
     }
     if (activeTab === "profile" && !user) setActiveTab("promo");
-    if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) {
+    if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk" || activeTab === "love23") && !canSeeOwnerTools(user)) {
       setActiveTab("promo");
     }
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) {
@@ -1960,7 +1961,7 @@ export default function App() {
     if (authLoading) return;
     if (activeTab === "combo" && !canSeeComboLocks(user)) return;
     if (activeTab === "profile" && !user) return;
-    if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
+    if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk" || activeTab === "love23") && !canSeeOwnerTools(user)) return;
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
     const desired = serializeAppHash({
       tab: activeTab || "promo",
@@ -3085,6 +3086,7 @@ export default function App() {
             <a href={tabHash("missTape")} style={tabStyle("missTape")} onClick={onNavTabClick("missTape")}>Miss tape</a>
             <a href={tabHash("sniperDash")} style={tabStyle("sniperDash")} onClick={onNavTabClick("sniperDash")}>Sniper</a>
             <a href={tabHash("liveDesk")} style={tabStyle("liveDesk")} onClick={onNavTabClick("liveDesk")}>Live Trading Desk</a>
+            <a href={tabHash("love23")} style={tabStyle("love23")} onClick={onNavTabClick("love23")}>love23 Rebate</a>
           </>
         )}
         {!authLoading && (user ? (
@@ -3118,14 +3120,14 @@ export default function App() {
         <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
       )}
 
-      {showFullPageSpinner && activeTab !== "liveDesk" && (
+      {showFullPageSpinner && activeTab !== "liveDesk" && activeTab !== "love23" && (
         <div style={{ padding: "60px 32px", textAlign: "center", color: "#4b5563" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⏳</div>
           <div style={{ fontSize: 14 }}>Loading live odds...</div>
         </div>
       )}
 
-      {showOddsLoadError && activeTab !== "liveDesk" && (
+      {showOddsLoadError && activeTab !== "liveDesk" && activeTab !== "love23" && (
         <div data-guard-allow="true" style={{ padding: "60px 32px", textAlign: "center", color: "#9ca3af" }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⚠️</div>
           <div style={{ fontSize: 15, color: "#e8eaed", fontWeight: 600, marginBottom: 8 }}>Couldn’t load live odds</div>
@@ -3150,7 +3152,13 @@ export default function App() {
         </div>
       )}
 
-      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && activeTab !== "liveDesk" && (
+      {activeTab === "love23" && canSeeOwnerTools(user) && (
+        <div style={{ padding: "20px 32px" }}>
+          <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><Love23Rebate user={user} /></Suspense>
+        </div>
+      )}
+
+      {!showFullPageSpinner && !showOddsLoadError && activeTab !== "oddsBetstamp" && activeTab !== "liveDesk" && activeTab !== "love23" && (
         <div className="app-body" style={{ padding: "20px 32px" }}>
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}

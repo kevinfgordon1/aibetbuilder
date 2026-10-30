@@ -190,6 +190,8 @@ export const APP_HASH_TABS = Object.freeze({
   liveDesk: "liveDesk",
   "live-trading-desk": "liveDesk",
   desk: "liveDesk",
+  love23: "love23",
+  "love23-rebate": "love23",
   profile: "profile",
 });
 
@@ -237,6 +239,7 @@ export function serializeAppHash({ tab = null, lockId = null, cardId = null } = 
   }
   if (resolved === "missTape") return "#missTape";
   if (resolved === "liveDesk") return "#live-trading-desk";
+  if (resolved === "love23") return "#love23-rebate";
   if (resolved === "sniperDash") return "#sniper-dashboard";
   if (resolved === "oddsBetstamp") return "#new-odds-board";
   return "#" + resolved;
@@ -297,7 +300,7 @@ export function resolveAppHash(parsed, user) {
       allowed: false,
     };
   }
-  if (tab === "missTape" || tab === "sniperDash" || tab === "liveDesk") {
+  if (tab === "missTape" || tab === "sniperDash" || tab === "liveDesk" || tab === "love23") {
     if (canSeeOwnerTools(user)) {
       return { tab, lockId: null, cardId: null, notice: null, allowed: true };
     }
