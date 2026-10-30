@@ -1,0 +1,187 @@
+{
+ "events": [
+  {
+   "id": "401909893",
+   "date": "2026-10-30T00:00Z",
+   "name": "Cleveland Cavaliers at Atlanta Hawks",
+   "shortName": "CLE @ ATL",
+   "status": {
+    "type": {
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "shortDetail": "10/29 - 8:00 PM EDT",
+     "name": "STATUS_SCHEDULED"
+    }
+   },
+   "competitions": [
+    {
+     "date": "2026-10-30T00:00Z",
+     "timeValid": true,
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0.0",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "Thu, October 29th at 8:00 PM EDT",
+       "shortDetail": "10/29 - 8:00 PM EDT"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL",
+        "location": "Atlanta",
+        "name": "Hawks",
+        "shortDisplayName": "Hawks",
+        "displayName": "Atlanta Hawks",
+        "nickname": null
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "5",
+        "abbreviation": "CLE",
+        "location": "Cleveland",
+        "name": "Cavaliers",
+        "shortDisplayName": "Cavaliers",
+        "displayName": "Cleveland Cavaliers",
+        "nickname": null
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909894",
+   "date": "2026-10-30T00:00Z",
+   "name": "Sacramento Kings at New Orleans Pelicans",
+   "shortName": "SAC @ NO",
+   "status": {
+    "type": {
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "shortDetail": "10/29 - 8:00 PM EDT",
+     "name": "STATUS_SCHEDULED"
+    }
+   },
+   "competitions": [
+    {
+     "date": "2026-10-30T00:00Z",
+     "timeValid": true,
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0.0",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "Thu, October 29th at 8:00 PM EDT",
+       "shortDetail": "10/29 - 8:00 PM EDT"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "3",
+        "abbreviation": "NO",
+        "location": "New Orleans",
+        "name": "Pelicans",
+        "shortDisplayName": "Pelicans",
+        "displayName": "New Orleans Pelicans",
+        "nickname": null
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "23",
+        "abbreviation": "SAC",
+        "location": "Sacramento",
+        "name": "Kings",
+        "shortDisplayName": "Kings",
+        "displayName": "Sacramento Kings",
+        "nickname": null
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401909895",
+   "date": "2026-10-30T02:00Z",
+   "name": "Memphis Grizzlies at Portland Trail Blazers",
+   "shortName": "MEM @ POR",
+   "status": {
+    "type": {
+     "state": "pre",
+     "completed": false,
+     "description": "Scheduled",
+     "shortDetail": "10/29 - 10:00 PM EDT",
+     "name": "STATUS_SCHEDULED"
+    }
+   },
+   "competitions": [
+    {
+     "date": "2026-10-30T02:00Z",
+     "timeValid": true,
+     "status": {
+      "clock": 0.0,
+      "displayClock": "0.0",
+      "period": 0,
+      "type": {
+       "id": "1",
+       "name": "STATUS_SCHEDULED",
+       "state": "pre",
+       "completed": false,
+       "description": "Scheduled",
+       "detail": "Thu, October 29th at 10:00 PM EDT",
+       "shortDetail": "10/29 - 10:00 PM EDT"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "team": {
+        "id": "22",
+        "abbreviation": "POR",
+        "location": "Portland",
+        "name": "Trail Blazers",
+        "shortDisplayName": "Trail Blazers",
+        "displayName": "Portland Trail Blazers",
+        "nickname": null
+       }
+      },
+      {
+       "homeAway": "away",
+       "team": {
+        "id": "29",
+        "abbreviation": "MEM",
+        "location": "Memphis",
+        "name": "Grizzlies",
+        "shortDisplayName": "Grizzlies",
+        "displayName": "Memphis Grizzlies",
+        "nickname": null
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

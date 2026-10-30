@@ -479,6 +479,18 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
   // 6h. Identity only, never quotable: lets Combo Locks say "already started at
   // 7:30 PM ET" instead of "no matching game" when a leg has no start time.
   const started = [];
+  // Full quotable copies of the exact-start games that were just dropped as started. Kalshi's
+  // occurrence_datetime is not always tip + 3h (Oct 29 2026: KXNBAGAME-26OCT29CLEATL 02:00Z for an
+  // 8:00 PM ET ESPN tip, so occurrence - 3h said 7:00 PM and Cavs legs were refused at 7:51 PM).
+  // applyCanonicalStarts puts one back on the slate only when the official schedule says it has
+  // not started yet; with no official answer it stays started (never quote a live game).
+  const provisional = [];
+  const marketsOf = (g) => ({
+    side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: /-TIE$/i.test(m.ticker) ? 'Draw' : m.label })),
+    spread: expandSpreads(g.raw.spread || [], g.raw.side),
+    total: expandTotals(g.raw.total || []),
+    ...(opts && opts.propKind ? { prop: expandProps(g.raw.prop || [], opts.propKind) } : {}),
+  });
   for (const g of byKey.values()) {
     if (g.raw.side.length < 2) continue; // needs a real moneyline pair
     // PRE-GAME: MLB (datetime key) drops once first pitch has passed. Football
@@ -497,6 +509,8 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       if (exactOcc && nowMs - (g.occurrenceMs - occOffset) < 6 * 3600 * 1000) {
         started.push({ key: g.key, title: g.title, date: g.date, startTime: new Date(g.occurrenceMs - occOffset).toISOString(), startExact: true,
           markets: { side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: m.label })), spread: [], total: [] } });
+        provisional.push({ key: g.key, title: g.title, date: g.date, startTime: new Date(g.occurrenceMs - occOffset).toISOString(),
+          startExact: true, kalshiStartedAt: new Date(g.occurrenceMs - occOffset).toISOString(), markets: marketsOf(g) });
       }
       const keyDay = dateOnlyUtcMs(g.key);
       const k = opts && opts.espnGames && Number.isFinite(keyDay) && !exactOcc
@@ -521,15 +535,11 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       startTime: new Date(startMs).toISOString(),
       ...(exactOcc ? { startExact: true } : {}),
       ...(Number.isFinite(rescuedMs) ? { kickoffSource: 'espn', ...(espnHit ? { startExact: true } : {}) } : {}),
-      markets: {
-        side: g.raw.side.map(m => ({ ticker: m.ticker, side: 'yes', label: /-TIE$/i.test(m.ticker) ? 'Draw' : m.label })),
-        spread: expandSpreads(g.raw.spread || [], g.raw.side),
-        total: expandTotals(g.raw.total || []),
-        ...(opts && opts.propKind ? { prop: expandProps(g.raw.prop || [], opts.propKind) } : {}),
-      },
+      markets: marketsOf(g),
     });
   }
   Object.defineProperty(games, 'started', { value: started, enumerable: false });
+  Object.defineProperty(games, 'provisional', { value: provisional, enumerable: false });
   return games;
 }
 
@@ -570,12 +580,33 @@ const { loadSchedule, loadScheduleWithin, SCHEDULE_BUDGET_MS } = require('../lib
 // Official start times on top of Kalshi's. Time-boxed (budgetMs, default 1.5 s): a slow table/ESPN load, or running out
 // of time mid-way, leaves the remaining sports on their Kalshi-derived times, so the game list (and the Promo Builder ->
 // Combo Locks prefill that waits on it) is never held up by the schedule.
-async function applyCanonicalStarts(sports, started, nowMs, load = loadSchedule, budgetMs = SCHEDULE_BUDGET_MS, clock = Date.now) {
+// `provisional` ({ sport: [game] }): games Kalshi's occurrence time already called started (full quotable copies from
+// groupSportGames). One goes back on the slate only when the official schedule verifies it has NOT started; a verified
+// start just corrects the started entry's time. Unverified / timed out: stays started.
+async function applyCanonicalStarts(sports, started, nowMs, load = loadSchedule, budgetMs = SCHEDULE_BUDGET_MS, clock = Date.now, provisional = {}) {
   const deadline = clock() + budgetMs;
   const evOf = (sport, g) => `${(MARKET_SERIES[sport] || {}).side}-${g.key}`.toUpperCase();
   const events = []; for (const [sport, list] of Object.entries(sports)) for (const g of list || []) events.push(evOf(sport, g));
+  for (const [sport, list] of Object.entries(provisional || {})) for (const g of list || []) events.push(evOf(sport, g));
   const { games, from } = await loadScheduleWithin(events, process.env, undefined, budgetMs, load);
   if (from === 'timeout') return sports;
+  for (const [sport, list] of Object.entries(provisional || {})) {
+    if (clock() > deadline) break;
+    for (const g of list || []) {
+      const r = GS.resolveStart(evOf(sport, g), games);
+      if (!r.verified) continue;
+      const idx = (started[sport] || []).findIndex((s) => s.key === g.key);
+      if (r.state === 'in' || r.state === 'post' || r.startMs <= nowMs) {
+        if (idx >= 0) started[sport][idx] = { ...started[sport][idx], startTime: r.iso, kickoffSource: 'official' };
+        continue;
+      }
+      if (idx >= 0) started[sport].splice(idx, 1);
+      if (started[sport] && !started[sport].length) delete started[sport];
+      const { kalshiStartedAt, ...game } = g;
+      (sports[sport] = sports[sport] || []).push({ ...game, startTime: r.iso, startExact: true, startVerified: true, kickoffSource: 'official' });
+      sports[sport].sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime));
+    }
+  }
   for (const [sport, list] of Object.entries(sports)) {
     if (clock() > deadline) break; // out of time: this and later sports keep Kalshi times
     const keep = [];
@@ -604,6 +635,7 @@ async function handler(req, res) {
     const sports = {};
     const failed = [];
     const started = {};
+    const provisional = {};
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
       const propSpec = PROP_SERIES[sport];
@@ -616,10 +648,11 @@ async function handler(req, res) {
       if (games.failed) failed.push(sport);
       if (games.started && games.started.length) started[sport] = games.started.map((g) => ({ ...g, sport }));
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
+      if (games.provisional && games.provisional.length) provisional[sport] = markComboEligible(games.provisional, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
     }));
     // Canonical schedule (official league times, lib/game-schedule): fixes every game's start, and a game the
     // official schedule says already started moves to `started` (never offered as quotable).
-    try { await applyCanonicalStarts(sports, started, Date.now()); } catch (_) { /* keep Kalshi-derived times */ }
+    try { await applyCanonicalStarts(sports, started, Date.now(), undefined, undefined, undefined, provisional); } catch (_) { /* keep Kalshi-derived times */ }
     // Never let the CDN keep a slate with a sport missing for 3 minutes.
     if (failed.length) res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, started, ...(failed.length ? { failed } : {}) });
