@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { makeSniperLegFair, indexTdRows, storedLegFairs, prophetxAsNovig, pxEffective, vwap } from "./sniperLegFair.js";
+import { makeSniperLegFair, indexTdRows, storedLegFairs, prophetxAsNovig, pxEffective, vwap, finalLegResult } from "./sniperLegFair.js";
 import { relayIndex } from "./rootForPrices.js";
 
 const now = Date.parse("2026-10-23T04:00:00Z");
@@ -40,4 +40,20 @@ assert.ok(Math.abs(pxq[0].depth[0].odds - pxEffective(0.35)) < 1e-12 && Math.abs
 const pxRelay = relayIndex({ kalshiBoard: board, novig: pxq, novigLive: true, polledAt: now });
 f = makeSniperLegFair({ pxRelay })({ ticker: "KXNFLGAME-26NOV01PHIWAS-WAS", side: "yes" }, { kalshiBooks: {}, relay: {}, now, kalshiAt: now });
 assert.equal(f.best, "prophetx"); assert.ok(Math.abs(f.p - (1 - pxEffective(0.35))) < 1e-9);
+
+// 5. finished winning leg: 1, not the fill-time fair left behind when the book disappears.
+// DAL beat PHI; the fill still had DAL around 65%.
+const DAL = "KXNFLGAME-26OCT26DALPHI-DAL";
+const dalPx = { kalshiBooks: {}, relay: {}, now, kalshiAt: now };
+const dalStored = { [`${DAL}:yes`]: 0.65 };
+f = makeSniperLegFair({ stored: dalStored, results: { [DAL]: "yes" } })({ ticker: DAL, side: "yes" }, dalPx);
+assert.equal(f.p, 1); assert.equal(f.best, "final"); assert.equal(f.fillTime, undefined);
+assert.equal(finalLegResult({ status: "active", result: "yes" }), null);
+f = makeSniperLegFair({ stored: dalStored, results: { [DAL]: { status: "finalized", result: "yes" } } })({ ticker: DAL, side: "yes" }, dalPx);
+assert.equal(f.p, 1);
+f = makeSniperLegFair({ stored: dalStored, results: { [DAL]: { status: "finalized", result: "no" } } })({ ticker: DAL, side: "yes" }, dalPx);
+assert.equal(f.p, 0); assert.equal(f.best, "final");
+// no result → still the fill-time fair
+f = makeSniperLegFair({ stored: dalStored })({ ticker: DAL, side: "yes" }, dalPx);
+assert.equal(f.best, "fill-time"); assert.ok(Math.abs(f.p - 0.65) < 1e-9);
 console.log("sniperLegFair.test ok");

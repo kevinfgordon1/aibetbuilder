@@ -191,6 +191,16 @@ async function kalshiMarkets(tickers) {
   }
   return out;
 }
+// Kalshi status + result for every leg (not just TD names). A final yes/no is the leg result.
+function kalshiLegResults(mk) {
+  const names = {}; const legResults = {};
+  for (const [t, m] of Object.entries(mk || {})) {
+    if (/^KXNFLTD-/.test(t)) names[t] = m.title || m.yes_sub_title;
+    const res = String(m.result || '').toLowerCase();
+    if ((res === 'yes' || res === 'no') && /settled|finalized|determined/.test(String(m.status || ''))) legResults[t] = res;
+  }
+  return { names, legResults };
+}
 // Plain-English leg + game labels for the quotes table / risk by game (ESPN kickoffs + Kalshi TD names).
 let legsMod = null;
 const ESPN = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
@@ -226,13 +236,13 @@ async function matched(db, env, nowMs) {
   if (!rows.length) return { ok: true, empty: true, asOf: new Date(nowMs).toISOString(), rows: [] };
   const tickers = [...new Set(rows.flatMap((r) => (r.legs || []).map((k) => String(k).split(':')[0].toUpperCase())))];
   const mk = await kalshiMarkets(tickers);
-  const names = {}; const legResults = {};
-  for (const [t, m] of Object.entries(mk)) { if (/^KXNFLTD-/.test(t)) names[t] = m.title || m.yes_sub_title; const res = String(m.result || '').toLowerCase(); if ((res === 'yes' || res === 'no') && /settled|finalized|determined/.test(String(m.status || ''))) legResults[t] = res; }
+  const { names, legResults } = kalshiLegResults(mk);
   const perf = S.perfStats(rows, legResults);
   const perfDays = S.perfByDay(rows, legResults);
   const breakdown = S.positionBreakdown(rows, legResults);
-  // Live EV uses the same open fills and the same four-venue sniper leg fairs as "What to root for".
-  const liveRows = rows.filter((r) => r.status === 'open' && Number(r.filled_contracts) > 0 && r.phase !== 'settled' && !r.settled_at);
+  // Live EV uses the same still-open fills and the same four-venue sniper leg fairs as "What to root for".
+  // A fill any of whose legs already lost, or whose legs all already won, is decided — not open.
+  const liveRows = rows.filter((r) => S.isOpenRisk(r, legResults));
   const Hg = await hedgeMod();
   const hedges = await loadHedges(db, rows.filter((r) => Number(r.filled_contracts) > 0).map((r) => r.rfq_id));
   const hedgeOf = (r) => { const m = S.rowMoney(r); return Hg.hedgeSummary({ n: m.n, risk: m.risk, fair: m.fair, baseEv: m.ev }, hedges[r.rfq_id]); };
@@ -244,7 +254,7 @@ async function matched(db, env, nowMs) {
     const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
     await collegeStarts(markets, positions, deps.fetch || fetch);
     starts = markets.starts || {};
-    const legFairFn = await sniperLegFairFn(db, env, liveRows, names, positions);
+    const legFairFn = await sniperLegFairFn(db, env, liveRows, names, positions, legResults);
     root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts, now: nowMs, kalshiAt: markets.kalshiAt, legFairFn });
     fillTimeFallback(root, liveRows, S);
     // Needle: pregame = expected profit at the fair we sold at; now = live engine EV.
@@ -300,7 +310,7 @@ async function matched(db, env, nowMs) {
   const fillLeg = (id, k) => { const q = quoteAt[id]; const [t, sd] = String(k).split(':'); const l = q && (q.legDetail || []).find((x) => String(x.ticker).toUpperCase() === t.toUpperCase() && (x.side || 'yes') === (sd || 'yes')); return l || null; };
   const list = rows.map((r) => {
     const m = S.rowMoney(r); const hg = hedgeOf(r);
-    return { rfqId: r.rfq_id, status: S.matchedStatus(r), filledAt: S.fillTimeOf(r, fillDecisionAt[r.rfq_id]), createdAt: r.created_at, settledAt: r.settled_at,
+    return { rfqId: r.rfq_id, status: S.matchedStatus(r, legResults), filledAt: S.fillTimeOf(r, fillDecisionAt[r.rfq_id]), createdAt: r.created_at, settledAt: r.settled_at,
       legs: (r.legs || []).map((k) => ({ ...S.legMeta(k, names), ...(lab.legInfo[k] ? { bet: lab.legInfo[k].bet, game: lab.legInfo[k].game } : {}), kickoff: kick(k) || (lab.legInfo[k] && lab.legInfo[k].kickoff) || null, fillFair: (fillLeg(r.rfq_id, k) || {}).fair ?? null, fillVenue: (fillLeg(r.rfq_id, k) || {}).venue || null, close: closes[legKey(k)] || null, result: legResults[String(k).split(':')[0].toUpperCase()] || null })),
       fairYes: m.fair, soldYes: m.sold, contracts: m.n, filled: Number(r.filled_contracts) > 0, risk: m.risk, toWin: m.toWin, ev: m.ev, edge: r.roi != null ? Number(r.roi) : null, pnl: r.realized_pnl != null ? Number(r.realized_pnl) : null, fee: r.filled_fee != null ? Number(r.filled_fee) : r.fee != null ? Number(r.fee) : null, quote: quoteAt[r.rfq_id] || null, bookArb: bookArb[r.rfq_id] || null,
       hedges: hedges[r.rfq_id] || [], hedge: hg, ...(hg && hg.ev != null ? { evUnhedged: m.ev, ev: hg.ev } : {}) };
@@ -323,12 +333,15 @@ async function sniperRootFor(db, env, nowMs, checkOnly, day) {
   const history = S.sniperNeedleHistory(all, nowMs).reverse();
   const asOf = new Date(nowMs).toISOString();
   if (day) return { ok: true, asOf, dayRow: history.find((h) => h.day === String(day).slice(0, 10)) || null, history };
-  const rows = all.filter((r) => r.status === 'open' && r.phase !== 'settled' && !r.settled_at);
-  if (checkOnly) return { ok: true, locks: rows.length, days: history.length };
+  const openRows = all.filter((r) => r.status === 'open' && r.phase !== 'settled' && !r.settled_at);
+  if (checkOnly) return { ok: true, locks: openRows.length, days: history.length };
+  if (!openRows.length) return { ok: true, empty: true, locksTotal: 0, asOf, ...(history.length ? { sweat: { history, dayRow: history[0] } } : {}) };
+  const tickers = [...new Set(openRows.flatMap((r) => (r.legs || []).map((k) => String(k).split(':')[0].toUpperCase())))];
+  const mk = await kalshiMarkets(tickers);
+  const { names, legResults } = kalshiLegResults(mk);
+  // Decided fills (any leg lost, or every leg won) are not open. Won legs on a still-live fill are priced at 1.
+  const rows = openRows.filter((r) => S.isOpenRisk(r, legResults));
   if (!rows.length) return { ok: true, empty: true, locksTotal: 0, asOf, ...(history.length ? { sweat: { history, dayRow: history[0] } } : {}) };
-  const tickers = [...new Set(rows.flatMap((r) => (r.legs || []).map((k) => String(k).split(':')[0].toUpperCase())))];
-  const mk = await kalshiMarkets(tickers.filter((t) => /^KXNFLTD/.test(t)));
-  const names = {}; for (const [t, m] of Object.entries(mk)) names[t] = m.title || m.yes_sub_title;
   const positions = S.enginePositions(rows, names);
   const Hg = await hedgeMod();
   const hedges = await loadHedges(db, rows.map((r) => r.rfq_id));
@@ -341,7 +354,7 @@ async function sniperRootFor(db, env, nowMs, checkOnly, day) {
   const R = rootForApi(); const M = await R._helpers.loadMods();
   const markets = await R._helpers.loadMarkets(M, positions.map((p) => ({ legs: p.legs })), env);
   await collegeStarts(markets, positions, deps.fetch || fetch);
-  const legFairFn = await sniperLegFairFn(db, env, rows, names, positions);
+  const legFairFn = await sniperLegFairFn(db, env, rows, names, positions, legResults);
   const root = M.computeRootFor({ parlays: [], extraPositions: positions, kalshiBooks: markets.kalshiBooks, relay: markets.relay, starts: markets.starts || {}, now: nowMs, kalshiAt: markets.kalshiAt, legFairFn });
   // plain-English labels: "NE @ CHI", ESPN kickoff first, TD outcomes as "X scores a TD" / "X doesn't score"
   const codeOf = (ev) => String(ev || '').toUpperCase().split('-')[1] || '';
@@ -355,6 +368,8 @@ async function sniperRootFor(db, env, nowMs, checkOnly, day) {
   root.perEvent = root.perEvent.map((e) => { const start = startOf(e.event, e.start); return { ...e, game: gameOf(e.event, e.game), start, slot: slotOf(start), rootForName: e.rootFor != null ? nameOf(e.event, e.rootFor, e.rootForName) : e.rootForName, outcomes: e.outcomes.map(deco) }; })
     .sort((a, b) => String(a.start || '9').localeCompare(String(b.start || '9')));
   root.top = (root.top || []).map(deco);
+  // The engine counts a TD or total as its own event (86 events, ~76 games). The header counts games.
+  root.gameCount = S.distinctGameCount(rows.flatMap((r) => r.legs || []));
   if (root.model && root.model.teamNames) for (const k of Object.keys(root.model.teamNames)) { const i = k.lastIndexOf(':'); root.model.teamNames[k] = nameOf(k.slice(0, i), k.slice(i + 1), root.model.teamNames[k]); }
   const evOf = (r) => { const m = S.rowMoney(r); const hg = Hg.hedgeSummary({ n: m.n, risk: m.risk, fair: m.fair, baseEv: m.ev }, hedges[r.rfq_id]); return hg && hg.ev != null ? hg.ev : m.ev; };
   const lockBaseline = {}; for (const r of rows) lockBaseline[r.rfq_id] = evOf(r);
@@ -369,7 +384,7 @@ async function sniperRootFor(db, env, nowMs, checkOnly, day) {
 // Sniper leg fairs (src/sniperLegFair.js): $1,000 inverse bet across Kalshi + relay Polymarket US / Novig (TD /td)
 // + ProphetX (relay board), falling back to the sniper's fill-time leg fair. Any feed failing just drops that venue.
 let legFairMod = null;
-async function sniperLegFairFn(db, env, rows, names, positions) {
+async function sniperLegFairFn(db, env, rows, names, positions, results = {}) {
   const F = legFairMod || (legFairMod = await import('../src/sniperLegFair.js'));
   const P = await import('../src/rootForPrices.js');
   const f = deps.fetch || fetch;
@@ -401,7 +416,7 @@ async function sniperLegFairFn(db, env, rows, names, positions) {
     const hit = (d) => ((d.details && d.details.legDetail) || []).some((l) => l && legsWanted.has(String(l.ticker).toUpperCase()));
     stored = { ...F.storedLegFairs((recent || []).filter(hit)), ...F.storedLegFairs(own || []) };
   } catch (_) { stored = {}; }
-  return F.makeSniperLegFair({ tdBooks, pxRelay, stored });
+  return F.makeSniperLegFair({ tdBooks, pxRelay, stored, results });
 }
 
 // College kickoffs from ESPN's FBS scoreboard. Kalshi NCAAF tickers carry the day BEFORE kickoff

@@ -6,7 +6,9 @@
 //   Moneylines: the root-for engine's Kalshi / Polymarket US / Novig sources at $1,000, plus ProphetX from
 //   the relay board (2% commission folded into the price, as the sniper does).
 // No venue survives → the sniper's own fill-time fair for that leg (sniper_decisions legDetail), so a thin
-// book never turns into a fake price. Sniper page only; Combo Locks keeps rootForPrices.legFair.
+// book never turns into a fake price. A Kalshi-finalized leg (status settled / finalized / determined) is
+// priced first: 1 if that side won, 0 if it lost. A finished game whose book is gone must not stay at the
+// fill price (DAL beat PHI was still ~65%). Sniper page only; Combo Locks keeps rootForPrices.legFair.
 import { legFair, FEES, american } from "./rootForPrices.js";
 
 export const SNIPER_DEPTH_USD = 1000;
@@ -96,11 +98,28 @@ const pick = (sources) => {
   return p > 0 && p < 1 ? { p, american: american(p), best: best.venue, oppAmerican: american(best.cost), sources } : null;
 };
 
+/** Kalshi market, or an already-checked 'yes'|'no' result → 'yes'|'no' once the market is final. */
+export function finalLegResult(raw) {
+  if (raw == null) return null;
+  if (typeof raw === "string") { const r = raw.toLowerCase(); return r === "yes" || r === "no" ? r : null; }
+  const res = String(raw.result || "").toLowerCase();
+  const status = String(raw.status || "").toLowerCase();
+  if ((res === "yes" || res === "no") && /settled|finalized|determined/.test(status)) return res;
+  return null;
+}
+
 /** → legFairFn(leg, px) for computeRootFor. tdBooks: indexTdRows(); pxRelay: relayIndex() of ProphetX quotes
- *  (passed as its "novig" slot, commission pre-folded, no fee); stored: { "TICKER:side": fair } fill-time fairs. */
-export function makeSniperLegFair({ tdBooks = {}, pxRelay = {}, stored = {}, usd = SNIPER_DEPTH_USD } = {}) {
+ *  (passed as its "novig" slot, commission pre-folded, no fee); stored: { "TICKER:side": fair } fill-time fairs.
+ *  results: { TICKER: 'yes'|'no' | { status, result } } Kalshi finals. A final leg is 1 (won) or 0 (lost)
+ *  before any live book or fill-time fallback. */
+export function makeSniperLegFair({ tdBooks = {}, pxRelay = {}, stored = {}, results = {}, usd = SNIPER_DEPTH_USD } = {}) {
   return (leg, px = {}) => {
     const ticker = String(leg.ticker || "").toUpperCase(); const side = leg.side === "no" ? "no" : "yes";
+    const result = finalLegResult(results[ticker]);
+    if (result) {
+      const p = result === side ? 1 : 0;
+      return { p, american: american(p), best: "final", sources: [], final: true };
+    }
     const now = px.now != null ? px.now : Date.now();
     let r = null;
     if (isTdTicker(ticker)) {

@@ -25,7 +25,7 @@ const pct = (x, d = 1) => (x == null || !Number.isFinite(x) ? "—" : `${(x * 10
 const signed = (x) => (x > 0 ? "+" : "") + fmtUsd(x);
 const pnlColor = (x) => (x > 0 ? C.good : x < 0 ? C.bad : C.text);
 const etTime = (iso) => (iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET" : "—");
-const statusColor = { won: C.good, lost: C.bad, open: C.gold, confirming: C.warn, void: C.muted };
+const statusColor = { won: C.good, lost: C.bad, open: C.gold, confirming: C.warn, decided: C.warn, void: C.muted };
 
 function Stat({ label, value, sub, color }) {
   return (<div style={{ ...card, flex: "1 1 150px" }}><div style={{ color: C.text2, fontSize: 12 }}>{label}</div><div style={{ fontSize: 20, fontWeight: 700, color: color || C.text, margin: "4px 0" }}>{value}</div>{sub && <div style={{ color: C.muted, fontSize: 11 }}>{sub}</div>}</div>);
@@ -342,7 +342,7 @@ export default function SniperMatched({ data }) {
       {dayKey && <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>Showing fills made {scope === "today" ? "today" : "on " + dayKey} (ET, day rolls at 2 AM): {t.n} fill{t.n === 1 ? "" : "s"}.{root ? "" : " The live needle covers every open position, so it shows under All; see What to root for → Past day for a day's needle."}</div>}
       {!dayKey && <SniperBreakdown data={data} />}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-        <Stat label="Record" value={`${t.won}-${t.lost}${t.void ? `-${t.void}` : ""}`} sub={`${t.open} open · ${t.n} matched`} />
+        <Stat label="Record" value={`${t.won}-${t.lost}${t.void ? `-${t.void}` : ""}`} sub={`${t.open} open${t.decided ? ` · ${t.decided} decided` : ""} · ${t.n} matched`} />
         <Stat label="P&L (settled)" value={signed(t.pnl)} color={pnlColor(t.pnl)} sub={`Expected ${signed(t.settledEv)}`} />
         <Stat label="ROI" value={pct(t.roi)} sub={`on ${fmtUsd(t.settledRisk)} risked`} />
         <Stat label="Win rate" value={pct(t.winRate)} sub={`Expected ${t.won + t.lost ? pct(t.expectedWins / (t.won + t.lost + t.void)) : "—"}`} />

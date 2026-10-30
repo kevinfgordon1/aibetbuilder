@@ -434,7 +434,7 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
       `}</style>
       <h3>
         What to root for
-        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun}${d.fillTimeLocks ? ` priced, ${d.fillTimeLocks} at fill-time value` : ""}${d.unpricedCount ? ` · ${unpricedText(d.unpricedCount, d.unpricedReasons)}` : ""} · ${d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
+        <span className="sub">{d ? (d.empty ? `No open locks · showing saved days · checked ${etStamp(d.asOf)}` : `Last updated ${etStamp(d.asOf)} · auto-updates every ${refreshMs() / 60000} min · ${d.locksPriced} of ${d.locksTotal} open ${noun}${d.fillTimeLocks ? ` priced, ${d.fillTimeLocks} at fill-time value` : ""}${d.unpricedCount ? ` · ${unpricedText(d.unpricedCount, d.unpricedReasons)}` : ""} · ${d.gameCount != null ? d.gameCount : d.events} games${d.house ? " · you're the house: root against the legs" : ""}`) : ""}</span>
         <span style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {open && <>
           <span className="seg" role="group" aria-label="Games">
