@@ -421,7 +421,7 @@ function fullPlan() {
   assert.match(app, /DataSourceBanner/);
   assert.match(app, /showOddsHealthBanner/);
   assert.match(app, />Retry</);
-  assert.match(app, /showOddsLoadError && activeTab !== "liveDesk" && \(\s*<div data-guard-allow="true"/);
+  assert.match(app, /showOddsLoadError && activeTab !== "liveDesk" && activeTab !== "love23" && \(\s*<div data-guard-allow="true"/);
   assert.match(app, /events\.error \? \[\] : \(events\.data \|\| \[\]\)/);
   assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);

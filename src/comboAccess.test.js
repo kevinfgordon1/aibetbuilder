@@ -239,6 +239,16 @@ assert.equal(clearComboHash("#profile"), "#profile");
   const signedOutDesk = resolveAppHash(parseAppHash("#live-trading-desk"), null);
   assert.equal(signedOutDesk.notice, "signin");
 }
+{
+  // love23 rebate optimizer: owner-only, same gate as the Live Trading Desk.
+  assert.deepEqual(parseAppHash("#love23-rebate"), { tab: "love23", lockId: null, cardId: null });
+  assert.equal(serializeAppHash({ tab: "love23" }), "#love23-rebate");
+  assert.equal(resolveAppHash(parseAppHash("#love23-rebate"), kevin).allowed, true);
+  assert.equal(resolveAppHash(parseAppHash("#love23"), kenneth).tab, "promo");
+  assert.equal(resolveAppHash(parseAppHash("#love23-rebate"), stranger).notice, "noaccess");
+  assert.equal(resolveAppHash(parseAppHash("#love23-rebate"), null).notice, "signin");
+  assert.equal(initialAppTab("#love23-rebate"), "promo");
+}
 
 {
   const dir = path.dirname(fileURLToPath(import.meta.url));
