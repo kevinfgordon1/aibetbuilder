@@ -1,4 +1,6 @@
 'use strict';
+// In-season fixtures include MLB; default-off is covered in lib/mlb-switch.test.js.
+process.env.MLB_ENABLED = '1';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

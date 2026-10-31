@@ -8,14 +8,15 @@ const ncaamChamp = require('../lib/ncaam-champ');
 // Yes/No sides and injected as extra bookmakers. Upserted into odds_cache under
 // each futures key, read separately from the game boards by the frontend.
 // Split out from /api/fetch-odds so game lines and futures run as independent jobs.
-const FUTURES_SPORTS = [
+// World Series only with MLB_ENABLED=1 (Kevin Oct 30 2026, season over).
+const FUTURES_SPORTS = require('../lib/mlb-switch').withoutMlb([
   'baseball_mlb_world_series_winner',
   'americanfootball_nfl_super_bowl_winner',
   'americanfootball_ncaaf_championship_winner',
   'basketball_nba_championship_winner',
   'basketball_ncaab_championship_winner',
   'icehockey_nhl_championship_winner',
-];
+]);
 
 // ═════════════════════════════════════════════════════════════════════════
 // Direct exchange futures (Kalshi + Polymarket)

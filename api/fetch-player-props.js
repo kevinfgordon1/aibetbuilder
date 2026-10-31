@@ -43,7 +43,9 @@ async function handler(req, res, deps) {
   const d = deps || {};
   if (!d.skipAuth && !(await guardCron(req, res, d.authDeps))) return;
   const runNfl = d.runNfl || runPlayerPropsJob;
-  const runMlb = d.runMlb || runPlayerHrJob;
+  // MLB HR props only with MLB_ENABLED=1 (Kevin Oct 30 2026, season over): no Odds API / Poly / Kalshi MLB calls.
+  const mlbOff = !d.runMlb && !require('../lib/mlb-switch').mlbOn();
+  const runMlb = mlbOff ? async () => ({ ok: true, skipped: 'mlb off (MLB_ENABLED)' }) : (d.runMlb || runPlayerHrJob);
   const runNhl = d.runNhl || runPlayerGoalJob;
   try {
     const apiKey = d.apiKey !== undefined ? d.apiKey : process.env.ODDS_API_KEY;
