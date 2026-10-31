@@ -1,6 +1,17 @@
 // ESM twin of lib/ncaab-d1.js for the browser bundle (New Odds Board NCAAB D1-vs-D1 filter).
 // Keep the two in sync; src/ncaabD1.test.js checks they agree on every name.
 import { NCAAB_D1_TEAMS } from "./ncaabD1Teams.js";
+// Canonical NCAAB team table (combo-worker ncaab-teams.json, synced by scripts/sync-ncaab-teams.cjs): every
+// unambiguous known venue spelling -> ESPN id. Same normalization as lib/ncaab-teams.js (canonNorm below).
+import { NCAAB_TEAM_NAMES } from "./ncaabTeamNames.js";
+
+const CANON_WORD = { saint: 'st', state: 'st', mt: 'mount', univ: 'university', intl: 'international', u: 'university' };
+export function canonNorm(value) {
+  return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/['\u2018\u2019\u02bb`.]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim()
+    .split(' ').filter((t) => t && t !== 'the').map((t) => CANON_WORD[t] || t).join(' ');
+}
+let CANON_BY_ID = null;
 
 
 export function normName(value) {
@@ -113,7 +124,12 @@ export function d1Team(name) {
   if (!n) return null;
   const direct = names.get(n) || names.get(ALIAS_N.get(n) || '');
   if (direct) return direct;
-  // "Villanova Wildcats" style full names are covered by display; nothing fuzzier (fail closed).
+  // Canonical table (exact known spellings only; ambiguous names are not in the map -> null).
+  const id = NCAAB_TEAM_NAMES[canonNorm(name)];
+  if (id) {
+    if (!CANON_BY_ID) CANON_BY_ID = new Map(NCAAB_D1_TEAMS.map((t) => [String(t.espnId), t]));
+    return CANON_BY_ID.get(String(id)) || null;
+  }
   return null;
 }
 

@@ -31,3 +31,17 @@ const board = gamesFromFreeFeeds({ league: "NCAAB", underdog: phone, nowMs: now 
 assert.deepEqual(board.map((g) => `${g.away}|${g.home}`), ["Villanova Wildcats|Notre Dame Fighting Irish"]);
 assert.equal(gamesFromFreeFeeds({ league: "NCAAF", underdog: phone, nowMs: now }).length, 0);
 console.log("ncaabD1: ok");
+
+// Canonical table (scripts/sync-ncaab-teams.cjs): browser and server agree on every known venue spelling.
+{
+  const canon = require("../lib/ncaab-teams.json");
+  let checked = 0;
+  for (const t of canon.teams) for (const a of Object.values(t.aliases)) for (const n of a.names || []) {
+    const s = cjs.d1Team(n); const b = d1Team(n);
+    if (b) { assert.ok(s, `server misses ${n}`); assert.equal(b.espnId, s.espnId, `disagree on ${n}`); checked += 1; }
+  }
+  assert.ok(checked > 1500, `browser names ${checked}`);
+  assert.equal(d1Team("Loyola (Chi) Ramblers").espnId, "2350");
+  assert.equal(d1Team("Oakwood"), null);
+  console.log(`ncaabD1 canonical: ${checked} names agree`);
+}
