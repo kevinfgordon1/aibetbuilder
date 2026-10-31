@@ -6,9 +6,9 @@
 
 export const encVal = (t, s) => `${t}|${s}`;
 
-export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "nba", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"];
+export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "nba", "ncaab", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"];
 export const COMBO_SPORT_LABEL = {
-  mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL", nba: "NBA",
+  mlb: "MLB", nfl: "NFL", ncaaf: "NCAAF", nhl: "NHL", nba: "NBA", ncaab: "NCAAB",
   mls: "MLS", epl: "EPL", laliga: "La Liga", seriea: "Serie A", bundesliga: "Bundesliga", ligue1: "Ligue 1", ucl: "UCL",
   ufc: "UFC",
 };
@@ -21,6 +21,7 @@ const PROMO_TO_SPORT = {
   americanfootball_ncaaf: "ncaaf",
   icehockey_nhl: "nhl",
   basketball_nba: "nba",
+  basketball_ncaab: "ncaab",
   soccer_usa_mls: "mls",
   soccer_epl: "epl",
   soccer_spain_la_liga: "laliga",
@@ -416,6 +417,8 @@ const NCAAF_NAME_ALIASES = [
   [/\b(etsu|east tennessee state)\b/, "east tennessee state"],
   [/\bhawai i\b/, "hawaii"],
 ];
+// College sports (football + men's basketball) match by school name, not a fixed team index.
+export const COLLEGE_COMBO_SPORTS = new Set(["ncaaf", "ncaab"]);
 export function ncaafCanonName(s) {
   let n = normalize(String(s || "").replace(/[()]/g, " ").replace(/[-\u2013]/g, " ").replace(/['\u2019.]/g, ""))
     .replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()
@@ -458,7 +461,7 @@ export function ncaafTeamsMatch(promoGame, kalshiGame) {
 function teamsMatchGame(promoGame, kalshiGame, sport = "mlb") {
   if (sport === "ufc") return ufcTeamsMatch(promoGame, kalshiGame);
   if (SOCCER_COMBO_SPORTS.has(sport)) return soccerTeamsMatch(promoGame, kalshiGame);
-  if (sport === "ncaaf") return ncaafTeamsMatch(promoGame, kalshiGame);
+  if (COLLEGE_COMBO_SPORTS.has(sport)) return ncaafTeamsMatch(promoGame, kalshiGame);
   const [away, home] = splitAt(promoGame);
   const promoIds = [identifyTeam(away, sport), identifyTeam(home, sport)].filter(Boolean);
   const kalshiIds = kalshiTeamIds(kalshiGame, sport);
@@ -639,7 +642,7 @@ function spreadSideMatches(parsed, sm, sport) {
   const teamId = identifyTeam(parsed.team, sport);
   const labelId = identifyTeam(sm.team, sport);
   if (teamId && labelId && teamId === labelId) return true;
-  if (sport === "ncaaf" && nameMatchesLabel(parsed.team, sm.team)) return true;
+  if (COLLEGE_COMBO_SPORTS.has(sport) && nameMatchesLabel(parsed.team, sm.team)) return true;
   if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return true;
   return false;
 }
@@ -705,7 +708,7 @@ function missingKalshiLineReason(wantLine, game, pool) {
 // is this team's +X — even when the NO label was built from the wrong city.
 function opponentMinusCovers(parsed, yesSpread, sport) {
   if (!yesSpread || yesSpread.sign !== "-") return false;
-  if (sport === "ncaaf") return !nameMatchesLabel(parsed.team, yesSpread.team);
+  if (COLLEGE_COMBO_SPORTS.has(sport)) return !nameMatchesLabel(parsed.team, yesSpread.team);
   const promoId = identifyTeam(parsed.team, sport);
   const yesId = identifyTeam(yesSpread.team, sport);
   if (promoId && yesId) return promoId !== yesId;
@@ -847,7 +850,7 @@ function matchMarket(promoLeg, game, sport = "mlb") {
       if (isDrawName(promoLeg.name)) return { market: sides.find((m) => /-TIE$/i.test(m.ticker || "")) || null };
       return { market: soccerSideFor(String(promoLeg.name || "").replace(/\s+(ml|moneyline)\s*$/i, ""), game) };
     }
-    if (sport === "ncaaf") {
+    if (COLLEGE_COMBO_SPORTS.has(sport)) {
       const hit = sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
       return { market: hit };
     }
@@ -921,7 +924,7 @@ function slateTeamOf(name, canonLabels) {
 export function oneTeamOtherGames(leg, slate, nowMs = Date.now()) {
   const sport = promoSportOf(leg);
   const [away, home] = splitAt(leg?.game);
-  if (sport !== "ncaaf" || !away || !home) return [];
+  if (!COLLEGE_COMBO_SPORTS.has(sport) || !away || !home) return [];
   const pool = (slate || []).filter((g) => g.sport === sport && !(Date.parse(g.startTime) <= nowMs));
   const labelsOf = (g) => (g.markets?.side || []).map((m) => ncaafCanonName(m.label)).filter(Boolean);
   const all = new Set(pool.flatMap(labelsOf));
@@ -976,7 +979,7 @@ export function mapPromoLegsToKalshi(promoLegs, games, nowMs = Date.now(), start
   for (const leg of promoLegs || []) {
     const sport = promoSportOf(leg);
     if (!sport) {
-      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, NHL, and NBA main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
+      unmatched.push(unmatchedEntry(leg, "Combo Locks maps MLB, NFL, NCAAF, NHL, NBA, and NCAAB main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, plus MLB 1+ HR, NFL anytime TD, and NHL 1+ Goal props"));
       rows.push({ gameKey: "", marketVal: "" });
       continue;
     }

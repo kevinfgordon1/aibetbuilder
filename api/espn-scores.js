@@ -7,6 +7,9 @@
 //   NFL    https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard
 //   NCAAF  https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard
 //   NHL    https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard
+//   NBA    https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard
+//   NCAAB  https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard
+//          (groups=50 = Division I, limit=500: 180+ games on a busy day)
 //
 // GET /api/espn-scores?queries=mlb:20260903,nfl:20260913
 // GET /api/espn-scores?live=nfl  → today's NFL scoreboard, slimmed to the
@@ -25,6 +28,7 @@ const ESPN = {
   ncaaf: 'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard',
   nhl: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard',
   nba: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
+  ncaab: 'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard',
 };
 
 const DATE_RE = /^(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/;
@@ -54,7 +58,7 @@ function queriesFromReq(req) {
   const out = [];
   const seen = new Set();
   for (const part of String(raw).split(/[,\s]+/)) {
-    const m = /^(mlb|nfl|ncaaf|nhl|nba):(\d{8})$/i.exec(part.trim());
+    const m = /^(mlb|nfl|ncaaf|nhl|nba|ncaab):(\d{8})$/i.exec(part.trim());
     if (!m || !DATE_RE.test(m[2])) continue;
     const sport = m[1].toLowerCase();
     const date = m[2];
@@ -119,7 +123,7 @@ function scoreboardUrl(sport, date) {
   const base = ESPN[sport];
   if (!base) return null;
   // Saturday NCAAF slates exceed ESPN's default page; include FCS (Mercyhurst).
-  const extra = sport === 'ncaaf' ? '&limit=300' : '';
+  const extra = sport === 'ncaaf' ? '&limit=300' : sport === 'ncaab' ? '&groups=50&limit=500' : '';
   return `${base}?dates=${encodeURIComponent(date)}${extra}`;
 }
 

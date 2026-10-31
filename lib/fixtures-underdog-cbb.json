@@ -1,0 +1,407 @@
+{
+ "note": "Underdog CBB match_grouped_lines (phone PE), VILL @ ND match 209889, trimmed from a live pull 2026-10-30 ~10 PM ET",
+ "games": [
+  {
+   "id": 209889,
+   "sport_id": "CBB",
+   "title": "VILL @ ND",
+   "full_team_names_title": "Villanova Wildcats @ Notre Dame Fighting Irish",
+   "scheduled_at": "2026-11-01T14:30:00Z",
+   "status": "scheduled"
+  }
+ ],
+ "appearances": [
+  {
+   "id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603",
+   "match_id": 209889,
+   "match_type": "Game",
+   "team_id": null
+  }
+ ],
+ "over_under_lines": [
+  {
+   "id": "d9578f8c-de75-472a-8d39-a3edf4d8fa61",
+   "contract_terms_url": null,
+   "contract_url": null,
+   "entry_stable_id": "cfc63151-a4ed-4e93-acc2-8cdaaeb90d5c|",
+   "expires_at": null,
+   "line_type": "balanced",
+   "live_event": false,
+   "live_event_stat": null,
+   "non_discounted_stat_value": null,
+   "options": [
+    {
+     "id": "a810eb53-97c5-4d9f-9c9d-45a5076a8c83",
+     "american_price": "-345",
+     "appearance_id": "9af27b2f-996f-4437-8ef8-4f003412f6d3",
+     "choice": "away",
+     "choice_display": "Villanova to win",
+     "choice_display_name_shorter": "To win",
+     "choice_display_short": "VILL",
+     "choice_id": "away__9af27b2f-996f-4437-8ef8-4f003412f6d3",
+     "decimal_price": "1.29",
+     "grouping_id": null,
+     "lookup_id": "b83da40f-70b1-5a31-96e3-c29e8ee7c65f",
+     "odds": {
+      "fantasy": null,
+      "prediction": {
+       "american": "-345",
+       "decimal": "1.29",
+       "probability": "76",
+       "type": "precision"
+      },
+      "sportsbook": null
+     },
+     "over_under_line_id": "d9578f8c-de75-472a-8d39-a3edf4d8fa61",
+     "payout_multiplier": "0.65",
+     "raw_probability": "0.76",
+     "rfq_combinable": true,
+     "selection_header": "Villanova Wildcats",
+     "selection_subheader": "To win",
+     "status": "active",
+     "type": "OverUnderOption",
+     "updated_at": "2026-10-31T00:42:10.118Z"
+    },
+    {
+     "id": "8cb0ec94-702d-42f0-b546-ccba3bd8030a",
+     "american_price": "+266",
+     "appearance_id": "5654e8f9-676d-4756-bf15-8bdf3db97785",
+     "choice": "home",
+     "choice_display": "Notre Dame to win",
+     "choice_display_name_shorter": "To win",
+     "choice_display_short": "ND",
+     "choice_id": "home__5654e8f9-676d-4756-bf15-8bdf3db97785",
+     "decimal_price": "3.66",
+     "grouping_id": null,
+     "lookup_id": "00cba918-cb60-5330-ad76-9d412b6be715",
+     "odds": {
+      "fantasy": null,
+      "prediction": {
+       "american": "+266",
+       "decimal": "3.66",
+       "probability": "26",
+       "type": "precision"
+      },
+      "sportsbook": null
+     },
+     "over_under_line_id": "d9578f8c-de75-472a-8d39-a3edf4d8fa61",
+     "payout_multiplier": "1.83",
+     "raw_probability": "0.26",
+     "rfq_combinable": true,
+     "selection_header": "Notre Dame Fighting Irish",
+     "selection_subheader": "To win",
+     "status": "active",
+     "type": "OverUnderOption",
+     "updated_at": "2026-10-30T22:01:50.258Z"
+    }
+   ],
+   "over_under": {
+    "id": "cfc63151-a4ed-4e93-acc2-8cdaaeb90d5c",
+    "appearance_stat": {
+     "id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603-1cf0e3f3-2cb4-4445-968e-b651d4919720",
+     "appearance_id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603",
+     "display_stat": "Moneyline",
+     "graded_by": "high_score",
+     "hide_current_stat_value": false,
+     "match_id": 209889,
+     "match_type": "Game",
+     "pickem_stat_id": "1cf0e3f3-2cb4-4445-968e-b651d4919720",
+     "rank": 0,
+     "show_current_stat_value_on_track": false,
+     "stat": "moneyline"
+    },
+    "boost": null,
+    "category": "core",
+    "display_mode": "moneyline",
+    "grid_display_title": "Winner",
+    "has_alternates": false,
+    "multi_provider": true,
+    "option_priority": "none",
+    "prediction_market": true,
+    "rfq_combinable_by_provider": {
+     "kalshi": {
+      "away": true,
+      "home": true
+     },
+     "nadex": {
+      "away": true,
+      "home": true
+     },
+     "udx": {
+      "away": true,
+      "home": true
+     }
+    },
+    "scoring_type_id": null,
+    "supercharge_type": null,
+    "team_divider": "@",
+    "title": "VILL @ ND Moneyline"
+   },
+   "over_under_id": "cfc63151-a4ed-4e93-acc2-8cdaaeb90d5c",
+   "provider_id": "udx",
+   "provider_type": "prediction_market",
+   "rank": 140199000000000,
+   "sort_by": null,
+   "stable_id": "cfc63151-a4ed-4e93-acc2-8cdaaeb90d5c|balanced",
+   "stat_value": null,
+   "status": "active",
+   "updated_at": "2026-10-31T00:42:10.121Z"
+  },
+  {
+   "id": "163210a3-b2a5-444f-be6c-08c7fba9f2bf",
+   "contract_terms_url": null,
+   "contract_url": null,
+   "entry_stable_id": "d6fde074-3e32-4b33-8fa2-8e5d973e5d2c|7.5",
+   "expires_at": null,
+   "line_type": "balanced",
+   "live_event": false,
+   "live_event_stat": null,
+   "non_discounted_stat_value": null,
+   "options": [
+    {
+     "id": "ec95b363-9a4d-45e0-b4fc-76cf26ca6c9f",
+     "american_price": "-112",
+     "appearance_id": "9af27b2f-996f-4437-8ef8-4f003412f6d3",
+     "choice": "away",
+     "choice_display": "VILL -7.5",
+     "choice_display_name_shorter": "-7.5",
+     "choice_display_short": "VILL -7.5",
+     "choice_id": "away__9af27b2f-996f-4437-8ef8-4f003412f6d3",
+     "decimal_price": "1.9",
+     "grouping_id": null,
+     "lookup_id": "b95da5bd-4b15-5cf7-8df9-c2e3e6a4c7d3",
+     "odds": {
+      "fantasy": null,
+      "prediction": {
+       "american": "-112",
+       "decimal": "1.9",
+       "probability": "51",
+       "type": "precision"
+      },
+      "sportsbook": null
+     },
+     "over_under_line_id": "163210a3-b2a5-444f-be6c-08c7fba9f2bf",
+     "payout_multiplier": "1.0",
+     "raw_probability": "0.51",
+     "rfq_combinable": true,
+     "selection_header": "Villanova Wildcats",
+     "selection_subheader": "-7.5 Spread",
+     "status": "active",
+     "type": "OverUnderOption",
+     "updated_at": "2026-10-31T00:23:27.616Z"
+    },
+    {
+     "id": "bf219a63-1b57-4756-bacc-300c9195dd3d",
+     "american_price": "-108",
+     "appearance_id": "5654e8f9-676d-4756-bf15-8bdf3db97785",
+     "choice": "home",
+     "choice_display": "ND +7.5",
+     "choice_display_name_shorter": "+7.5",
+     "choice_display_short": "ND +7.5",
+     "choice_id": "home__5654e8f9-676d-4756-bf15-8bdf3db97785",
+     "decimal_price": "1.93",
+     "grouping_id": null,
+     "lookup_id": "69a52a66-fa65-5bc2-ad8c-916c9f30571d",
+     "odds": {
+      "fantasy": null,
+      "prediction": {
+       "american": "-108",
+       "decimal": "1.93",
+       "probability": "50",
+       "type": "precision"
+      },
+      "sportsbook": null
+     },
+     "over_under_line_id": "163210a3-b2a5-444f-be6c-08c7fba9f2bf",
+     "payout_multiplier": "1.0",
+     "raw_probability": "0.5",
+     "rfq_combinable": true,
+     "selection_header": "Notre Dame Fighting Irish",
+     "selection_subheader": "+7.5 Spread",
+     "status": "active",
+     "type": "OverUnderOption",
+     "updated_at": "2026-10-31T00:23:40.734Z"
+    }
+   ],
+   "over_under": {
+    "id": "d6fde074-3e32-4b33-8fa2-8e5d973e5d2c",
+    "appearance_stat": {
+     "id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603-ec20a18f-28bc-4232-8561-3ba918668a66",
+     "appearance_id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603",
+     "display_stat": "Spread",
+     "graded_by": "high_score",
+     "hide_current_stat_value": true,
+     "match_id": 209889,
+     "match_type": "Game",
+     "pickem_stat_id": "ec20a18f-28bc-4232-8561-3ba918668a66",
+     "rank": 1,
+     "show_current_stat_value_on_track": false,
+     "stat": "spread"
+    },
+    "boost": null,
+    "category": "core",
+    "display_mode": "spread",
+    "grid_display_title": "Spread",
+    "has_alternates": true,
+    "multi_provider": true,
+    "option_priority": "none",
+    "prediction_market": true,
+    "rfq_combinable_by_provider": {
+     "kalshi": {
+      "away": true,
+      "home": true
+     },
+     "nadex": {
+      "away": true,
+      "home": true
+     },
+     "udx": {
+      "away": true,
+      "home": true
+     }
+    },
+    "scoring_type_id": null,
+    "supercharge_type": null,
+    "team_divider": "@",
+    "title": "VILL @ ND Spread"
+   },
+   "over_under_id": "d6fde074-3e32-4b33-8fa2-8e5d973e5d2c",
+   "provider_id": "udx",
+   "provider_type": "prediction_market",
+   "rank": 140199000001000,
+   "sort_by": null,
+   "stable_id": "d6fde074-3e32-4b33-8fa2-8e5d973e5d2c|balanced",
+   "stat_value": "7.5",
+   "status": "active",
+   "updated_at": "2026-10-31T00:23:40.740Z"
+  },
+  {
+   "id": "6827cf08-db92-48cb-bba0-ca2a2dd6a73f",
+   "contract_terms_url": null,
+   "contract_url": null,
+   "entry_stable_id": "9f27fb72-21c4-40b2-a5f4-532eb5474e2e|147.5",
+   "expires_at": null,
+   "line_type": "balanced",
+   "live_event": false,
+   "live_event_stat": null,
+   "non_discounted_stat_value": null,
+   "options": [
+    {
+     "id": "e5e75374-3448-4d29-936d-d4f3d1ebc03a",
+     "american_price": "-113",
+     "appearance_id": null,
+     "choice": "higher",
+     "choice_display": "Higher",
+     "choice_display_name_shorter": "148+",
+     "choice_display_short": "Higher",
+     "choice_id": "over__",
+     "decimal_price": "1.89",
+     "grouping_id": null,
+     "lookup_id": "3bd50021-3afd-5f42-9b61-a7a5893cc19a",
+     "odds": {
+      "fantasy": null,
+      "prediction": {
+       "american": "-113",
+       "decimal": "1.89",
+       "probability": "51",
+       "type": "precision"
+      },
+      "sportsbook": null
+     },
+     "over_under_line_id": "6827cf08-db92-48cb-bba0-ca2a2dd6a73f",
+     "payout_multiplier": "1.0",
+     "raw_probability": "0.51",
+     "rfq_combinable": true,
+     "selection_header": "VILL @ ND",
+     "selection_subheader": "Higher 147.5 Total Points",
+     "status": "active",
+     "type": "OverUnderOption",
+     "updated_at": "2026-10-31T00:24:12.761Z"
+    },
+    {
+     "id": "247bfbc4-56be-42fb-a911-4f55a6589e5d",
+     "american_price": "-117",
+     "appearance_id": null,
+     "choice": "lower",
+     "choice_display": "Lower",
+     "choice_display_name_shorter": "147-",
+     "choice_display_short": "Lower",
+     "choice_id": "under__",
+     "decimal_price": "1.86",
+     "grouping_id": null,
+     "lookup_id": "9456f326-67c5-5d15-b429-a5d758174d9c",
+     "odds": {
+      "fantasy": null,
+      "prediction": {
+       "american": "-117",
+       "decimal": "1.86",
+       "probability": "52",
+       "type": "precision"
+      },
+      "sportsbook": null
+     },
+     "over_under_line_id": "6827cf08-db92-48cb-bba0-ca2a2dd6a73f",
+     "payout_multiplier": "1.0",
+     "raw_probability": "0.52",
+     "rfq_combinable": true,
+     "selection_header": "VILL @ ND",
+     "selection_subheader": "Lower 147.5 Total Points",
+     "status": "active",
+     "type": "OverUnderOption",
+     "updated_at": "2026-10-30T21:28:21.915Z"
+    }
+   ],
+   "over_under": {
+    "id": "9f27fb72-21c4-40b2-a5f4-532eb5474e2e",
+    "appearance_stat": {
+     "id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603-9483471c-6041-423d-9da6-93a0625cac42",
+     "appearance_id": "2c58e3ea-65ff-42f0-9a7f-ec4a5da68603",
+     "display_stat": "Total Points",
+     "graded_by": "high_score",
+     "hide_current_stat_value": true,
+     "match_id": 209889,
+     "match_type": "Game",
+     "pickem_stat_id": "9483471c-6041-423d-9da6-93a0625cac42",
+     "rank": 2,
+     "show_current_stat_value_on_track": false,
+     "stat": "points"
+    },
+    "boost": null,
+    "category": "core",
+    "display_mode": "default",
+    "grid_display_title": "Total",
+    "has_alternates": true,
+    "multi_provider": true,
+    "option_priority": "none",
+    "prediction_market": true,
+    "rfq_combinable_by_provider": {
+     "kalshi": {
+      "higher": true,
+      "lower": true
+     },
+     "nadex": {
+      "higher": true,
+      "lower": true
+     },
+     "udx": {
+      "higher": true,
+      "lower": true
+     }
+    },
+    "scoring_type_id": null,
+    "supercharge_type": null,
+    "team_divider": "@",
+    "title": "VILL @ ND Total Points O/U"
+   },
+   "over_under_id": "9f27fb72-21c4-40b2-a5f4-532eb5474e2e",
+   "provider_id": "udx",
+   "provider_type": "prediction_market",
+   "rank": 140199000002000,
+   "sort_by": null,
+   "stable_id": "9f27fb72-21c4-40b2-a5f4-532eb5474e2e|balanced",
+   "stat_value": "147.5",
+   "status": "active",
+   "updated_at": "2026-10-31T00:24:12.767Z"
+  }
+ ]
+}

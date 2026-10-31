@@ -33,6 +33,9 @@ const BOOKS_BY_KEY = new Map(BETSTAMP_TRIAL_BOOKS.map((b) => [b.key, b]));
 export const BETSTAMP_SPORTS = Object.freeze([
   { id: "americanfootball_nfl", label: "NFL", league: "NFL" },
   { id: "americanfootball_ncaaf", label: "NCAAF", league: "NCAAF" },
+  // New Odds Board NCAAB tab (Kevin Oct 30 2026): free feeds only (relay Polymarket US cbb, Kalshi
+  // KXNCAAMB*, Novig, Underdog CBB), D1 vs D1 games only. Betstamp itself stays NFL/NCAAF.
+  { id: "basketball_ncaab", label: "NCAAB", league: "NCAAB" },
 ]);
 
 export const BETSTAMP_LEAGUES = BETSTAMP_SPORTS.map((s) => s.league);

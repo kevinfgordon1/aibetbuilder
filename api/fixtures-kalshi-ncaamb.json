@@ -1,0 +1,326 @@
+{
+ "note": "Live Kalshi KXNCAAMB* events pulled Oct 30 2026 ~10 PM ET (trimmed)",
+ "side": [
+  {
+   "event_ticker": "KXNCAAMBGAME-26NOV01NDVILL",
+   "title": "Notre Dame vs Villanova",
+   "sub_title": "ND vs VILL (Nov 1)",
+   "markets": [
+    {
+     "ticker": "KXNCAAMBGAME-26NOV01NDVILL-VILL",
+     "yes_sub_title": "Villanova",
+     "occurrence_datetime": "2026-11-01T17:30:00Z",
+     "status": "active"
+    },
+    {
+     "ticker": "KXNCAAMBGAME-26NOV01NDVILL-ND",
+     "yes_sub_title": "Notre Dame",
+     "occurrence_datetime": "2026-11-01T17:30:00Z",
+     "status": "active"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXNCAAMBGAME-26NOV02FISKMTU",
+   "title": "Fisk vs Middle Tennessee",
+   "sub_title": "FISK vs MTU (Nov 2)",
+   "markets": [
+    {
+     "ticker": "KXNCAAMBGAME-26NOV02FISKMTU-MTU",
+     "yes_sub_title": "Middle Tennessee",
+     "occurrence_datetime": "2026-11-02T19:30:00Z",
+     "status": "active"
+    },
+    {
+     "ticker": "KXNCAAMBGAME-26NOV02FISKMTU-FISK",
+     "yes_sub_title": "Fisk",
+     "occurrence_datetime": "2026-11-02T19:30:00Z",
+     "status": "active"
+    }
+   ]
+  }
+ ],
+ "spread": [
+  {
+   "event_ticker": "KXNCAAMBSPREAD-26NOV01NDVILL",
+   "title": "Notre Dame vs Villanova: Spread",
+   "sub_title": "ND vs VILL (Nov 1)",
+   "markets": [
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL33",
+     "yes_sub_title": "Villanova wins by over 32.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL29",
+     "yes_sub_title": "Villanova wins by over 28.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL25",
+     "yes_sub_title": "Villanova wins by over 24.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL21",
+     "yes_sub_title": "Villanova wins by over 20.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL18",
+     "yes_sub_title": "Villanova wins by over 17.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL15",
+     "yes_sub_title": "Villanova wins by over 14.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL12",
+     "yes_sub_title": "Villanova wins by over 11.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL10",
+     "yes_sub_title": "Villanova wins by over 9.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL9",
+     "yes_sub_title": "Villanova wins by over 8.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL8",
+     "yes_sub_title": "Villanova wins by over 7.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL7",
+     "yes_sub_title": "Villanova wins by over 6.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL6",
+     "yes_sub_title": "Villanova wins by over 5.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL4",
+     "yes_sub_title": "Villanova wins by over 3.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-VILL2",
+     "yes_sub_title": "Villanova wins by over 1.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-ND2",
+     "yes_sub_title": "Notre Dame wins by over 1.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-ND5",
+     "yes_sub_title": "Notre Dame wins by over 4.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-ND9",
+     "yes_sub_title": "Notre Dame wins by over 8.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-ND13",
+     "yes_sub_title": "Notre Dame wins by over 12.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBSPREAD-26NOV01NDVILL-ND17",
+     "yes_sub_title": "Notre Dame wins by over 16.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    }
+   ]
+  }
+ ],
+ "total": [
+  {
+   "event_ticker": "KXNCAAMBTOTAL-26NOV01NDVILL",
+   "title": "Notre Dame vs Villanova: Point Total",
+   "sub_title": "ND vs VILL (Nov 1)",
+   "markets": [
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-123",
+     "yes_sub_title": "Over 122.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-124",
+     "yes_sub_title": "Over 123.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-127",
+     "yes_sub_title": "Over 126.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-128",
+     "yes_sub_title": "Over 127.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-131",
+     "yes_sub_title": "Over 130.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-132",
+     "yes_sub_title": "Over 131.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-135",
+     "yes_sub_title": "Over 134.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-136",
+     "yes_sub_title": "Over 135.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-138",
+     "yes_sub_title": "Over 137.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-139",
+     "yes_sub_title": "Over 138.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-141",
+     "yes_sub_title": "Over 140.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-142",
+     "yes_sub_title": "Over 141.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-144",
+     "yes_sub_title": "Over 143.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-145",
+     "yes_sub_title": "Over 144.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-146",
+     "yes_sub_title": "Over 145.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-147",
+     "yes_sub_title": "Over 146.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-148",
+     "yes_sub_title": "Over 147.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-149",
+     "yes_sub_title": "Over 148.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-150",
+     "yes_sub_title": "Over 149.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-151",
+     "yes_sub_title": "Over 150.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-152",
+     "yes_sub_title": "Over 151.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-153",
+     "yes_sub_title": "Over 152.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-155",
+     "yes_sub_title": "Over 154.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-156",
+     "yes_sub_title": "Over 155.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-158",
+     "yes_sub_title": "Over 157.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-159",
+     "yes_sub_title": "Over 158.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-161",
+     "yes_sub_title": "Over 160.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-162",
+     "yes_sub_title": "Over 161.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-165",
+     "yes_sub_title": "Over 164.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-166",
+     "yes_sub_title": "Over 165.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-169",
+     "yes_sub_title": "Over 168.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-170",
+     "yes_sub_title": "Over 169.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-173",
+     "yes_sub_title": "Over 172.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    },
+    {
+     "ticker": "KXNCAAMBTOTAL-26NOV01NDVILL-174",
+     "yes_sub_title": "Over 173.5 points",
+     "occurrence_datetime": "2026-11-01T17:30:00Z"
+    }
+   ]
+  }
+ ]
+}

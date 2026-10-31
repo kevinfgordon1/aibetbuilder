@@ -39,12 +39,14 @@ export function sportFromTicker(ticker, gameKey) {
   if (/KXNCAAF/i.test(t)) return "ncaaf";
   if (/KXNHL/i.test(t)) return "nhl";
   if (/KXNBA/i.test(t)) return "nba";
+  if (/KXNCAAMB|KXNCAAB/i.test(t)) return "ncaab";
   const gk = String(gameKey || "");
   if (gk.startsWith("mlb:")) return "mlb";
   if (gk.startsWith("nfl:")) return "nfl";
   if (gk.startsWith("ncaaf:")) return "ncaaf";
   if (gk.startsWith("nhl:")) return "nhl";
   if (gk.startsWith("nba:")) return "nba";
+  if (gk.startsWith("ncaab:")) return "ncaab";
   return null;
 }
 
@@ -187,7 +189,7 @@ function espnAbbr(code, sport) {
 
 function teamCodes(raw, sport) {
   const codes = new Set();
-  const id = identifyTeam(raw, sport === "ncaaf" ? "nfl" : sport);
+  const id = sport === "ncaab" ? null : identifyTeam(raw, sport === "ncaaf" ? "nfl" : sport);
   if (id) {
     codes.add(id);
     codes.add(espnAbbr(id, sport));
@@ -248,7 +250,7 @@ function abbrVariants(abbr, sport) {
   if (a === "ARI") out.add("AZ");
   if (a === "WSH") out.add("WAS");
   if (a === "TAMU") out.add("TXAM");
-  const extra = sport === "ncaaf" ? (NCAAF_ABBR_ALIASES[a] || []) : [];
+  const extra = sport === "ncaaf" || sport === "ncaab" ? (NCAAF_ABBR_ALIASES[a] || []) : [];
   extra.forEach((v) => out.add(v));
   out.add(espnAbbr(a, sport));
   return [...out].filter((v) => v && v.length >= 2);

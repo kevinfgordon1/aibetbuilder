@@ -12,6 +12,7 @@ assert.strictEqual(driftSummary(Array.from({ length: 10 }, () => mk(0.6))).warn,
 assert.strictEqual(driftSummary(Array.from({ length: 40 }, () => mk(0.5))).warn, false);
 // per-leg league + filter
 assert.strictEqual(leagueOfLeg("KXNBAGAME-X-PHI"), "NBA"); assert.strictEqual(leagueOfLeg("KXNCAAFSPREAD-X"), "NCAAF"); assert.strictEqual(leagueOfLeg("KXNFLTD-X"), "NFL");
+assert.strictEqual(leagueOfLeg("KXNCAAMBGAME-26NOV01VILLND-VILL"), "NCAAB"); assert.strictEqual(leagueOfLeg("KXNCAAMBSPREAD-26NOV01VILLND-VILL5"), "NCAAB"); assert.strictEqual(leagueOfLeg("KXNCAAFGAME-X-ND"), "NCAAF");
 const mixed = { legs: [{ ticker: "KXNCAAFGAME-X-NW" }, { ticker: "KXNBAGAME-X-PHI" }] }, nfl = { legs: [{ ticker: "KXNFLGAME-X-CIN" }, { ticker: "KXNFLTD-X-W" }] };
 assert.strictEqual(leagueOfFill(mixed), "Mixed"); assert.strictEqual(leagueOfFill(nfl), "NFL");
 assert.ok(fillMatchesLeague(mixed, "NBA") && fillMatchesLeague(mixed, "NCAAF") && fillMatchesLeague(mixed, "Mixed") && fillMatchesLeague(mixed, ""));

@@ -4,7 +4,7 @@
 // otherwise it is "no close" (never invented).
 const legType = (t) => { const s = String(t || "").toUpperCase(); return /TD/.test(s.split("-")[0]) ? "Player TD" : /SPREAD|TOTAL/.test(s) ? "Spread/total" : "ML"; };
 export { legType };
-const LG = [[/^KXNCAAF/, "NCAAF"], [/^KXNFL/, "NFL"], [/^KXNCAAB/, "NCAAB"], [/^KXNBA/, "NBA"], [/^KXNHL/, "NHL"], [/^KXMLB/, "MLB"], [/^KXUFC/, "UFC"]];
+const LG = [[/^KXNCAAF/, "NCAAF"], [/^KXNFL/, "NFL"], [/^KXNCAA(MB|B)/, "NCAAB"], [/^KXNBA/, "NBA"], [/^KXNHL/, "NHL"], [/^KXMLB/, "MLB"], [/^KXUFC/, "UFC"]];
 const leagueOf = (t) => { const s = String(t || "").toUpperCase(); for (const [re, n] of LG) if (re.test(s)) return n; return "Other"; };
 
 // row: { risk, contracts, fairYes, ev (unhedged ok), legs: [{ ticker, fillFair, close: { fair } | null }] }
