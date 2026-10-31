@@ -301,6 +301,10 @@ const handler = async (req, res) => {
         } catch (exErr) {
           console.error(`exchange futures inject failed ${sport}:`, exErr.message);
         }
+        // NCAAM: one name per team across every book + exchange so the board shows one Yes/No row pair per team.
+        if (EXCHANGE_FUTURES[sport] && EXCHANGE_FUTURES[sport].ncaam) {
+          try { exDiag = { ...exDiag, renamed: ncaamChamp.unifyTeamNames(rawData) }; } catch (e) { console.error(`ncaam name unify failed: ${e.message}`); }
+        }
         const data = applyBookAdjustments(rawData);
         const { error } = await supabase
           .from('odds_cache')
