@@ -3,8 +3,6 @@ import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import { isSoccerSport } from "./soccerPairing.js";
 import { boardSportMatches, isSoccerChipId } from "./sportChips.js";
-import NcaamChampionView from "./NcaamChampionView.jsx";
-import { NCAAM_CHAMP_KEY } from "./ncaamChampion.js";
 import {
   fmtBoardSize,
   bookInitials,
@@ -75,9 +73,10 @@ function BookMark({ book, extra = 0, title, size = 13 }) {
   );
 }
 
-function LiquidityCue({ size, price, inline = false }) {
+function LiquidityCue({ size, price, profit, inline = false }) {
   // Depth = potential profit at this price, not stake ($3,000 at −200 = $1.5k).
-  const label = fmtBoardSize(price != null ? depthFromStake(size, price) : size);
+  // `profit` = server-computed potential profit (fee in; NCAAM champion exchanges) and wins when present.
+  const label = fmtBoardSize(Number(profit) > 0 ? Number(profit) : price != null ? depthFromStake(size, price) : size);
   if (!label) return null;
   return (
     <span data-liq={label} style={{ fontSize: 9, color: "#6b7280", fontWeight: 500, lineHeight: 1.15, display: inline ? "inline" : "block" }}>
@@ -89,6 +88,7 @@ function LiquidityCue({ size, price, inline = false }) {
 function OddsSide({
   price,
   size,
+  profit,
   line,
   noPrice,
   noSize,
@@ -111,7 +111,7 @@ function OddsSide({
         {showBestMark && price != null && book && (
           <BookMark book={book} extra={Math.max(0, (books?.length || 0) - 1)} title={title} />
         )}
-        <LiquidityCue size={size} price={price} inline />
+        <LiquidityCue size={size} price={price} profit={profit} inline />
       </div>
       {noPrice != null && (
         <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginTop: 2, display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "nowrap" }}>
@@ -205,13 +205,15 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
         noBestBook: no.primaryKey,
         noBestBooks: no.books,
         noBestSize: no.size,
+        bestProfit: t.bookProfits?.[yes.primaryKey],
+        noBestProfit: t.noBookProfits?.[no.primaryKey],
         hasNo: no.price !== null,
       };
     })
     .filter((t) => t.best !== null || t.hasNo)
     .sort((a, b) => impliedProb(b.best) - impliedProb(a.best));
 
-  const champRow = (key, name, isNo, priceMap, rowBest, hideNameBorder, sizeMap, bestBooks, bestSize) => (
+  const champRow = (key, name, isNo, priceMap, rowBest, hideNameBorder, sizeMap, bestBooks, bestSize, profitMap, bestProfit) => (
     <tr key={key} style={{ background: isNo ? "rgba(239,68,68,0.05)" : "transparent" }}>
       <td style={{ padding: "10px 16px", width: teamColWidth, position: "sticky", left: 0, background: isNo ? "#0f0a0b" : "#0b0b0c", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)", borderBottom: hideNameBorder ? "none" : "1px solid rgba(255,255,255,0.03)", fontSize: 13, fontWeight: 600, color: isNo ? "#9ca3af" : "#e8eaed" }}>
         {name}{isNo && <span style={{ color: "#ef4444", fontWeight: 700, marginLeft: 8, fontSize: 11 }}>NO</span>}
@@ -219,6 +221,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
       {champBooks.map((b) => {
         const price = b.key === "best" ? rowBest : priceMap?.[b.key];
         const size = b.key === "best" ? bestSize : sizeMap?.[b.key];
+        const profit = b.key === "best" ? bestProfit : profitMap?.[b.key];
         const isBestCol = b.key === "best";
         const isBestCell = b.key !== "best" && price != null && price === rowBest;
         const markBooks = isBestCol ? (bestBooks || []) : [];
@@ -227,6 +230,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
             <OddsSide
               price={price}
               size={size}
+              profit={profit}
               books={markBooks}
               allBooks={allBooks}
               showBestMark={isBestCol}
@@ -304,10 +308,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
           ))}
         </div>
       </div>
-      {deferredMarket === "champ" && champMeta?.key === NCAAM_CHAMP_KEY && (
-        <NcaamChampionView entry={champEntry} selectedBooks={deferredSelectedBooks} search={deferredSearch} books={allBooks} />
-      )}
-      {deferredMarket === "champ" && champMeta?.key !== NCAAM_CHAMP_KEY && (
+      {deferredMarket === "champ" && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + champBooks.length * oddsColWidth }}>
           <thead>
@@ -324,8 +325,8 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
             )}
             {champTeams.flatMap((t, ti) => {
               const rows = [];
-              if (t.best !== null) rows.push(champRow(`${ti}-yes`, t.name, false, t.books, t.best, t.hasNo, t.bookSizes, t.bestBooks, t.bestSize));
-              if (t.hasNo) rows.push(champRow(`${ti}-no`, t.name, true, t.noBooks, t.noBest, false, t.noBookSizes, t.noBestBooks, t.noBestSize));
+              if (t.best !== null) rows.push(champRow(`${ti}-yes`, t.name, false, t.books, t.best, t.hasNo, t.bookSizes, t.bestBooks, t.bestSize, t.bookProfits, t.bestProfit));
+              if (t.hasNo) rows.push(champRow(`${ti}-no`, t.name, true, t.noBooks, t.noBest, false, t.noBookSizes, t.noBestBooks, t.noBestSize, t.noBookProfits, t.noBestProfit));
               return rows;
             })}
           </tbody>
