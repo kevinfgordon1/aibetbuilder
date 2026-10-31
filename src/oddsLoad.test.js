@@ -437,7 +437,7 @@ function fullPlan() {
   assert.match(app, /\[evDateRange, setEvDateRange\] = useState\(DEFAULT_EV_DATE_RANGE\)/);
   assert.doesNotMatch(app, /\[evDateRange, setEvDateRange\] = useState\("any"\)/);
   const board = fs.readFileSync(path.join(dir, "OddsBoard.jsx"), "utf8");
-  assert.match(board, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
+  assert.match(board, /\[boardSport, setBoardSport\] = useState\(\(\) => \(sportChips/); // MLB off-season: first chip (Kevin Oct 30)
   assert.match(app, /import OddsBoard from "\.\/OddsBoard\.jsx"/);
 }
 

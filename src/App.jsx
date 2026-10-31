@@ -228,7 +228,10 @@ const ADJUSTED_BOOK_NOTES = {
   polymarket: "after Polymarket taker fee",
 };
 
-const SPORTS = [
+// MLB / World Series hidden unless VITE_MLB_ENABLED=1 at build (Kevin Oct 30 2026, season over).
+const MLB_UI_ON = /^(1|true|yes|on)$/i.test(String(import.meta.env.VITE_MLB_ENABLED || "").trim());
+const withoutMlbUi = (list) => (MLB_UI_ON ? list : list.filter((x) => !String(x.key).startsWith("baseball_mlb")));
+const SPORTS = withoutMlbUi([
   { key: "baseball_mlb", label: "MLB" },
   { key: "americanfootball_nfl", label: "NFL" },
   { key: "americanfootball_ncaaf", label: "NCAAF" },
@@ -238,21 +241,21 @@ const SPORTS = [
   { key: "soccer_epl", label: "EPL" },
   { key: "soccer_usa_mls", label: "MLS" },
   { key: "mma_mixed_martial_arts", label: "UFC" },
-];
+]);
 const SPORT_KEYS = SPORTS.map(s => s.key);
 // Promo / Odds Board / Profile chips. Soccer is one chip → both Odds API keys.
 const SPORT_CHIPS = sportChipOptions(SPORTS);
 
 // Futures / outrights (championship winners). `sport` links each to its parent league
 // for badge coloring. These are pulled/stored separately from the game boards.
-const FUTURES = [
+const FUTURES = withoutMlbUi([
   { key: "baseball_mlb_world_series_winner", label: "World Series", sport: "baseball_mlb" },
   { key: "americanfootball_nfl_super_bowl_winner", label: "Super Bowl", sport: "americanfootball_nfl" },
   { key: "americanfootball_ncaaf_championship_winner", label: "CFP Champion", sport: "americanfootball_ncaaf" },
   { key: "basketball_nba_championship_winner", label: "NBA Finals", sport: "basketball_nba" },
   { key: "basketball_ncaab_championship_winner", label: "NCAAM Champion", sport: "basketball_ncaab" },
   { key: "icehockey_nhl_championship_winner", label: "Stanley Cup", sport: "icehockey_nhl" },
-];
+]);
 const FUTURES_KEYS = FUTURES.map(f => f.key);
 
 const DATE_RANGES = [

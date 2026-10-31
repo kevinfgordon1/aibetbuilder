@@ -1072,7 +1072,7 @@ assert.ok(!/fanatics|crypto/i.test(BETSTAMP_TRIAL_BOOKS.find((b) => b.id === 196
   assert.match(app, />New Odds Board<\/a>/);
   assert.doesNotMatch(app, />New Odds Board<\/button>/);
   assert.doesNotMatch(app, />Betstamp<\/button>/);
-  assert.match(board, /\[boardSport, setBoardSport\] = useState\("baseball_mlb"\)/);
+  assert.match(board, /\[boardSport, setBoardSport\] = useState\(\(\) => \(sportChips/); // MLB off-season: first chip (Kevin Oct 30)
   assert.match(stamp, />New Odds Board</);
   assert.doesNotMatch(stamp, />Betstamp Odds Board</);
   assert.match(stamp, /oddsBoardOrder\.js/);

@@ -131,7 +131,8 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set((books || []).map((b) => b.key)));
   const [booksOpen, setBooksOpen] = useState(false);
-  const [boardSport, setBoardSport] = useState("baseball_mlb");
+  // First chip (MLB is hidden off-season; was hard-coded "baseball_mlb").
+  const [boardSport, setBoardSport] = useState(() => (sportChips && sportChips[0] && sportChips[0].id) || "americanfootball_nfl");
   const deferredBoardSport = useDeferredValue(boardSport);
   const deferredSearch = useDeferredValue(search);
   const deferredSelectedBooks = useDeferredValue(selectedBooks);
