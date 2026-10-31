@@ -82,7 +82,13 @@ export const ALIASES = {
   'st thomas mn': 'st thomas',
   'william and mary': 'william and mary',
   'hawaii': 'hawaii',
+  'k state': 'kansas state',
+  'la tech': 'louisiana tech',
+  'nm state': 'new mexico state',
+  'southeastern louisiana': 'se louisiana',
 };
+// Keys and values go through normName too ("st" -> "state"), so "St. Thomas (MN)" finds 'st thomas mn'.
+const ALIAS_N = new Map(Object.entries(ALIASES).map(([k, v]) => [normName(k), normName(v)]));
 
 let INDEX = null;
 function index() {
@@ -105,7 +111,7 @@ export function d1Team(name) {
   const { names } = index();
   const n = normName(name);
   if (!n) return null;
-  const direct = names.get(n) || names.get(ALIASES[n] || '');
+  const direct = names.get(n) || names.get(ALIAS_N.get(n) || '');
   if (direct) return direct;
   // "Villanova Wildcats" style full names are covered by display; nothing fuzzier (fail closed).
   return null;
