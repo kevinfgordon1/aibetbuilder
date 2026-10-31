@@ -1,6 +1,7 @@
 const { guardCron } = require('../lib/cron-auth');
 const { supabase, applyBookAdjustments } = require('../lib/odds-shared');
 const { dropExcludedBooks } = require('../lib/odds-excluded-books');
+const ncaamChamp = require('../lib/ncaam-champ');
 
 // Championship / outright futures for six leagues. The Odds API supplies the
 // sportsbook (Yes) side; Kalshi + Polymarket are pulled directly for the exchange
@@ -38,7 +39,9 @@ const EXCHANGE_FUTURES = {
   americanfootball_nfl_super_bowl_winner:  { pmQuery: 'Super Bowl',             keywords: ['super bowl'],          kalshiSeries: 'KXSB' },
   americanfootball_ncaaf_championship_winner: { pmQuery: 'College Football Playoff', keywords: ['college football playoff', 'cfp', 'national championship'], kalshiSeries: 'KXNCAAF' },
   basketball_nba_championship_winner:      { pmQuery: 'NBA Champion',           keywords: ['nba champion', 'nba finals'], kalshiSeries: 'KXNBA' },
-  basketball_ncaab_championship_winner:    { pmQuery: 'March Madness',          keywords: ['march madness', 'ncaa', 'college basketball champion'], kalshiSeries: 'KXMARMAD' },
+  // NCAAM: Polymarket US cbb-champ-* (not the international gamma event) + Kalshi KXMARMAD, joined on
+  // ESPN team id via lib/ncaam-champ-crosswalk.json. See lib/ncaam-champ.js / buildNcaamExchangeBookmakers.
+  basketball_ncaab_championship_winner:    { ncaam: true, kalshiSeries: 'KXMARMAD' },
   icehockey_nhl_championship_winner:       { pmQuery: 'Stanley Cup',            keywords: ['stanley cup'],         kalshiSeries: 'KXNHL' },
 };
 
@@ -200,11 +203,27 @@ async function fetchKalshiFutures(cfg) {
   return out;
 }
 
+// NCAAM national champion: Polymarket US + Kalshi with strict ESPN-id team matching (unmatched dropped),
+// depth as potential profit on each exchange outcome.
+async function buildNcaamExchangeBookmakers(sport, rawData, deps = {}) {
+  const cfg = EXCHANGE_FUTURES[sport];
+  const fetchFn = deps.fetchFn || fetch;
+  const base = process.env.KALSHI_API_BASE || 'https://api.elections.kalshi.com/trade-api/v2';
+  const [polymarket, kalshiBody] = await Promise.all([
+    ncaamChamp.fetchPolymarketUsChamp({ fetchFn, ...(deps.sleepFn ? { sleepFn: deps.sleepFn } : {}) }).catch((e) => { console.error(`polymarket us ncaam futures: ${e.message}`); return []; }),
+    deps.kalshiBody !== undefined ? Promise.resolve(deps.kalshiBody)
+      : fetchJson(`${base}/events?series_ticker=${encodeURIComponent(cfg.kalshiSeries)}&status=open&with_nested_markets=true`),
+  ]);
+  const kalshi = ncaamChamp.kalshiChampFromEvents(kalshiBody);
+  return ncaamChamp.buildNcaamChampBookmakers(rawData, { polymarket, kalshi });
+}
+
 // Build injectable kalshi/polymarket bookmaker objects for a futures event,
 // matching each exchange contract to the sportsbook team names in rawData.
 async function buildExchangeBookmakers(sport, rawData) {
   const cfg = EXCHANGE_FUTURES[sport];
   if (!cfg) return { bookmakers: [], diag: {} };
+  if (cfg.ncaam) return buildNcaamExchangeBookmakers(sport, rawData);
   const ev = Array.isArray(rawData) ? rawData[0] : null;
 
   // Canonical team names = the exact strings the sportsbooks use (outrights side).
@@ -256,7 +275,7 @@ async function buildExchangeBookmakers(sport, rawData) {
 // inject Kalshi/Polymarket. Leagues run concurrently. Cheap: 6 Odds API calls
 // plus a handful of free exchange calls.
 // ─────────────────────────────────────────────────────────────────────────
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   if (!(await guardCron(req, res))) return;
   try {
     const results = [];
@@ -268,7 +287,9 @@ module.exports = async (req, res) => {
           console.error(`Failed to fetch futures ${sport}: ${response.status}`);
           return;
         }
-        const rawData = dropExcludedBooks(await response.json());
+        let rawData = dropExcludedBooks(await response.json());
+        // NCAAM: keep a row for the exchanges even when no sportsbook has posted the outright yet.
+        if (EXCHANGE_FUTURES[sport] && EXCHANGE_FUTURES[sport].ncaam) rawData = ncaamChamp.ensureOutrightsEvent(rawData, sport);
         // Inject direct Kalshi/Polymarket exchange futures (Yes + No) before fee adjustment.
         let exDiag = {};
         try {
@@ -299,3 +320,6 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+module.exports = handler;
+module.exports._helpers = { EXCHANGE_FUTURES, FUTURES_SPORTS, buildExchangeBookmakers, buildNcaamExchangeBookmakers };

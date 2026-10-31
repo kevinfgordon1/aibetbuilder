@@ -250,7 +250,7 @@ const FUTURES = [
   { key: "americanfootball_nfl_super_bowl_winner", label: "Super Bowl", sport: "americanfootball_nfl" },
   { key: "americanfootball_ncaaf_championship_winner", label: "CFP Champion", sport: "americanfootball_ncaaf" },
   { key: "basketball_nba_championship_winner", label: "NBA Finals", sport: "basketball_nba" },
-  { key: "basketball_ncaab_championship_winner", label: "NCAAB Champion", sport: "basketball_ncaab" },
+  { key: "basketball_ncaab_championship_winner", label: "NCAAM Champion", sport: "basketball_ncaab" },
   { key: "icehockey_nhl_championship_winner", label: "Stanley Cup", sport: "icehockey_nhl" },
 ];
 const FUTURES_KEYS = FUTURES.map(f => f.key);
@@ -1017,7 +1017,7 @@ function transformFuturesData(dataArray, futuresKey) {
   // one row per team: `books` = Yes price by book, `noBooks` = No price by book.
   // Best-across-books is computed in the component (depends on selected books).
   const teams = {};
-  const ensure = (name) => (teams[name] || (teams[name] = { name, books: {}, noBooks: {}, bookSizes: {}, noBookSizes: {} }));
+  const ensure = (name) => (teams[name] || (teams[name] = { name, books: {}, noBooks: {}, bookSizes: {}, noBookSizes: {}, bookProfits: {}, noBookProfits: {} }));
   (Array.isArray(dataArray) ? dataArray : []).forEach(event => {
     (event.bookmakers || []).forEach(bm => {
       (bm.markets || []).forEach(mkt => {
@@ -1032,6 +1032,9 @@ function transformFuturesData(dataArray, futuresKey) {
             t[bucket][bm.key] = o.price;
             const sz = outcomeSize(o);
             if (sz != null) t[sizeBucket][bm.key] = sz;
+            // Depth as potential profit (server-computed, fee in; NCAAM champion exchanges).
+            const pf = Number(o.profit);
+            if (Number.isFinite(pf) && pf > 0) t[bucket === "books" ? "bookProfits" : "noBookProfits"][bm.key] = pf;
           }
         });
       });

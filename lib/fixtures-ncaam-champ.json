@@ -1,0 +1,188 @@
+{
+ "note": "Live Polymarket US cbb-champ-2027-04-05-w + Kalshi KXMARMAD-27, pulled Oct 30 2026 ~10 PM ET (trimmed)",
+ "polyList": {
+  "events": [
+   {
+    "slug": "cbb-champ-2027-04-05-w",
+    "active": true,
+    "closed": false
+   },
+   {
+    "slug": "cbb-conf-2027-04-05-w",
+    "active": true,
+    "closed": false
+   }
+  ]
+ },
+ "polyEvent": {
+  "event": {
+   "slug": "cbb-champ-2027-04-05-w",
+   "title": "2027 Men's College Basketball National Champion",
+   "markets": [
+    {
+     "slug": "tec-cbb-champ-2027-04-05-w-duke",
+     "active": true,
+     "closed": false,
+     "feeCoefficient": 0.0695,
+     "bestBidQuote": {
+      "value": "0.1400",
+      "currency": "USD"
+     },
+     "bestAskQuote": {
+      "value": "0.1500",
+      "currency": "USD"
+     },
+     "marketSides": [
+      {
+       "long": true,
+       "description": "Yes",
+       "team": {
+        "id": 1685,
+        "name": "Duke",
+        "alias": "Blue Devils",
+        "safeName": "Duke",
+        "abbreviation": "duke"
+       }
+      },
+      {
+       "long": false,
+       "description": "No",
+       "team": {
+        "id": 1685,
+        "name": "Duke",
+        "alias": "Blue Devils",
+        "safeName": "Duke",
+        "abbreviation": "duke"
+       }
+      }
+     ]
+    },
+    {
+     "slug": "tec-cbb-champ-2027-04-05-w-fl",
+     "active": true,
+     "closed": false,
+     "feeCoefficient": 0.0695,
+     "bestBidQuote": {
+      "value": "0.1200",
+      "currency": "USD"
+     },
+     "bestAskQuote": {
+      "value": "0.1300",
+      "currency": "USD"
+     },
+     "marketSides": [
+      {
+       "long": true,
+       "description": "Yes",
+       "team": {
+        "id": 1928,
+        "name": "Florida",
+        "alias": "Gators",
+        "safeName": "Florida",
+        "abbreviation": "fl"
+       }
+      },
+      {
+       "long": false,
+       "description": "No",
+       "team": {
+        "id": 1928,
+        "name": "Florida",
+        "alias": "Gators",
+        "safeName": "Florida",
+        "abbreviation": "fl"
+       }
+      }
+     ]
+    },
+    {
+     "slug": "tec-cbb-champ-2027-04-05-w-mich",
+     "active": true,
+     "closed": false,
+     "feeCoefficient": 0.0695,
+     "bestBidQuote": {
+      "value": "0.0200",
+      "currency": "USD"
+     },
+     "bestAskQuote": {
+      "value": "0.0300",
+      "currency": "USD"
+     },
+     "marketSides": [
+      {
+       "long": true,
+       "description": "Yes",
+       "team": {
+        "id": 1754,
+        "name": "Michigan",
+        "alias": "Wolverines",
+        "safeName": "Michigan",
+        "abbreviation": "mich"
+       }
+      },
+      {
+       "long": false,
+       "description": "No",
+       "team": {
+        "id": 1754,
+        "name": "Michigan",
+        "alias": "Wolverines",
+        "safeName": "Michigan",
+        "abbreviation": "mich"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "kalshi": {
+  "events": [
+   {
+    "event_ticker": "KXMARMAD-27",
+    "markets": [
+     {
+      "ticker": "KXMARMAD-27-DUKE",
+      "yes_sub_title": "Duke",
+      "status": "active",
+      "yes_ask_dollars": "0.1400",
+      "no_ask_dollars": "0.8700",
+      "yes_ask_size_fp": "13460.78",
+      "no_ask_size_fp": null,
+      "yes_bid_size_fp": "10361.10"
+     },
+     {
+      "ticker": "KXMARMAD-27-MICH",
+      "yes_sub_title": "Michigan",
+      "status": "active",
+      "yes_ask_dollars": "0.0180",
+      "no_ask_dollars": "0.9830",
+      "yes_ask_size_fp": "5600.00",
+      "no_ask_size_fp": null,
+      "yes_bid_size_fp": "993.71"
+     },
+     {
+      "ticker": "KXMARMAD-27-MSU",
+      "yes_sub_title": "Michigan St.",
+      "status": "active",
+      "yes_ask_dollars": "0.0400",
+      "no_ask_dollars": "0.9630",
+      "yes_ask_size_fp": "7.00",
+      "no_ask_size_fp": null,
+      "yes_bid_size_fp": "18.97"
+     },
+     {
+      "ticker": "KXMARMAD-27-FLA",
+      "yes_sub_title": "Florida",
+      "status": "active",
+      "yes_ask_dollars": "0.1300",
+      "no_ask_dollars": "0.8800",
+      "yes_ask_size_fp": "95292.39",
+      "no_ask_size_fp": null,
+      "yes_bid_size_fp": "27260.41"
+     }
+    ]
+   }
+  ]
+ }
+}

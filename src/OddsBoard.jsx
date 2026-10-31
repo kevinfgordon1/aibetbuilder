@@ -3,6 +3,8 @@ import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import { isSoccerSport } from "./soccerPairing.js";
 import { boardSportMatches, isSoccerChipId } from "./sportChips.js";
+import NcaamChampionView from "./NcaamChampionView.jsx";
+import { NCAAM_CHAMP_KEY } from "./ncaamChampion.js";
 import {
   fmtBoardSize,
   bookInitials,
@@ -302,7 +304,10 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
           ))}
         </div>
       </div>
-      {deferredMarket === "champ" && (
+      {deferredMarket === "champ" && champMeta?.key === NCAAM_CHAMP_KEY && (
+        <NcaamChampionView entry={champEntry} selectedBooks={deferredSelectedBooks} search={deferredSearch} books={allBooks} />
+      )}
+      {deferredMarket === "champ" && champMeta?.key !== NCAAM_CHAMP_KEY && (
       <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + champBooks.length * oddsColWidth }}>
           <thead>
