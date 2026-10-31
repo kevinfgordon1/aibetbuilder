@@ -1,7 +1,8 @@
 'use strict';
 
 // GET /api/underdog-predict — Underdog phone prices for Promo and the
-// New Odds Board. Indexes NFL, CFB (app sport NCAAF), MLB, NHL, and NBA moneylines,
+// New Odds Board. Indexes NFL, CFB (app sport NCAAF), MLB, NHL, NBA, and CBB (app sport
+// NCAAB) moneylines,
 // spreads, and totals from /v1/lobbies/content/lines (Team Picks
 // PickemStat pills, phone PE). A market with no prediction quote is omitted.
 // An aged moneyline side whose price still equals Kalshi's current yes

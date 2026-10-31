@@ -1,5 +1,5 @@
 // Sniper per-leg league tags + League filter, and the needle's fill-time (pregame) view. Pure, node-testable.
-export const LEAGUES = [[/^KXNCAAF/, "NCAAF"], [/^KXNFL/, "NFL"], [/^KXNCAAB/, "NCAAB"], [/^KXNBA/, "NBA"], [/^KXNHL/, "NHL"], [/^KXMLB/, "MLB"], [/^KXUFC/, "UFC"]];
+export const LEAGUES = [[/^KXNCAAF/, "NCAAF"], [/^KXNFL/, "NFL"], [/^KXNCAA(MB|B)/, "NCAAB"], [/^KXNBA/, "NBA"], [/^KXNHL/, "NHL"], [/^KXMLB/, "MLB"], [/^KXUFC/, "UFC"]];
 export const leagueOfLeg = (t) => { const s = String(t || "").toUpperCase(); for (const [re, n] of LEAGUES) if (re.test(s)) return n; return (s.replace(/^KX/, "").match(/^[A-Z]+?(?=GAME|TD|SPREAD|TOTAL|-|$)/) || ["Other"])[0] || "Other"; };
 export const leaguesOfFill = (r) => [...new Set((r.legs || []).map((l) => leagueOfLeg(l.ticker)))];
 export const leagueOfFill = (r) => { const s = leaguesOfFill(r); return s.length > 1 ? "Mixed" : s[0] || "Other"; };

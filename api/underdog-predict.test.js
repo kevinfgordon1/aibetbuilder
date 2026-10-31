@@ -302,7 +302,7 @@ function linesFor(sport) {
   }
 
   {
-    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB', 'NHL', 'NBA']);
+    assert.deepEqual([...INDEX_SPORTS], ['NFL', 'CFB', 'MLB', 'NHL', 'NBA', 'CBB']);
     assert.equal(SPORT_BY_UNDERDOG_ID.NFL, 'NFL');
     assert.equal(SPORT_BY_UNDERDOG_ID.CFB, 'NCAAF');
     assert.equal(SPORT_BY_UNDERDOG_ID.MLB, 'MLB');

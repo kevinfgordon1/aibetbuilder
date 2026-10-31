@@ -15,6 +15,7 @@ import { applyStreamMarkets, emptyBookOddsForBooks, kickoffHasPassed, lineUpdate
 import { teamsLikelySame } from "./promoBookmaker.js";
 import { applyUnderdogPhoneQuotes } from "./underdogPredictionQuote.js";
 import { novigLiveFeeRate } from "./venueTakerFee.js";
+import { isD1Game } from "./ncaabD1.js";
 
 export const FREE_FEED_BOOK_ORDER = Object.freeze(["polymarket", "kalshi", "novig", "fourcasters", "underdog_predict"]);
 export const FREE_FEED_POLL_MS = 20_000;
@@ -447,7 +448,8 @@ export function gamesFromFreeFeeds({
     allowNewGames: false,
   }).games;
   const withPhone = underdog ? applyUnderdogPhoneQuotes(painted, underdog) : painted;
-  return withPhone.filter((g) => g && String(g.league || "").toUpperCase() === lg);
+  // NCAAB: D1 vs D1 only (both names must be D1 schools; unknown names are dropped).
+  return withPhone.filter((g) => g && String(g.league || "").toUpperCase() === lg && (lg !== "NCAAB" || isD1Game(g.away, g.home)));
 }
 
 // Main lines already on the board. These feeds do not publish an alt ladder.

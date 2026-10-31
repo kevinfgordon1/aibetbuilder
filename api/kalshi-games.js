@@ -8,6 +8,7 @@
 //   NCAAF side=KXNCAAFGAME  spread=KXNCAAFSPREAD total=KXNCAAFTOTAL
 //   NHL   side=KXNHLGAME    spread=KXNHLSPREAD   total=KXNHLTOTAL
 //   NBA   side=KXNBAGAME    spread=KXNBASPREAD   total=KXNBATOTAL
+//   NCAAB side=KXNCAAMBGAME spread=KXNCAAMBSPREAD total=KXNCAAMBTOTAL (D1 vs D1 only)
 // Series tickers were confirmed against the live Kalshi series catalog; if a
 // type 404s later, that ladder is simply empty (moneyline still ships).
 // All share the game key `<SERIES>-<DATE[TIME]><TEAMS>` (group on the part after
@@ -45,6 +46,11 @@ const MARKET_SERIES = {
   // NBA (verified Oct 19 2026 against live Kalshi: KXNBAGAME-26OCT20OKCSAS,
   // KXNBASPREAD-...-OKC5 "Oklahoma City wins by over 4.5 points", KXNBATOTAL-...-232).
   nba: { side: 'KXNBAGAME', spread: 'KXNBASPREAD', total: 'KXNBATOTAL' },
+  // NCAAB men's college basketball (verified Oct 30 2026 against live Kalshi: KXNCAAMBGAME-26NOV01NDVILL
+  // "Notre Dame vs Villanova", KXNCAAMBSPREAD-...-VILL5 "Villanova wins by over 4.5 points",
+  // KXNCAAMBTOTAL-...-124 "Over 123.5 points"). D1 vs D1 games only (lib/ncaab-d1.js): Kalshi also
+  // lists D1 vs non-D1 exhibitions (Fisk, Bethesda, Willamette ...), which are dropped.
+  ncaab: { side: 'KXNCAAMBGAME', spread: 'KXNCAAMBSPREAD', total: 'KXNCAAMBTOTAL' },
   // Soccer: 3-way regulation result (90' + stoppage; no extra time/penalties).
   // Moneyline only — each event lists <TEAM A>, <TEAM B> and TIE (shown as "Draw").
   mls: { side: 'KXMLSGAME' },
@@ -79,7 +85,25 @@ const PROP_SERIES = {
 // never later than the fight's real start (earlier fights on a card read early, safe).
 // NBA occurrence_datetime is also tip-off + 3h (KXNBAGAME-26OCT20OKCSAS 04:30Z for a
 // 9:30 PM ET tip; KXNBAGAME-26OCT20BOSDET likewise).
-const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, nba: 3 * 3600 * 1000, ufc: 5 * 3600 * 1000 };
+// NCAAB occurrence_datetime is tip-off + 3h too (KXNCAAMBGAME-26NOV01NDVILL 17:30Z vs ESPN's 14:30Z tip,
+// checked Oct 30 2026). The official ESPN schedule (applyCanonicalStarts) corrects it when it differs.
+const OCCURRENCE_START_OFFSET_MS = { nhl: 3 * 3600 * 1000, nba: 3 * 3600 * 1000, ncaab: 3 * 3600 * 1000, ufc: 5 * 3600 * 1000 };
+const { isD1Game } = require('../lib/ncaab-d1');
+// Sports whose slate is restricted to D1-vs-D1 games (both moneyline labels must be D1 teams).
+const D1_ONLY_SPORTS = new Set(['ncaab']);
+function d1OnlyGames(games) {
+  const keep = (games || []).filter((g) => {
+    const sides = ((g.markets && g.markets.side) || []).filter((m) => !/-TIE$/i.test(m.ticker || ''));
+    return sides.length === 2 && isD1Game(sides[0].label, sides[1].label);
+  });
+  for (const k of ['started', 'provisional', 'failed']) {
+    if (games && games[k] !== undefined) {
+      const v = Array.isArray(games[k]) ? d1OnlyGames(games[k]) : games[k];
+      Object.defineProperty(keep, k, { value: v, enumerable: false, writable: true });
+    }
+  }
+  return keep;
+}
 // NFL / college football occurrence_datetime is kickoff + 3h (Oct 19 2026: every
 // KXNCAAFGAME with a real time sat exactly 3.0h after ESPN's and the odds feed's
 // kickoff, e.g. Missouri St. vs Delaware 10 PM vs 7 PM ET; KXNFLGAME-26OCT19WASSF
@@ -639,12 +663,13 @@ async function handler(req, res) {
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
     await Promise.all(Object.entries(MARKET_SERIES).map(async ([sport, seriesByType]) => {
       const propSpec = PROP_SERIES[sport];
-      const games = await fetchSportGames(propSpec ? { ...seriesByType, prop: propSpec.series } : seriesByType, {
+      let games = await fetchSportGames(propSpec ? { ...seriesByType, prop: propSpec.series } : seriesByType, {
         occurrenceStartOffsetMs: OCCURRENCE_START_OFFSET_MS[sport] || 0,
         ...(SOCCER_SPORTS.has(sport) ? { dateOnlyStart: true } : {}),
         ...(propSpec ? { propKind: propSpec.kind } : {}),
         ...(ESPN_FOOTBALL[sport] ? { espnSport: sport, footballOccurrenceOffsetMs: FOOTBALL_OCCURRENCE_OFFSET_MS } : {}),
       });
+      if (D1_ONLY_SPORTS.has(sport)) games = d1OnlyGames(games);
       if (games.failed) failed.push(sport);
       if (games.started && games.started.length) started[sport] = games.started.map((g) => ({ ...g, sport }));
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
@@ -668,8 +693,9 @@ module.exports.PROP_SERIES = PROP_SERIES;
 module.exports.SOCCER_SPORTS = SOCCER_SPORTS;
 module.exports.OCCURRENCE_START_OFFSET_MS = OCCURRENCE_START_OFFSET_MS;
 module.exports.FOOTBALL_OCCURRENCE_OFFSET_MS = FOOTBALL_OCCURRENCE_OFFSET_MS;
+module.exports.D1_ONLY_SPORTS = D1_ONLY_SPORTS;
 module.exports._helpers = {
-  applyCanonicalStarts,
+  applyCanonicalStarts, d1OnlyGames,
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
   groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, espnMatchFor, fetchEspnFootball, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
