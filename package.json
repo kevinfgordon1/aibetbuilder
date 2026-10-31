@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "ev-alerts": "node worker/ev-parlay-alerts.js",
     "test": "node scripts/run-tests.cjs",
-    "build:player-td-cjs": "node scripts/build-player-td-cjs.js"
+    "build:player-td-cjs": "node scripts/build-player-td-cjs.js",
+    "sync:ncaab-teams": "node scripts/sync-ncaab-teams.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
