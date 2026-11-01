@@ -6,6 +6,7 @@ import { gaugeFrac, liveLegMoves, lockedPregameEv, anchorWhatIf, RESIDUAL_EVENT 
 import { american } from "./rootForPrices";
 import { tickerLabel, binarySideName } from "./rootForSideName.js";
 import { quantileOf } from "./rootForSimple";
+import { rootForGroups } from "./rootForGroups.js";
 import { rootFor } from "./rootForEngine";
 
 function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let x = a; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; }; }
@@ -88,7 +89,8 @@ function LiveLegs({ d, part = "live", headline }) {
   const starts = { ...(d.starts || {}) }; const meta = {}; for (const e of d.perEvent || []) { if (e.start) starts[e.event] = e.start; meta[e.event] = e; }
   const finals = model.finals || {};
   // saved day rows: per-lock kickoff baselines + the row's Now, so the bars add up to the headline exactly
-  const { legs, done, settled } = liveLegMoves(positions, probs, s.legsFrozen || s.frozen || {}, starts, new Set([...(s.finished || []), ...Object.keys(finals), ...Object.keys(s.legsFinal || {})]), s.lockPre ? { lockPre: s.lockPre, now: s.nowValue, pregame: s.baseline } : {});
+  const nowMs = Date.now();
+  const { legs, done, settled, upcoming = [], upcomingMove = 0 } = liveLegMoves(positions, probs, s.legsFrozen || s.frozen || {}, starts, new Set([...(s.finished || []), ...Object.keys(finals), ...Object.keys(s.legsFinal || {})]), s.lockPre ? { lockPre: s.lockPre, now: s.nowValue, pregame: s.baseline, nowMs } : { nowMs });
   const doneShown = done.filter((l) => Math.abs(l.move) >= 0.5);
   const result = (ev) => { // "HOU Texans won" / "Over 42.5 hit"
     if (ev === RESIDUAL_EVENT) return "Other: contract changes / legs with no price";
@@ -102,47 +104,85 @@ function LiveLegs({ d, part = "live", headline }) {
   };
   // side names for the what-if line: team / "Over 44.5" / "Not: …" (spread buckets are grouped by team upstream)
   const sideName = (ev, side) => (side === "yes" || side === "no" ? binarySideName(ev, side, (t) => (model.teamNames || {})[`${String(ev).split("-").slice(0, 2).join("-").replace(/SPREAD-/, "GAME-")}:${t}`]) : null) || (model.teamNames || {})[`${ev}:${side}`] || (((meta[ev] || {}).outcomes || []).find((o) => o.outcome === side) || {}).name || (side === "yes" || side === "no" ? `${tickerLabel(ev) || ev} ${side === "yes" ? "Yes" : "No"}` : side);
-  const verb = (ev) => (/SPREAD-/.test(String(ev)) ? "" : /^(yes|no)$/.test(Object.keys(probs[ev] || {}).find((o) => o !== "__neither") || "") ? "hits" : "wins");
   const total = (n) => (n < 0 ? "−$" : "$") + Math.round(Math.abs(n)).toLocaleString("en-US");
   const shown = anchorWhatIf(legs, headline).filter((l) => Math.abs(l.move) >= 0.5);
+  const upShown = anchorWhatIf(upcoming, headline).filter((l) => Number.isFinite(l.stakes) ? Math.abs(l.stakes) >= 0.5 : Math.abs(l.move) >= 0.5);
   const mx = Math.max(...shown.map((l) => Math.abs(l.move)), ...doneShown.map((l) => Math.abs(l.move)), 1);
+  const bar = (v, w = "100%") => { const pos = v >= 0; return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+      <div style={{ flex: "1 1 auto", minWidth: 0 }}><div style={{ height: 10, borderRadius: 3, minWidth: 3, background: pos ? "#34d399" : "#f87171", width: `calc(${w} * ${(Math.abs(v) / mx).toFixed(4)})` }} /></div>
+      <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5", minWidth: 52, textAlign: "right" }}>{money(v)}</span>
+    </div>); };
+  const doneList = (rows) => rows.map((l) => { const e = meta[l.event] || {};
+    return (
+      <div key={l.event} style={{ margin: "6px 0" }}>
+        <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{l.residual ? "not tied to one game" : e.game || ""}</span></div>
+        {bar(l.move)}
+      </div>); });
   if (part === "done") return !doneShown.length ? null : (
     <div className="donelegs" data-noclick style={{ alignSelf: "stretch", width: "100%", borderTop: "1px solid #1f2937", paddingTop: 8, marginTop: 4 }}>
-      {doneShown.length > 0 && <div>
-        <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Finished games <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· total <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> change in expected profit since kickoff</span></div>
-        {doneShown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
-          return (
-            <div key={l.event} style={{ margin: "6px 0" }}>
-              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{l.residual ? "not tied to one game" : `${e.game ? `${e.game} · ` : ""}final`}</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
-                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
-              </div>
-            </div>); })}
-      </div>}
+      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>Finished games <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· total <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> since kickoff</span></div>
+      {doneList(doneShown)}
     </div>
   );
+  const groups = rootForGroups({ legs: shown, upcoming: upShown, done: doneShown }, starts);
+  const signed = (n) => (n == null ? "" : `${n > 0 ? "+" : ""}${n}`);
+  const what = (l) => Number.isFinite(l.rootIfTotal) ? (
+    <>
+      <div className="rf-c" title="If it wins: change in expected profit → resulting total"><b className={l.rootIf >= 0 ? "pos" : "neg"}>{money(l.rootIf)}</b><div className="sub rf-tot">→ {total(l.rootIfTotal)}</div></div>
+      <div className="rf-c" title="If not: change in expected profit → resulting total">{Number.isFinite(l.notIfTotal) ? <><b className={l.notIf >= 0 ? "pos" : "neg"}>{money(l.notIf)}</b><div className="sub rf-tot">→ {total(l.notIfTotal)}</div></> : <span className="sub">—</span>}</div>
+    </>) : <><div className="rf-c sub">—</div><div className="rf-c sub">—</div></>;
+  // one row: who to root for · status | impact (live only) | if it wins | if not
+  const row = (l, kind, sub) => { const e = meta[l.event] || {};
+    const root = l.root != null ? sideName(l.event, l.root) : (e.rootForName || e.game || l.event);
+    const lead = l.leader != null ? sideName(l.event, l.leader) : null; const leadAm = american(l.leaderP); const rootAm = american(l.rootP);
+    const status = kind === "live"
+      ? (lead && leadAm != null ? (l.root === l.leader ? `leading ${signed(leadAm)}` : `${lead} leading ${signed(leadAm)}`) : "live")
+      : rootAm != null ? signed(rootAm) : "";
+    return (
+      <div key={l.event} className={`rf-row${sub ? " rf-sub" : ""}`} data-testid={`rf-row-${kind}`}>
+        <div style={{ minWidth: 0 }}>
+          <div className="rf-team"><b>{root}</b>{status ? <span className="sub"> · {status}</span> : null}</div>
+          {!sub && e.game ? <div className="sub rf-game">{e.game}</div> : null}
+        </div>
+        {kind === "live" ? <div className="rf-imp" title="Impact so far: change in expected profit since kickoff">{bar(l.move)}</div> : <div className="sub rf-c rf-imp" style={{ textAlign: "left" }}>{kind === "upcoming" && !sub ? <>Kicks off<br />{etTime(starts[l.event])} ET</> : ""}</div>}
+        {what(l)}
+      </div>); };
+  const gameBlock = (g, kind) => (
+    <div key={`${kind}-${g.key}`} className="rf-game-block">
+      {row(g.main, kind, false)}
+      {g.more.length > 0 && <details className="rf-more"><summary className="sub">+{g.more.length} more on this game (spread, total, props){kind === "live" ? <> · <b className={g.move - g.main.move >= 0 ? "pos" : "neg"}>{money(g.move - g.main.move)}</b></> : null}</summary>
+        {g.more.map((l) => row(l, kind, true))}
+      </details>}
+    </div>);
+  const head = (label, extra) => <div className="rf-h"><span>{label}</span>{extra ? <span className="sub" style={{ textTransform: "none", letterSpacing: 0 }}> · {extra}</span> : null}</div>;
+  const liveMove = shown.reduce((a, l) => a + l.move, 0);
   return (
-    <div className="livelegs" data-noclick style={{ flex: "1 1 300px", minWidth: 0, borderLeft: "1px solid #1f2937", paddingLeft: 14 }}>
-      <style>{`@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}}`}</style>
-      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 4 }}>What you're rooting for <span style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}>· impact so far (since kickoff) and what's still at stake · biggest swing first</span></div>
-      {!shown.length ? <div className="sub" style={{ fontSize: 13, padding: "10px 0" }}>No legs are live right now. Once a game you're in kicks off, its push on the needle shows up here.</div>
-        : shown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
-          // headline = the side Kevin is ROOTING FOR (its win helps most); leader + live price in small text
-          const root = l.root != null ? sideName(l.event, l.root) : (e.rootForName || e.game || l.event);
-          const lead = l.leader != null ? sideName(l.event, l.leader) : null; const am = american(l.leaderP);
-          const won = (l.root != null && l.root === l.leader);
-          return (
-            <div key={l.event} style={{ margin: "8px 0" }}>
-              <div style={{ fontSize: 12.5, marginBottom: 2 }}>Root for: <b>{root}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}{lead && am != null ? `${won ? "leading" : `${lead} leading`}, live ${am > 0 ? "+" : ""}${am}` : ""}</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }} title="Impact so far: change in expected profit since kickoff">
-                <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 120px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
-                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{pos ? "helping" : "hurting"} {money(l.move)}</span>
-              </div>
-              {Number.isFinite(l.rootIfTotal) && <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }} title="Stakes: change and resulting total expected profit if this leg ended now, every other leg at the live odds">
-                if {root}{verb(l.event) ? ` ${verb(l.event)}` : ""}: <b className={l.rootIf >= 0 ? "pos" : "neg"}>{money(l.rootIf)}</b> → {total(l.rootIfTotal)}{Number.isFinite(l.notIfTotal) ? <> · if not: <b className={l.notIf >= 0 ? "pos" : "neg"}>{money(l.notIf)}</b> → {total(l.notIfTotal)}</> : null}
-              </div>}
-            </div>); })}
+    <div className="livelegs" data-noclick style={{ flex: "1 1 360px", minWidth: 0, borderLeft: "1px solid #1f2937", paddingLeft: 14 }}>
+      <style>{`.rf-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(70px,1fr) 74px 74px;gap:10px;align-items:center;padding:5px 0;border-top:1px solid #1f2937;font-size:12.5px}
+.rf-row.rf-sub{padding-left:12px;font-size:12px;border-top:1px dashed #1f2937}.rf-c{text-align:right;white-space:nowrap;font-size:12px}
+.rf-team{overflow-wrap:anywhere;line-height:1.3}.rf-game{font-size:11px;line-height:1.25}.rf-tot{font-size:10.5px}
+.rf-h{font-size:12px;color:#f5c542;text-transform:uppercase;letter-spacing:.04em;margin:12px 0 2px;font-weight:700}
+.rf-cols{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(70px,1fr) 74px 74px;gap:10px;font-size:11px;color:#9ca3af}
+.rf-more summary{cursor:pointer;font-size:11.5px;padding:2px 0 4px 12px}
+@media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}.rf-row,.rf-cols{grid-template-columns:minmax(0,1fr) 74px 74px}.rf-imp{grid-column:1/-1;order:5}.rf-cols .rf-imp{display:none}}`}</style>
+      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>What you're rooting for</div>
+      {(groups.live.length || groups.upcoming.length) ? <div className="rf-cols" style={{ marginTop: 6 }}><span>Root for</span><span className="rf-imp">Impact so far</span><span style={{ textAlign: "right" }}>If it wins</span><span style={{ textAlign: "right" }}>If not</span></div> : null}
+      {head(`Live now (${groups.live.length})`, groups.live.length ? <>impact <b className={liveMove >= 0 ? "pos" : "neg"}>{money(liveMove)}</b> · biggest swing first</> : null)}
+      {groups.live.length ? groups.live.map((g) => gameBlock(g, "live")) : <div className="sub" style={{ fontSize: 12.5, padding: "4px 0" }}>No games in play right now.</div>}
+      {groups.upcoming.length > 0 && <>
+        {head(`Upcoming (${groups.upcoming.length})`, <>by kickoff{Math.abs(upcomingMove) >= 0.5 ? <> · pregame line moves <b className={upcomingMove >= 0 ? "pos" : "neg"}>{money(upcomingMove)}</b></> : null}</>)}
+        {groups.upcoming.map((g) => gameBlock(g, "upcoming"))}
+      </>}
+      {doneShown.length > 0 && <>
+        {head(`Finished (${groups.finished.length})`, <>total <b className={settled >= 0 ? "pos" : "neg"}>{money(settled)}</b> since kickoff</>)}
+        {groups.finished.map((g) => (
+          <div key={`fin-${g.key}`} className="rf-game-block">
+            {doneList([g.main])}
+            {g.more.length > 0 && <details className="rf-more"><summary className="sub">+{g.more.length} more on this game · <b className={g.move - g.main.move >= 0 ? "pos" : "neg"}>{money(g.move - g.main.move)}</b></summary>{doneList(g.more)}</details>}
+          </div>))}
+        {groups.residual && doneList([groups.residual])}
+      </>}
     </div>
   );
 }
@@ -189,7 +229,7 @@ export default function SweatMeter({ d, legs = true, liveCol = true }) {
           return <g><polygon points={`${ax + dx * 14},${ay} ${ax + dx * 2},${ay - 7} ${ax + dx * 2},${ay + 7}`} fill="#f5c542" /><text x={ax - dx * 4} y={ay - 10} fill="#f5c542" fontSize="10.5" fontWeight="700" textAnchor={off > 0 ? "end" : "start"}>{money(now)} off scale</text></g>; })()}
       </svg>
         {d.asOf && <UpdatedPill asOf={d.asOf} loading={pillLoading} />}
-        {legs && started && base != null && <LiveLegs d={d} part="done" />}
+        {legs && started && base != null && !liveCol && <LiveLegs d={d} part="done" />}
       </div>
       <div style={{ flex: "1 1 200px", fontSize: 14, lineHeight: 1.55, paddingTop: 8 }}>
         <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>Live meter</div>

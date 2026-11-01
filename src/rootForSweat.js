@@ -70,11 +70,23 @@ export function gaugeFrac(v, lo, base, hi) {
 // frozen kickoff price (each lock starts at its own frozen chances for it). opts.now = the headline's Now (the day
 // row's live_ev), opts.pregame = its Pregame (pregame_ev); anything the game bars can't explain (contracts added after kickoff, legs with no live or final
 // price) becomes one explicit residual bar, so finished + live bars add up exactly to Now − Pregame.
+// Upcoming (Kevin, Nov 1 2026: PHI @ WAS, the 8:20 PM SNF game, showed "Washington leading, live −218 · hurting −$6"
+// at 2:36 PM): a game whose known kickoff is still ahead (opts.nowMs, default now) is never "live". It gets no
+// impact bar; it comes back in `upcoming` with its what-ifs (what's at stake once it kicks off). On the per-lock
+// path a lock that froze at an earlier leg's kickoff also froze this game's price then, so pregame line moves in
+// it still move Now − Pregame: that drift is each upcoming row's `move` and their sum is `upcomingMove`, so
+// live + finished + upcomingMove = Now − Pregame exactly. A game with no known kickoff keeps the old behaviour.
+export function isUpcoming(ev, starts = {}, finished = new Set(), nowMs = Date.now()) {
+  if (finished.has(ev)) return false;
+  const t = Date.parse((starts || {})[ev] || ""); return Number.isFinite(t) && t > nowMs;
+}
 export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {}, finished = new Set(), opts = {}) {
+  const nowMs = opts && Number.isFinite(Number(opts.nowMs)) ? Number(opts.nowMs) : Date.now();
   const lockPre = opts && opts.lockPre && Object.keys(opts.lockPre).length ? opts.lockPre : null;
-  if (lockPre) return lockLegMoves(positions, probs, frozen, starts, finished, lockPre, opts.now, opts.pregame);
+  if (lockPre) return lockLegMoves(positions, probs, frozen, starts, finished, lockPre, opts.now, opts.pregame, nowMs);
   const held = new Set(positions.flatMap((p) => p.legs.map((l) => l.event)));
-  const evs = Object.keys(frozen).filter((ev) => held.has(ev) && probs[ev] && frozen[ev])
+  const up = [...held].filter((ev) => probs[ev] && isUpcoming(ev, starts, finished, nowMs)).map((ev) => ({ event: ev, move: 0, upcoming: true }));
+  const evs = Object.keys(frozen).filter((ev) => held.has(ev) && probs[ev] && frozen[ev] && !isUpcoming(ev, starts, finished, nowMs))
     .sort((a, b) => (Date.parse(starts[a] || "") || 0) - (Date.parse(starts[b] || "") || 0) || a.localeCompare(b));
   let cur = { ...probs }; for (const ev of evs) cur[ev] = frozen[ev];
   const pregame = expectedProfit(positions, cur); let prev = pregame;
@@ -84,14 +96,14 @@ export function liveLegMoves(positions = [], probs = {}, frozen = {}, starts = {
     // authoritative finals only (a 98% in-play price is not a final)
     if (finished.has(ev)) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
   }
-  return legMoveWhatIfs(positions, probs, legs, done, settled, prev - pregame);
+  return legMoveWhatIfs(positions, probs, legs, done, settled, prev - pregame, up, starts);
 }
 
 export const RESIDUAL_EVENT = "__residual";
 // Per-lock telescoping: each lock starts at its own frozen kickoff chances (snap.lockPre[id].probs, else the
 // game-level kickoff numbers, else live) — the headline's lockedPregameEv. Games are swapped to their live/final
 // chances one at a time in kickoff order (then name); a game's bar = the change that swap makes across all locks.
-function lockLegMoves(positions, probs, frozen, starts, finished, lockPre, nowValue, pregameValue) {
+function lockLegMoves(positions, probs, frozen, starts, finished, lockPre, nowValue, pregameValue, nowMs = Date.now()) {
   const preP = { ...probs, ...frozen };
   // the headline's Pregame when given (saved row's pregame_ev), else recomputed the same way
   const pregame = Number.isFinite(Number(pregameValue)) && pregameValue !== null ? Number(pregameValue) : lockedPregameEv(positions, preP, lockPre);
@@ -100,26 +112,27 @@ function lockLegMoves(positions, probs, frozen, starts, finished, lockPre, nowVa
   const held = new Set(positions.flatMap((p) => p.legs.map((l) => l.event)));
   const t = (ev) => { const ms = Date.parse(starts[ev] || ""); return Number.isFinite(ms) ? ms : Infinity; };
   const evs = [...held].filter((ev) => probs[ev]).sort((a, b) => t(a) - t(b) || a.localeCompare(b));
-  const legs = []; const done = []; let settled = 0;
+  const legs = []; const done = []; const up = []; let settled = 0;
   let prev = total(); const res0 = prev - pregame; // contracts changed after the freeze (adds)
   for (const ev of evs) {
     for (const m of maps) m[ev] = probs[ev];
     const v = total(); const move = v - prev; prev = v;
-    if (finished.has(ev)) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
+    if (isUpcoming(ev, starts, finished, nowMs)) up.push({ event: ev, move, upcoming: true }); // pregame line drift, not a game result
+    else if (finished.has(ev)) { settled += move; done.push({ event: ev, move }); } else legs.push({ event: ev, move });
   }
   const end = Number.isFinite(Number(nowValue)) ? Number(nowValue) : prev;
   const residual = res0 + (end - prev);
   if (Math.abs(residual) >= 0.005) { settled += residual; done.push({ event: RESIDUAL_EVENT, move: residual, residual: true }); }
-  return legMoveWhatIfs(positions, probs, legs, done, settled, end - pregame);
+  return legMoveWhatIfs(positions, probs, legs, done, settled, end - pregame, up, starts);
 }
 
-function legMoveWhatIfs(positions, probs, legs, done, settled, totalMove) {
+function legMoveWhatIfs(positions, probs, legs, done, settled, totalMove, upcoming = [], starts = {}) {
   // what-if per live leg (Kevin, Oct 25): EV with this leg settled as currently leading (1/0), every other leg at
   // current prices, minus current EV; plus the same if the runner-up wins instead ("if it flips").
   const nowEv = expectedProfit(positions, probs);
   // Spread games split a team into margin buckets ("MIN>=7"/"MIN<7"): grouped by team, the winning team's buckets
   // keep their current split (the margin is still open), the rest go to 0.
-  for (const l of legs) {
+  for (const l of [...legs, ...upcoming]) {
     const d = probs[l.event]; const team = {};
     for (const [o, p] of Object.entries(d)) if (o !== "__neither") { const t = o.split(/[<>]=?/)[0]; team[t] = (team[t] || 0) + p; }
     const ranked = Object.entries(team).sort((a, b) => b[1] - a[1]);
@@ -140,7 +153,11 @@ function legMoveWhatIfs(positions, probs, legs, done, settled, totalMove) {
   }
   // sorted by stakes (biggest swing still to play for first); falls back to impact so far
   legs.sort((a, b) => (Number(b.stakes) || 0) - (Number(a.stakes) || 0) || Math.abs(b.move) - Math.abs(a.move)); done.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
-  return { legs, done, settled, total: totalMove, nowEv };
+  // upcoming: kickoff order, then biggest stake
+  const ko = (ev) => { const t = Date.parse(starts[ev] || ""); return Number.isFinite(t) ? t : Infinity; };
+  upcoming.sort((a, b) => ko(a.event) - ko(b.event) || (Number(b.stakes) || 0) - (Number(a.stakes) || 0) || a.event.localeCompare(b.event));
+  const upcomingMove = upcoming.reduce((a, l) => a + l.move, 0);
+  return { legs, done, upcoming, upcomingMove, settled, total: totalMove, nowEv };
 }
 
 // All view: finished games stay counted at their LAST live chances (same as Today) for 12 hours after the game
