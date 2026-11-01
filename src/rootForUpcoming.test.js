@@ -4,7 +4,7 @@
 // looked like an in-play move. Now: upcoming games go to `upcoming` (what's at stake, no impact bar) and their
 // pregame drift is reported separately so live + finished + upcoming drift still equal Now − Pregame.
 import assert from "node:assert/strict";
-import { liveLegMoves, lockedPregameEv, expectedProfit, isUpcoming } from "./rootForSweat.js";
+import { liveLegMoves, lockedPregameEv, expectedProfit, isUpcoming, anchorWhatIf } from "./rootForSweat.js";
 import { rootForRows } from "./rootForGroups.js";
 
 const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, `${msg}: ${a} vs ${b}`);
@@ -51,4 +51,14 @@ assert.deepEqual(R.live.map((x) => x.event), ["KXNFLSPREAD-26NOV01JACLV", "KXNFL
 assert.deepEqual(R.upcoming.map((x) => x.event), [LATE, SNF], "upcoming by kickoff");
 assert.deepEqual(R.finished.map((x) => x.event), ["KXNFLGAME-26NOV01BALBUF", "KXNFLTOTAL-26NOV01BALBUF", ONE, "__residual"], "finished per leg by kickoff, residual last");
 near(R.finished.reduce((a, l) => a + l.move, 0), 59, "finished rows keep every bar (sum = Finished total)");
+// row base == headline Now (Kevin, Nov 1 2:49 PM: rows read "+$1,496 → $2,145", base $649 = Now; the $1,040 on top of
+// the gauge is Pregame). The saved day row's Now (live_ev, which also counts settled/kept locks) differs from the live
+// model's nowEv, and every row's "→ total" must still be exactly headline + its delta.
+{
+  const headline = r.nowEv + 391.25; // e.g. finished locks the live model doesn't price any more
+  for (const l of [...anchorWhatIf(r.legs, headline), ...anchorWhatIf(r.upcoming, headline)]) {
+    near(l.rootIfTotal - l.rootIf, headline, `${l.event} if-wins base`);
+    if (Number.isFinite(l.notIf)) near(l.notIfTotal - l.notIf, headline, `${l.event} if-not base`);
+  }
+}
 console.log("rootForUpcoming ok");
