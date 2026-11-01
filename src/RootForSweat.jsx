@@ -158,7 +158,7 @@ function LiveLegs({ d, part = "live", headline }) {
 .rf-h{font-size:12px;color:#f5c542;text-transform:uppercase;letter-spacing:.04em;margin:12px 0 2px;font-weight:700}
 .rf-cols{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(70px,1fr) 74px 74px;gap:10px;font-size:11px;color:#9ca3af}
 @media (max-width:600px){.livelegs{border-left:0!important;padding-left:0!important;border-top:1px solid #1f2937;padding-top:10px}.rf-row,.rf-cols{grid-template-columns:minmax(0,1fr) 74px 74px}.rf-imp{grid-column:1/-1;order:5}.rf-cols .rf-imp{display:none}}`}</style>
-      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>What you're rooting for</div>
+      <div style={{ fontSize: 13, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".04em" }}>What you're rooting for{Number.isFinite(Number(headline)) ? <span data-testid="rf-base" style={{ textTransform: "none", letterSpacing: 0, fontSize: 11.5 }}> · if it wins / if not = change from Now <b>{money(Number(headline))}</b></span> : null}</div>
       {(rows.live.length || rows.upcoming.length) ? <div className="rf-cols" style={{ marginTop: 6 }}><span>Root for</span><span className="rf-imp">Impact so far</span><span style={{ textAlign: "right" }}>If it wins</span><span style={{ textAlign: "right" }}>If not</span></div> : null}
       {head(`Live now (${rows.live.length})`, rows.live.length ? <>impact <b className={liveMove >= 0 ? "pos" : "neg"}>{money(liveMove)}</b> · biggest swing first</> : null)}
       {rows.live.length ? rows.live.map((l) => row(l, "live")) : <div className="sub" style={{ fontSize: 12.5, padding: "4px 0" }}>No games in play right now.</div>}
@@ -201,7 +201,7 @@ export default function SweatMeter({ d, legs = true, liveCol = true }) {
           const col = red ? `rgba(${Math.round(254 - 101 * t)},${Math.round(202 - 175 * t)},${Math.round(202 - 175 * t)},1)` : `rgba(${Math.round(209 - 204 * t)},${Math.round(250 - 100 * t)},${Math.round(229 - 124 * t)},1)`;
           return <path key={i} d={arc(cx, cy, r, f0, f1 + 0.002)} stroke={col} strokeWidth="20" fill="none" />; })}
         <line x1={cx} x2={cx} y1={cy - r - 14} y2={cy - r + 14} stroke="#e5e7eb" strokeWidth="2" />
-        <text x={cx} y={cy - r - 17} fill="#f5c542" fontSize="13" fontWeight="700" textAnchor="middle">{money(center)}</text>
+        <text x={cx} y={cy - r - 17} fill="#f5c542" fontSize="13" fontWeight="700" textAnchor="middle">{started && base != null ? `Pregame ${money(center)}` : money(center)}</text>
         {hasH && [[m2, "#fca5a5"], [p2, "#6ee7b7"]].map(([v, col]) => { const g = gaugeFrac(v, lo, center, hi); const [x0, y0] = pt(cx, cy, r - 12, g); const [x1, y1] = pt(cx, cy, r + 12, g); const [tx0, ty0] = pt(cx, cy, r + 12, g); const tx = tx0 + (g < 0.5 ? -4 : 4), ty = ty0 - 6;
           return <g key={col}><line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#f9fafb" strokeWidth="2" strokeDasharray="2 2" /><text x={tx} y={ty} fill={col} fontSize="11" fontWeight="700" textAnchor={g < 0.5 ? "end" : "start"}>{money(v)}</text></g>; })}
         <text x={4} y={cy + 18} fill="#fca5a5" fontSize="12" textAnchor="start">Below expected</text>
