@@ -192,16 +192,22 @@ export function DaySheet({ row, past = false }) {
   const approx = !row.sniper && (!sn || !sn.lockPre || !Object.keys(sn.lockPre).length);
   // settled results (snap.final, from Kalshi) → what these locks actually made; legs still live count at last price
   const fin = (sn && sn.final) || {}; const lastP = { ...((sn && sn.last) || {}), ...fin };
-  const settledPos = positions.filter((p) => lockDecided(p, fin)); const openN = new Set(positions.filter((p) => !settledPos.includes(p)).map((p) => String(p.id))).size;
-  const actual = sn && Object.keys(fin).length ? dayValue(settledPos, lastP, fin) : null;
-  const d = { asOf: past ? undefined : row.updated_at, ev: live, model: { positions, probs: {}, finals: {}, teamNames: {} }, perEvent: [], livePos: positions,
-    sweat: { started: true, baseline: pre, now: live, dayResult: result, dayRow: sn ? row : undefined, kept: [], last: lastP, frozen: (sn && sn.frozen) || {}, finished: Object.keys((sn && sn.last) || {}), source: {} } };
+  // unpriced locks touching the day (snap.unpriced): no EV (left out of Pregame/Now), but their settled result is real
+  // money, so Actual P/L counts them
+  const unpriced = sn && sn.unpriced ? Object.values(sn.unpriced) : [];
+  const settledPos = positions.filter((p) => lockDecided(p, fin)); const settledUnp = unpriced.filter((p) => lockDecided(p, fin));
+  const openN = new Set([...positions.filter((p) => !settledPos.includes(p)), ...unpriced.filter((p) => !settledUnp.includes(p))].map((p) => String(p.id).split(":")[0])).size;
+  const unpActual = dayValue(settledUnp, lastP, fin); const unpN = new Set(settledUnp.map((p) => String(p.id).split(":")[0])).size;
+  const actual = sn && Object.keys(fin).length ? dayValue(settledPos, lastP, fin) + unpActual : null;
+  // kickoff times saved with the day (snap.starts) order the finished-game bars by kickoff, like the live sheet
+  const d = { asOf: past ? undefined : row.updated_at, ev: live, model: { positions, probs: {}, finals: {}, teamNames: {} }, perEvent: [], starts: (sn && sn.starts) || {}, livePos: positions,
+    sweat: { started: true, baseline: pre, now: live, nowValue: live, lockPre: (sn && sn.lockPre) || undefined, dayResult: result, dayRow: sn ? row : undefined, kept: [], last: lastP, frozen: (sn && sn.frozen) || {}, finished: Object.keys((sn && sn.last) || {}), source: {} } };
   return (
     <div>
       <div className="lead">{label}{row.final ? " — final" : past ? " (still in progress when last saved)" : ""}: <b className={result >= 0 ? "pos" : "neg"}>{sMoney(result)}</b> vs the pregame expectation.</div>
       <div className="lead2">{row.games} game{row.games === 1 ? "" : "s"} across {row.locks} {row.sniper ? "fill" : "lock"}{row.locks === 1 ? "" : "s"} · pregame {sMoney(pre)} → {row.final ? "final" : "latest"} {sMoney(live)}{past ? ` · saved ${etStamp(row.updated_at)}` : ""}.</div>
       {row.sniper && <div className="lead2" style={{ fontSize: 15 }}>Realized P&L on {row.settled} settled fill{row.settled === 1 ? "" : "s"}: <b className={Number(row.pnl) >= 0 ? "pos" : "neg"}>{sMoney(Number(row.pnl) || 0)}</b>{row.open ? <span className="sub"> · {row.open} fill{row.open === 1 ? "" : "s"} still open, counted at fill-time expected value</span> : null}. <span className="sub">Pregame = fill-time expected profit of the fills made that day (sniper fair at the quote, fees included); final = realized P&L.</span></div>}
-      {actual != null && <div className="lead2" style={{ fontSize: 15 }}>Actual P/L for these locks{openN ? ` (settled so far, ${openN} lock${openN === 1 ? "" : "s"} still live)` : ""}: <b className={actual >= 0 ? "pos" : "neg"}>{sMoney(actual)}</b> <span className="sub">· sportsbook result + hedge fills for every lock touching this day (unfilled cash parlays count their lost stake); can differ from History P/L by a few dollars (fees, rounding).</span></div>}
+      {actual != null && <div className="lead2" style={{ fontSize: 15 }}>Actual P/L for these locks{openN ? ` (settled so far, ${openN} lock${openN === 1 ? "" : "s"} still live)` : ""}: <b className={actual >= 0 ? "pos" : "neg"}>{sMoney(actual)}</b> <span className="sub">· sportsbook result + hedge fills for every lock touching this day (unfilled cash parlays count their lost stake){unpN ? `; includes ${unpN} unpriced lock${unpN === 1 ? "" : "s"} (${sMoney(unpActual)}), not in the expected-profit numbers` : ""}; can differ from History P/L by a few dollars (fees, rounding).</span></div>}
       {approx && <div className="note" style={{ color: "#fbbf24" }}>Baseline approximate: this day was saved before per-lock first-kickoff baselines existed, so it uses each game's kickoff numbers{sn ? "" : " (no leg detail saved for this day)"}.</div>}
       <SweatMeter d={d} legs={!!sn} liveCol={false} />
     </div>
@@ -254,8 +260,16 @@ function todayView(base, nowMs) {
   // finished games of this sheet day (no longer priced, kept at last live chances) feed the leg chart's "Finished games" line
   const s0 = base.sweat || {}; const fin = new Set(((s0.tu && s0.tu.finished) || s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === todayDay(nowMs)));
   const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
+  // Owner with a saved day row: the needle reads that row (todaySweat), so the leg bars use the same locks, per-lock
+  // kickoff baselines and Now; then live + finished bars add up to the headline's move exactly.
+  let sweat = todaySweat(base, pos, r.ev, nowMs); let livePos = [...pos, ...keptToday]; let dayStarts;
+  const dr = sweat && sweat.dayRow && sweat.dayRow.snap && sweat.dayRow.snap.positions && sweat.dayRow.snap.lockPre && String(sweat.dayRow.day).slice(0, 10) === todayDay(nowMs) && Number.isFinite(Number(sweat.dayRow.live_ev)) ? sweat.dayRow : null;
+  if (dr) {
+    const sn = dr.snap; livePos = Object.values(sn.positions); dayStarts = sn.starts || undefined;
+    sweat = { ...sweat, lockPre: sn.lockPre, nowValue: Number(dr.live_ev), legsFrozen: sn.frozen || {}, legsFinal: sn.final || {} };
+  }
   return {
-    d: { ...base, ...r, model: { ...base.model, positions: pos }, sweat: todaySweat(base, pos, r.ev, nowMs), livePos: [...pos, ...keptToday], perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
+    d: { ...base, ...r, model: { ...base.model, positions: pos }, sweat, livePos, ...(dayStarts ? { starts: dayStarts } : {}), perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
     info: { games: evs.size, locks, total: (base.model.positions || []).length, unpriced: unpricedText(base.unpricedCount, base.unpricedReasons), dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
   };
 }

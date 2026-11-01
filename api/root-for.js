@@ -474,17 +474,67 @@ async function resolveFinal(ev, dist) {
   return Object.values(res).some((v) => v === 1) ? res : null;
 }
 // fill snap.final for the day's legs no longer on the board (or not yet confirmed); returns true when every leg is settled
+// Unpriced locks' legs (snap.unpriced, never on the board) are resolved too so Actual P/L can count them; the return
+// value still covers the day's priced games only.
 async function resolveSnapFinals(snap, probs = {}) {
-  snap.final = snap.final || {}; const todo = Object.keys(snap.last || {}).filter((ev) => !snap.final[ev] && !(probs[ev] && Math.max(...Object.values(probs[ev])) >= 0.995));
-  for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(async (ev) => { const f = await resolveFinal(ev, snap.last[ev]).catch(() => null); if (f) snap.final[ev] = f; }));
+  const U = await import('../src/rootForDayUnpriced.js'); const extra = U.unpricedEvents(snap);
+  snap.final = snap.final || {}; const todo = [...new Set([...Object.keys(snap.last || {}), ...Object.keys(extra)])].filter((ev) => !snap.final[ev] && !(probs[ev] && Math.max(...Object.values(probs[ev])) >= 0.995));
+  for (let i = 0; i < todo.length; i += 4) await Promise.all(todo.slice(i, i + 4).map(async (ev) => { const f = await resolveFinal(ev, (snap.last || {})[ev] || extra[ev]).catch(() => null); if (f) snap.final[ev] = f; }));
   return Object.keys(snap.last || {}).every((ev) => snap.final[ev] || (probs[ev] && Math.max(...Object.values(probs[ev])) >= 0.995));
+}
+
+// Saved day rows from before v4 (Nov 1 2026): add the day's unpriced locks (snap.unpriced: a leg never had a usable
+// price, so the live sheet left them out; e.g. Oct 31 ASU–BYU 17-pt spread + Virginia, $55 boost, lost) and the
+// day's kickoff times (snap.starts, bar order). Unpriced locks only count in Actual P/L, never in Pregame / Now.
+// Locks moved to History by hand before their first kickoff, or decided before the day began, stay out. Mutates
+// snap; the caller decides on writing.
+async function backfillDaySnap(client, userId, day, snap) {
+  try {
+    const U = await import('../src/rootForDayUnpriced.js'); const M = await loadMods();
+    const noon = Date.parse(`${String(day).slice(0, 10)}T12:00:00Z`); if (!Number.isFinite(noon)) return snap;
+    const { data, error } = await client.from('combo_parlays').select(LOCK_COLS + ',archived_at,merged_into_id,settled_at,underlying_settled_at').eq('user_id', userId).is('merged_into_id', null)
+      .gte('starts_at', new Date(noon - 3 * 86400000).toISOString()).lte('starts_at', new Date(noon + 1.5 * 86400000).toISOString()).limit(1000);
+    if (error) throw error;
+    const have = new Set(Object.keys(snap.positions || {}).map((k) => String(((snap.positions || {})[k] || {}).id || k).split(':')[0]));
+    // decided before this day began (5 AM ET) → an earlier day's lock, even if one leg is in today's games
+    const dayStart = Date.parse(`${String(day).slice(0, 10)}T09:00:00Z`);
+    const settledBefore = (p) => [p.settled_at, p.underlying_settled_at].some((t) => t && Date.parse(t) < dayStart);
+    const parlays = (data || []).filter((p) => !have.has(String(p.id)) && !(p.archived_at && p.starts_at && Date.parse(p.archived_at) < Date.parse(p.starts_at)) && !settledBefore(p))
+      .map(({ archived_at, merged_into_id, settled_at, underlying_settled_at, ...rest }) => rest);
+    if (parlays.length) {
+      const kids = await loadLockChildren(client, parlays.map((p) => p.id));
+      const out = M.computeRootFor({ parlays, ...kids, kalshiBooks: {}, relay: {}, now: deps.now(), finals: {} });
+      U.addUnpriced(snap, out.unpriced || [], String(day).slice(0, 10), new Set([...Object.keys(snap.last || {}), ...Object.keys(snap.frozen || {})]));
+    }
+    const evs = Object.keys(snap.last || {}).filter((ev) => !(snap.starts || {})[ev]);
+    if (evs.length) {
+      const { data: ks } = await client.from('root_for_pregame_probs').select('event,kickoff').in('event', evs).not('kickoff', 'is', null)
+        .gte('kickoff', new Date(noon - 1.5 * 86400000).toISOString()).lte('kickoff', new Date(noon + 1.5 * 86400000).toISOString()).limit(5000);
+      snap.starts = snap.starts || {};
+      for (const r of ks || []) { const iso = new Date(r.kickoff).toISOString(); if (!snap.starts[r.event] || iso > snap.starts[r.event]) snap.starts[r.event] = iso; }
+    }
+  } catch (e) { console.error('[root-for] day backfill failed:', String((e && e.message) || e).slice(0, 120)); }
+  return snap;
+}
+// Read paths (saved-day view, Today's day row once final; an in-progress Today row already gets them from
+// needleDay): show a pre-v4 row with its unpriced locks + kickoff order without
+// writing (the settle pass writes it).
+async function upgradeDayRowForRead(client, userId, row) {
+  if (!row || !row.snap || !row.snap.positions || Number(row.snap.settleV) >= 4) return row;
+  try {
+    const snap = JSON.parse(JSON.stringify(row.snap));
+    await backfillDaySnap(client, userId, row.day, snap);
+    if (snap.unpriced) await resolveSnapFinals(snap);
+    return { ...row, snap };
+  } catch (_) { return row; }
 }
 // Re-price a saved day's locks the History P/L way (settled locks are gone from the open-lock query): reload each
 // lock (any state) + its fills/orders/filled submissions and rebuild its positions; frozen pregame chances stay.
 async function rebuildSnapPositions(client, snap) {
   try {
     const L = await import('../src/rootForLocks.js'); const T = await import('../src/comboTape.js');
-    const base = [...new Set(Object.keys(snap.positions || {}).map((k) => String((snap.positions[k] || {}).id || k).split(':')[0]))];
+    const base = [...new Set([...Object.keys(snap.positions || {}).map((k) => String((snap.positions[k] || {}).id || k).split(':')[0]),
+      ...Object.keys(snap.unpriced || {}).map((k) => String(k).split(':')[0])])];
     if (!base.length) return;
     const { data: parlays, error } = await client.from('combo_parlays').select('id,label,legs,parlay_stake,parlay_american,fill_american,is_free_bet,sportsbook,active,starts_at,hedge_mode,kalshi_status').in('id', base);
     if (error || !parlays) return;
@@ -500,6 +550,11 @@ async function rebuildSnapPositions(client, snap) {
         snap.positions[k] = { ...sp, hit: np.hit, miss: np.miss, filled: np.filled, received: np.received };
         const f = (snap.lockPre || {})[id]; if (f && f.pos) f.pos = { ...f.pos, hit: np.hit, miss: np.miss };
       }
+      for (const k of Object.keys(snap.unpriced || {})) { // unpriced locks: same contract value refresh
+        const id = String(k); if (id !== p.id && !id.startsWith(p.id + ':')) continue;
+        const np = want.get(id); if (!np) { delete snap.unpriced[k]; continue; }
+        snap.unpriced[k] = { ...snap.unpriced[k], hit: np.hit, miss: np.miss };
+      }
     }
   } catch (e) { console.error('[root-for] rebuild failed:', String((e && e.message) || e).slice(0, 120)); }
 }
@@ -508,14 +563,16 @@ async function rebuildSnapPositions(client, snap) {
 // live_ev at settled results = what those locks actually made; final + 'settled' once all are decided.
 async function settleDays(client, userId, now, skipDay = null) {
   try {
-    const S = await import('../src/rootForSweat.js');
+    const S = await import('../src/rootForSweat.js'); const U = await import('../src/rootForDayUnpriced.js');
     const lo = new Date(now - 4 * 86400000).toISOString().slice(0, 10);
     const { data } = await client.from('root_for_needle_days').select('day,final,final_reason,snap,result,live_ev,pregame_ev').eq('user_id', userId).gte('day', lo);
     for (const row of data || []) {
-      if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled' && Number(row.snap.settleV) >= 3) || String(row.day).slice(0, 10) === skipDay) continue;
+      // settled rows are done once v4 and every unpriced lock is decided (their result keeps settling until then)
+      if (!row.snap || !row.snap.positions || (row.final && row.final_reason === 'settled' && Number(row.snap.settleV) >= 4 && U.unpricedDecided(row.snap)) || String(row.day).slice(0, 10) === skipDay) continue;
       const snap = row.snap; const before = JSON.stringify(snap);
       if (!(Number(snap.settleV) >= 3)) await rebuildSnapPositions(client, snap); // v3: History P/L contract counts, no double-counted single orders
-      snap.settleV = 3; const legsAll = await resolveSnapFinals(snap); // v2: losing leg decides a lock
+      if (!(Number(snap.settleV) >= 4)) { await backfillDaySnap(client, userId, row.day, snap); if (snap.unpriced) await rebuildSnapPositions(client, snap); } // v4: unpriced locks (Actual P/L) + kickoff times
+      snap.settleV = 4; const legsAll = await resolveSnapFinals(snap); // v2: losing leg decides a lock
       const pos = Object.values(snap.positions); const all = legsAll || pos.every((p) => S.lockDecided(p, snap.final)); const liveP = { ...(snap.last || {}), ...snap.final }; const preP = { ...liveP, ...(snap.frozen || {}) };
       const liveEv = S.dayValue(pos, liveP, snap.final); const preEv = S.lockedPregameEv(pos, preP, snap.lockPre);
       const stamp = new Date(now).toISOString();
@@ -549,6 +606,9 @@ async function needleDay(client, userId, out, now, frozen, starts = {}, rows = [
       // keep each leg's display names (finished props/totals drop off the board and lose them)
       snap.names = snap.names || {}; for (const e of out.perEvent || []) { if (!e || !evs.has(e.event)) continue; const nm = {}; for (const o of e.outcomes || []) if (o && o.outcome && o.name) nm[o.outcome] = o.name; if (e.rootForName) nm.label = e.rootForName; if (e.game) nm.game = e.game; if (Object.keys(nm).length) snap.names[e.event] = nm; }
       for (const p of TD.touchedLocks(model, new Set(Object.keys(snap.last)))) snap.positions[p.id] = p;
+      // kickoff times (bar order on the saved day) + the day's unpriced locks (Actual P/L only; no EV)
+      snap.starts = snap.starts || {}; for (const ev of Object.keys(snap.last)) { const ms = starts[ev] ? Date.parse(starts[ev]) : NaN; if (Number.isFinite(ms)) snap.starts[ev] = new Date(ms).toISOString(); }
+      const U = await import('../src/rootForDayUnpriced.js'); U.addUnpriced(snap, out.unpriced || [], day);
       const dayEvs = Object.keys(snap.frozen);
       if (dayEvs.length) {
         const pos = Object.values(snap.positions);
@@ -632,7 +692,7 @@ async function sweatBaseline(client, out, now, userId) {
     }
     // Today's needle reads the saved day row (all of the day's games and locks, settled ones included), so it matches history.
     let dayRow = (history || []).find((h) => String(h.day).slice(0, 10) === sd) || null;
-    if (dayRow && userId) { try { const { data: x } = await client.from('root_for_needle_days').select('snap').eq('user_id', userId).eq('day', sd).limit(1); if (x && x[0]) dayRow = { ...dayRow, snap: x[0].snap }; } catch (_) { /* gauge falls back */ } }
+    if (dayRow && userId) { try { const { data: x } = await client.from('root_for_needle_days').select('snap').eq('user_id', userId).eq('day', sd).limit(1); if (x && x[0]) { dayRow = { ...dayRow, snap: x[0].snap }; if (dayRow.final) dayRow = await upgradeDayRowForRead(client, userId, dayRow); } } catch (_) { /* gauge falls back */ } }
     const ids = (c) => (c ? c.kept.map((p) => String(p.id)) : []);
     const union = carry || carryTU ? (() => {
       const byId = {}; for (const c of [carry, carryTU]) if (c) for (const p of c.kept) byId[String(p.id)] = p;
@@ -750,14 +810,15 @@ async function handler(req, res) {
     if (q.check === '1' || q.check === 1) { const hist = await needleHist().catch(() => []); return json(res, 200, { ok: true, locks: await countLocks(client, uid), days: hist.length }); }
     // one saved day (gauge vs that day's frozen pregame baseline, final needle, finished legs)
     if (q.day && /^\d{4}-\d{2}-\d{2}$/.test(String(q.day))) {
-      const [row, history] = await Promise.all([needleRow(String(q.day)), needleHist()]);
+      const [row0, history] = await Promise.all([needleRow(String(q.day)), needleHist()]);
+      const row = await upgradeDayRowForRead(client, uid, row0); // pre-v4 rows: unpriced locks + kickoff order, read-only
       return json(res, 200, { ok: true, asOf: new Date(deps.now()).toISOString(), dayRow: row, history });
     }
     const M = await loadMods();
     const { parlays, fills, singles, submissions } = await loadLocks(client, uid);
     if (!parlays.length) { // nothing open: still show the latest saved day (and the past-day picker)
       await settleDays(client, uid, deps.now()); // own (or owner View-as) saved days keep settling; no-op rows are not rewritten
-      const history = await needleHist().catch(() => []); const latest = history[0] ? await needleRow(String(history[0].day).slice(0, 10)).catch(() => null) : null;
+      const history = await needleHist().catch(() => []); const latest = history[0] ? await upgradeDayRowForRead(client, uid, await needleRow(String(history[0].day).slice(0, 10)).catch(() => null)) : null;
       return json(res, 200, { ok: true, empty: true, locksTotal: 0, ...(history.length ? { asOf: new Date(deps.now()).toISOString(), sweat: { history, dayRow: latest } } : {}) });
     }
     const mk = await loadMarkets(M, parlays, env);
@@ -779,4 +840,4 @@ module.exports = handler;
 module.exports.config = { maxDuration: 60 };
 module.exports._autoArchivedStillOpen = autoArchivedStillOpen;
 module.exports._setDeps = (p) => { deps = { ...deps, ...p }; };
-module.exports._helpers = { priceWithRetry, freshBooks, refreshBooks, fetchKalshiBooks, RELAY_TIMEOUT_MS, markStartDates, loadSchedule, applySchedule, legStarts, needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };
+module.exports._helpers = { backfillDaySnap, upgradeDayRowForRead, resolveSnapFinals, priceWithRetry, freshBooks, refreshBooks, fetchKalshiBooks, RELAY_TIMEOUT_MS, markStartDates, loadSchedule, applySchedule, legStarts, needleCron, savedKickoffs, settleDays, loadLocks, countLocks, loadMarkets, loadMods, loadStoredFairs, lockBaselines, requireUser, matchKey, isPlaceholderStart, parseKalshiGame, espnStarts, nflTeam, nflKey, lockStarts };

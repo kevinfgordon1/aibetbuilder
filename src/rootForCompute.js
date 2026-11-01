@@ -157,7 +157,10 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
   }
   // a lock needs every event priced
   const priced = []; const unpriced = [];
-  for (const pos of resolved) { const bad = pos.legs.find((l) => unpricedEv.has(l.event)); if (bad) unpriced.push({ id: pos.id, label: pos.label, leg: bad.label || bad.event, reason: unpricedWhy[bad.event] || "no_book", hit: pos.hit, miss: pos.miss }); else priced.push(pos); }
+  // unpriced entries keep their engine legs + the lock's first kickoff so the day snapshot can still count their
+  // settled result (Actual P/L) without pricing them
+  const startOf = {}; for (const p of parlays) if (p && p.id) startOf[p.id] = p.starts_at || null;
+  for (const pos of resolved) { const bad = pos.legs.find((l) => unpricedEv.has(l.event)); if (bad) unpriced.push({ id: pos.id, label: pos.label, leg: bad.label || bad.event, reason: unpricedWhy[bad.event] || "no_book", hit: pos.hit, miss: pos.miss, start: startOf[String(pos.id).split(":")[0]] || null, legs: pos.legs.map(({ event, kind, outcomes, allowed }) => ({ event, kind, outcomes, allowed })) }); else priced.push(pos); }
   // locks only (single-leg hedge positions are not counted), grouped by reason, for the page text
   const unpricedLocks = unpriced.filter((u) => !String(u.id).includes(":"));
   const unpricedReasons = {}; for (const u of unpricedLocks) unpricedReasons[u.reason] = (unpricedReasons[u.reason] || 0) + 1;
