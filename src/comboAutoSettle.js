@@ -128,12 +128,22 @@ export async function planSettlementPatches({ living, archived, fills, outcomes,
   return { rowPatch, livePatch, idle: false };
 }
 
-/** True when a lock can no longer change: Kalshi settled it, or it never filled and its legs settled. */
+/** Hedged on a combo that is not a Kalshi market (Polymarket caoc-/crossd-/asta-… tickers): Kalshi never stamps a
+ *  kalshi_result for it, so the legs' official result is its final result. */
+export function isNonKalshiCombo(ticker) {
+  const t = String(ticker || "").trim();
+  return !!t && !/^KX/i.test(t);
+}
+
+/** True when a lock can no longer change: Kalshi settled it, or its legs settled and it either never filled or its
+ *  hedge is on a non-Kalshi combo (Nov 1 2026: a Polymarket-hedged lock that lost at 10:59 PM ET stayed active
+ *  until the first-kickoff + 6h auto-archive because it waited for a Kalshi result that never comes). */
 export function isFinalLock(row, filled = 0) {
   if (!row) return false;
   if (row.kalshi_result === "yes" || row.kalshi_result === "no") return true;
   const u = row.underlying_result;
-  return !(filled > 0) && (u === "won" || u === "lost" || u === "push");
+  if (!(u === "won" || u === "lost" || u === "push")) return false;
+  return !(filled > 0) || isNonKalshiCombo(row.combo_ticker);
 }
 
 /** Browser getJson: same fetch + headers the page always used. */

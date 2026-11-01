@@ -2,7 +2,7 @@
 import React, { useContext, useEffect, useMemo, useState } from "react";
 // Sheet passes its loading flag down so the pill under the gauge can say "refreshing…".
 export const PillLoading = React.createContext(false);
-import { gaugeFrac, liveLegMoves, lockedPregameEv, anchorWhatIf } from "./rootForSweat";
+import { gaugeFrac, liveLegMoves, lockedPregameEv, anchorWhatIf, RESIDUAL_EVENT } from "./rootForSweat";
 import { american } from "./rootForPrices";
 import { tickerLabel, binarySideName } from "./rootForSideName.js";
 import { quantileOf } from "./rootForSimple";
@@ -11,7 +11,8 @@ import { rootFor } from "./rootForEngine";
 function seeded(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let x = a; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; }; }
 // Pregame range for the day: the same locks as Now, every one of the day's games at its kickoff (frozen) chances,
 // later games at their current pregame chances. Kickoff numbers never change, so the range doesn't drift as games
-// finish. 2.3rd/97.7th percentiles of that distribution = the ±2 SD lines (the engine only gives percentiles).
+// finish. 2.3rd/97.7th percentiles of that distribution = the range lines (labelled as percentiles: with long shots
+// the distribution is lopsided, so it is not a ±2 SD band).
 export function pregameRange(d, s, full = false) {
   try {
     const model = d.model || {}; const sn = (s.dayRow && s.dayRow.snap) || null; let pos; let preP;
@@ -83,12 +84,14 @@ function LiveLegs({ d, part = "live", headline }) {
   const s = d.sweat || {}; const model = d.model || {};
   const kept = (s.kept || []).filter((p) => !s.keptIds || s.keptIds.includes(String(p.id)));
   const positions = d.livePos || [...(model.positions || []), ...kept];
-  const probs = { ...(s.last || {}), ...(model.probs || {}) };
-  const starts = {}; const meta = {}; for (const e of d.perEvent || []) { starts[e.event] = e.start; meta[e.event] = e; }
+  const probs = { ...(s.last || {}), ...(model.probs || {}), ...(s.legsFinal || {}) };
+  const starts = { ...(d.starts || {}) }; const meta = {}; for (const e of d.perEvent || []) { if (e.start) starts[e.event] = e.start; meta[e.event] = e; }
   const finals = model.finals || {};
-  const { legs, done, settled } = liveLegMoves(positions, probs, s.frozen || {}, starts, new Set([...(s.finished || []), ...Object.keys(finals)]));
+  // saved day rows: per-lock kickoff baselines + the row's Now, so the bars add up to the headline exactly
+  const { legs, done, settled } = liveLegMoves(positions, probs, s.legsFrozen || s.frozen || {}, starts, new Set([...(s.finished || []), ...Object.keys(finals), ...Object.keys(s.legsFinal || {})]), s.lockPre ? { lockPre: s.lockPre, now: s.nowValue, pregame: s.baseline } : {});
   const doneShown = done.filter((l) => Math.abs(l.move) >= 0.5);
   const result = (ev) => { // "HOU Texans won" / "Over 42.5 hit"
+    if (ev === RESIDUAL_EVENT) return "Other: contract changes / legs with no price";
     const pr = probs[ev] || {}; const w = finals[ev] || Object.entries(pr).filter(([o]) => o !== "__neither").sort((a, b) => b[1] - a[1])[0]?.[0]; if (!w) return ev;
     const e = meta[ev] || {}; const team = String(w).split(/[<>]=?/)[0];
     const nm = ((e.outcomes || []).find((o) => o.outcome === w) || {}).name || (model.teamNames || {})[`${ev}:${team}`] || w;
@@ -110,7 +113,7 @@ function LiveLegs({ d, part = "live", headline }) {
         {doneShown.map((l) => { const e = meta[l.event] || {}; const pos = l.move >= 0;
           return (
             <div key={l.event} style={{ margin: "6px 0" }}>
-              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{e.game ? `${e.game} · ` : ""}final</span></div>
+              <div style={{ fontSize: 12.5, marginBottom: 2 }}><b>{result(l.event)}</b> <span className="sub">{l.residual ? "not tied to one game" : `${e.game ? `${e.game} · ` : ""}final`}</span></div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{ height: 12, borderRadius: 4, minWidth: 4, background: pos ? "#34d399" : "#f87171", width: `calc((100% - 70px) * ${(Math.abs(l.move) / mx).toFixed(4)})` }} />
                 <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", color: pos ? "#6ee7b7" : "#fca5a5" }}>{money(l.move)} EV</span>
@@ -193,7 +196,7 @@ export default function SweatMeter({ d, legs = true, liveCol = true }) {
         <div style={{ fontSize: 20, fontWeight: 700, color: !started || base == null || Math.abs(diff) < 0.5 ? "#e5e7eb" : diff >= 0 ? "#6ee7b7" : "#fca5a5" }}>{mood}</div>
         <div>Now <b>{money(now)}</b> expected</div>
         {base != null && <div className="sub">{started ? `Pregame ${money(base)}` : `Pregame ${money(base)} (each game locks in at its kickoff)`}</div>}
-        {hasH && <div className="sub" style={{ fontSize: 11.5 }}>{pre ? "Pregame likely range" : "Dotted lines: likely range"} (±2 SD) {money(m2)} to {money(p2)}</div>}
+        {hasH && <div className="sub" style={{ fontSize: 11.5 }}>{pre ? "Pregame likely range" : "Dotted lines: likely range"} (2.3rd–97.7th percentile) {money(m2)} to {money(p2)}</div>}
         {started && base != null && <div><b className={diff >= 0 ? "pos" : "neg"}>{money(diff)}</b> {s.fixedBaseline ? "since the fills (games played + price moves)" : "from games played"}</div>}
         {started && pre && pre.countedLegs > 0 && <div className="sub" data-testid="rf-saved-legs" style={{ fontSize: 11.5 }}>Kickoff numbers: <b>{pre.savedLegs}</b> of {pre.countedLegs} legs from prices saved before kickoff{pre.estimatedLegs ? `, ${pre.estimatedLegs} estimated` : ""}{pre.countedLegs - pre.savedLegs - pre.estimatedLegs > 0 ? `, ${pre.countedLegs - pre.savedLegs - pre.estimatedLegs} from live prices at kickoff` : ""}.</div>}
         {started && s.source && Object.values(s.source).includes("kickoff") && <div className="sub" style={{ fontSize: 11.5 }}>Some starting points are Kalshi prices at kickoff (saved history).</div>}
