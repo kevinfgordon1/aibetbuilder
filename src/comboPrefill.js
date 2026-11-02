@@ -4,6 +4,8 @@
 // otherwise fill stays empty. Fill is the odds you sell at AFTER the maker fee
 // (already baked in) — do not apply KFEE again when recommending fill.
 
+import { d1Team } from "./ncaabD1.js";
+
 export const encVal = (t, s) => `${t}|${s}`;
 
 export const COMBO_SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nhl", "nba", "ncaab", "mls", "epl", "laliga", "seriea", "bundesliga", "ligue1", "ucl", "ufc"];
@@ -427,7 +429,28 @@ export function ncaafCanonName(s) {
   return n;
 }
 
-function nameMatchesLabel(promoName, label) {
+// NCAAB: identify both names with the shared D1 team table (src/ncaabD1.js, the Oct 30 2026 mapping used by
+// the New Odds Board) before any fuzzy matching. The Odds API writes "Georgia St Panthers", "Texas A&M-CC
+// Islanders", "GW Revolutionaries", "UMKC Kangaroos", "Loyola (MD) Greyhounds" where Kalshi has "Georgia St.",
+// "Texas A&M-Corpus Christi", "George Washington", "Kansas City", "Loyola Maryland" (Nov 2 2026: 11 of 116
+// pre-game Odds API games missed). When both sides resolve, the ESPN id decides (true or false); otherwise
+// fall back to the fuzzy name match.
+function d1TeamOf(name) {
+  const raw = String(name || "").replace(/\s+(ml|moneyline)\s*$/i, "").trim();
+  return raw ? d1Team(raw) : null;
+}
+function d1SameTeam(a, b) {
+  const ta = d1TeamOf(a);
+  const tb = ta ? d1TeamOf(b) : null;
+  if (!ta || !tb) return null;
+  return String(ta.espnId) === String(tb.espnId);
+}
+
+function nameMatchesLabel(promoName, label, sport) {
+  if (sport === "ncaab") {
+    const same = d1SameTeam(promoName, label);
+    if (same !== null) return same;
+  }
   promoName = ncaafCanonName(promoName);
   label = ncaafCanonName(label);
   const p = normalize(promoName);
@@ -446,16 +469,17 @@ function nameMatchesLabel(promoName, label) {
 export function ncaafTeamsMatch(promoGame, kalshiGame) {
   const [away, home] = splitAt(promoGame);
   if (!away || !home) return false;
+  const sport = kalshiGame.sport;
   const sides = (kalshiGame.markets?.side || []).map((m) => m.label).filter(Boolean);
   if (sides.length >= 2) {
-    const a0 = nameMatchesLabel(away, sides[0]);
-    const a1 = nameMatchesLabel(away, sides[1]);
-    const h0 = nameMatchesLabel(home, sides[0]);
-    const h1 = nameMatchesLabel(home, sides[1]);
+    const a0 = nameMatchesLabel(away, sides[0], sport);
+    const a1 = nameMatchesLabel(away, sides[1], sport);
+    const h0 = nameMatchesLabel(home, sides[0], sport);
+    const h1 = nameMatchesLabel(home, sides[1], sport);
     return (a0 && h1 && !a1 && !h0) || (a1 && h0 && !a0 && !h1) || (a0 && h1) || (a1 && h0);
   }
   const title = kalshiGame.title || "";
-  return nameMatchesLabel(away, title) && nameMatchesLabel(home, title);
+  return nameMatchesLabel(away, title, sport) && nameMatchesLabel(home, title, sport);
 }
 
 function teamsMatchGame(promoGame, kalshiGame, sport = "mlb") {
@@ -642,7 +666,7 @@ function spreadSideMatches(parsed, sm, sport) {
   const teamId = identifyTeam(parsed.team, sport);
   const labelId = identifyTeam(sm.team, sport);
   if (teamId && labelId && teamId === labelId) return true;
-  if (COLLEGE_COMBO_SPORTS.has(sport) && nameMatchesLabel(parsed.team, sm.team)) return true;
+  if (COLLEGE_COMBO_SPORTS.has(sport) && nameMatchesLabel(parsed.team, sm.team, sport)) return true;
   if (teamId && normalize(sm.team).includes(normalize(parsed.team).split(" ").pop())) return true;
   return false;
 }
@@ -708,7 +732,7 @@ function missingKalshiLineReason(wantLine, game, pool) {
 // is this team's +X — even when the NO label was built from the wrong city.
 function opponentMinusCovers(parsed, yesSpread, sport) {
   if (!yesSpread || yesSpread.sign !== "-") return false;
-  if (COLLEGE_COMBO_SPORTS.has(sport)) return !nameMatchesLabel(parsed.team, yesSpread.team);
+  if (COLLEGE_COMBO_SPORTS.has(sport)) return !nameMatchesLabel(parsed.team, yesSpread.team, sport);
   const promoId = identifyTeam(parsed.team, sport);
   const yesId = identifyTeam(yesSpread.team, sport);
   if (promoId && yesId) return promoId !== yesId;
@@ -851,7 +875,7 @@ function matchMarket(promoLeg, game, sport = "mlb") {
       return { market: soccerSideFor(String(promoLeg.name || "").replace(/\s+(ml|moneyline)\s*$/i, ""), game) };
     }
     if (COLLEGE_COMBO_SPORTS.has(sport)) {
-      const hit = sides.find((m) => nameMatchesLabel(promoLeg.name, m.label)) || null;
+      const hit = sides.find((m) => nameMatchesLabel(promoLeg.name, m.label, sport)) || null;
       return { market: hit };
     }
     const teamId = identifyTeam(promoLeg.name, sport);
