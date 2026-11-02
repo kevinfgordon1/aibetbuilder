@@ -61,6 +61,15 @@ export function quoteLooksAbsurdVsReference(reference, candidate, edge = ABSURD_
 // levels being WORSE than the quote is normal; better by this much is not.
 export const LADDER_TOP_MAX_IMPROVE = 0.20;
 
+// Points of probability miss longshots: Texas A&M-CC ML (2026-11-02) feed Novig
+// +456 (≈18%) vs a wrong-game ladder topped at +9900 (1%) is only 17 points,
+// yet 22x the odds. A top whose odds (p/(1−p)) beat the quote's by 3x or more
+// is rogue too, and so is a ≤2c top (+4900 or longer) when the quote is not.
+export const LADDER_TOP_MAX_ODDS_RATIO = 3;
+export const LADDER_PENNY_TOP_PROB = 0.02;
+
+function oddsOf(p) { return p / (1 - p); }
+
 export function ladderTopLooksRogue(quoted, levels, maxImprove = LADDER_TOP_MAX_IMPROVE) {
   const pq = impliedFromAmerican(quoted);
   if (pq == null) return false;
@@ -72,7 +81,9 @@ export function ladderTopLooksRogue(quoted, levels, maxImprove = LADDER_TOP_MAX_
   }
   const pt = impliedFromAmerican(top);
   if (pt == null) return false;
-  return pq - pt >= maxImprove;
+  if (pq - pt >= maxImprove) return true;
+  if (pt < pq && oddsOf(pq) / oddsOf(pt) >= LADDER_TOP_MAX_ODDS_RATIO) return true;
+  return pt <= LADDER_PENNY_TOP_PROB && pq > LADDER_PENNY_TOP_PROB * 2;
 }
 
 // Opposite-side Yes quotes whose implieds do not sum to a 2-way (~1).
