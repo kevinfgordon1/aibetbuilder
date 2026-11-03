@@ -345,11 +345,13 @@ function fullPlan() {
   assert.deepEqual(sportKeysForPromoLoad(new Set(["soccer_epl"]), SPORT_KEYS), [
     "soccer_epl",
     "soccer_usa_mls",
+    "soccer_uefa_champs_league",
   ]);
   assert.deepEqual(sportKeysForPromoLoad(new Set(["soccer_usa_mls", "baseball_mlb"]), SPORT_KEYS), [
     "baseball_mlb",
     "soccer_epl",
     "soccer_usa_mls",
+    "soccer_uefa_champs_league",
   ]);
 }
 

@@ -45,5 +45,44 @@ for (const [a, b, ok] of [
   ["Los Angeles FC", "Los Angeles F", true], ["LA Galaxy", "Los Angeles F", false],
   ["St. Louis City SC", "Saint Louis", true], ["CF Montréal", "Montreal", true],
   ["Manchester United", "Manchester City", false],
+  ["PSG", "Paris Saint-Germain", true],
+  ["Paris Saint-Germain FC", "PSG", true],
+  ["Bayern Munich", "FC Bayern München", true],
+  ["FC Bayern Munchen", "Bayern", true],
+  ["Inter", "Internazionale", true],
+  ["Inter", "FC Internazionale Milano", true],
+  ["Inter", "Inter Miami CF", false],
+  ["Inter Miami", "Internazionale", false],
+  ["Sporting CP", "Sporting Clube de Portugal", true],
+  ["Club Atlético de Madrid", "Atletico", true],
 ]) assert.equal(soccerNameMatches(a, b), ok, `${a} vs ${b}`);
+
+// This week's UCL slate: promo leg "PSG ML" maps onto Kalshi's PSG yes, not Villarreal.
+const uclEv = (key, a, b, an, bn) => ({
+  event_ticker: `KXUCLGAME-${key}`, title: `${an} vs ${bn}`, sub_title: `${a} vs ${b}`,
+  markets: [
+    { ticker: `KXUCLGAME-${key}-${a}`, yes_sub_title: an, occurrence_datetime: "2026-11-03T23:00:00Z" },
+    { ticker: `KXUCLGAME-${key}-${b}`, yes_sub_title: bn, occurrence_datetime: "2026-11-03T23:00:00Z" },
+    { ticker: `KXUCLGAME-${key}-TIE`, yes_sub_title: "Tie", occurrence_datetime: "2026-11-03T23:00:00Z" },
+  ],
+});
+const ucl = kg._helpers.groupSportGames({
+  side: [
+    uclEv("26NOV03VILPSG", "VIL", "PSG", "Villarreal", "PSG"),
+    uclEv("26NOV03FEYINT", "FEY", "INT", "Feyenoord", "Inter"),
+    uclEv("26NOV03ATMBMU", "ATM", "BMU", "Atletico", "Bayern Munich"),
+  ],
+}, Date.parse("2026-11-03T16:00:00Z"), { dateOnlyStart: true }).map((g) => ({ ...g, sport: "ucl" }));
+const uclLeg = (name, game) => ({ name, market: "ML", game, commence_time: "2026-11-03T20:00:00Z", sport: "soccer_uefa_champs_league" });
+const mapped = mapPromoLegsToKalshi([
+  uclLeg("PSG ML", "Villarreal CF @ Paris Saint-Germain"),
+  uclLeg("Draw", "FC Internazionale Milano @ Feyenoord Rotterdam"),
+  uclLeg("Bayern Munich ML", "Atletico Madrid @ FC Bayern München"),
+  uclLeg("Inter Miami CF ML", "Inter Miami CF @ Orlando City SC"),
+], { ucl });
+assert.equal(mapped.rows[0].marketVal, "KXUCLGAME-26NOV03VILPSG-PSG|yes");
+assert.equal(mapped.rows[1].marketVal, "KXUCLGAME-26NOV03FEYINT-TIE|yes");
+assert.equal(mapped.rows[2].marketVal, "KXUCLGAME-26NOV03ATMBMU-BMU|yes");
+assert.equal(mapped.rows[3].marketVal, "");
+assert.equal(mapped.unmatched.length, 1);
 console.log("combo soccer tests passed");

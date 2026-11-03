@@ -2,11 +2,12 @@
 // Soft-book / PM "Home wins" pairs with the same binary's No — never Away Yes.
 // 2-way sports (NFL/MLB/…) keep other-team Yes as the inverse.
 
-export const SOCCER_SPORT_KEYS = ["soccer_epl", "soccer_usa_mls"];
+export const SOCCER_SPORT_KEYS = ["soccer_epl", "soccer_usa_mls", "soccer_uefa_champs_league"];
 // League labels for game badges / cache rows. Filter chips collapse these to Soccer.
 export const SOCCER_SPORTS = [
   { key: "soccer_epl", label: "EPL" },
   { key: "soccer_usa_mls", label: "MLS" },
+  { key: "soccer_uefa_champs_league", label: "UCL" },
 ];
 export const SOCCER_ML_SIDES = ["away", "draw", "home"];
 export const DRAW_OUTCOME_NAMES = ["Draw", "Tie"];

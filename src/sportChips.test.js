@@ -57,7 +57,7 @@ assert.equal(sportChipSelected(mlb, new Set(["baseball_mlb"])), true);
 
 {
   const on = toggleSportChip(new Set(["baseball_mlb"]), soccer);
-  assert.deepEqual([...on].sort(), ["baseball_mlb", "soccer_epl", "soccer_usa_mls"].sort());
+  assert.deepEqual([...on].sort(), ["baseball_mlb", ...SOCCER_SPORT_KEYS].sort());
 }
 
 {

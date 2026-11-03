@@ -5,6 +5,7 @@
 // (already baked in) — do not apply KFEE again when recommending fill.
 
 import { d1Team } from "./ncaabD1.js";
+import { soccerSameClub } from "../lib/soccer-clubs.mjs";
 
 export const encVal = (t, s) => `${t}|${s}`;
 
@@ -96,6 +97,11 @@ function soccerTokens(raw) {
     .split(" ").filter(Boolean);
 }
 export function soccerNameMatches(bookName, kalshiLabel) {
+  // Known UCL clubs ("PSG" / "Paris Saint-Germain", "Inter" / "Internazionale",
+  // "Bayern Munich" / "FC Bayern München"). Inter Miami is a different club.
+  const same = soccerSameClub(bookName, kalshiLabel);
+  if (same === true) return true;
+  if (same === false) return false;
   const b = soccerTokens(bookName);
   const k = soccerTokens(kalshiLabel);
   if (!b.length || !k.length) return false;

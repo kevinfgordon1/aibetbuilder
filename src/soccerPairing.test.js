@@ -38,10 +38,11 @@ const require = createRequire(import.meta.url);
 const cjs = require("../lib/soccer-pairing.js");
 const { TRUSTED_BOOK_KEYS, ALL_BOOKS, buildAllLegsForBook } = require("../lib/promo-ev.js");
 
-assert.deepEqual(SOCCER_SPORT_KEYS, ["soccer_epl", "soccer_usa_mls"]);
+assert.deepEqual(SOCCER_SPORT_KEYS, ["soccer_epl", "soccer_usa_mls", "soccer_uefa_champs_league"]);
 assert.deepEqual(SOCCER_ML_SIDES, ["away", "draw", "home"]);
 assert.equal(isSoccerSport("soccer_epl"), true);
 assert.equal(isSoccerSport("soccer_usa_mls"), true);
+assert.equal(isSoccerSport("soccer_uefa_champs_league"), true);
 assert.equal(isSoccerSport("americanfootball_nfl"), false);
 assert.equal(isSoccerSport("baseball_mlb"), false);
 assert.deepEqual([...expandSoccerSportKeys(new Set(["soccer_epl"]))].sort(), [...SOCCER_SPORT_KEYS].sort());
@@ -297,6 +298,7 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /key: "soccer_epl", label: "EPL"/);
   assert.match(app, /key: "soccer_usa_mls", label: "MLS"/);
+  assert.match(app, /key: "soccer_uefa_champs_league", label: "UCL"/);
   assert.match(app, /SPORT_CHIPS = sportChipOptions\(SPORTS\)/);
   assert.match(app, /function pushSoccerMlLegs/);
   assert.match(app, /function PromoLegGameLine\(/);
