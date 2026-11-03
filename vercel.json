@@ -85,6 +85,9 @@
     "api/kalshi-board.js": {
       "maxDuration": 20
     },
+    "api/election-board.js": {
+      "maxDuration": 20
+    },
     "api/novig-stream.js": {
       "maxDuration": 300
     },
