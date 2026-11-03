@@ -46,6 +46,7 @@ import {
   soccerMlOppResolveArgs,
   soccerLayBookLabel,
   soccerPromoEmptyDetail,
+  soccerGroupedLabel,
   formatPromoLegTitle,
   formatPromoLegMarket,
   formatPromoLegGame,
@@ -242,10 +243,11 @@ const SPORTS = withoutMlbUi([
   { key: "icehockey_nhl", label: "NHL" },
   { key: "soccer_epl", label: "EPL" },
   { key: "soccer_usa_mls", label: "MLS" },
+  { key: "soccer_uefa_champs_league", label: "UCL" },
   { key: "mma_mixed_martial_arts", label: "UFC" },
 ]);
 const SPORT_KEYS = SPORTS.map(s => s.key);
-// Promo / Odds Board / Profile chips. Soccer is one chip → both Odds API keys.
+// Promo / Odds Board / Profile chips. Soccer is one chip → EPL, MLS, and UCL Odds API keys.
 const SPORT_CHIPS = sportChipOptions(SPORTS);
 
 // Futures / outrights (championship winners). `sport` links each to its parent league
@@ -610,8 +612,15 @@ function PromoLegStartTime({ commence_time }) {
 
 function PromoLegGameLine({ leg, style }) {
   const game = formatPromoLegGame(leg);
-  if (!game) return null;
-  return <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, ...style }}>{game}</div>;
+  const grouped = soccerGroupedLabel(leg && leg.sport);
+  if (!game && !grouped) return null;
+  return (
+    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, ...style }}>
+      {grouped ? <span style={{ fontWeight: 700, color: "#22c55e" }}>{grouped}</span> : null}
+      {grouped && game ? " · " : null}
+      {game || null}
+    </div>
+  );
 }
 
 // Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
@@ -1006,11 +1015,12 @@ function EVBadge({ ev }) {
 }
 
 function SportBadge({ sport }) {
+  const grouped = soccerGroupedLabel(sport);
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { baseball_mlb: "#d4af37", americanfootball_nfl: "#b8932a", americanfootball_ncaaf: "#e6c65c", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16" };
+  const colors = { baseball_mlb: "#d4af37", americanfootball_nfl: "#b8932a", americanfootball_ncaaf: "#e6c65c", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#22c55e", soccer_uefa_champs_league: "#22c55e" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
-      {s?.label || sport}
+      {grouped || s?.label || sport}
     </span>
   );
 }
@@ -1179,7 +1189,7 @@ function LandingFull({ onBack }) {
         <div className="lf-sechead"><div className="k">FAQ</div><h2>Good questions</h2></div>
         <div className="lf-faq">
           <div className="lf-qa"><h4>Is it really free?</h4><p>Yes. Sign in with Google, email, X, or Facebook and everything's available — no credit card, no trial timer.</p></div>
-          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, college football &amp; basketball, plus EPL and MLS soccer — with championship futures too.</p></div>
+          <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, college football &amp; basketball, plus EPL, MLS, and UEFA Champions League soccer — with championship futures too.</p></div>
           <div className="lf-qa"><h4>Do I have to link my sportsbook accounts?</h4><p>No. It reads public odds; you place bets yourself at whichever book has the edge.</p></div>
           <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 20+ sportsbooks and exchanges, including Kalshi and Polymarket, refreshed every 5 minutes.</p></div>
         </div>

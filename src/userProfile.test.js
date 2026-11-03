@@ -218,12 +218,12 @@ assert.equal(defaultProfilePrefs().seenTargetedAlertId, "");
 {
   const soccerAllowed = new Set([
     "baseball_mlb", "americanfootball_nfl", "americanfootball_ncaaf",
-    "soccer_epl", "soccer_usa_mls",
+    "soccer_epl", "soccer_usa_mls", "soccer_uefa_champs_league",
   ]);
   const one = normalizeProfilePrefs({ sports: ["soccer_epl"] }, { allowedSports: soccerAllowed });
-  assert.deepEqual(one.sports, ["soccer_epl", "soccer_usa_mls"]);
+  assert.deepEqual(one.sports, ["soccer_epl", "soccer_usa_mls", "soccer_uefa_champs_league"]);
   const other = normalizeProfilePrefs({ sports: ["baseball_mlb", "soccer_usa_mls"] }, { allowedSports: soccerAllowed });
-  assert.deepEqual(other.sports, ["baseball_mlb", "soccer_usa_mls", "soccer_epl"]);
+  assert.deepEqual(other.sports, ["baseball_mlb", "soccer_usa_mls", "soccer_epl", "soccer_uefa_champs_league"]);
 }
 
 {

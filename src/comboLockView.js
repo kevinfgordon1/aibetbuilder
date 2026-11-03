@@ -116,15 +116,19 @@ export function etStamp(iso) {
   return dtf("mdhm", { timeZone: ET_ZONE, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(d) + " ET";
 }
 
-const SPORT_WORD = { mlb: "MLB", nfl: "NFL", ncaaf: "College football", nhl: "NHL", nba: "NBA", ncaab: "College basketball", wnba: "WNBA" };
+const SPORT_WORD = { mlb: "MLB", nfl: "NFL", ncaaf: "College football", nhl: "NHL", nba: "NBA", ncaab: "College basketball", wnba: "WNBA", soccer: "Soccer" };
 
 export function lockSports(parlay) {
   const seen = [];
+  const words = [];
   for (const leg of (parlay && parlay.legs) || []) {
     const s = leg && (sportFromTicker(leg.ticker, leg.gameKey) || null);
-    if (s && !seen.includes(s)) seen.push(s);
+    if (!s || seen.includes(s)) continue;
+    seen.push(s);
+    const word = SPORT_WORD[s] || s.toUpperCase();
+    if (!words.includes(word)) words.push(word);
   }
-  return seen.map((s) => SPORT_WORD[s] || s.toUpperCase());
+  return words;
 }
 
 export const LEG_TYPE_WORD = { side: "Moneyline", spread: "Spread", total: "Total", prop: "Player prop" };

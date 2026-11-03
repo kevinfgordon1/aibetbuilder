@@ -135,6 +135,33 @@ export function computeRootFor({ parlays = [], fills = [], singles = [], submiss
       continue;
     }
     const teams = (() => { const sp = spreadOf[ev]; if (!sp) return outs; const r = legEvent({ ticker: `${ev}-${sp.team}` }); return r.outcomes; })();
+    // UCL (and only a 3-way ticker): each side's fair is its own inverse No.
+    // The unpriced side keeps whatever probability the priced sides leave, so a
+    // draw is not given to the other club. 2-way sports stay on the block below.
+    if (teams.includes("TIE")) {
+      const ps = {};
+      let sum = 0;
+      let n = 0;
+      for (const t of teams) {
+        const p = fair(`${ev}-${t}`, "yes").p;
+        if (p != null) { ps[t] = p; sum += p; n += 1; shown[`${ev}:${t}`] = p; }
+      }
+      if (!n) { if (!settle(ev, outs)) { unpricedEv.add(ev); unpricedWhy[ev] = whyNone(...teams.map((t) => fair(`${ev}-${t}`, "yes"))); } continue; }
+      const row = { ...ps };
+      if (n === teams.length) {
+        if (sum > 1) { for (const t of teams) row[t] = ps[t] / sum; }
+        else if (sum < 1) row[NEITHER] = 1 - sum;
+      } else if (n === teams.length - 1) {
+        const missing = teams.find((t) => row[t] == null);
+        row[missing] = Math.max(0, 1 - sum);
+        shown[`${ev}:${missing}`] = row[missing];
+      } else {
+        for (const t of teams) if (row[t] == null) row[t] = 0;
+        row[NEITHER] = Math.max(0, 1 - sum);
+      }
+      probs[ev] = row;
+      continue;
+    }
     const [a, b] = teams; const held = mlHeld[ev] || new Set();
     const ra = fair(`${ev}-${a}`, "yes").p, rb = fair(`${ev}-${b}`, "yes").p;
     let pa, pb, pn = 0;

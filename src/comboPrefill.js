@@ -5,6 +5,7 @@
 // (already baked in) — do not apply KFEE again when recommending fill.
 
 import { d1Team } from "./ncaabD1.js";
+import { soccerSameClub } from "../lib/soccer-clubs.mjs";
 
 export const encVal = (t, s) => `${t}|${s}`;
 
@@ -96,6 +97,11 @@ function soccerTokens(raw) {
     .split(" ").filter(Boolean);
 }
 export function soccerNameMatches(bookName, kalshiLabel) {
+  // Known UCL clubs ("PSG" / "Paris Saint-Germain", "Inter" / "Internazionale",
+  // "Bayern Munich" / "FC Bayern München"). Inter Miami is a different club.
+  const same = soccerSameClub(bookName, kalshiLabel);
+  if (same === true) return true;
+  if (same === false) return false;
   const b = soccerTokens(bookName);
   const k = soccerTokens(kalshiLabel);
   if (!b.length || !k.length) return false;
@@ -609,7 +615,10 @@ export function formatGameOption(g) {
   const title = g.title || g.key || "Game";
   const date = g.date ? ` · ${g.date}` : "";
   const noCombo = g.comboEligible === false ? " · no Kalshi combos" : "";
-  return `${g.sportLabel || "MLB"} · ${title}${date}${noCombo}`;
+  const league = g.sportLabel || "MLB";
+  // Soccer leagues share one sport. The league stays on the game: "Soccer · UCL".
+  const head = SOCCER_COMBO_SPORTS.has(g.sport) ? `Soccer · ${league}` : league;
+  return `${head} · ${title}${date}${noCombo}`;
 }
 
 export function indexComboGames(sportsOrList) {

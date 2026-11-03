@@ -40,6 +40,8 @@ export function sportFromTicker(ticker, gameKey) {
   if (/KXNHL/i.test(t)) return "nhl";
   if (/KXNBA/i.test(t)) return "nba";
   if (/KXNCAAMB|KXNCAAB/i.test(t)) return "ncaab";
+  // One soccer sport. The league (UCL, EPL, MLS, …) stays on the game label.
+  if (/KX(UCL|MLS|EPL|LALIGA|SERIEA|BUNDESLIGA|LIGUE1)/i.test(t)) return "soccer";
   const gk = String(gameKey || "");
   if (gk.startsWith("mlb:")) return "mlb";
   if (gk.startsWith("nfl:")) return "nfl";
@@ -47,6 +49,7 @@ export function sportFromTicker(ticker, gameKey) {
   if (gk.startsWith("nhl:")) return "nhl";
   if (gk.startsWith("nba:")) return "nba";
   if (gk.startsWith("ncaab:")) return "ncaab";
+  if (/^(ucl|mls|epl|laliga|seriea|bundesliga|ligue1|soccer):/.test(gk)) return "soccer";
   return null;
 }
 

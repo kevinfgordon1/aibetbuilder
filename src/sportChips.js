@@ -1,4 +1,4 @@
-// UI sport chips. Soccer is one chip that maps to soccer_epl + soccer_usa_mls.
+// UI sport chips. Soccer is one chip that maps to EPL + MLS + UEFA Champions League.
 // Those remain the Odds API / cache keys — do not invent a soccer Odds API key.
 //
 // Chip on iff at least one soccer key is selected. Toggling Soccer on sets both;

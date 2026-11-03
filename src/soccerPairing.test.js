@@ -9,6 +9,7 @@ import {
   SOCCER_EXCHANGE_LAY_BOOK_KEYS,
   SOCCER_ML_EMPTY_HINT,
   isSoccerSport,
+  soccerGroupedLabel,
   expandSoccerSportKeys,
   isDrawOutcomeName,
   soccerYesName,
@@ -38,10 +39,15 @@ const require = createRequire(import.meta.url);
 const cjs = require("../lib/soccer-pairing.js");
 const { TRUSTED_BOOK_KEYS, ALL_BOOKS, buildAllLegsForBook } = require("../lib/promo-ev.js");
 
-assert.deepEqual(SOCCER_SPORT_KEYS, ["soccer_epl", "soccer_usa_mls"]);
+assert.deepEqual(SOCCER_SPORT_KEYS, ["soccer_epl", "soccer_usa_mls", "soccer_uefa_champs_league"]);
 assert.deepEqual(SOCCER_ML_SIDES, ["away", "draw", "home"]);
 assert.equal(isSoccerSport("soccer_epl"), true);
 assert.equal(isSoccerSport("soccer_usa_mls"), true);
+assert.equal(isSoccerSport("soccer_uefa_champs_league"), true);
+assert.equal(soccerGroupedLabel("soccer_uefa_champs_league"), "Soccer · UCL");
+assert.equal(soccerGroupedLabel("soccer_epl"), "Soccer · EPL");
+assert.equal(soccerGroupedLabel("soccer_usa_mls"), "Soccer · MLS");
+assert.equal(soccerGroupedLabel("americanfootball_nfl"), "");
 assert.equal(isSoccerSport("americanfootball_nfl"), false);
 assert.equal(isSoccerSport("baseball_mlb"), false);
 assert.deepEqual([...expandSoccerSportKeys(new Set(["soccer_epl"]))].sort(), [...SOCCER_SPORT_KEYS].sort());
@@ -186,6 +192,7 @@ for (const key of Object.keys(cjs)) {
   }
 }
 assert.deepEqual(cjs.SOCCER_SPORT_KEYS, SOCCER_SPORT_KEYS);
+assert.equal(cjs.soccerGroupedLabel("soccer_uefa_champs_league"), "Soccer · UCL");
 assert.equal(cjs.preferSoccerBinaryNo({ best: 100 }, { best: 999 }).best, 100);
 assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
 assert.ok(SOCCER_EXCHANGE_LAY_BOOK_KEYS.has("betfair_ex_eu"));
@@ -297,6 +304,7 @@ assert.equal(cjs.bestSoccerBinaryNo([{
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /key: "soccer_epl", label: "EPL"/);
   assert.match(app, /key: "soccer_usa_mls", label: "MLS"/);
+  assert.match(app, /key: "soccer_uefa_champs_league", label: "UCL"/);
   assert.match(app, /SPORT_CHIPS = sportChipOptions\(SPORTS\)/);
   assert.match(app, /function pushSoccerMlLegs/);
   assert.match(app, /function PromoLegGameLine\(/);

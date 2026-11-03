@@ -1,7 +1,7 @@
 import { useState, useDeferredValue, useMemo } from "react";
 import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
-import { isSoccerSport } from "./soccerPairing.js";
+import { isSoccerSport, soccerGroupedLabel } from "./soccerPairing.js";
 import { boardSportMatches, isSoccerChipId } from "./sportChips.js";
 import {
   fmtBoardSize,
@@ -363,7 +363,7 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                     <tr key={gi} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                       <td style={{ padding: 0, width: teamColWidth, position: "sticky", left: 0, background: "#0b0b0c", zIndex: 1, borderRight: "1px solid rgba(255,255,255,0.06)" }}>
                         <div style={{ padding: "8px 16px 4px" }}>
-                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>{new Date(game.commence_time).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} ET</div>
+                          <div style={{ fontSize: 11, color: "#4b5563", marginBottom: 4 }}>{isSoccerSport(game.sport) ? <span style={{ fontWeight: 700, color: "#22c55e", marginRight: 6 }}>{soccerGroupedLabel(game.sport)}</span> : null}{new Date(game.commence_time).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", hour12: true })} ET</div>
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed", marginBottom: 6 }}>{game.away}</div>
                           {threeWay && market === "ml" && <div style={{ fontSize: 13, fontWeight: 600, color: "#9ca3af", marginBottom: 6 }}>Draw</div>}
                           <div style={{ fontSize: 13, fontWeight: 600, color: "#e8eaed" }}>{game.home}</div>

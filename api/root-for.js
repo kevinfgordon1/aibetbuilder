@@ -323,6 +323,20 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
     const tNow = now(); const started = new Set(Object.entries(starts).filter(([, t]) => t && Date.parse(t) <= tNow).map(([ev]) => ev));
     relay = M.relayIndex({ kalshiBoard: boards.kalshi, polymarket: boards.polymarket, novig: boards.novig, novigLive: !!boards.novigLive, polledAt, started, kalshiBooks, kalshiAt });
     for (const d of relay.droppedNovig || []) relayNote.push(`novig ${d.event}-${d.team} ignored (${d.reason}${d.ref != null ? `, ${d.novig} vs ${d.ref}` : ''})`);
+    // UCL opposing No on Polymarket US / Novig (pregame) / ProphetX. The NFL
+    // relay above does not carry soccer. Kalshi No is already in kalshiBooks.
+    const uclTickers = tickers.filter((t) => /^KXUCLGAME-/i.test(String(t || '')));
+    if (uclTickers.length) {
+      try {
+        const ladders = await require('../lib/soccer-opposing').loadUclNoLadders(uclTickers, { now: polledAt });
+        for (const [ev, codes] of Object.entries(ladders || {})) {
+          if (!relay[ev]) relay[ev] = {};
+          for (const [code, venues] of Object.entries(codes || {})) {
+            relay[ev][code] = { ...(relay[ev][code] || {}), ...venues };
+          }
+        }
+      } catch (e) { relayNote.push(`ucl opposing: ${String(e && e.message || e).slice(0, 80)}`); }
+    }
   } catch (e) { relayNote.push(`relay index: ${String(e.message).slice(0, 80)}`); }
   return { kalshiBooks, kalshiAt, bookTickers: tickers, relay, relayNote, starts, startInfo, startDates, startWarnings, scheduleFrom: sched.from, tickers: tickers.length };
 }

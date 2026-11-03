@@ -466,6 +466,9 @@ console.log("comboLegResult.test.js ok");
 // NHL: Kalshi ticker/gameKey → sport, ESPN query, UTA/UTAH, and OT/shootout scoring.
 {
   assert.equal(sportFromTicker("KXNHLGAME-26SEP30PITPHI-PIT"), "nhl");
+assert.equal(sportFromTicker("KXUCLGAME-26NOV03VILPSG-PSG"), "soccer");
+assert.equal(sportFromTicker("KXMLSGAME-26OCT14SDHOU-SD", "mls:26OCT14SDHOU"), "soccer");
+assert.equal(sportFromTicker("", "ucl:26NOV03VILPSG"), "soccer");
   assert.equal(sportFromTicker("", "nhl:26SEP30PITPHI"), "nhl");
   assert.deepEqual(espnQueryForLeg({ ticker: "KXNHLTOTAL-26SEP30PITPHI-7", gameKey: "nhl:26SEP30PITPHI" }), { sport: "nhl", date: "20260930" });
   const pitPhi = { sport: "nhl", date: "20260930", home: "Philadelphia Flyers", homeAbbr: "PHI", away: "Pittsburgh Penguins", awayAbbr: "PIT", homeScore: 4, awayScore: 3, completed: true };

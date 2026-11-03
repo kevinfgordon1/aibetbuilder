@@ -41,8 +41,9 @@ const SPORT_LABEL = {
   nhl: "NHL",
   ncaab: "NCAAB",
   wnba: "WNBA",
+  soccer: "Soccer",
 };
-const SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nba", "nhl", "ncaab", "wnba"];
+const SPORT_ORDER = ["mlb", "nfl", "ncaaf", "nba", "nhl", "ncaab", "wnba", "soccer"];
 const SPORT_ALIASES = {
   baseball_mlb: "mlb",
   baseball: "mlb",
@@ -54,6 +55,21 @@ const SPORT_ALIASES = {
   basketball_ncaab: "ncaab",
   cbb: "ncaab",
   basketball_wnba: "wnba",
+  soccer: "soccer",
+  ucl: "soccer",
+  mls: "soccer",
+  epl: "soccer",
+  laliga: "soccer",
+  seriea: "soccer",
+  bundesliga: "soccer",
+  ligue1: "soccer",
+  soccer_epl: "soccer",
+  soccer_usa_mls: "soccer",
+  soccer_uefa_champs_league: "soccer",
+  soccer_spain_la_liga: "soccer",
+  soccer_italy_serie_a: "soccer",
+  soccer_germany_bundesliga: "soccer",
+  soccer_france_ligue_one: "soccer",
 };
 
 function toNum(v) {

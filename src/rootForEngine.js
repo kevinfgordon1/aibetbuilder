@@ -1,5 +1,6 @@
 // "What to root for": joint P&L across ALL of Kevin's open Combo Locks.
 import { expandAllowed } from "./rootForBuckets.js";
+import { splitUclCodes } from "../lib/soccer-clubs.mjs";
 //
 // Each lock = sportsbook parlay + hedge contracts sold on the combo (Kalshi / Polymarket).
 //   hit  (every leg wins): book.hit  + hedge.received − hedge.filled   ($1 per sold contract)
@@ -24,6 +25,20 @@ export function legEvent(leg) {
   const ticker = String((leg && leg.ticker) || "").toUpperCase();
   const side = String((leg && leg.side) || "yes").toLowerCase() === "no" ? "no" : "yes";
   const parts = ticker.split("-");
+  // UCL is 3-way (home / draw / away). Outcomes are the two clubs plus TIE.
+  // No on a club wins on the other club OR the draw — not on the other club alone.
+  if (parts[0] === "KXUCLGAME" && parts.length >= 3) {
+    const blob = String(parts[1] || "").replace(/^\d{2}[A-Z]{3}\d{2}/, "");
+    const codes = splitUclCodes(blob);
+    const sel = parts[2];
+    if (codes && (sel === "TIE" || sel === codes[0] || sel === codes[1])) {
+      const outcomes = [codes[0], codes[1], "TIE"];
+      const allowed = sel === "TIE"
+        ? (side === "no" ? [codes[0], codes[1]] : ["TIE"])
+        : (side === "no" ? outcomes.filter((t) => t !== sel) : [sel]);
+      return { event: `${parts[0]}-${parts[1]}`, kind: "game", outcomes, allowed, team: sel, threeWay: true };
+    }
+  }
   if (/GAME$/.test(parts[0] || "") && parts.length >= 3) {
     const m = /^\d{2}[A-Z]{3}\d{2}([A-Z]+)$/.exec(parts[1] || "");
     const team = parts[2];

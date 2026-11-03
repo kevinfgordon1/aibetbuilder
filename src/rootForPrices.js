@@ -9,7 +9,14 @@ export const STALE_MS = 15000;
 export const FEES = {
   kalshi: (p) => 0.07 * p * (1 - p),
   polymarket: (p) => 0.0695 * p * (1 - p),
+  // Pregame takes are $0. The walk does not add a live fee (15s / $500 rules unchanged).
   novig: () => 0,
+  // 2% of net winnings: a contract bought at p pays 1 − 0.02*(1−p) after commission,
+  // so the fee-included cost of a $1 payout is p / (0.98 + 0.02*p).
+  prophetx: (p) => {
+    const denom = 0.98 + 0.02 * p;
+    return denom > 0 ? (p / denom - p) : 0;
+  },
 };
 const SETTLED = 0.015;
 
@@ -125,14 +132,23 @@ export function legFair(leg, { kalshiBooks = {}, relay = {}, now = Date.now(), k
     else sources.push({ ...s, used: true, cost: w.vwap, costAmerican: american(w.vwap), reason: "ok" });
   };
   if (r.kind === "game") {
-    const team = r.allowed.length === 1 ? r.allowed[0] : null; // yes-side moneyline
-    const opp = team ? r.outcomes.find((t) => t !== team) : null;
-    if (team && opp) {
-      const own = kalshiBooks[`${r.event}-${team}`]; const oth = kalshiBooks[`${r.event}-${opp}`];
-      if (oth) tryV("kalshi", oth.yes, kalshiAt, `Yes ${opp}`);
+    const team = r.team || (r.allowed.length === 1 ? r.allowed[0] : null);
+    // UCL 3-way: the opposing bet is No on this same binary. The other club's
+    // Yes still loses if the match draws, so it is not the inverse.
+    if (r.threeWay && team) {
+      const own = kalshiBooks[`${r.event}-${team}`];
       if (own) tryV("kalshi", own.no, kalshiAt, `No ${team}`);
-      const rv = (relay[r.event] || {})[opp] || {};
-      for (const v of ["polymarket", "novig"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, opp);
+      const rv = (relay[r.event] || {})[team] || {};
+      for (const v of ["polymarket", "novig", "prophetx"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, `No ${team}`);
+    } else {
+      const opp = team ? r.outcomes.find((t) => t !== team) : null;
+      if (team && opp) {
+        const own = kalshiBooks[`${r.event}-${team}`]; const oth = kalshiBooks[`${r.event}-${opp}`];
+        if (oth) tryV("kalshi", oth.yes, kalshiAt, `Yes ${opp}`);
+        if (own) tryV("kalshi", own.no, kalshiAt, `No ${team}`);
+        const rv = (relay[r.event] || {})[opp] || {};
+        for (const v of ["polymarket", "novig"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, opp);
+      }
     }
   } else {
     const bk = kalshiBooks[r.event];
