@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mapPromoLegsToKalshi, soccerNameMatches, flattenComboGames } from "./comboPrefill.js";
+import { mapPromoLegsToKalshi, soccerNameMatches, flattenComboGames, formatGameOption } from "./comboPrefill.js";
 const require = createRequire(import.meta.url);
 const kg = require("../api/kalshi-games.js");
 
@@ -22,6 +22,9 @@ assert.deepEqual(mls[0].markets.side.map((m) => m.label), ["San Diego FC", "Hous
 assert.equal(mls[0].markets.spread.length, 0);
 assert.ok(kg.MARKET_SERIES.mls && kg.MARKET_SERIES.epl && kg.MARKET_SERIES.ucl);
 assert.ok(flattenComboGames({ mls }).every((g) => g.sportLabel === "MLS"));
+assert.equal(formatGameOption({ sport: "ucl", sportLabel: "UCL", title: "Villarreal vs PSG", date: "Nov 3" }), "Soccer · UCL · Villarreal vs PSG · Nov 3");
+assert.equal(formatGameOption({ sport: "mls", sportLabel: "MLS", title: "LAFC vs Miami" }), "Soccer · MLS · LAFC vs Miami");
+assert.equal(formatGameOption({ sport: "epl", sportLabel: "EPL", title: "Arsenal vs Chelsea" }), "Soccer · EPL · Arsenal vs Chelsea");
 
 const leg = (name, game, t) => ({ name, market: "ML", game, commence_time: t, sport: "soccer_usa_mls" });
 const { rows, unmatched } = mapPromoLegsToKalshi([

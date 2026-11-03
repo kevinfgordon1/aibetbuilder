@@ -44,6 +44,7 @@ import {
   soccerMlOppResolveArgs,
   soccerLayBookLabel,
   soccerPromoEmptyDetail,
+  soccerGroupedLabel,
   formatPromoLegTitle,
   formatPromoLegMarket,
   formatPromoLegGame,
@@ -609,8 +610,15 @@ function PromoLegStartTime({ commence_time }) {
 
 function PromoLegGameLine({ leg, style }) {
   const game = formatPromoLegGame(leg);
-  if (!game) return null;
-  return <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, ...style }}>{game}</div>;
+  const grouped = soccerGroupedLabel(leg && leg.sport);
+  if (!game && !grouped) return null;
+  return (
+    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, ...style }}>
+      {grouped ? <span style={{ fontWeight: 700, color: "#22c55e" }}>{grouped}</span> : null}
+      {grouped && game ? " · " : null}
+      {game || null}
+    </div>
+  );
 }
 
 // Decimal -> American. Must branch at 2.0: below it the price is a favorite (negative).
@@ -1005,11 +1013,12 @@ function EVBadge({ ev }) {
 }
 
 function SportBadge({ sport }) {
+  const grouped = soccerGroupedLabel(sport);
   const s = SPORTS.find(x => x.key === sport);
-  const colors = { baseball_mlb: "#d4af37", americanfootball_nfl: "#b8932a", americanfootball_ncaaf: "#e6c65c", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#84cc16", soccer_uefa_champs_league: "#15803d" };
+  const colors = { baseball_mlb: "#d4af37", americanfootball_nfl: "#b8932a", americanfootball_ncaaf: "#e6c65c", basketball_nba: "#f97316", basketball_ncaab: "#fb923c", icehockey_nhl: "#06b6d4", mma_mixed_martial_arts: "#dc2626", soccer_epl: "#22c55e", soccer_usa_mls: "#22c55e", soccer_uefa_champs_league: "#22c55e" };
   return (
     <span style={{ fontSize: 10, fontWeight: 700, color: colors[sport] || "#6b7280", background: "rgba(255,255,255,0.05)", padding: "1px 6px", borderRadius: 4 }}>
-      {s?.label || sport}
+      {grouped || s?.label || sport}
     </span>
   );
 }

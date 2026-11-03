@@ -218,6 +218,7 @@ assert.equal(normalizeStatementDateRange("nope"), "all");
   assert.match(mixed.searchText, /hawaii/);
   assert.match(mixed.searchText, /rangers/);
   assert.deepEqual(sportsFromParlay({ legs: [{ sport: "americanfootball_nfl" }] }), ["nfl"]);
+  assert.deepEqual(sportsFromParlay({ legs: [{ sport: "soccer_uefa_champs_league" }, { ticker: "KXMLSGAME-26OCT14SDHOU-SD" }] }), ["soccer"]);
 }
 
 {

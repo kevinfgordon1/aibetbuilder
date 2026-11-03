@@ -18,6 +18,19 @@ export function isSoccerSport(sportKey) {
   return SOCCER_SPORT_KEYS.includes(String(sportKey || ""));
 }
 
+// League under the Soccer chip. "UCL" is not its own sport.
+export function soccerLeagueLabel(sportKey) {
+  const hit = SOCCER_SPORTS.find((s) => s.key === sportKey);
+  return hit ? hit.label : "";
+}
+
+// Game sub-label. Promo badges, the odds board, and Combo Locks all use this
+// so UCL sits with EPL and MLS: "Soccer · UCL".
+export function soccerGroupedLabel(sportKey) {
+  const league = soccerLeagueLabel(sportKey);
+  return league ? `Soccer · ${league}` : "";
+}
+
 // If any soccer league key is present, include both Odds API keys (featured fetch / filter).
 export function expandSoccerSportKeys(selected) {
   const set = selected instanceof Set ? new Set(selected) : new Set(selected || []);

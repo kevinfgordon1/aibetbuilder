@@ -9,6 +9,7 @@ import {
   SOCCER_EXCHANGE_LAY_BOOK_KEYS,
   SOCCER_ML_EMPTY_HINT,
   isSoccerSport,
+  soccerGroupedLabel,
   expandSoccerSportKeys,
   isDrawOutcomeName,
   soccerYesName,
@@ -43,6 +44,10 @@ assert.deepEqual(SOCCER_ML_SIDES, ["away", "draw", "home"]);
 assert.equal(isSoccerSport("soccer_epl"), true);
 assert.equal(isSoccerSport("soccer_usa_mls"), true);
 assert.equal(isSoccerSport("soccer_uefa_champs_league"), true);
+assert.equal(soccerGroupedLabel("soccer_uefa_champs_league"), "Soccer · UCL");
+assert.equal(soccerGroupedLabel("soccer_epl"), "Soccer · EPL");
+assert.equal(soccerGroupedLabel("soccer_usa_mls"), "Soccer · MLS");
+assert.equal(soccerGroupedLabel("americanfootball_nfl"), "");
 assert.equal(isSoccerSport("americanfootball_nfl"), false);
 assert.equal(isSoccerSport("baseball_mlb"), false);
 assert.deepEqual([...expandSoccerSportKeys(new Set(["soccer_epl"]))].sort(), [...SOCCER_SPORT_KEYS].sort());
@@ -187,6 +192,7 @@ for (const key of Object.keys(cjs)) {
   }
 }
 assert.deepEqual(cjs.SOCCER_SPORT_KEYS, SOCCER_SPORT_KEYS);
+assert.equal(cjs.soccerGroupedLabel("soccer_uefa_champs_league"), "Soccer · UCL");
 assert.equal(cjs.preferSoccerBinaryNo({ best: 100 }, { best: 999 }).best, 100);
 assert.equal(cjs.preferSoccerBinaryNo(null, { best: 999 }).best, null);
 assert.ok(SOCCER_EXCHANGE_LAY_BOOK_KEYS.has("betfair_ex_eu"));

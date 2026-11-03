@@ -615,7 +615,10 @@ export function formatGameOption(g) {
   const title = g.title || g.key || "Game";
   const date = g.date ? ` · ${g.date}` : "";
   const noCombo = g.comboEligible === false ? " · no Kalshi combos" : "";
-  return `${g.sportLabel || "MLB"} · ${title}${date}${noCombo}`;
+  const league = g.sportLabel || "MLB";
+  // Soccer leagues share one sport. The league stays on the game: "Soccer · UCL".
+  const head = SOCCER_COMBO_SPORTS.has(g.sport) ? `Soccer · ${league}` : league;
+  return `${head} · ${title}${date}${noCombo}`;
 }
 
 export function indexComboGames(sportsOrList) {

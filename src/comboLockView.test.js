@@ -45,6 +45,11 @@ assert.equal(lockTitle(auto), "Kansas City −3.5 + Over 45.5 + Buffalo to win")
 assert.equal(lockTitle({ ...auto, label: "Free bet · Kansas City −3.5 + Over 45.5 + Buffalo", is_free_bet: true }), "Kansas City −3.5 + Over 45.5 + Buffalo to win");
 assert.equal(lockTitle({ ...auto, label: "Sunday special" }), "Sunday special");
 assert.deepEqual(lockSports(auto), ["NFL"]);
+assert.deepEqual(lockSports({ legs: [
+  { ticker: "KXUCLGAME-26NOV03VILPSG-PSG" },
+  { ticker: "KXEPLGAME-26NOV08ARSCHE-ARS" },
+  { ticker: "KXNFLGAME-26OCT12BUFNYJ-BUF" },
+] }), ["Soccer", "NFL"]);
 
 // Status: one per lock, priority paused > filled > stopped > off > partial > quoting.
 const p = { max_contracts: 1000, active: true, paused: false };
