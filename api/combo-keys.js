@@ -6,8 +6,8 @@
 //              combo_exchange_key_put (Supabase Vault), return masked status.
 //   DELETE  ?venue=kalshi|polymarket_us -> remove the key + its Vault secret.
 //
-// Combo Locks is private: only the hardcoded COMBO_LOCKS_ACCOUNTS (Kevin's two
-// accounts + the approved tester) get any answer; everyone else gets 403.
+// Combo Locks is limited to COMBO_LOCKS_ACCOUNTS plus an approved
+// combo_locks_access_requests row. Everyone else gets 403.
 // Only users approved in combo_live_users (can_trade) may connect. Kevin's
 // desk keeps using the server keys on Railway, so his accounts are refused.
 // The secret is never logged, echoed, or returned; errors are generic.
@@ -94,7 +94,7 @@ async function handler(req, res) {
   if (req.method !== 'GET' && viewAsLib.blockViewAsWrite(req, res)) return;
   const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
-  if (!lib.canSeeComboLocks(auth.user)) return json(res, 403, { ok: false, error: 'Not allowed' });
+  if (!(await lib.hasApprovedComboAccess(auth.user, () => serviceClient()))) return json(res, 403, { ok: false, error: 'Not allowed' });
   const client = serviceClient();
   if (!client) return json(res, 503, { ok: false, error: 'Server is not configured' });
   const userId = auth.user.id;

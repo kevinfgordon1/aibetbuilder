@@ -28,7 +28,7 @@ assert.equal(m.rows[0].marketVal, "KXNFLTD-26OCT25CINPIT-CINCKINER23-1|yes");
 
 // App wiring: singles get "Lock it", multi-leg keep "Send to Combo Locks".
 const app = readFileSync(new URL("./App.jsx", import.meta.url), "utf8");
-assert.match(app, /canSeeComboLocks\(user\) && isSingle && \(\s*<LockItButton onLock=\{\(\) => sendToComboLocks\(p, "freebet", "promo-lock-it"\)\} \/>/);
+assert.match(app, /comboUnlocked && isSingle && \(\s*<LockItButton onLock=\{\(\) => sendToComboLocks\(p, "freebet", "promo-lock-it"\)\} \/>/);
 assert.match(app, /source,\n    \}\)\);\n    setActiveTab\("combo"\)/);
 const cl = readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
 assert.match(cl, /data-testid="lock-it-note"/);

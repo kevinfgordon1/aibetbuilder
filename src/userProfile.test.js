@@ -356,7 +356,7 @@ assert.equal(PROFILE_PREFS_KEY, "aibetbuilder.profilePrefs");
   assert.match(app, /loadProfilePrefs/);
   assert.match(app, /saveProfilePrefs/);
   assert.match(app, /UserProfile/);
-  assert.match(app, /canSeeLocks=\{canSeeComboLocks\(user\)\}/);
+  assert.match(app, /canSeeLocks=\{comboUnlocked\}/);
   assert.match(app, /isOwner=\{Boolean\(user\)\}/);
 }
 

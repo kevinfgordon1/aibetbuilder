@@ -9,6 +9,7 @@
 // logs, or re-displays a secret.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canSeeOwnerTools } from "./comboAccess";
+import ComboAccessAdmin from "./ComboAccessAdmin.jsx";
 import {
   CONNECT_COPY, VENUE_HELP, VENUE_LABEL, capsLine, emptyForm, money, pnlByUser, signedMoney, userTradingState, venueStatusText,
   KALSHI_HOWTO, autoFundLine, fundMoveText, keepSetting, keepTargetUsd, parsePctInput, DEFAULT_KEEP_PCT,
@@ -621,6 +622,7 @@ export default function ComboTesters({ user, supabase }) {
   return (
     <>
       <style>{TESTERS_CSS}</style>
+      <ComboAccessAdmin user={user} supabase={supabase} />
       {isOwner && <OwnerBalances supabase={supabase} user={user} />}
       {isOwner && <AdminPanel supabase={supabase} selfId={user.id} />}
       {!isOwner && status && status.approved && <ConnectPanel supabase={supabase} userId={user.id} status={status} setStatus={setStatus} />}

@@ -297,6 +297,45 @@ function canSeeComboLocks(user, _env) {
   return COMBO_LOCKS_ACCOUNTS.some((a) => a.email === email && a.id === id);
 }
 
+// Kevin's two accounts. Mirror of COMBO_ACCESS_ADMINS in src/comboAccess.js.
+const COMBO_ACCESS_ADMINS = Object.freeze([
+  Object.freeze({ email: 'kev120909@gmail.com', id: '79ae1610-097e-4b46-a622-1e952f18e936' }),
+  Object.freeze({ email: 'kevin.f.gordon1@gmail.com', id: '968efed8-54db-48a6-808b-194a7a03a4cb' }),
+]);
+
+function canReviewComboAccess(user) {
+  if (!user || !user.email || !user.id) return false;
+  const email = String(user.email).trim().toLowerCase();
+  const id = String(user.id).trim().toLowerCase();
+  return COMBO_ACCESS_ADMINS.some((a) => a.email === email && a.id === id);
+}
+
+// Hardcoded allowlist, or an approved combo_locks_access_requests row whose
+// email matches this session. getClient() runs only for people off the list,
+// so existing accounts never touch the new table. Missing table / errors deny.
+async function hasApprovedComboAccess(user, getClient) {
+  if (canSeeComboLocks(user)) return true;
+  if (!user || !user.email || !user.id) return false;
+  let client = null;
+  try {
+    client = typeof getClient === 'function' ? getClient() : getClient;
+  } catch (_) {
+    return false;
+  }
+  if (!client || typeof client.from !== 'function') return false;
+  try {
+    let q = client.from('combo_locks_access_requests').select('email,status').eq('user_id', user.id);
+    if (q && typeof q.maybeSingle === 'function') q = q.maybeSingle();
+    const result = await q;
+    if (!result || result.error || result.data == null) return false;
+    const row = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!row || row.status !== 'approved') return false;
+    return String(row.email || '').trim().toLowerCase() === String(user.email).trim().toLowerCase();
+  } catch (_) {
+    return false;
+  }
+}
+
 function selectedMarkets(legs) {
   return (legs || []).map((l) => ({
     market_ticker: l.ticker,
@@ -478,8 +517,11 @@ module.exports = {
   normalizeLegs,
   parseContracts,
   COMBO_LOCKS_ACCOUNTS,
+  COMBO_ACCESS_ADMINS,
   comboLocksAllowlist,
   canSeeComboLocks,
+  canReviewComboAccess,
+  hasApprovedComboAccess,
   selectedMarkets,
   readBearer,
   parseBody,

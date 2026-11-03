@@ -1,5 +1,7 @@
-// Combo Locks — private tab for the Kalshi combo RFQ auto-quoter.
-// Gated by canSeeComboLocks (hardcoded COMBO_LOCKS_ACCOUNTS in comboAccess). This
+// Combo Locks — Kalshi combo RFQ auto-quoter.
+// The full page is gated by canSeeComboLocks (hardcoded COMBO_LOCKS_ACCOUNTS
+// in comboAccess) or an approved beta request (accessGranted). The nav tab
+// itself is visible to every signed-in user. This
 // component returns null for anyone else — no copy that names the feature.
 // Backed by Supabase (combo_parlays / combo_settings / combo_submissions) so the
 // always-on worker reads the same active parlays. NO live prices — the lock uses
@@ -527,7 +529,7 @@ const money = (v) => (v < 0 ? "-$" : "+$") + Math.abs(Number(v)).toFixed(2);
 const HISTORY_BUFFER_HOURS = 6;
 
 // Owner-only "View as": Kevin picks a tester and sees their page read-only.
-export default function ComboLocks({ user, prefill = null, focusLockId = null, onViewAsChange = null }) {
+export default function ComboLocks({ user, prefill = null, focusLockId = null, onViewAsChange = null, accessGranted = false }) {
   const isOwner = canSeeOwnerTools(user);
   const [viewUsers, setViewUsers] = useState([]);
   const [viewId, setViewId] = useState("");
@@ -564,6 +566,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null, o
       readOnly={viewing}
       prefill={viewing ? null : prefill}
       focusLockId={viewing ? null : focusLockId}
+      accessGranted={viewing ? false : accessGranted}
     />
   );
   if (!isOwner || !viewUsers.length) return page;
@@ -591,7 +594,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null, o
   );
 }
 
-function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = realSupabase, readOnly = false }) {
+function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = realSupabase, readOnly = false, accessGranted = false }) {
   const [games, setGames] = useState(SAMPLE);
   const [srcLive, setSrcLive] = useState(false);
   const [parlays, setParlays] = useState([]);
@@ -693,7 +696,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const gameOptions = useMemo(() => gameList.map((g) => { const label = formatGameOption(g); return { value: comboGameId(g), label, search: gameSearchText(g, label) }; }), [gameList]);
   const gameIdx = useMemo(() => indexComboGames(games.sports), [games]);
   // View-as: the owner already passed the gate server-side; the viewed tester may not be hardcoded.
-  const owner = readOnly || canSeeComboLocks(user);
+  const owner = readOnly || canSeeComboLocks(user) || !!accessGranted;
 
   const gamesRetryRef = useRef(0);
   const loadGames = useCallback(async () => {
@@ -1025,7 +1028,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   }, [loadDesk]);
   useEffect(() => {
     let alive = true;
-    if (!user || !(readOnly || canSeeComboLocks(user))) return undefined;
+    if (!user || !(readOnly || canSeeComboLocks(user) || accessGranted)) return undefined;
     if (canSeeOwnerTools(user)) { setKalshiKeyConnected(true); return undefined; }
     (async () => {
       try {
@@ -1044,7 +1047,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       }
     })();
     return () => { alive = false; };
-  }, [user]);
+  }, [user, readOnly, accessGranted]);
   useEffect(() => { loadGames(); }, [loadGames]);
   // User actions (save, merge, archive, restore, delete, pause) can change archived rows, so they
   // drop the cached History list; only the 20s poll reuses it.
@@ -1868,7 +1871,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
               {/* Owner: server Kalshi key. Testers: their own connected key (api/combo-probe). */}
               {(() => {
                 const probeUi = probeUiState({
-                  canSeeCombo: canSeeComboLocks(user),
+                  canSeeCombo: canSeeComboLocks(user) || !!accessGranted,
                   isOwner: canSeeOwnerTools(user),
                   kalshiConnected: canSeeOwnerTools(user) ? true : !!kalshiKeyConnected,
                   probing,
@@ -1895,7 +1898,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
                 );
               })()}
             </div>
-            {canSeeComboLocks(user) && (canSeeOwnerTools(user) || kalshiKeyConnected) && (
+            {(canSeeComboLocks(user) || accessGranted) && (canSeeOwnerTools(user) || kalshiKeyConnected) && (
               <div style={{ fontSize: 12, color: "#8a8f98", marginTop: 8, lineHeight: 1.45 }}>
                 "Check market price" shows the best price traders would pay for this parlay right now. It doesn't place anything{canSeeOwnerTools(user) ? "" : " — it uses your connected Kalshi key"}.
               </div>

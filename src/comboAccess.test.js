@@ -11,6 +11,8 @@ import {
   comboLocksAllowlist,
   COMBO_LOCKS_ACCOUNTS,
   canSeeComboLocks,
+  canReviewComboAccess,
+  comboAccessRequestApproved,
   canSeeOwnerTools,
   canSeeNewOddsBoard,
   canSeeUnderdogPredict,
@@ -174,6 +176,15 @@ assert.equal(profileShowsComboPnl(kevin, { isOwner: false }), false);
 assert.equal(profileShowsComboPnl(kevin, { isOwner: true }), true);
 assert.equal(profileShowsComboPnl(kevin, { isOwner: true }, { VITE_COMBO_LOCKS_ALLOWLIST: "" }), true);
 assert.equal(profileShowsComboPnl(stranger, { isOwner: true }), false);
+assert.equal(profileShowsComboPnl(stranger, { isOwner: true, granted: true }), true, "approved beta request shows own P/L");
+assert.equal(profileShowsComboPnl(stranger, { isOwner: false, granted: true }), false);
+assert.equal(comboAccessRequestApproved(stranger, { status: "approved", email: "stranger@gmail.com", user_id: "u2" }), true);
+assert.equal(comboAccessRequestApproved(stranger, { status: "pending", email: "stranger@gmail.com", user_id: "u2" }), false);
+assert.equal(comboAccessRequestApproved(stranger, { status: "approved", email: "other@gmail.com", user_id: "u2" }), false);
+assert.equal(canReviewComboAccess(kevin), true);
+assert.equal(canReviewComboAccess(KEVIN_ALT), true);
+assert.equal(canReviewComboAccess(stranger), false);
+assert.equal(canReviewComboAccess(GTESTER), false);
 assert.equal(profileShowsComboPnl(stranger, { isOwner: true }, { VITE_COMBO_LOCKS_ALLOWLIST: "stranger@gmail.com" }), false);
 assert.equal(profileShowsComboPnl(tester, { isOwner: true }), true);
 assert.equal(profileShowsComboPnl(tester, { isOwner: false }), false);
@@ -198,6 +209,7 @@ assert.equal(initialAppTab("#odds"), "odds");
 assert.equal(initialAppTab("#promo"), "promo");
 assert.equal(initialAppTab(""), "promo");
 assert.equal(initialAppTab("#combo"), "promo");
+assert.equal(initialAppTab("#combo", { email: "stranger@gmail.com", id: "u2" }), "combo");
 assert.equal(initialAppTab("#live-trading-desk"), "promo");
 assert.equal(serializeAppHash({ tab: "odds" }), "#odds");
 assert.equal(comboLockHash("p1"), "#combo/p1");
@@ -205,10 +217,14 @@ assert.equal(profileHash(), "#profile");
 assert.equal(clearComboHash("#combo/p1"), "");
 assert.equal(clearComboHash("#profile"), "#profile");
 {
-  const denied = resolveAppHash(parseAppHash("#combo/hidden"), { email: "stranger@gmail.com" });
-  assert.equal(denied.tab, "promo");
-  assert.equal(denied.lockId, null);
-  assert.equal(denied.notice, "noaccess");
+  const denied = resolveAppHash(parseAppHash("#combo/hidden"), { email: "stranger@gmail.com", id: "u2" });
+  assert.equal(denied.tab, "combo", "signed-in users can open the Beta tab");
+  assert.equal(denied.lockId, null, "a shared lock id is not focused");
+  assert.equal(denied.notice, null);
+  assert.equal(denied.allowed, true);
+  const signedOutCombo = resolveAppHash(parseAppHash("#combo/hidden"), null);
+  assert.equal(signedOutCombo.tab, "promo");
+  assert.equal(signedOutCombo.notice, "signin");
 }
 {
   const kevinBoard = resolveAppHash(parseAppHash("#new-odds-board"), kevin);
@@ -256,7 +272,11 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, /<BetstampOddsBoard user=\{user\}/);
   assert.match(app, /trustedVisible\.has\(b\.key\)/);
   assert.match(app, /VITE_COMBO_LOCKS_ALLOWLIST|comboAccess/);
-  assert.match(app, /activeTab === "combo" && canSeeComboLocks\(user\) && <Suspense[\s\S]*?<ComboLocks/);
+  assert.match(app, /activeTab === "combo" && comboUnlocked && <Suspense[\s\S]*?<ComboLocks/);
+  assert.match(app, /accessGranted=\{comboAccessApproved\}/);
+  assert.match(app, /ComboLocksGate/);
+  assert.match(app, /Combo Locks <ComboBetaBadge \/>/);
+  assert.match(app, /\{user && \(\s*<a href=\{tabHash\("combo"\)\}/);
   assert.match(app, /activeTab === "missTape" && canSeeOwnerTools\(user\) && <Suspense[\s\S]*?<ComboTape/);
   assert.doesNotMatch(app, /UnhedgedTape|Unhedged RFQs|tabHash\("unhedged"\)/);
   assert.match(app, /activeTab === "liveDesk" && canSeeOwnerTools\(user\) && \([\s\S]*?<LiveTradingDesk/);
@@ -264,7 +284,7 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, />Live Trading Desk<\/a>/);
   assert.match(app, /href=\{tabHash\("combo"\)\}/);
   assert.match(app, /tabStyle\("combo"\)/);
-  assert.match(app, />Combo Locks<\/a>/);
+  assert.match(app, /Combo Locks <ComboBetaBadge \/>/);
   assert.match(app, /href=\{tabHash\("promo"\)\}/);
   assert.match(app, /href=\{tabHash\("ev"\)\}/);
   assert.match(app, /href=\{tabHash\("odds"\)\}/);
@@ -281,7 +301,7 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.doesNotMatch(landingSlice, /New Odds Board|Betstamp/i);
   assert.match(app, /activeTab === "profile"/);
   assert.match(app, /<UserProfile[\s>]/);
-  assert.match(app, /canSeeLocks=\{canSeeComboLocks\(user\)\}/);
+  assert.match(app, /canSeeLocks=\{comboUnlocked\}/);
   assert.match(app, /isOwner=\{Boolean\(user\)\}/);
   assert.doesNotMatch(app, /^\s+isOwner\s*$/m);
   assert.doesNotMatch(app, /activeTab === "combo" && user\?\.email === OWNER_EMAIL && <ComboLocks/);
@@ -289,11 +309,11 @@ assert.equal(clearComboHash("#profile"), "#profile");
   // Promo copy that names Combo Locks only renders for Combo Locks accounts.
   for (const m of app.matchAll(/"[^"\n]*Combo Locks[^"\n]*"/g)) {
     const before = app.slice(Math.max(0, m.index - 60), m.index);
-    assert.match(before, /canSeeComboLocks\(user\) \? $/, "ungated Combo Locks copy: " + m[0].slice(0, 60));
+    assert.match(before, /comboUnlocked \? $/, "ungated Combo Locks copy: " + m[0].slice(0, 60));
   }
   assert.doesNotMatch(app, /UNHEDGED_RFQ_LIVE/);
 
-  assert.match(profile, /profileShowsComboPnl\(user, \{ isOwner: isOwner && canSeeLocks \}\)/);
+  assert.match(profile, /profileShowsComboPnl\(user, \{ isOwner: isOwner && canSeeLocks, granted: !!canSeeLocks \}\)/);
   assert.match(profile, /isOwner = false/);
   assert.match(profile, /canSeeLocks = false/);
   assert.match(profile, /if \(!showPnl \|\| !user\?\.id\)/);

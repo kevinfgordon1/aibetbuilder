@@ -6,7 +6,9 @@ const SniperDashboard = lazy(() => import("./SniperDashboard")); // owner/tester
 import RootFor from "./RootFor";
 const LiveTradingDesk = lazy(() => import("./LiveTradingDesk")); // owner/tester tab: own chunk (audit Oct 24)
 import UserProfile from "./UserProfile";
-import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab } from "./comboAccess";
+import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab, comboAccessRequestApproved } from "./comboAccess";
+import ComboBetaBadge, { ComboBetaStyles } from "./ComboBetaBadge.jsx";
+import ComboLocksGate from "./ComboLocksGate.jsx";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
@@ -1822,6 +1824,52 @@ export default function App() {
     };
   }, []);
 
+  const [comboRequest, setComboRequest] = useState(null);
+  const [comboRequestReady, setComboRequestReady] = useState(false);
+  useEffect(() => {
+    if (authLoading) return undefined;
+    if (!supabase || !user || !user.id || canSeeComboLocks(user)) {
+      setComboRequest(null);
+      setComboRequestReady(true);
+      return undefined;
+    }
+    let alive = true;
+    setComboRequestReady(false);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("combo_locks_access_requests")
+          .select("user_id,email,status")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!alive) return;
+        setComboRequest(error ? { status: "error" } : (data || { status: "none" }));
+      } catch (_) {
+        if (!alive) return;
+        setComboRequest({ status: "error" });
+      }
+      if (alive) setComboRequestReady(true);
+    })();
+    return () => { alive = false; };
+  }, [authLoading, user && user.id, user && user.email]);
+  useEffect(() => {
+    if (!supabase || authLoading || !user || !user.id || canSeeComboLocks(user)) return undefined;
+    if (activeTab !== "combo" || !comboRequest || comboRequest.status !== "pending") return undefined;
+    let alive = true;
+    const timer = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from("combo_locks_access_requests")
+          .select("user_id,email,status")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (!alive || error || !data) return;
+        setComboRequest(data);
+      } catch (_) { /* keep the pending state until the next poll */ }
+    }, 15000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [authLoading, activeTab, comboRequest && comboRequest.status, user && user.id]);
+
   useEffect(() => {
     if (!user) {
       profilePrefsUserRef.current = null;
@@ -1949,7 +1997,7 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (activeTab === "combo" && !canSeeComboLocks(user)) {
+    if (activeTab === "combo" && !user) {
       setActiveTab("promo");
       setFocusLockId(null);
     }
@@ -1964,7 +2012,7 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (activeTab === "combo" && !canSeeComboLocks(user)) return;
+    if (activeTab === "combo" && !user) return;
     if (activeTab === "profile" && !user) return;
     if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
@@ -2858,8 +2906,11 @@ export default function App() {
     setFocusCardId(id);
   }, [optimizeTick, promoType, promoBook, stake, numLegs, scanNumLegs, promoScanBusy, promoFilterPending, scanCompletedForCurrent, topParlaysWithHedge, topNoPromoWithHedge, topNoSweatsWithLock, topFreeBetsWithLock]);
 
+  const comboAccessApproved = comboAccessRequestApproved(user, comboRequest);
+  const comboUnlocked = canSeeComboLocks(user) || comboAccessApproved;
+
   const sendToComboLocks = (p, kind = "cash", source = "") => {
-    if (!canSeeComboLocks(user)) return;
+    if (!comboUnlocked) return;
     const american = kind === "freebet"
       ? p.parlayOdds
       : decimalToAmerican(1 + p.boostedProfit / stake);
@@ -2936,6 +2987,7 @@ export default function App() {
 
   return (
     <div className="app-root" style={{ minHeight: "100vh", background: "#0b0b0c", color: "#e8eaed", fontFamily: "'DM Sans', sans-serif" }}>
+      <ComboBetaStyles />
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .signin-short { display: none; }
@@ -3068,7 +3120,7 @@ export default function App() {
 
       <div className="app-tabs" style={{ padding: "20px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <a href={tabHash("promo")} title="Start here: find the best bet for your boost or free bet" style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
-        {(canSeeComboLocks(user) || canSeeOwnerTools(user)) ? (
+        {(comboUnlocked || canSeeOwnerTools(user)) ? (
           <>
             <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
             <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
@@ -3080,8 +3132,8 @@ export default function App() {
             <a href="/learn" data-tab-learn="true" title="What EV, true odds, ML/SPR/TT and the other terms mean" style={tabStyle("__learn")}>Learn</a>
           </>
         )}
-        {canSeeComboLocks(user) && (
-          <a href={tabHash("combo")} style={tabStyle("combo")} onClick={onNavTabClick("combo")}>Combo Locks</a>
+        {user && (
+          <a href={tabHash("combo")} style={{ ...tabStyle("combo"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={onNavTabClick("combo")}>Combo Locks <ComboBetaBadge /></a>
         )}
         {canSeeNewOddsBoard(user) && (
           <a href={tabHash("oddsBetstamp")} style={tabStyle("oddsBetstamp")} onClick={onNavTabClick("oddsBetstamp", "odds_betstamp")}>New Odds Board</a>
@@ -3161,8 +3213,20 @@ export default function App() {
 
           {activeTab === "odds" && <OddsBoard oddsData={allOddsData} futuresData={futuresData} books={ALL_BOOKS} sportChips={SPORT_CHIPS} futures={FUTURES} />}
 
-          {activeTab === "combo" && canSeeComboLocks(user) && <RootFor key={comboViewAs || "self"} user={user} viewAs={comboViewAs} />}
-          {activeTab === "combo" && canSeeComboLocks(user) && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} onViewAsChange={setComboViewAs} /></Suspense>}
+          {activeTab === "combo" && user && (
+            <div className="combo-beta-note" data-testid="combo-beta-note" role="note">
+              <ComboBetaBadge />
+              <span>{comboUnlocked ? "Beta. You have access. This page works the same way it does today." : "Beta. This page is open to a small group while we finish it."}</span>
+            </div>
+          )}
+          {activeTab === "combo" && comboUnlocked && <RootFor key={comboViewAs || "self"} user={user} viewAs={comboViewAs} />}
+          {activeTab === "combo" && comboUnlocked && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} onViewAsChange={setComboViewAs} accessGranted={comboAccessApproved} /></Suspense>}
+          {activeTab === "combo" && user && !comboUnlocked && !comboRequestReady && (
+            <div className="empty loading" data-testid="combo-beta-loading"><span className="spin" aria-hidden="true" />Loading…</div>
+          )}
+          {activeTab === "combo" && user && !comboUnlocked && comboRequestReady && (
+            <ComboLocksGate user={user} supabase={supabase} request={comboRequest} onRequested={setComboRequest} />
+          )}
 
           {activeTab === "missTape" && canSeeOwnerTools(user) && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><ComboTape user={user} /></Suspense>}
 
@@ -3187,7 +3251,7 @@ export default function App() {
               bookOptions={ALL_BOOKS.map((b) => ({ ...b, trusted: TRUSTED_BOOK_KEYS.has(b.key) }))}
               matchingBookKeys={matchingBookKeys}
               onToggleMatchingBook={toggleMatchingBook}
-              canSeeLocks={canSeeComboLocks(user)}
+              canSeeLocks={comboUnlocked}
               isOwner={Boolean(user)}
               announcement={whatsNew}
               onAnnouncementPublished={(ann) => {
@@ -3196,7 +3260,7 @@ export default function App() {
               }}
               onAnnouncementUnpublished={() => setWhatsNew(null)}
               onOpenLock={(id, hash) => {
-                if (!canSeeComboLocks(user)) return;
+                if (!comboUnlocked) return;
                 setFocusLockId(id);
                 setActiveTab("combo");
                 if (hash) window.history.replaceState(null, "", hash);
@@ -3423,7 +3487,7 @@ export default function App() {
                     ? "Place a cash bet. If it loses, the stake comes back as site credit, counted at 70¢ on the dollar. Ranked by expected value. 1-leg no-sweats can lock guaranteed cash by hedging the other side."
                     : (numLegs === 1
                       ? "Use a free bet on a single or a parlay. 1-leg still converts to locked cash by hedging the other side. Ranked by free-bet EV — you don't risk cash; a win pays profit only."
-                      : "Use a free bet on a parlay ranked by free-bet EV. You don't risk cash (a loss costs $0); a win pays profit only — the stake is not returned. 1-leg still converts to locked cash." + (canSeeComboLocks(user) ? " Multi-leg can lock via Combo Locks (combo RFQ hedges hit vs miss)." : ""))}
+                      : "Use a free bet on a parlay ranked by free-bet EV. You don't risk cash (a loss costs $0); a win pays profit only — the stake is not returned. 1-leg still converts to locked cash." + (comboUnlocked ? " Multi-leg can lock via Combo Locks (combo RFQ hedges hit vs miss)." : ""))}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 }}>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
@@ -3740,7 +3804,7 @@ export default function App() {
 
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
-                            {canSeeComboLocks(user) && (
+                            {comboUnlocked && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                             )}
                           </div>
@@ -3791,7 +3855,7 @@ export default function App() {
                             <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                               <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.boostedProfit + stake).toFixed(0)}</strong> with your boost. Expected profit: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvMoney(view.ev)}</strong> on a ${stake} bet.
                             </div>
-                            {canSeeComboLocks(user) && (
+                            {comboUnlocked && (
                               <div style={{ marginTop: 12 }}>
                                 <SendToComboLocksButton onSend={() => sendToComboLocks(p)} />
                               </div>
@@ -3946,7 +4010,7 @@ export default function App() {
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                                   <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "bet" : "parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${(p.winProfit + stake).toFixed(0)}</strong>. If it loses, you get <strong style={{ color: "#e8eaed" }}>${p.refund.toFixed(0)}</strong> site credit (≈ <strong style={{ color: "#10b981" }}>${p.creditValue.toFixed(0)}</strong> cash). Expected profit: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${stake} cash stake.
-                                  {" "}{isSingle ? (canSeeComboLocks(user) ? "No opposite price at a book — tap Lock it to hedge it as a single-leg lock on Kalshi and Polymarket instead." : "No opposite price is available to lock both sides.") : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
+                                  {" "}{isSingle ? (comboUnlocked ? "No opposite price at a book — tap Lock it to hedge it as a single-leg lock on Kalshi and Polymarket instead." : "No opposite price is available to lock both sides.") : "A guaranteed lock needs a 2-way opposite. Multi-leg no-sweats cannot be locked on both sides at once."}
                                 </div>
                               </>
                             )}
@@ -4104,10 +4168,10 @@ export default function App() {
                           )}
                           <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
-                            {canSeeComboLocks(user) && !isSingle && (
+                            {comboUnlocked && !isSingle && (
                               <SendToComboLocksButton onSend={() => sendToComboLocks(p, "freebet")} />
                             )}
-                            {canSeeComboLocks(user) && isSingle && (
+                            {comboUnlocked && isSingle && (
                               <LockItButton onLock={() => sendToComboLocks(p, "freebet", "promo-lock-it")} />
                             )}
                           </div>
@@ -4156,9 +4220,9 @@ export default function App() {
                                 </div>
                                 <div style={{ fontSize: 13, color: "#9ca3af", padding: "12px 16px", background: "rgba(16,185,129,0.04)", borderRadius: 8, border: "1px solid rgba(16,185,129,0.1)" }}>
                                   <strong style={{ color: "#10b981" }}>Bottom line:</strong> This {isSingle ? "free bet" : "free-bet parlay"} has a {(view.combinedProb * 100).toFixed(1)}% chance of hitting and pays <strong style={{ color: "#e8eaed" }}>${p.winProfit.toFixed(0)}</strong> profit (stake not returned). A loss costs $0. Expected value: <strong style={{ color: evColor }}>{formatSignedEvMoney(view.ev)}</strong> on a ${fbAmount} free bet.
-                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : canSeeComboLocks(user) ? "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss." : "A per-leg 2-way cannot lock every multi-leg outcome."}
+                                  {" "}{isSingle ? "No opposite price is available to lock both sides." : comboUnlocked ? "A per-leg 2-way cannot lock every multi-leg outcome. Send 2+ game legs to Combo Locks to hedge the joint hit vs miss." : "A per-leg 2-way cannot lock every multi-leg outcome."}
                                 </div>
-                                {canSeeComboLocks(user) && (
+                                {comboUnlocked && (
                                   <div style={{ marginTop: 12 }}>
                                     {isSingle
                                       ? <LockItButton onLock={() => sendToComboLocks(p, "freebet", "promo-lock-it")} />
