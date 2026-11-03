@@ -59,7 +59,7 @@ async function requireOwner(req) {
   const { data, error } = await supabase.auth.getUser(token);
   const user = data && data.user;
   if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
-  if (!lib.canSeeComboLocks(user, env)) return { ok: false, status: 403, error: 'Not allowed' };
+  if (!(await lib.hasApprovedComboAccess(user, () => serviceClient()))) return { ok: false, status: 403, error: 'Not allowed' };
   return { ok: true, user };
 }
 

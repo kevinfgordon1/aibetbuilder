@@ -176,15 +176,16 @@ function kalshiFetch(scopes, extra = {}) {
     assert.equal(r.code, 401);
     s.restore();
   }
-  // Combo Locks is private: anyone outside COMBO_LOCKS_ACCOUNTS gets 403 on every
-  // method, before any DB read, even if a combo_live_users row exists for them.
+  // Anyone outside COMBO_LOCKS_ACCOUNTS without an approved beta request gets
+  // 403 on every method. The only read allowed is the access-request lookup.
+  // Keys, vault, and the exchange are not touched, even if combo_live_users has a row.
   for (const user of [{ id: STRANGER, email: 'random@example.com' }, { id: STRANGER, email: 'gmoneyvikes@gmail.com' }, { id: T, email: 'random@example.com' }, { id: STRANGER, email: 'kmguido97@gmail.com' }]) {
     const f = kalshiFetch(['read', 'write::trade']);
     const s = setup({ user, live: { ...APPROVED, user_id: user.id }, fetchImpl: f });
     assert.equal((await call('GET')).code, 403);
     assert.equal((await call('POST', { venue: 'kalshi', key_id: KID, secret: RSA_PEM })).code, 403);
     assert.equal((await call('DELETE', null, { venue: 'kalshi' })).code, 403);
-    assert.deepEqual(s.reads, []);
+    assert.deepEqual(s.reads, ['combo_locks_access_requests', 'combo_locks_access_requests', 'combo_locks_access_requests']);
     assert.equal(s.rpcs.length, 0);
     assert.equal(f.seen.length, 0);
     s.restore();

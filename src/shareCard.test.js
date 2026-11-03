@@ -384,11 +384,11 @@ const stranger = { id: "u2", email: "stranger@gmail.com" };
 }
 {
   const denied = resolveAppHash(parseAppHash("#combo/secret-1"), stranger);
-  assert.equal(denied.tab, "promo");
+  assert.equal(denied.tab, "combo");
   assert.equal(denied.lockId, null);
   assert.equal(denied.cardId, null);
-  assert.equal(denied.allowed, false);
-  assert.equal(denied.notice, "noaccess");
+  assert.equal(denied.allowed, true);
+  assert.equal(denied.notice, null);
 }
 {
   const signedOut = resolveAppHash(parseAppHash("#combo/secret-1"), null);

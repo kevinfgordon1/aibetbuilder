@@ -45,7 +45,7 @@ export default function UserProfile({
     setDraftBook(prefs?.promoBook || "draftkings");
   }, [prefs, ident.name]);
 
-  const showPnl = profileShowsComboPnl(user, { isOwner: isOwner && canSeeLocks });
+  const showPnl = profileShowsComboPnl(user, { isOwner: isOwner && canSeeLocks, granted: !!canSeeLocks });
 
   const loadStatement = useCallback(async () => {
     if (!showPnl || !user?.id) {

@@ -1,10 +1,11 @@
-// Combo Locks visibility — PRIVATE. Hardcoded, no env allowlist.
+// Combo Locks visibility. Hardcoded allowlist, no env allowlist.
 //
-// Only COMBO_LOCKS_ACCOUNTS may see the Combo Locks tab, page, links, copy,
-// and lock P/L: Kevin's two accounts plus one approved tester. Each entry pins
-// the Supabase Auth email AND the auth uid, so a look-alike account, an X
-// sign-in without email, or a stale VITE_COMBO_LOCKS_ALLOWLIST cannot match.
-// Kenneth is NOT on this list. Server mirror: api/combo-probe-lib.js.
+// The Combo Locks tab is visible to every signed-in user and labeled Beta.
+// The full page (links, copy, lock P/L, APIs) stays on COMBO_LOCKS_ACCOUNTS
+// unless that user has an approved row in combo_locks_access_requests.
+// Each hardcoded entry pins the Supabase Auth email AND the auth uid, so a
+// look-alike account, an X sign-in without email, or a stale
+// VITE_COMBO_LOCKS_ALLOWLIST cannot match. Server mirror: api/combo-probe-lib.js.
 //
 // user_metadata.email is never a key (user-editable).
 //
@@ -77,7 +78,7 @@ function userTokens(user) {
   return out.filter(Boolean);
 }
 
-/** True when this signed-in user may see Combo Locks UI, routes, and lock P/L. */
+/** True when this signed-in user is on the hardcoded Combo Locks allowlist. */
 export function canSeeComboLocks(user, _env) {
   if (!user || !user.email || !user.id) return false;
   const email = String(user.email).trim().toLowerCase();
@@ -85,14 +86,41 @@ export function canSeeComboLocks(user, _env) {
   return COMBO_LOCKS_ACCOUNTS.some((a) => a.email === email && a.id === id);
 }
 
+/** Kevin's two accounts may review beta access requests. Email AND uid. */
+export const COMBO_ACCESS_ADMINS = Object.freeze([
+  Object.freeze({ email: "kev120909@gmail.com", id: "79ae1610-097e-4b46-a622-1e952f18e936" }),
+  Object.freeze({ email: "kevin.f.gordon1@gmail.com", id: "968efed8-54db-48a6-808b-194a7a03a4cb" }),
+]);
+
+export function canReviewComboAccess(user) {
+  if (!user || !user.email || !user.id) return false;
+  const email = String(user.email).trim().toLowerCase();
+  const id = String(user.id).trim().toLowerCase();
+  return COMBO_ACCESS_ADMINS.some((a) => a.email === email && a.id === id);
+}
+
+/**
+ * Approved combo_locks_access_requests row for this user.
+ * Email and user id both have to match. A pending row does not open the page.
+ */
+export function comboAccessRequestApproved(user, request) {
+  if (!request || request.status !== "approved") return false;
+  if (!user || !user.id || !user.email) return false;
+  if (!request.email) return false;
+  if (String(request.email).trim().toLowerCase() !== String(user.email).trim().toLowerCase()) return false;
+  if (request.user_id && String(request.user_id).toLowerCase() !== String(user.id).toLowerCase()) return false;
+  return true;
+}
+
 /**
  * Profile Combo Locks P/L / statement / history.
- * Same allowlist as the Combo Locks tab (canSeeComboLocks). isOwner is the
+ * Hardcoded allowlist, or an approved beta request (granted). isOwner is the
  * signed-in user's own profile — default false so a public/other-player
  * profile cannot leak lock P/L even when the subject is Kevin.
  */
-export function profileShowsComboPnl(user, { isOwner = false } = {}, env) {
-  return !!(isOwner && canSeeComboLocks(user, env));
+export function profileShowsComboPnl(user, { isOwner = false, granted = false } = {}, env) {
+  if (!isOwner) return false;
+  return !!(canSeeComboLocks(user, env) || granted === true);
 }
 
 /** Miss tape / Unhedged / Live Trading Desk stay owner-only — not Combo Locks, not Kenneth. */
@@ -274,16 +302,21 @@ export function resolveAppHash(parsed, user) {
     return { tab: "promo", lockId: null, cardId: null, notice: null, allowed: true };
   }
   if (tab === "combo") {
+    if (!user) {
+      return {
+        tab: "promo",
+        lockId: null,
+        cardId: null,
+        notice: "signin",
+        allowed: false,
+      };
+    }
     if (canSeeComboLocks(user)) {
       return { tab: "combo", lockId: route.lockId || null, cardId: null, notice: null, allowed: true };
     }
-    return {
-      tab: "promo",
-      lockId: null,
-      cardId: null,
-      notice: user ? "noaccess" : "signin",
-      allowed: false,
-    };
+    // Signed-in visitors open the Beta tab. The page stays locked until an
+    // approved request. Drop the lock id so a shared lock link does not focus.
+    return { tab: "combo", lockId: null, cardId: null, notice: null, allowed: true };
   }
   if (tab === "oddsBetstamp") {
     if (canSeeNewOddsBoard(user)) {

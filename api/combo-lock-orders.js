@@ -156,7 +156,7 @@ async function handler(req, res) {
   if (require('./combo-view-as-lib').blockViewAsWrite(req, res)) return;
   const auth = await requireUser(req);
   if (!auth.ok) return json(res, auth.status, { ok: false, error: auth.error });
-  if (!lib.canSeeComboLocks(auth.user)) return json(res, 403, { ok: false, error: 'Not allowed' });
+  if (!(await lib.hasApprovedComboAccess(auth.user, () => serviceClient()))) return json(res, 403, { ok: false, error: 'Not allowed' });
   const client = serviceClient();
   if (!client) return json(res, 503, { ok: false, error: 'Server is not configured' });
   const body = parseBody(req);

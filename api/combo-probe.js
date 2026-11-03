@@ -105,7 +105,9 @@ async function requireProbeUser(req, createClientImpl) {
   const user = data && data.user;
   if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
   if (lib.isComboOwner(user)) return { ok: true, user, isOwner: true };
-  if (!lib.canSeeComboLocks(user)) return { ok: false, status: 403, error: 'Not allowed' };
+  if (!lib.canSeeComboLocks(user) && !(await lib.hasApprovedComboAccess(user, () => serviceClient()))) {
+    return { ok: false, status: 403, error: 'Not allowed' };
+  }
   return { ok: true, user, isOwner: false };
 }
 
