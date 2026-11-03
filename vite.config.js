@@ -12,6 +12,7 @@ const LOCAL_API_HANDLERS = {
   '/api/polymarket-board': './api/polymarket-board.js',
   '/api/kalshi-stream': './api/kalshi-stream.js',
   '/api/kalshi-board': './api/kalshi-board.js',
+  '/api/election-board': './api/election-board.js',
   '/api/novig-stream': './api/novig-stream.js',
   '/api/4casters-stream': './api/4casters-stream.js',
   '/api/live-trading-desk': './api/live-trading-desk.js',

@@ -2,6 +2,7 @@ import { Fragment, createContext, memo, useCallback, useContext, useEffect, useM
 import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import { TAKER_FEE_LEGEND } from "./venueTakerFee.js";
+import ElectionBoard from "./ElectionBoard.jsx";
 import {
   fmtBoardSize,
   bestBooksTitle,
@@ -1143,6 +1144,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
   }, [liveOnly]);
 
   useEffect(() => {
+    if (boardSport === "politics") return undefined;
     const gen = ++fetchGen.current;
     const league = leagueForSport(boardSport);
     const ctrl = new AbortController();
@@ -1859,11 +1861,15 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: "var(--nob-gold)", letterSpacing: 0.2 }}>New Odds Board</div>
           <div style={{ fontSize: 12, color: "var(--nob-muted)", marginTop: 4 }}>
-            Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters appears when the server has credentials. No sportsbook columns.
+            {boardSport === "politics"
+              ? "2026 midterms. Senate control, House control, and Senate and governor races. Polymarket US and Kalshi."
+              : "Polymarket, Kalshi, Novig, and Underdog Predict. 4Casters appears when the server has credentials. No sportsbook columns."}
           </div>
+          {boardSport !== "politics" && (
           <div data-fee-legend="1" style={{ fontSize: 12, color: "var(--nob-text-2)", marginTop: 2 }}>
             {TAKER_FEE_LEGEND}
           </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
@@ -1884,6 +1890,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           >
             Refresh
           </button>
+          {boardSport !== "politics" && (
           <button
             type="button"
             onClick={() => setLiveOnly((v) => !v)}
@@ -1901,9 +1908,11 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
           >
             {liveOnly ? "● LIVE" : "Pregame"}
           </button>
+          )}
         </div>
       </div>
 
+      {boardSport !== "politics" && (
       <LiveTickStrip
         liveOnly={liveOnly}
         books={books}
@@ -1913,6 +1922,7 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
         register={registerTickSink}
         resetKey={`${boardSport}:${liveOnly}:${boardRefreshKey}`}
       />
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {BETSTAMP_SPORTS.map((s) => (
@@ -1920,7 +1930,14 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             {s.label}
           </button>
         ))}
+        <button type="button" data-board-sport="politics" onClick={() => setBoardSport("politics")} style={{ padding: "6px 16px", borderRadius: 6, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: boardSport === "politics" ? "var(--nob-gold)" : "var(--nob-chip)", color: boardSport === "politics" ? "var(--nob-on-gold)" : "var(--nob-text-2)", boxShadow: boardSport === "politics" ? "none" : "inset 0 0 0 1px var(--nob-border)" }}>
+          Politics
+        </button>
       </div>
+      {boardSport === "politics" ? (
+        <ElectionBoard refreshKey={boardRefreshKey} />
+      ) : (
+      <>
       <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search team or matchup..." style={{ width: "100%", maxWidth: 400, background: "var(--nob-chip)", border: "1px solid var(--nob-border-strong)", borderRadius: 8, color: "var(--nob-text)", padding: "10px 16px", fontSize: 14, fontFamily: "'DM Sans', sans-serif", marginBottom: 16, boxSizing: "border-box", outline: "none" }} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         {BOARD_MARKETS.filter((m) => !m.sport || boardSport === m.sport).map((m) => (
@@ -2247,6 +2264,8 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
             )}
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
     </BestNowProvider>
