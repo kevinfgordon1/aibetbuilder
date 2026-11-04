@@ -20,7 +20,8 @@ async function handler(req, res, deps) {
   }
   try {
     const load = deps && deps.loadElectionBoard ? deps.loadElectionBoard : loadElectionBoard;
-    const body = await load(deps || {});
+    const fresh = /(?:\?|&)fresh=1(?:&|$)/.test(String(req && req.url || ''));
+    const body = await load({ ...(deps || {}), fresh: fresh || !!(deps && deps.fresh) });
     res.status(200).json(body);
   } catch (_) {
     res.status(502).json({ ok: false, races: [], venues: {}, error: 'election_board_unavailable' });

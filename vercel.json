@@ -86,7 +86,7 @@
       "maxDuration": 20
     },
     "api/election-board.js": {
-      "maxDuration": 20
+      "maxDuration": 30
     },
     "api/novig-stream.js": {
       "maxDuration": 300
