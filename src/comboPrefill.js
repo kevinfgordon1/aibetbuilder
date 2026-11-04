@@ -1171,3 +1171,12 @@ export function lockItNote(prefill) {
   const amt = Number.isFinite(stake) ? `$${stake % 1 ? stake.toFixed(2) : stake}` : "";
   return `Lock it from Promo: ${leg} — ${amt} free bet${book} at ${odds}. Check the leg and sell odds, then tap Save. Nothing is saved until you confirm.`;
 }
+
+// /api/kalshi-games slate that is not complete: a sport's moneylines failed (`failed`), or its spreads, totals
+// or props did not load (`partial`, { sport: ['total', ...] }). Those markets are unknown, not missing.
+export function slateIncomplete(d) {
+  if (!d) return false;
+  if (Array.isArray(d.failed) && d.failed.length) return true;
+  const p = d.partial;
+  return !!(p && typeof p === "object" && Object.values(p).some((v) => Array.isArray(v) && v.length));
+}
