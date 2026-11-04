@@ -1,6 +1,6 @@
 // "What to root for": joint P&L across ALL of Kevin's open Combo Locks.
 import { expandAllowed } from "./rootForBuckets.js";
-import { splitUclCodes } from "../lib/soccer-clubs.mjs";
+import { splitUclCodes } from "../lib/soccer-clubs.js";
 //
 // Each lock = sportsbook parlay + hedge contracts sold on the combo (Kalshi / Polymarket).
 //   hit  (every leg wins): book.hit  + hedge.received − hedge.filled   ($1 per sold contract)

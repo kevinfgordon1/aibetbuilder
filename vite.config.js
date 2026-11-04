@@ -58,6 +58,22 @@ function attachLocalApi(middlewares) {
   })
 }
 
+// lib/soccer-clubs.js is CommonJS so Vercel Node 20 can require() it.
+// The browser graph is ESM. Swap the export block only for Vite; Node still
+// loads module.exports from disk.
+function soccerClubsBrowserEsm() {
+  return {
+    name: 'soccer-clubs-browser-esm',
+    enforce: 'pre',
+    transform(code, id) {
+      const file = id.split('?')[0].replace(/\\/g, '/')
+      if (!file.endsWith('/lib/soccer-clubs.js')) return null
+      if (!/module\.exports\s*=/.test(code)) return null
+      return { code: code.replace(/module\.exports\s*=/, 'export'), map: null }
+    },
+  }
+}
+
 function betstampLocalApi() {
   return {
     name: 'betstamp-local-api',
@@ -76,6 +92,6 @@ export default defineConfig(({ mode }) => {
     if (process.env[k] == null) process.env[k] = v
   }
   return {
-    plugins: [react(), betstampLocalApi()],
+    plugins: [react(), soccerClubsBrowserEsm(), betstampLocalApi()],
   }
 })

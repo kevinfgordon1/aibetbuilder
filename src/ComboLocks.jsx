@@ -501,6 +501,7 @@ const SAMPLE = { comboCollection: "KXMVESPORTSMULTIGAMEEXTENDED-R", sample: true
   ],
 } };
 const TYPE_LABEL = { side: "Side (moneyline)", spread: "Spread (alt lines)", total: "Total (alt over/unders)", prop: "Player props (MLB 1+ HR / NFL anytime TD / NHL 1+ Goal)" };
+const SLATE_RETRY_NOTE = "Kalshi game list failed to load, retrying";
 const encVal = (t, s) => `${t}|${s}`;
 const decValFn = (v) => { const i = v.lastIndexOf("|"); return i < 0 ? [v, "yes"] : [v.slice(0, i), v.slice(i + 1)]; };
 const DEFAULT_FORM = { stake: 100, boost: 2000, fill: 1200, fair: 1000, mode: "1x", kind: "cash", starts: "", label: "", labelEdited: false, sportsbook: "", boostPct: "" };
@@ -699,21 +700,45 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const owner = readOnly || canSeeComboLocks(user) || !!accessGranted;
 
   const gamesRetryRef = useRef(0);
+  const gamesFailRetryRef = useRef(0);
+  const srcLiveRef = useRef(false);
+  const slateTimerRef = useRef(null);
+  const loadGenRef = useRef(0);
+  const [slateUnavailable, setSlateUnavailable] = useState(false);
   const loadGames = useCallback(async () => {
+    const schedule = (delayMs) => {
+      if (slateTimerRef.current) clearTimeout(slateTimerRef.current);
+      slateTimerRef.current = setTimeout(() => { slateTimerRef.current = null; loadGames(); }, delayMs);
+    };
+    const gen = ++loadGenRef.current;
     try { const r = await fetch("/api/kalshi-games", { headers: { accept: "application/json" } });
+      if (gen !== loadGenRef.current) return;
       if (!r.ok) throw 0; const d = await r.json();
+      if (gen !== loadGenRef.current) return;
       const n = COMBO_SPORT_ORDER.reduce((acc, s) => acc + ((d.sports && d.sports[s]) || []).length, 0);
       if (d && d.sports && n) {
-        setGames(d); setSrcLive(true); setGamesReady(true);
+        setGames(d); setSrcLive(true); srcLiveRef.current = true; setSlateUnavailable(false); setGamesReady(true);
+        gamesFailRetryRef.current = 0;
         // A sport's Kalshi feed failed this load (its slate is unknown, not empty): try again shortly.
         if (Array.isArray(d.failed) && d.failed.length && gamesRetryRef.current < 3) {
           gamesRetryRef.current += 1;
-          setTimeout(() => { loadGames(); }, 4000 * gamesRetryRef.current);
-        } else if (!(Array.isArray(d.failed) && d.failed.length)) gamesRetryRef.current = 0;
+          schedule(4000 * gamesRetryRef.current);
+        } else if (!(Array.isArray(d.failed) && d.failed.length)) {
+          gamesRetryRef.current = 0;
+          if (slateTimerRef.current) { clearTimeout(slateTimerRef.current); slateTimerRef.current = null; }
+        }
         return;
       }
     } catch (_) {}
-    setGames(SAMPLE); setSrcLive(false); setGamesReady(true);
+    if (gen !== loadGenRef.current) return;
+    // A failed fetch must not replace a live slate with SAMPLE. Sample games are
+    // not today's markets, so mapping a paste against them says every leg missed.
+    if (srcLiveRef.current) return;
+    setSrcLive(false);
+    setSlateUnavailable(true);
+    setGamesReady(true);
+    gamesFailRetryRef.current += 1;
+    schedule(Math.min(4000 * gamesFailRetryRef.current, 30000));
   }, []);
   const refreshSettlements = useCallback(async (inputs) => {
     if (settleInflight.current) return;
@@ -1048,15 +1073,27 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     })();
     return () => { alive = false; };
   }, [user, readOnly, accessGranted]);
-  useEffect(() => { loadGames(); }, [loadGames]);
+  useEffect(() => {
+    loadGames();
+    return () => {
+      loadGenRef.current += 1;
+      if (slateTimerRef.current) clearTimeout(slateTimerRef.current);
+    };
+  }, [loadGames]);
   // User actions (save, merge, archive, restore, delete, pause) can change archived rows, so they
   // drop the cached History list; only the 20s poll reuses it.
   const reloadAll = useCallback(() => { archivedGenRef.current += 1; archivedRowsRef.current = null; fillsCacheRef.current = null; return reload(); }, [reload]);
   useEffect(() => { reload(); }, [reload]);
-  // Apply a Promo Builder prefill once live (or sample) games are in. Prefill is
+  // Apply a Promo Builder prefill once the live Kalshi slate is in. Prefill is
   // App state and is cleared when leaving this tab — do not insert into Supabase.
+  // SAMPLE is only the empty-form placeholder. Mapping a paste against it reports
+  // "no matching Kalshi NBA game" for every real leg.
   useEffect(() => {
     if (!prefill || !gamesReady) return;
+    if (!srcLive) {
+      setPrefillWarning(SLATE_RETRY_NOTE);
+      return;
+    }
     const nonce = prefill.nonce ?? prefill;
     if (appliedNonceRef.current === nonce) {
       // Same prefill, newer slate (e.g. a sport's feed failed on the first load):
@@ -1091,7 +1128,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     setForm(formFromPrefill(prefill));
     setPrefillWarning(unmatched.length ? unmatched : null);
     requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }, [prefill, gamesReady, games, gameIdx, loadGames]);
+  }, [prefill, gamesReady, games, gameIdx, loadGames, srcLive]);
   // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
   // Paused while the tab is hidden (audit Oct 24: background tabs were ~10 reads / 20s each);
   // refreshes once as soon as the tab is visible again.
@@ -1775,10 +1812,13 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             {lockItNote(prefill) && (
               <div className="note" data-testid="lock-it-note" style={{ marginBottom: 12 }}>{lockItNote(prefill)}</div>
             )}
-            {prefill && !gamesReady && (
+            {prefill && !gamesReady && !slateUnavailable && (
               <div className="note warn" style={{ marginBottom: 12 }}>Matching your Promo Builder legs to live games…</div>
             )}
-            {prefillWarning && prefillWarning.length > 0 && (
+            {prefillWarning === SLATE_RETRY_NOTE && (
+              <div className="note warn" data-testid="slate-retry-note" style={{ marginBottom: 12 }}>{SLATE_RETRY_NOTE}</div>
+            )}
+            {Array.isArray(prefillWarning) && prefillWarning.length > 0 && (
               <div className="note warn" style={{ marginBottom: 12 }}>
                 Couldn't match {prefillWarning.length} leg{prefillWarning.length === 1 ? "" : "s"} automatically (supported: MLB, NFL, college football, NHL, NBA and college basketball main lines, soccer moneylines (MLS, EPL, La Liga, Serie A, Bundesliga, Ligue 1, UCL), UFC moneylines, MLB home runs, NFL anytime TDs, NHL goals). Pick those rows by hand, then save. Nothing has been saved yet.
                 <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
