@@ -567,16 +567,23 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
   return games;
 }
 
-async function fetchSportGames(seriesByType, opts) {
+async function fetchSportGames(seriesByType, optsIn) {
+  const { fetchFn, ...opts } = optsIn || {};
   const eventsByType = {};
   const espnP = opts && opts.espnSport ? fetchEspnFootball(opts.espnSport).catch(() => []) : null;
   await Promise.all(Object.entries(seriesByType || {}).map(async ([type, series]) => {
-    eventsByType[type] = await fetchSeriesEvents(series);
+    eventsByType[type] = await (fetchFn ? fetchSeriesEvents(series, fetchFn) : fetchSeriesEvents(series));
   }));
   const espnGames = espnP ? await espnP : null;
   const games = groupSportGames(eventsByType, Date.now(), { ...opts, ...(espnGames ? { espnGames } : {}) });
   // Moneyline series never loaded: the sport's slate is unknown, not empty.
   games.failed = !!(eventsByType.side && eventsByType.side.failed);
+  // Spread / total / prop series that never loaded (Nov 4 2026: one KXNCAAMBTOTAL fetch failed, every NCAAB
+  // game went out with total: [] and the CDN kept that slate, so Promo -> Combo Locks said "no matching TOT").
+  // Those markets are unknown, not missing: report them so the response is not cached and the client retries.
+  games.partial = Object.entries(eventsByType)
+    .filter(([type, evs]) => type !== 'side' && evs && evs.failed)
+    .map(([type]) => type);
   return games;
 }
 
@@ -658,6 +665,7 @@ async function handler(req, res) {
     }
     const sports = {};
     const failed = [];
+    const partial = {};
     const started = {};
     const provisional = {};
     const eventSetP = fetchCollectionEventSet(COMBO_COLLECTION).catch(() => null);
@@ -671,6 +679,7 @@ async function handler(req, res) {
       });
       if (D1_ONLY_SPORTS.has(sport)) games = d1OnlyGames(games);
       if (games.failed) failed.push(sport);
+      else if (games.partial && games.partial.length) partial[sport] = games.partial;
       if (games.started && games.started.length) started[sport] = games.started.map((g) => ({ ...g, sport }));
       sports[sport] = markComboEligible(games, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
       if (games.provisional && games.provisional.length) provisional[sport] = markComboEligible(games.provisional, seriesByType.side, await eventSetP).map((g) => ({ ...g, sport }));
@@ -679,8 +688,11 @@ async function handler(req, res) {
     // official schedule says already started moves to `started` (never offered as quotable).
     try { await applyCanonicalStarts(sports, started, Date.now(), undefined, undefined, undefined, provisional); } catch (_) { /* keep Kalshi-derived times */ }
     // Never let the CDN keep a slate with a sport missing for 3 minutes.
-    if (failed.length) res.setHeader('Cache-Control', 'no-store');
-    res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, started, ...(failed.length ? { failed } : {}) });
+    // Same for a sport whose spreads/totals/props did not load (never cache a slate with markets silently missing).
+    const hasPartial = Object.keys(partial).length > 0;
+    if (failed.length || hasPartial) res.setHeader('Cache-Control', 'no-store');
+    res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: new Date().toISOString(), sports, started,
+      ...(failed.length ? { failed } : {}), ...(hasPartial ? { partial } : {}) });
   } catch (e) {
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ comboCollection: COMBO_COLLECTION, updatedAt: null, sports: {}, error: String(e && e.message || e) });
@@ -698,5 +710,5 @@ module.exports._helpers = {
   applyCanonicalStarts, d1OnlyGames,
   parseTotal, parseSpread, parsePropLabel, expandProps, expandTotals, expandSpreads, teamCodeOf, tickerTail,
   gameKeyOf, tickersFromReq, slimMarket,
-  groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, espnMatchFor, fetchEspnFootball, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
+  fetchSportGames, groupSportGames, mergeOffByOneDateKeys, markComboEligible, fetchSeriesEvents, espnGamesFrom, espnKickoffFor, espnMatchFor, fetchEspnFootball, normTeam, gameStartUtcMs, firstPitchUtcMs, dateOnlyUtcMs, isUpcomingGame,
 };

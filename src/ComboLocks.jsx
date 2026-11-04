@@ -27,7 +27,7 @@
 // deletes the RFQ. Never accept/confirm.
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, gameStartFromLegs, dateOnlyLegDays, etDateOf, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER } from "./comboPrefill";
+import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, gameStartFromLegs, dateOnlyLegDays, etDateOf, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER, slateIncomplete } from "./comboPrefill";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import GameCombo, { gameSearchText } from "./GameCombo.jsx";
@@ -719,11 +719,14 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       if (d && d.sports && n) {
         setGames(d); setSrcLive(true); srcLiveRef.current = true; setSlateUnavailable(false); setGamesReady(true);
         gamesFailRetryRef.current = 0;
-        // A sport's Kalshi feed failed this load (its slate is unknown, not empty): try again shortly.
-        if (Array.isArray(d.failed) && d.failed.length && gamesRetryRef.current < 3) {
+        // A sport's Kalshi feed failed this load (its slate is unknown, not empty), or its spreads/totals/props
+        // did not load (`partial`, e.g. every NCAAB total missing): try again shortly. The server does not cache
+        // either kind of slate, so the retry gets a fresh pull.
+        const incomplete = slateIncomplete(d);
+        if (incomplete && gamesRetryRef.current < 3) {
           gamesRetryRef.current += 1;
           schedule(4000 * gamesRetryRef.current);
-        } else if (!(Array.isArray(d.failed) && d.failed.length)) {
+        } else if (!incomplete) {
           gamesRetryRef.current = 0;
           if (slateTimerRef.current) { clearTimeout(slateTimerRef.current); slateTimerRef.current = null; }
         }
