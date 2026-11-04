@@ -7,6 +7,7 @@ import RootFor from "./RootFor";
 const LiveTradingDesk = lazy(() => import("./LiveTradingDesk")); // owner/tester tab: own chunk (audit Oct 24)
 import UserProfile from "./UserProfile";
 import { canSeeComboLocks, canSeeOwnerTools, canSeeNewOddsBoard, canSeeUnderdogPredict, visibleTrustedBookKeys, matchingKeysVisibleToUser, parseAppHash, serializeAppHash, resolveAppHash, hashesEqual, tabHash, initialAppTab, comboAccessRequestApproved } from "./comboAccess";
+import { NEW_ODDS_BOARD_PAUSED } from "./newOddsBoardPause.js";
 import ComboBetaBadge, { ComboBetaStyles } from "./ComboBetaBadge.jsx";
 import ComboLocksGate from "./ComboLocksGate.jsx";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
@@ -1676,9 +1677,15 @@ function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders,
 export default function App() {
   const [allOddsData, setAllOddsData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
   const [futuresData, setFuturesData] = useState([]);
-  const [activeTab, setActiveTab] = useState(() => (
-    typeof window === "undefined" ? "promo" : initialAppTab(bootAppHash(window.location))
-  ));
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window === "undefined") return "promo";
+    const hash = bootAppHash(window.location);
+    // Stay on the paused board from the first render. Starting on Promo
+    // made the hash writer and the odds fetch treat this URL as Promo and
+    // pull odds_cache plus /api/underdog-predict before the tab switched.
+    if (NEW_ODDS_BOARD_PAUSED && parseAppHash(hash).tab === "oddsBetstamp") return "oddsBetstamp";
+    return initialAppTab(bootAppHash(window.location));
+  });
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [signInPrompt, setSignInPrompt] = useState(null);
   const [signInNotice, setSignInNotice] = useState(null);
@@ -2162,6 +2169,7 @@ export default function App() {
 
   const fetchOdds = async ({ forceRefresh = true } = {}) => {
     const tab = activeTab;
+    if (NEW_ODDS_BOARD_PAUSED && tab === "oddsBetstamp") return;
     if (forceRefresh) setManualRefreshing(true);
     const started = Date.now();
     try {
@@ -2190,7 +2198,8 @@ export default function App() {
     if (authLoading) return;
     // Read the tab from this render. #ev / #odds must not also start the Promo
     // board — that used to transform event odds and scan parlays on the same
-    // tick as the +EV list.
+    // tick as the +EV list. A paused New Odds Board must not start it either.
+    if (NEW_ODDS_BOARD_PAUSED && activeTab === "oddsBetstamp") return;
     if (shouldFetchFullBoard({ tab: activeTab, fullBoardLoaded, forceRefresh: false })) {
       loadFullBoard();
       return;
@@ -3080,6 +3089,9 @@ export default function App() {
               <button
                 onClick={() => {
                   if (activeTab === "oddsBetstamp") {
+                    // Paused board must not bump refreshKey. That key is what
+                    // BetstampOddsBoard uses to re-pull its feeds.
+                    if (NEW_ODDS_BOARD_PAUSED) return;
                     setBetstampRefreshKey((n) => n + 1);
                     logEvent(user, "odds_refreshed", { trigger: "manual_betstamp" });
                     return;
@@ -3087,9 +3099,11 @@ export default function App() {
                   fetchOdds({ forceRefresh: true });
                   logEvent(user, "odds_refreshed", { trigger: "manual" });
                 }}
-                disabled={activeTab === "oddsBetstamp" ? false : refreshBusy}
+                disabled={activeTab === "oddsBetstamp" ? NEW_ODDS_BOARD_PAUSED : refreshBusy}
                 title={activeTab === "oddsBetstamp"
-                  ? "Re-pull Polymarket, Kalshi, and Underdog for New Odds Board."
+                  ? (NEW_ODDS_BOARD_PAUSED
+                    ? "New Odds Board is paused."
+                    : "Re-pull Polymarket, Kalshi, and Underdog for New Odds Board.")
                   : "Re-read the odds cache (updated every 5 min). Does not call The Odds API."}
                 style={{ background: "rgba(212,175,55,0.1)", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 6, color: "#d4af37", padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: (activeTab !== "oddsBetstamp" && refreshBusy) ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 4, opacity: (activeTab !== "oddsBetstamp" && refreshBusy) ? 0.6 : 1, transition: "all 0.2s" }}
                 onMouseEnter={e => { if (activeTab === "oddsBetstamp" || !refreshBusy) e.currentTarget.style.background = "rgba(212,175,55,0.2)"; }}
@@ -3208,7 +3222,11 @@ export default function App() {
 
       {activeTab === "oddsBetstamp" && canSeeNewOddsBoard(user) && (
         <div style={{ padding: "20px 32px" }}>
-          <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><BetstampOddsBoard user={user} refreshKey={betstampRefreshKey} /></Suspense>
+          {NEW_ODDS_BOARD_PAUSED ? (
+            <p data-new-odds-board-paused="true" style={{ margin: 0, fontSize: 16 }}>New Odds Board is paused.</p>
+          ) : (
+            <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><BetstampOddsBoard user={user} refreshKey={betstampRefreshKey} /></Suspense>
+          )}
         </div>
       )}
 
