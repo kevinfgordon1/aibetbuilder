@@ -5,7 +5,7 @@
 // (already baked in) — do not apply KFEE again when recommending fill.
 
 import { d1Team } from "./ncaabD1.js";
-import { soccerSameClub } from "../lib/soccer-clubs.mjs";
+import { soccerSameClub } from "../lib/soccer-clubs.js";
 
 export const encVal = (t, s) => `${t}|${s}`;
 
