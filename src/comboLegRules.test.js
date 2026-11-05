@@ -8,7 +8,9 @@ assert.equal(lockLegsError([]), "Pick at least 1 leg (game + market).");
 assert.equal(lockLegsError([wild]), "");
 assert.equal(lockLegsError([wild, { ...wild }]), "The same market is picked twice.");
 assert.equal(lockLegsError([{ ticker: "X", side: "maybe" }]), "Every leg needs a market and a side.");
-assert.equal(lockLegsError(Array.from({ length: 13 }, (_, i) => ({ ticker: "T" + i, side: "yes" }))), "A lock can have at most 12 legs.");
+// No maximum leg count (Kevin Nov 4 2026): 13 and 25 legs are valid.
+assert.equal(lockLegsError(Array.from({ length: 13 }, (_, i) => ({ ticker: "T" + i, side: "yes" }))), "");
+assert.equal(lockLegsError(Array.from({ length: 25 }, (_, i) => ({ ticker: "T" + i, side: "yes" }))), "");
 assert.ok(isSingleLegLock({ legs: [wild] }));
 assert.ok(!isSingleLegLock({ legs: [wild, { ticker: "B", side: "yes" }] }));
 

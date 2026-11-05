@@ -53,6 +53,10 @@ assert.equal(patch.fill_american, 1000);
 assert.equal(patch.fill_edited_at, "2026-10-10T05:00:00.000Z");
 assert.equal(patch.cancel_open_at, patch.fill_edited_at);
 assert.ok(patch.max_contracts >= 50);
+// Editing fill odds keeps the user's own cap (3000), never the hedge-mode size.
+assert.equal(patch.max_contracts, 3000);
+assert.equal(fillEditParlayPatch({ ...parlay, max_contracts: 40 }, 1000, { filled: 50 }).max_contracts, 50, "raised only to filled");
+assert.ok(fillEditParlayPatch({ ...parlay, max_contracts: 0 }, 1000).max_contracts > 0, "no saved cap -> hedge-mode size");
 
 const opens = openQuotesForLock([
   { id: "s1", parlay_id: "p1", is_live: true, quote_id: "q1", contracts: 100, venue: "kalshi", fill_american: 1150, created_at: "2026-10-10T04:00:00Z" },
