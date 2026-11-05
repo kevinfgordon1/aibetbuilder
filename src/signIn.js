@@ -6,6 +6,11 @@
 // GoTrue allows any path or query on the Site URL host, and matches extra
 // redirect hosts against the allow list with the fragment removed.
 //
+// Email code and magic link share signInWithOtp. The Magic Link email template
+// has to include both {{ .Token }} (the 6-digit code) and {{ .ConfirmationURL }}
+// (the link). verifyOtp({ type: "email" }) writes the session through the
+// supabase-js client, which persists it in localStorage on this browser.
+//
 // X is Supabase provider "x" (OAuth 2.0). Legacy "twitter" is OAuth 1.0a.
 // @supabase/supabase-js 2.117 (this install) includes "x" on the Provider union.
 
@@ -168,7 +173,19 @@ export function describeAuthError(error) {
   if (blob.includes("email address not authorized") || blob.includes("signup is disabled")) {
     return {
       kind: "error",
-      message: "We couldn’t email that address from the default mailer. Try Google, or use an address that’s allowed to receive sign-in mail.",
+      message: "We couldn’t email that address from the default mailer. Try another address, or use Google from Safari or Chrome.",
+    };
+  }
+  if (
+    code === "otp_expired" ||
+    code === "otp_disabled" ||
+    blob.includes("token has expired") ||
+    blob.includes("email link is invalid") ||
+    blob.includes("otp has expired")
+  ) {
+    return {
+      kind: "error",
+      message: "That code or link is expired or not valid. Request a new one and try again.",
     };
   }
   if ((blob.includes("invalid") && blob.includes("email")) || blob.includes("unable to validate email")) {
@@ -249,7 +266,18 @@ async function probeAuthorize(url, fetchImpl) {
   }
 }
 
-export async function sendMagicLink(client, emailRaw, loc) {
+export const EMAIL_OTP_LENGTH = 6;
+
+export function normalizeOtpCode(raw) {
+  return String(raw || "").replace(/\D/g, "").slice(0, EMAIL_OTP_LENGTH);
+}
+
+export function isCompleteOtp(code) {
+  return new RegExp("^\\d{" + EMAIL_OTP_LENGTH + "}$").test(String(code || ""));
+}
+
+/** One email. The template decides whether it shows the code, the link, or both. */
+async function requestEmailSignIn(client, emailRaw, loc) {
   const email = normalizeSignInEmail(emailRaw);
   if (!isPlausibleEmail(email)) {
     return { ok: false, kind: "error", message: "Enter a valid email address." };
@@ -264,12 +292,61 @@ export async function sendMagicLink(client, emailRaw, loc) {
       },
     });
     if (error) return { ok: false, ...describeAuthError(error) };
-    return {
-      ok: true,
-      kind: "sent",
+    return { ok: true, email };
+  } catch (err) {
+    return { ok: false, ...describeAuthError(err) };
+  }
+}
+
+export async function sendMagicLink(client, emailRaw, loc) {
+  const result = await requestEmailSignIn(client, emailRaw, loc);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    kind: "sent",
+    email: result.email,
+    message: "Check your email",
+  };
+}
+
+export async function sendEmailCode(client, emailRaw, loc) {
+  const result = await requestEmailSignIn(client, emailRaw, loc);
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    kind: "code",
+    email: result.email,
+    message: "Check your email",
+  };
+}
+
+/**
+ * Turn the 6-digit code into a session on this client. supabase-js writes that
+ * session to localStorage (persistSession default), so a later getSession on
+ * this browser — including another createClient with the same project — sees it.
+ */
+export async function verifyEmailCode(client, emailRaw, codeRaw) {
+  const email = normalizeSignInEmail(emailRaw);
+  const token = normalizeOtpCode(codeRaw);
+  if (!isPlausibleEmail(email)) {
+    return { ok: false, kind: "error", message: "Enter a valid email address." };
+  }
+  if (!isCompleteOtp(token)) {
+    return { ok: false, kind: "error", message: "Enter the 6-digit code from your email." };
+  }
+  if (!client || !client.auth || typeof client.auth.verifyOtp !== "function") return missingClient();
+  try {
+    const { data, error } = await client.auth.verifyOtp({
       email,
-      message: "Check your email",
-    };
+      token,
+      type: "email",
+    });
+    if (error) return { ok: false, ...describeAuthError(error) };
+    const session = data && data.session;
+    if (!session || !session.access_token) {
+      return { ok: false, kind: "error", message: "That code didn’t sign you in. Request a new one and try again." };
+    }
+    return { ok: true, kind: "session", email, session };
   } catch (err) {
     return { ok: false, ...describeAuthError(err) };
   }

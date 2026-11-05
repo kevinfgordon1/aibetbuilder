@@ -1180,7 +1180,7 @@ function LandingFull({ onBack }) {
       <section className="lf-sec" style={{ background: "rgba(255,255,255,0.015)", borderTop: "1px solid rgba(255,255,255,0.05)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}><div className="wrap">
         <div className="lf-sechead"><div className="k">How it works</div><h2>Three steps to your edge</h2></div>
         <div className="lf-steps">
-          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>Google, a link to your email, X, or Facebook. No card, no bank account linking, no setup.</p></div>
+          <div className="lf-step"><div className="num">1</div><h3>Sign in free</h3><p>Google, an email code or link, X, or Facebook. No card, no bank account linking, no setup.</p></div>
           <div className="lf-step"><div className="num">2</div><h3>Pick your book &amp; promo</h3><p>Choose your sportsbook and the boost or free bet you're working with.</p></div>
           <div className="lf-step"><div className="num">3</div><h3>Get the optimal play</h3><p>Get the highest-EV parlay or hedge, ranked and ready, from live odds.</p></div>
         </div>
@@ -1864,6 +1864,12 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Email-code sign-in stays on this page. OAuth leaves and comes back, which
+  // remounts the prompt; a code does not, so close it once a session exists.
+  useEffect(() => {
+    if (user) setSignInPrompt(null);
+  }, [user && user.id]);
 
   const [comboRequest, setComboRequest] = useState(null);
   const [comboRequestReady, setComboRequestReady] = useState(false);
