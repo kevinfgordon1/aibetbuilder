@@ -91,20 +91,22 @@ export function openQuoteLabel(row, lockTicker = null) {
 
 /**
  * Patch for combo_parlays after a validated fill edit.
- * Recalculates max_contracts like create; never below already-filled count.
+ * Keeps the user's own contract cap (max_contracts); only raises it to the
+ * already-filled count. A lock with no saved cap gets the hedge-mode size.
  */
 export function fillEditParlayPatch(parlay, fillAmerican, { filled = 0, now = new Date() } = {}) {
-  const kind = lockKind(parlay);
-  const stake = Number(parlay.parlay_stake);
-  const boost = Number(parlay.parlay_american);
-  let cap = hedgeCap({
-    stake: Number.isFinite(stake) ? stake : 0,
-    boostAmerican: Number.isFinite(boost) ? boost : 0,
-    fillAmerican,
-    mode: parlay.hedge_mode || "1x",
-    kind,
-  });
-  if (!(cap > 0)) cap = Number(parlay.max_contracts) || 0;
+  let cap = Number(parlay.max_contracts) || 0;
+  if (!(cap > 0)) {
+    const stake = Number(parlay.parlay_stake);
+    const boost = Number(parlay.parlay_american);
+    cap = hedgeCap({
+      stake: Number.isFinite(stake) ? stake : 0,
+      boostAmerican: Number.isFinite(boost) ? boost : 0,
+      fillAmerican,
+      mode: parlay.hedge_mode || "1x",
+      kind: lockKind(parlay),
+    });
+  }
   const floor = Math.max(0, Math.ceil(Number(filled) || 0));
   if (cap < floor) cap = floor;
   const iso = (now instanceof Date ? now : new Date(now)).toISOString();

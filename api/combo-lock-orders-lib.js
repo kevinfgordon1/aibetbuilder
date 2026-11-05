@@ -87,17 +87,22 @@ function hedgeCap({ stake, boostAmerican, fillAmerican, mode, kind }) {
   }
 }
 
+// Editing the fill odds only changes the price. The user's own contract cap
+// (max_contracts) is kept as-is; it is only raised to the already-filled count
+// so the row never claims less than what really filled. A lock with no saved
+// cap (0 / null) still gets the hedge-mode size, as before.
 function fillEditParlayPatch(parlay, fillAmerican, { filled = 0, now = new Date() } = {}) {
-  const kind = lockKind(parlay);
-  let cap = hedgeCap({
-    stake: Number(parlay.parlay_stake) || 0,
-    boostAmerican: Number(parlay.parlay_american) || 0,
-    fillAmerican,
-    mode: parlay.hedge_mode || '1x',
-    kind,
-  });
   const prev = Number(parlay.max_contracts) || 0;
-  if (!(cap > 0)) cap = prev;
+  let cap = prev;
+  if (!(cap > 0)) {
+    cap = hedgeCap({
+      stake: Number(parlay.parlay_stake) || 0,
+      boostAmerican: Number(parlay.parlay_american) || 0,
+      fillAmerican,
+      mode: parlay.hedge_mode || '1x',
+      kind: lockKind(parlay),
+    });
+  }
   const floor = Math.max(0, Math.ceil(Number(filled) || 0));
   if (cap < floor) cap = floor;
   const iso = (now instanceof Date ? now : new Date(now)).toISOString();
