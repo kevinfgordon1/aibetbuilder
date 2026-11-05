@@ -31,6 +31,20 @@ export default function ComboLocksGate({ user, supabase, request, onRequested, o
       <p>
         Combo Locks locks in a profit on a sportsbook parlay by offering that same parlay to traders on Kalshi and Polymarket.
       </p>
+      <ol className="combo-beta-steps" data-testid="combo-beta-steps" style={{ textAlign: "left", lineHeight: 1.5, margin: "12px 0", paddingLeft: 20 }}>
+        <li>Place a boosted or +EV parlay at your sportsbook.</li>
+        <li>Enter that parlay in Combo Locks.</li>
+        <li>We offer the same combo to traders on Kalshi and Polymarket US, priced off the best opposing price across prediction markets.</li>
+        <li>When traders take it, your parlay is hedged and the profit is locked in.</li>
+        <li>Track fills, hedge %, and your P&amp;L on every lock.</li>
+      </ol>
+      <div className="combo-beta-example" data-testid="combo-beta-example" style={{ textAlign: "left", border: "1px dashed rgba(167,139,250,0.6)", borderRadius: 10, padding: "10px 14px", margin: "12px 0", fontSize: 13 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: "#a78bfa" }}>EXAMPLE</div>
+        <div>3-leg parlay, $100 at <b>+600</b> (boosted)</div>
+        <div>Same combo sold on Kalshi at <b>+450</b> → hedged 100%</div>
+        <div>Locked profit: <b>+$27</b> win or lose</div>
+        <div className="muted" style={{ fontSize: 11 }}>Illustration only. Real prices and fills vary.</div>
+      </div>
       <p>It's in beta. Request access and we'll open the page for your account.</p>
       {!user ? (
         <button type="button" data-testid="combo-beta-signin" onClick={onSignIn}>Sign in to request access</button>
