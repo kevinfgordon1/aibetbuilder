@@ -128,7 +128,7 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { findTopParlaysExact, linearEvForm } from "./promoExactScan.js";
-import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds } from "./promoParlayScan.js";
+import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
@@ -307,9 +307,10 @@ const MAX_PROMO_LEGS = 12;
 // candidates per added leg — similar budget to today's 3-leg scan.
 const GROW_FROM_3_SEEDS = 50;
 const PARLAY_LEG_CAP = 200;
-// Fallback stake when the debounced amount is 0/empty. Stake-only tweaks
-// rescale a cached scan — they do not re-run findTopParlays.
-const PROMO_SCAN_STAKE = 100;
+// Fallback stake when the field is cleared, 0, or negative. Stake-only tweaks
+// rescale a cached scan — they do not re-run findTopParlays. Empty must use
+// this same amount for the scan and for displayed EV (not rescale to $0).
+const PROMO_SCAN_STAKE = PROMO_STAKE_FALLBACK;
 const PROMO_SCAN_DEBOUNCE_MS = 150;
 
 
@@ -1720,6 +1721,9 @@ export default function App() {
   const [creditConversionPct, setCreditConversionPct] = useState(DEFAULT_CREDIT_CONVERSION);
   const [refundPct, setRefundPct] = useState(DEFAULT_REFUND_PCT);
   const [stake, setStake] = useState(100);
+  // Empty / 0 / negative keystrokes stay visible without becoming the stake
+  // the cards and scan use. null means the field is showing `stake`.
+  const [stakeDraft, setStakeDraft] = useState(null);
   const [numLegs, setNumLegs] = useState(3);
   const [minFinalOdds, setMinFinalOdds] = useState("");
   const [maxFinalOdds, setMaxFinalOdds] = useState("");
@@ -1994,7 +1998,10 @@ export default function App() {
             shareCardIdRef.current = resolved.cardId;
             if (fromRoute.promoType) setPromoType(fromRoute.promoType);
             if (fromRoute.promoBook) setPromoBook(fromRoute.promoBook);
-            if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) setStake(fromRoute.stake);
+            if (Number.isFinite(fromRoute.stake) && fromRoute.stake > 0) {
+              setStake(fromRoute.stake);
+              setStakeDraft(null);
+            }
             setFocusCardId(resolved.cardId);
             focusedCardApplied.current = null;
           } else {
@@ -2607,8 +2614,7 @@ export default function App() {
       return;
     }
     const gen = ++promoScanGen.current;
-    const raw = Number(scanStakeRef.current);
-    const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
+    const atStake = promoStakeOrDefault(scanStakeRef.current);
     const calc = promoType === "nosweat"
       ? (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct)
       : promoType === "freebet"
@@ -2890,8 +2896,7 @@ export default function App() {
       across_legs: true,
     });
 
-    const raw = Number(scanStakeRef.current);
-    const atStake = Number.isFinite(raw) && raw !== 0 ? raw : PROMO_SCAN_STAKE;
+    const atStake = promoStakeOrDefault(scanStakeRef.current);
     const calc = promoType === "nosweat"
       ? (ls) => calcNoSweatFromLegs(ls, atStake, refundPct, creditConversionPct)
       : promoType === "freebet"
@@ -3509,7 +3514,8 @@ export default function App() {
                   setPromoType(v.promoType);
                   setPromoBook(v.promoBook);
                   if (Number.isFinite(v.boostPct)) setBoostPct(v.boostPct);
-                  if (Number.isFinite(v.stake) && v.stake > 0) setStake(v.stake);
+                  setStake(promoStakeOrDefault(v.stake));
+                  setStakeDraft(null);
                   if (v.numLegs) setNumLegs(v.numLegs);
                   setWizardApplied(true);
                   closeWizard();
@@ -3596,7 +3602,18 @@ export default function App() {
                   </>)}
                   {controlBox(<>
                     <label style={labelStyle}>{promoType === "freebet" ? "Free Bet $" : "Stake $"}</label>
-                    <input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value))} style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                    <input
+                      type="number"
+                      min={1}
+                      value={stakeDraft != null ? stakeDraft : stake}
+                      onChange={(e) => {
+                        const next = nextPromoStakeField(e.target.value);
+                        setStake(next.stake);
+                        setStakeDraft(next.draft);
+                      }}
+                      onBlur={() => setStakeDraft(null)}
+                      style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }}
+                    />
                   </>)}
                   {promoType === "nosweat" && controlBox(<>
                     <label style={labelStyle} title="Site credit counted as cash">Credit %</label>

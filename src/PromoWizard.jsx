@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { nextPromoStakeField } from "./promoParlayScan.js";
 
 // First-run guided setup for Promo Builder. Only calls the setters it is
 // given; no pricing logic lives here.
@@ -23,7 +24,10 @@ export default function PromoWizard({ books, promoTypes, initial, onApply, onSki
     { t: "How big is it?", body: (
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
         {type === "boost" && <label style={{ fontSize: 13, color: "#9ca3af" }}>Boost %<br /><input type="number" value={boost} onChange={(e) => setBoost(Number(e.target.value) || 0)} style={input} /></label>}
-        <label style={{ fontSize: 13, color: "#9ca3af" }}>{type === "freebet" ? "Free bet $" : "Stake $"}<br /><input type="number" value={stake} onChange={(e) => setStake(Number(e.target.value) || 0)} style={input} /></label>
+        <label style={{ fontSize: 13, color: "#9ca3af" }}>{type === "freebet" ? "Free bet $" : "Stake $"}<br /><input type="number" min={1} value={stake} onChange={(e) => {
+          const next = nextPromoStakeField(e.target.value);
+          setStake(next.draft != null ? next.draft : next.stake);
+        }} style={input} /></label>
         <div style={{ fontSize: 13, color: "#9ca3af" }}>Legs (1 = single bet)<br />
           <div style={{ display: "flex", gap: 6, marginTop: 4 }}>{[1, 2, 3, 4].map((n) => <button key={n} type="button" style={chip(legs === n)} onClick={() => setLegs(n)}>{n}</button>)}</div>
         </div>
