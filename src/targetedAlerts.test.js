@@ -48,7 +48,7 @@ assert.equal(isKennethGuido(null), false);
   const ann = kennethOddsBoardAnnouncement();
   assert.equal(ann.id, KENNETH_ODDS_BOARD_ALERT_ID);
   assert.equal(ann.title, "New Odds Board");
-  assert.match(ann.body, /Kevin shared the live New Odds Board/i);
+  assert.match(ann.body, /You now have the live New Odds Board/i);
   assert.match(ann.body, /live odds and moneylines across the books/i);
   assert.match(ann.body, /including Underdog Predict/i);
   assert.match(ann.body, /best odds highlighted/i);
