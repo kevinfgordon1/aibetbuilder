@@ -276,7 +276,9 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, /accessGranted=\{comboAccessApproved\}/);
   assert.match(app, /ComboLocksGate/);
   assert.match(app, /Combo Locks <ComboBetaBadge \/>/);
-  assert.match(app, /\{user && \(\s*<a href=\{tabHash\("combo"\)\}/);
+  // Combo Locks tab shows signed out too; signed-out visitors get the sign-in gate.
+  assert.doesNotMatch(app, /\{user && \(\s*<a href=\{tabHash\("combo"\)\}/);
+  assert.match(app, /activeTab === "combo" && !user && !authLoading && \(\s*<ComboLocksGate user=\{null\}/);
   assert.match(app, /activeTab === "missTape" && canSeeOwnerTools\(user\) && <Suspense[\s\S]*?<ComboTape/);
   assert.doesNotMatch(app, /UnhedgedTape|Unhedged RFQs|tabHash\("unhedged"\)/);
   assert.match(app, /activeTab === "liveDesk" && canSeeOwnerTools\(user\) && \([\s\S]*?<LiveTradingDesk/);
@@ -286,7 +288,8 @@ assert.equal(clearComboHash("#profile"), "#profile");
   assert.match(app, /tabStyle\("combo"\)/);
   assert.match(app, /Combo Locks <ComboBetaBadge \/>/);
   assert.match(app, /href=\{tabHash\("promo"\)\}/);
-  assert.match(app, /href=\{tabHash\("ev"\)\}/);
+  // +EV Bets tab hidden from the main nav (route + API kept).
+  assert.doesNotMatch(app, /href=\{tabHash\("ev"\)\}/);
   assert.match(app, /href=\{tabHash\("odds"\)\}/);
   assert.match(app, /href=\{tabHash\("oddsBetstamp"\)\}/);
   assert.match(app, /href=\{tabHash\("missTape"\)\}/);
