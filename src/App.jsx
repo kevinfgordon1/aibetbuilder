@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useDeferredValue, lazy, Suspense } from "react";
+import { Children, useState, useEffect, useMemo, useRef, useDeferredValue, lazy, Suspense } from "react";
 import { createClient } from "@supabase/supabase-js";
 const ComboLocks = lazy(() => import("./ComboLocks")); // owner/tester tab: own chunk (audit Oct 24)
 const ComboTape = lazy(() => import("./ComboTape")); // owner/tester tab: own chunk (audit Oct 24)
@@ -13,7 +13,7 @@ import ComboLocksGate from "./ComboLocksGate.jsx";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
-import { GUEST_EXPLAINER_COPY, guestActionNeedsSignIn, promoControlSummary } from "./guestAccess.js";
+import { GUEST_EXPLAINER_COPY, GUEST_FULL_PICKS, GUEST_PICKS_GATE_COPY, GUEST_SOFT_PROMPT_COPY, GUEST_SOFT_PROMPT_DELAY_MS, GUEST_SOFT_PROMPT_OPTIMIZES, guestActionNeedsSignIn, promoControlSummary, shouldShowSoftPrompt, markSoftPromptShown } from "./guestAccess.js";
 import { evEmptyState } from "./evEmptyState.js";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
 import PromoWizard from "./PromoWizard.jsx";
@@ -1212,6 +1212,30 @@ function LandingFull({ onBack }) {
   );
 }
 
+function GuestPickGate({ locked, hasMore, onLocked, children }) {
+  const items = Children.toArray(children);
+  if (!locked) return <>{items}</>;
+  const shown = items.slice(0, GUEST_FULL_PICKS);
+  const hidden = items.slice(GUEST_FULL_PICKS);
+  if (!hidden.length && !hasMore) return <>{shown}</>;
+  return (
+    <>
+      {shown}
+      <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", minHeight: 140 }}>
+        <div aria-hidden="true" inert="" style={{ filter: "blur(6px)", pointerEvents: "none", userSelect: "none", display: "flex", flexDirection: "column", gap: 12, maxHeight: 420, overflow: "hidden" }}>
+          {hidden}
+        </div>
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(180deg, rgba(10,10,15,0.35), rgba(10,10,15,0.8))" }}>
+          <button type="button" onClick={onLocked} style={{ padding: "12px 20px", borderRadius: 10, border: "1px solid rgba(212,175,55,0.5)", background: "rgba(212,175,55,0.15)", color: "#d4af37", fontSize: 14, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <GuestLock locked />
+            {GUEST_PICKS_GATE_COPY}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ShowMorePicks({ remaining, locked, onShowMore, onLocked }) {
   return (
     <button
@@ -2228,12 +2252,29 @@ export default function App() {
   };
 
   const guestLocked = !authLoading && !user;
-  const askSignIn = (reason) => {
+  const askSignIn = (reason, source) => {
     if (!guestLocked) return;
     setSignInNotice(null);
     setSignInPrompt(reason || "Sign in to continue.");
-    window.gtag?.("event", "signup_gate_shown");
+    window.gtag?.("event", "signup_gate_shown", source ? { source } : undefined);
   };
+
+  // Soft sign-in nudge for guests: after 2 Optimize runs or 90s on site.
+  // Once per session; 7 days quiet after it is shown and dismissed.
+  const [guestOptimizeCount, setGuestOptimizeCount] = useState(0);
+  const [guestTimeUp, setGuestTimeUp] = useState(false);
+  useEffect(() => {
+    if (!guestLocked) return;
+    const id = setTimeout(() => setGuestTimeUp(true), GUEST_SOFT_PROMPT_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [guestLocked]);
+  useEffect(() => {
+    if (!guestLocked || signInPrompt) return;
+    if (!guestTimeUp && guestOptimizeCount < GUEST_SOFT_PROMPT_OPTIMIZES) return;
+    if (!shouldShowSoftPrompt(Date.now())) return;
+    markSoftPromptShown(Date.now());
+    askSignIn(GUEST_SOFT_PROMPT_COPY, "soft_prompt");
+  }, [guestLocked, guestTimeUp, guestOptimizeCount, signInPrompt]);
 
   const signOut = async () => {
     window.gtag?.('event', 'sign_out');
@@ -2832,6 +2873,7 @@ export default function App() {
     pendingOptimize.current = true;
     pendingOptimizeTarget.current = null;
     setOptimizeBusy(true);
+    if (guestLocked) setGuestOptimizeCount((c) => c + 1);
     window.gtag?.("event", "promo_optimize", {
       promo_type: promoType,
       book: promoBook,
@@ -3772,6 +3814,7 @@ export default function App() {
                     </div>
                   )}
                   {promoDepthNotice}
+                  <GuestPickGate locked={guestLocked} hasMore={promoDepthRank.rest.length > 0} onLocked={() => askSignIn("Sign in free to see all picks.", "picks_blur")}>
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const shownBoostPct = effectiveBoostPct(promoType, boostPct);
@@ -3890,8 +3933,9 @@ export default function App() {
                       </PromoPickView>
                     );
                   })}
+                  </GuestPickGate>
 
-                  {promoDepthRank.rest.length > 0 && (
+                  {promoDepthRank.rest.length > 0 && !guestLocked && (
                     <ShowMorePicks
                       remaining={promoDepthRank.rest.length}
                       locked={guestLocked}
@@ -3921,6 +3965,7 @@ export default function App() {
                     </div>
                   )}
                   {promoDepthNotice}
+                  <GuestPickGate locked={guestLocked} hasMore={promoDepthRank.rest.length > 0} onLocked={() => askSignIn("Sign in free to see all picks.", "picks_blur")}>
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
@@ -4044,8 +4089,9 @@ export default function App() {
                       </PromoPickView>
                     );
                   })}
+                  </GuestPickGate>
 
-                  {promoDepthRank.rest.length > 0 && (
+                  {promoDepthRank.rest.length > 0 && !guestLocked && (
                     <ShowMorePicks
                       remaining={promoDepthRank.rest.length}
                       locked={guestLocked}
@@ -4075,6 +4121,7 @@ export default function App() {
                     </div>
                   )}
                   {promoDepthNotice}
+                  <GuestPickGate locked={guestLocked} hasMore={promoDepthRank.rest.length > 0} onLocked={() => askSignIn("Sign in free to see all picks.", "picks_blur")}>
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs?.length === 1;
                     const showLock = isSingle && !!p.lock?.valid;
@@ -4261,8 +4308,9 @@ export default function App() {
                       </PromoPickView>
                     );
                   })}
+                  </GuestPickGate>
 
-                  {promoDepthRank.rest.length > 0 && (
+                  {promoDepthRank.rest.length > 0 && !guestLocked && (
                     <ShowMorePicks
                       remaining={promoDepthRank.rest.length}
                       locked={guestLocked}

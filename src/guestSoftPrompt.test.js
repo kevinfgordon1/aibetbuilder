@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { shouldShowSoftPrompt, markSoftPromptShown, GUEST_FULL_PICKS, GUEST_SOFT_PROMPT_QUIET_MS } from "./guestAccess.js";
+const mk = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; };
+assert.equal(GUEST_FULL_PICKS, 2);
+const local = mk(); let session = mk();
+assert.equal(shouldShowSoftPrompt(1000, { local, session }), true);
+markSoftPromptShown(1000, { local, session });
+assert.equal(shouldShowSoftPrompt(2000, { local, session }), false);
+session = mk();
+assert.equal(shouldShowSoftPrompt(1000 + GUEST_SOFT_PROMPT_QUIET_MS - 1, { local, session }), false);
+assert.equal(shouldShowSoftPrompt(1000 + GUEST_SOFT_PROMPT_QUIET_MS + 1, { local, session }), true);
+console.log("guestSoftPrompt.test.js ok");
