@@ -2014,10 +2014,6 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (activeTab === "combo" && !user) {
-      setActiveTab("promo");
-      setFocusLockId(null);
-    }
     if (activeTab === "profile" && !user) setActiveTab("promo");
     if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) {
       setActiveTab("promo");
@@ -2029,7 +2025,6 @@ export default function App() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (activeTab === "combo" && !user) return;
     if (activeTab === "profile" && !user) return;
     if ((activeTab === "missTape" || activeTab === "sniperDash" || activeTab === "liveDesk") && !canSeeOwnerTools(user)) return;
     if (activeTab === "oddsBetstamp" && !canSeeNewOddsBoard(user)) return;
@@ -3146,19 +3141,15 @@ export default function App() {
         <a href={tabHash("promo")} title="Start here: find the best bet for your boost or free bet" style={tabStyle("promo")} onClick={onNavTabClick("promo", "promo_builder")}>Promo Builder</a>
         {(comboUnlocked || canSeeOwnerTools(user)) ? (
           <>
-            <a href={tabHash("ev")} style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets</a>
             <a data-guard-allow="true" href={tabHash("odds")} style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
           </>
         ) : (
           <>
             <a data-guard-allow="true" href={tabHash("odds")} title="Compare one game's prices across every book" style={tabStyle("odds")} onClick={onNavTabClick("odds", "odds_board")}>Odds Board</a>
-            <a href={tabHash("ev")} title="Advanced: every bet priced better than our fair-odds estimate" style={tabStyle("ev")} onClick={onNavTabClick("ev", "ev_bets")}>+EV Bets <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>ADVANCED</span></a>
             <a href="/learn" data-tab-learn="true" title="What EV, true odds, ML/SPR/TT and the other terms mean" style={tabStyle("__learn")}>Learn</a>
           </>
         )}
-        {user && (
-          <a href={tabHash("combo")} style={{ ...tabStyle("combo"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={onNavTabClick("combo")}>Combo Locks <ComboBetaBadge /></a>
-        )}
+        <a data-guard-allow="true" href={tabHash("combo")} style={{ ...tabStyle("combo"), display: "inline-flex", alignItems: "center", gap: 6 }} onClick={onNavTabClick("combo")}>Combo Locks <ComboBetaBadge /></a>
         {canSeeNewOddsBoard(user) && (
           <a href={tabHash("oddsBetstamp")} style={tabStyle("oddsBetstamp")} onClick={onNavTabClick("oddsBetstamp", "odds_betstamp")}>New Odds Board</a>
         )}
@@ -3251,6 +3242,9 @@ export default function App() {
           {activeTab === "combo" && comboUnlocked && <Suspense fallback={<div className="empty loading"><span className="spin" aria-hidden="true" />Loading…</div>}><ComboLocks user={user} prefill={comboPrefill} focusLockId={focusLockId} onViewAsChange={setComboViewAs} accessGranted={comboAccessApproved} /></Suspense>}
           {activeTab === "combo" && user && !comboUnlocked && !comboRequestReady && (
             <div className="empty loading" data-testid="combo-beta-loading"><span className="spin" aria-hidden="true" />Loading…</div>
+          )}
+          {activeTab === "combo" && !user && !authLoading && (
+            <ComboLocksGate user={null} supabase={supabase} request={null} onSignIn={() => askSignIn("Sign in to request beta access.")} />
           )}
           {activeTab === "combo" && user && !comboUnlocked && comboRequestReady && (
             <ComboLocksGate user={user} supabase={supabase} request={comboRequest} onRequested={setComboRequest} />

@@ -1,9 +1,9 @@
-// Locked Combo Locks screen for signed-in users who are not on the
+// Locked Combo Locks screen for signed-out visitors (sign in first) and signed-in users who are not on the
 // hardcoded allowlist and do not have an approved access request.
 import { useState } from "react";
 import ComboBetaBadge from "./ComboBetaBadge.jsx";
 
-export default function ComboLocksGate({ user, supabase, request, onRequested }) {
+export default function ComboLocksGate({ user, supabase, request, onRequested, onSignIn }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const pending = request && request.status === "pending";
@@ -32,7 +32,9 @@ export default function ComboLocksGate({ user, supabase, request, onRequested })
         Combo Locks locks in a profit on a sportsbook parlay by offering that same parlay to traders on Kalshi and Polymarket.
       </p>
       <p>It's in beta. Request access and we'll open the page for your account.</p>
-      {!email ? (
+      {!user ? (
+        <button type="button" data-testid="combo-beta-signin" onClick={onSignIn}>Sign in to request access</button>
+      ) : !email ? (
         <p>This account has no email address, so a request can't be saved.</p>
       ) : pending ? (
         <button type="button" disabled data-testid="combo-beta-pending">Request pending</button>
