@@ -54,15 +54,43 @@ export function promoControlSummary({ bookLabel, promoType, boostPct, stake, num
 export const GUEST_FULL_PICKS = 2;
 export const GUEST_PICKS_GATE_COPY = "Sign in free to see all picks";
 
-export const GUEST_SOFT_PROMPT_COPY = "Sign in free to save your boosts and get alerts.";
+export const GUEST_SOFT_PROMPT_TITLE = "Browsing as a guest";
+export const GUEST_SOFT_PROMPT_COPY = "You’re browsing as a guest. Sign in free to save your boosts and unlock the rest of the picks. No card.";
 export const GUEST_SOFT_PROMPT_OPTIMIZES = 2;
-export const GUEST_SOFT_PROMPT_DELAY_MS = 90 * 1000;
 export const GUEST_SOFT_PROMPT_QUIET_MS = 7 * 24 * 60 * 60 * 1000;
+// supabase-js session slot. Not the PKCE verifier (sb-…-auth-token-code-verifier).
+const STORED_AUTH_KEY = /^sb-.+-auth-token$/;
 const SOFT_LOCAL_KEY = "abb_soft_signin_prompt_at";
 const SOFT_SESSION_KEY = "abb_soft_signin_prompt_session";
 
 function safeStore(kind) {
   try { return typeof window !== "undefined" ? window[kind] : null; } catch { return null; }
+}
+
+/** True when localStorage still holds a Supabase session that may be restoring. */
+export function hasStoredAuthSession(storage) {
+  if (!storage || typeof storage.length !== "number" || typeof storage.key !== "function") return false;
+  try {
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !STORED_AUTH_KEY.test(key)) continue;
+      const value = storage.getItem(key);
+      if (value && (value.includes("access_token") || value.includes("refresh_token"))) return true;
+    }
+  } catch { return false; }
+  return false;
+}
+
+/**
+ * Soft guest tip only. Hard gates use askSignIn directly.
+ * Auth must be finished, the visitor must be signed out, and no sb-*-auth-token
+ * may still be sitting in storage (a refresh can still be in flight).
+ */
+export function canShowGuestSoftPrompt({ user, authLoading, storage } = {}) {
+  if (authLoading) return false;
+  if (user) return false;
+  if (hasStoredAuthSession(storage)) return false;
+  return true;
 }
 
 // Pure check, storage injectable for tests.

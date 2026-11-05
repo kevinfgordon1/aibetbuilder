@@ -13,7 +13,7 @@ import ComboLocksGate from "./ComboLocksGate.jsx";
 import { encodePromoCardId, decodePromoCardId, encodeEvCardId, buildShareCardModel, promoPrefsFromRoute, persistPickFocusInHash, hashCardIdForTab, shouldApplySharePromoPrefs, consumePendingShareCard } from "./shareCard";
 import ShareCardActions from "./ShareCardActions";
 import GuestLock from "./GuestLock.jsx";
-import { GUEST_EXPLAINER_COPY, GUEST_FULL_PICKS, GUEST_PICKS_GATE_COPY, GUEST_SOFT_PROMPT_COPY, GUEST_SOFT_PROMPT_DELAY_MS, GUEST_SOFT_PROMPT_OPTIMIZES, guestActionNeedsSignIn, promoControlSummary, shouldShowSoftPrompt, markSoftPromptShown } from "./guestAccess.js";
+import { GUEST_EXPLAINER_COPY, GUEST_FULL_PICKS, GUEST_PICKS_GATE_COPY, GUEST_SOFT_PROMPT_COPY, GUEST_SOFT_PROMPT_TITLE, GUEST_SOFT_PROMPT_OPTIMIZES, canShowGuestSoftPrompt, guestActionNeedsSignIn, promoControlSummary, shouldShowSoftPrompt, markSoftPromptShown } from "./guestAccess.js";
 import { evEmptyState } from "./evEmptyState.js";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
 import PromoWizard from "./PromoWizard.jsx";
@@ -1701,6 +1701,7 @@ export default function App() {
   });
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [signInPrompt, setSignInPrompt] = useState(null);
+  const [signInSource, setSignInSource] = useState(null);
   const [signInNotice, setSignInNotice] = useState(null);
   const [showLanding, setShowLanding] = useState(false);
   const [promoControlsOpen, setPromoControlsOpen] = useState(false);
@@ -1824,6 +1825,7 @@ export default function App() {
       if (restored) window.history.replaceState(null, "", restored);
       if (notice) {
         setSignInNotice(notice);
+        setSignInSource(null);
         setSignInPrompt(notice.message);
       }
       const u = session?.user ?? null;
@@ -2259,26 +2261,24 @@ export default function App() {
   const askSignIn = (reason, source) => {
     if (!guestLocked) return;
     setSignInNotice(null);
+    setSignInSource(source || null);
     setSignInPrompt(reason || "Sign in to continue.");
     window.gtag?.("event", "signup_gate_shown", source ? { source } : undefined);
   };
 
-  // Soft sign-in nudge for guests: after 2 Optimize runs or 90s on site.
-  // Once per session; 7 days quiet after it is shown and dismissed.
+  // Guest tip after 2 Optimize runs. No timer, so looking around does not
+  // open a modal. Once per session; 7 days quiet after it is shown.
+  // Skipped while auth is loading or a sb-*-auth-token is still in storage.
   const [guestOptimizeCount, setGuestOptimizeCount] = useState(0);
-  const [guestTimeUp, setGuestTimeUp] = useState(false);
   useEffect(() => {
-    if (!guestLocked) return;
-    const id = setTimeout(() => setGuestTimeUp(true), GUEST_SOFT_PROMPT_DELAY_MS);
-    return () => clearTimeout(id);
-  }, [guestLocked]);
-  useEffect(() => {
-    if (!guestLocked || signInPrompt) return;
-    if (!guestTimeUp && guestOptimizeCount < GUEST_SOFT_PROMPT_OPTIMIZES) return;
+    if (signInPrompt) return;
+    const storage = typeof localStorage !== "undefined" ? localStorage : null;
+    if (!canShowGuestSoftPrompt({ user, authLoading, storage })) return;
+    if (guestOptimizeCount < GUEST_SOFT_PROMPT_OPTIMIZES) return;
     if (!shouldShowSoftPrompt(Date.now())) return;
     markSoftPromptShown(Date.now());
     askSignIn(GUEST_SOFT_PROMPT_COPY, "soft_prompt");
-  }, [guestLocked, guestTimeUp, guestOptimizeCount, signInPrompt]);
+  }, [user, authLoading, guestOptimizeCount, signInPrompt]);
 
   const signOut = async () => {
     window.gtag?.('event', 'sign_out');
@@ -4375,8 +4375,8 @@ export default function App() {
       {signInPrompt && (
         <div className="signin-modal-back" onClick={() => setSignInPrompt(null)}>
           <div className="signin-modal" role="dialog" aria-modal="true" aria-labelledby="signin-prompt-title" onClick={(e) => e.stopPropagation()}>
-            <h2 id="signin-prompt-title">Sign in to continue</h2>
-            <p>{signInNotice ? "Something went wrong with that sign-in." : signInPrompt} It’s free — no card.</p>
+            <h2 id="signin-prompt-title">{signInSource === "soft_prompt" && !signInNotice ? GUEST_SOFT_PROMPT_TITLE : "Sign in to continue"}</h2>
+            <p>{signInNotice ? "Something went wrong with that sign-in." : signInPrompt}{signInSource === "soft_prompt" && !signInNotice ? "" : " It’s free — no card."}</p>
             <SignInPanel id="signin-modal-panel" supabaseClient={supabase} initialStatus={signInNotice} />
             <div className="signin-modal-actions" style={{ marginTop: 14 }}>
               <button type="button" onClick={() => setSignInPrompt(null)} style={{ background: "transparent", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Not now</button>
