@@ -2,6 +2,7 @@
 // hardcoded allowlist and do not have an approved access request.
 import { useState } from "react";
 import ComboBetaBadge from "./ComboBetaBadge.jsx";
+import { ComboFlowGraphic, ComboMemberPreview, GATE_PREVIEW_CSS } from "./ComboLocksGatePreview.jsx";
 
 export default function ComboLocksGate({ user, supabase, request, onRequested, onSignIn }) {
   const [busy, setBusy] = useState(false);
@@ -26,11 +27,13 @@ export default function ComboLocksGate({ user, supabase, request, onRequested, o
 
   return (
     <div className="combo-beta-gate" data-testid="combo-beta-gate">
+      <style>{GATE_PREVIEW_CSS}</style>
       <ComboBetaBadge />
       <h1>Combo Locks</h1>
       <p>
         Submit a parlay you've already bet at your sportsbook, and Combo Locks hedges it for you on Kalshi and Polymarket US. Hedge most or all of it to lock in profit whether the parlay wins or loses.
       </p>
+      <ComboFlowGraphic />
       <ol className="combo-beta-steps" data-testid="combo-beta-steps" style={{ textAlign: "left", lineHeight: 1.5, margin: "12px 0", paddingLeft: 20 }}>
         <li>Place a boosted or +EV parlay at your sportsbook.</li>
         <li>Submit that parlay to Combo Locks as a lock.</li>
@@ -45,6 +48,7 @@ export default function ComboLocksGate({ user, supabase, request, onRequested, o
         <div>Locked profit: <b>+$27</b> win or lose</div>
         <div className="muted" style={{ fontSize: 11 }}>Illustration only. Real prices and fills vary.</div>
       </div>
+      <ComboMemberPreview />
       <p>It's in beta. Request access and we'll open the page for your account.</p>
       {!user ? (
         <button type="button" data-testid="combo-beta-signin" onClick={onSignIn}>Sign in to request access</button>
