@@ -26,7 +26,7 @@
 // (early-exit on a usable quote), shows best maker NO / implied fill, then
 // deletes the RFQ. Never accept/confirm.
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, gameStartFromLegs, dateOnlyLegDays, etDateOf, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER, slateIncomplete } from "./comboPrefill";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
@@ -76,7 +76,7 @@ import {
   undoStatus,
 } from "./comboMerge";
 
-const realSupabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+const realSupabase = getBrowserSupabase();
 export { OWNER_EMAIL };
 
 /* ── engine (mirrors worker engine.js exactly) ── */

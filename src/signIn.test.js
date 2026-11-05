@@ -18,10 +18,15 @@ import {
   authCallbackError,
   startOAuthSignIn,
   sendMagicLink,
+  sendEmailCode,
+  verifyEmailCode,
+  normalizeOtpCode,
+  isCompleteOtp,
   oauthProviderEnabled,
   loadAuthSettings,
   resetAuthSettingsCache,
 } from "./signIn.js";
+import { createClient } from "@supabase/supabase-js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -101,6 +106,8 @@ assert.equal(safeAppHash("https://evil.example/#ev"), "");
   assert.match(disabled.message, /isn’t turned on yet/);
   const bad = describeAuthError({ message: "Unable to validate email address: invalid format" });
   assert.equal(bad.message, "Enter a valid email address.");
+  const expiredLink = describeAuthError({ message: "Email link is invalid or has expired", code: "otp_expired" });
+  assert.match(expiredLink.message, /expired or not valid/);
   const callback = authCallbackError({
     hash: "#error=access_denied&error_code=400&error_description=" + encodeURIComponent("Provider is not enabled"),
     search: "",
@@ -180,6 +187,135 @@ assert.equal(safeAppHash("https://evil.example/#ev"), "");
 }
 
 {
+  assert.equal(normalizeOtpCode(" 12-34 56 "), "123456");
+  assert.equal(normalizeOtpCode("1234567"), "123456");
+  assert.equal(normalizeOtpCode("abc"), "");
+  assert.equal(isCompleteOtp("123456"), true);
+  assert.equal(isCompleteOtp("12345"), false);
+  const loc = { origin: "https://www.aibetbuilder.io", pathname: "/", search: "", hash: "#ev" };
+  let sentArgs = null;
+  const sent = await sendEmailCode({
+    auth: {
+      async signInWithOtp(args) {
+        sentArgs = args;
+        return { data: { user: null, session: null }, error: null };
+      },
+    },
+  }, "Fan@Example.com", loc);
+  assert.equal(sent.ok, true);
+  assert.equal(sent.kind, "code");
+  assert.equal(sent.email, "fan@example.com");
+  assert.equal(sentArgs.options.shouldCreateUser, true);
+  assert.equal(new URL(sentArgs.options.emailRedirectTo).searchParams.get(AUTH_NEXT_PARAM), "#ev");
+  let verifyArgs = null;
+  const session = { access_token: "token", refresh_token: "refresh", user: { id: "u", email: "fan@example.com" } };
+  const verified = await verifyEmailCode({
+    auth: {
+      async verifyOtp(args) {
+        verifyArgs = args;
+        return { data: { session, user: session.user }, error: null };
+      },
+    },
+  }, "fan@example.com", "12 34-56");
+  assert.equal(verified.ok, true);
+  assert.equal(verified.kind, "session");
+  assert.equal(verified.session.access_token, "token");
+  assert.deepEqual(verifyArgs, { email: "fan@example.com", token: "123456", type: "email" });
+  let called = false;
+  const short = await verifyEmailCode({
+    auth: { async verifyOtp() { called = true; return { data: null, error: null }; } },
+  }, "fan@example.com", "12345");
+  assert.equal(called, false);
+  assert.equal(short.ok, false);
+  assert.match(short.message, /6-digit code/);
+  const expired = await verifyEmailCode({
+    auth: {
+      async verifyOtp() {
+        return { data: { session: null, user: null }, error: { message: "Token has expired or is invalid", code: "otp_expired", status: 403 } };
+      },
+    },
+  }, "fan@example.com", "123456");
+  assert.equal(expired.ok, false);
+  assert.match(expired.message, /expired or not valid/);
+  const empty = await verifyEmailCode({
+    auth: {
+      async verifyOtp() {
+        return { data: { session: null, user: null }, error: null };
+      },
+    },
+  }, "fan@example.com", "123456");
+  assert.equal(empty.ok, false);
+  assert.match(empty.message, /didn’t sign you in/);
+}
+
+{
+  const storage = new Map();
+  const memory = {
+    getItem: (key) => (storage.has(key) ? storage.get(key) : null),
+    setItem: (key, value) => { storage.set(key, String(value)); },
+    removeItem: (key) => { storage.delete(key); },
+  };
+  const exp = Math.floor(Date.now() / 1000) + 3600;
+  const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const accessToken = b64({ alg: "HS256", typ: "JWT" }) + "." + b64({
+    sub: "11111111-1111-1111-1111-111111111111",
+    email: "fan@example.com",
+    aud: "authenticated",
+    role: "authenticated",
+    exp,
+  }) + ".sig";
+  const user = {
+    id: "11111111-1111-1111-1111-111111111111",
+    aud: "authenticated",
+    role: "authenticated",
+    email: "fan@example.com",
+    app_metadata: { provider: "email" },
+    user_metadata: {},
+  };
+  const body = {
+    access_token: accessToken,
+    refresh_token: "refresh-token-value",
+    expires_in: 3600,
+    expires_at: exp,
+    token_type: "bearer",
+    user,
+  };
+  const fetchImpl = async (url) => {
+    const href = String(url);
+    if (href.includes("/verify")) {
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const auth = {
+    storage: memory,
+    persistSession: true,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    flowType: "implicit",
+  };
+  const client = createClient("https://example.supabase.co", "test-anon-key", {
+    auth,
+    global: { fetch: fetchImpl },
+  });
+  const verified = await verifyEmailCode(client, "fan@example.com", "123456");
+  assert.equal(verified.ok, true);
+  assert.equal(verified.session.access_token, accessToken);
+  const stored = JSON.parse(memory.getItem("sb-example-auth-token"));
+  assert.equal(stored.access_token, accessToken);
+  assert.equal(stored.user.email, "fan@example.com");
+  const { data: { session } } = await client.auth.getSession();
+  assert.equal(session.access_token, accessToken);
+  const again = createClient("https://example.supabase.co", "test-anon-key", {
+    auth,
+    global: { fetch: fetchImpl },
+  });
+  const second = await again.auth.getSession();
+  assert.equal(second.data.session.user.email, "fan@example.com");
+  assert.equal(second.data.session.access_token, accessToken);
+}
+
+{
   const types = fs.readFileSync(path.join(dir, "..", "node_modules", "@supabase", "auth-js", "src", "lib", "types.ts"), "utf8");
   const providerBlock = types.slice(types.indexOf("export type Provider ="), types.indexOf("export type AuthChangeEventMFA"));
   assert.match(providerBlock, /\| 'x'/);
@@ -199,8 +335,18 @@ assert.equal(safeAppHash("https://evil.example/#ev"), "");
   assert.match(app, /askSignIn\(/);
   assert.match(app, /signin-prompt-title/);
   assert.match(app, /Sign in to continue/);
+  assert.match(app, /if \(user\) setSignInPrompt\(null\)/);
+  assert.match(app, /email code or link/);
   assert.match(panel, /Send me a sign-in link/);
+  assert.match(panel, /Email me a 6-digit code/);
   assert.match(panel, /Check your email/);
+  assert.match(panel, /Open in Safari or Chrome/);
+  assert.match(panel, /data-signin-copy-link/);
+  assert.match(panel, /data-signin-open-external/);
+  assert.match(panel, /data-signin-otp/);
+  assert.match(panel, /data-signin-email-code/);
+  assert.match(panel, /verifyEmailCode/);
+  assert.match(panel, /inApp \? null/);
   assert.match(panel, /data-signin-google/);
   assert.match(panel, /data-signin-x/);
   assert.match(panel, /data-signin-facebook/);

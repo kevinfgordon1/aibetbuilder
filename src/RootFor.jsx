@@ -6,20 +6,15 @@ import PnlCurve from "./RootForCurve";
 import EvBars from "./RootForEvBars";
 import SweatMeter, { PillLoading, pregameView } from "./RootForSweat";
 import { expectedProfit, lockDecided, dayValue } from "./rootForSweat";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { todayEvents, touchedLocks, sheetDayLabel, sheetDay, todayDay, todayDayLabel, unpricedText } from "./rootForToday";
 import { summarySentence, kickoffRef, chanceWords, typicalRange, topByGain, topByDrop, sMoney, fmtAmerican, americanFromP } from "./rootForSimple";
 
 const VIEW_KEY = "rootfor.view";
 const readView = () => { try { return (typeof localStorage !== "undefined" && localStorage.getItem(VIEW_KEY)) === "detailed" ? "detailed" : "simple"; } catch { return "simple"; } };
 
-let client = null;
 function supabase() {
-  if (client) return client;
-  const url = import.meta.env.VITE_SUPABASE_URL; const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  client = createClient(url, key);
-  return client;
+  return getBrowserSupabase();
 }
 const usd = (n) => (n == null || !Number.isFinite(Number(n)) ? "—" : (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const sUsd = (n) => (n > 0 ? "+" : "") + usd(n);
