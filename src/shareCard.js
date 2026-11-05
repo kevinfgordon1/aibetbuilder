@@ -252,12 +252,12 @@ export const SHARE_PROMO_TYPE_LABELS = {
 
 // Share image: 1080px wide portrait card (reads as a phone screenshot or a
 // social post). Height grows with the number of legs; rows shrink as legs
-// are added so 10 legs still fit. Anything past SHARE_MAX_LEGS collapses
+// are added so 12 legs still fit. Anything past SHARE_MAX_LEGS collapses
 // into a "+N more legs" row.
 const SHARE_WIDTH = 1080;
 const SHARE_MIN_HEIGHT = 1080;
 const SHARE_PAD = 64;
-const SHARE_MAX_LEGS = 10;
+const SHARE_MAX_LEGS = 12;
 
 function finiteNum(v) {
   if (v == null || v === "") return null;

@@ -495,10 +495,10 @@ console.log("shareCard.test.js ok");
 
   const many = buildShareCardModel({
     kind: "promo", promoType: "boost", stake: 25, ev: 3, odds: "+9000",
-    legs: Array.from({ length: 12 }, (_, i) => ({ name: "Team " + i + " with a really really long name -3.5", market: "SPR", game: "A @ B", dk: -110 })),
+    legs: Array.from({ length: 14 }, (_, i) => ({ name: "Team " + i + " with a really really long name -3.5", market: "SPR", game: "A @ B", dk: -110 })),
   });
   const lay = shareCardLayout(many);
-  assert.equal(lay.shown, 10);
+  assert.equal(lay.shown, 12);
   assert.equal(lay.more, 2);
   assert.ok(lay.height > 1080 && lay.height < 2000);
   assert.ok(lay.L.footer > lay.L.stats);

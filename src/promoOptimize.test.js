@@ -80,7 +80,7 @@ const leg = (name, game = "A @ B", dk = 150, bestOpp = -160) => ({
   assert.ok(best, "cross-leg optimize returns a winner");
   assert.equal(best.numLegs, 4, "highest EV across 1..4 is the 4-leg (synthetic calc)");
   assert.equal(best.pick.legs.length, 4);
-  assert.equal(SCAN_MAX_PROMO_LEGS, 10);
+  assert.equal(SCAN_MAX_PROMO_LEGS, 12);
 }
 
 {
