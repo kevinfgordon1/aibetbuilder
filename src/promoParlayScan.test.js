@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, findBestAcrossLegCounts, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange, SCAN_MAX_PROMO_LEGS, SCAN_GROW_FROM_3_SEEDS } from "./promoParlayScan.js";
+import { rescaleParlaysForStake, rescaleFreeBetConversions, findTopParlaysChunked, findBestAcrossLegCounts, promoScanEmptyState, promoScanInputKey, considerTopByEv, finalizeTopByEv, preferTimerYield, shouldTake, passesOddsBounds, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, nextPromoSessionAfterFilterChange, SCAN_MAX_PROMO_LEGS, SCAN_GROW_FROM_3_SEEDS, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK } from "./promoParlayScan.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 
 const require = createRequire(import.meta.url);
@@ -253,6 +253,43 @@ const scanSrc = fs.readFileSync(path.join(dir, "promoParlayScan.js"), "utf8");
   assert.equal(rescaleParlaysForStake(parlays, 100, 100), parlays);
   assert.deepEqual(rescaleParlaysForStake([], 100, 50), []);
   assert.equal(rescaleParlaysForStake(parlays, 0, 50), parlays);
+}
+
+// ── Cleared / 0 / negative stake must not zero displayed EV
+{
+  assert.equal(PROMO_STAKE_FALLBACK, 100);
+  assert.equal(promoStakeOrDefault(""), 100);
+  assert.equal(promoStakeOrDefault(0), 100);
+  assert.equal(promoStakeOrDefault(-5), 100);
+  assert.equal(promoStakeOrDefault("40"), 40);
+  assert.equal(promoStakeOrDefault(0.5), 0.5);
+  assert.deepEqual(nextPromoStakeField(""), { stake: 100, draft: "" });
+  assert.deepEqual(nextPromoStakeField("0"), { stake: 100, draft: "0" });
+  assert.deepEqual(nextPromoStakeField("-3"), { stake: 100, draft: "-3" });
+  assert.deepEqual(nextPromoStakeField("25"), { stake: 25, draft: null });
+
+  const at100 = [{ ev: 12.5, boostedProfit: 40, winProfit: 30, legs: [] }];
+  assert.equal(rescaleParlaysForStake(at100, 100, 0), at100, "stake 0 at the $100 fallback is not a wipe");
+  assert.equal(rescaleParlaysForStake(at100, 100, ""), at100);
+  assert.equal(rescaleParlaysForStake(at100, 100, -8), at100);
+  const at40 = [{ ev: 10, boostedProfit: 20, winProfit: 16, creditValue: 4, refund: 8, loseNet: -6 }];
+  const as100 = rescaleParlaysForStake(at40, 40, 0);
+  assert.ok(Math.abs(as100[0].ev - 25) < 1e-9, "cleared stake rescales display to the $100 default");
+  assert.ok(Math.abs(as100[0].boostedProfit - 50) < 1e-9);
+  assert.ok(Math.abs(as100[0].winProfit - 40) < 1e-9);
+  assert.ok(as100[0].ev !== 0);
+
+  const hedges = [{ hedgeStake: 80, guaranteedCash: 56, conversionRate: 0.7 }];
+  assert.equal(rescaleFreeBetConversions(hedges, 100, 0), hedges);
+  const hedges40 = rescaleFreeBetConversions([{ hedgeStake: 32, guaranteedCash: 20, conversionRate: 0.5 }], 40, "");
+  assert.ok(Math.abs(hedges40[0].hedgeStake - 80) < 1e-9);
+  assert.ok(Math.abs(hedges40[0].guaranteedCash - 50) < 1e-9);
+  assert.equal(hedges40[0].conversionRate, 0.5);
+
+  assert.match(app, /promoStakeOrDefault\(scanStakeRef\.current\)/);
+  assert.match(app, /nextPromoStakeField\(e\.target\.value\)/);
+  assert.match(app, /min=\{1\}/);
+  assert.doesNotMatch(app, /setStake\(Number\(e\.target\.value\)\)/);
 }
 
 function mkLeg(name, game, dk, bestOpp) {

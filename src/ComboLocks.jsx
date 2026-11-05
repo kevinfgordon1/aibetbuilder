@@ -1853,7 +1853,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
               <div><label>Boost % (optional)</label><input className="num" type="number" value={form.boostPct} onChange={(e) => setForm({ ...form, boostPct: e.target.value })} placeholder="25" /></div>
             </div>
             <div className="row c3" style={{ marginTop: 14 }}>
-              <div><label>{lockKind(form) === "freebet" ? "Free bet amount ($)" : "Your stake ($)"}</label><input className="num" type="number" value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
+              <div><label>{lockKind(form) === "freebet" ? "Free bet amount ($)" : "Your stake ($)"}</label><input className="num" type="number" min={1} value={form.stake} onChange={(e) => setForm({ ...form, stake: e.target.value })} /></div>
               <div><label>{lockKind(form) === "freebet" ? "Your parlay odds at the book" : "Your odds at the book (boosted)"}</label><input className="num" type="number" value={form.boost} onChange={(e) => setForm({ ...form, boost: e.target.value })} /></div>
               <div><label style={{ display: "flex", alignItems: "center", gap: 6 }}>{feeOn ? "Your all-in price (includes 1% fee)" : "Sell at (odds you offer, after fees)"}
                 {+form.fill ? <span className="info" tabIndex={0} data-tip={`The buyer gets ${fmtAm(fillView(+form.fill).effTaker)}, a bit worse than your ${fmtAm(+form.fill)}, because their fee (7%) is bigger than yours. That's the price they shop on.`}>i</span> : null}

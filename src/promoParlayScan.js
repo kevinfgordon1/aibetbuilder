@@ -429,20 +429,30 @@ export async function findBestAcrossLegCounts(legs, calc, {
   return best;
 }
 
+// Cleared Stake $ / Free Bet $ becomes 0 (`Number("") === 0`). That is not a
+// real stake. Scan and display both use this fallback so EV is not rescaled to $0.
+export const PROMO_STAKE_FALLBACK = 100;
+
+export function promoStakeOrDefault(value, fallback = PROMO_STAKE_FALLBACK) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// While the field is empty, 0, or negative, keep those keystrokes visible and
+// use the fallback for scan + display. A positive amount commits immediately.
+export function nextPromoStakeField(raw, fallback = PROMO_STAKE_FALLBACK) {
+  const text = raw == null ? "" : String(raw);
+  const n = Number(text);
+  if (text !== "" && Number.isFinite(n) && n > 0) return { stake: n, draft: null };
+  return { stake: fallback, draft: text };
+}
+
 export function rescaleParlaysForStake(parlays, fromStake, toStake) {
   if (!parlays?.length) return parlays || [];
   const from = Number(fromStake);
-  const to = Number(toStake);
-  if (!isFinite(from) || from === 0 || from === to) return parlays;
-  if (!isFinite(to)) {
-    return parlays.map((p) => {
-      const next = { ...p };
-      for (const field of STAKE_LINEAR_FIELDS) {
-        if (typeof p[field] === "number") next[field] = 0;
-      }
-      return next;
-    });
-  }
+  // Empty / 0 / negative target is a cleared input, not a request to wipe EV.
+  const to = promoStakeOrDefault(toStake);
+  if (!Number.isFinite(from) || !(from > 0) || from === to) return parlays;
   const scale = to / from;
   return parlays.map((p) => {
     const next = { ...p };
@@ -456,11 +466,8 @@ export function rescaleParlaysForStake(parlays, fromStake, toStake) {
 export function rescaleFreeBetConversions(list, fromAmount, toAmount) {
   if (!list?.length) return list || [];
   const from = Number(fromAmount);
-  const to = Number(toAmount);
-  if (!isFinite(from) || from === 0 || from === to) return list;
-  if (!isFinite(to)) {
-    return list.map((x) => ({ ...x, hedgeStake: 0, guaranteedCash: 0 }));
-  }
+  const to = promoStakeOrDefault(toAmount);
+  if (!Number.isFinite(from) || !(from > 0) || from === to) return list;
   const scale = to / from;
   return list.map((x) => ({
     ...x,
