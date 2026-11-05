@@ -10,8 +10,8 @@ const { conflictsWithAny, promoLegsCorrelate } = playerTd;
 
 export const SCAN_YIELD_MS = 8;
 // Keep in step with App.jsx / lib/promo-ev MAX_PROMO_LEGS. 4+ legs still grow
-// from SCAN_GROW_FROM_3_SEEDS three-leg seeds — do not enumerate C(n,9) or C(n,10).
-export const SCAN_MAX_PROMO_LEGS = 10;
+// from SCAN_GROW_FROM_3_SEEDS three-leg seeds — do not enumerate C(n,11) or C(n,12).
+export const SCAN_MAX_PROMO_LEGS = 12;
 export const SCAN_GROW_FROM_3_SEEDS = 50;
 
 // Identity of the boost/nosweat scan inputs, including pool contents. Used so
