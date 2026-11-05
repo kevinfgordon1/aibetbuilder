@@ -4,7 +4,7 @@
 // amounts only when tape columns exist.
 // Lock settlement copy is official kalshi_result via settlementFromStored.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { formatCents } from "./comboDesk";
 import { OWNER_EMAIL } from "./ComboLocks";
 import {
@@ -27,7 +27,7 @@ import {
 } from "./comboTape";
 import { settlementFromStored } from "./comboSettlement";
 
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+const supabase = getBrowserSupabase();
 
 const SCOPE = [
   { key: "active", label: "Active" },
@@ -185,7 +185,7 @@ export default function ComboTape({ user }) {
   const [poll, setPoll] = useState(false);
 
   const reload = useCallback(async (mode = "full") => {
-    if (!owner || !user?.id) return;
+    if (!owner || !user?.id || !supabase) return;
     if (mode === "tick") {
       const { data: peek } = await supabase
         .from("combo_parlays")

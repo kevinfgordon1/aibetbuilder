@@ -3,7 +3,7 @@
 // + canSeeComboLocks). isOwner / canSeeLocks default false so public or
 // non-allowlisted profiles never mention the feature or fetch combo_*.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { canSeeOwnerTools, comboLockHash, profileShowsComboPnl } from "./comboAccess";
 import { identityFromUser, profileDisplayName } from "./userProfile";
 import { sportChipSelected, toggleSportChip } from "./sportChips";
@@ -12,7 +12,7 @@ import { buildComboStatement } from "./comboStatement";
 import { fetchAllRows } from "./comboPaging";
 import StatementBoard, { downloadStatementCsv, useStatementView } from "./StatementBoard";
 
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+const supabase = getBrowserSupabase();
 
 export default function UserProfile({
   user,
@@ -49,6 +49,10 @@ export default function UserProfile({
 
   const loadStatement = useCallback(async () => {
     if (!showPnl || !user?.id) {
+      setStatement(null);
+      return;
+    }
+    if (!supabase) {
       setStatement(null);
       return;
     }

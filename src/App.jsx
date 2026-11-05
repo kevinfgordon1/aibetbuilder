@@ -1,5 +1,5 @@
 import { Children, useState, useEffect, useMemo, useRef, useDeferredValue, lazy, Suspense } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase, userAfterAuthEvent } from "./supabaseBrowser.js";
 const ComboLocks = lazy(() => import("./ComboLocks")); // owner/tester tab: own chunk (audit Oct 24)
 const ComboTape = lazy(() => import("./ComboTape")); // owner/tester tab: own chunk (audit Oct 24)
 const SniperDashboard = lazy(() => import("./SniperDashboard")); // owner/tester tab: own chunk (audit Oct 24)
@@ -157,18 +157,7 @@ import {
 
 const { conflictsWithAny, playerTdLegsForBook, playerTdsFromCacheRows, promoLegsCorrelate } = playerTd;
 
-function createBrowserSupabase() {
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  try {
-    return createClient(url, key);
-  } catch (err) {
-    console.error("Supabase client failed to start", err);
-    return null;
-  }
-}
-const supabase = createBrowserSupabase();
+const supabase = getBrowserSupabase();
 
 // ── Activity logging helper ──────────────────────────────────────────────
 // NOTE: supabase-js v2 query builders are lazy thenables — the HTTP request
@@ -1854,10 +1843,19 @@ export default function App() {
     }).catch(() => {
       if (!cancelled) setAuthLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const next = session?.user ?? null;
-      setUser(next);
-      if (next) setShowLanding(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const apply = (next) => {
+        if (cancelled) return;
+        setUser(next);
+        if (next) setShowLanding(false);
+      };
+      // A refresh race can emit SIGNED_OUT after another writer saved a new
+      // token. Re-read storage before dropping the user. signOut leaves it empty.
+      if (event === "SIGNED_OUT") {
+        userAfterAuthEvent(supabase, event, session).then(apply);
+        return;
+      }
+      apply(session?.user ?? null);
     });
     return () => {
       cancelled = true;

@@ -322,8 +322,8 @@ export async function sendEmailCode(client, emailRaw, loc) {
 
 /**
  * Turn the 6-digit code into a session on this client. supabase-js writes that
- * session to localStorage (persistSession default), so a later getSession on
- * this browser — including another createClient with the same project — sees it.
+ * session to localStorage (persistSession default). The page uses one browser
+ * client (supabaseBrowser.js), so later reads and token refresh share it.
  */
 export async function verifyEmailCode(client, emailRaw, codeRaw) {
   const email = normalizeSignInEmail(emailRaw);

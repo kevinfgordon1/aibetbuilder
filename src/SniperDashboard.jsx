@@ -1,17 +1,13 @@
 // Sniper dashboard — owner-only (canSeeOwnerTools). Read-only view of the isolated Combo Sniper
 // service (sniper_ledger / sniper_decisions) via /api/sniper-dashboard. No trading controls.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { fmtAmerican, fmtUsd, takerSeesAmerican } from "./sniperDashboard.js";
 import SniperMatched, { MyFills } from "./SniperMatched";
 import RootFor from "./RootFor";
 
-let client = null;
 function supabase() {
-  if (client) return client;
-  const url = import.meta.env.VITE_SUPABASE_URL; const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  client = createClient(url, key); return client;
+  return getBrowserSupabase();
 }
 const C = { bg: "#141414", surface: "#181818", head: "#1f1f1f", border: "#2a2a2a", gold: "#bc9e66", text: "#e4e0d8", text2: "#a8a49c", muted: "#8a8a8a", good: "#7cc49a", bad: "#d88c84", warn: "#e0a04a" };
 const card = { background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 };

@@ -1,7 +1,7 @@
 // Private Live Trading Desk. Owner gate is canSeeOwnerTools (Kevin), same as
 // Miss tape / Unhedged — not the Underdog allowlist. The API checks again.
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
@@ -12,14 +12,8 @@ import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLi
 import { orderTags, orderTagLine } from "./liveDeskOrderTags";
 import { NOVIG_VENUE, isNovigMarketId, quoteNovigRest } from "./liveDeskNovig";
 
-let supabaseClient = null;
 function supabase() {
-  if (supabaseClient) return supabaseClient;
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  supabaseClient = createClient(url, key);
-  return supabaseClient;
+  return getBrowserSupabase();
 }
 
 async function authHeaders() {
