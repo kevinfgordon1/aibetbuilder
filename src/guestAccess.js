@@ -49,3 +49,33 @@ export function promoControlSummary({ bookLabel, promoType, boostPct, stake, num
   else if (promoType === "nosweat") promoBit = "No sweat";
   return `${book} · ${promoBit} · ${money(stake)} · ${legWord(numLegs)}`;
 }
+
+// Signed-out visitors see this many ranked picks in full; the rest blur.
+export const GUEST_FULL_PICKS = 2;
+export const GUEST_PICKS_GATE_COPY = "Sign in free to see all picks";
+
+export const GUEST_SOFT_PROMPT_COPY = "Sign in free to save your boosts and get alerts.";
+export const GUEST_SOFT_PROMPT_OPTIMIZES = 2;
+export const GUEST_SOFT_PROMPT_DELAY_MS = 90 * 1000;
+export const GUEST_SOFT_PROMPT_QUIET_MS = 7 * 24 * 60 * 60 * 1000;
+const SOFT_LOCAL_KEY = "abb_soft_signin_prompt_at";
+const SOFT_SESSION_KEY = "abb_soft_signin_prompt_session";
+
+function safeStore(kind) {
+  try { return typeof window !== "undefined" ? window[kind] : null; } catch { return null; }
+}
+
+// Pure check, storage injectable for tests.
+export function shouldShowSoftPrompt(nowMs, { local = safeStore("localStorage"), session = safeStore("sessionStorage") } = {}) {
+  try {
+    if (session?.getItem(SOFT_SESSION_KEY)) return false;
+    const last = Number(local?.getItem(SOFT_LOCAL_KEY));
+    if (Number.isFinite(last) && last > 0 && nowMs - last < GUEST_SOFT_PROMPT_QUIET_MS) return false;
+  } catch { /* storage blocked: still show once */ }
+  return true;
+}
+
+export function markSoftPromptShown(nowMs, { local = safeStore("localStorage"), session = safeStore("sessionStorage") } = {}) {
+  try { session?.setItem(SOFT_SESSION_KEY, "1"); } catch {}
+  try { local?.setItem(SOFT_LOCAL_KEY, String(nowMs)); } catch {}
+}
