@@ -48,8 +48,39 @@ assert.match(index, /og:url" content="https:\/\/www\.aibetbuilder\.io"/);
 assert.match(index, /twitter:card" content="summary_large_image"/);
 assert.match(index, /rel="manifest" href="\/site\.webmanifest"/);
 assert.match(index, /rel="apple-touch-icon"/);
-for (const f of ["og-image.png", "favicon.ico", "favicon.svg", "apple-touch-icon.png", "icon-192.png", "icon-512.png", "site.webmanifest", "site-pages.css"]) {
+for (const f of ["og-image.png", "favicon.ico", "favicon.svg", "apple-touch-icon.png", "icon-192.png", "icon-512.png", "site.webmanifest", "site-pages.css", "robots.txt", "sitemap.xml"]) {
   assert.ok(fs.existsSync(path.join(root, "public", f)), f);
+}
+const og = fs.readFileSync(path.join(root, "public", "og-image.png"));
+assert.equal(og.readUInt32BE(16), 1200);
+assert.equal(og.readUInt32BE(20), 630);
+assert.doesNotMatch(og.toString("latin1").toLowerCase(), /kevin|gordon|kev120909/);
+const robots = read("public/robots.txt");
+assert.match(robots, /Sitemap: https:\/\/www\.aibetbuilder\.io\/sitemap\.xml/);
+const sitemap = read("public/sitemap.xml");
+for (const loc of ["https://www.aibetbuilder.io/", "https://www.aibetbuilder.io/about", "https://www.aibetbuilder.io/privacy", "https://www.aibetbuilder.io/terms"]) {
+  assert.ok(sitemap.includes(`<loc>${loc}</loc>`), loc);
+}
+for (const page of ["index.html", "public/about.html", "public/privacy.html", "public/terms.html"]) {
+  const html = read(page);
+  assert.match(html, /<title>[^<]+<\/title>/, page);
+  assert.match(html, /name="description"/, page);
+  assert.match(html, /rel="canonical"/, page);
+  assert.match(html, /property="og:title"/, page);
+  assert.match(html, /property="og:image"/, page);
+  assert.match(html, /name="twitter:card" content="summary_large_image"/, page);
+}
+const shortCache = "public, max-age=0, must-revalidate";
+const bySource = new Map((vercel.headers || []).map((rule) => [rule.source, rule]));
+const assets = bySource.get("/assets/(.*)");
+assert.ok(assets, "hashed /assets cache rule");
+assert.equal(assets.headers.find((h) => h.key === "Cache-Control").value, "public, max-age=31536000, immutable");
+for (const source of ["/", "/index.html", "/about", "/about.html", "/privacy", "/privacy.html", "/terms", "/terms.html", "/app", "/learn"]) {
+  const rule = bySource.get(source);
+  assert.ok(rule, source);
+  const value = rule.headers.find((h) => h.key === "Cache-Control").value;
+  assert.equal(value, shortCache, source);
+  assert.doesNotMatch(value, /immutable|31536000/);
 }
 const manifest = JSON.parse(read("public/site.webmanifest"));
 assert.equal(manifest.name, "AI Bet Builder");

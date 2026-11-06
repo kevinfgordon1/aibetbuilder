@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /kgsadmin-sendalert.html
+
+Sitemap: https://www.aibetbuilder.io/sitemap.xml
