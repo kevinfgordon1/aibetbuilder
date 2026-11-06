@@ -82,6 +82,7 @@ function jsonRes() {
   const res = jsonRes();
   await handler({ method: 'GET', url: '/api/player-td-board' }, res, {
     fetchFn,
+    supabaseClient: null,
     cache: { at: 0, body: null },
     cacheMs: 0,
     now: Date.parse('2026-09-26T12:00:00Z'),
@@ -101,6 +102,67 @@ function jsonRes() {
   assert.ok(calls.some((url) => String(url).includes('nfl-kc-mia-2026-09-27')));
   assert.equal(calls.some((url) => String(url).includes('KXNFLFIRSTTD')), false);
   assert.equal(calls.some((url) => String(url).includes('2026-10-05')), false);
+  assert.equal(calls.some((url) => String(url).includes('novig.com')), false, 'cold board must not spend the 25s Novig budget');
+  assert.match(res.headers['Cache-Control'], /stale-while-revalidate=240/);
+
+  const warmedCalls = [];
+  const warmed = jsonRes();
+  const fetchedAt = '2026-09-26T11:55:00.000Z';
+  await handler({ method: 'GET', url: '/api/player-td-board' }, warmed, {
+    now: Date.parse('2026-09-26T12:00:00Z'),
+    fetchFn: async (url) => { warmedCalls.push(String(url)); throw new Error('upstream'); },
+    supabaseClient: {
+      from(table) {
+        assert.equal(table, 'player_prop_cache');
+        return {
+          select() { return this; },
+          eq(col, val) {
+            assert.equal(col, 'event_id');
+            assert.equal(val, 'nfl-player-td-board');
+            return this;
+          },
+          maybeSingle: async () => ({
+            error: null,
+            data: {
+              fetched_at: fetchedAt,
+              data: {
+                fetchedAt,
+                games: [{ gameKey: 'KC|MIA|2026-09-27', players: [{ name: 'Travis Kelce' }] }],
+              },
+            },
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(warmed.statusCode, 200);
+  assert.equal(warmed.body.cached, true);
+  assert.equal(warmed.body.games[0].players[0].name, 'Travis Kelce');
+  assert.equal(warmedCalls.length, 0, 'a cron snapshot must not hit Kalshi, Polymarket, Underdog, or Novig');
+  assert.match(warmed.headers['Cache-Control'], /s-maxage=60/);
+
+  const stale = jsonRes();
+  const staleCalls = [];
+  const staleAt = '2026-09-26T11:40:00.000Z';
+  await handler({ method: 'GET', url: '/api/player-td-board' }, stale, {
+    now: Date.parse('2026-09-26T12:00:00Z'),
+    fetchFn: async (url) => { staleCalls.push(String(url)); throw new Error('upstream'); },
+    supabaseClient: {
+      from() {
+        return {
+          select() { return this; },
+          eq() { return this; },
+          maybeSingle: async () => ({
+            error: null,
+            data: { fetched_at: staleAt, data: { fetchedAt: staleAt, games: [{ gameKey: 'g', players: [] }] } },
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(stale.statusCode, 200);
+  assert.equal(stale.body.cached, true);
+  assert.equal(staleCalls.length, 0, 'a snapshot inside 30 minutes is served stale, not rebuilt');
   console.log('player-td-board.test.js ok');
 })().catch((err) => {
   console.error(err);
