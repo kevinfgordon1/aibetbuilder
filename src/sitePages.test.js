@@ -18,6 +18,17 @@ for (const name of ["about", "privacy", "terms"]) {
   assert.ok(vercel.rewrites.some((r) => r.source === `/${name}` && r.destination === `/${name}.html`), name);
 }
 assert.ok(vercel.rewrites.some((r) => r.source === "/s/:path*"));
+const headerMap = Object.fromEntries((vercel.headers || []).flatMap((block) => block.headers || []).map((h) => [h.key, h.value]));
+assert.equal(headerMap["X-Content-Type-Options"], "nosniff");
+assert.equal(headerMap["Referrer-Policy"], "strict-origin-when-cross-origin");
+assert.equal(headerMap["X-Frame-Options"], "DENY");
+assert.match(headerMap["Strict-Transport-Security"], /max-age=63072000/);
+assert.match(headerMap["Permissions-Policy"], /camera=\(\)/);
+assert.match(headerMap["Content-Security-Policy-Report-Only"], /frame-ancestors 'none'/);
+assert.match(headerMap["Content-Security-Policy-Report-Only"], /https:\/\/\*\.supabase\.co/);
+assert.match(headerMap["Content-Security-Policy-Report-Only"], /wss:\/\/\*\.supabase\.co/);
+assert.match(headerMap["Content-Security-Policy-Report-Only"], /gateway\.polymarket\.us/);
+assert.equal(headerMap["Content-Security-Policy"], undefined);
 assert.ok(vercel.redirects.some((r) => r.source === "/contact" && r.destination === "/about#contact"));
 
 const privacy = read("public/privacy.html");
