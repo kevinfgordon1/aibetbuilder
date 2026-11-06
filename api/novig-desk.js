@@ -442,12 +442,150 @@ async function handle({ req, res, json, deps, owner, store, body, query }) {
   return true;
 }
 
-module.exports = {
-  handle,
-  snapshot,
-  mapOrder,
-  placeOrder,
-  cancelOrder,
-  ensureMods,
-  readNovigDeskCreds,
+function readBearer(req) {
+  const headers = (req && req.headers) || {};
+  const raw = headers.authorization || headers.Authorization || '';
+  const m = /^Bearer\s+(\S+)/i.exec(String(raw));
+  return m ? m[1] : '';
+}
+
+function parseBody(req) {
+  const raw = req && req.body;
+  if (raw == null || raw === '') return {};
+  if (typeof raw === 'object' && !Buffer.isBuffer(raw)) return raw;
+  try { return JSON.parse(String(raw)); } catch (_) { return {}; }
+}
+
+function queryFrom(req) {
+  const query = { ...((req && req.query) || {}) };
+  if (!req || !req.url || (query.marketId && query.slug)) return query;
+  try {
+    const sp = new URL(req.url, 'http://localhost').searchParams;
+    if (!query.marketId && sp.get('marketId')) query.marketId = sp.get('marketId');
+    if (!query.slug && sp.get('slug')) query.slug = sp.get('slug');
+  } catch (_) { /* query string stays as req.query */ }
+  return query;
+}
+
+function sendJson(res, status, body) {
+  const payload = (body && typeof body === 'object' && !Array.isArray(body)) ? { ...body } : { ok: false, error: 'Request failed' };
+  delete payload.stack;
+  if (!res || res.headersSent || res.writableEnded) return;
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  } catch (_) { /* headers already flushed */ }
+  if (typeof res.status === 'function' && typeof res.json === 'function') {
+    res.status(status).json(payload);
+    return;
+  }
+  res.statusCode = status;
+  try { res.setHeader('Content-Type', 'application/json; charset=utf-8'); } catch (_) { /* ignore */ }
+  res.end(JSON.stringify(payload));
+}
+
+// Public /api/novig-desk is this file. It is not a request handler unless we
+// export one, and Vercel then answers 500 with a platform stack. Unauthenticated
+// and invalid calls stop here, before Novig or the ESM desk modules load.
+async function requireNovigDeskUser(req) {
+  const token = readBearer(req);
+  if (!token) return { ok: false, status: 401, error: 'Sign in required' };
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const anon = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anon) return { ok: false, status: 401, error: 'Sign in required' };
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { data, error } = await supabase.auth.getUser(token);
+    const user = data && data.user;
+    if (error || !user) return { ok: false, status: 401, error: 'Invalid session' };
+    const access = await import('../src/comboAccess.js');
+    if (!access.canSeeOwnerTools(user)) return { ok: false, status: 403, error: 'Not allowed' };
+    return { ok: true, user };
+  } catch (_) {
+    return { ok: false, status: 401, error: 'Sign in required' };
+  }
+}
+
+function defaultProtectStore() {
+  try {
+    const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
+    return createSupabaseProtectStore();
+  } catch (_) {
+    return null;
+  }
+}
+
+const httpDefaults = {
+  requireUser: requireNovigDeskUser,
+  novigCreds: null,
+  fetchImpl: (...args) => fetch(...args),
+  protectStore: defaultProtectStore,
 };
+
+let httpDeps = { ...httpDefaults };
+
+function resetHttpDeps() {
+  httpDeps = { ...httpDefaults };
+}
+
+function setHttpDeps(patch) {
+  httpDeps = { ...httpDeps, ...patch };
+}
+
+async function httpHandler(req, res) {
+  let authed = false;
+  try {
+    const method = String((req && req.method) || 'GET').toUpperCase();
+    if (method === 'OPTIONS') {
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      }
+      if (typeof res.status === 'function') res.status(204).end();
+      else {
+        res.statusCode = 204;
+        res.end();
+      }
+      return;
+    }
+    if (method !== 'GET' && method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'Method not allowed' });
+      return;
+    }
+    const owner = await httpDeps.requireUser(req);
+    if (!owner || !owner.ok) {
+      const status = owner && Number(owner.status) === 403 ? 403 : 401;
+      const allowed = status === 403 ? 'Not allowed' : (owner && owner.error === 'Invalid session' ? 'Invalid session' : 'Sign in required');
+      sendJson(res, status, { ok: false, error: allowed });
+      return;
+    }
+    authed = true;
+    const deps = { fetchImpl: httpDeps.fetchImpl };
+    if (httpDeps.novigCreds) deps.novigCreds = httpDeps.novigCreds;
+    await handle({
+      req,
+      res,
+      json: sendJson,
+      deps,
+      owner,
+      store: httpDeps.protectStore ? httpDeps.protectStore() : null,
+      body: method === 'POST' ? parseBody(req) : {},
+      query: queryFrom(req),
+    });
+  } catch (_) {
+    sendJson(res, authed ? 400 : 401, { ok: false, error: authed ? 'Request failed' : 'Sign in required' });
+  }
+}
+
+module.exports = httpHandler;
+module.exports.handle = handle;
+module.exports.snapshot = snapshot;
+module.exports.mapOrder = mapOrder;
+module.exports.placeOrder = placeOrder;
+module.exports.cancelOrder = cancelOrder;
+module.exports.ensureMods = ensureMods;
+module.exports.readNovigDeskCreds = readNovigDeskCreds;
+module.exports._setHttpDeps = setHttpDeps;
+module.exports._resetHttpDeps = resetHttpDeps;

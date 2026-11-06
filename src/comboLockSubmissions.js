@@ -53,10 +53,12 @@ export function mergeSubmissionRows(...lists) {
   });
 }
 
-// History's .in(parlay_id, ids) reads skip the user_id filter: the ids are already this user's locks
-// (every submission row carries its lock's user_id; RLS still applies), and with user_id in the
-// query Postgres walks the user's whole 1M+ row (user_id, created_at) index instead of the
-// per-lock partial indexes (combo_submissions_parlay_quote_idx / _skip_idx): ~5s → ~0.1s.
+// History's .in(parlay_id, ids) reads skip the user_id filter on purpose. Those ids are
+// already this user's locks. Adding user_id makes Postgres walk combo_submissions_user_idx
+// (user_id, created_at desc), the whole submission history, instead of the per-lock partial
+// indexes. The slow chunk reads (parlay_id = any, order by created_at desc limit) are covered
+// by the created_at-leading partial indexes in
+// supabase/migrations/20261106190000_combo_submissions_history_created_idx.sql.
 const scopeUser = (q, { userId, parlayIds }) => (parlayIds && parlayIds.length ? q : q.eq("user_id", userId));
 
 function applyQuoteFilters(q, { userId, parlayId, parlayIds, limit }) {

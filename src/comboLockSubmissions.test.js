@@ -166,6 +166,14 @@ console.log("comboLockSubmissions.test.js ok");
 }
 
 {
+  const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../supabase/migrations/20261106190000_combo_submissions_history_created_idx.sql"), "utf8");
+  assert.match(sql, /create index concurrently if not exists combo_submissions_quote_history_created_idx/i);
+  assert.match(sql, /create index concurrently if not exists combo_submissions_skip_history_created_idx/i);
+  assert.match(sql, /on public\.combo_submissions \(created_at desc, parlay_id\)/i);
+  assert.equal((sql.match(/create index concurrently if not exists/gi) || []).length, 2);
+}
+
+{
   const { lockQuoteFillLine } = await import("./comboLockSubmissions.js");
   assert.equal(lockQuoteFillLine([], { fills: 0 }), "");
   assert.equal(lockQuoteFillLine([{ status: "declined", skip_reason: "x" }]), "");
