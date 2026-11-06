@@ -1,6 +1,6 @@
 import React from "react";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
-import { DEMO_VIDEO_URL, ABOUT_PHOTO_URL } from "./onboarding.js";
+import { DEMO_VIDEO_URL } from "./onboarding.js";
 
 // Black & gold, one display face (Fraunces) + one body face (Inter). No
 // gradients, glows or emoji.
@@ -46,7 +46,6 @@ export default function MarketingLanding() {
           <Wordmark />
           <nav style={{ display: "flex", gap: 22, alignItems: "center", fontSize: 14 }}>
             <a href="#how" style={{ color: "#bdb6a4", textDecoration: "none" }}>How it works</a>
-            <a href="#about" style={{ color: "#bdb6a4", textDecoration: "none" }}>About</a>
             <a href="/learn" style={{ color: "#bdb6a4", textDecoration: "none" }}>Learn</a>
             <a href="/app#promo" style={{ ...S.ghost, padding: "8px 16px", fontSize: 14 }}>Open the app</a>
           </nav>
@@ -123,16 +122,6 @@ export default function MarketingLanding() {
         </div>
       </section>
 
-      <section id="about" style={{ ...S.wrap, padding: "48px 24px" }}>
-        <div style={S.k}>About</div>
-        <div style={{ display: "flex", gap: 28, alignItems: "flex-start", flexWrap: "wrap" }}>
-          {ABOUT_PHOTO_URL && <img data-about-photo="true" src={ABOUT_PHOTO_URL} alt="Kevin Gordon" style={{ width: 160, height: 160, objectFit: "cover", borderRadius: 8, border: "1px solid " + GOLD }} />}
-          <div style={{ flex: 1, minWidth: 280, maxWidth: 680 }}>
-            <h2 style={{ ...S.h2, marginBottom: 14 }}>Built by Kevin Gordon, a bettor in New Jersey.</h2>
-            <p style={{ fontSize: 14, color: "#8a8473", margin: 0 }}>aibetbuilder is operated by Kaygosports, LLC.</p>
-          </div>
-        </div>
-      </section>
 
       <section style={{ ...S.wrap, padding: "40px 24px 64px", textAlign: "center" }}>
         <a href="/app?wizard=1#promo" style={S.btn}>Try it with your boost</a>
