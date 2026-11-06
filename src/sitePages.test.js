@@ -14,7 +14,7 @@ for (const name of ["about", "privacy", "terms"]) {
   assert.match(html, /1-800-GAMBLER/, name);
   assert.match(html, /href="\/privacy"/, name);
   assert.match(html, /href="\/terms"/, name);
-  assert.match(html, /kev120909@gmail\.com/, name);
+  assert.match(html, /support@aibetbuilder\.io/, name);
   assert.ok(vercel.rewrites.some((r) => r.source === `/${name}` && r.destination === `/${name}.html`), name);
 }
 assert.ok(vercel.rewrites.some((r) => r.source === "/s/:path*"));

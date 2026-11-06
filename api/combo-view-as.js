@@ -1,6 +1,6 @@
 // /api/combo-view-as — owner-only, read-only "View as" for Combo Locks.
 //
-//   GET  -> { users: [{ id, email, label }] } who Kevin can view as.
+//   GET  -> { users: [{ id, email, label }] } who the owner can view as.
 //   POST { view_as: <user id>, queries: [...] } -> { results: [...] }
 //        Each query is either a recorded SELECT ({ table, select, filters,
 //        order, limit, single }) or { kind: 'rpc', name: 'combo_my_fee_status' }.
@@ -61,8 +61,8 @@ const NAMES = {
   'kmguido97@gmail.com': 'Kenny',
   'c.w.higgins1@gmail.com': 'Chris (Higgins)',
   'gmoneyvikes@gmail.com': 'gmoneyvikes',
-  'kev120909@gmail.com': 'Kevin (you)',
-  'kevin.f.gordon1@gmail.com': 'Kevin (2nd account)',
+  'kev120909@gmail.com': 'You (owner)',
+  'kevin.f.gordon1@gmail.com': 'Owner (2nd account)',
 };
 
 async function listUsers(client) {
