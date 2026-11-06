@@ -101,6 +101,18 @@ function jsonRes() {
   assert.ok(calls.some((url) => String(url).includes('nfl-kc-mia-2026-09-27')));
   assert.equal(calls.some((url) => String(url).includes('KXNFLFIRSTTD')), false);
   assert.equal(calls.some((url) => String(url).includes('2026-10-05')), false);
+  assert.equal(calls.some((url) => String(url).includes('novig.com')), false);
+  assert.equal(res.body.partial, false);
+  assert.equal(res.body.stale, false);
+  assert.equal(res.body.cached, false);
+  assert.equal(res.body.sources.kalshi, 'ok');
+  assert.equal(res.body.sources.polymarket, 'ok');
+  assert.equal(res.body.sources.underdog, 'empty');
+  assert.equal(res.body.sources.novig, 'skipped');
+  assert.equal(res.body.quotes, undefined);
+  assert.equal(res.headers['Cache-Control'], 'no-store');
+  assert.equal(Number.isInteger(kelce.anytime.kalshi), true);
+  assert.equal(Number.isInteger(kelce.anytime.polymarket), true);
   console.log('player-td-board.test.js ok');
 })().catch((err) => {
   console.error(err);

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import * as playerTdLib from "../lib/player-td.mjs";
+import { PLAYER_TD_FETCH_TIMEOUT_MS, reducePlayerTdLoad } from "./playerTdBoardState.js";
 
 const { formatKickoffEt } = playerTdLib;
 
 export const PLAYER_TD_POLL_MS = 45_000;
+export { PLAYER_TD_FETCH_TIMEOUT_MS };
 
 // Player Props sub-selector. The first entry is the default. Add another
 // { id, label } here when a new prop type ships; the table already keys off id.
@@ -33,31 +35,37 @@ export function playerTdBestBook(row, threshold) {
 
 export default function PlayerTdBoard({ search = "", active = true } = {}) {
   const [threshold, setThreshold] = useState(PLAYER_PROP_TYPES[0].id);
-  const [games, setGames] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [fetchedAt, setFetchedAt] = useState(null);
+  const [board, setBoard] = useState({
+    games: [],
+    loading: true,
+    error: "",
+    notice: "",
+    stale: false,
+    partial: false,
+    fetchedAt: null,
+  });
 
   useEffect(() => {
     if (!active) return undefined;
     let cancelled = false;
+    let inflight = false;
     const load = async () => {
+      if (inflight) return;
+      inflight = true;
+      const signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(PLAYER_TD_FETCH_TIMEOUT_MS)
+        : undefined;
       try {
-        const res = await fetch("/api/player-td-board");
-        const body = await res.json();
+        const res = await fetch("/api/player-td-board", signal ? { signal } : undefined);
+        const body = await res.json().catch(() => null);
         if (cancelled) return;
-        if (!res.ok || !body || body.ok === false) {
-          setError("Player TD prices are unavailable.");
-          setGames([]);
-        } else {
-          setError("");
-          setGames(Array.isArray(body.games) ? body.games : []);
-          setFetchedAt(body.fetchedAt || null);
-        }
+        setBoard((prev) => ({ ...reducePlayerTdLoad(prev, { httpOk: res.ok, body }), loading: false }));
       } catch (_) {
-        if (!cancelled) setError("Player TD prices are unavailable.");
+        if (!cancelled) {
+          setBoard((prev) => ({ ...reducePlayerTdLoad(prev, { aborted: true, httpOk: false, body: null }), loading: false }));
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        inflight = false;
       }
     };
     load();
@@ -67,6 +75,8 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
       clearInterval(timer);
     };
   }, [active]);
+
+  const { games, loading, error, notice, stale, partial, fetchedAt } = board;
 
   const needle = String(search || "").trim().toLowerCase();
   const visible = useMemo(() => {
@@ -84,7 +94,7 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
   }, [games, threshold, needle]);
 
   return (
-    <div data-player-td-board="1" data-td-poll-ms={PLAYER_TD_POLL_MS}>
+    <div data-player-td-board="1" data-td-poll-ms={PLAYER_TD_POLL_MS} data-td-fetch-timeout-ms={PLAYER_TD_FETCH_TIMEOUT_MS}>
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="Prop type" data-prop-type-selector="1">
         {PLAYER_PROP_TYPES.map((item) => (
           <button
@@ -114,6 +124,16 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
       {loading && (
         <div style={{ padding: "28px 12px", textAlign: "center", color: "var(--nob-muted, #6b7280)", fontSize: 14 }}>
           Loading player touchdowns…
+        </div>
+      )}
+      {!loading && notice && (
+        <div
+          data-td-notice="1"
+          data-td-stale={stale ? "1" : "0"}
+          data-td-partial={partial ? "1" : "0"}
+          style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 10, border: "1px solid rgba(var(--nob-gold-rgb, 232,234,237),0.28)", color: "var(--nob-text-2, #d1d5db)", fontSize: 13 }}
+        >
+          {notice}
         </div>
       )}
       {!loading && error && (
@@ -191,8 +211,8 @@ export default function PlayerTdBoard({ search = "", active = true } = {}) {
         </div>
       ))}
       {fetchedAt && (
-        <div style={{ fontSize: 11, color: "var(--nob-faint, #4b5563)", marginTop: 4 }}>
-          Player TD snapshot {fetchedAt}
+        <div style={{ fontSize: 11, color: "var(--nob-faint, #4b5563)", marginTop: 4 }} data-td-snapshot="1">
+          Player TD snapshot {fetchedAt}{stale ? " (stale)" : ""}{partial && !stale ? " (partial)" : ""}
         </div>
       )}
     </div>
