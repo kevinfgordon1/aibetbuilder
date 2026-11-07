@@ -8,7 +8,7 @@ import {
   xPostIntentUrl,
 } from "./shareCard";
 
-// Hidden on Promo Builder for now (Kevin wants it back later). Flip to true to restore.
+// Hidden on Promo Builder for now (may restore later). Flip to true to restore.
 export const SHOW_POST_ON_X = false;
 
 const btn = {

@@ -87,7 +87,7 @@ module.exports = async (req, res) => {
       await sendTelegram(chatId,
         `👋 Welcome, ${firstName || 'there'}!\n\n` +
         `You're subscribed to KayGo Sports alerts. ` +
-        `Kevin will text you when a bet is placed on your account.\n\n` +
+        `We'll message you when a bet is placed on your account.\n\n` +
         `Reply STOP at any time to unsubscribe.`
       );
     } else if (/^\/?stop\b/i.test(text)) {
@@ -108,7 +108,7 @@ module.exports = async (req, res) => {
         `/start — subscribe\n` +
         `STOP — unsubscribe\n` +
         `HELP — this message\n\n` +
-        `Questions? Reach out to Kevin directly.`
+        `Questions? Email support@aibetbuilder.io.`
       );
     } else {
       // ── Catch-all: ack sender, forward to admin ────────────────
