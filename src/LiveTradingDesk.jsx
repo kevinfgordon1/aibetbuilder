@@ -5,7 +5,7 @@ import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { canSeeOwnerTools } from "./comboAccess";
 import { MAX_SIZE_DOLLARS, DEFAULT_SIZE_DOLLARS, deskErrorText, quoteRestingOrder, crossBlock, orderTicket, restFormAfterPlace } from "./liveDeskPrice";
 import { DESK_MARKET_TYPES, classifyDeskMarket, fallbackGameLabel, moneylineSlugForGame } from "./liveDeskGames";
-import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
+import { DEFAULT_PROTECT_X_CENTS, DEFAULT_PROTECT_Y_CENTS, PROTECT_CENTS_STEP, PROTECT_MAX_CENTS, PROTECT_X_MIN_CENTS, PROTECT_Y_MIN_CENTS, parseProtectCents, protectOverCapNote } from "./liveDeskProtect";
 import LiveDeskFilledOrders from "./LiveDeskFilledOrders";
 import LiveDeskPositionFills from "./LiveDeskPositionFills";
 import { DESK_REFRESH_MS, deskRateLimitMessage, deskRefreshDelayMs, isDeskRateLimit, mergeDeskBoard } from "./liveDeskRefresh";
@@ -220,11 +220,11 @@ function LiveTradingDeskView({ user }) {
   }, [market, american, outcome, action, dollars, venue]);
 
   const protectXParsed = useMemo(
-    () => parseProtectCents(protectX, DEFAULT_PROTECT_X_CENTS, { min: 0.1 }),
+    () => parseProtectCents(protectX, DEFAULT_PROTECT_X_CENTS, { min: PROTECT_X_MIN_CENTS, max: PROTECT_MAX_CENTS }),
     [protectX],
   );
   const protectYParsed = useMemo(
-    () => parseProtectCents(protectY, DEFAULT_PROTECT_Y_CENTS, { min: 0 }),
+    () => parseProtectCents(protectY, DEFAULT_PROTECT_Y_CENTS, { min: PROTECT_Y_MIN_CENTS, max: PROTECT_MAX_CENTS }),
     [protectY],
   );
   const outcomeName = market ? plain(outcome === "short" ? market.shortName : market.longName, "") : "";
@@ -887,9 +887,9 @@ function LiveTradingDeskView({ user }) {
                     <input
                       id="desk-protect-x"
                       type="number"
-                      min="0.1"
-                      max="25"
-                      step="0.5"
+                      min={PROTECT_X_MIN_CENTS}
+                      max={PROTECT_MAX_CENTS}
+                      step={PROTECT_CENTS_STEP}
                       value={protectX}
                       onChange={(e) => setProtectX(e.target.value)}
                       style={{ ...field, fontSize: 16 }}
@@ -900,9 +900,9 @@ function LiveTradingDeskView({ user }) {
                     <input
                       id="desk-protect-y"
                       type="number"
-                      min="0"
-                      max="25"
-                      step="0.5"
+                      min={PROTECT_Y_MIN_CENTS}
+                      max={PROTECT_MAX_CENTS}
+                      step={PROTECT_CENTS_STEP}
                       value={protectY}
                       onChange={(e) => setProtectY(e.target.value)}
                       style={{ ...field, fontSize: 16 }}

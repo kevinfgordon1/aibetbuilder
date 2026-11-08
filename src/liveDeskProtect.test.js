@@ -6,6 +6,10 @@ import {
   DEFAULT_PROTECT_X_CENTS,
   DEFAULT_PROTECT_Y_CENTS,
   MAX_PROTECTS_PER_LINEAGE,
+  PROTECT_CENTS_STEP,
+  PROTECT_MAX_CENTS,
+  PROTECT_X_MIN_CENTS,
+  PROTECT_Y_MIN_CENTS,
   centsToMicro,
   evaluateProtect,
   improveFromMid,
@@ -15,6 +19,8 @@ import {
   formatProtectTelegram,
   readProtectRequest,
   parseProtectCents,
+  browserNumberInputValidity,
+  protectCentsInputBounds,
   originalSubmittedMicro,
   protectFillForPosition,
 } from "./liveDeskProtect.js";
@@ -56,6 +62,123 @@ assert.equal(readProtectRequest({ protect: true }).xCents, 2);
 assert.equal(readProtectRequest({ protect: true }).yCents, 0.5);
 assert.equal(readProtectRequest({ protect: true, protectXCents: 0 }).ok, false);
 assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
+assert.equal(parseProtectCents(1.65, 2, { min: PROTECT_X_MIN_CENTS, max: PROTECT_MAX_CENTS }).cents, 1.7);
+assert.equal(parseProtectCents("abc", DEFAULT_PROTECT_X_CENTS, { min: PROTECT_X_MIN_CENTS }).ok, false);
+assert.equal(parseProtectCents(25.1, DEFAULT_PROTECT_X_CENTS, protectCentsInputBounds("x")).ok, false);
+assert.equal(parseProtectCents(-0.5, DEFAULT_PROTECT_Y_CENTS, { min: PROTECT_Y_MIN_CENTS, max: PROTECT_MAX_CENTS }).ok, false);
+assert.equal(parseProtectCents(0, DEFAULT_PROTECT_Y_CENTS, { min: PROTECT_Y_MIN_CENTS }).cents, 0);
+assert.equal(parseProtectCents("", DEFAULT_PROTECT_X_CENTS, { min: PROTECT_X_MIN_CENTS }).cents, DEFAULT_PROTECT_X_CENTS);
+
+// Native number-input validity. The step base is min. The old through-mid
+// control (min 0.1, step 0.5) rejects the default 2.0; Chrome reports the
+// two nearest legal values as 1.6 and 2.1 and blocks the confirm submit.
+{
+  const broken = browserNumberInputValidity("2.0", { min: 0.1, max: 25, step: 0.5 });
+  assert.equal(broken.ok, false);
+  assert.equal(broken.reason, "stepMismatch");
+  assert.deepEqual(broken.nearest, [1.6, 2.1]);
+  assert.equal(broken.validationMessage, "Please enter a valid value. The two nearest valid values are 1.6 and 2.1.");
+  assert.equal(browserNumberInputValidity("2", { min: 0.1, max: 25, step: 0.5 }).validationMessage, broken.validationMessage);
+  assert.equal(
+    browserNumberInputValidity("0.5", { min: 0.1, max: 25, step: 0.5 }).validationMessage,
+    "Please enter a valid value. The two nearest valid values are 0.1 and 0.6.",
+  );
+  assert.equal(
+    browserNumberInputValidity("25", { min: 0.1, max: 25, step: 0.5 }).validationMessage,
+    "Please enter a valid value. The nearest valid value is 24.6.",
+  );
+  assert.equal(
+    browserNumberInputValidity("0.1", { min: 0, max: 25, step: 0.5 }).validationMessage,
+    "Please enter a valid value. The two nearest valid values are 0 and 0.5.",
+  );
+  assert.equal(
+    browserNumberInputValidity("4.2", { min: 0, max: 25, step: 0.5 }).validationMessage,
+    "Please enter a valid value. The two nearest valid values are 4 and 4.5.",
+  );
+}
+
+{
+  const xBounds = protectCentsInputBounds("x");
+  const yBounds = protectCentsInputBounds("y");
+  assert.equal(xBounds.min, PROTECT_X_MIN_CENTS);
+  assert.equal(yBounds.min, PROTECT_Y_MIN_CENTS);
+  assert.equal(xBounds.max, PROTECT_MAX_CENTS);
+  assert.equal(yBounds.max, PROTECT_MAX_CENTS);
+  assert.equal(xBounds.step, PROTECT_CENTS_STEP);
+  assert.equal(PROTECT_CENTS_STEP, 0.1);
+  assert.equal(PROTECT_X_MIN_CENTS, 0.1);
+  assert.equal(PROTECT_Y_MIN_CENTS, 0);
+  assert.equal(PROTECT_MAX_CENTS, 25);
+
+  for (const raw of ["2", "2.0", "2.00", String(DEFAULT_PROTECT_X_CENTS)]) {
+    const hit = browserNumberInputValidity(raw, xBounds);
+    assert.equal(hit.ok, true, "through-mid default " + raw);
+    assert.equal(hit.validationMessage, "");
+  }
+  for (const raw of ["0.5", "0.50", String(DEFAULT_PROTECT_Y_CENTS)]) {
+    const hit = browserNumberInputValidity(raw, yBounds);
+    assert.equal(hit.ok, true, "re-rest default " + raw);
+    assert.equal(hit.validationMessage, "");
+  }
+
+  const tenths = ["0.1", "0.5", "1", "1.5", "1.6", "2", "2.1", "4.2", "25", "25.0"];
+  for (const raw of tenths) {
+    assert.equal(browserNumberInputValidity(raw, xBounds).ok, true, "through-mid " + raw);
+    assert.equal(browserNumberInputValidity(raw, yBounds).ok, true, "re-rest " + raw);
+    const parsedX = parseProtectCents(raw, null, { min: xBounds.min, max: xBounds.max });
+    const parsedY = parseProtectCents(raw, null, { min: yBounds.min, max: yBounds.max });
+    assert.equal(parsedX.ok, true, raw);
+    assert.equal(parsedY.ok, true, raw);
+  }
+  for (let i = 1; i <= 250; i += 1) {
+    const raw = (i / 10).toFixed(1);
+    assert.equal(browserNumberInputValidity(raw, xBounds).ok, true, "x tenth " + raw);
+  }
+  for (let i = 0; i <= 250; i += 1) {
+    const raw = (i / 10).toFixed(1);
+    assert.equal(browserNumberInputValidity(raw, yBounds).ok, true, "y tenth " + raw);
+  }
+  assert.equal(browserNumberInputValidity("0", yBounds).ok, true);
+
+  const underX = browserNumberInputValidity("0", xBounds);
+  assert.equal(underX.ok, false);
+  assert.equal(underX.reason, "rangeUnderflow");
+  assert.equal(underX.validationMessage, "Value must be greater than or equal to 0.1.");
+  assert.equal(parseProtectCents("0", DEFAULT_PROTECT_X_CENTS, { min: xBounds.min, max: xBounds.max }).ok, false);
+
+  const over = browserNumberInputValidity("25.1", xBounds);
+  assert.equal(over.ok, false);
+  assert.equal(over.reason, "rangeOverflow");
+  assert.equal(over.validationMessage, "Value must be less than or equal to 25.");
+  assert.equal(browserNumberInputValidity("25.1", yBounds).reason, "rangeOverflow");
+
+  const offX = browserNumberInputValidity("1.65", xBounds);
+  assert.equal(offX.ok, false);
+  assert.equal(offX.reason, "stepMismatch");
+  assert.deepEqual(offX.nearest, [1.6, 1.7]);
+  assert.equal(offX.validationMessage, "Please enter a valid value. The two nearest valid values are 1.6 and 1.7.");
+
+  const offY = browserNumberInputValidity("0.25", yBounds);
+  assert.equal(offY.ok, false);
+  assert.equal(offY.reason, "stepMismatch");
+  assert.deepEqual(offY.nearest, [0.2, 0.3]);
+  assert.equal(offY.validationMessage, "Please enter a valid value. The two nearest valid values are 0.2 and 0.3.");
+
+  const underY = browserNumberInputValidity("-0.5", yBounds);
+  assert.equal(underY.ok, false);
+  assert.equal(underY.reason, "rangeUnderflow");
+  assert.equal(underY.validationMessage, "Value must be greater than or equal to 0.");
+
+  const letters = browserNumberInputValidity("abc", xBounds);
+  assert.equal(letters.ok, false);
+  assert.equal(letters.reason, "badInput");
+  assert.equal(letters.validationMessage, "Please enter a number.");
+
+  const blank = browserNumberInputValidity("", xBounds);
+  assert.equal(blank.ok, true);
+  assert.equal(blank.empty, true);
+  assert.equal(blank.validationMessage, "");
+}
 
 {
   const bbo = yesMidFromBbo({
@@ -403,8 +526,29 @@ assert.equal(parseProtectCents(4.24, 3, { min: 0.1 }).cents, 4.2);
   assert.ok(submitFn.indexOf("Order was not accepted") < submitFn.indexOf("clearRestForm()"));
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_X_CENTS\)\)/);
   assert.match(ui, /useState\(String\(DEFAULT_PROTECT_Y_CENTS\)\)/);
-  assert.match(ui, /step="0\.5"/);
   assert.match(ui, /protectXCents/);
+  assert.doesNotMatch(ui, /step="0\.5"/);
+  assert.doesNotMatch(ui, /noValidate|novalidate/);
+  function inputTag(id) {
+    const re = new RegExp("<input\\b(?:(?!<input\\b)[\\s\\S])*?id=\"" + id + "\"(?:(?!<input\\b)[\\s\\S])*?/>");
+    const m = ui.match(re);
+    assert.ok(m, id);
+    return m[0];
+  }
+  const protectX = inputTag("desk-protect-x");
+  const protectY = inputTag("desk-protect-y");
+  assert.match(protectX, /type="number"/);
+  assert.match(protectX, /min=\{PROTECT_X_MIN_CENTS\}/);
+  assert.match(protectX, /max=\{PROTECT_MAX_CENTS\}/);
+  assert.match(protectX, /step=\{PROTECT_CENTS_STEP\}/);
+  assert.match(protectY, /type="number"/);
+  assert.match(protectY, /min=\{PROTECT_Y_MIN_CENTS\}/);
+  assert.match(protectY, /max=\{PROTECT_MAX_CENTS\}/);
+  assert.match(protectY, /step=\{PROTECT_CENTS_STEP\}/);
+  const size = inputTag("desk-size");
+  assert.match(size, /min="1"/);
+  assert.match(size, /max=\{MAX_SIZE_DOLLARS\}/);
+  assert.match(size, /step="1"/);
   assert.match(ui, /protectFill/);
   assert.doesNotMatch(ui, /canSeeComboLocks/);
   const desk = fs.readFileSync(path.join(here, "../api/live-trading-desk.js"), "utf8");
