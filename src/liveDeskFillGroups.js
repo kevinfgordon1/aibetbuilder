@@ -87,8 +87,8 @@ export function fillGroupStatus(rows) {
   const state = text(verified && verified.state);
   if (state === "filled") return "full";
   if (state === "partial") return "partial";
-  if (state === "canceled") return "canceled";
-  if (state === "expired") return "expired";
+  if (state === "canceled" || state === "partial_canceled") return "canceled";
+  if (state === "expired" || state === "partial_expired") return "expired";
   const embedded = embeddedEvidence(list);
   if (!embedded) return null;
   const orderState = text(embedded.orderState).toUpperCase();

@@ -641,7 +641,7 @@ async function withBook(client, slug, market) {
   }
 }
 
-async function placeOrder(client, body, { store, ownerEmail } = {}) {
+async function placeOrder(client, body, { store, ownerEmail, tracks } = {}) {
   const slug = String(body.marketSlug || body.slug || '').trim();
   if (!price.isMarketSlug(slug)) return { ok: false, status: 400, error: 'Enter a Polymarket US market slug.' };
   const early = games.placeScopeError(body, slug);
@@ -733,6 +733,23 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
       try { await client.cancelOrder(String(orderId), slug); } catch (__) { /* best effort */ }
       return { ok: false, status: 503, error: 'Bet Protect could not be armed. That order was cancelled.' };
     }
+  }
+  if (orderId && ownerEmail && tracks && tracks.configured !== false && typeof tracks.upsert === 'function') {
+    try {
+      await tracks.upsert({
+        orderId: String(orderId),
+        ownerEmail: String(ownerEmail).trim().toLowerCase(),
+        marketSlug: slug,
+        verifiedState: 'open',
+        orderQty: quote.contracts,
+        leavesQty: quote.contracts,
+        cumQty: 0,
+        source: 'place',
+        resolveAttempts: 0,
+        totalFailures: 0,
+        reopenCount: 0,
+      });
+    } catch (_) { /* a missing track table must not cancel a resting order */ }
   }
   return {
     ok: true,
@@ -854,7 +871,8 @@ async function handler(req, res) {
     }
     if (op === 'place') {
       const email = owner.user && (owner.user.email || owner.user.user_email);
-      const placed = await placeOrder(client, body, { store, ownerEmail: email });
+      const tracks = typeof deps.trackStore === 'function' ? deps.trackStore() : null;
+      const placed = await placeOrder(client, body, { store, ownerEmail: email, tracks });
       json(res, placed.ok ? 200 : (placed.status || 400), placed);
       return;
     }

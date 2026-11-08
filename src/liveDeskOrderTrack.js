@@ -13,7 +13,9 @@
 export const RESOLVE_ATTEMPT_LIMIT = 3;
 export const RESOLVE_COOLDOWN_MS = 60_000;
 
-const TERMINAL = new Set(["filled", "canceled", "expired"]);
+const TERMINAL = new Set(["filled", "canceled", "partial_canceled", "expired", "partial_expired"]);
+export const FAILURE_STOP = 6;
+export const REOPEN_LIMIT = 3;
 
 function amount(v) {
   if (v == null || v === "") return null;
@@ -41,11 +43,13 @@ function stateFromExchange(exchangeState, cumQty, orderQty) {
     if (cumQty != null && orderQty != null && orderQty > 0 && cumQty + 1e-9 >= orderQty) return "filled";
     return "unknown";
   }
-  if (s.includes("EXPIRED")) return "expired";
+  if (s.includes("EXPIRED")) return cumQty > 0 ? "partial_expired" : "expired";
   if (s.includes("PARTIAL")) return "partial";
   if (s.includes("PENDING")) return cumQty > 0 ? "partial" : "open";
   if (s.includes("FILLED")) return "filled";
-  if (s.includes("CANCEL") || s.includes("REPLACED") || s.includes("REJECT")) return "canceled";
+  if (s.includes("CANCEL") || s.includes("REPLACED") || s.includes("REJECT")) {
+    return cumQty > 0 ? "partial_canceled" : "canceled";
+  }
   if (s.includes("NEW")) return cumQty > 0 ? "partial" : "open";
   return "unknown";
 }
@@ -159,33 +163,115 @@ function blank(incoming) {
     unknownReason: text(src.unknownReason || src.unknown_reason),
     source: text(src.source),
     resolveAttempts: Number(src.resolveAttempts != null ? src.resolveAttempts : src.resolve_attempts) || 0,
+    totalFailures: Number(src.totalFailures != null ? src.totalFailures : src.total_failures) || 0,
+    reopenCount: Number(src.reopenCount != null ? src.reopenCount : src.reopen_count) || 0,
     readFailed: !!(src.readFailed || src.transient),
+    stopped: !!src.stopped,
   };
 }
 
-/** Our own successful cancel is a cancel, not a fill. Quantity stays unset until an order payload has it. */
-export function protectCancelRecord(row, { replacedBy, at } = {}) {
-  return {
+const REPLACEABLE = new Set(["canceled", "partial_canceled", "expired", "partial_expired"]);
+
+/**
+ * A cancel HTTP success is not a fill report. Without an official order
+ * payload the record stays unreconciled and must not be stored as a
+ * zero-fill cancel.
+ */
+export function protectCancelRecord(row, { replacedBy, at, official } = {}) {
+  const base = {
     orderId: row && row.order_id,
     ownerEmail: row && row.owner_email,
     marketSlug: row && row.market_slug,
-    verifiedState: "canceled",
-    exchangeState: "",
-    source: "protect_cancel",
-    transient: false,
-    replacedBy: replacedBy || (row && row.replaced_by) || null,
     replaces: (row && row.replaces) || null,
+    replacedBy: replacedBy || (row && row.replaced_by) || null,
     lineageId: (row && row.lineage_id) || null,
     terminalAt: at || null,
+  };
+  if (official && !official.transient && official.verifiedState && official.verifiedState !== "unknown") {
+    return { ...official, ...base, source: official.source || "get_order", transient: false, readFailed: false };
+  }
+  return {
+    ...base,
+    verifiedState: "unknown",
+    unknownReason: "cancel_unreconciled",
+    source: "protect_cancel",
+    transient: true,
+    readFailed: true,
     cumQty: null,
-    unknownReason: "",
+  };
+}
+
+/**
+ * Replace only after the exchange confirms the order is terminal and how
+ * much already executed. Unknown quantity or unknown fill cost → no new order.
+ * Room is the $1000 desk cap minus this order's executed notional and any
+ * already-counted lineage spend. Remainder is original quantity minus cumQty.
+ */
+export function replacementGate({
+  official,
+  observedLeaves,
+  priorSpentDollars = 0,
+  capDollars = 1000,
+  outcomeShort = false,
+} = {}) {
+  if (!official || official.transient || official.readFailed || official.verifiedState === "unknown") {
+    return { replace: false, reason: "unconfirmed" };
+  }
+  if (official.verifiedState === "filled") {
+    return { replace: false, reason: "filled", cumQty: official.cumQty };
+  }
+  if (official.verifiedState === "open" || official.verifiedState === "partial") {
+    return { replace: false, reason: "still-open", cumQty: official.cumQty };
+  }
+  if (!REPLACEABLE.has(official.verifiedState)) {
+    return { replace: false, reason: "unconfirmed" };
+  }
+  if (official.orderQty == null || official.cumQty == null) {
+    return { replace: false, reason: "qty-unknown", cumQty: official.cumQty };
+  }
+  const remainder = official.orderQty - official.cumQty;
+  if (!(remainder > 1e-9)) {
+    return { replace: false, reason: "nothing-left", cumQty: official.cumQty, remainder: 0 };
+  }
+  let spent = 0;
+  if (official.cumQty > 0) {
+    if (official.avgYesPrice == null) {
+      return { replace: false, reason: "fill-cost-unknown", cumQty: official.cumQty, remainder };
+    }
+    const px = outcomeShort ? 1 - official.avgYesPrice : official.avgYesPrice;
+    if (!(px > 0 && px < 1)) {
+      return { replace: false, reason: "fill-cost-unknown", cumQty: official.cumQty, remainder };
+    }
+    spent = official.cumQty * px;
+  }
+  const room = capDollars - Number(priorSpentDollars || 0) - spent;
+  if (!(room > 1e-6)) {
+    return { replace: false, reason: "chain-cap", cumQty: official.cumQty, remainder, spent, roomDollars: 0 };
+  }
+  const observed = observedLeaves == null ? remainder : Number(observedLeaves);
+  const leaves = Math.min(observed, remainder);
+  if (!(leaves > 1e-9)) {
+    return { replace: false, reason: "nothing-left", cumQty: official.cumQty, remainder, roomDollars: room };
+  }
+  return {
+    replace: true,
+    leaves,
+    remainder,
+    cumQty: official.cumQty,
+    spent,
+    roomDollars: room,
+    avgYesPrice: official.avgYesPrice,
   };
 }
 
 export function mergeVerifiedTrack(previous, incoming) {
   const next = blank(incoming);
   if (!previous) {
-    if (next.readFailed) next.resolveAttempts = 1;
+    if (next.readFailed) {
+      next.resolveAttempts = 1;
+      next.totalFailures = 1;
+      next.stopped = next.totalFailures >= FAILURE_STOP;
+    }
     return next;
   }
   const prev = blank(previous);
@@ -195,29 +281,29 @@ export function mergeVerifiedTrack(previous, incoming) {
   next.replaces = next.replaces || prev.replaces;
   next.replacedBy = next.replacedBy || prev.replacedBy;
   next.lineageId = next.lineageId || prev.lineageId;
+  next.totalFailures = prev.totalFailures;
+  next.reopenCount = prev.reopenCount;
 
   const failed = next.readFailed
     || next.unknownReason === "not_found"
     || next.unknownReason === "read_error"
-    || next.unknownReason === "disappeared";
+    || next.unknownReason === "disappeared"
+    || next.unknownReason === "cancel_unreconciled";
   if (failed && next.verifiedState === "unknown") {
     if (TERMINAL.has(prev.verifiedState)) return { ...prev, readFailed: true };
     const attempts = (prev.resolveAttempts || 0) + 1;
-    if (attempts >= RESOLVE_ATTEMPT_LIMIT) {
-      return {
-        ...prev,
-        verifiedState: "unknown",
-        unknownReason: next.unknownReason || "not_found",
-        resolveAttempts: attempts,
-        readFailed: true,
-        source: prev.source || next.source,
-      };
-    }
+    const total = (prev.totalFailures || 0) + 1;
+    const stopped = attempts >= RESOLVE_ATTEMPT_LIMIT || total >= FAILURE_STOP;
     return {
       ...prev,
-      unknownReason: next.unknownReason || prev.unknownReason,
+      verifiedState: "unknown",
+      unknownReason: next.unknownReason || prev.unknownReason || "not_found",
       resolveAttempts: attempts,
+      totalFailures: total,
       readFailed: true,
+      stopped,
+      replacedBy: next.replacedBy || prev.replacedBy,
+      source: prev.source || next.source,
     };
   }
 
@@ -229,6 +315,13 @@ export function mergeVerifiedTrack(previous, incoming) {
       readFailed: false,
     };
   }
+  if ((prev.verifiedState === "unknown" || prev.stopped) && (next.verifiedState === "open" || next.verifiedState === "partial")) {
+    const reopenCount = (prev.reopenCount || 0) + 1;
+    if (reopenCount > REOPEN_LIMIT) {
+      return { ...prev, reopenCount, stopped: true };
+    }
+    next.reopenCount = reopenCount;
+  }
   if (next.cumQty == null) next.cumQty = prev.cumQty;
   if (next.avgYesPrice == null) next.avgYesPrice = prev.avgYesPrice;
   if (next.fees == null) next.fees = prev.fees;
@@ -238,6 +331,7 @@ export function mergeVerifiedTrack(previous, incoming) {
   if (!next.openedAt) next.openedAt = prev.openedAt;
   next.resolveAttempts = 0;
   next.readFailed = false;
+  next.stopped = false;
   return next;
 }
 

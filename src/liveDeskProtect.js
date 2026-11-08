@@ -302,11 +302,13 @@ export function improveFromMid({
   return { ok: true, ...snap, targetMicro: target };
 }
 
-export function protectContracts({ leaves, outcomeMicro, action, minQty } = {}) {
+export function protectContracts({ leaves, outcomeMicro, action, minQty, capDollars = MAX_SIZE_DOLLARS } = {}) {
   const n = Number(leaves);
   if (!(n > 0)) return { ok: false, error: "No size left on the resting order." };
+  const dollars = Math.min(MAX_SIZE_DOLLARS, Number(capDollars));
+  if (!(dollars > 0)) return { ok: false, error: "Re-rest would exceed the $" + MAX_SIZE_DOLLARS + " cap." };
   const cap = sizeToContracts({
-    dollars: MAX_SIZE_DOLLARS,
+    dollars,
     outcomeMicro,
     action,
     minQty,
@@ -323,7 +325,7 @@ export function protectContracts({ leaves, outcomeMicro, action, minQty } = {}) 
   const act = normalizeAction(action);
   const riskMicro = act === "sell" ? (MICRO - micro) : micro;
   const riskDollars = (contracts * riskMicro) / MICRO;
-  if (!(riskDollars <= MAX_SIZE_DOLLARS + 1e-6)) {
+  if (!(riskDollars <= dollars + 1e-6)) {
     return { ok: false, error: "Re-rest would exceed the $" + MAX_SIZE_DOLLARS + " cap." };
   }
   return { ok: true, contracts, riskDollars, riskLabel: "$" + riskDollars.toFixed(2) };

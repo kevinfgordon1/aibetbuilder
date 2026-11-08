@@ -5,6 +5,7 @@ import {
   classifyLookup,
   mergeVerifiedTrack,
   protectCancelRecord,
+  replacementGate,
   sameTrack,
 } from "./liveDeskOrderTrack.js";
 
@@ -35,7 +36,7 @@ const partialThenCancel = classifyOfficialOrder({
     updateTime: "2026-11-08T22:34:20.000Z",
   },
 });
-assert.equal(partialThenCancel.verifiedState, "canceled");
+assert.equal(partialThenCancel.verifiedState, "partial_canceled");
 assert.equal(partialThenCancel.cumQty, 40);
 assert.equal(partialThenCancel.avgYesPrice, 0.71);
 assert.equal(partialThenCancel.fees, 0.04);
@@ -84,7 +85,7 @@ const openThenCancel = mergeVerifiedTrack(
   { ...classifyOfficialOrder({ order: packers }), orderId: packers.id },
   partialThenCancel,
 );
-assert.equal(openThenCancel.verifiedState, "canceled");
+assert.equal(openThenCancel.verifiedState, "partial_canceled");
 assert.equal(openThenCancel.cumQty, 40);
 
 const staleOpen = mergeVerifiedTrack(
@@ -99,11 +100,57 @@ const cancelNote = protectCancelRecord({
   market_slug: "m",
   lineage_id: "ord-1",
 }, { replacedBy: "ord-2" });
-assert.equal(cancelNote.verifiedState, "canceled");
+assert.equal(cancelNote.verifiedState, "unknown");
+assert.equal(cancelNote.unknownReason, "cancel_unreconciled");
 assert.equal(cancelNote.cumQty, null);
-assert.equal(cancelNote.replacedBy, "ord-2");
 const linked = mergeVerifiedTrack({ ...filled, orderId: "ord-1", ownerEmail: "k@example.com" }, cancelNote);
-assert.equal(linked.verifiedState, "canceled");
-assert.equal(linked.replacedBy, "ord-2");
+assert.equal(linked.verifiedState, "filled", "an unreconciled cancel does not erase a verified fill");
+assert.equal(linked.cumQty, 1403.5);
+
+const reconciled = protectCancelRecord({
+  order_id: "ord-1",
+  owner_email: "k@example.com",
+  market_slug: "m",
+}, { replacedBy: "ord-2", official: partialThenCancel });
+assert.equal(reconciled.verifiedState, "partial_canceled");
+assert.equal(reconciled.cumQty, 40);
+assert.equal(reconciled.avgYesPrice, 0.71);
+assert.equal(reconciled.replacedBy, "ord-2");
+
+const fullReplace = replacementGate({
+  official: classifyOfficialOrder({ order: { ...packers, state: "ORDER_STATE_CANCELED", cumQuantity: 0, leavesQuantity: 0 } }),
+  observedLeaves: 1403.5,
+});
+assert.equal(fullReplace.replace, true);
+assert.equal(fullReplace.leaves, 1403.5);
+
+const raced = replacementGate({
+  official: partialThenCancel,
+  observedLeaves: 1403.5,
+  outcomeShort: false,
+});
+assert.equal(raced.replace, true);
+assert.equal(raced.leaves, 1363.5);
+assert.ok(raced.roomDollars < 1000);
+
+const noPrice = replacementGate({
+  official: { ...partialThenCancel, avgYesPrice: null },
+  observedLeaves: 1403.5,
+});
+assert.equal(noPrice.replace, false);
+assert.equal(noPrice.reason, "fill-cost-unknown");
+
+const unconfirmed = replacementGate({ official: cancelNote, observedLeaves: 10 });
+assert.equal(unconfirmed.replace, false);
+assert.equal(unconfirmed.reason, "unconfirmed");
+
+const over = replacementGate({
+  official: { ...partialThenCancel, cumQuantity: 40, avgYesPrice: 0.99, orderQty: 50 },
+  observedLeaves: 10,
+  priorSpentDollars: 990,
+  capDollars: 1000,
+});
+assert.equal(over.replace, false);
+assert.equal(over.reason, "chain-cap");
 
 console.log("liveDeskOrderTrack.test.js ok");

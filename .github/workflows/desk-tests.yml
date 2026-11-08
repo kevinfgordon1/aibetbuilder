@@ -1,0 +1,24 @@
+name: Desk tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  desk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - run: node src/liveDeskOrderTrack.test.js
+      - run: node src/liveDeskFillGroups.test.js
+      - run: node src/liveDeskFills.test.js
+      - run: node src/liveDeskProtect.test.js
+      - run: node lib/desk-protect-sweep.test.js
+      - run: node lib/desk-protect-sweep-novig.test.js
+      - run: node api/desk-protect-sweep.test.js
+      - run: node api/live-trading-desk.test.js
