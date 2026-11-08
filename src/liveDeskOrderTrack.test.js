@@ -3,10 +3,14 @@ import {
   RESOLVE_ATTEMPT_LIMIT,
   classifyOfficialOrder,
   classifyLookup,
+  executedRiskDollars,
+  lineagePriorSpent,
   mergeVerifiedTrack,
   protectCancelRecord,
   replacementGate,
   sameTrack,
+  tracksNeedingLookup,
+  TRACK_LOOKUP_LIMIT,
 } from "./liveDeskOrderTrack.js";
 
 const packers = {
@@ -152,5 +156,45 @@ const over = replacementGate({
 });
 assert.equal(over.replace, false);
 assert.equal(over.reason, "chain-cap");
+
+assert.equal(executedRiskDollars({ cumQty: 100, avgYesPrice: 0.4, outcome: "long", action: "sell" }).dollars, 60);
+assert.equal(executedRiskDollars({ cumQty: 100, avgYesPrice: 0.4, outcome: "short", action: "buy" }).dollars, 60);
+assert.equal(executedRiskDollars({ cumQty: 100, avgYesPrice: 0.4, outcome: "short", action: "sell" }).dollars, 40);
+assert.equal(executedRiskDollars({ cumQty: 10, avgYesPrice: null }).known, false);
+
+const chain = lineagePriorSpent([
+  { orderId: "root", cumQty: 800, avgYesPrice: 0.7, outcome: "long", action: "buy" },
+  { orderId: "child", cumQty: 50, avgYesPrice: 0.6, outcome: "long", action: "buy" },
+], { excludeOrderId: "child", outcome: "long", action: "buy" });
+assert.equal(chain.known, true);
+assert.equal(chain.dollars, 560);
+assert.equal(lineagePriorSpent([
+  { orderId: "root", cumQty: 10, avgYesPrice: null },
+], { excludeOrderId: "next" }).known, false);
+
+const gateChain = replacementGate({
+  official: classifyOfficialOrder({ order: { ...packers, state: "ORDER_STATE_CANCELED", quantity: 200, cumQuantity: 0, leavesQuantity: 0 } }),
+  observedLeaves: 200,
+  priorSpentDollars: 900,
+  capDollars: 1000,
+});
+assert.equal(gateChain.replace, true);
+assert.ok(gateChain.roomDollars <= 100 + 1e-6);
+const blocked = replacementGate({
+  official: classifyOfficialOrder({ order: { ...packers, state: "ORDER_STATE_CANCELED", quantity: 200, cumQuantity: 0, leavesQuantity: 0 } }),
+  observedLeaves: 200,
+  priorKnown: false,
+});
+assert.equal(blocked.reason, "prior-spent-unknown");
+
+const pending = [
+  { orderId: "a", verifiedState: "open", totalFailures: 0 },
+  { orderId: "b", verifiedState: "unknown", totalFailures: 1 },
+  { orderId: "c", verifiedState: "partial", totalFailures: 0 },
+  { orderId: "d", verifiedState: "filled", totalFailures: 0 },
+  { orderId: "e", verifiedState: "open", totalFailures: 6 },
+];
+assert.deepEqual(tracksNeedingLookup(pending, ["a"], 2).map((row) => row.orderId), ["b", "c"]);
+assert.equal(tracksNeedingLookup(pending, [], 10).length, TRACK_LOOKUP_LIMIT);
 
 console.log("liveDeskOrderTrack.test.js ok");

@@ -955,7 +955,9 @@ export function mapOpenOrders(payload, marketsBySlug = {}) {
       centsLabel: outcomeMicro == null ? "" : formatCentsFromMicro(outcomeMicro),
       outcomeMicro,
       yesMicro,
-      quantity: order.leavesQuantity != null ? order.leavesQuantity : order.quantity,
+      originalQuantity: order.quantity != null && order.quantity !== "" ? Number(order.quantity) : null,
+      leavesQuantity: order.leavesQuantity != null && order.leavesQuantity !== "" ? Number(order.leavesQuantity) : null,
+      quantity: order.leavesQuantity != null && order.leavesQuantity !== "" ? Number(order.leavesQuantity) : order.quantity,
       state: order.state || "",
     };
   }).filter((row) => row && row.id);

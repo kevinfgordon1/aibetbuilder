@@ -485,6 +485,75 @@ async function attachTracks(fills, tracks, ownerEmail) {
   }
 }
 
+async function reconcileOwnedTracks(client, tracks, ownerEmail, openOrders, activities, skipLookup) {
+  if (!tracks || tracks.configured === false || !ownerEmail || typeof tracks.listNonTerminal !== 'function') return;
+  let pending = [];
+  try { pending = await tracks.listNonTerminal(ownerEmail, 25); } catch (_) { return; }
+  if (!pending.length) return;
+  const trackMath = await import('../src/liveDeskOrderTrack.js');
+  const openIds = [];
+  for (const order of openOrders || []) {
+    if (!order || !order.id) continue;
+    const id = String(order.id);
+    openIds.push(id);
+    const existing = pending.find((row) => row.orderId === id);
+    if (!existing) continue;
+    const merged = trackMath.mergeVerifiedTrack(existing, {
+      ...trackMath.classifyOfficialOrder(order),
+      orderId: id,
+      ownerEmail,
+      marketSlug: existing.marketSlug || order.marketSlug || '',
+      source: 'open_list',
+    });
+    if (!trackMath.sameTrack(existing, merged)) {
+      try { await tracks.upsert(merged); } catch (_) { /* table missing */ }
+    }
+  }
+  const list = Array.isArray(activities) ? activities : [];
+  for (const item of list) {
+    const trade = item && item.trade;
+    if (!trade) continue;
+    const embedded = (trade.passiveExecution && trade.passiveExecution.order)
+      || (trade.aggressorExecution && trade.aggressorExecution.order);
+    if (!embedded || !embedded.id || !embedded.state) continue;
+    const id = String(embedded.id);
+    const existing = pending.find((row) => row.orderId === id);
+    if (!existing) continue;
+    const merged = trackMath.mergeVerifiedTrack(existing, {
+      ...trackMath.classifyOfficialOrder(embedded),
+      orderId: id,
+      ownerEmail,
+      marketSlug: existing.marketSlug || trade.marketSlug || '',
+      source: 'activities',
+    });
+    if (!trackMath.sameTrack(existing, merged)) {
+      try { await tracks.upsert(merged); } catch (_) { /* table missing */ }
+    }
+  }
+  if (skipLookup || !client || typeof client.getOrder !== 'function') return;
+  let fresh = pending;
+  try { fresh = await tracks.listNonTerminal(ownerEmail, 25); } catch (_) {}
+  const need = trackMath.tracksNeedingLookup(fresh, openIds, trackMath.TRACK_LOOKUP_LIMIT);
+  for (const row of need) {
+    let classified;
+    try {
+      classified = trackMath.classifyLookup({ order: await client.getOrder(row.orderId) });
+    } catch (err) {
+      classified = trackMath.classifyLookup({ error: err });
+    }
+    const prev = (await tracks.get(row.orderId)) || row;
+    const merged = trackMath.mergeVerifiedTrack(prev, {
+      ...classified,
+      orderId: row.orderId,
+      ownerEmail,
+      marketSlug: row.marketSlug,
+    });
+    if (!trackMath.sameTrack(prev, merged)) {
+      try { await tracks.upsert(merged); } catch (_) { /* table missing */ }
+    }
+  }
+}
+
 async function snapshot(client, slug, store, { tracks, ownerEmail } = {}) {
   // Account reads, trade history, and the public slate fail independently.
   // A 429 on positions must still return the NFL dropdown.
@@ -554,6 +623,7 @@ async function snapshot(client, slug, store, { tracks, ownerEmail } = {}) {
     rate = absorbRate(rate, booked.error);
   }
   const activity = activityErr ? null : price.mapActivities({ activities: recent }, markets);
+  await reconcileOwnedTracks(client, tracks, ownerEmail, orderList, activityErr ? [] : activities, !!rate.rateLimited);
   const fills = activityErr
     ? null
     : await attachTracks(

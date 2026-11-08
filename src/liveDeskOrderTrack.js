@@ -14,6 +14,8 @@ export const RESOLVE_ATTEMPT_LIMIT = 3;
 export const RESOLVE_COOLDOWN_MS = 60_000;
 
 const TERMINAL = new Set(["filled", "canceled", "partial_canceled", "expired", "partial_expired"]);
+export const TERMINAL_TRACK_STATES = ["filled", "canceled", "partial_canceled", "expired", "partial_expired"];
+export const TRACK_LOOKUP_LIMIT = 3;
 export const FAILURE_STOP = 6;
 export const REOPEN_LIMIT = 3;
 
@@ -207,13 +209,43 @@ export function protectCancelRecord(row, { replacedBy, at, official } = {}) {
  * Room is the $1000 desk cap minus this order's executed notional and any
  * already-counted lineage spend. Remainder is original quantity minus cumQty.
  */
+export function executedRiskDollars(row, { outcome, action } = {}) {
+  const cum = num(row && (row.cumQty != null ? row.cumQty : row.cumQuantity));
+  if (!(cum > 0)) return { known: true, dollars: 0 };
+  const avgYes = num(row && (row.avgYesPrice != null ? row.avgYesPrice : row.avgPx));
+  if (avgYes == null) return { known: false, dollars: null };
+  const short = (outcome || row.outcome) === "short";
+  const outcomePx = short ? 1 - avgYes : avgYes;
+  if (!(outcomePx > 0 && outcomePx < 1)) return { known: false, dollars: null };
+  const sell = (action || row.action) === "sell";
+  const riskPx = sell ? 1 - outcomePx : outcomePx;
+  return { known: true, dollars: cum * riskPx };
+}
+
+export function lineagePriorSpent(rows, { excludeOrderId, outcome, action } = {}) {
+  let dollars = 0;
+  for (const row of rows || []) {
+    if (!row || row.orderId === excludeOrderId) continue;
+    const part = executedRiskDollars(row, {
+      outcome: outcome || row.outcome,
+      action: action || row.action,
+    });
+    if (!part.known) return { known: false, dollars: null };
+    dollars += part.dollars;
+  }
+  return { known: true, dollars };
+}
+
 export function replacementGate({
   official,
   observedLeaves,
   priorSpentDollars = 0,
+  priorKnown = true,
   capDollars = 1000,
   outcomeShort = false,
+  action = "buy",
 } = {}) {
+  if (priorKnown === false) return { replace: false, reason: "prior-spent-unknown" };
   if (!official || official.transient || official.readFailed || official.verifiedState === "unknown") {
     return { replace: false, reason: "unconfirmed" };
   }
@@ -233,17 +265,14 @@ export function replacementGate({
   if (!(remainder > 1e-9)) {
     return { replace: false, reason: "nothing-left", cumQty: official.cumQty, remainder: 0 };
   }
-  let spent = 0;
-  if (official.cumQty > 0) {
-    if (official.avgYesPrice == null) {
-      return { replace: false, reason: "fill-cost-unknown", cumQty: official.cumQty, remainder };
-    }
-    const px = outcomeShort ? 1 - official.avgYesPrice : official.avgYesPrice;
-    if (!(px > 0 && px < 1)) {
-      return { replace: false, reason: "fill-cost-unknown", cumQty: official.cumQty, remainder };
-    }
-    spent = official.cumQty * px;
+  const spentPart = executedRiskDollars(official, {
+    outcome: outcomeShort ? "short" : "long",
+    action,
+  });
+  if (!spentPart.known) {
+    return { replace: false, reason: "fill-cost-unknown", cumQty: official.cumQty, remainder };
   }
+  const spent = spentPart.dollars;
   const room = capDollars - Number(priorSpentDollars || 0) - spent;
   if (!(room > 1e-6)) {
     return { replace: false, reason: "chain-cap", cumQty: official.cumQty, remainder, spent, roomDollars: 0 };
@@ -361,6 +390,21 @@ export function trackFacts(row) {
     r.lastFillAt || "",
     r.terminalAt || "",
   ].join("|");
+}
+
+export function tracksNeedingLookup(rows, openIds, limit = TRACK_LOOKUP_LIMIT) {
+  const open = new Set((openIds || []).map((id) => String(id || "")));
+  const out = [];
+  const cap = Number(limit) > 0 ? Number(limit) : TRACK_LOOKUP_LIMIT;
+  for (const row of rows || []) {
+    if (!row || row.stopped) continue;
+    if ((row.totalFailures || 0) >= FAILURE_STOP) continue;
+    if (open.has(String(row.orderId || ""))) continue;
+    if (row.verifiedState !== "open" && row.verifiedState !== "partial" && row.verifiedState !== "unknown") continue;
+    out.push(row);
+    if (out.length >= cap) break;
+  }
+  return out;
 }
 
 export function sameTrack(a, b) {
