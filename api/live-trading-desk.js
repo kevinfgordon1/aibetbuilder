@@ -510,24 +510,17 @@ async function reconcileOwnedTracks(client, tracks, ownerEmail, openOrders, acti
     }
   }
   const list = Array.isArray(activities) ? activities : [];
-  for (const item of list) {
-    const trade = item && item.trade;
-    if (!trade) continue;
-    const embedded = (trade.passiveExecution && trade.passiveExecution.order)
-      || (trade.aggressorExecution && trade.aggressorExecution.order);
-    if (!embedded || !embedded.id || !embedded.state) continue;
-    const id = String(embedded.id);
+  const grouped = new Map();
+  for (const exec of trackMath.executionsFromActivities(list)) {
+    if (!grouped.has(exec.orderId)) grouped.set(exec.orderId, []);
+    grouped.get(exec.orderId).push(exec);
+  }
+  for (const [id, execs] of grouped) {
     const existing = pending.find((row) => row.orderId === id);
     if (!existing) continue;
-    const merged = trackMath.mergeVerifiedTrack(existing, {
-      ...trackMath.classifyOfficialOrder(embedded),
-      orderId: id,
-      ownerEmail,
-      marketSlug: existing.marketSlug || trade.marketSlug || '',
-      source: 'activities',
-    });
-    if (!trackMath.sameTrack(existing, merged)) {
-      try { await tracks.upsert(merged); } catch (_) { /* table missing */ }
+    const folded = trackMath.foldOrderExecutions(existing, execs);
+    if (!trackMath.sameTrack(existing, folded)) {
+      try { await tracks.upsert(folded); } catch (_) { /* table missing */ }
     }
   }
   if (skipLookup || !client || typeof client.getOrder !== 'function') return;
@@ -973,3 +966,4 @@ module.exports.config = { maxDuration: 15 };
 module.exports._setDeps = setDeps;
 module.exports._resetDeps = resetDeps;
 module.exports._requireDeskOwner = requireDeskOwner;
+module.exports._reconcileOwnedTracks = reconcileOwnedTracks;

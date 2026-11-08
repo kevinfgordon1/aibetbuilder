@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const handler = require('./desk-protect-sweep');
 const { createMemoryProtectStore } = require('../lib/desk-protect-registry');
+const { createMemoryOrderTrackStore } = require('../lib/desk-order-tracks');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 
 const SECRET = 'desk-sweep-secret';
@@ -248,6 +249,7 @@ async function post(headers, body) {
     notify: async () => ({ ok: false }),
     now: () => now,
     runSweep: runProtectSweep,
+    trackStore: () => createMemoryOrderTrackStore(),
   });
   const fired = await post(
     { 'X-Desk-Protect-Secret': SECRET },

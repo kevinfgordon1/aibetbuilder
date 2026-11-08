@@ -141,6 +141,36 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeFillIds(value) {
+  const raw = Array.isArray(value) ? value : String(value || "").split(",");
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = text(item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+    if (out.length >= 200) break;
+  }
+  return out;
+}
+
+function strongerTrackState(current, incoming) {
+  const rank = {
+    open: 1,
+    unknown: 1,
+    partial: 2,
+    filled: 3,
+    canceled: 4,
+    expired: 4,
+    partial_canceled: 5,
+    partial_expired: 5,
+  };
+  const c = rank[current] || 0;
+  const n = rank[incoming] || 0;
+  return n >= c ? (incoming || current) : current;
+}
+
 function blank(incoming) {
   const src = incoming || {};
   return {
@@ -162,6 +192,9 @@ function blank(incoming) {
     replaces: src.replaces || null,
     replacedBy: src.replacedBy || src.replaced_by || null,
     lineageId: src.lineageId || src.lineage_id || null,
+    outcome: text(src.outcome),
+    action: text(src.action),
+    fillIds: normalizeFillIds(src.fillIds != null ? src.fillIds : src.fill_ids),
     unknownReason: text(src.unknownReason || src.unknown_reason),
     source: text(src.source),
     resolveAttempts: Number(src.resolveAttempts != null ? src.resolveAttempts : src.resolve_attempts) || 0,
@@ -310,6 +343,9 @@ export function mergeVerifiedTrack(previous, incoming) {
   next.replaces = next.replaces || prev.replaces;
   next.replacedBy = next.replacedBy || prev.replacedBy;
   next.lineageId = next.lineageId || prev.lineageId;
+  next.outcome = next.outcome || prev.outcome;
+  next.action = next.action || prev.action;
+  next.fillIds = normalizeFillIds([...(prev.fillIds || []), ...(next.fillIds || [])]);
   next.totalFailures = prev.totalFailures;
   next.reopenCount = prev.reopenCount;
 
@@ -336,13 +372,30 @@ export function mergeVerifiedTrack(previous, incoming) {
     };
   }
 
+  if (next.cumQty > 0 && next.verifiedState === "canceled") next.verifiedState = "partial_canceled";
+  if (next.cumQty > 0 && next.verifiedState === "expired") next.verifiedState = "partial_expired";
+  const kept = preferFill(prev, next);
+  next.cumQty = kept.cumQty;
+  next.avgYesPrice = kept.avgYesPrice;
+  next.cost = kept.cost;
+  next.fees = kept.fees;
   if (TERMINAL.has(prev.verifiedState) && !TERMINAL.has(next.verifiedState)) {
     return {
       ...prev,
       replacedBy: next.replacedBy || prev.replacedBy,
       replaces: next.replaces || prev.replaces,
+      outcome: next.outcome || prev.outcome,
+      action: next.action || prev.action,
+      fillIds: next.fillIds,
+      cumQty: kept.cumQty,
+      avgYesPrice: kept.avgYesPrice,
+      cost: kept.cost,
+      fees: kept.fees,
       readFailed: false,
     };
+  }
+  if (TERMINAL.has(prev.verifiedState) && TERMINAL.has(next.verifiedState)) {
+    next.verifiedState = strongerTrackState(prev.verifiedState, next.verifiedState);
   }
   if ((prev.verifiedState === "unknown" || prev.stopped) && (next.verifiedState === "open" || next.verifiedState === "partial")) {
     const reopenCount = (prev.reopenCount || 0) + 1;
@@ -362,6 +415,189 @@ export function mergeVerifiedTrack(previous, incoming) {
   next.readFailed = false;
   next.stopped = false;
   return next;
+}
+
+function preferFill(prev, next) {
+  const pc = prev.cumQty;
+  const nc = next.cumQty;
+  if (pc == null) return { cumQty: nc, avgYesPrice: next.avgYesPrice, cost: next.cost, fees: next.fees };
+  if (nc == null || nc + 1e-9 < pc) return { cumQty: pc, avgYesPrice: prev.avgYesPrice, cost: prev.cost, fees: prev.fees };
+  if (Math.abs(nc - pc) <= 1e-9) {
+    return {
+      cumQty: pc,
+      avgYesPrice: prev.avgYesPrice != null ? prev.avgYesPrice : next.avgYesPrice,
+      cost: prev.cost != null ? prev.cost : next.cost,
+      fees: prev.fees != null ? prev.fees : next.fees,
+    };
+  }
+  return {
+    cumQty: nc,
+    avgYesPrice: next.avgYesPrice != null ? next.avgYesPrice : prev.avgYesPrice,
+    cost: next.cost != null ? next.cost : prev.cost,
+    fees: next.fees != null ? next.fees : prev.fees,
+  };
+}
+
+/**
+ * One execution from a portfolio activity. trade.id is the dedupe key.
+ * Price is the YES price on the execution. Cost is the trade cost, not cashOrderQty.
+ */
+export function executionsFromActivities(activities) {
+  const seen = new Set();
+  const out = [];
+  const list = Array.isArray(activities) ? activities : [];
+  for (const item of list) {
+    const trade = item && item.trade;
+    if (!trade || typeof trade !== "object") continue;
+    const tradeId = text(trade.id);
+    if (tradeId) {
+      if (seen.has(tradeId)) continue;
+      seen.add(tradeId);
+    }
+    if (/BUSTED|REJECTED/i.test(text(trade.state))) continue;
+    const exec = trade.isAggressor ? trade.aggressorExecution : trade.passiveExecution;
+    const order = (exec && exec.order)
+      || (trade.passiveExecution && trade.passiveExecution.order)
+      || (trade.aggressorExecution && trade.aggressorExecution.order);
+    if (!order || !order.id) continue;
+    const qty = amount(trade.qtyDecimal != null ? trade.qtyDecimal : (exec && exec.lastShares != null ? exec.lastShares : trade.qty));
+    const yes = amount(exec && exec.lastPx) != null ? amount(exec.lastPx) : amount(trade.price);
+    out.push({
+      tradeId,
+      orderId: String(order.id),
+      qty,
+      yesPrice: yes,
+      cost: amount(trade.cost != null ? trade.cost : trade.costBasis),
+      fee: amount(exec && (exec.commissionNotionalCollected != null ? exec.commissionNotionalCollected : exec.commissionNotionalTotalCollected)),
+      orderState: text(order.state),
+      orderQty: amount(order.quantity),
+      orderCum: amount(order.cumQuantity),
+      avgYesPrice: amount(order.avgPx),
+    });
+  }
+  return out;
+}
+
+/**
+ * Add executions to a track without letting an older or repeated trade shrink cum,
+ * average, cost, or a terminal state. Ids already stored are ignored, so a reload
+ * of the same page does not add the quantity again.
+ */
+export function foldOrderExecutions(previous, executions) {
+  const prev = blank(previous);
+  const ids = new Set(prev.fillIds);
+  const fresh = [];
+  let bestOrderCum = prev.cumQty;
+  let bestAvg = prev.avgYesPrice;
+  let state = prev.verifiedState;
+  let orderQty = prev.orderQty;
+  for (const ex of executions || []) {
+    if (!ex || String(ex.orderId || "") !== prev.orderId) continue;
+    if (ex.tradeId && ids.has(ex.tradeId)) continue;
+    if (!ex.tradeId) {
+      if (ex.orderCum != null && (bestOrderCum == null || ex.orderCum > bestOrderCum)) {
+        bestOrderCum = ex.orderCum;
+        if (ex.avgYesPrice != null) bestAvg = ex.avgYesPrice;
+      }
+      if (ex.orderQty != null) orderQty = ex.orderQty;
+      const snapCum = ex.orderCum != null ? ex.orderCum : ex.qty;
+      state = strongerTrackState(state, stateFromExchange(ex.orderState, snapCum, ex.orderQty));
+      continue;
+    }
+    ids.add(ex.tradeId);
+    fresh.push(ex);
+    if (ex.orderCum != null && (bestOrderCum == null || ex.orderCum > bestOrderCum)) {
+      bestOrderCum = ex.orderCum;
+      if (ex.avgYesPrice != null) bestAvg = ex.avgYesPrice;
+    }
+    if (ex.orderQty != null) orderQty = ex.orderQty;
+    const snapCum = ex.orderCum != null ? ex.orderCum : ex.qty;
+    state = strongerTrackState(state, stateFromExchange(ex.orderState, snapCum, ex.orderQty));
+  }
+  let addQty = 0;
+  let addNotional = 0;
+  let priced = 0;
+  let addCost = 0;
+  let costOk = true;
+  let addFee = 0;
+  let feeOk = true;
+  for (const ex of fresh) {
+    const qty = num(ex.qty);
+    if (!(qty > 0)) continue;
+    addQty += qty;
+    const px = num(ex.yesPrice);
+    if (px != null) {
+      addNotional += px * qty;
+      priced += qty;
+    }
+    if (num(ex.cost) == null) costOk = false;
+    else addCost += num(ex.cost);
+    if (num(ex.fee) == null) feeOk = false;
+    else addFee += num(ex.fee);
+  }
+  const covered = prev.fillIds.length === 0 && prev.cumQty != null && addQty <= prev.cumQty + 1e-9;
+  let cum = prev.cumQty != null ? prev.cumQty : 0;
+  let avg = prev.avgYesPrice;
+  let cost = prev.cost;
+  let fees = prev.fees;
+  if (!covered && addQty > 0) {
+    if (priced === addQty && (avg != null || cum === 0)) {
+      avg = cum > 0 && avg != null ? (avg * cum + addNotional) / (cum + addQty) : addNotional / addQty;
+    } else if (priced !== addQty) avg = null;
+    if (costOk && (cost != null || cum === 0)) cost = (cost || 0) + addCost;
+    else cost = null;
+    if (feeOk && (fees != null || cum === 0)) fees = (fees || 0) + addFee;
+    else fees = null;
+    cum += addQty;
+  }
+  if (bestOrderCum != null && bestOrderCum > cum + 1e-9) {
+    cum = bestOrderCum;
+    if (bestAvg != null) avg = bestAvg;
+  }
+  if (cum > 0 && state === "canceled") state = "partial_canceled";
+  if (cum > 0 && state === "expired") state = "partial_expired";
+  if ((!state || state === "unknown" || state === "open") && cum > 0) {
+    state = orderQty != null && cum + 1e-9 >= orderQty ? "filled" : "partial";
+  }
+  if (TERMINAL.has(prev.verifiedState) && !TERMINAL.has(state)) state = prev.verifiedState;
+  return mergeVerifiedTrack(prev, {
+    orderId: prev.orderId,
+    ownerEmail: prev.ownerEmail,
+    marketSlug: prev.marketSlug,
+    verifiedState: state || prev.verifiedState,
+    exchangeState: prev.exchangeState,
+    cumQty: cum,
+    avgYesPrice: avg,
+    cost,
+    fees,
+    orderQty,
+    outcome: prev.outcome,
+    action: prev.action,
+    fillIds: [...ids],
+    replaces: prev.replaces,
+    replacedBy: prev.replacedBy,
+    lineageId: prev.lineageId,
+    source: fresh.length ? "activities" : prev.source,
+  });
+}
+
+/**
+ * Prior spend counts only when every required order id was actually stored.
+ * A missing row is not zero spend.
+ */
+export function lineageSpend(rows, { requiredOrderIds, excludeOrderId, outcome, action } = {}) {
+  const required = requiredOrderIds || [];
+  if (!required.length) return { known: false, dollars: null, reason: "lineage-incomplete" };
+  const have = new Set();
+  for (const row of rows || []) {
+    if (row && row.orderId) have.add(row.orderId);
+  }
+  for (const id of required) {
+    if (!have.has(id)) return { known: false, dollars: null, reason: "lineage-incomplete" };
+  }
+  const prior = lineagePriorSpent(rows, { excludeOrderId, outcome, action });
+  if (!prior.known) return { known: false, dollars: null, reason: "prior-spent-unknown" };
+  return { known: true, dollars: prior.dollars, reason: "ok" };
 }
 
 function factNum(v) {
@@ -385,6 +621,9 @@ export function trackFacts(row) {
     r.replacedBy || "",
     r.replaces || "",
     r.lineageId || "",
+    r.outcome || "",
+    r.action || "",
+    (r.fillIds || []).join(","),
     r.source,
     String(r.resolveAttempts || 0),
     r.lastFillAt || "",

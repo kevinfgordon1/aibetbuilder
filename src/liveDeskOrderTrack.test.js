@@ -5,7 +5,10 @@ import {
   classifyOfficialOrder,
   classifyLookup,
   executedRiskDollars,
+  executionsFromActivities,
+  foldOrderExecutions,
   lineagePriorSpent,
+  lineageSpend,
   mergeVerifiedTrack,
   protectCancelRecord,
   replacementGate,
@@ -218,6 +221,60 @@ const pending = [
   const spent = lineagePriorSpent([back], { excludeOrderId: "child", outcome: "long", action: "buy" });
   assert.equal(spent.dollars, 60);
 }
+
+assert.equal(lineageSpend([], { requiredOrderIds: ["root"], excludeOrderId: "child" }).reason, "lineage-incomplete");
+assert.equal(lineageSpend([
+  { orderId: "root", cumQty: 100, avgYesPrice: 0.4, outcome: "long", action: "sell" },
+], { requiredOrderIds: ["root", "child"], excludeOrderId: "child" }).reason, "lineage-incomplete");
+
+function deskTrade(id, qty, px, cost, state, orderCum) {
+  return {
+    trade: {
+      id,
+      isAggressor: true,
+      qtyDecimal: qty,
+      price: { value: String(px) },
+      cost: cost == null ? undefined : { value: String(cost) },
+      aggressorExecution: {
+        lastShares: qty,
+        lastPx: { value: String(px) },
+        commissionNotionalCollected: { value: "0.10" },
+        order: {
+          id: "ord",
+          state,
+          quantity: 20,
+          cumQuantity: orderCum,
+          avgPx: { value: String(px) },
+        },
+      },
+    },
+  };
+}
+const older = deskTrade("t1", 6, 0.4, 2.4, "ORDER_STATE_PARTIALLY_FILLED", 6);
+const newer = deskTrade("t2", 4, 0.7, 2.8, "ORDER_STATE_CANCELED", 10);
+const openTrack = {
+  orderId: "ord", ownerEmail: "a@b.c", marketSlug: "m", verifiedState: "open", cumQty: 0, outcome: "long", action: "buy",
+};
+const forward = foldOrderExecutions(openTrack, executionsFromActivities([older, newer]));
+const backward = foldOrderExecutions(openTrack, executionsFromActivities([newer, older]));
+assert.equal(forward.cumQty, 10);
+assert.equal(backward.cumQty, 10);
+assert.ok(Math.abs(forward.avgYesPrice - 0.52) < 1e-9);
+assert.ok(Math.abs(backward.avgYesPrice - 0.52) < 1e-9);
+assert.equal(forward.verifiedState, "partial_canceled");
+assert.equal(backward.verifiedState, "partial_canceled");
+assert.ok(Math.abs(forward.cost - 5.2) < 1e-9);
+const duplicated = foldOrderExecutions(openTrack, executionsFromActivities([older, older, newer, newer]));
+assert.equal(duplicated.cumQty, 10);
+const reloaded = foldOrderExecutions(forward, executionsFromActivities([newer, older, older]));
+assert.equal(reloaded.cumQty, 10);
+assert.equal(reloaded.verifiedState, "partial_canceled");
+assert.ok(Math.abs(reloaded.avgYesPrice - forward.avgYesPrice) < 1e-9);
+const stale = foldOrderExecutions(forward, executionsFromActivities([
+  deskTrade("t1", 6, 0.4, 2.4, "ORDER_STATE_PARTIALLY_FILLED", 3),
+]));
+assert.equal(stale.cumQty, 10);
+assert.equal(stale.verifiedState, "partial_canceled");
 
 assert.deepEqual(tracksNeedingLookup(pending, ["a"], 2).map((row) => row.orderId), ["b", "c"]);
 assert.equal(tracksNeedingLookup(pending, [], 10).length, TRACK_LOOKUP_LIMIT);

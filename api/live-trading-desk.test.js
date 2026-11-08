@@ -1526,6 +1526,41 @@ const goodCreds = () => ({
     handler._resetDeps();
   }
 
+  {
+    const { createMemoryOrderTrackStore } = require('../lib/desk-order-tracks');
+    const owner = 'kev120909@gmail.com';
+    const tracks = createMemoryOrderTrackStore([
+      { orderId: 'ord', ownerEmail: owner, marketSlug: 'm', verifiedState: 'open', cumQty: 0, outcome: 'long', action: 'buy' },
+    ]);
+    const trade = (id, qty, px, state, orderCum) => ({
+      trade: {
+        id,
+        isAggressor: true,
+        qtyDecimal: qty,
+        cost: { value: String(qty * px) },
+        aggressorExecution: {
+          lastShares: qty,
+          lastPx: { value: String(px) },
+          commissionNotionalCollected: { value: '0.1' },
+          order: { id: 'ord', state, quantity: 20, cumQuantity: orderCum, avgPx: { value: String(px) } },
+        },
+      },
+    });
+    const older = trade('t1', 6, 0.4, 'ORDER_STATE_PARTIALLY_FILLED', 6);
+    const newer = trade('t2', 4, 0.7, 'ORDER_STATE_CANCELED', 10);
+    await handler._reconcileOwnedTracks({ async getOrder() { throw new Error('no'); } }, tracks, owner, [], [newer, older, older], false);
+    const once = await tracks.get('ord');
+    assert.equal(once.cumQty, 10);
+    assert.equal(once.verifiedState, 'partial_canceled');
+    assert.ok(Math.abs(once.avgYesPrice - 0.52) < 1e-9);
+    assert.ok(Math.abs(once.cost - 5.2) < 1e-9);
+    await handler._reconcileOwnedTracks({ async getOrder() { throw new Error('no'); } }, tracks, owner, [], [older, newer], false);
+    const twice = await tracks.get('ord');
+    assert.equal(twice.cumQty, 10);
+    assert.equal(twice.verifiedState, 'partial_canceled');
+    assert.ok(Math.abs(twice.avgYesPrice - once.avgYesPrice) < 1e-9);
+  }
+
   console.log('live-trading-desk.test.js ok');
 })().catch((err) => {
   console.error(err);

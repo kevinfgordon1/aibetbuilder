@@ -13,6 +13,8 @@
 -- row's own side: buy risk is the outcome price times cum_qty, sell risk is
 -- one minus that price times cum_qty. A short outcome price is 1 - avg_yes_price.
 -- A row with cum_qty > 0 and no avg_yes_price is unknown spend. Do not replace.
+-- fill_ids is the comma-separated execution ids already counted into cum_qty.
+-- A missing lineage row is not zero spend. A failed track write blocks a new rest.
 
 create table if not exists public.desk_order_tracks (
   order_id text primary key,
@@ -27,6 +29,7 @@ create table if not exists public.desk_order_tracks (
   avg_yes_price numeric,
   outcome text not null default '',
   action text not null default '',
+  fill_ids text not null default '',
   cost numeric,
   fees numeric,
   opened_at timestamptz,
@@ -53,3 +56,4 @@ alter table public.desk_order_tracks enable row level security;
 -- Safe if the table was created from an earlier copy of this file.
 alter table public.desk_order_tracks add column if not exists outcome text not null default '';
 alter table public.desk_order_tracks add column if not exists action text not null default '';
+alter table public.desk_order_tracks add column if not exists fill_ids text not null default '';
