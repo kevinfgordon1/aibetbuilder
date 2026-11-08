@@ -58,6 +58,7 @@ function ensureMods() {
 const auth = require('./polymarket-us-auth');
 const { createPolymarketUsClient } = require('./polymarket-us-client');
 const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
+const { createSupabaseOrderTrackStore } = require('../lib/desk-order-tracks');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
 const novigDesk = require('./novig-desk');
@@ -66,6 +67,12 @@ let sharedStore = null;
 function defaultProtectStore() {
   if (!sharedStore) sharedStore = createSupabaseProtectStore();
   return sharedStore;
+}
+
+let sharedTracks = null;
+function defaultTrackStore() {
+  if (!sharedTracks) sharedTracks = createSupabaseOrderTrackStore();
+  return sharedTracks;
 }
 
 function headerValue(headers, name) {
@@ -92,6 +99,7 @@ const defaults = {
   requireOwner: requireDeskOwner,
   creds: () => auth.readPolymarketCreds(process.env),
   protectStore: defaultProtectStore,
+  trackStore: defaultTrackStore,
   notify: (text) => sendProtectPing(text),
   now: () => Date.now(),
   serviceAuthorized: serviceSweepAuthorized,
@@ -111,6 +119,7 @@ const DEFAULT_RETRY_AFTER_SEC = 45;
 
 function resetDeps() {
   sharedStore = null;
+  sharedTracks = null;
   deps = { ...defaults };
   nflGamesCache = { at: 0, games: null };
   marketCache = new Map();
@@ -443,7 +452,40 @@ function withFillNotes(positions, rows) {
   });
 }
 
-async function snapshot(client, slug, store) {
+async function attachTracks(fills, tracks, ownerEmail) {
+  if (!Array.isArray(fills) || !tracks || tracks.configured === false || !ownerEmail) return fills;
+  if (typeof tracks.listByOrderIds !== 'function') return fills;
+  try {
+    const ids = [...new Set(fills.map((row) => row && row.orderId).filter(Boolean))].slice(0, 50);
+    const saved = await tracks.listByOrderIds(ids, ownerEmail);
+    const byId = new Map((saved || []).map((row) => [row.orderId, row]));
+    return fills.map((row) => {
+      const savedRow = row && byId.get(row.orderId);
+      if (!savedRow) return row;
+      return {
+        ...row,
+        verified: {
+          state: savedRow.verifiedState,
+          cumQty: savedRow.cumQty,
+          orderQty: savedRow.orderQty,
+          avgYesPrice: savedRow.avgYesPrice,
+          fees: savedRow.fees,
+          cost: savedRow.cost,
+          replacedBy: savedRow.replacedBy || '',
+          replaces: savedRow.replaces || '',
+          unknownReason: savedRow.unknownReason || '',
+          exchangeState: savedRow.exchangeState || '',
+        },
+        replacedBy: row.replacedBy || savedRow.replacedBy || '',
+        replaces: row.replaces || savedRow.replaces || '',
+      };
+    });
+  } catch (_) {
+    return fills;
+  }
+}
+
+async function snapshot(client, slug, store, { tracks, ownerEmail } = {}) {
   // Account reads, trade history, and the public slate fail independently.
   // A 429 on positions must still return the NFL dropdown.
   const [posRes, ordRes, actRes, slateRes] = await Promise.allSettled([
@@ -514,7 +556,11 @@ async function snapshot(client, slug, store) {
   const activity = activityErr ? null : price.mapActivities({ activities: recent }, markets);
   const fills = activityErr
     ? null
-    : fillsMod.mapFilledOrders(activities, { protectRows: await protectRowsForFills(store, activities) });
+    : await attachTracks(
+      fillsMod.mapFilledOrders(activities, { protectRows: await protectRowsForFills(store, activities) }),
+      tracks,
+      ownerEmail,
+    );
   const limited = !!rate.rateLimited;
   const retryAfter = limited ? normalizeRetryAfter(rate.retryAfter) : null;
   return {
@@ -791,7 +837,8 @@ async function handler(req, res) {
         json(res, 400, { ok: false, error: 'Bad market slug.' });
         return;
       }
-      json(res, 200, await snapshot(client, slug, store));
+      const email = owner.user && (owner.user.email || owner.user.user_email);
+      json(res, 200, await snapshot(client, slug, store, { tracks: deps.trackStore(), ownerEmail: email }));
       return;
     }
     if (op === 'protect-sweep') {
@@ -800,6 +847,7 @@ async function handler(req, res) {
         store,
         notify: deps.notify,
         now: deps.now,
+        tracks: deps.trackStore(),
       });
       json(res, swept.ok ? 200 : (swept.status || 503), swept);
       return;

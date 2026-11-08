@@ -265,6 +265,9 @@ export function mapFilledOrders(payload, { protectRows, limit } = {}) {
       partial,
       orderQty,
       orderCum,
+      orderState,
+      replaces: row ? str(row.replaces) : "",
+      replacedBy: row ? str(row.replaced_by) : "",
       orderProgress: orderQty != null && orderCum != null
         ? contractsLabel(orderCum) + " of " + contractsLabel(orderQty)
         : "",
