@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createMemoryOrderTrackStore } from "../lib/desk-order-tracks.js";
 import {
   RESOLVE_ATTEMPT_LIMIT,
   classifyOfficialOrder,
@@ -168,6 +169,10 @@ const chain = lineagePriorSpent([
 ], { excludeOrderId: "child", outcome: "long", action: "buy" });
 assert.equal(chain.known, true);
 assert.equal(chain.dollars, 560);
+const storedSell = lineagePriorSpent([
+  { orderId: "root", cumQty: 100, avgYesPrice: 0.4, outcome: "long", action: "sell" },
+], { excludeOrderId: "next", outcome: "long", action: "buy" });
+assert.equal(storedSell.dollars, 60, "a stored sell keeps sell risk when the caller is a buy");
 assert.equal(lineagePriorSpent([
   { orderId: "root", cumQty: 10, avgYesPrice: null },
 ], { excludeOrderId: "next" }).known, false);
@@ -194,6 +199,26 @@ const pending = [
   { orderId: "d", verifiedState: "filled", totalFailures: 0 },
   { orderId: "e", verifiedState: "open", totalFailures: 6 },
 ];
+{
+  const store = createMemoryOrderTrackStore();
+  await store.upsert({
+    orderId: "sell-parent",
+    ownerEmail: "kev120909@gmail.com",
+    marketSlug: "m",
+    verifiedState: "partial_canceled",
+    cumQty: 100,
+    avgYesPrice: 0.4,
+    outcome: "long",
+    action: "sell",
+    lineageId: "sell-parent",
+  });
+  const back = await store.get("sell-parent");
+  assert.equal(back.action, "sell");
+  assert.equal(back.outcome, "long");
+  const spent = lineagePriorSpent([back], { excludeOrderId: "child", outcome: "long", action: "buy" });
+  assert.equal(spent.dollars, 60);
+}
+
 assert.deepEqual(tracksNeedingLookup(pending, ["a"], 2).map((row) => row.orderId), ["b", "c"]);
 assert.equal(tracksNeedingLookup(pending, [], 10).length, TRACK_LOOKUP_LIMIT);
 

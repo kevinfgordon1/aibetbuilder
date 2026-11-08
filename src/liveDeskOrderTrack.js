@@ -227,8 +227,8 @@ export function lineagePriorSpent(rows, { excludeOrderId, outcome, action } = {}
   for (const row of rows || []) {
     if (!row || row.orderId === excludeOrderId) continue;
     const part = executedRiskDollars(row, {
-      outcome: outcome || row.outcome,
-      action: action || row.action,
+      outcome: row.outcome || outcome,
+      action: row.action || action,
     });
     if (!part.known) return { known: false, dollars: null };
     dollars += part.dollars;
