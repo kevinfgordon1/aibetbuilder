@@ -1092,16 +1092,27 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
     { gameKey: "26OCT031300CWSCLE", marketVal: encVal("KXMLBHR-26OCT031300CWSCLE-CWSMMURAKAMI5-1", "yes") },
   ]);
 
-  // NFL anytime TD maps; accents/punctuation fold, the Jr./III suffix does not.
+  // NFL anytime TD maps. Accents, punctuation, and a trailing Jr/II/III fold.
+  // The game, the 1+ rung, and a second player who folds to the same name do not.
   const nflOk = mapPromoLegsToKalshi([td("Josh Allen 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], psports, PNOW);
   assert.deepEqual(nflOk.unmatched, []);
   assert.equal(nflOk.rows[0].marketVal, encVal("KXNFLTD-26OCT04NEBUF-BUFJALLEN17-1", "yes"));
   const cook = mapPromoLegsToKalshi([td("James Cook III 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], psports, PNOW);
   assert.equal(cook.rows[0].marketVal, encVal("KXNFLTD-26OCT04NEBUF-BUFJCOOK4-1", "yes"));
   const cookNoSuffix = mapPromoLegsToKalshi([td("James Cook 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], psports, PNOW);
-  assert.equal(cookNoSuffix.rows[0].marketVal, "");
-  assert.match(cookNoSuffix.unmatched[0].reason, /no anytime TD market for James Cook/);
-  assert.match(cookNoSuffix.unmatched[0].reason, /James Cook III — not an exact full-name match/);
+  assert.deepEqual(cookNoSuffix.unmatched, []);
+  assert.equal(cookNoSuffix.rows[0].marketVal, encVal("KXNFLTD-26OCT04NEBUF-BUFJCOOK4-1", "yes"));
+  const cookDupGames = JSON.parse(JSON.stringify(psports));
+  const cookProps = cookDupGames.nfl[0].markets.prop;
+  cookProps.push({ ...cookProps.find((p) => p.player === "James Cook III"), player: "James Cook", label: "James Cook: 1+", ticker: "KXNFLTD-26OCT04NEBUF-BUFJCOOK99-1" });
+  const cookAmbiguous = mapPromoLegsToKalshi([td("James Cook 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")], cookDupGames, PNOW);
+  assert.equal(cookAmbiguous.rows[0].marketVal, "");
+  assert.match(cookAmbiguous.unmatched[0].reason, /2 Kalshi anytime TD markets match/);
+  const acuna = mapPromoLegsToKalshi([hr("Ronald Acuna 1+ HR", ATL, "2026-10-03T20:08:00Z")], psports, PNOW);
+  assert.deepEqual(acuna.unmatched, []);
+  assert.equal(acuna.rows[0].marketVal, encVal("KXMLBHR-26OCT031600ATLLAD-ATLRACUNA13-1", "yes"));
+  const ramirez = mapPromoLegsToKalshi([hr("Jose Ramirez 1+ HR", CWS, "2026-10-03T17:10:00Z")], psports, PNOW);
+  assert.equal(ramirez.rows[0].marketVal, encVal("KXMLBHR-26OCT031300CWSCLE-CLEJRAMREZ11-1", "yes"));
 
   // Strict skips: nothing is guessed.
   const bad = (leg) => { const r = mapPromoLegsToKalshi([leg], psports, PNOW); assert.equal(r.rows[0].marketVal, ""); assert.equal(r.unmatched.length, 1); return r.unmatched[0].reason; };
@@ -1162,6 +1173,62 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.match(gbad(goal("Trevor Moore 1+ HR", FLA, "2026-10-07T02:00:00Z")), /not a "<Player> 1\+ Goal" leg/);
   // ET date must match the Kalshi game key (26OCT06… → 2026-10-06 ET).
   assert.match(gbad(goal("Trevor Moore 1+ Goal", FLA, "2026-10-08T02:00:00Z")), /date could not be verified|no matching|listed yet/);
+
+  // Nov 8 2026 HOU vs LAC: promo "Oronde Gadsden II" vs Kalshi "Oronde Gadsden: 1+"
+  // (title "Oronde Gadsden: 1+ touchdowns", series KXNFLTD). Suffix, Jr., hyphen,
+  // period, and apostrophe fold. Two players who fold together are not picked.
+  const GNOW8 = Date.parse("2026-11-08T16:00:00Z");
+  const houlac = kalshiGames._helpers.groupSportGames({
+    side: [{
+      event_ticker: "KXNFLGAME-26NOV08HOULAC", title: "Houston vs Los Angeles C", sub_title: "HOU vs LAC (Nov 8)",
+      markets: [
+        { ticker: "KXNFLGAME-26NOV08HOULAC-HOU", yes_sub_title: "Houston" },
+        { ticker: "KXNFLGAME-26NOV08HOULAC-LAC", yes_sub_title: "Los Angeles C" },
+      ],
+    }],
+    prop: [{
+      event_ticker: "KXNFLTD-26NOV08HOULAC",
+      title: "Houston vs Los Angeles C: Touchdowns",
+      sub_title: "HOU vs LAC (Nov 8)",
+      markets: [
+        { ticker: "KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-1", yes_sub_title: "Oronde Gadsden: 1+", title: "Oronde Gadsden: 1+ touchdowns", status: "active" },
+        { ticker: "KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-2", yes_sub_title: "Oronde Gadsden: 2+", title: "Oronde Gadsden: 2+ touchdowns", status: "active" },
+        { ticker: "KXNFLTD-26NOV08HOULAC-HOUMHARRISON18-1", yes_sub_title: "Marvin Harrison Jr.: 1+", title: "Marvin Harrison Jr.: 1+ touchdowns", status: "active" },
+        { ticker: "KXNFLTD-26NOV08HOULAC-DETAMONRA-1", yes_sub_title: "", title: "Amon-Ra St. Brown: 1+ touchdowns", status: "active" },
+        { ticker: "KXNFLTD-26NOV08HOULAC-CHIDSWIFT4-1", yes_sub_title: "D'Andre Swift: 1+", status: "active" },
+        { ticker: "KXNFLANYTD-26NOV08HOULAC-LACOLDNAME", yes_sub_title: "Legacy Scorer: 1+", status: "active" },
+      ],
+    }],
+  }, GNOW8, { propKind: "td" }).map((g) => ({ ...g, sport: "nfl" }));
+  const houlacSports = { nfl: houlac };
+  const HOU = "Houston Texans @ Los Angeles Chargers";
+  const kick = "2026-11-08T18:00:00Z";
+  const mapped = mapPromoLegsToKalshi([
+    td("Oronde Gadsden II 1+ TD", HOU, kick),
+    td("Marvin Harrison 1+ TD", HOU, kick),
+    td("Amon Ra St Brown 1+ TD", HOU, kick),
+    td("DAndre Swift 1+ TD", HOU, kick),
+    td("Legacy Scorer 1+ TD", HOU, kick),
+  ], houlacSports, GNOW8);
+  assert.deepEqual(mapped.unmatched, [], JSON.stringify(mapped.unmatched));
+  assert.deepEqual(mapped.rows.map((r) => r.marketVal), [
+    encVal("KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-1", "yes"),
+    encVal("KXNFLTD-26NOV08HOULAC-HOUMHARRISON18-1", "yes"),
+    encVal("KXNFLTD-26NOV08HOULAC-DETAMONRA-1", "yes"),
+    encVal("KXNFLTD-26NOV08HOULAC-CHIDSWIFT4-1", "yes"),
+    encVal("KXNFLANYTD-26NOV08HOULAC-LACOLDNAME", "yes"),
+  ]);
+  assert.equal(mapPromoLegsToKalshi([td("Oronde Gadsden II 2+ TD", HOU, kick)], houlacSports, GNOW8).rows[0].marketVal, "");
+  const bothHarrison = JSON.parse(JSON.stringify(houlacSports));
+  bothHarrison.nfl[0].markets.prop.push({
+    ticker: "KXNFLTD-26NOV08HOULAC-HOUMHARRISON5-1", side: "yes", label: "Marvin Harrison: 1+", player: "Marvin Harrison", kind: "td",
+  });
+  const amb = mapPromoLegsToKalshi([td("Marvin Harrison Jr. 1+ TD", HOU, kick)], bothHarrison, GNOW8);
+  assert.equal(amb.rows[0].marketVal, "");
+  assert.match(amb.unmatched[0].reason, /2 Kalshi anytime TD markets match "Marvin Harrison Jr\." on HOU vs LAC/);
+  // A different game's player is not borrowed, and a last-name typo is not guessed.
+  assert.match(bad(td("Oronde Gadsden II 1+ TD", "New England Patriots @ Buffalo Bills", "2026-10-04T17:00:00Z")), /no anytime TD market for Oronde Gadsden II/);
+  assert.match(mapPromoLegsToKalshi([td("Oronde Gadsen II 1+ TD", HOU, kick)], houlacSports, GNOW8).unmatched[0].reason, /no anytime TD market for Oronde Gadsen II/);
 
   console.log("comboPrefill player-prop tests passed");
 }
