@@ -6,6 +6,7 @@
 
 import { d1Team } from "./ncaabD1.js";
 import { soccerSameClub } from "../lib/soccer-clubs.js";
+import { normalizePlayerName } from "../lib/player-td.mjs";
 
 export const encVal = (t, s) => `${t}|${s}`;
 
@@ -795,15 +796,18 @@ function noStrikeInRangeReason(kind, want, title) {
 
 // ── Player props (MLB 1+ HR, NFL anytime TD, NHL 1+ Goal) ──────────────────────
 // Promo legs are named "<Player> 1+ HR" / "<Player> 1+ TD" / "<Player> 1+ Goal"
-// (lib/player-td legName) and Kalshi lists the same rung as "<Player>: 1+" under
-// KXMLBHR / KXNFLTD / KXNHLGOAL, on the SAME game key as the game's moneyline
-// pair. A prop maps only when ALL hold:
+// (lib/player-td legName) and Kalshi lists the same rung as "<Player>: 1+"
+// (title "Oronde Gadsden: 1+ touchdowns") under KXMLBHR / KXNFLTD (and the
+// legacy KXNFLANYTD series) / KXNHLGOAL, on the SAME game key as the game's
+// moneyline pair. A prop maps only when ALL hold:
 //   - HR on MLB, TD on NFL, Goal on NHL (kind comes from the leg, not the name);
 //   - the leg's rung is exactly 1+ (2+ / first TD / anything else is skipped);
 //   - the game is the one matchKalshiGame picked (teams + first-pitch gap), AND the
 //     leg's commence_time falls on that game key's ET calendar date;
-//   - the FULL player name equals Kalshi's after case/accent/punctuation folding
-//     (a Jr./II suffix is NOT dropped), and exactly one Kalshi market qualifies.
+//   - the player name equals Kalshi's after normalizePlayerName (case, accents,
+//     apostrophes, periods, hyphens, extra space, and a trailing Jr/Sr/II/III/IV/V).
+//     Game, team, and the 1+ rung stay exact. If that folding hits two Kalshi
+//     players in the same game, nothing is picked.
 // Anything else is skipped with a reason — never a nearest-name guess.
 const PROP_KIND_BY_MARKET = {
   HR: { kind: "hr", sport: "mlb", label: "HR" },
@@ -833,8 +837,14 @@ function keyEtDate(key) {
 }
 
 function propPlayerName(label) {
-  const m = /^(.+?):\s*1\+\s*$/.exec(String(label || "").trim());
+  const m = /^(.+?):\s*1\+(?:\s+[a-z][a-z\s-]*)?\??\s*$/i.exec(String(label || "").trim());
   return m ? m[1].trim() : "";
+}
+
+function marketPlayerName(market) {
+  const named = market && market.player ? String(market.player).trim() : "";
+  if (named) return named;
+  return propPlayerName(market && market.label);
 }
 
 function matchPropMarket(promoLeg, game, sport) {
@@ -860,14 +870,20 @@ function matchPropMarket(promoLeg, game, sport) {
   if (!props.length) {
     return { market: null, reason: `Kalshi has no ${what} markets listed yet for ${matchup}` };
   }
-  const want = normalize(parsed.player);
-  const hits = props.filter((m) => normalize(propPlayerName(m.label)) === want);
+  const want = normalizePlayerName(parsed.player);
+  const hits = props.filter((m) => {
+    const got = normalizePlayerName(marketPlayerName(m));
+    return got && got === want;
+  });
   if (hits.length === 1) return { market: hits[0] };
   if (hits.length > 1) {
     return { market: null, reason: `${hits.length} Kalshi ${what} markets match "${parsed.player}" on ${matchup}; not guessing` };
   }
   const last = want.split(" ").pop();
-  const near = props.filter((m) => last && normalize(propPlayerName(m.label)).split(" ").includes(last)).map((m) => propPlayerName(m.label));
+  const near = props.filter((m) => {
+    const n = normalizePlayerName(marketPlayerName(m));
+    return last && n.split(" ").includes(last);
+  }).map((m) => marketPlayerName(m));
   const hint = near.length ? ` (Kalshi has ${near.join(" / ")} — not an exact full-name match, so not mapped)` : "";
   return { market: null, reason: `Kalshi has no ${what} market for ${parsed.player} on ${matchup}${hint}` };
 }

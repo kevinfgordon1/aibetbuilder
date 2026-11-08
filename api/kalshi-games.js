@@ -70,9 +70,12 @@ const SOCCER_SPORTS = new Set(['mls', 'epl', 'laliga', 'seriea', 'bundesliga', '
 // exposed (MLB 1+ HR, NFL anytime TD, NHL anytime goal); label stays Kalshi's
 // own "Matt Olson: 1+" / "Trevor Moore: 1+" because the combo-worker's
 // Polymarket prop crosswalk verifies that exact string.
+// NFL anytime TD is KXNFLTD now ("Oronde Gadsden: 1+" / title "… 1+ touchdowns",
+// ticker …-1). KXNFLANYTD is the previous series (KXNFLANYTD-26OCT12DETTB-JGIBBS26,
+// no rung). Both are fetched; a miss on either is a partial prop slate.
 const PROP_SERIES = {
   mlb: { series: 'KXMLBHR', kind: 'hr' },
-  nfl: { series: 'KXNFLTD', kind: 'td' },
+  nfl: { series: ['KXNFLTD', 'KXNFLANYTD'], kind: 'td' },
   nhl: { series: 'KXNHLGOAL', kind: 'goal' },
 };
 // NHL keys are date-only (26SEP30PITPHI) but every market's occurrence_datetime is
@@ -213,22 +216,37 @@ function occurrenceMsOf(ev) {
 }
 
 // ── player props ──
-// Kalshi yes_sub_title is "<Full Name>: 1+". Anything else (2+, 3+, D/ST team
-// defenses, blank names) is not exposed — skip, never guess.
+// Kalshi yes_sub_title is "<Full Name>: 1+". The market title is longer:
+// "Oronde Gadsden: 1+ touchdowns". 2+, 3+, D/ST team defenses, and blank
+// names are not exposed — skip, never guess.
 function parsePropLabel(label) {
-  const m = /^(.+?):\s*1\+\s*$/.exec(String(label || '').trim());
+  const m = /^(.+?):\s*1\+(?:\s+[a-z][a-z\s-]*)?\??\s*$/i.exec(String(label || '').trim());
   if (!m) return null;
   const name = m[1].trim();
   if (!name || /D\/ST/i.test(name)) return null;
   return { name };
 }
+function propRawLabel(market) {
+  const sub = String((market && market.yes_sub_title) || (market && market.label) || '').trim();
+  if (parsePropLabel(sub)) return sub;
+  const title = String((market && (market.title || market.subtitle)) || '').trim();
+  if (parsePropLabel(title)) return title;
+  return sub;
+}
+// Current 1+ markets end in -1 (KXNFLTD-…-LACOGADSDEN86-1). The old anytime
+// series has no rung: KXNFLANYTD-26OCT12DETTB-JGIBBS26.
+function isListedOnePlusTicker(ticker) {
+  const t = String(ticker || '');
+  if (/-1$/.test(t)) return true;
+  return /^KXNFLANYTD-[A-Z0-9]+-[A-Z0-9]+$/i.test(t);
+}
 function expandProps(raw, kind) {
   const seen = new Set();
   const legs = [];
   for (const m of raw || []) {
-    if (!m || !m.ticker || !/-1$/.test(m.ticker) || seen.has(m.ticker)) continue;
+    if (!m || !m.ticker || !isListedOnePlusTicker(m.ticker) || seen.has(m.ticker)) continue;
     if (m.status && !/^(active|open)$/i.test(m.status)) continue;
-    const p = parsePropLabel(m.label);
+    const p = parsePropLabel(propRawLabel(m));
     if (!p) continue;
     seen.add(m.ticker);
     legs.push({ ticker: m.ticker, side: 'yes', label: `${p.name}: 1+`, player: p.name, kind });
@@ -494,7 +512,7 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
       const occ = type === 'prop' ? NaN : occurrenceMsOf(ev);
       if (Number.isFinite(occ) && (!Number.isFinite(g.occurrenceMs) || occ < g.occurrenceMs)) g.occurrenceMs = occ;
       if (!g.raw[type]) g.raw[type] = [];
-      (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: type === 'prop' ? (m.yes_sub_title || '') : marketLabel(m), ...(type === 'prop' ? { status: m.status || '' } : {}) }); });
+      (ev.markets || []).forEach(m => { if (m.ticker) g.raw[type].push({ ticker: m.ticker, label: type === 'prop' ? propRawLabel(m) : marketLabel(m), ...(type === 'prop' ? { status: m.status || '' } : {}) }); });
     }
   }
   mergeOffByOneDateKeys(byKey);
@@ -567,15 +585,33 @@ function groupSportGames(eventsByType, nowMs = Date.now(), opts = {}) {
   return games;
 }
 
+// One ladder, or several series that share a ladder (NFL anytime TD is
+// KXNFLTD plus the legacy KXNFLANYTD). Fetched together; any miss marks the
+// type failed so the slate is not cached as if those markets were absent.
+async function fetchTypeEvents(series, fetchFn) {
+  const tickers = (Array.isArray(series) ? series : [series]).filter(Boolean);
+  const pages = await Promise.all(tickers.map((ticker) => (
+    fetchFn ? fetchSeriesEvents(ticker, fetchFn) : fetchSeriesEvents(ticker)
+  )));
+  const events = [];
+  let failed = false;
+  for (const page of pages) {
+    if (!page || page.failed) failed = true;
+    for (const ev of page || []) events.push(ev);
+  }
+  if (failed) events.failed = true;
+  return events;
+}
 async function fetchSportGames(seriesByType, optsIn) {
   const { fetchFn, ...opts } = optsIn || {};
   const eventsByType = {};
   const espnP = opts && opts.espnSport ? fetchEspnFootball(opts.espnSport).catch(() => []) : null;
   await Promise.all(Object.entries(seriesByType || {}).map(async ([type, series]) => {
-    eventsByType[type] = await (fetchFn ? fetchSeriesEvents(series, fetchFn) : fetchSeriesEvents(series));
+    eventsByType[type] = await fetchTypeEvents(series, fetchFn);
   }));
   const espnGames = espnP ? await espnP : null;
-  const games = groupSportGames(eventsByType, Date.now(), { ...opts, ...(espnGames ? { espnGames } : {}) });
+  const nowMs = Number(opts && opts.nowMs) || Date.now();
+  const games = groupSportGames(eventsByType, nowMs, { ...opts, ...(espnGames ? { espnGames } : {}) });
   // Moneyline series never loaded: the sport's slate is unknown, not empty.
   games.failed = !!(eventsByType.side && eventsByType.side.failed);
   // Spread / total / prop series that never loaded (Nov 4 2026: one KXNCAAMBTOTAL fetch failed, every NCAAB

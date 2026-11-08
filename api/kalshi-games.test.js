@@ -254,12 +254,16 @@ console.log('kalshi-games tests passed');
   const fx = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'fixtures-combo-props.json'), 'utf8'));
   assert.deepEqual(handler.PROP_SERIES, {
     mlb: { series: 'KXMLBHR', kind: 'hr' },
-    nfl: { series: 'KXNFLTD', kind: 'td' },
+    nfl: { series: ['KXNFLTD', 'KXNFLANYTD'], kind: 'td' },
     nhl: { series: 'KXNHLGOAL', kind: 'goal' },
   });
   assert.deepEqual(h.parsePropLabel('Matt Olson: 1+'), { name: 'Matt Olson' });
   assert.deepEqual(h.parsePropLabel('Ronald Acuña Jr.: 1+'), { name: 'Ronald Acuña Jr.' });
+  assert.deepEqual(h.parsePropLabel('Oronde Gadsden: 1+ touchdowns'), { name: 'Oronde Gadsden' });
+  assert.deepEqual(h.parsePropLabel('Marvin Harrison Jr.: 1+ touchdowns'), { name: 'Marvin Harrison Jr.' });
+  assert.deepEqual(h.parsePropLabel('Julio Rodríguez: 1+ home runs?'), { name: 'Julio Rodríguez' });
   assert.equal(h.parsePropLabel('Matt Olson: 2+'), null);   // only the 1+ rung
+  assert.equal(h.parsePropLabel('Oronde Gadsden: 2+ touchdowns'), null);
   assert.equal(h.parsePropLabel('BUF Bills D/ST: 1+'), null); // team defenses are not player props
   assert.equal(h.parsePropLabel('Matt Olson'), null);
   assert.equal(h.parsePropLabel(': 1+'), null);
@@ -315,6 +319,32 @@ console.log('kalshi-games tests passed');
   assert.ok(td.every((p) => p.kind === 'td' && !/D\/ST/.test(p.label)));
   assert.ok(td.some((p) => p.label === 'Josh Allen: 1+' && p.ticker === 'KXNFLTD-26OCT04NEBUF-BUFJALLEN17-1'));
   assert.equal(nfl[0].startTime, new Date(h.dateOnlyUtcMs('26OCT04NEBUF')).toISOString());
+
+  // Current title is "Name: 1+ touchdowns" when yes_sub_title is missing, and
+  // the legacy KXNFLANYTD ticker (no -1 rung) is still a 1+ leg. 2+ stays off.
+  const houlac = h.groupSportGames({
+    side: [side('KXNFLGAME', '26NOV08HOULAC', 'HOU', 'LAC', 'Houston', 'Los Angeles C')],
+    prop: [{
+      event_ticker: 'KXNFLTD-26NOV08HOULAC',
+      title: 'Houston vs Los Angeles C: Touchdowns',
+      markets: [
+        { ticker: 'KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-1', yes_sub_title: 'Oronde Gadsden: 1+', title: 'Oronde Gadsden: 1+ touchdowns', status: 'active' },
+        { ticker: 'KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-2', yes_sub_title: 'Oronde Gadsden: 2+', title: 'Oronde Gadsden: 2+ touchdowns', status: 'active' },
+        { ticker: 'KXNFLTD-26NOV08HOULAC-DETAMONRA-1', yes_sub_title: '', title: 'Amon-Ra St. Brown: 1+ touchdowns', status: 'active' },
+        { ticker: 'KXNFLANYTD-26NOV08HOULAC-LACDSWIFT4', yes_sub_title: "D'Andre Swift: 1+", status: 'active' },
+      ],
+    }],
+  }, Date.parse('2026-11-08T16:00:00Z'), { propKind: 'td' });
+  assert.equal(houlac.length, 1);
+  const houlacProps = houlac[0].markets.prop;
+  assert.deepEqual(houlacProps.map((p) => p.ticker).sort(), [
+    'KXNFLANYTD-26NOV08HOULAC-LACDSWIFT4',
+    'KXNFLTD-26NOV08HOULAC-DETAMONRA-1',
+    'KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-1',
+  ]);
+  assert.equal(houlacProps.find((p) => p.ticker.endsWith('LACOGADSDEN86-1')).player, 'Oronde Gadsden');
+  assert.equal(houlacProps.find((p) => p.ticker.includes('AMONRA')).player, 'Amon-Ra St. Brown');
+  assert.equal(houlacProps.find((p) => p.ticker.startsWith('KXNFLANYTD')).player, "D'Andre Swift");
 
   // NHL: anytime 1+ goal (KXNHLGOAL), 2+ dropped, date-only start unchanged by prop occurrence.
   const nhl = h.groupSportGames({

@@ -10,19 +10,27 @@
 // priced first: 1 if that side won, 0 if it lost. A finished game whose book is gone must not stay at the
 // fill price (DAL beat PHI was still ~65%). Sniper page only; Combo Locks keeps rootForPrices.legFair.
 import { legFair, FEES, american } from "./rootForPrices.js";
+import { normalizePlayerName } from "../lib/player-td.mjs";
 
 export const SNIPER_DEPTH_USD = 1000;
 export const TD_MAX_OVERROUND = 0.15;
 export const STALE_MS = 15000;
-const TD_RE = /^KXNFLTD-(\d{2})([A-Z]{3})(\d{2})([A-Z]+)-([A-Z0-9]+)-1$/;
+// Current anytime rung is KXNFLTD-…-1. KXNFLANYTD is the previous series and
+// often has no rung suffix (KXNFLANYTD-26OCT12DETTB-JGIBBS26).
+const TD_NEW_RE = /^KXNFLTD-(\d{2})([A-Z]{3})(\d{2})([A-Z]+)-([A-Z0-9]+)-1$/;
+const TD_OLD_RE = /^KXNFLANYTD-(\d{2})([A-Z]{3})(\d{2})([A-Z]+)-([A-Z0-9]+)(?:-1)?$/;
+function tdMatch(t) {
+  const u = String(t || "").toUpperCase();
+  return TD_NEW_RE.exec(u) || TD_OLD_RE.exec(u);
+}
 const MONTHS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
 const PX_COMMISSION = 0.02;
 export const pxEffective = (p) => 1 / (1 + (1 / p - 1) * (1 - PX_COMMISSION));
 const etDate = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : null);
 
-export function isTdTicker(t) { return TD_RE.test(String(t || "").toUpperCase()); }
+export function isTdTicker(t) { return !!tdMatch(t); }
 export function tdTickerDate(t) {
-  const m = TD_RE.exec(String(t || "").toUpperCase()); if (!m || !MONTHS[m[2]]) return null;
+  const m = tdMatch(t); if (!m || !MONTHS[m[2]]) return null;
   return `20${m[1]}-${String(MONTHS[m[2]]).padStart(2, "0")}-${m[3]}`;
 }
 
@@ -40,8 +48,7 @@ export function vwap(levels, feeFn, usd = SNIPER_DEPTH_USD) {
 
 // player matching (port of combo-worker td-book samePlayer)
 export function normName(name) {
-  return String(name || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019.]/g, "").toLowerCase()
-    .replace(/[^a-z\s]/g, " ").replace(/\b(jr|sr|ii|iii|iv|v)\b/g, " ").replace(/\s+/g, " ").trim();
+  return normalizePlayerName(name);
 }
 const NICK = { kenny: "kenneth", ken: "kenneth", mike: "michael", chris: "christopher", matt: "matthew", josh: "joshua", nick: "nicholas", will: "william", bill: "william", rob: "robert", bob: "robert", tony: "anthony" };
 export function samePlayer(a, b) {
@@ -58,7 +65,7 @@ const canon = (a) => { const u = String(a || "").toUpperCase(); return TEAM_ALIA
  *  A row matches only when exactly one Kalshi TD ticker has the same ET date, same player and a compatible team. */
 export function indexTdRows(rowsByVenue = {}, names = {}, polledAt = Date.now()) {
   const kal = Object.entries(names).filter(([t]) => isTdTicker(t)).map(([t, n]) => {
-    const m = TD_RE.exec(t); return { t, name: String(n || "").split(":")[0].replace(/\s*\([A-Z]{2,4}\)\s*TD$/, "").trim(), date: tdTickerDate(t), game: m[4], code: m[5] };
+    const m = tdMatch(t); return { t, name: String(n || "").split(":")[0].replace(/\s*\([A-Z]{2,4}\)\s*TD$/, "").trim(), date: tdTickerDate(t), game: m[4], code: m[5] };
   });
   const out = {}; const stats = {};
   for (const [venue, rows] of Object.entries(rowsByVenue)) {

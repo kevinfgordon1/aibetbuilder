@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { makeSniperLegFair, indexTdRows, storedLegFairs, prophetxAsNovig, pxEffective, vwap, finalLegResult } from "./sniperLegFair.js";
+import { makeSniperLegFair, indexTdRows, storedLegFairs, prophetxAsNovig, pxEffective, vwap, finalLegResult, isTdTicker, normName } from "./sniperLegFair.js";
 import { relayIndex } from "./rootForPrices.js";
 
 const now = Date.parse("2026-10-23T04:00:00Z");
@@ -26,6 +26,25 @@ f = makeSniperLegFair({ tdBooks })({ ticker: T, side: "no" }, px);
 assert.ok(Math.abs(f.p - 0.5) < 1e-9);
 // wrong player / date never matches
 assert.equal(indexTdRows({ novig: [{ player: "Puka Nacua", start: "2026-11-01T20:05:00Z", yes: [], no: [] }] }, names, now).stats.novig.unmatched, 1);
+assert.equal(isTdTicker("KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-1"), true);
+assert.equal(isTdTicker("KXNFLANYTD-26OCT12DETTB-JGIBBS26"), true);
+assert.equal(isTdTicker("KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-2"), false);
+assert.equal(normName("Oronde Gadsden II"), normName("Oronde Gadsden"));
+assert.equal(normName("Amon-Ra St. Brown"), normName("Amon Ra St Brown"));
+assert.equal(normName("D'Andre Swift"), "dandre swift");
+const G = "KXNFLTD-26NOV08HOULAC-LACOGADSDEN86-1";
+const gNow = Date.parse("2026-11-08T16:00:00Z");
+const gHit = indexTdRows({ novig: [{ player: "Oronde Gadsden II", team: "LAC", start: "2026-11-08T21:00:00Z", yes: [{ odds: 0.2, size: 5000 }], no: [{ odds: 0.8, size: 5000 }] }] }, { [G]: "Oronde Gadsden: 1+ touchdowns" }, gNow);
+assert.equal(gHit.stats.novig.matched, 1);
+assert.ok(gHit[G]);
+const H1 = "KXNFLTD-26NOV08HOULAC-HOUMHARRISON18-1";
+const H2 = "KXNFLTD-26NOV08HOULAC-HOUMHARRISON5-1";
+const amb = indexTdRows({ novig: [{ player: "Marvin Harrison", team: "HOU", start: "2026-11-08T21:00:00Z", yes: [], no: [] }] }, {
+  [H1]: "Marvin Harrison Jr.: 1+ touchdowns",
+  [H2]: "Marvin Harrison: 1+ touchdowns",
+}, gNow);
+assert.equal(amb.stats.novig.ambiguous, 1);
+assert.equal(amb[H1], undefined);
 
 // 3. Kalshi TD fee + $1,000 depth when the book is deep enough
 const deep = { yes: [[0.5, 1e5]], no: [[0.52, 1e5]] };
