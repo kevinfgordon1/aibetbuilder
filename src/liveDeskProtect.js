@@ -25,6 +25,18 @@ export const MAX_PROTECTS_PER_LINEAGE = 8;
 export const PROTECT_COOLDOWN_MS = 1000;
 export const PROTECT_STALE_SWEEP_MS = 15000;
 
+// Through-mid of 0 would cancel on any touch of the mid. A tenth of a cent
+// is the smallest cushion the desk accepts.
+export const PROTECT_X_MIN_CENTS = 0.1;
+// Re-rest of 0 stays at the new mid, then the tick snaps in the trader's favor.
+export const PROTECT_Y_MIN_CENTS = 0;
+export const PROTECT_MAX_CENTS = 25;
+// Tenth-of-a-cent grid, matching parseProtectCents. An HTML number input's
+// step is counted from min (the step base), not from zero. step 0.5 with
+// min 0.1 rejects the default 2¢ through-mid: the nearest legal values are
+// 1.6 and 2.1, and the browser never fires the confirm submit.
+export const PROTECT_CENTS_STEP = 0.1;
+
 const MICRO = 1_000_000;
 
 export function centsToMicro(cents) {
@@ -33,7 +45,7 @@ export function centsToMicro(cents) {
   return Math.round(n * 10_000);
 }
 
-export function parseProtectCents(raw, fallback, { min = 0, max = 25 } = {}) {
+export function parseProtectCents(raw, fallback, { min = 0, max = PROTECT_MAX_CENTS } = {}) {
   if (raw == null || raw === "") {
     if (fallback == null || !Number.isFinite(Number(fallback))) {
       return { ok: false, error: "Enter Bet Protect cents." };
@@ -47,6 +59,109 @@ export function parseProtectCents(raw, fallback, { min = 0, max = 25 } = {}) {
     return { ok: false, error: "Bet Protect cents must be between " + min + " and " + max + "." };
   }
   return { ok: true, cents };
+}
+
+const NUMBER_INPUT_PLACES = 10;
+const NUMBER_INPUT_SCALE = 10n ** BigInt(NUMBER_INPUT_PLACES);
+
+// Decimal string → scaled integer. Binary floats such as 0.1 stringify to a
+// short decimal ("0.1") before scaling, which is how Chrome parses the min
+// and step attributes.
+function scaledDecimal(raw) {
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw)) return null;
+    raw = String(raw);
+  }
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s)) return null;
+  const neg = s.startsWith("-");
+  const body = s.replace(/^[+-]/, "");
+  const [whole, frac = ""] = body.split(".");
+  if (frac.length > NUMBER_INPUT_PLACES) return null;
+  const digits = (frac + "0".repeat(NUMBER_INPUT_PLACES)).slice(0, NUMBER_INPUT_PLACES);
+  let scaled = BigInt(whole || "0") * NUMBER_INPUT_SCALE + BigInt(digits || "0");
+  if (neg) scaled = -scaled;
+  return scaled;
+}
+
+function unscaledDecimal(scaled) {
+  const neg = scaled < 0n;
+  const v = neg ? -scaled : scaled;
+  const whole = v / NUMBER_INPUT_SCALE;
+  const frac = (v % NUMBER_INPUT_SCALE).toString().padStart(NUMBER_INPUT_PLACES, "0").replace(/0+$/, "");
+  const text = frac ? whole.toString() + "." + frac : whole.toString();
+  return neg ? -Number(text) : Number(text);
+}
+
+function floorDiv(a, b) {
+  const q = a / b;
+  if (a % b !== 0n && (a < 0n) !== (b < 0n)) return q - 1n;
+  return q;
+}
+
+/**
+ * HTML number-input constraint check. Step base is min when min is set,
+ * otherwise 0. A value is step-aligned when (value - stepBase) is an
+ * integral multiple of step. validationMessage matches Chrome's wording
+ * for range and step mismatch.
+ */
+export function browserNumberInputValidity(raw, { min, max, step } = {}) {
+  if (raw == null || (typeof raw === "string" && raw.trim() === "")) {
+    return { ok: true, empty: true, validationMessage: "" };
+  }
+  const value = scaledDecimal(raw);
+  if (value == null) {
+    return { ok: false, reason: "badInput", validationMessage: "Please enter a number." };
+  }
+  const minS = min == null || min === "" ? null : scaledDecimal(min);
+  const maxS = max == null || max === "" ? null : scaledDecimal(max);
+  if ((min != null && min !== "" && minS == null) || (max != null && max !== "" && maxS == null)) {
+    return { ok: false, reason: "badInput", validationMessage: "Please enter a number." };
+  }
+  if (minS != null && value < minS) {
+    return {
+      ok: false,
+      reason: "rangeUnderflow",
+      validationMessage: "Value must be greater than or equal to " + unscaledDecimal(minS) + ".",
+    };
+  }
+  if (maxS != null && value > maxS) {
+    return {
+      ok: false,
+      reason: "rangeOverflow",
+      validationMessage: "Value must be less than or equal to " + unscaledDecimal(maxS) + ".",
+    };
+  }
+  if (step == null || step === "" || step === "any") return { ok: true, validationMessage: "" };
+  const stepS = scaledDecimal(step);
+  if (stepS == null || stepS <= 0n) {
+    return { ok: false, reason: "badInput", validationMessage: "Please enter a number." };
+  }
+  const base = minS != null ? minS : 0n;
+  const delta = value - base;
+  if (delta % stepS === 0n) return { ok: true, validationMessage: "" };
+  const q = floorDiv(delta, stepS);
+  const lower = base + q * stepS;
+  const upper = lower + stepS;
+  const nearest = [];
+  if ((minS == null || lower >= minS) && (maxS == null || lower <= maxS)) nearest.push(unscaledDecimal(lower));
+  if ((minS == null || upper >= minS) && (maxS == null || upper <= maxS)) nearest.push(unscaledDecimal(upper));
+  let validationMessage = "Please enter a valid value.";
+  if (nearest.length === 2) {
+    validationMessage = "Please enter a valid value. The two nearest valid values are " + nearest[0] + " and " + nearest[1] + ".";
+  } else if (nearest.length === 1) {
+    validationMessage = "Please enter a valid value. The nearest valid value is " + nearest[0] + ".";
+  }
+  return { ok: false, reason: "stepMismatch", nearest, validationMessage };
+}
+
+export function protectCentsInputBounds(kind) {
+  return {
+    min: kind === "y" ? PROTECT_Y_MIN_CENTS : PROTECT_X_MIN_CENTS,
+    max: PROTECT_MAX_CENTS,
+    step: PROTECT_CENTS_STEP,
+  };
 }
 
 function protectFlagOff(flag) {
@@ -79,9 +194,11 @@ export function readProtectRequest(body, { riskDollars } = {}) {
   if (Number.isFinite(risk) && risk > MAX_SIZE_DOLLARS + 1e-6) {
     return { ok: true, on: false, overCap: true, note: protectOverCapNote() };
   }
-  const x = parseProtectCents(raw.protectXCents != null ? raw.protectXCents : raw.xCents, DEFAULT_PROTECT_X_CENTS, { min: 0.1 });
+  const xBounds = protectCentsInputBounds("x");
+  const yBounds = protectCentsInputBounds("y");
+  const x = parseProtectCents(raw.protectXCents != null ? raw.protectXCents : raw.xCents, DEFAULT_PROTECT_X_CENTS, { min: xBounds.min, max: xBounds.max });
   if (!x.ok) return { ok: false, on: true, error: "Through-mid (X): " + x.error };
-  const y = parseProtectCents(raw.protectYCents != null ? raw.protectYCents : raw.yCents, DEFAULT_PROTECT_Y_CENTS, { min: 0 });
+  const y = parseProtectCents(raw.protectYCents != null ? raw.protectYCents : raw.yCents, DEFAULT_PROTECT_Y_CENTS, { min: yBounds.min, max: yBounds.max });
   if (!y.ok) return { ok: false, on: true, error: "Re-rest (Y): " + y.error };
   const defaulted = flag == null || flag === "";
   return { ok: true, on: true, defaulted, xCents: x.cents, yCents: y.cents };
