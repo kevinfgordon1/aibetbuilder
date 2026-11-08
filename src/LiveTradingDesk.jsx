@@ -874,12 +874,12 @@ function LiveTradingDeskView({ user }) {
               Bet Protect <span style={{ fontWeight: 600, color: "#9ca3af" }}>(adverse pickoff)</span>
             </label>
             <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 6, lineHeight: 1.45 }}>
-              On by default for every rest (uncheck to send this one unprotected). Cancel if mid blows through your rest, then re-rest better. Does not chase if the market runs away. Orders over the ${MAX_SIZE_DOLLARS} Bet Protect cap rest unprotected.
+              On by default for every rest (uncheck to send this one unprotected). Cancel only when this snapshot's depth, after removing every one of our remaining orders at the price, shows a worse level more than your cushion through this price and the book includes a fresh exchange timestamp. A public best bid that includes this order is not an early signal. Others at the same price, a crossed or truncated book, or a missing timestamp do not cancel. Does not chase if the market runs away. Orders over the ${MAX_SIZE_DOLLARS} cap, counting earlier fills in the same chain, rest unprotected.
             </div>
             {protect && (
               <details open style={{ marginTop: 10 }}>
                 <summary style={{ cursor: "pointer", fontSize: 12, color: "#cbd5e1", fontWeight: 700 }}>
-                  {(protectXParsed.ok ? protectXParsed.cents : protectX) + "¢ through mid · re-rest " + (protectYParsed.ok ? protectYParsed.cents : protectY) + "¢ better"}
+                  {(protectXParsed.ok ? protectXParsed.cents : protectX) + "¢ through the live bid/ask · re-rest " + (protectYParsed.ok ? protectYParsed.cents : protectY) + "¢ behind"}
                 </summary>
                 <div className="desk-protect-xy">
                   <div>
@@ -936,7 +936,7 @@ function LiveTradingDeskView({ user }) {
                   )}
                   {protect && protectReady && !protectOverCap && (
                     <div style={{ fontSize: 12, color: "#f5d76e", marginTop: 6 }}>
-                      Bet Protect armed. Cancel if this rest is more than {protectXParsed.cents}¢ through the new mid, then re-rest {protectYParsed.cents}¢ better (buy lower / sell higher) and snap the tick in your favor. Shown as American odds.
+                      Bet Protect armed. Cancel a buy more than {protectXParsed.cents}¢ above the live bid, or a sell more than {protectXParsed.cents}¢ below the live ask, then re-rest {protectYParsed.cents}¢ behind that price and snap the tick in your favor. Shown as American odds.
                     </div>
                   )}
                   {crossBlocked && (
@@ -1012,7 +1012,7 @@ function LiveTradingDeskView({ user }) {
                   })()}
                   {order.protect && order.protect.on && (
                     <div style={{ fontSize: 11, color: "#f5d76e", marginTop: 4 }}>
-                      Bet Protect · cancel if more than {order.protect.xCents}¢ through mid · re-rest {order.protect.yCents}¢ better
+                      Bet Protect · cancel if more than {order.protect.xCents}¢ through the live bid/ask · re-rest {order.protect.yCents}¢ behind
                       {order.protect.count > 0 ? " · improved " + order.protect.count + "×" : ""}
                       {order.protect.status === "pending_rereset" ? " · re-rest retrying" : ""}
                     </div>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { americanFromMicro, formatAmerican } from "./liveDeskPrice.js";
 import {
   DEFAULT_PROTECT_X_CENTS,
   DEFAULT_PROTECT_Y_CENTS,
@@ -15,6 +16,11 @@ import {
   improveFromMid,
   protectContracts,
   yesMidFromBbo,
+  outcomeBookFromBbo,
+  evaluateBookProtect,
+  normalizeBookLevels,
+  outsideTouch,
+  ownLeaves,
   outcomeMidMicro,
   formatProtectTelegram,
   readProtectRequest,
@@ -519,7 +525,10 @@ assert.equal(parseProtectCents("", DEFAULT_PROTECT_X_CENTS, { min: PROTECT_X_MIN
   assert.match(ui, /Bet Protect armed/);
   assert.doesNotMatch(ui, /Bet Protect on/);
   assert.match(ui, / · Bet Protect/);
-  assert.match(ui, /Cancel if mid blows through your rest, then re-rest better\. Does not chase if the market runs away\./);
+  assert.match(ui, /after removing every one of our remaining orders at the price/);
+  assert.match(ui, /fresh exchange timestamp/);
+  assert.match(ui, /missing timestamp do not cancel/);
+  assert.match(ui, /Does not chase if the market runs away/);
   assert.match(ui, /useState\(false\)/);
   assert.match(ui, /setProtect\(reset\.protect\)/);
   const submitFn = ui.slice(ui.indexOf("async function submit"), ui.indexOf("async function cancel"));
@@ -555,5 +564,240 @@ assert.equal(parseProtectCents("", DEFAULT_PROTECT_X_CENTS, { min: PROTECT_X_MIN
   assert.match(desk, /canSeeOwnerTools/);
   assert.doesNotMatch(desk, /canSeeUnderdog|UNDERDOG_PREDICT_ALLOWLIST/);
 }
+
+function americanAt(cents) {
+  return formatAmerican(americanFromMicro(Math.round(cents * 10000)));
+}
+
+// Public best bid cannot be below our own resting buy while that order is
+// the touch. Passing that visible bid to the old mid/bid helper does not
+// create an early cancel. American: 71.25¢ is −248, 69.25¢ is −225.
+{
+  assert.equal(americanAt(71.25), "-248");
+  assert.equal(americanAt(69.25), "-225");
+  const masked = evaluateProtect({
+    action: "buy",
+    restingOutcomeMicro: 712500,
+    midOutcomeMicro: 712500,
+    bidMicro: 712500,
+    askMicro: 720000,
+    xCents: 2,
+  });
+  assert.equal(masked.fire, false);
+  assert.equal(masked.refKind, "mid");
+}
+
+const own = [{ yesPrice: 0.7125, leaves: 1403.5 }];
+const level = (px, qty) => ({ px: { value: String(px), currency: "USD" }, qty: String(qty) });
+
+// Our size explains the touch and the next bid is 69¢. That is a real
+// outside price, 2.25¢ through, so this snapshot can cancel.
+{
+  const hit = evaluateBookProtect({
+    outcome: "long",
+    action: "buy",
+    yesPrice: 0.7125,
+    bids: [level(0.7125, 1403.5), level(0.69, 800)],
+    offers: [level(0.72, 500)],
+    ownBids: own,
+    ownOffers: [],
+    xCents: 2,
+    feedAgeMs: 100,
+  });
+  assert.equal(hit.fire, true);
+  assert.equal(hit.reason, "through");
+  assert.equal(hit.gapMicro, 22500);
+}
+
+// Others still bid our price. Do not cancel.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 2000), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 100,
+}).fire, false);
+
+// Both of our orders at the price have to come off before the next level counts.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1500), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: [{ yesPrice: 0.7125, leaves: 1403.5 }, { yesPrice: 0.7125, leaves: 96.5 }],
+  ownOffers: [], xCents: 2, feedAgeMs: 100,
+}).fire, true);
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1500), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: [{ yesPrice: 0.7125, leaves: 1403.5 }],
+  ownOffers: [], xCents: 2, feedAgeMs: 100,
+}).reason, "inside");
+
+// Book ends on our size. Next level was not in the snapshot. No cancel.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5)],
+  offers: [level(0.72, 100)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 100,
+}).reason, "truncated");
+
+// Level smaller than our leaves is a torn snapshot. No cancel.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1000), level(0.69, 800)],
+  offers: [level(0.72, 100)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 100,
+}).reason, "inconsistent");
+
+// Our price is missing. That can be exclusion or lag. Not a signal.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.69, 800)],
+  offers: [level(0.70, 100)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 100,
+}).reason, "absent");
+
+// Ask through our bid is a crossed book, not proof of protection.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.60,
+  bids: [level(0.60, 41), level(0.565, 1000)],
+  offers: [level(0.595, 1000)],
+  ownBids: [{ yesPrice: 0.60, leaves: 41 }], ownOffers: [], xCents: 3, feedAgeMs: 100,
+}).reason, "crossed");
+
+// Short buy rests on the YES offer. Next YES offer 0.31 is outcome bid 69¢.
+{
+  const hit = evaluateBookProtect({
+    outcome: "short", action: "buy", yesPrice: 0.2875,
+    bids: [level(0.28, 100)],
+    offers: [level(0.2875, 1403.5), level(0.31, 500)],
+    ownBids: [], ownOffers: [{ yesPrice: 0.2875, leaves: 1403.5 }], xCents: 2, feedAgeMs: 100,
+  });
+  assert.equal(hit.fire, true);
+  assert.equal(hit.gapMicro, 22500);
+}
+
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5), level(0.69, 10)],
+  offers: [level(0.72, 10)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 9000,
+}).reason, "stale-feed");
+
+assert.equal(outsideTouch([level(0.7125, 1403.5), level(0.70, 10)], own, 0.7125).price, 0.70);
+
+// The gateway is not required to send best-first. Duplicate prices merge.
+// Non-finite and out-of-range levels are dropped.
+{
+  const unsorted = evaluateBookProtect({
+    outcome: "long", action: "buy", yesPrice: 0.60,
+    bids: [
+      level(0.40, 10),
+      { px: { value: "nope" }, qty: "100" },
+      { px: { value: "1.20" }, qty: "100" },
+      { px: { value: "0.60" }, qty: "-5" },
+      level(0.60, 20),
+      level(0.55, 4),
+      level(0.60, 21),
+      level(0.55, 6),
+    ],
+    offers: [level(0.80, 10), level(0.70, 10)],
+    ownBids: [{ yesPrice: 0.60, leaves: 41 }],
+    ownOffers: [],
+    xCents: 2,
+    feedAgeMs: 100,
+  });
+  assert.equal(unsorted.fire, true);
+  assert.equal(unsorted.gapMicro, 50000);
+  const merged = normalizeBookLevels([
+    level(0.60, 20),
+    { px: { value: "NaN" }, qty: "1" },
+    level(0.55, 4),
+    level(0.60, 21),
+    { px: { value: "0" }, qty: "9" },
+    { px: { value: "1" }, qty: "9" },
+  ], { better: "higher" });
+  assert.deepEqual(merged, [
+    { price: 0.6, qty: 41 },
+    { price: 0.55, qty: 4 },
+  ]);
+}
+
+// First element is not the touch. After sorting, 0.60 bid vs 0.55 ask is crossed.
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.50,
+  bids: [level(0.40, 10), level(0.60, 10)],
+  offers: [level(0.80, 10), level(0.55, 10)],
+  ownBids: [{ yesPrice: 0.50, leaves: 1 }],
+  ownOffers: [],
+  xCents: 2,
+  feedAgeMs: 100,
+}).reason, "crossed");
+
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: own, ownOffers: [], xCents: 2,
+}).reason, "age-unknown");
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: null,
+}).reason, "age-unknown");
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 100, receivedAgeMs: 9000,
+}).reason, "stale-receipt");
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5), level(0.69, 800)],
+  offers: [level(0.72, 500)],
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: -9000,
+}).reason, "stale-feed");
+
+// Public gateway read on 2026-11-08, no credentials:
+// GET https://gateway.polymarket.us/v1/markets/tec-mls-winner-2026-11-07-nas/book
+// marketData.bids/offers were best-first that time. transactTime had nanoseconds.
+// Sorting still runs. The exchange time is parsed, not replaced with receipt time.
+{
+  const publicBook = {
+    marketData: {
+      marketSlug: "tec-mls-winner-2026-11-07-nas",
+      bids: [
+        { px: { value: "0.2600", currency: "USD" }, qty: "17.0000" },
+        { px: { value: "0.2130", currency: "USD" }, qty: "40.0000" },
+      ],
+      offers: [
+        { px: { value: "0.2780", currency: "USD" }, qty: "16.0000" },
+        { px: { value: "0.2790", currency: "USD" }, qty: "25.0000" },
+      ],
+      transactTime: "2026-11-08T23:15:20.072958363Z",
+    },
+  };
+  const feedAt = Date.parse(publicBook.marketData.transactTime);
+  assert.equal(feedAt, Date.parse("2026-11-08T23:15:20.072Z"));
+  const rows = normalizeBookLevels(publicBook.marketData.bids, { better: "higher" });
+  assert.equal(rows[0].price, 0.26);
+  assert.equal(rows[0].qty, 17);
+  const decision = evaluateBookProtect({
+    outcome: "long", action: "buy", yesPrice: 0.26,
+    bids: publicBook.marketData.bids,
+    offers: publicBook.marketData.offers,
+    ownBids: [{ yesPrice: 0.26, leaves: 17 }],
+    ownOffers: [],
+    xCents: 2,
+    feedAgeMs: 1000,
+  });
+  assert.equal(decision.fire, true);
+  assert.equal(decision.gapMicro, 47000);
+}
+
+assert.equal(ownLeaves({ quantity: 100, leavesQuantity: 40 }), 40);
+assert.equal(ownLeaves({ quantity: 100, leavesQuantity: 0 }), 0);
+assert.equal(ownLeaves({ quantity: 100 }), 100);
 
 console.log("liveDeskProtect.test.js ok");

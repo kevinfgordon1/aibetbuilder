@@ -15,6 +15,7 @@ const { createPolymarketUsClient } = require('./polymarket-us-client');
 const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
 const { createSupabaseOrderTrackStore } = require('../lib/desk-order-tracks');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
+const { createSupabaseProtectAudit } = require('../lib/desk-protect-audit');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
 const { watcherEventsFromActions } = require('../lib/desk-protect-events');
 const { readNovigDeskCreds } = require('./novig-auth');
@@ -59,6 +60,12 @@ function sweepAuthorized(req, env = process.env) {
     || headerValue(req && req.headers, 'x-admin-secret'));
   if (!provided) return false;
   return acceptedSecrets(env).some((secret) => safeEqual(provided, secret));
+}
+
+let sharedAudit = null;
+function defaultAudit() {
+  if (!sharedAudit) sharedAudit = createSupabaseProtectAudit();
+  return sharedAudit;
 }
 
 let sharedStore = null;
@@ -108,6 +115,7 @@ let deps = { ...defaults };
 function resetDeps() {
   sharedStore = null;
   sharedTracks = null;
+  sharedAudit = null;
   deps = { ...defaults };
 }
 
@@ -169,6 +177,7 @@ async function handler(req, res) {
         notify: deps.notify,
         now: deps.now,
         tracks: deps.trackStore(),
+        audits: typeof deps.auditStore === 'function' ? deps.auditStore() : defaultAudit(),
       })),
     });
   }
