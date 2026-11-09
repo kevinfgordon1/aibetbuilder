@@ -80,7 +80,7 @@ async function rowsOf(query) {
 async function loadCluster(client, ids) {
   const [fills, submissions, matches, outcomes, bets] = await Promise.all([
     rowsOf(client.from('combo_fills').select('*').in('parlay_id', ids)),
-    rowsOf(client.from('combo_submissions').select('*').in('parlay_id', ids)),
+    rowsOf(client.from('combo_submissions').select('id,parlay_id').in('parlay_id', ids)),
     rowsOf(client.from('combo_matches').select('*').in('parlay_id', ids)),
     rowsOf(client.from('quote_outcomes').select('*').in('parlay_id', ids)),
     rowsOf(client.from('combo_parlay_bets').select('*').in('parlay_id', ids)),

@@ -86,7 +86,7 @@ async function loadLockChildren(client, ids) {
     const [f, s, sb] = await Promise.all([
       client.from('combo_fills').select(FILL_COLS).in('parlay_id', chunk).limit(10000),
       client.from('combo_single_orders').select('id,parlay_id,venue,order_id,market,hedge,price,size,filled,open,status').in('parlay_id', chunk).limit(10000),
-      client.from('combo_submissions').select('parlay_id,order_id,status,contracts,venue').in('parlay_id', chunk).eq('status', 'filled').limit(10000),
+      client.from('combo_submissions').select('parlay_id,order_id,status,contracts,venue').in('parlay_id', chunk).eq('status', 'filled').order('created_at', { ascending: false }).limit(10000),
     ]);
     if (f.error) throw f.error; if (s.error) throw s.error;
     fills.push(...(f.data || [])); singles.push(...(s.data || [])); if (!sb.error) submissions.push(...(sb.data || []));

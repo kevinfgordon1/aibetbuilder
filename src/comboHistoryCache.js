@@ -1,8 +1,7 @@
 // Combo Locks History load plan: what each 20s poll actually has to re-download.
 //
-// History = every archived lock (~600 rows, ~0.8 MB) plus per-lock quote rows read in
-// .in(parlay_id) chunks (the slowest reads on the page: p95 ~8s on a busy Sunday).
-// Archived locks barely change, so:
+// History = every archived lock (~600 rows, ~0.8 MB) plus one equality read per lock
+// (parlay_id = $id, not a 100-id ANY chunk). Archived locks barely change, so:
 //   - archived lock rows are re-read when a lock left the living list (it moved to
 //     History), on the first load, or every ARCHIVED_ROWS_TTL_MS (settlement stamps);
 //   - per-lock quote rows for archived locks are read ONCE per lock: a newly archived
@@ -46,11 +45,12 @@ export function nextArchivedSubsCache(cache, { allIds, fetchIds, full, fetched, 
   const ids = new Set();
   if (!full && cache && cache.ids) for (const id of cache.ids) if (all.has(id)) ids.add(id);
   for (const id of fetchSet) if (!failed.has(id)) ids.add(id);
-  const anyFailed = [...fetchSet].some((id) => failed.has(id));
   return {
     ids,
-    // A failed full read stays "due" so the next poll retries everything still missing.
-    at: full ? (anyFailed ? 0 : now) : (cache ? cache.at : now),
+    // Stamp the full-read clock even when some locks failed. Failed ids are left
+    // out of `ids`, so the next poll retries only those. Resetting `at` to 0
+    // made every 20s poll repeat the successful chunks (the ~2s History reads).
+    at: full ? now : (cache && cache.at ? cache.at : now),
     rows: merge(fetched || [], kept),
   };
 }

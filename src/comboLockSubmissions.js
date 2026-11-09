@@ -9,10 +9,42 @@ export const LOCK_QUOTE_LIMIT = 400;
 export const LOCK_SKIP_LIMIT = 40;
 export const LOCK_ARCHIVED_QUOTE_LIMIT = 400;
 export const LOCK_ARCHIVED_SKIP_LIMIT = 80;
-export const ARCHIVED_ID_CHUNK = 100;
 // Archived locks are finished, so their per-lock history is re-read at most this often
-// (or when a lock moves to History). These .in() reads were the slowest calls on the page.
+// (or when a lock moves to History). Each lock is its own equality read (see below).
 export const ARCHIVED_SUBS_TTL_MS = 10 * 60 * 1000;
+// Desk (locks, fills, booked contracts) stays on this cadence so the hedged bar moves.
+// Quote/skip history for a lock that is still quoting (game not started, or a live quote)
+// refreshes on LIVING_SUBS_POLL_MS. A lock whose game has started and that has no live
+// quote refreshes on IDLE_SUBS_POLL_MS. The 20s timer does not stack a second fetch
+// while one is already running.
+export const DESK_POLL_MS = 20 * 1000;
+export const LIVING_SUBS_POLL_MS = 60 * 1000;
+export const IDLE_SUBS_POLL_MS = 5 * 60 * 1000;
+export const SUBMISSION_FETCH_CONCURRENCY = 6;
+
+// Columns the lock tape, quote history, open-quote cancel, and settlement ticker read.
+// select('*') was the History scan at ~2s and tens of millions of shared_blks_read.
+export const LOCK_SUBMISSION_COLUMNS = [
+  "id",
+  "parlay_id",
+  "rfq_id",
+  "status",
+  "is_live",
+  "quote_id",
+  "order_id",
+  "contracts",
+  "venue",
+  "skip_reason",
+  "fill_american",
+  "market_ticker",
+  "remaining",
+  "worst_lock",
+  "cancel_requested_at",
+  "created_at",
+  "tape_match",
+  "tape_no_price",
+  "tape_yes_price",
+].join(",");
 
 // Posted quotes persist as unfilled (worker maps quoted → unfilled) + quote_id.
 export const LOCK_QUOTE_OR =
@@ -53,43 +85,55 @@ export function mergeSubmissionRows(...lists) {
   });
 }
 
-// History's .in(parlay_id, ids) reads skip the user_id filter on purpose. Those ids are
-// already this user's locks. Adding user_id makes Postgres walk combo_submissions_user_idx
-// (user_id, created_at desc), the whole submission history, instead of the per-lock partial
-// indexes. The slow chunk reads (parlay_id = any, order by created_at desc limit) are covered
-// by the created_at-leading partial indexes in
-// supabase/migrations/20261106190000_combo_submissions_history_created_idx.sql.
-const scopeUser = (q, { userId, parlayIds }) => (parlayIds && parlayIds.length ? q : q.eq("user_id", userId));
-
-function applyQuoteFilters(q, { userId, parlayId, parlayIds, limit }) {
-  let next = scopeUser(q.select("*"), { userId, parlayIds }).neq("status", "shadow");
-  if (parlayId) next = next.eq("parlay_id", parlayId);
-  if (parlayIds && parlayIds.length) next = next.in("parlay_id", parlayIds);
-  return next.or(LOCK_QUOTE_OR).order("created_at", { ascending: false }).limit(limit);
+// One lock per query: parlay_id = $id (not parlay_id = ANY(chunk)).
+// pg_stat_statements on the 3.3M-row table: the ANY() History read (select *,
+// order by created_at desc limit 400/80) averaged ~2.1s and ~1,300 heap blocks
+// per call because combo_submissions_parlay_quote_idx / _skip_idx are
+// (parlay_id, created_at desc) and a 100-id chunk sorts every match before LIMIT.
+// The same filters with parlay_id equality stop at LIMIT on those indexes (~9ms).
+// user_id stays on the equality read; that is the fast plan already in prod.
+function applyQuoteFilters(q, { userId, parlayId, limit }) {
+  return q.select(LOCK_SUBMISSION_COLUMNS)
+    .eq("user_id", userId)
+    .eq("parlay_id", parlayId)
+    .neq("status", "shadow")
+    .or(LOCK_QUOTE_OR)
+    .order("created_at", { ascending: false })
+    .limit(limit);
 }
 
-function applySkipFilters(q, { userId, parlayId, parlayIds, limit }) {
-  let next = scopeUser(q.select("*"), { userId, parlayIds }).eq("status", "declined").is("quote_id", null);
-  if (parlayId) next = next.eq("parlay_id", parlayId);
-  if (parlayIds && parlayIds.length) next = next.in("parlay_id", parlayIds);
-  return next.or(LOCK_SKIP_OR).order("created_at", { ascending: false }).limit(limit);
+function applySkipFilters(q, { userId, parlayId, limit }) {
+  return q.select(LOCK_SUBMISSION_COLUMNS)
+    .eq("user_id", userId)
+    .eq("parlay_id", parlayId)
+    .eq("status", "declined")
+    .is("quote_id", null)
+    .or(LOCK_SKIP_OR)
+    .order("created_at", { ascending: false })
+    .limit(limit);
 }
 
-export function livingLockSubmissionQueries(client, { userId, parlayId }) {
+export function livingLockSubmissionQueries(client, { userId, parlayId, quoteLimit = LOCK_QUOTE_LIMIT, skipLimit = LOCK_SKIP_LIMIT }) {
   const table = () => client.from("combo_submissions");
   return [
-    applyQuoteFilters(table(), { userId, parlayId, limit: LOCK_QUOTE_LIMIT }),
-    applySkipFilters(table(), { userId, parlayId, limit: LOCK_SKIP_LIMIT }),
+    applyQuoteFilters(table(), { userId, parlayId, limit: quoteLimit }),
+    applySkipFilters(table(), { userId, parlayId, limit: skipLimit }),
   ];
 }
 
 export function archivedLockSubmissionQueries(client, { userId, parlayIds }) {
   if (!parlayIds || !parlayIds.length) return [];
-  const table = () => client.from("combo_submissions");
-  return [
-    applyQuoteFilters(table(), { userId, parlayIds, limit: LOCK_ARCHIVED_QUOTE_LIMIT }),
-    applySkipFilters(table(), { userId, parlayIds, limit: LOCK_ARCHIVED_SKIP_LIMIT }),
-  ];
+  const reqs = [];
+  for (const parlayId of parlayIds) {
+    if (!parlayId) continue;
+    reqs.push(...livingLockSubmissionQueries(client, {
+      userId,
+      parlayId,
+      quoteLimit: LOCK_ARCHIVED_QUOTE_LIMIT,
+      skipLimit: LOCK_ARCHIVED_SKIP_LIMIT,
+    }));
+  }
+  return reqs;
 }
 
 export function lockSubmissionQueriesForParlays(client, { userId, living = [], archivedIds = [] }) {
@@ -98,12 +142,70 @@ export function lockSubmissionQueriesForParlays(client, { userId, living = [], a
     if (!row || !row.id) continue;
     reqs.push(...livingLockSubmissionQueries(client, { userId, parlayId: row.id }));
   }
-  // Chunk archived ids so .in() URLs stay short now that History loads every lock.
   const ids = (archivedIds || []).filter(Boolean);
-  for (let i = 0; i < ids.length; i += ARCHIVED_ID_CHUNK) {
-    reqs.push(...archivedLockSubmissionQueries(client, { userId, parlayIds: ids.slice(i, i + ARCHIVED_ID_CHUNK) }));
-  }
+  if (ids.length) reqs.push(...archivedLockSubmissionQueries(client, { userId, parlayIds: ids }));
   return reqs;
+}
+
+// A lock still being quoted: worker is watching and the game has not started,
+// or a quote is still live. Everything else (paused, game started, no live quote)
+// only needs a slow refresh so a late fill still shows up.
+export function lockQuotesLive(parlay, { live = false, now = Date.now() } = {}) {
+  if (live) return true;
+  if (!parlay || parlay.active === false || parlay.archived_at) return false;
+  const start = Date.parse(parlay.starts_at || "");
+  if (Number.isFinite(start) && start <= now) return false;
+  return true;
+}
+
+export function lockSubmissionPollMs(parlay, opts = {}) {
+  const quotingMs = opts.quotingMs || LIVING_SUBS_POLL_MS;
+  const idleMs = opts.idleMs || IDLE_SUBS_POLL_MS;
+  return lockQuotesLive(parlay, opts) ? quotingMs : idleMs;
+}
+
+export function submissionPollDue({ lastAt = 0, now = Date.now(), force = false, intervalMs = LIVING_SUBS_POLL_MS } = {}) {
+  if (force) return true;
+  if (!lastAt) return true;
+  return now - lastAt >= intervalMs;
+}
+
+// Living locks whose quote/skip history should be read on this poll.
+// alsoIds: parlays whose confirmed-fill set just changed (same poll as the fill bar).
+export function livingLocksDue(rows, { now = Date.now(), force = false, lastAt, liveIds, alsoIds, quotingMs, idleMs } = {}) {
+  const at = lastAt || new Map();
+  const live = liveIds || new Set();
+  const also = alsoIds || new Set();
+  const due = [];
+  for (const row of rows || []) {
+    if (!row || !row.id) continue;
+    const intervalMs = lockSubmissionPollMs(row, { live: live.has(row.id), now, quotingMs, idleMs });
+    if (force || also.has(row.id) || submissionPollDue({ lastAt: at.get(row.id) || 0, now, intervalMs })) due.push(row);
+  }
+  return due;
+}
+
+// Await thenables a few at a time, in input order. Building every PostgREST
+// filter chain up front does not send; the request starts when the builder is awaited.
+export async function settleInBatches(tasks, concurrency = SUBMISSION_FETCH_CONCURRENCY) {
+  const list = tasks || [];
+  const results = new Array(list.length);
+  if (!list.length) return results;
+  let cursor = 0;
+  const workers = Math.max(1, Math.min(concurrency, list.length));
+  async function run() {
+    while (cursor < list.length) {
+      const i = cursor;
+      cursor += 1;
+      try {
+        results[i] = { status: "fulfilled", value: await list[i] };
+      } catch (reason) {
+        results[i] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: workers }, () => run()));
+  return results;
 }
 
 // Real "Not filled" total for a lock whose quote read hit LOCK_QUOTE_LIMIT.

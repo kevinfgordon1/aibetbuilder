@@ -979,6 +979,9 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   assert.match(tapeUi, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.is\("archived_at"/);
   assert.match(tapeUi, /from\("combo_parlays"\)\.select\("\*"\)\.eq\("user_id", user\.id\)\.not\("archived_at"/);
   assert.match(tapeUi, /from\("combo_submissions"\)[\s\S]*?\.eq\("user_id", user\.id\)/);
+  assert.match(tapeUi, /LOCK_SUBMISSION_COLUMNS/);
+  assert.match(tapeUi, /inflightRef/);
+  assert.doesNotMatch(tapeUi, /from\("combo_submissions"\)\.select\("\*"\)/);
   assert.match(tapeUi, /from\("combo_fills"\)[\s\S]*?\.in\("parlay_id"/);
   assert.match(tapeUi, /from\("combo_matches"\)[\s\S]*?\.in\("parlay_id"/);
   assert.match(tapeUi, /from\("quote_outcomes"\)[\s\S]*?\.in\("parlay_id"/);
