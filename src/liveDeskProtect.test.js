@@ -18,6 +18,8 @@ import {
   yesMidFromBbo,
   outcomeBookFromBbo,
   evaluateBookProtect,
+  evaluateTradeProtect,
+  filledBeforeTriggerLabel,
   normalizeBookLevels,
   outsideTouch,
   ownLeaves,
@@ -681,8 +683,14 @@ assert.equal(evaluateBookProtect({
   outcome: "long", action: "buy", yesPrice: 0.7125,
   bids: [level(0.7125, 1403.5), level(0.69, 10)],
   offers: [level(0.72, 10)],
-  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 9000,
-}).reason, "stale-feed");
+  ownBids: own, ownOffers: [], xCents: 2, feedAgeMs: 16000, receivedAgeMs: 0,
+}).fire, true);
+assert.equal(evaluateBookProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7125,
+  bids: [level(0.7125, 1403.5), level(0.69, 10)],
+  offers: [level(0.72, 10)],
+  ownBids: own, ownOffers: [], xCents: 2, receivedAgeMs: 9000,
+}).reason, "stale-receipt");
 
 assert.equal(outsideTouch([level(0.7125, 1403.5), level(0.70, 10)], own, 0.7125).price, 0.70);
 
@@ -795,6 +803,22 @@ assert.equal(evaluateBookProtect({
   assert.equal(decision.fire, true);
   assert.equal(decision.gapMicro, 47000);
 }
+
+assert.equal(evaluateTradeProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7775, tradeYes: 0.75,
+  tradeAtMs: 1_000, nowMs: 2_000, xCents: 2, ownYesPrices: [0.7775],
+}).reason, "trade-through");
+assert.equal(evaluateTradeProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7775, tradeYes: 0.7775,
+  tradeAtMs: 1_000, nowMs: 2_000, xCents: 2, ownYesPrices: [0.7775],
+}).reason, "own-fill");
+assert.equal(evaluateTradeProtect({
+  outcome: "long", action: "buy", yesPrice: 0.7775, tradeYes: 0.75,
+  tradeAtMs: 1_000, nowMs: 30_000, xCents: 2,
+}).reason, "trade-old");
+assert.equal(filledBeforeTriggerLabel({ trigger: "inside", gapCents: 0.75, xCents: 2 }), "Filled before Protect trigger");
+assert.equal(filledBeforeTriggerLabel({ trigger: "through", gapCents: 3, xCents: 2 }), "");
+assert.match(fs.readFileSync(new URL("./LiveDeskFilledOrders.jsx", import.meta.url), "utf8"), /Filled before Protect trigger/);
 
 assert.equal(ownLeaves({ quantity: 100, leavesQuantity: 40 }), 40);
 assert.equal(ownLeaves({ quantity: 100, leavesQuantity: 0 }), 0);

@@ -362,13 +362,14 @@ export function outsideTouch(levels, ownOrdersAtPrice, ourPrice, { better = "hig
  * remaining orders at the price, shows a worse level more than X¢ through
  * our price. A raw BBO that includes this order cannot do that.
  *
- * feedAgeMs is now minus the exchange timestamp on this payload
- * (marketData.transactTime, or marketData.timestamp when that is what the
- * payload actually sent). A missing timestamp is age-unknown and does not
- * cancel. This function does not invent an exchange event time.
- * receivedAgeMs is how long ago this process finished reading the HTTP body.
- * It is not an exchange time. A stale receipt also does not cancel, and a
- * fresh receipt does not make a missing exchange timestamp safe.
+ * feedAgeMs is now minus marketData.transactTime when the payload has one.
+ * Two public reads of the same book kept that field still, so it is the last
+ * book change, not the time we fetched the snapshot. A quiet book therefore
+ * has an old transactTime and a fresh receipt. receivedAgeMs is how long ago
+ * this process finished a successful read. That is the freshness clock.
+ * An old transactTime does not block a decision when the receipt is fresh.
+ * A missing receipt is not a successful read. This does not invent an
+ * exchange event time.
  *
  * Others still resting at our price, a level smaller than our leaves, a book
  * that ends on our size, a crossed book, or our price simply missing are not
@@ -387,16 +388,16 @@ export function evaluateBookProtect({
   feedAgeMs,
   receivedAgeMs,
 } = {}) {
-  const age = feedAgeMs == null || feedAgeMs === "" ? NaN : Number(feedAgeMs);
-  if (!Number.isFinite(age)) {
+  const received = receivedAgeMs == null || receivedAgeMs === "" ? null : Number(receivedAgeMs);
+  const lastChange = feedAgeMs == null || feedAgeMs === "" ? null : Number(feedAgeMs);
+  if (received != null && Number.isFinite(received)) {
+    if (received > PROTECT_FEED_STALE_MS || received < 0) {
+      return { fire: false, reason: "stale-receipt", refKind: "unsolved", lastChangeMs: Number.isFinite(lastChange) ? lastChange : null };
+    }
+  } else if (lastChange == null || !Number.isFinite(lastChange)) {
     return { fire: false, reason: "age-unknown", refKind: "unsolved" };
-  }
-  if (age > PROTECT_FEED_STALE_MS || age < -PROTECT_FEED_STALE_MS) {
+  } else if (lastChange > PROTECT_FEED_STALE_MS || lastChange < -PROTECT_FEED_STALE_MS) {
     return { fire: false, reason: "stale-feed", refKind: "unsolved" };
-  }
-  const received = Number(receivedAgeMs);
-  if (Number.isFinite(received) && (received > PROTECT_FEED_STALE_MS || received < 0)) {
-    return { fire: false, reason: "stale-receipt", refKind: "unsolved" };
   }
   const yes = Number(yesPrice);
   const xMicro = centsToMicro(xCents);
@@ -448,6 +449,55 @@ export function outcomeMidMicro(yesMid, outcome) {
  * fill a rest that is still within X of the live bid or ask.
  */
 export const PROTECT_FEED_STALE_MS = 8000;
+export const PROTECT_TRADE_FRESH_MS = 15000;
+
+/**
+ * A public book stats block carries one last trade (lastTradePx, lastTradeSetTime).
+ * It is not a tape and has no order id. Fire only when that print is recent and
+ * more than X¢ through our price. A print at one of our own prices is our fill
+ * or our level, not an adverse trade.
+ */
+export function evaluateTradeProtect({
+  outcome,
+  action,
+  yesPrice,
+  tradeYes,
+  tradeAtMs,
+  nowMs,
+  xCents,
+  ownYesPrices,
+} = {}) {
+  const yes = Number(yesPrice);
+  const px = Number(tradeYes);
+  const act = normalizeAction(action);
+  const side = normalizeOutcome(outcome);
+  const xMicro = centsToMicro(xCents);
+  if (!(yes > 0 && yes < 1) || !(px > 0 && px < 1) || !act || !side || xMicro == null) {
+    return { fire: false, reason: "no-trade" };
+  }
+  const at = Number(tradeAtMs);
+  const now = Number(nowMs);
+  if (!Number.isFinite(at) || !Number.isFinite(now)) return { fire: false, reason: "trade-time-unknown" };
+  const age = now - at;
+  if (age < 0 || age > PROTECT_TRADE_FRESH_MS) return { fire: false, reason: "trade-old" };
+  for (const own of ownYesPrices || []) {
+    if (Math.abs(Number(own) - px) <= 5e-5) return { fire: false, reason: "own-fill" };
+  }
+  const tradeOutcome = side === "short" ? 1 - px : px;
+  const ourOutcome = side === "short" ? 1 - yes : yes;
+  const gapMicro = Math.round((act === "buy" ? ourOutcome - tradeOutcome : tradeOutcome - ourOutcome) * MICRO);
+  const referenceMicro = Math.round(tradeOutcome * MICRO);
+  if (gapMicro <= xMicro) return { fire: false, reason: "inside", gapMicro, referenceMicro };
+  return { fire: true, reason: "trade-through", gapMicro, referenceMicro };
+}
+
+export function filledBeforeTriggerLabel({ trigger, gapCents, xCents } = {}) {
+  if (String(trigger || "") !== "inside") return "";
+  const gap = Number(gapCents);
+  const x = Number(xCents);
+  if (!Number.isFinite(gap) || !Number.isFinite(x) || gap > x) return "";
+  return "Filled before Protect trigger";
+}
 
 function bookMicro(v) {
   const n = Math.round(Number(v));

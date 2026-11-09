@@ -138,6 +138,7 @@ export default function LiveDeskFilledOrders({ fills, stale, failed, note, style
                   <span style={{ fontWeight: 700, fontSize: 13 }}>{txt(group.sideLabel, "—")}</span>
                   {statusBadge(group)}
                   {p && <Badge tone="green">Bet Protect</Badge>}
+                  {group.beforeTrigger && <Badge tone="amber">Filled before Protect trigger</Badge>}
                   {!p && group.source === "desk" && <Badge tone="blue">Desk</Badge>}
                   {group.source === "combo" && <Badge tone="gray">Combo</Badge>}
                   <span style={{ display: "block", color: "#9ca3af", fontSize: 12, marginTop: 2 }}>{txt(group.game, "—")} · {txt(group.market, "—")}</span>
