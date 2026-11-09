@@ -4,9 +4,10 @@
 -- per order each 30 seconds, not on every poll.
 --
 -- checked_at is when this process finished reading the HTTP body.
--- feed_at is only the exchange timestamp on that payload (transactTime,
--- or timestamp when the payload sent that field). It stays null when the
--- payload has no timestamp. A missing feed_at is not treated as fresh.
+-- feed_at is marketData.transactTime when the payload has one. That is the
+-- last book change, not the time this process fetched the snapshot. A quiet
+-- book can have an old feed_at and still be current. A missing feed_at with
+-- a successful read is not a failed fetch.
 
 create table if not exists public.desk_protect_audits (
   id bigint generated always as identity primary key,

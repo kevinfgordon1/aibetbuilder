@@ -547,6 +547,26 @@ async function reconcileOwnedTracks(client, tracks, ownerEmail, openOrders, acti
   }
 }
 
+async function labelBeforeTrigger(fills, ownerEmail) {
+  if (!Array.isArray(fills) || !fills.length || !ownerEmail) return fills;
+  try {
+    const { createSupabaseProtectAudit } = require('../lib/desk-protect-audit');
+    const audits = createSupabaseProtectAudit();
+    if (!audits.configured || typeof audits.latestByOrder !== 'function') return fills;
+    const ids = [...new Set(fills.map((row) => row && row.orderId).filter(Boolean))].slice(0, 40);
+    const latest = await audits.latestByOrder(ownerEmail, ids);
+    return fills.map((row) => {
+      const hit = latest && row && latest[row.orderId];
+      if (!hit || hit.trigger !== 'inside') return row;
+      const gap = Number(hit.gapCents != null ? hit.gapCents : hit.gap_cents);
+      if (Number.isFinite(gap) && gap < 0) return row;
+      return { ...row, beforeTrigger: true };
+    });
+  } catch (_) {
+    return fills;
+  }
+}
+
 async function snapshot(client, slug, store, { tracks, ownerEmail } = {}) {
   // Account reads, trade history, and the public slate fail independently.
   // A 429 on positions must still return the NFL dropdown.
@@ -619,11 +639,11 @@ async function snapshot(client, slug, store, { tracks, ownerEmail } = {}) {
   await reconcileOwnedTracks(client, tracks, ownerEmail, orderList, activityErr ? [] : activities, !!rate.rateLimited);
   const fills = activityErr
     ? null
-    : await attachTracks(
+    : await labelBeforeTrigger(await attachTracks(
       fillsMod.mapFilledOrders(activities, { protectRows: await protectRowsForFills(store, activities) }),
       tracks,
       ownerEmail,
-    );
+    ), ownerEmail);
   const limited = !!rate.rateLimited;
   const retryAfter = limited ? normalizeRetryAfter(rate.retryAfter) : null;
   return {

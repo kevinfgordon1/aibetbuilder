@@ -207,6 +207,7 @@ export function groupFillsByOrder(fills) {
       venue: text(head.venue),
       replacedBy,
       replaces,
+      beforeTrigger: ordered.some((row) => row && row.beforeTrigger === true),
       executionCount: ordered.length,
       executions: ordered.map(executionView),
     });
