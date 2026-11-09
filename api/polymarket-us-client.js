@@ -199,10 +199,29 @@ function createPolymarketUsClient({
     return res.json;
   }
 
+  async function getMarketBook(slug) {
+    const path = '/v1/markets/' + encodeURIComponent(slug) + '/book';
+    try {
+      const pub = await fetchImpl(gateway + path, { method: 'GET', headers: { accept: 'application/json' } });
+      const pubText = await pub.text();
+      if (pub.status >= 200 && pub.status < 300) {
+        const json = parseBody(pubText);
+        if (json && (json.marketData || json.bids || json.offers)) return json;
+      }
+    } catch (_) { /* public gateway down — fall through to signed Retail */ }
+    const res = await request('GET', path);
+    if (res.statusCode === 404) return null;
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw httpError('GET', path, res.statusCode, res.json, res.text, res.retryAfter);
+    }
+    return res.json;
+  }
+
   return {
     request,
     getMarketBySlug,
     getMarketBbo,
+    getMarketBook,
     getNflLeagueEventsText,
     listPositions: (query) => okJson('GET', '/v1/portfolio/positions', { query }),
     listActivities: (query) => okJson('GET', '/v1/portfolio/activities', { query }),

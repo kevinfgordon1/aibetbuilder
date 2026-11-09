@@ -227,6 +227,206 @@ export function yesMidFromBbo(payload) {
   return mid;
 }
 
+function feedAtMs(payload, data) {
+  const raw = (data && (data.timestamp || data.exchangeTime || data.updatedAt || data.transactTime))
+    || (payload && (payload.timestamp || payload.exchangeTime || payload.updatedAt));
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Outcome bid/ask/mid from a YES BBO. Short prices are the complement:
+ * a short bid is one minus the YES ask. Both YES sides are required.
+ * A crossed book or a feed timestamp older than PROTECT_FEED_STALE_MS
+ * is not a signal.
+ */
+export function outcomeBookFromBbo(payload, outcome, nowMs) {
+  const data = payload && (payload.marketData || payload.market_data || payload);
+  if (!data || typeof data !== "object") return { ok: false, reason: "unpriced", stale: false };
+  const yesBid = amountValue(data.bestBid != null ? data.bestBid : data.best_bid);
+  const yesAsk = amountValue(data.bestAsk != null ? data.bestAsk : data.best_ask);
+  if (!(yesBid > 0 && yesBid < 1 && yesAsk > 0 && yesAsk < 1) || yesAsk + 1e-9 < yesBid) {
+    return { ok: false, reason: "unpriced", stale: false };
+  }
+  const side = normalizeOutcome(outcome);
+  if (!side) return { ok: false, reason: "unpriced", stale: false };
+  const bid = side === "short" ? 1 - yesAsk : yesBid;
+  const ask = side === "short" ? 1 - yesBid : yesAsk;
+  const mid = (bid + ask) / 2;
+  const feedAt = feedAtMs(payload, data);
+  const now = Number(nowMs);
+  const feedAgeMs = feedAt != null && Number.isFinite(now) ? now - feedAt : null;
+  const stale = feedAgeMs != null && feedAgeMs > PROTECT_FEED_STALE_MS;
+  const toMicro = (p) => Math.round(p * MICRO);
+  return {
+    ok: !stale,
+    stale,
+    reason: stale ? "stale-feed" : "ok",
+    bidMicro: toMicro(bid),
+    askMicro: toMicro(ask),
+    midMicro: toMicro(mid),
+    feedAt: feedAt == null ? null : new Date(feedAt).toISOString(),
+    feedAgeMs,
+  };
+}
+
+function levelPrice(level) {
+  if (!level || typeof level !== "object") return null;
+  return amountValue(level.px != null ? level.px : level.price);
+}
+
+function levelQty(level) {
+  if (!level || typeof level !== "object") return null;
+  const n = Number(level.qty != null ? level.qty : level.quantity);
+  return Number.isFinite(n) ? n : null;
+}
+
+function ownQtyAt(orders, yesPrice) {
+  let sum = 0;
+  for (const order of orders || []) {
+    const px = Number(order && order.yesPrice);
+    const qty = Number(order && order.leaves);
+    if (!Number.isFinite(px) || !Number.isFinite(qty) || !(qty > 0)) continue;
+    if (Math.abs(px - yesPrice) <= 5e-5) sum += qty;
+  }
+  return sum;
+}
+
+/**
+ * Remaining size on one of our open orders. leavesQuantity is the official
+ * remainder. quantity is the original size and is used only when the
+ * payload did not include a remainder. Zero leaves stays zero.
+ */
+export function ownLeaves(order) {
+  if (!order || typeof order !== "object") return 0;
+  const leaves = Number(order.leavesQuantity);
+  if (Number.isFinite(leaves) && leaves >= 0) return leaves;
+  const qty = Number(order.quantity);
+  return Number.isFinite(qty) && qty >= 0 ? qty : 0;
+}
+
+/**
+ * One finite price in (0, 1) per level, quantities summed, best price first.
+ * A book is not trusted in the order the gateway happened to send.
+ * Non-finite prices, prices outside (0, 1), and negative quantities are dropped.
+ */
+export function normalizeBookLevels(levels, { better = "higher" } = {}) {
+  const byMicro = new Map();
+  for (const level of levels || []) {
+    const price = levelPrice(level);
+    const qty = levelQty(level);
+    if (!(price > 0 && price < 1) || qty == null || qty < 0) continue;
+    const micro = Math.round(price * MICRO);
+    if (!(micro > 0 && micro < MICRO)) continue;
+    byMicro.set(micro, (byMicro.get(micro) || 0) + qty);
+  }
+  const rows = [];
+  for (const [micro, qty] of byMicro) rows.push({ price: micro / MICRO, qty });
+  rows.sort((a, b) => (better === "lower" ? a.price - b.price : b.price - a.price));
+  return rows;
+}
+
+/**
+ * Best price on one side of an aggregated book after removing our own
+ * leaves at each level. Documented REST books combine every order at a
+ * price and do not label which quantity is ours, so this only works when
+ * our orders are inside that aggregate. If our price is missing, the next
+ * level is not fully explained by us, or the visible book ends on our
+ * size, the result is not a signal.
+ */
+export function outsideTouch(levels, ownOrdersAtPrice, ourPrice, { better = "higher" } = {}) {
+  const ours = Number(ourPrice);
+  const rows = normalizeBookLevels(levels, { better });
+  if (!(ours > 0 && ours < 1)) return { ok: false, reason: "unpriced" };
+  const idx = rows.findIndex((row) => Math.abs(row.price - ours) <= 5e-5);
+  if (idx < 0) {
+    const ahead = rows.find((row) => (better === "higher" ? row.price > ours + 5e-5 : row.price < ours - 5e-5));
+    if (ahead) return { ok: true, price: ahead.price, reason: "ahead" };
+    return { ok: false, reason: "absent" };
+  }
+  const own = ownQtyAt(ownOrdersAtPrice, rows[idx].price);
+  const outside = rows[idx].qty - own;
+  if (outside < -1e-4) return { ok: false, reason: "inconsistent" };
+  if (outside > 1e-4) return { ok: true, price: rows[idx].price, reason: "shared" };
+  for (let i = idx + 1; i < rows.length; i += 1) {
+    const nextOwn = ownQtyAt(ownOrdersAtPrice, rows[i].price);
+    const nextOutside = rows[i].qty - nextOwn;
+    if (nextOutside < -1e-4) return { ok: false, reason: "inconsistent" };
+    if (nextOutside > 1e-4) return { ok: true, price: rows[i].price, reason: "outside" };
+  }
+  return { ok: false, reason: "truncated" };
+}
+
+/**
+ * Cancel only when aggregate depth, after subtracting every one of our
+ * remaining orders at the price, shows a worse level more than X¢ through
+ * our price. A raw BBO that includes this order cannot do that.
+ *
+ * feedAgeMs is now minus the exchange timestamp on this payload
+ * (marketData.transactTime, or marketData.timestamp when that is what the
+ * payload actually sent). A missing timestamp is age-unknown and does not
+ * cancel. This function does not invent an exchange event time.
+ * receivedAgeMs is how long ago this process finished reading the HTTP body.
+ * It is not an exchange time. A stale receipt also does not cancel, and a
+ * fresh receipt does not make a missing exchange timestamp safe.
+ *
+ * Others still resting at our price, a level smaller than our leaves, a book
+ * that ends on our size, a crossed book, or our price simply missing are not
+ * signals. Own-size subtraction cannot see someone else's order that shares
+ * the price, and a book that never contains our size never fires.
+ */
+export function evaluateBookProtect({
+  outcome,
+  action,
+  yesPrice,
+  bids,
+  offers,
+  ownBids,
+  ownOffers,
+  xCents,
+  feedAgeMs,
+  receivedAgeMs,
+} = {}) {
+  const age = feedAgeMs == null || feedAgeMs === "" ? NaN : Number(feedAgeMs);
+  if (!Number.isFinite(age)) {
+    return { fire: false, reason: "age-unknown", refKind: "unsolved" };
+  }
+  if (age > PROTECT_FEED_STALE_MS || age < -PROTECT_FEED_STALE_MS) {
+    return { fire: false, reason: "stale-feed", refKind: "unsolved" };
+  }
+  const received = Number(receivedAgeMs);
+  if (Number.isFinite(received) && (received > PROTECT_FEED_STALE_MS || received < 0)) {
+    return { fire: false, reason: "stale-receipt", refKind: "unsolved" };
+  }
+  const yes = Number(yesPrice);
+  const xMicro = centsToMicro(xCents);
+  const act = normalizeAction(action);
+  const side = normalizeOutcome(outcome);
+  if (!(yes > 0 && yes < 1) || !act || !side || xMicro == null) {
+    return { fire: false, reason: "unpriced", refKind: "unsolved" };
+  }
+  const bidRows = normalizeBookLevels(bids, { better: "higher" });
+  const askRows = normalizeBookLevels(offers, { better: "lower" });
+  const bestBid = bidRows.length ? bidRows[0].price : null;
+  const bestAsk = askRows.length ? askRows[0].price : null;
+  if (bestBid != null && bestAsk != null && bestBid + 1e-9 >= bestAsk) {
+    return { fire: false, reason: "crossed", refKind: "unsolved" };
+  }
+  const bookSide = side === "short" ? (act === "buy" ? "sell" : "buy") : act;
+  const levels = bookSide === "sell" ? offers : bids;
+  const own = bookSide === "sell" ? ownOffers : ownBids;
+  const touch = outsideTouch(levels, own, yes, { better: bookSide === "sell" ? "lower" : "higher" });
+  if (!touch.ok) return { fire: false, reason: touch.reason, refKind: "unsolved", sawOwn: touch.sawOwn };
+  const gap = bookSide === "sell" ? touch.price - yes : yes - touch.price;
+  const gapMicro = Math.round(gap * MICRO);
+  const reference = bookSide === "sell"
+    ? (side === "short" ? 1 - touch.price : touch.price)
+    : (side === "short" ? 1 - touch.price : touch.price);
+  if (gapMicro < 0) return { fire: false, reason: "ran-away", gapMicro, refKind: touch.reason, referenceMicro: Math.round(reference * MICRO) };
+  if (gapMicro <= xMicro) return { fire: false, reason: "inside", gapMicro, refKind: touch.reason, referenceMicro: Math.round(reference * MICRO) };
+  return { fire: true, reason: "through", gapMicro, refKind: touch.reason, referenceMicro: Math.round(reference * MICRO) };
+}
+
 export function outcomeMidMicro(yesMid, outcome) {
   const yes = Number(yesMid);
   if (!(yes > 0 && yes < 1)) return null;
@@ -239,23 +439,51 @@ export function outcomeMidMicro(yesMid, outcome) {
 }
 
 /**
- * Buy is through when the rest is more than X¢ above the outcome mid
- * (bidding a stale high price). Sell is through when the rest is more than
- * X¢ below the outcome mid. Exactly X¢, or a rest on the safe side of mid,
- * does not fire. Protect does not chase a market that ran away.
+ * A buy is stale when it is more than X¢ above the live outcome bid.
+ * A sell is stale when it is more than X¢ below the live outcome ask.
+ * Mid is only the reference when that side of the book is missing, so older
+ * callers keep the previous rule. Exactly X¢ does not fire. A price on the
+ * safe side of the reference does not fire and is not chased.
+ * Being merely near the opposite touch is not enough: a quiet market can
+ * fill a rest that is still within X of the live bid or ask.
  */
-export function evaluateProtect({ action, restingOutcomeMicro, midOutcomeMicro, xCents } = {}) {
+export const PROTECT_FEED_STALE_MS = 8000;
+
+function bookMicro(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n > 0 && n < MICRO ? n : null;
+}
+
+export function evaluateProtect({
+  action,
+  restingOutcomeMicro,
+  midOutcomeMicro,
+  bidMicro,
+  askMicro,
+  xCents,
+  feedAgeMs,
+} = {}) {
   const act = normalizeAction(action);
   const rest = Math.round(Number(restingOutcomeMicro));
-  const mid = Math.round(Number(midOutcomeMicro));
   const xMicro = centsToMicro(xCents);
-  if (!act || !Number.isFinite(rest) || !Number.isFinite(mid) || xMicro == null) {
-    return { fire: false, reason: "unpriced", gapMicro: null };
+  const age = Number(feedAgeMs);
+  if (Number.isFinite(age) && age > PROTECT_FEED_STALE_MS) {
+    return { fire: false, reason: "stale-feed", gapMicro: null, refKind: "stale", referenceMicro: null };
   }
-  const gapMicro = act === "buy" ? rest - mid : mid - rest;
-  if (gapMicro < 0) return { fire: false, reason: "ran-away", gapMicro };
-  if (gapMicro <= xMicro) return { fire: false, reason: "inside", gapMicro };
-  return { fire: true, reason: "through", gapMicro };
+  const mid = bookMicro(midOutcomeMicro);
+  // Raw best bid/ask is not an early signal. While this order is the touch,
+  // the public price cannot print beyond it. Callers that have aggregate
+  // depth use evaluateBookProtect instead.
+  const reference = mid;
+  const refKind = "mid";
+  if (!act || !Number.isFinite(rest) || reference == null || xMicro == null) {
+    return { fire: false, reason: "unpriced", gapMicro: null, refKind, referenceMicro: reference };
+  }
+  const gapMicro = act === "buy" ? rest - reference : reference - rest;
+  const base = { gapMicro, refKind, referenceMicro: reference, midMicro: mid };
+  if (gapMicro < 0) return { fire: false, reason: "ran-away", ...base };
+  if (gapMicro <= xMicro) return { fire: false, reason: "inside", ...base };
+  return { fire: true, reason: "through", ...base };
 }
 
 /**
@@ -266,6 +494,8 @@ export function improveFromMid({
   outcome,
   action,
   midOutcomeMicro,
+  bidMicro,
+  askMicro,
   yCents,
   tick,
   restingOutcomeMicro,
@@ -276,10 +506,13 @@ export function improveFromMid({
   const mid = Math.round(Number(midOutcomeMicro));
   const yMicro = centsToMicro(yCents);
   const resting = Math.round(Number(restingOutcomeMicro));
-  if (!act || !side || !Number.isFinite(mid) || yMicro == null) {
+  const bid = bookMicro(bidMicro);
+  const ask = bookMicro(askMicro);
+  const ref = act === "buy" ? (bid != null ? bid : mid) : (ask != null ? ask : mid);
+  if (!act || !side || !Number.isFinite(ref) || yMicro == null) {
     return { ok: false, error: "Cannot price a re-rest.", code: "no-improve" };
   }
-  const target = act === "buy" ? mid - yMicro : mid + yMicro;
+  const target = act === "buy" ? ref - yMicro : ref + yMicro;
   const snap = snapFavorableFromMicro({ fairMicro: target, outcome: side, action: act, tick });
   if (!snap.ok) return { ...snap, code: "no-improve" };
   const better = Number.isFinite(resting)
@@ -292,11 +525,13 @@ export function improveFromMid({
     const still = evaluateProtect({
       action: act,
       restingOutcomeMicro: snap.outcomeMicro,
-      midOutcomeMicro: mid,
+      midOutcomeMicro: Number.isFinite(mid) ? mid : ref,
+      bidMicro: act === "buy" ? bid : null,
+      askMicro: act === "sell" ? ask : null,
       xCents,
     });
     if (still.fire) {
-      return { ok: false, error: "Re-rest would still be through the mid.", code: "no-improve", snap };
+      return { ok: false, error: "Re-rest would still be through the live book.", code: "no-improve", snap };
     }
   }
   return { ok: true, ...snap, targetMicro: target };

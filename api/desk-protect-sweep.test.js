@@ -48,11 +48,12 @@ function goodCreds() {
   };
 }
 
-function bbo(bid, ask) {
+function bbo(bid, ask, at = 1_700_000_000_000) {
   return {
     marketData: {
       bestBid: { value: String(bid), currency: 'USD' },
       bestAsk: { value: String(ask), currency: 'USD' },
+      timestamp: new Date(at).toISOString(),
     },
   };
 }
@@ -134,6 +135,22 @@ function fakeClient({ open, book }) {
       };
     },
     async getMarketBbo() { return book; },
+    async getMarketBook() {
+      const md = book && book.marketData;
+      const bids = state.open
+        .filter((order) => String(order.intent || '').includes('BUY_LONG') || String(order.intent || '').includes('SELL_SHORT'))
+        .map((order) => ({ px: order.price, qty: String(order.leavesQuantity != null ? order.leavesQuantity : order.quantity) }));
+      const offers = state.open
+        .filter((order) => !(String(order.intent || '').includes('BUY_LONG') || String(order.intent || '').includes('SELL_SHORT')))
+        .map((order) => ({ px: order.price, qty: String(order.leavesQuantity != null ? order.leavesQuantity : order.quantity) }));
+      const maxBid = bids.reduce((m, level) => Math.max(m, Number(level.px.value)), 0);
+      const minAsk = offers.reduce((m, level) => Math.min(m, Number(level.px.value)), 1);
+      if (md && md.bestBid && Number(md.bestBid.value) < minAsk - 1e-9) bids.push({ px: md.bestBid, qty: '1000' });
+      if (md && md.bestAsk && Number(md.bestAsk.value) > maxBid + 1e-9) offers.push({ px: md.bestAsk, qty: '1000' });
+      bids.sort((a, b) => Number(b.px.value) - Number(a.px.value));
+      offers.sort((a, b) => Number(a.px.value) - Number(b.px.value));
+      return { marketData: { bids, offers, transactTime: md && (md.transactTime || md.timestamp) } };
+    },
     async cancelOrder(id) {
       calls.cancel.push(id);
       const row = state.open.find((item) => item.id === id);
@@ -258,14 +275,14 @@ async function post(headers, body) {
   assert.equal(fired.statusCode, 200, JSON.stringify(fired.body));
   assert.equal(client.calls.cancel.length, 1);
   assert.equal(client.calls.create.length, 1);
-  assert.equal(client.calls.create[0].price.value, '0.550');
+  assert.equal(client.calls.create[0].price.value, '0.540');
   assert.equal(client.calls.create[0].quantity, 41);
   assert.equal(fired.body.events.length, 1);
   assert.equal(fired.body.events[0].kind, 'adverse-reprice');
   assert.equal(fired.body.events[0].chase, false);
-  assert.match(fired.body.events[0].label, /-122/);
+  assert.match(fired.body.events[0].label, /-117/);
   assert.equal(fired.body.events[0].fromCents, 60);
-  assert.equal(fired.body.events[0].toCents, 55);
+  assert.equal(fired.body.events[0].toCents, 54);
 
   const again = await post(
     { 'X-Desk-Protect-Secret': SECRET },

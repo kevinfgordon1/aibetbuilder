@@ -1561,6 +1561,60 @@ const goodCreds = () => ({
     assert.ok(Math.abs(twice.avgYesPrice - once.avgYesPrice) < 1e-9);
   }
 
+  {
+    const { createMemoryOrderTrackStore } = require('../lib/desk-order-tracks');
+    const owner = 'kev120909@gmail.com';
+    const tracks = createMemoryOrderTrackStore([
+      { orderId: 'still-open', ownerEmail: owner, marketSlug: 'm', verifiedState: 'open', cumQty: 0, orderQty: 10 },
+      { orderId: 'filled-off', ownerEmail: owner, marketSlug: 'm', verifiedState: 'open', cumQty: 0, orderQty: 5 },
+      { orderId: 'cancel-off', ownerEmail: owner, marketSlug: 'm', verifiedState: 'open', cumQty: 0, orderQty: 5 },
+      { orderId: 'from-trade', ownerEmail: owner, marketSlug: 'm', verifiedState: 'open', cumQty: 0, orderQty: 8 },
+      { orderId: 'later-1', ownerEmail: owner, marketSlug: 'm', verifiedState: 'unknown', totalFailures: 0 },
+      { orderId: 'later-2', ownerEmail: owner, marketSlug: 'm', verifiedState: 'unknown', totalFailures: 0 },
+      { orderId: 'later-3', ownerEmail: owner, marketSlug: 'm', verifiedState: 'unknown', totalFailures: 0 },
+    ]);
+    const looked = [];
+    const client = {
+      async getOrder(id) {
+        looked.push(id);
+        if (id === 'filled-off') {
+          return { order: { id, state: 'ORDER_STATE_FILLED', quantity: 5, cumQuantity: 5, leavesQuantity: 0, avgPx: { value: '0.55' }, marketSlug: 'm' } };
+        }
+        if (id === 'cancel-off') {
+          return { order: { id, state: 'ORDER_STATE_CANCELED', quantity: 5, cumQuantity: 0, leavesQuantity: 0, marketSlug: 'm' } };
+        }
+        return { order: { id, state: 'ORDER_STATE_NEW', quantity: 1, cumQuantity: 0, leavesQuantity: 1, marketSlug: 'm' } };
+      },
+    };
+    await handler._reconcileOwnedTracks(client, tracks, owner, [
+      { id: 'still-open', state: 'ORDER_STATE_PARTIALLY_FILLED', quantity: 10, cumQuantity: 4, leavesQuantity: 6, avgPx: { value: '0.40' }, marketSlug: 'm' },
+    ], [
+      { trade: { marketSlug: 'm', aggressorExecution: { order: { id: 'from-trade', state: 'ORDER_STATE_CANCELED', quantity: 8, cumQuantity: 3, leavesQuantity: 0, avgPx: { value: '0.25' } } } } },
+    ], false);
+    assert.equal((await tracks.get('still-open')).verifiedState, 'partial');
+    assert.equal((await tracks.get('still-open')).cumQty, 4);
+    assert.equal(looked.includes('still-open'), false, 'an order still on the open list is not fetched again');
+    assert.equal((await tracks.get('from-trade')).verifiedState, 'partial_canceled');
+    assert.equal((await tracks.get('from-trade')).cumQty, 3);
+    assert.equal(looked.includes('from-trade'), false, 'a desk trade payload is enough');
+    assert.deepEqual(looked, ['filled-off', 'cancel-off', 'later-1']);
+    assert.equal((await tracks.get('filled-off')).verifiedState, 'filled');
+    assert.equal((await tracks.get('filled-off')).avgYesPrice, 0.55);
+    assert.equal((await tracks.get('cancel-off')).verifiedState, 'canceled');
+    assert.equal((await tracks.get('cancel-off')).cumQty, 0);
+    assert.equal((await tracks.get('later-2')).verifiedState, 'unknown');
+    const again = [];
+    client.getOrder = async (id) => {
+      again.push(id);
+      return { order: { id, state: 'ORDER_STATE_NEW', quantity: 1, cumQuantity: 0, leavesQuantity: 1, marketSlug: 'm' } };
+    };
+    await handler._reconcileOwnedTracks(client, tracks, owner, [], [], false);
+    assert.equal(again.includes('filled-off'), false);
+    assert.equal(again.includes('cancel-off'), false);
+    assert.equal(again.includes('from-trade'), false);
+    assert.ok(again.length <= 3);
+  }
+
   console.log('live-trading-desk.test.js ok');
 })().catch((err) => {
   console.error(err);
