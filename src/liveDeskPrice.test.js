@@ -430,6 +430,26 @@ const GB_MARKET = {
   assert.equal(orders[0].action, "buy");
   assert.equal(orders[0].americanLabel, formatAmerican(americanFromMicro(600000)));
   assert.equal(orders[0].americanLabel, "-150");
+  assert.equal(orders[0].quantity, 10);
+  assert.equal(orders[0].leavesQuantity, 10);
+  assert.equal(orders[0].originalQuantity, 10);
+}
+{
+  const partial = mapOpenOrders({
+    orders: [{
+      id: "ord-partial",
+      marketSlug: "m",
+      intent: "ORDER_INTENT_BUY_LONG",
+      price: { value: "0.60" },
+      quantity: 100,
+      leavesQuantity: 40,
+      cumQuantity: 60,
+      state: "ORDER_STATE_PARTIALLY_FILLED",
+    }],
+  });
+  assert.equal(partial[0].quantity, 40, "displayed size is remaining, not the original 100");
+  assert.equal(partial[0].leavesQuantity, 40);
+  assert.equal(partial[0].originalQuantity, 100);
 }
 
 {

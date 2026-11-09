@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const auth = require('./polymarket-us-auth');
 const { createPolymarketUsClient } = require('./polymarket-us-client');
 const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
+const { createSupabaseOrderTrackStore } = require('../lib/desk-order-tracks');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
 const { watcherEventsFromActions } = require('../lib/desk-protect-events');
@@ -66,9 +67,16 @@ function defaultStore() {
   return sharedStore;
 }
 
+let sharedTracks = null;
+function defaultTrackStore() {
+  if (!sharedTracks) sharedTracks = createSupabaseOrderTrackStore();
+  return sharedTracks;
+}
+
 const defaults = {
   creds: () => auth.readPolymarketCreds(process.env),
   protectStore: defaultStore,
+  trackStore: defaultTrackStore,
   notify: (text) => sendProtectPing(text),
   now: () => Date.now(),
   runSweep: runProtectSweep,
@@ -99,6 +107,7 @@ let deps = { ...defaults };
 
 function resetDeps() {
   sharedStore = null;
+  sharedTracks = null;
   deps = { ...defaults };
 }
 
@@ -159,6 +168,7 @@ async function handler(req, res) {
         store: deps.protectStore(),
         notify: deps.notify,
         now: deps.now,
+        tracks: deps.trackStore(),
       })),
     });
   }

@@ -7,6 +7,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const handler = require('./desk-protect-sweep');
 const { createMemoryProtectStore } = require('../lib/desk-protect-registry');
+const { createMemoryOrderTrackStore } = require('../lib/desk-order-tracks');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 
 const SECRET = 'desk-sweep-secret';
@@ -93,11 +94,30 @@ function armedRow(overrides) {
 
 function fakeClient({ open, book }) {
   const calls = { cancel: [], create: [] };
-  const state = { open: open.map((row) => ({ ...row, price: { ...row.price } })) };
+  const state = {
+    open: open.map((row) => ({ ...row, price: { ...row.price } })),
+    canceled: {},
+  };
   return {
     calls,
     async listOpenOrders() {
       return { orders: state.open.map((row) => ({ ...row, price: { ...row.price } })) };
+    },
+    async getOrder(id) {
+      const row = state.canceled[id] || state.open.find((item) => item.id === id);
+      if (!row) {
+        const err = new Error('missing');
+        err.statusCode = 404;
+        throw err;
+      }
+      return {
+        order: {
+          ...row,
+          state: state.canceled[id] ? 'ORDER_STATE_CANCELED' : row.state,
+          cumQuantity: 0,
+          leavesQuantity: state.canceled[id] ? 0 : row.leavesQuantity,
+        },
+      };
     },
     async getMarketBySlug() {
       return {
@@ -116,7 +136,9 @@ function fakeClient({ open, book }) {
     async getMarketBbo() { return book; },
     async cancelOrder(id) {
       calls.cancel.push(id);
-      state.open = state.open.filter((row) => row.id !== id);
+      const row = state.open.find((item) => item.id === id);
+      if (row) state.canceled[id] = row;
+      state.open = state.open.filter((item) => item.id !== id);
     },
     async createOrder(body) {
       calls.create.push(body);
@@ -227,6 +249,7 @@ async function post(headers, body) {
     notify: async () => ({ ok: false }),
     now: () => now,
     runSweep: runProtectSweep,
+    trackStore: () => createMemoryOrderTrackStore(),
   });
   const fired = await post(
     { 'X-Desk-Protect-Secret': SECRET },

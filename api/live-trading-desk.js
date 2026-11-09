@@ -58,6 +58,7 @@ function ensureMods() {
 const auth = require('./polymarket-us-auth');
 const { createPolymarketUsClient } = require('./polymarket-us-client');
 const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
+const { createSupabaseOrderTrackStore } = require('../lib/desk-order-tracks');
 const { runProtectSweep } = require('../lib/desk-protect-sweep');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
 const novigDesk = require('./novig-desk');
@@ -66,6 +67,12 @@ let sharedStore = null;
 function defaultProtectStore() {
   if (!sharedStore) sharedStore = createSupabaseProtectStore();
   return sharedStore;
+}
+
+let sharedTracks = null;
+function defaultTrackStore() {
+  if (!sharedTracks) sharedTracks = createSupabaseOrderTrackStore();
+  return sharedTracks;
 }
 
 function headerValue(headers, name) {
@@ -92,6 +99,7 @@ const defaults = {
   requireOwner: requireDeskOwner,
   creds: () => auth.readPolymarketCreds(process.env),
   protectStore: defaultProtectStore,
+  trackStore: defaultTrackStore,
   notify: (text) => sendProtectPing(text),
   now: () => Date.now(),
   serviceAuthorized: serviceSweepAuthorized,
@@ -111,6 +119,7 @@ const DEFAULT_RETRY_AFTER_SEC = 45;
 
 function resetDeps() {
   sharedStore = null;
+  sharedTracks = null;
   deps = { ...defaults };
   nflGamesCache = { at: 0, games: null };
   marketCache = new Map();
@@ -443,7 +452,102 @@ function withFillNotes(positions, rows) {
   });
 }
 
-async function snapshot(client, slug, store) {
+async function attachTracks(fills, tracks, ownerEmail) {
+  if (!Array.isArray(fills) || !tracks || tracks.configured === false || !ownerEmail) return fills;
+  if (typeof tracks.listByOrderIds !== 'function') return fills;
+  try {
+    const ids = [...new Set(fills.map((row) => row && row.orderId).filter(Boolean))].slice(0, 50);
+    const saved = await tracks.listByOrderIds(ids, ownerEmail);
+    const byId = new Map((saved || []).map((row) => [row.orderId, row]));
+    return fills.map((row) => {
+      const savedRow = row && byId.get(row.orderId);
+      if (!savedRow) return row;
+      return {
+        ...row,
+        verified: {
+          state: savedRow.verifiedState,
+          cumQty: savedRow.cumQty,
+          orderQty: savedRow.orderQty,
+          avgYesPrice: savedRow.avgYesPrice,
+          fees: savedRow.fees,
+          cost: savedRow.cost,
+          replacedBy: savedRow.replacedBy || '',
+          replaces: savedRow.replaces || '',
+          unknownReason: savedRow.unknownReason || '',
+          exchangeState: savedRow.exchangeState || '',
+        },
+        replacedBy: row.replacedBy || savedRow.replacedBy || '',
+        replaces: row.replaces || savedRow.replaces || '',
+      };
+    });
+  } catch (_) {
+    return fills;
+  }
+}
+
+async function reconcileOwnedTracks(client, tracks, ownerEmail, openOrders, activities, skipLookup) {
+  if (!tracks || tracks.configured === false || !ownerEmail || typeof tracks.listNonTerminal !== 'function') return;
+  let pending = [];
+  try { pending = await tracks.listNonTerminal(ownerEmail, 25); } catch (_) { return; }
+  if (!pending.length) return;
+  const trackMath = await import('../src/liveDeskOrderTrack.js');
+  const openIds = [];
+  for (const order of openOrders || []) {
+    if (!order || !order.id) continue;
+    const id = String(order.id);
+    openIds.push(id);
+    const existing = pending.find((row) => row.orderId === id);
+    if (!existing) continue;
+    const merged = trackMath.mergeVerifiedTrack(existing, {
+      ...trackMath.classifyOfficialOrder(order),
+      orderId: id,
+      ownerEmail,
+      marketSlug: existing.marketSlug || order.marketSlug || '',
+      source: 'open_list',
+    });
+    if (!trackMath.sameTrack(existing, merged)) {
+      try { await tracks.upsert(merged); } catch (_) { /* table missing */ }
+    }
+  }
+  const list = Array.isArray(activities) ? activities : [];
+  const grouped = new Map();
+  for (const exec of trackMath.executionsFromActivities(list)) {
+    if (!grouped.has(exec.orderId)) grouped.set(exec.orderId, []);
+    grouped.get(exec.orderId).push(exec);
+  }
+  for (const [id, execs] of grouped) {
+    const existing = pending.find((row) => row.orderId === id);
+    if (!existing) continue;
+    const folded = trackMath.foldOrderExecutions(existing, execs);
+    if (!trackMath.sameTrack(existing, folded)) {
+      try { await tracks.upsert(folded); } catch (_) { /* table missing */ }
+    }
+  }
+  if (skipLookup || !client || typeof client.getOrder !== 'function') return;
+  let fresh = pending;
+  try { fresh = await tracks.listNonTerminal(ownerEmail, 25); } catch (_) {}
+  const need = trackMath.tracksNeedingLookup(fresh, openIds, trackMath.TRACK_LOOKUP_LIMIT);
+  for (const row of need) {
+    let classified;
+    try {
+      classified = trackMath.classifyLookup({ order: await client.getOrder(row.orderId) });
+    } catch (err) {
+      classified = trackMath.classifyLookup({ error: err });
+    }
+    const prev = (await tracks.get(row.orderId)) || row;
+    const merged = trackMath.mergeVerifiedTrack(prev, {
+      ...classified,
+      orderId: row.orderId,
+      ownerEmail,
+      marketSlug: row.marketSlug,
+    });
+    if (!trackMath.sameTrack(prev, merged)) {
+      try { await tracks.upsert(merged); } catch (_) { /* table missing */ }
+    }
+  }
+}
+
+async function snapshot(client, slug, store, { tracks, ownerEmail } = {}) {
   // Account reads, trade history, and the public slate fail independently.
   // A 429 on positions must still return the NFL dropdown.
   const [posRes, ordRes, actRes, slateRes] = await Promise.allSettled([
@@ -512,9 +616,14 @@ async function snapshot(client, slug, store) {
     rate = absorbRate(rate, booked.error);
   }
   const activity = activityErr ? null : price.mapActivities({ activities: recent }, markets);
+  await reconcileOwnedTracks(client, tracks, ownerEmail, orderList, activityErr ? [] : activities, !!rate.rateLimited);
   const fills = activityErr
     ? null
-    : fillsMod.mapFilledOrders(activities, { protectRows: await protectRowsForFills(store, activities) });
+    : await attachTracks(
+      fillsMod.mapFilledOrders(activities, { protectRows: await protectRowsForFills(store, activities) }),
+      tracks,
+      ownerEmail,
+    );
   const limited = !!rate.rateLimited;
   const retryAfter = limited ? normalizeRetryAfter(rate.retryAfter) : null;
   return {
@@ -595,7 +704,7 @@ async function withBook(client, slug, market) {
   }
 }
 
-async function placeOrder(client, body, { store, ownerEmail } = {}) {
+async function placeOrder(client, body, { store, ownerEmail, tracks } = {}) {
   const slug = String(body.marketSlug || body.slug || '').trim();
   if (!price.isMarketSlug(slug)) return { ok: false, status: 400, error: 'Enter a Polymarket US market slug.' };
   const early = games.placeScopeError(body, slug);
@@ -687,6 +796,23 @@ async function placeOrder(client, body, { store, ownerEmail } = {}) {
       try { await client.cancelOrder(String(orderId), slug); } catch (__) { /* best effort */ }
       return { ok: false, status: 503, error: 'Bet Protect could not be armed. That order was cancelled.' };
     }
+  }
+  if (orderId && ownerEmail && tracks && tracks.configured !== false && typeof tracks.upsert === 'function') {
+    try {
+      await tracks.upsert({
+        orderId: String(orderId),
+        ownerEmail: String(ownerEmail).trim().toLowerCase(),
+        marketSlug: slug,
+        verifiedState: 'open',
+        orderQty: quote.contracts,
+        leavesQty: quote.contracts,
+        cumQty: 0,
+        source: 'place',
+        resolveAttempts: 0,
+        totalFailures: 0,
+        reopenCount: 0,
+      });
+    } catch (_) { /* a missing track table must not cancel a resting order */ }
   }
   return {
     ok: true,
@@ -791,7 +917,8 @@ async function handler(req, res) {
         json(res, 400, { ok: false, error: 'Bad market slug.' });
         return;
       }
-      json(res, 200, await snapshot(client, slug, store));
+      const email = owner.user && (owner.user.email || owner.user.user_email);
+      json(res, 200, await snapshot(client, slug, store, { tracks: deps.trackStore(), ownerEmail: email }));
       return;
     }
     if (op === 'protect-sweep') {
@@ -800,13 +927,15 @@ async function handler(req, res) {
         store,
         notify: deps.notify,
         now: deps.now,
+        tracks: deps.trackStore(),
       });
       json(res, swept.ok ? 200 : (swept.status || 503), swept);
       return;
     }
     if (op === 'place') {
       const email = owner.user && (owner.user.email || owner.user.user_email);
-      const placed = await placeOrder(client, body, { store, ownerEmail: email });
+      const tracks = typeof deps.trackStore === 'function' ? deps.trackStore() : null;
+      const placed = await placeOrder(client, body, { store, ownerEmail: email, tracks });
       json(res, placed.ok ? 200 : (placed.status || 400), placed);
       return;
     }
@@ -837,3 +966,4 @@ module.exports.config = { maxDuration: 15 };
 module.exports._setDeps = setDeps;
 module.exports._resetDeps = resetDeps;
 module.exports._requireDeskOwner = requireDeskOwner;
+module.exports._reconcileOwnedTracks = reconcileOwnedTracks;
