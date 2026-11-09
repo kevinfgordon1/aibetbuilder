@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fetchAllRows, chunkIds } from "./comboPaging.js";
-import { lockSubmissionQueriesForParlays, ARCHIVED_ID_CHUNK, ARCHIVED_SUBS_TTL_MS } from "./comboLockSubmissions.js";
+import { lockSubmissionQueriesForParlays, ARCHIVED_SUBS_TTL_MS } from "./comboLockSubmissions.js";
 import {
   buildComboStatement, sortStatementLines, lockFillReceipt, pushHedgeValue,
   reducedParlayDecimal, pushLockPnl,
@@ -23,12 +23,12 @@ const src = readFileSync(new URL("./ComboLocks.jsx", import.meta.url), "utf8");
 assert.ok(!/not\("archived_at", "is", null\)[^\n]*\.limit\(100\)/.test(src), "History must not stop at 100 locks");
 assert.match(src, /fetchAllRows\(\(\) => supabase\.from\("combo_parlays"\)[^\n]*order\("id"/);
 
-// Archived submission reads are chunked.
+// Archived submission reads are one equality pair per lock, not a shared parlay_id=in. chunk.
 const q = () => { const b = { select: () => b, eq: () => b, neq: () => b, in: () => b, is: () => b, or: () => b, order: () => b, limit: () => b }; return b; };
 const client = { from: q };
 const ids = Array.from({ length: 447 }, (_, i) => "id" + i);
 const reqs = lockSubmissionQueriesForParlays(client, { userId: "u", living: [], archivedIds: ids });
-assert.equal(reqs.length, 2 * Math.ceil(447 / ARCHIVED_ID_CHUNK));
+assert.equal(reqs.length, 2 * ids.length);
 
 // Stable sort: same sortAt -> createdAt desc -> id desc, regardless of input order.
 const L = [

@@ -39,7 +39,7 @@ import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked, matchedRfqCounts } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, lockQuoteFillCounts, ARCHIVED_ID_CHUNK } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, lockQuoteFillCounts, livingLocksDue, settleInBatches, DESK_POLL_MS } from "./comboLockSubmissions";
 import { outcomeChrome } from "./comboLegResult";
 import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
@@ -770,6 +770,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   // slowest calls on the page (seconds each on a 1.4M-row table). Archived locks no longer change,
   // so read them once and again only when the archived set changes or every ARCHIVED_SUBS_TTL_MS.
   const archivedSubsRef = useRef({ ids: null, at: 0, rows: [] });
+  const subsAtRef = useRef(new Map()); // parlay id -> last successful quote/skip read
+  const subsForceRef = useRef(false); // user actions refresh quoting history on the next reload
   // Archived lock rows (~0.8 MB) are re-read only when a lock leaves the living list, on the
   // first load, or every ARCHIVED_ROWS_TTL_MS (src/comboHistoryCache.js), not on every 20s poll.
   const archivedRowsRef = useRef(null);
@@ -923,6 +925,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       if (ocRows) setOutcomes(ocRows);
       const bookedRows = takeList(bookedRes);
       if (bookedRows) pageHintRef.current.booked = bookedRows.length;
+      let fillTouchIds = null;
       if (bookedRows) {
         const q = {};
         bookedRows.forEach((b) => { q[b.parlay_id] = (q[b.parlay_id] || 0) + Number(b.contracts || 0); });
@@ -931,9 +934,15 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         // order_id whose combo_fills row is still unattributed. Unwindowed on purpose — the per-lock
         // History window (newest 400 rows) must not change the fill count between polls.
         const prevSubs = filledSubsRef.current;
-        filledSubsRef.current = bookedRows.filter(isConfirmedFillSubmission);
-        const sameSubs = prevSubs.length === filledSubsRef.current.length
-          && prevSubs.every((s, i) => s && filledSubsRef.current[i] && s.id === filledSubsRef.current[i].id);
+        const nextFilled = bookedRows.filter(isConfirmedFillSubmission);
+        const sameSubs = prevSubs.length === nextFilled.length
+          && prevSubs.every((s, i) => s && nextFilled[i] && s.id === nextFilled[i].id);
+        if (!sameSubs) {
+          fillTouchIds = new Set();
+          prevSubs.forEach((s) => { if (s && s.parlay_id) fillTouchIds.add(s.parlay_id); });
+          nextFilled.forEach((s) => { if (s && s.parlay_id) fillTouchIds.add(s.parlay_id); });
+        }
+        filledSubsRef.current = nextFilled;
         if (fillRows && !sameSubs) {
           summed = deskFillCounts(fillRows, filledSubsRef.current);
           writeFills(summed);
@@ -954,36 +963,51 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       const allArchivedIds = archivedForSubs.map((row) => row.id).filter(Boolean);
       const archCache = archivedSubsRef.current;
       // Archived locks: read each lock's rows once (a newly archived lock reads only its own
-      // chunk), and re-read everything every ARCHIVED_SUBS_FULL_TTL_MS.
+      // pair), and re-read everything every ARCHIVED_SUBS_FULL_TTL_MS.
       const archPlan = archivedRows ? archivedSubsPlan(archCache, allArchivedIds) : { fetchIds: [], full: false };
       const archivedIds = archPlan.fetchIds;
-      // Every living lock gets its own history read (was newest 20 only, so
-      // older locks showed "Not filled 0"). Reads are indexed on parlay_id.
-      const livingForSubs = livingRows.slice(0, 200);
+      // Quoting locks (game not started, or a quote still live) refresh every
+      // LIVING_SUBS_POLL_MS. Idle locks refresh every IDLE_SUBS_POLL_MS. A new
+      // confirmed fill refreshes that lock on this poll. Each read is parlay_id
+      // equality on the partial indexes, not a 100-id ANY() sort.
+      const pollNow = Date.now();
+      const forceSubs = subsForceRef.current;
+      subsForceRef.current = false;
+      const liveQuoteIds = new Set((submissionsRef.current || []).filter((r) => r && r.is_live === true && r.parlay_id).map((r) => r.parlay_id));
+      const livingForSubs = livingLocksDue(livingRows.slice(0, 200), {
+        now: pollNow,
+        force: forceSubs,
+        lastAt: subsAtRef.current,
+        liveIds: liveQuoteIds,
+        alsoIds: fillTouchIds,
+      });
       const subReqs = lockSubmissionQueriesForParlays(supabase, {
         userId: user.id,
         living: livingForSubs,
         archivedIds,
       });
-      const subSettled = await Promise.allSettled(subReqs.length ? subReqs : [Promise.resolve({ data: [] })]);
+      const subSettled = subReqs.length ? await settleInBatches(subReqs) : [];
       const subRes = subSettled.map(comboSettledQuery);
       const livingSubsOk = subReqs.length === 0 || subRes.every(comboListQueryOk);
       const freshSubRows = subRes.flatMap((r) => (comboListQueryOk(r) ? r.data : []));
       // One slow/failed per-lock read must not blank every card's Quote history:
       // keep the last known rows for just the locks whose reads failed.
       const failedIds = new Set();
+      const readAt = Date.now();
       let qi = 0;
       for (const row of livingForSubs) {
         if (!row || !row.id) continue;
         if (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1])) failedIds.add(row.id);
+        else subsAtRef.current.set(row.id, readAt);
         qi += 2;
       }
       let archFailed = false;
-      for (let ci = 0; ci * ARCHIVED_ID_CHUNK < archivedIds.length; ci += 1, qi += 2) {
+      for (const id of archivedIds) {
         if (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1])) {
           archFailed = true;
-          archivedIds.slice(ci * ARCHIVED_ID_CHUNK, (ci + 1) * ARCHIVED_ID_CHUNK).forEach((id) => failedIds.add(id));
+          failedIds.add(id);
         }
+        qi += 2;
       }
       if (archivedIds.length) {
         const archSet = new Set(archivedIds);
@@ -1009,7 +1033,12 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
           .catch(() => {});
       }
       if (livingSubsOk || livingSubRows.length || failedIds.size) {
-        const kept = (submissionsRef.current || []).filter((row) => row && failedIds.has(row.parlay_id));
+        // Keep rows for locks this poll did not re-read (quoting cadence / idle
+        // game-started locks) and for locks whose read failed.
+        const fetchedIds = new Set();
+        livingForSubs.forEach((row) => { if (row && row.id) fetchedIds.add(row.id); });
+        archivedIds.forEach((id) => fetchedIds.add(id));
+        const kept = (submissionsRef.current || []).filter((row) => row && (failedIds.has(row.parlay_id) || !fetchedIds.has(row.parlay_id)));
         const subRows = mergeSubmissionRows(livingSubRows, kept);
         submissionsRef.current = subRows;
         setSubmissions(subRows);
@@ -1044,8 +1073,14 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   // running schedules ONE trailing run (which sees the write that triggered it).
   const reloadInflightRef = useRef(false);
   const reloadAgainRef = useRef(false);
-  const reload = useCallback(async () => {
-    if (reloadInflightRef.current) { reloadAgainRef.current = true; return; }
+  const reload = useCallback(async (reason = "action") => {
+    // The 20s timer must not queue another full read when the previous one is
+    // still in flight (that turned a slow poll into a continuous one). A user
+    // action or a tab becoming visible still gets one trailing run.
+    if (reloadInflightRef.current) {
+      if (reason !== "poll") reloadAgainRef.current = true;
+      return;
+    }
     reloadInflightRef.current = true;
     try {
       await loadDesk();
@@ -1085,7 +1120,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   }, [loadGames]);
   // User actions (save, merge, archive, restore, delete, pause) can change archived rows, so they
   // drop the cached History list; only the 20s poll reuses it.
-  const reloadAll = useCallback(() => { archivedGenRef.current += 1; archivedRowsRef.current = null; fillsCacheRef.current = null; return reload(); }, [reload]);
+  const reloadAll = useCallback(() => { archivedGenRef.current += 1; archivedRowsRef.current = null; fillsCacheRef.current = null; subsForceRef.current = true; return reload(); }, [reload]);
   useEffect(() => { reload(); }, [reload]);
   // Apply a Promo Builder prefill once the live Kalshi slate is in. Prefill is
   // App state and is cleared when leaving this tab — do not insert into Supabase.
@@ -1132,13 +1167,15 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     setPrefillWarning(unmatched.length ? unmatched : null);
     requestAnimationFrame(() => createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, [prefill, gamesReady, games, gameIdx, loadGames, srcLive]);
-  // Live-ish monitor: refresh the parlay/fills data every 20s so the real-fills bars update on their own.
+  // Live-ish monitor: refresh locks / fills / booked contracts every DESK_POLL_MS so the
+  // real-fills bars update on their own. Quote history is slower (livingLocksDue).
   // Paused while the tab is hidden (audit Oct 24: background tabs were ~10 reads / 20s each);
-  // refreshes once as soon as the tab is visible again.
+  // refreshes once as soon as the tab is visible again. The timer does not stack a second
+  // fetch on top of one that is still running.
   useEffect(() => {
     const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
-    const t = setInterval(() => { if (!hidden()) reload(); }, 20000);
-    const onVis = () => { if (!hidden()) reload(); };
+    const t = setInterval(() => { if (!hidden()) reload("poll"); }, DESK_POLL_MS);
+    const onVis = () => { if (!hidden()) reload("visible"); };
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(t); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis); };
   }, [reload]);

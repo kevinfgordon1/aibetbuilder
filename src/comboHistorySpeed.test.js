@@ -71,6 +71,14 @@ for (const n of [0, 5, 999, 1000, 1001, 1268, 2000, 2500]) {
   const failed = nextArchivedSubsCache(cache, { allIds: ["d", "c", "a", "b"], fetchIds: ["d"], full: false, fetched: [], failedIds: new Set(["d"]), now: now + 3000, merge });
   assert.equal(failed.ids.has("d"), false);
   assert.deepEqual(archivedSubsPlan(failed, ["d", "c", "a", "b"], now + 4000).fetchIds, ["d"]);
+  // A failed lock in a full read is retried alone. Successes are not read again.
+  const partial = nextArchivedSubsCache(null, {
+    allIds: ["a", "b"], fetchIds: ["a", "b"], full: true,
+    fetched: [{ id: 9, parlay_id: "a" }], failedIds: new Set(["b"]), now, merge,
+  });
+  assert.equal(partial.at, now);
+  assert.equal(partial.ids.has("b"), false);
+  assert.deepEqual(archivedSubsPlan(partial, ["a", "b"], now + 1000).fetchIds, ["b"]);
   // full refresh after TTL; a lock that left History drops out
   plan = archivedSubsPlan(cache, ["a", "c"], now + ARCHIVED_SUBS_FULL_TTL_MS);
   assert.equal(plan.full, true);

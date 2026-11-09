@@ -26,6 +26,7 @@ import {
   tapeWatcherState,
 } from "./comboTape";
 import { settlementFromStored } from "./comboSettlement";
+import { LOCK_SUBMISSION_COLUMNS } from "./comboLockSubmissions";
 
 const supabase = getBrowserSupabase();
 
@@ -183,9 +184,15 @@ export default function ComboTape({ user }) {
   const [open, setOpen] = useState({});
   const [loaded, setLoaded] = useState(false);
   const [poll, setPoll] = useState(false);
+  const inflightRef = React.useRef(false);
 
   const reload = useCallback(async (mode = "full") => {
     if (!owner || !user?.id || !supabase) return;
+    // A 60s tick that lands while the previous read is still running would
+    // double the combo_submissions fetch. Drop it; the in-flight read is newer.
+    if (inflightRef.current) return;
+    inflightRef.current = true;
+    try {
     if (mode === "tick") {
       const { data: peek } = await supabase
         .from("combo_parlays")
@@ -204,7 +211,7 @@ export default function ComboTape({ user }) {
     const [living, archived, submissionRows] = await Promise.all([
       supabase.from("combo_parlays").select("*").eq("user_id", user.id).is("archived_at", null).order("created_at", { ascending: false }),
       supabase.from("combo_parlays").select("*").eq("user_id", user.id).not("archived_at", "is", null).order("archived_at", { ascending: false }).limit(100),
-      supabase.from("combo_submissions").select("*").eq("user_id", user.id).in("status", ["quoted", "declined", "limitreached", "filled", "unfilled"]).order("created_at", { ascending: false }).limit(SUBMISSION_LIMIT),
+      supabase.from("combo_submissions").select(LOCK_SUBMISSION_COLUMNS).eq("user_id", user.id).in("status", ["quoted", "declined", "limitreached", "filled", "unfilled"]).order("created_at", { ascending: false }).limit(SUBMISSION_LIMIT),
     ]);
     const livingRows = living.data || [];
     const archivedRows = archived.data || [];
@@ -224,6 +231,9 @@ export default function ComboTape({ user }) {
     setSubmissions(submissionRows.data || []);
     setLoaded(true);
     setPoll(hasQuotingParlays(livingRows));
+    } finally {
+      inflightRef.current = false;
+    }
   }, [owner, user]);
 
   useEffect(() => { reload("full"); }, [reload]);

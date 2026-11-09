@@ -7,12 +7,18 @@ import {
   LOCK_SKIP_LIMIT,
   LOCK_QUOTE_OR,
   LOCK_SKIP_OR,
+  LOCK_SUBMISSION_COLUMNS,
+  LIVING_SUBS_POLL_MS,
+  IDLE_SUBS_POLL_MS,
   isNoisySkipReason,
   isLockQuoteRow,
   mergeSubmissionRows,
   livingLockSubmissionQueries,
   archivedLockSubmissionQueries,
   lockSubmissionQueriesForParlays,
+  livingLocksDue,
+  lockQuotesLive,
+  settleInBatches,
 } from "./comboLockSubmissions.js";
 
 assert.equal(isNoisySkipReason("game_started"), true);
@@ -102,6 +108,9 @@ function mockClient() {
     parlayId: "aee3b29d-2a4b-4dd6-8dd5-37358b0aa294",
   });
   assert.equal(reqs.length, 2);
+  assert.equal(client.calls[0].select, LOCK_SUBMISSION_COLUMNS);
+  assert.equal(client.calls[1].select, LOCK_SUBMISSION_COLUMNS);
+  assert.doesNotMatch(LOCK_SUBMISSION_COLUMNS, /\*/);
   assert.equal(client.calls[0].or, LOCK_QUOTE_OR);
   assert.equal(client.calls[0].limit, LOCK_QUOTE_LIMIT);
   assert.ok(client.calls[0].filters.some((f) => f[0] === "eq" && f[1] === "parlay_id"));
@@ -151,18 +160,22 @@ function mockClient() {
 
 console.log("comboLockSubmissions.test.js ok");
 
-// History .in() reads drop the redundant user_id filter (lets Postgres use the per-lock partial
-// indexes); single-lock reads keep it.
+// Every lock is parlay_id equality (user_id + parlay_id), never parlay_id = ANY(chunk).
+// The ANY plan sorted every match in the chunk before LIMIT (~2s, ~10MB heap per call).
 {
   const calls = [];
   const mk = () => { const b = new Proxy({}, { get: (_t, k) => (...a) => { calls.push([k, ...a]); return b; } }); return b; };
   const client = { from: () => mk() };
   calls.length = 0;
   archivedLockSubmissionQueries(client, { userId: "u", parlayIds: ["a", "b"] });
-  assert.equal(calls.some(([k, c]) => k === "eq" && c === "user_id"), false);
+  assert.equal(calls.filter(([k, c]) => k === "eq" && c === "parlay_id").length, 4);
+  assert.equal(calls.filter(([k, c]) => k === "eq" && c === "user_id").length, 4);
+  assert.equal(calls.some(([k]) => k === "in"), false);
+  assert.ok(calls.filter(([k]) => k === "select").every(([, cols]) => cols === LOCK_SUBMISSION_COLUMNS));
   calls.length = 0;
   livingLockSubmissionQueries(client, { userId: "u", parlayId: "a" });
   assert.equal(calls.filter(([k, c]) => k === "eq" && c === "user_id").length, 2);
+  assert.equal(calls.filter(([k, c]) => k === "eq" && c === "parlay_id").length, 2);
 }
 
 {
@@ -187,4 +200,61 @@ console.log("comboLockSubmissions.test.js ok");
   assert.equal(lockQuoteFillLine(rows, { fills: 1, countedUnfilledQuotes: 30 }), "31 quotes · 1 fill");
   assert.equal(lockQuoteFillLine([rows[1]], { fills: 0 }), "1 quote · 0 fills");
   console.log("lockQuoteFillLine ok");
+}
+
+{
+  const now = Date.parse("2026-11-09T18:00:00Z");
+  const quoting = { id: "q", active: true, starts_at: "2026-11-09T20:00:00Z" };
+  const started = { id: "s", active: true, starts_at: "2026-11-09T16:00:00Z" };
+  const paused = { id: "p", active: false, starts_at: "2026-11-09T20:00:00Z" };
+  assert.equal(lockQuotesLive(quoting, { now }), true);
+  assert.equal(lockQuotesLive(started, { now }), false, "game already started");
+  assert.equal(lockQuotesLive(started, { now, live: true }), true, "a live quote still refreshes");
+  assert.equal(lockQuotesLive(paused, { now }), false);
+  const lastAt = new Map([["q", now - 30_000], ["s", now - 60_000], ["p", now - 60_000]]);
+  const due = livingLocksDue([quoting, started, paused], { now, lastAt });
+  assert.deepEqual(due.map((r) => r.id), [], "quoting lock is inside 60s; idle locks are inside 5min");
+  const later = livingLocksDue([quoting, started, paused], { now: now + LIVING_SUBS_POLL_MS, lastAt });
+  assert.deepEqual(later.map((r) => r.id), ["q"]);
+  const idle = livingLocksDue([started, paused], { now: now + IDLE_SUBS_POLL_MS, lastAt });
+  assert.deepEqual(idle.map((r) => r.id), ["s", "p"]);
+  const forced = livingLocksDue([paused], { now, lastAt, force: true });
+  assert.deepEqual(forced.map((r) => r.id), ["p"]);
+  const filled = livingLocksDue([started], { now, lastAt, alsoIds: new Set(["s"]) });
+  assert.deepEqual(filled.map((r) => r.id), ["s"], "a new confirmed fill refreshes that lock now");
+}
+
+{
+  let current = 0;
+  let max = 0;
+  const tasks = Array.from({ length: 7 }, (_, i) => ({
+    then(resolve, reject) {
+      (async () => {
+        current += 1;
+        max = Math.max(max, current);
+        await new Promise((r) => setTimeout(r, 15));
+        current -= 1;
+        return i;
+      })().then(resolve, reject);
+    },
+  }));
+  const settled = await settleInBatches(tasks, 3);
+  assert.equal(max <= 3, true, "submission reads do not all fly at once");
+  assert.deepEqual(settled.map((r) => r.value), [0, 1, 2, 3, 4, 5, 6]);
+}
+
+{
+  const sql = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../sql/20261109_combo_submissions_venue_quote_created_idx.sql"), "utf8");
+  assert.match(sql, /create index concurrently if not exists combo_submissions_venue_quote_created_idx/i);
+  assert.match(sql, /on public\.combo_submissions \(venue, created_at desc\)/i);
+  assert.match(sql, /where quote_id is not null/i);
+  const locks = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  assert.match(locks, /livingLocksDue/);
+  assert.match(locks, /settleInBatches/);
+  assert.match(locks, /reload\("poll"\)/);
+  assert.match(locks, /visibilityState === "hidden"/);
+  const tape = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboTape.jsx"), "utf8");
+  assert.match(tape, /LOCK_SUBMISSION_COLUMNS/);
+  assert.match(tape, /inflightRef/);
+  assert.doesNotMatch(tape, /from\("combo_submissions"\)\.select\("\*"\)/);
 }

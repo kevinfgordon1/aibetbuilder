@@ -99,8 +99,13 @@ async function loadUserInputs(client, userId, T) {
   const ids = parlays.map((p) => p.id);
   const fills = await pagedAll(() => client.from('combo_fills').select(FILL_COLS).eq('user_id', userId).eq('is_combo', true).order('recorded_at', { ascending: true }).order('id', { ascending: true }));
   // Booked rows (confirmed fills / live quotes) feed filledById, exactly like the page's booked read.
-  const booked = await inChunks(ids, (c) => client.from('combo_submissions').select(SUB_COLS).eq('user_id', userId).in('parlay_id', c)
-    .or('status.eq.filled,is_live.eq.true').order('created_at', { ascending: false }).limit(5000));
+  // One user_id read on combo_submissions_booked_idx (a few thousand rows), then
+  // keep this user's unsettled locks. parlay_id = ANY(chunk) was walking a much
+  // larger slice of the table for the same rows.
+  const bookedAll = await pagedAll(() => client.from('combo_submissions').select(SUB_COLS).eq('user_id', userId)
+    .or('status.eq.filled,is_live.eq.true').order('created_at', { ascending: false }).order('id', { ascending: false }));
+  const idSet = new Set(ids);
+  const booked = bookedAll.filter((r) => r && idSet.has(r.parlay_id));
   // Ticker evidence (market_ticker on skip-tape rows) only for locks that still need a combo ticker.
   // Capped per chunk: resolveComboTicker takes the most common ticker, so the newest rows suffice.
   const S0 = await import('../src/comboSettlement.js');

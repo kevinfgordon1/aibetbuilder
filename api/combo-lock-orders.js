@@ -129,7 +129,7 @@ async function cancelAllOpen(client, actor, body, isOwner) {
 async function cancelQuote(client, actor, body, isOwner) {
   const submissionId = String(body.submission_id || '');
   if (!UUID_RE.test(submissionId)) return { ok: false, status: 400, error: 'submission_id required' };
-  const { data: row, error } = await client.from('combo_submissions').select('*').eq('id', submissionId).maybeSingle();
+  const { data: row, error } = await client.from('combo_submissions').select('id,user_id,parlay_id,quote_id,order_id,status,is_live').eq('id', submissionId).maybeSingle();
   if (error) throw error;
   if (!row) return { ok: false, status: 404, error: 'Quote not found' };
   if (!orders.isOpenSubmission(row)) {
