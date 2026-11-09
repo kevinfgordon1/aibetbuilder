@@ -375,6 +375,36 @@ async function post(headers, body) {
   assert.equal(handler._sweepErrorDetail(null), 'unknown error');
   assert.equal(handler._sweepErrorDetail(new Error('x'.repeat(500))).length, 300);
 
+  let handoffs = 0;
+  const sweepsBefore = sweeps;
+  handler._setDeps({
+    creds: goodCreds,
+    runSweep: async () => {
+      sweeps += 1;
+      return { ok: true, actions: [] };
+    },
+    runHandoff: async (input) => {
+      handoffs += 1;
+      assert.equal(input.orderId, 'ord-1');
+      assert.equal(input.trigger, 'ws-through');
+      assert.equal(input.canceled, true);
+      assert.equal(input.latencyMs, 21);
+      return { ok: true, fired: 0, actions: [{ result: 'cancelled', reason: 'chain-cap', orderId: 'ord-1' }] };
+    },
+  });
+  const denied = await post({}, { op: 'ws-replace', mode: 'adverse-only', orderId: 'ord-1' });
+  assert.equal(denied.statusCode, 401);
+  assert.equal(handoffs, 0);
+  const handed = await post(
+    { 'X-Admin-Secret': SECRET },
+    { op: 'ws-replace', mode: 'adverse-only', orderId: 'ord-1', trigger: 'ws-through', canceled: true, latencyMs: 21 },
+  );
+  assert.equal(handed.statusCode, 200);
+  assert.equal(handed.body.ok, true);
+  assert.equal(handed.body.actions[0].reason, 'chain-cap');
+  assert.equal(handoffs, 1);
+  assert.equal(sweeps, sweepsBefore, 'ws-replace does not run the REST sweep');
+
   if (prevAdmin == null) delete process.env.ADMIN_API_SECRET;
   else process.env.ADMIN_API_SECRET = prevAdmin;
   if (prevDedicated == null) delete process.env.DESK_PROTECT_SWEEP_SECRET;

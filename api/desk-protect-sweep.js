@@ -2,7 +2,9 @@
 // POST /api/desk-protect-sweep
 // Header X-Desk-Protect-Secret = DESK_PROTECT_SWEEP_SECRET, or ADMIN_API_SECRET
 // when the dedicated name is unset. Body { op: "sweep", mode: "adverse-only" }.
-// Same cancel / re-rest as the desk. The secret cannot place or cancel.
+// Same cancel / re-rest as the desk. The secret cannot place a new order.
+// op ws-replace only continues a replacement after the poly-worker already
+// cancelled an armed rest. It uses the same chain cap and idempotency as sweep.
 // Armed rests only (desk rests are armed by default; an order switched off is
 // not in the registry, so it is never touched).
 // Polymarket US rests and Novig rests (market_slug novig:<uuid>) are swept in
@@ -14,7 +16,7 @@ const auth = require('./polymarket-us-auth');
 const { createPolymarketUsClient } = require('./polymarket-us-client');
 const { createSupabaseProtectStore } = require('../lib/desk-protect-registry');
 const { createSupabaseOrderTrackStore } = require('../lib/desk-order-tracks');
-const { runProtectSweep } = require('../lib/desk-protect-sweep');
+const { runProtectSweep, runProtectWsHandoff } = require('../lib/desk-protect-sweep');
 const { createSupabaseProtectAudit } = require('../lib/desk-protect-audit');
 const { sendProtectPing } = require('../lib/desk-protect-notify');
 const { watcherEventsFromActions } = require('../lib/desk-protect-events');
@@ -87,6 +89,7 @@ const defaults = {
   notify: (text) => sendProtectPing(text),
   now: () => Date.now(),
   runSweep: runProtectSweep,
+  runHandoff: runProtectWsHandoff,
   clientFromCreds(creds) {
     return createPolymarketUsClient({
       keyId: creds.keyId,
@@ -157,7 +160,44 @@ async function handler(req, res) {
   const body = parseBody(req);
   const op = String(body.op || '').trim().toLowerCase();
   const mode = String(body.mode || 'adverse-only').trim().toLowerCase();
-  if (op !== 'sweep' || mode !== 'adverse-only') {
+  if (mode !== 'adverse-only') {
+    json(res, 400, { ok: false, error: 'Adverse sweep only.' });
+    return;
+  }
+  if (op === 'ws-replace') {
+    const creds = deps.creds();
+    if (!creds.ok) {
+      json(res, 503, auth.missingKeysError(creds.missing));
+      return;
+    }
+    try {
+      const out = await deps.runHandoff({
+        client: deps.clientFromCreds(creds),
+        store: deps.protectStore(),
+        notify: deps.notify,
+        now: deps.now,
+        tracks: deps.trackStore(),
+        audits: typeof deps.auditStore === 'function' ? deps.auditStore() : defaultAudit(),
+        orderId: body.orderId,
+        trigger: body.trigger,
+        book: body.book,
+        tradeYes: body.tradeYes,
+        latencyMs: body.latencyMs,
+        canceled: body.canceled === true,
+      });
+      if (!out || out.ok === false) {
+        json(res, (out && out.status) || 503, { ok: false, error: (out && out.error) || 'Replace failed' });
+        return;
+      }
+      json(res, 200, { ok: true, fired: out.fired || 0, actions: out.actions || [], skipped: out.skipped || null });
+    } catch (err) {
+      const detail = sweepErrorDetail(err);
+      console.error('[desk-protect-sweep] ws-replace failed:', detail);
+      json(res, 502, { ok: false, error: 'Sweep failed', detail });
+    }
+    return;
+  }
+  if (op !== 'sweep') {
     json(res, 400, { ok: false, error: 'Adverse sweep only.' });
     return;
   }
