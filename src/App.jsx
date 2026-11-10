@@ -130,6 +130,7 @@ import { describePromoLock } from "./promoLockExplainer.js";
 import { findTopParlaysExact, linearEvForm } from "./promoExactScan.js";
 import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK, yieldToMain } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
+import { lockOppAmerican, calcBoostLockFromPrices } from "./blendAskLadder.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
 import OddsBoard from "./OddsBoard.jsx";
@@ -348,7 +349,7 @@ function GuaranteedBadge({ leg, stake, boostedProfit, lock, bookLabel, variant =
   const promoOdds = isNoSweat || isFreeBet || !(stake > 0)
     ? leg.dk
     : decimalToAmerican(1 + boostedProfit / stake);
-  const hedgeOdds = quotedOppAmerican(leg);
+  const hedgeOdds = lockOppAmerican(leg) ?? quotedOppAmerican(leg);
   const explainer = describePromoLock({
     variant,
     stake,
@@ -665,12 +666,7 @@ function calcNoSweatFromLegs(legs, stake, refundPct, conversionPct) {
 // NOTE: only valid for 1-leg boosts. With n legs there are n hedge stakes but 2^n outcomes,
 // which cannot all be equalized simultaneously — no true simultaneous lock exists.
 function calcBoostLock(bestOppAmerican, stake, boostedProfit) {
-  if (!bestOppAmerican || !stake || !boostedProfit) return { valid: false, hedgeStake: 0, lockedProfit: 0 };
-  const d_h = dkDecimal(bestOppAmerican);
-  if (d_h <= 1) return { valid: false, hedgeStake: 0, lockedProfit: 0 };
-  const hedgeStake = (boostedProfit + stake) / d_h;
-  const lockedProfit = boostedProfit - hedgeStake;
-  return { valid: lockedProfit > 0, hedgeStake, lockedProfit, d_h };
+  return calcBoostLockFromPrices(bestOppAmerican, stake, boostedProfit);
 }
 
 // Resolve the opposing odds used to derive a leg's true win probability.
@@ -1564,7 +1560,7 @@ function UnderdogStaleOddsChip({ leg, now, style }) {
 
 function attachBoostLockToPick(p, nextStake) {
   if (!p.legs || p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
-  const lock = calcBoostLock(quotedOppAmerican(p.legs[0]), nextStake, p.boostedProfit);
+  const lock = calcBoostLock(lockOppAmerican(p.legs[0]), nextStake, p.boostedProfit);
   return { ...p, lock, isGuaranteed: lock.valid };
 }
 
@@ -1594,7 +1590,7 @@ function attachNoSweatLockToPick(p, nextStake) {
     winProfit: p.winProfit,
     stake: nextStake,
     creditValue: p.creditValue,
-    hedgeDecimal: dkDecimal(quotedOppAmerican(p.legs[0])),
+    hedgeDecimal: dkDecimal(lockOppAmerican(p.legs[0])),
   });
   return { ...p, lock, isGuaranteed: lock.valid };
 }
@@ -4065,7 +4061,6 @@ export default function App() {
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs.length === 1;
                     const shownBoostPct = effectiveBoostPct(promoType, boostPct);
-                    const boostedOdds = decimalToAmerican(1 + p.boostedProfit / stake);
                     const promoId = encodePromoCardId({ promoType, book: promoBook, stake, legs: p.legs });
                     const isExpanded = expandedPromo === promoId;
 
@@ -4073,6 +4068,15 @@ export default function App() {
                       <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType={promoType} stake={stake} boostPct={shownBoostPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
+                    const displayLeg = (overlay.displayLegs && overlay.displayLegs[0]) || p.legs[0];
+                    // Lock and the book-odds line use the same prices as this card's EV.
+                    // The page depth walk can move the opposing fill off the thin top
+                    // after rank time; p.lock would still be that top.
+                    const cardLock = isSingle
+                      ? calcBoostLock(lockOppAmerican(displayLeg), stake, view.boostedProfit)
+                      : null;
+                    const bookOddsShown = view.parlayOdds ?? p.parlayOdds;
+                    const boostedOdds = decimalToAmerican(1 + (view.boostedProfit ?? p.boostedProfit) / stake);
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
@@ -4080,11 +4084,11 @@ export default function App() {
                       bookLabel: activePromoBookData.label,
                       ev: view.ev,
                       evPct: stake ? (view.ev / stake) * 100 : null,
-                      odds: formatOdds(promoType === "nopromo" ? p.parlayOdds : boostedOdds),
-                      parlayOdds: formatOdds(p.parlayOdds),
+                      odds: formatOdds(promoType === "nopromo" ? bookOddsShown : boostedOdds),
+                      parlayOdds: formatOdds(bookOddsShown),
                       stake,
                       boostPct: shownBoostPct,
-                      winProfit: p.boostedProfit,
+                      winProfit: view.boostedProfit ?? p.boostedProfit,
                       legs: p.legs,
                     });
                     return (
@@ -4107,7 +4111,7 @@ export default function App() {
                           </div>
                           <PromoParlayLegChips legs={overlay.displayLegs} isExpanded={isExpanded} onExclude={excludePromoLeg} />
                           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#8a8f98", fontFamily: "'JetBrains Mono', monospace", flexWrap: "wrap" }}>
-                            <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(p.parlayOdds)}</strong></span>
+                            <span>{activePromoBookData.label} {isSingle ? "Odds" : "Parlay"}: <strong style={{ color: "#e8eaed" }}>{formatOdds(bookOddsShown)}</strong></span>
                             {promoType === "boost" && <span>With Boost: <strong style={{ color: "#10b981" }}>{formatOdds(boostedOdds)}</strong></span>}
                             <span><InfoTip k="trueOdds">True Odds</InfoTip>: <strong style={{ color: "#f59e0b" }}>{formatOdds(trueParlayOdds)}</strong></span>
                             <span><InfoTip k="ev">EV</InfoTip>: <strong style={{ color: view.ev > 0 ? "#10b981" : "#ef4444" }}>{formatSignedEvPct(stake ? view.ev / stake * 100 : 0)}</strong></span>
@@ -4121,13 +4125,13 @@ export default function App() {
                             )}
                           </div>
 
-                          {p.isGuaranteed && (
+                          {cardLock?.valid && (
                             <div onClick={e => e.stopPropagation()}>
                               <GuaranteedBadge
-                                leg={p.legs[0]}
+                                leg={displayLeg}
                                 stake={stake}
-                                boostedProfit={p.boostedProfit}
-                                lock={p.lock}
+                                boostedProfit={view.boostedProfit}
+                                lock={cardLock}
                                 bookLabel={activePromoBookData.label}
                               />
                             </div>
@@ -4223,6 +4227,16 @@ export default function App() {
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
+                    const nsLeg = (overlay.displayLegs && overlay.displayLegs[0]) || p.legs[0];
+                    const nsLock = (p.legs || []).length === 1
+                      ? calcNoSweatLock({
+                          winProfit: view.winProfit ?? p.winProfit,
+                          stake,
+                          creditValue: view.creditValue ?? p.creditValue,
+                          hedgeDecimal: dkDecimal(lockOppAmerican(nsLeg)),
+                        })
+                      : null;
+                    const nsGuaranteed = !!(nsLock && nsLock.valid);
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? "BEST PICK" : "PICK",
@@ -4257,8 +4271,8 @@ export default function App() {
                             </div>
                             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
                               <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 22, fontWeight: 700, color: evColor }}>{formatSignedEvMoney(view.ev)} EV</div>
-                              {p.isGuaranteed && (
-                                <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>${p.lock.lockedProfit.toFixed(2)} guaranteed</div>
+                              {nsGuaranteed && (
+                                <div style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>${nsLock.lockedProfit.toFixed(2)} guaranteed</div>
                               )}
                             </div>
                           </div>
@@ -4274,28 +4288,28 @@ export default function App() {
                           <div style={{ marginTop: 12 }} onClick={e => e.stopPropagation()}>
                             <ShareCardActions tab="promo" cardId={promoId} model={promoShareModel} showImage={i === 0 || view.ev > 0} locked={guestLocked && guestActionNeedsSignIn("copy-link")} onLocked={() => askSignIn("Sign in to copy a link or share an image.")} />
                           </div>
-                          {p.isGuaranteed && (
+                          {nsGuaranteed && (
                             <div onClick={e => e.stopPropagation()}>
                               <GuaranteedBadge
                                 variant="nosweat"
-                                leg={p.legs[0]}
+                                leg={nsLeg}
                                 stake={stake}
-                                boostedProfit={p.winProfit}
-                                lock={p.lock}
+                                boostedProfit={view.winProfit ?? p.winProfit}
+                                lock={nsLock}
                                 bookLabel={activePromoBookData.label}
-                                creditValue={p.creditValue}
+                                creditValue={view.creditValue ?? p.creditValue}
                                 conversionPct={creditConversionPct}
                                 refund={p.refund}
                                 open={isExpanded}
                                 onToggle={(next) => setExpandedPromo(next ? promoId : null)}
-                                hedgeExtra={<PromoTrueOddsSubline leg={overlay.displayLegs[0] || p.legs[0]} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} />}
+                                hedgeExtra={<PromoTrueOddsSubline leg={nsLeg} live levels={overlay.ladders[depthCacheKey(p.legs[0])]} blendCtx={overlay.ctx} />}
                               />
                             </div>
                           )}
                         </div>
 
                         {/* Locked single: the Guaranteed Profit dropdown above IS the expanded view. */}
-                        {isExpanded && !p.isGuaranteed && (
+                        {isExpanded && !nsGuaranteed && (
                           <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "20px 24px", background: "rgba(0,0,0,0.2)" }}
                             onClick={e => e.stopPropagation()}>
                             {(
@@ -4371,11 +4385,8 @@ export default function App() {
                   <GuestPickGate locked={guestLocked} hasMore={promoDepthRank.rest.length > 0} onLocked={() => askSignIn("Sign in free to see all picks.", "picks_blur")}>
                   {promoDepthRank.visible.map((p, i) => {
                     const isSingle = p.legs?.length === 1;
-                    const showLock = isSingle && !!p.lock?.valid;
                     const fbAmount = stake;
                     const leg = p.legs?.[0];
-                    const lock = showLock ? p.lock : null;
-                    const adjustmentNote = showLock ? getAdjustmentNote(leg?.bestOppBook) : null;
                     const promoId = encodePromoCardId({ promoType: "freebet", book: promoBook, stake, legs: p.legs });
                     const isExpanded = expandedFreeBet === promoId;
 
@@ -4385,6 +4396,11 @@ export default function App() {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
                     const hedgeLeg = overlay.displayLegs?.[0] || leg;
+                    const lock = isSingle && hedgeLeg
+                      ? attachFreeBetLock({ legs: [hedgeLeg] }, fbAmount).lock
+                      : null;
+                    const showLock = !!(lock && lock.valid);
+                    const adjustmentNote = showLock ? getAdjustmentNote(hedgeLeg?.bestOppBook) : null;
                     const promoShareModel = buildShareCardModel({
                       kind: "promo",
                       badge: i === 0 ? (showLock ? "BEST CONVERSION" : "BEST PICK") : "PICK",
@@ -4401,9 +4417,9 @@ export default function App() {
                       hedge: showLock && lock ? {
                         stake: lock.hedgeStake,
                         bookLabel: getBookLabel(leg?.bestOppBook),
-                        odds: quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp,
+                        odds: lockOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp,
                         selection: leg?.bestOppName,
-                        payout: lock.hedgeStake * (lock.d_h || dkDecimal(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)),
+                        payout: lock.hedgeStake * (lock.d_h || dkDecimal(lockOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)),
                       } : null,
                       legs: p.legs,
                     });
@@ -4457,7 +4473,7 @@ export default function App() {
                                   <PromoLegGameLine leg={leg} />
                                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                                     <span style={{ fontSize: 11, color: "#6b7280" }}>{getBookLabel(leg?.bestOppBook)}</span>
-                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: (quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp) > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(quotedOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)}</span>
+                                    <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 700, color: (lockOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp) > 0 ? "#10b981" : "#e8eaed" }}>{formatOdds(lockOppAmerican(hedgeLeg) ?? hedgeLeg?.bestOpp)}</span>
                                   </div>
                                   <PromoLegStartTime commence_time={leg?.commence_time} />
                                   <div style={{ fontSize: 11, color: "#4b5563", marginTop: 2 }}>${(lock?.hedgeStake ?? 0).toFixed(2)} hedge stake</div>

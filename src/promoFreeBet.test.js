@@ -190,7 +190,7 @@ function mkLeg(name, game, dk, bestOpp, extra = {}) {
   assert.doesNotMatch(app, /topFreeBetsWithLock\.length === 0 && !promoScanBusy/);
   // 1-leg lock UI still present; multi-leg copy forbids a fake 2-way lock.
   // Only read lock money fields when lock?.valid — {valid:false} must not throw.
-  assert.match(app, /showLock = isSingle && !!p\.lock\?\.valid/);
+  assert.match(app, /showLock = !!\(lock && lock\.valid\)/);
   assert.match(app, /guaranteed cash · \{\(\(lock\?\.conversionRate \?\? 0\) \* 100\)\.toFixed\(1\)\}%/);
   assert.doesNotMatch(app, /Multi-leg free bets cannot be locked on both sides at once/);
   assert.match(app, /Send 2\+ game legs to Combo Locks to hedge the joint hit vs miss/);

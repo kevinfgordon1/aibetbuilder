@@ -1,3 +1,5 @@
+import { lockOppAmerican } from "./blendAskLadder.js";
+
 // Free-bet promo EV. A free bet does not risk cash: loss = $0.
 // Win profit = (D − 1) × FB  (the stake is not returned).
 // EV = p × winProfit.
@@ -60,14 +62,8 @@ export function attachFreeBetLock(parlay, freeBetAmount) {
   if (!parlay?.legs || parlay.legs.length !== 1) {
     return { ...parlay, lock: null, isGuaranteed: false };
   }
-  // Hedge at the walked (blended within one venue / min-depth) price when it
-  // is worse than the quoted top: that is the price the hedge really fills at.
-  const leg0 = parlay.legs[0];
-  const q = Number(leg0.bestOppQuoted);
-  const b = Number(leg0.bestOpp);
-  const hedgeAmerican = Number.isFinite(q) && q !== 0
-    ? (Number.isFinite(b) && b !== 0 && b < q ? b : q)
-    : leg0.bestOpp;
+  // Hedge at the walked price when it is worse than the quoted top.
+  const hedgeAmerican = lockOppAmerican(parlay.legs[0]);
   const lock = calcFreeBetConversion(parlay.legs[0].dk, hedgeAmerican, freeBetAmount);
   if (!lock?.valid) {
     return { ...parlay, lock: null, isGuaranteed: false };

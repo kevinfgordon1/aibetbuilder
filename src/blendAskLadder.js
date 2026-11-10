@@ -317,6 +317,37 @@ export function trueOppAmerican(leg) {
   return Number.isFinite(n) && n !== 0 ? n : null;
 }
 
+// Hedge price for Guaranteed Profit. The number on the card is the walked
+// blend (Best opp / True Odds), not the thin top. A top of +296 with a few
+// dollars of size must not lock a $100 bet when the shown fill is +282.
+// Lower American is a worse price for the hedge, so the walk wins when it
+// is below the quote. Same rule as the free-bet lock.
+export function lockOppAmerican(leg) {
+  if (!leg) return null;
+  const quoted = Number(leg.bestOppQuoted);
+  const walked = trueOppAmerican(leg);
+  const hasQuoted = Number.isFinite(quoted) && quoted !== 0;
+  if (hasQuoted && walked != null && walked < quoted) return walked;
+  if (hasQuoted) return quoted;
+  return walked;
+}
+
+// Boost / No Promo lock from the prices the card shows.
+// H = (win + stake) / hedgeDecimal, locked = win − H.
+// valid only when that cash is positive. A −289 book vs +282 opp locks
+// about −$0.63 and must not say Guaranteed Profit.
+export function calcBoostLockFromPrices(oppAmerican, stake, boostedProfit) {
+  const S = Number(stake);
+  const profit = Number(boostedProfit);
+  const d_h = americanToDecimal(oppAmerican);
+  if (!(S > 0) || !(profit > 0) || d_h == null || d_h <= 1) {
+    return { valid: false, hedgeStake: 0, lockedProfit: 0, d_h: d_h || 0 };
+  }
+  const hedgeStake = (profit + S) / d_h;
+  const lockedProfit = profit - hedgeStake;
+  return { valid: lockedProfit > 0, hedgeStake, lockedProfit, d_h };
+}
+
 // One venue's opposing ladder for this selection. The best venue uses the
 // live ladder → stored ladder → top-of-book size (resolvePmBookLevels).
 // Other venues use their live ladder from ctx.laddersByKey when the page
