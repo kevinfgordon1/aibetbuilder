@@ -222,10 +222,16 @@ function parlayLegKey(p) {
   return p.legs.map((l) => `${l.game}\0${l.name}`).sort().join("\n");
 }
 
-function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds) {
+async function growFromSeeds(legs, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds, yieldFn, signal) {
   const seen = new Set();
   const grown = [];
   for (const seed of seeds) {
+    // 4–12 legs grow from every 3-leg seed. One seed walks the pool once per
+    // added slot (up to ~200 × 9). Yield between seeds so that is not one long task.
+    if (yieldFn) {
+      throwIfAborted(signal);
+      await yieldFn();
+    }
     let current = seed;
     let failed = false;
     for (let n = current.legs.length; n < numLegs; n++) {
@@ -292,7 +298,7 @@ export async function findTopParlaysChunked(
       acceptCombo,
     });
     throwIfAborted(signal);
-    const grown = growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds);
+    const grown = await growFromSeeds(list, numLegs, seeds, calc, maxResults, minFinalOdds, maxFinalOdds, yieldFn, signal);
     throwIfAborted(signal);
     return typeof acceptCombo === "function" ? grown.filter((p) => acceptCombo(p.legs)) : grown;
   }
@@ -420,7 +426,7 @@ export async function findBestAcrossLegCounts(legs, calc, {
 
   for (let n = 4; n <= cap; n++) {
     throwIfAborted(signal);
-    const grown = growFromSeeds(legs, n, seeds, calc, 1, minFinalOdds, maxFinalOdds);
+    const grown = await growFromSeeds(legs, n, seeds, calc, 1, minFinalOdds, maxFinalOdds, yieldFn, signal);
     const filtered = typeof acceptCombo === "function"
       ? grown.filter((p) => acceptCombo(p.legs))
       : grown;
