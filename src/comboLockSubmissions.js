@@ -208,16 +208,6 @@ export async function settleInBatches(tasks, concurrency = SUBMISSION_FETCH_CONC
   return results;
 }
 
-// Real "Not filled" total for a lock whose quote read hit LOCK_QUOTE_LIMIT.
-// head + count=exact (indexed on parlay_id, RLS applies): no rows come back.
-export function lockUnfilledCountQuery(client, { userId, parlayId }) {
-  return client.from("combo_submissions")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId).eq("parlay_id", parlayId)
-    .neq("status", "shadow").neq("status", "filled")
-    .or(LOCK_QUOTE_OR);
-}
-
 // Locks whose quote read came back full (more rows exist than were loaded).
 export function cappedLockIds(rows, limit = LOCK_QUOTE_LIMIT) {
   const n = new Map();
@@ -240,8 +230,9 @@ export function notFilledTotal({ shown, loadedUnfilledQuotes, countedUnfilledQuo
 // Yellow pill on each Combo Locks card ("25 quotes · 3 fills"), same chip as Miss tape.
 // Reuses rows the page already loaded (no extra query). quotes = quotes we posted for
 // the lock (filled + not filled); fills = fills that went through (Matched RFQs count).
-// Locks over the 400-row window use the head count of not-filled quotes already fetched.
-// Zero quotes → "" (no pill).
+// Locks over the 400-row window show a "+" on the loaded count. An exact count of
+// the rest walked every quote row for that lock (~270ms, multi-second when the
+// desk fired many at once). Zero quotes → "" (no pill).
 export function lockQuoteFillCounts(rows, { fills = 0, countedUnfilledQuotes } = {}) {
   let quoted = 0;
   let unfilledLoaded = 0;
@@ -263,5 +254,6 @@ export function lockQuoteFillLine(rows, opts = {}) {
   const { quoted, fills: f } = lockQuoteFillCounts(rows, opts);
   if (!quoted) return "";
   const n = (x) => x.toLocaleString("en-US");
-  return `${n(quoted)} quote${quoted === 1 ? "" : "s"} · ${n(f)} fill${f === 1 ? "" : "s"}`;
+  const plus = opts.capped ? "+" : "";
+  return `${n(quoted)}${plus} quote${quoted === 1 ? "" : "s"} · ${n(f)} fill${f === 1 ? "" : "s"}`;
 }

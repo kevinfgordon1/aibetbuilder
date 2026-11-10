@@ -39,7 +39,7 @@ import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked, matchedRfqCounts } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, lockQuoteFillCounts, livingLocksDue, settleInBatches, DESK_POLL_MS } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, mergeSubmissionRows, cappedLockIds, lockQuoteFillLine, lockQuoteFillCounts, livingLocksDue, settleInBatches, DESK_POLL_MS } from "./comboLockSubmissions";
 import { outcomeChrome } from "./comboLegResult";
 import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
@@ -669,7 +669,6 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
   const submissionsRef = useRef([]);
-  const [unfilledCounts, setUnfilledCounts] = useState({}); // parlay_id -> real not-filled quote count (only for capped locks)
   const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
   const [originalBets, setOriginalBets] = useState([]);
   const [mergePrompt, setMergePrompt] = useState(null);
@@ -1021,17 +1020,6 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       // Cached per-lock rows for archived locks not re-read this poll (or whose read failed).
       const archCachedRows = archivedSubsRef.current.rows || [];
       const livingSubRows = mergeSubmissionRows(freshSubRows, archCachedRows);
-      // Real Not filled totals for locks over the 400-row display window (head counts, no rows).
-      const capped = cappedLockIds(livingSubRows);
-      if (capped.length) {
-        Promise.allSettled(capped.map((id) => lockUnfilledCountQuery(supabase, { userId: user.id, parlayId: id })))
-          .then((res) => {
-            const next = {};
-            res.forEach((r, i) => { if (r.status === "fulfilled" && r.value && !r.value.error && r.value.count != null) next[capped[i]] = r.value.count; });
-            setUnfilledCounts((prev) => ({ ...prev, ...next }));
-          })
-          .catch(() => {});
-      }
       if (livingSubsOk || livingSubRows.length || failedIds.size) {
         // Keep rows for locks this poll did not re-read (quoting cadence / idle
         // game-started locks) and for locks whose read failed.
@@ -1261,6 +1249,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     });
     return m;
   }, [submissions]);
+  // Quote window full (400). Shown as "N+" — no count(*) of the rows past the window.
+  const cappedQuoteIds = useMemo(() => new Set(cappedLockIds(submissions)), [submissions]);
   const deskByParlay = useMemo(() => {
     const out = {};
     (parlays || []).forEach((p) => {
@@ -1637,11 +1627,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     return `Matched ${n} request${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} would lock profit)` : ""}`;
   };
   // The request watcher can be parked; fills still come from combo_fills.
-  const withNotFilledTotal = (h, id) => {
-    if (!h || unfilledCounts[id] == null) return h;
-    const loaded = (submissionsByParlay[id] || []).filter((r) => isLockQuoteRow(r) && String(r.status || "").toLowerCase() !== "filled").length;
-    const total = notFilledTotal({ shown: h.notFilled.length, loadedUnfilledQuotes: loaded, countedUnfilledQuotes: unfilledCounts[id] });
-    return total > h.notFilled.length ? { ...h, notFilledTotal: total } : h;
+  const quoteHistoryFor = (parlay) => {
+    const h = quoteHistory(attemptsByParlay[parlay.id], { parlay });
+    if (!h || !cappedQuoteIds.has(parlay.id)) return h;
+    return { ...h, capped: true };
   };
   const watcherNote = (id) => (matchedRfqWatcherParked(matchesByParlay[id] || [], attemptsByParlay[id])
     ? "The request watcher is paused. Fills below still come straight from your account."
@@ -1655,7 +1644,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const status = lockStatus({ parlay: p, filled: filledN, ceiling, kill: deskReady && !deskLoading ? kill : false });
     const out = outcomeChrome(lockOutcome(p, filledN), { filled: filledN > 0 });
     const matched = matchedCountText(p);
-    const qfOpts = { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, countedUnfilledQuotes: unfilledCounts[p.id] };
+    const qfOpts = { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, capped: cappedQuoteIds.has(p.id) };
     const quoteLine = lockQuoteFillLine(submissionsByParlay[p.id], qfOpts);
     const quoteCounts = lockQuoteFillCounts(submissionsByParlay[p.id], qfOpts);
     const showCheck = lockCheckOnCard({ parlay: p, user, filledSection, left: desk && desk.fill ? desk.fill.left : 0 });
@@ -1695,7 +1684,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         )}
         {singleLegOf(p) ? <DetailBlock title="Resting hedge"><SingleLegVenues parlayId={p.id} supabase={supabase} /></DetailBlock> : null}
         {out && out.kind !== "pending" && <div className="chips" style={{ marginBottom: 8 }}><OutcomeChip out={lockOutcome(p, filledN)} filled={filledN > 0} /></div>}
-        <QuoteHistory history={withNotFilledTotal(quoteHistory(attemptsByParlay[p.id], { parlay: p }), p.id)} note={canSeeOwnerTools(user) ? watcherNote(p.id) : ""} />
+        <QuoteHistory history={quoteHistoryFor(p)} note={canSeeOwnerTools(user) ? watcherNote(p.id) : ""} />
         <MergedOrder parlay={p} bets={betsByParlay[p.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
         <div className="actions">
           <CopyLockLink lockId={p.id} />
@@ -2053,7 +2042,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
                   <DetailBlock title="The legs"><LegList legs={a.legs} /></DetailBlock>
                   <MergedOrder parlay={a} bets={betsByParlay[a.id]} fills={comboFills} onUndo={undoMerge} busy={mergeBusy} />
                   <DetailBlock title="Quote history">
-                    <QuoteHistory history={quoteHistory(attemptsByParlay[a.id], { parlay: a })} />
+                    <QuoteHistory history={quoteHistoryFor(a)} />
                   </DetailBlock>
                 </div>
               );

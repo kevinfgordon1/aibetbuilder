@@ -52,7 +52,7 @@ assert.match(locksView, /aria-label="History filters"/);
 assert.match(locksView, /Date \(ET\)/);
 assert.match(locksView, /Net profit \/ loss/);
 assert.match(locksView, /id=\{"lock-" \+ line\.id\}/);
-assert.match(locks, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
+assert.match(locks, /<QuoteHistory history=\{quoteHistoryFor\(a\)\}/);
 assert.match(locksView, /<th>Fair odds<\/th>/);
 assert.match(locksView, /<td colSpan=\{8\}>/);
 assert.match(locksView, /<LockCard|export function LockCard/);
