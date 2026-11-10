@@ -28,6 +28,6 @@ assert.doesNotMatch(app, /LockMathRow/);
 assert.match(app, /onToggle=\{\(next\) => setExpandedFreeBet\(next \? promoId : null\)\}/);
 assert.match(app, /onToggle=\{\(next\) => setExpandedPromo\(next \? promoId : null\)\}/);
 assert.match(app, /isExpanded && !showLock && \(/);
-assert.match(app, /isExpanded && !p\.isGuaranteed && \(/);
+assert.match(app, /isExpanded && !nsGuaranteed && \(/);
 
 console.log("promoLockCard.test.js ok");
