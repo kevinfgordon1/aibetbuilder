@@ -7,7 +7,8 @@ import {
   betSummary, countText, etDateTime, fmtAmerican, historyRow, historyTotals,
   lockMetaLine, lockTitle, plainLeg, cardOutcomeTiles, QUOTE_ROWS_SHOWN, signedDollars,
 } from "./comboLockView";
-import { STATEMENT_DATE_FILTERS } from "./comboStatement";
+import { STATEMENT_DATE_FILTERS, STATEMENT_DEFAULT_DATE_RANGE } from "./comboStatement";
+import { cumulativeRealizedProfit, profitChartLayout, profitImageCanCopy, profitImageModel } from "./comboProfit.js";
 import { shouldToggleFromCard } from "./comboCardToggle.js";
 import { formatAmerican, formatDollars, sortOriginalBets } from "./comboMerge";
 import { allInFromExchange } from "./comboCredits";
@@ -255,6 +256,17 @@ export const COMBO_VIEW_CSS = `
   .cl .leglist li.leg1{display:block;padding:2px 0;font-size:12.5px;line-height:1.35;border:0;background:none}
   .cl .leglist li.leg1 .lp{font-weight:600;color:#e8eaed}
   .cl .leglist li.leg1 .lg{color:#8a8f98;display:inline;margin:0}
+  .cl .pnl-chart{margin:0 0 14px;padding:14px 16px 10px;border:1px solid rgba(212,175,55,.28);border-radius:12px;background:linear-gradient(180deg,rgba(212,175,55,.08),rgba(0,0,0,.35) 48%)}
+  .cl .pnl-chart .pc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .cl .pnl-chart .pc-k{font-size:12px;font-weight:700;color:#c3b48a;text-transform:uppercase;letter-spacing:.45px}
+  .cl .pnl-chart .pc-v{font-size:26px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums;color:#f3f4f6}
+  .cl .pnl-chart .pc-s{font-size:12px;color:#8a8f98;margin-top:2px}
+  .cl .pnl-chart .pc-ranges{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .cl .pnl-chart .pc-share{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .cl .pnl-chart .pc-share button:disabled{opacity:.55;cursor:wait}
+  .cl .pnl-chart .pc-status{font-size:12px;font-weight:700;color:#6ee7b7}
+  .cl .pnl-chart .pc-empty{color:#8a8f98;font-size:14px;padding:14px 0 6px}
+  .cl .pnl-chart svg{display:block;width:100%;height:auto;margin-top:6px}
 `;
 
 export function StatusPill({ status }) {
@@ -513,6 +525,130 @@ const KIND_CHIPS = [
   { key: "unfilled", label: "Not hedged" },
   { key: "open", label: "Open" },
 ];
+
+function loadProfitImage() {
+  return import("./comboProfitImage.js");
+}
+
+function ProfitSvg({ points, total }) {
+  const layout = profitChartLayout(points);
+  if (!layout) return null;
+  const d = layout.line.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const last = layout.line[layout.line.length - 1];
+  const area = `${d} L${last.x.toFixed(1)},${layout.zeroY.toFixed(1)} Z`;
+  const aria = `Running profit ${signedDollars(total)}` + (layout.firstDate && layout.lastDate ? `, ${layout.firstDate} to ${layout.lastDate}` : "");
+  return (
+    <svg viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={aria}>
+      <title>{aria}</title>
+      <line x1={layout.padL} x2={layout.width - layout.padR} y1={layout.zeroY} y2={layout.zeroY} stroke="rgba(255,255,255,0.16)" />
+      <path d={area} fill="rgba(212,175,55,0.16)" />
+      <path d={d} fill="none" stroke="#f5d76e" strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={layout.end.x} cy={layout.end.y} r="3.5" fill="#f5d76e" />
+      {layout.labels.map((lb, i) => (
+        <text key={i} x={lb.x} y={lb.y} textAnchor={lb.anchor} dominantBaseline="middle" fill="#8a8f98" fontSize="11">{lb.text}</text>
+      ))}
+      {layout.firstDate ? <text x={layout.padL} y={layout.height - 8} fill="#6b7280" fontSize="11">{layout.firstDate}</text> : null}
+      {layout.lastDate && layout.lastDate !== layout.firstDate ? <text x={layout.width - layout.padR} y={layout.height - 8} textAnchor="end" fill="#6b7280" fontSize="11">{layout.lastDate}</text> : null}
+    </svg>
+  );
+}
+
+/** Cumulative realized profit for the signed-in user's settled locks. `lines` are History statement lines. */
+export function ComboProfitChart({ lines }) {
+  const [dateRange, setDateRange] = React.useState(STATEMENT_DEFAULT_DATE_RANGE);
+  const [busy, setBusy] = React.useState(false);
+  const [status, setStatus] = React.useState("");
+  const [canCopy] = React.useState(() => profitImageCanCopy(
+    typeof navigator !== "undefined" ? navigator : null,
+    typeof ClipboardItem === "function" ? ClipboardItem : null,
+  ));
+  const curve = React.useMemo(
+    () => cumulativeRealizedProfit(lines, { dateRange }),
+    [lines, dateRange],
+  );
+  const tone = curve.total > 0 ? " pos" : curve.total < 0 ? " neg" : "";
+  const emptyText = curve.range === "all"
+    ? "No settled locks yet. Profit shows here once a lock in History has a result."
+    : "No settled locks in this range.";
+  const imageModel = React.useMemo(() => profitImageModel({
+    total: curve.total,
+    count: curve.count,
+    range: curve.range,
+    points: curve.points,
+    emptyText,
+  }), [curve, emptyText]);
+
+  const flash = (msg) => {
+    setStatus(msg);
+    if (!msg) return;
+    window.setTimeout(() => setStatus((cur) => (cur === msg ? "" : cur)), 1800);
+  };
+
+  const onShare = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { shareProfitImage } = await loadProfitImage();
+      const result = await shareProfitImage(imageModel);
+      if (result === "shared") flash("Shared");
+      else if (result === "downloaded") flash("Saved PNG");
+      else if (result === "canceled") flash("");
+      else flash("Couldn't share");
+    } catch (err) {
+      if (err && err.name === "AbortError") flash("");
+      else flash("Couldn't share");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCopy = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (busy) return;
+    const nav = typeof navigator !== "undefined" ? navigator : null;
+    const Clip = typeof ClipboardItem === "function" ? ClipboardItem : null;
+    if (!profitImageCanCopy(nav, Clip)) {
+      flash("Couldn't copy");
+      return;
+    }
+    // ClipboardItem has to be created in the click, with the PNG promise inside,
+    // or the browser drops the copy after the image module loads.
+    setBusy(true);
+    const blobPromise = loadProfitImage().then((mod) => mod.renderProfitImageBlob(imageModel));
+    nav.clipboard.write([new Clip({ "image/png": blobPromise })]).then(() => {
+      flash("Copied");
+    }).catch((err) => {
+      if (err && err.name === "AbortError") flash("");
+      else flash("Couldn't copy");
+    }).finally(() => setBusy(false));
+  };
+
+  return (
+    <section className="pnl-chart" data-testid="combo-profit-chart" aria-label="Running profit">
+      <div className="pc-top">
+        <div>
+          <div className="pc-k">Running profit</div>
+          <div className={"pc-v num" + (curve.count ? tone : "")}>{curve.count ? signedDollars(curve.total) : "—"}</div>
+          <div className="pc-s">{curve.count ? `${curve.count} settled lock${curve.count === 1 ? "" : "s"}` : "Settled locks only"}</div>
+        </div>
+        <div className="pc-ranges" role="group" aria-label="Running profit date range">
+          {STATEMENT_DATE_FILTERS.map((c) => (
+            <button key={c.key} type="button" className={"fchip" + (dateRange === c.key ? " on" : "")} aria-pressed={dateRange === c.key} onClick={() => { setDateRange(c.key); setStatus(""); }}>{c.label}</button>
+          ))}
+        </div>
+      </div>
+      {curve.count ? <ProfitSvg points={curve.points} total={curve.total} /> : <div className="pc-empty">{emptyText}</div>}
+      <div className="pc-share">
+        <button type="button" className="btn mini" onClick={onShare} disabled={busy}>Share image</button>
+        {canCopy ? <button type="button" className="btn mini" onClick={onCopy} disabled={busy}>Copy image</button> : null}
+        {status ? <span className="pc-status" role="status">{status}</span> : null}
+      </div>
+    </section>
+  );
+}
 
 /** History: totals on top, simple filters, then one clean row per lock. */
 export const HISTORY_ROWS_STEP = 100;
