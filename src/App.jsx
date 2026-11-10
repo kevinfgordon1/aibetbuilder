@@ -128,7 +128,7 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { findTopParlaysExact, linearEvForm } from "./promoExactScan.js";
-import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK } from "./promoParlayScan.js";
+import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK, yieldToMain } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
@@ -742,10 +742,28 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   const quoteNow = opts && opts.now != null ? Number(opts.now) : Date.now();
   const legs = [];
   const now = new Date();
-  const mlRows = upcomingInRange(data && data.moneylines, now, dateRange, sportFilter);
-  const rlRows = upcomingInRange(data && data.run_lines, now, dateRange, sportFilter);
-  const totRows = upcomingInRange(data && data.totals, now, dateRange, sportFilter);
-  const ttRows = upcomingInRange(data && data.team_totals, now, dateRange, sportFilter);
+  // rowWindow slices one market so the caller can yield between slices.
+  // marketSeen keeps spread/total dedupe across those slices. Omit both and
+  // this is the full one-shot build.
+  const rowWindow = opts && opts.rowWindow;
+  const windowRows = (key, rows) => {
+    const list = rows || [];
+    if (!rowWindow) return list;
+    if (rowWindow.key !== key) return [];
+    const start = rowWindow.start || 0;
+    const end = rowWindow.end == null ? list.length : rowWindow.end;
+    return list.slice(start, end);
+  };
+  const marketSeen = (opts && opts.marketSeen) || null;
+  const seenFor = (key) => {
+    if (!marketSeen) return new Set();
+    if (!marketSeen[key]) marketSeen[key] = new Set();
+    return marketSeen[key];
+  };
+  const mlRows = upcomingInRange(windowRows("moneylines", data && data.moneylines), now, dateRange, sportFilter);
+  const rlRows = upcomingInRange(windowRows("run_lines", data && data.run_lines), now, dateRange, sportFilter);
+  const totRows = upcomingInRange(windowRows("totals", data && data.totals), now, dateRange, sportFilter);
+  const ttRows = upcomingInRange(windowRows("team_totals", data && data.team_totals), now, dateRange, sportFilter);
 
   if (mlRows.length) {
     mlRows.forEach(g => {
@@ -767,7 +785,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   if (rlRows.length) {
-    const seen = new Set();
+    const seen = seenFor("run_lines");
     rlRows.forEach(g => {
       if (g.book !== book) return;
       const awayOdds = g.away_odds;
@@ -783,7 +801,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   if (totRows.length) {
-    const seen = new Set();
+    const seen = seenFor("totals");
     totRows.forEach(g => {
       if (g.book !== book) return;
       const overOdds = g.over_odds;
@@ -799,7 +817,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   if (ttRows.length) {
-    const seen = new Set();
+    const seen = seenFor("team_totals");
     ttRows.forEach(g => {
       if (g.book !== book) return;
       const overOdds = g.over_odds;
@@ -814,8 +832,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
-  if (data.playerTds && data.playerTds.length) {
-    for (const leg of playerTdLegsForBook(data.playerTds, book, {
+  const tdRows = windowRows("playerTds", data && data.playerTds);
+  if (tdRows.length) {
+    for (const leg of playerTdLegsForBook(tdRows, book, {
       sportFilter,
       minLegOdds,
       maxLegOdds,
@@ -829,7 +848,14 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     })) legs.push(leg);
   }
 
-  const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
+  const stampData = rowWindow ? {
+    moneylines: windowRows("moneylines", data && data.moneylines),
+    run_lines: windowRows("run_lines", data && data.run_lines),
+    totals: windowRows("totals", data && data.totals),
+    team_totals: windowRows("team_totals", data && data.team_totals),
+    playerTds: windowRows("playerTds", data && data.playerTds),
+  } : data;
+  const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), stampData), true);
   return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow, l.playerTd ? UNDERDOG_BOARD_OMIT_MS : UNDERDOG_STALE_MS));
 }
 
@@ -2588,42 +2614,80 @@ export default function App() {
   useEffect(() => {
     if (promoLegsReq.soccerWait) return undefined;
     let cancel = false;
-    let cancelTimer = null;
     const raf = requestAnimationFrame(() => {
-      cancelTimer = setTimeout(() => {
-        if (cancel) return;
-        const legs = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, {
-          underdogCash: true,
-          matchingBooks: promoMatchingPartial ? scanMatchingBookKeys : null,
-        });
+      (async () => {
+        const keys = ["moneylines", "run_lines", "totals", "team_totals", "playerTds"];
+        const marketSeen = {};
+        const legs = [];
+        const matchingBooks = promoMatchingPartial ? scanMatchingBookKeys : null;
+        const CHUNK = 20;
+        for (const key of keys) {
+          const rows = (promoOddsForPromo && promoOddsForPromo[key]) || [];
+          for (let start = 0; start < rows.length; start += CHUNK) {
+            if (cancel) return;
+            const part = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, {
+              underdogCash: true,
+              matchingBooks,
+              rowWindow: { key, start, end: Math.min(rows.length, start + CHUNK) },
+              marketSeen,
+            });
+            for (let i = 0; i < part.length; i++) legs.push(part[i]);
+            await yieldToMain();
+          }
+        }
         if (!cancel) setPromoLegsBuilt({ req: promoLegsReq, legs });
-      }, 0);
+      })();
     });
     return () => {
       cancel = true;
       cancelAnimationFrame(raf);
-      if (cancelTimer) clearTimeout(cancelTimer);
     };
-    // promoLegsReq identity covers every build input. The call below stays
-    // in this effect so the walk is not on the chip's render.
+    // promoLegsReq identity covers every build input. The walk is chunked
+    // after paint so a book or sport click is not one long task.
   }, [promoLegsReq, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, promoMatchingPartial, scanMatchingBookKeys]);
-  const promoLegsReady = promoLegsBuilt.req === promoLegsReq;
-  const promoLegBuild = useMemo(() => {
+  const promoLegsFiltered = useMemo(() => {
     if (promoLegsBuilt.req == null) return { legs: [], stages: null };
     const promoLegsAll = promoLegsBuilt.legs;
     const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
     const promoLegsLiquidRaw = filterLegsByMinDepth(filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs }), minLegDepth);
-    const promoLegsLiquid = repriceLegsForMinDepth(preBlendStoredLadderLegs(promoLegsLiquidRaw, { promoType, numLegs: scanNumLegs }), minLegDepth);
     const stages = promoLegStageCounts({ scoped: promoLegsScoped, afterHidden: promoLegsNamed, afterLiquidity: promoLegsLiquidRaw });
-    // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
-    // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
-    if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
-      return { legs: filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens), stages };
-    }
-    return { legs: promoLegsLiquid, stages };
-  }, [promoLegsBuilt, scanMarketScope, excludedPromoLegs, dropThinPoolLegs, promoType, scanNumLegs, includeTeamTokens, excludeTeamTokens, minLegDepth]);
+    return { legs: promoLegsLiquidRaw, stages };
+  }, [promoLegsBuilt, scanMarketScope, excludedPromoLegs, excludeTeamTokens, dropThinPoolLegs, promoType, scanNumLegs, minLegDepth]);
+  const [promoLegsPriced, setPromoLegsPriced] = useState({ src: null, legs: [], stages: null });
+  useEffect(() => {
+    let cancel = false;
+    const src = promoLegsFiltered;
+    (async () => {
+      const raw = src.legs || [];
+      const ctx = { promoType, numLegs: scanNumLegs };
+      const blended = [];
+      const CHUNK = 12;
+      for (let i = 0; i < raw.length; i += CHUNK) {
+        if (cancel) return;
+        const slice = preBlendStoredLadderLegs(raw.slice(i, i + CHUNK), ctx);
+        for (let j = 0; j < slice.length; j++) blended.push(slice[j]);
+        if (i + CHUNK < raw.length) await yieldToMain();
+      }
+      if (cancel) return;
+      let legs = repriceLegsForMinDepth(blended, minLegDepth);
+      // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
+      // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
+      if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
+        legs = filterLegsByTeamInclude(legs, includeTeamTokens);
+      }
+      if (!cancel) setPromoLegsPriced({ src, legs, stages: src.stages });
+    })();
+    return () => { cancel = true; };
+  }, [promoLegsFiltered, promoType, scanNumLegs, minLegDepth, includeTeamTokens]);
+  const promoLegsReady = promoLegsBuilt.req === promoLegsReq && promoLegsPriced.src === promoLegsFiltered;
+  // Name kept so existing scan tests can find the memo. The heavy blend
+  // already ran off the render path; this is the priced list.
+  const promoLegBuild = useMemo(() => ({
+    legs: promoLegsPriced.legs,
+    stages: promoLegsPriced.stages,
+  }), [promoLegsPriced]);
 
   const promoLegs = promoLegBuild.legs;
   const promoEmptyWhy = promoEmptyReasons(promoLegBuild.stages, {
@@ -2652,23 +2716,38 @@ export default function App() {
 
   // Player Props empty-state counts: legs removed by a partial Matching
   // books selection, and by Hide low liquidity. Only built on Player Props.
-  const playerPropHidden = useMemo(() => {
-    if (!scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) return null;
+  const [playerPropHiddenState, setPlayerPropHiddenState] = useState(null);
+  useEffect(() => {
+    if (!scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) {
+      setPlayerPropHiddenState(null);
+      return undefined;
+    }
     const tds = promoOddsForPromo && promoOddsForPromo.playerTds;
-    if (!tds || !tds.length) return null;
-    const onlyTds = { playerTds: tds };
-    const build = (matchingBooks) => filterLegsByTeamExclude(
-      filterExcludedLegs(
-        scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), ["props"]),
-        excludedPromoLegs,
-      ),
-      excludeTeamTokens,
-    );
-    const matched = build(promoMatchingPartial ? scanMatchingBookKeys : null);
-    const unfiltered = promoMatchingPartial ? build(null) : matched;
-    const liquid = filterLowLiquidityLegs(matched, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
-    return playerPropHiddenCounts({ unfiltered, matched, liquid });
+    if (!tds || !tds.length) {
+      setPlayerPropHiddenState(null);
+      return undefined;
+    }
+    let cancel = false;
+    // Second TD walk is only for the empty-state counts. After paint, so a
+    // Player Props click is not blocked on it.
+    const timer = setTimeout(() => {
+      if (cancel) return;
+      const onlyTds = { playerTds: tds };
+      const build = (matchingBooks) => filterLegsByTeamExclude(
+        filterExcludedLegs(
+          scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), ["props"]),
+          excludedPromoLegs,
+        ),
+        excludeTeamTokens,
+      );
+      const matched = build(promoMatchingPartial ? scanMatchingBookKeys : null);
+      const unfiltered = promoMatchingPartial ? build(null) : matched;
+      const liquid = filterLowLiquidityLegs(matched, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
+      if (!cancel) setPlayerPropHiddenState(playerPropHiddenCounts({ unfiltered, matched, liquid }));
+    }, 0);
+    return () => { cancel = true; clearTimeout(timer); };
   }, [scanMarketScope, waitForSoccerPm, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, excludedPromoLegs, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, dropThinPoolLegs, promoType, scanNumLegs]);
+  const playerPropHidden = useMemo(() => playerPropHiddenState, [playerPropHiddenState]);
 
   const parlayLegPoolStored = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
