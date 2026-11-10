@@ -103,38 +103,40 @@ export async function findTopParlaysExact(legs, numLegs, calc, form, {
     for (let j = i; j < i + r; j++) top *= A[j];
     return alpha * aProd * top - beta * pProd * sufMin[i][r] + gamma;
   }
-  function dfsSync(start, aProd, pProd) {
-    const r = k - chosen.length;
-    if (r === 0) { leaf(aProd, pProd); return; }
-    for (let i = start; i <= n - r; i++) {
-      if (bound(i, r, aProd, pProd) <= thr()) break;
-      const it = items[i];
-      if (chosen.length && conflictsWithAny(it.leg, chosen)) continue;
-      chosen.push(it.leg);
-      dfsSync(i + 1, aProd * it.a, pProd * it.p);
-      chosen.pop();
+  // Same left-to-right order as the old recursive DFS. Deeper legs used to
+  // run in one synchronous burst (dfsSync once two legs were chosen), which
+  // froze the tab on 4–12 leg exact searches. The explicit stack yields on
+  // the same clock as the outer loop and does not change which combos are
+  // scored or the order they enter the heap.
+  const frames = [{ i: 0, aProd: 1, pProd: 1 }];
+  let steps = 0;
+  while (frames.length) {
+    if ((++steps & 63) === 0 && nowMs() - st.last >= yieldMs) {
+      abort();
+      await yieldFn();
+      st.last = nowMs();
     }
-  }
-  async function dfs(start, aProd, pProd) {
-    const r = k - chosen.length;
-    if (r === 0) { leaf(aProd, pProd); return; }
-    if (chosen.length >= 2) { dfsSync(start, aProd, pProd); return; }
-    for (let i = start; i <= n - r; i++) {
-      if (nowMs() - st.last >= yieldMs) {
-        abort();
-        await yieldFn();
-        st.last = nowMs();
-      }
-      if (bound(i, r, aProd, pProd) <= thr()) break;
-      const it = items[i];
-      if (chosen.length && conflictsWithAny(it.leg, chosen)) continue;
-      chosen.push(it.leg);
-      await dfs(i + 1, aProd * it.a, pProd * it.p);
+    const fr = frames[frames.length - 1];
+    const depth = frames.length - 1;
+    const r = k - depth;
+    if (r === 0) {
+      leaf(fr.aProd, fr.pProd);
+      frames.pop();
       chosen.pop();
+      continue;
     }
+    if (fr.i > n - r || bound(fr.i, r, fr.aProd, fr.pProd) <= thr()) {
+      frames.pop();
+      if (frames.length) chosen.pop();
+      continue;
+    }
+    const it = items[fr.i];
+    const i = fr.i;
+    fr.i = i + 1;
+    if (depth && conflictsWithAny(it.leg, chosen)) continue;
+    chosen.push(it.leg);
+    frames.push({ i: i + 1, aProd: fr.aProd * it.a, pProd: fr.pProd * it.p });
   }
-  abort();
-  await dfs(0, 1, 1);
   abort();
   return finalizeTopByEv(heap);
 }

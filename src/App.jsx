@@ -128,7 +128,7 @@ import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFU
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
 import { findTopParlaysExact, linearEvForm } from "./promoExactScan.js";
-import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK } from "./promoParlayScan.js";
+import { diversifyTopParlays, SCAN_DEEP_RESULTS, rescaleParlaysForStake, findTopParlaysChunked, findBestAcrossLegCounts, promoScanInputKey, promoScanEmptyState, soccerBlocksPromoPool, promoSlateReady, shouldCommitPromoScan, parsedPromoLegOddsBounds, promoStakeOrDefault, nextPromoStakeField, PROMO_STAKE_FALLBACK, yieldToMain } from "./promoParlayScan.js";
 import { formatTrueOddsWithBlend, labelBestOppLine, formatAvailableSizeClause, formatDepthTrail, outcomeSize, formatAmericanOdds, formatPromoTotalBookOdds, formatSignedEvMoney, formatSignedEvPct } from "./trueOddsLine.js";
 import { resolveOppWithSideGuard } from "./promoOppGuard.js";
 import { applyUnderdogCashLegPrices, stampUnderdogPredictionLegs, underdogCashOfferAmerican } from "./underdogPredictFee.js";
@@ -301,6 +301,9 @@ const PARLAY_LEG_CAP = 200;
 // this same amount for the scan and for displayed EV (not rescale to $0).
 const PROMO_SCAN_STAKE = PROMO_STAKE_FALLBACK;
 const PROMO_SCAN_DEBOUNCE_MS = 150;
+// Stake, boost %, and text filters commit after this so a keystroke paints
+// before EV / leg rebuild. Scan debounce stays PROMO_SCAN_DEBOUNCE_MS.
+const PROMO_INPUT_DEBOUNCE_MS = 200;
 
 
 
@@ -739,10 +742,28 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   const quoteNow = opts && opts.now != null ? Number(opts.now) : Date.now();
   const legs = [];
   const now = new Date();
-  const mlRows = upcomingInRange(data && data.moneylines, now, dateRange, sportFilter);
-  const rlRows = upcomingInRange(data && data.run_lines, now, dateRange, sportFilter);
-  const totRows = upcomingInRange(data && data.totals, now, dateRange, sportFilter);
-  const ttRows = upcomingInRange(data && data.team_totals, now, dateRange, sportFilter);
+  // rowWindow slices one market so the caller can yield between slices.
+  // marketSeen keeps spread/total dedupe across those slices. Omit both and
+  // this is the full one-shot build.
+  const rowWindow = opts && opts.rowWindow;
+  const windowRows = (key, rows) => {
+    const list = rows || [];
+    if (!rowWindow) return list;
+    if (rowWindow.key !== key) return [];
+    const start = rowWindow.start || 0;
+    const end = rowWindow.end == null ? list.length : rowWindow.end;
+    return list.slice(start, end);
+  };
+  const marketSeen = (opts && opts.marketSeen) || null;
+  const seenFor = (key) => {
+    if (!marketSeen) return new Set();
+    if (!marketSeen[key]) marketSeen[key] = new Set();
+    return marketSeen[key];
+  };
+  const mlRows = upcomingInRange(windowRows("moneylines", data && data.moneylines), now, dateRange, sportFilter);
+  const rlRows = upcomingInRange(windowRows("run_lines", data && data.run_lines), now, dateRange, sportFilter);
+  const totRows = upcomingInRange(windowRows("totals", data && data.totals), now, dateRange, sportFilter);
+  const ttRows = upcomingInRange(windowRows("team_totals", data && data.team_totals), now, dateRange, sportFilter);
 
   if (mlRows.length) {
     mlRows.forEach(g => {
@@ -764,7 +785,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   if (rlRows.length) {
-    const seen = new Set();
+    const seen = seenFor("run_lines");
     rlRows.forEach(g => {
       if (g.book !== book) return;
       const awayOdds = g.away_odds;
@@ -780,7 +801,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   if (totRows.length) {
-    const seen = new Set();
+    const seen = seenFor("totals");
     totRows.forEach(g => {
       if (g.book !== book) return;
       const overOdds = g.over_odds;
@@ -796,7 +817,7 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
   }
 
   if (ttRows.length) {
-    const seen = new Set();
+    const seen = seenFor("team_totals");
     ttRows.forEach(g => {
       if (g.book !== book) return;
       const overOdds = g.over_odds;
@@ -811,8 +832,9 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     });
   }
 
-  if (data.playerTds && data.playerTds.length) {
-    for (const leg of playerTdLegsForBook(data.playerTds, book, {
+  const tdRows = windowRows("playerTds", data && data.playerTds);
+  if (tdRows.length) {
+    for (const leg of playerTdLegsForBook(tdRows, book, {
       sportFilter,
       minLegOdds,
       maxLegOdds,
@@ -826,7 +848,14 @@ function buildAllLegsForBook(data, book, sportFilter = null, minLegOdds = null, 
     })) legs.push(leg);
   }
 
-  const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), data), true);
+  const stampData = rowWindow ? {
+    moneylines: windowRows("moneylines", data && data.moneylines),
+    run_lines: windowRows("run_lines", data && data.run_lines),
+    totals: windowRows("totals", data && data.totals),
+    team_totals: windowRows("team_totals", data && data.team_totals),
+    playerTds: windowRows("playerTds", data && data.playerTds),
+  } : data;
+  const priced = applyUnderdogCashLegPrices(stampUnderdogPredictionLegs(legs.filter((l) => l.bestOpp != null), stampData), true);
   return priced.filter((l) => passesOddsBounds(l.dk, minLegOdds, maxLegOdds) && underdogOfferIsRankable(l, quoteNow, l.playerTd ? UNDERDOG_BOARD_OMIT_MS : UNDERDOG_STALE_MS));
 }
 
@@ -992,6 +1021,76 @@ function useDebouncedValue(value, delayMs = PROMO_SCAN_DEBOUNCE_MS) {
     return () => clearTimeout(id);
   }, [value, delayMs]);
   return debounced;
+}
+
+// Local text so typing does not re-render Promo Builder. Parent state (and the
+// scan / rank that read it) updates once the user pauses.
+function PromoDebouncedInput({ value, onCommit, delay = PROMO_INPUT_DEBOUNCE_MS, sanitize, ...rest }) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  const focused = useRef(false);
+  const timer = useRef(null);
+  const commitRef = useRef(onCommit);
+  commitRef.current = onCommit;
+  useEffect(() => {
+    if (!focused.current) setText(value == null ? "" : String(value));
+  }, [value]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return (
+    <input
+      {...rest}
+      value={text}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => {
+        focused.current = false;
+        clearTimeout(timer.current);
+        commitRef.current(text);
+      }}
+      onChange={(e) => {
+        const next = sanitize ? sanitize(e.target.value) : e.target.value;
+        setText(next);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => commitRef.current(next), delay);
+      }}
+    />
+  );
+}
+
+function PromoStakeInput({ stake, onCommit }) {
+  const [text, setText] = useState(String(stake));
+  const focused = useRef(false);
+  const timer = useRef(null);
+  const commitRef = useRef(onCommit);
+  commitRef.current = onCommit;
+  useEffect(() => {
+    if (!focused.current) setText(String(stake));
+  }, [stake]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const commitText = (raw) => {
+    const next = nextPromoStakeField(raw);
+    commitRef.current(next.stake);
+    return next;
+  };
+  return (
+    <input
+      type="number"
+      min={1}
+      value={text}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => {
+        focused.current = false;
+        clearTimeout(timer.current);
+        const next = commitText(text);
+        setText(next.draft != null ? String(next.stake) : text);
+      }}
+      onChange={(e) => {
+        const next = nextPromoStakeField(e.target.value);
+        setText(e.target.value);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => commitRef.current(next.stake), PROMO_INPUT_DEBOUNCE_MS);
+      }}
+      style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }}
+    />
+  );
 }
 
 
@@ -1467,6 +1566,26 @@ function attachBoostLockToPick(p, nextStake) {
   if (!p.legs || p.legs.length !== 1) return { ...p, lock: null, isGuaranteed: false };
   const lock = calcBoostLock(quotedOppAmerican(p.legs[0]), nextStake, p.boostedProfit);
   return { ...p, lock, isGuaranteed: lock.valid };
+}
+
+// $500 blend does not read stake. Rank once at the scan stake, then scale the
+// linear money fields. Re-attach the lock so hedge dollars match the new stake.
+function scaleRankedPicks(picks, fromStake, toStake, attach) {
+  const scaled = rescaleParlaysForStake(picks, fromStake, toStake);
+  if (scaled === picks) return picks;
+  return scaled.map((p) => attach(p, toStake));
+}
+
+function scaleDepthRank(rank, fromStake, toStake, attach) {
+  if (!rank) return rank;
+  const from = Number(fromStake);
+  const to = promoStakeOrDefault(toStake);
+  if (!Number.isFinite(from) || !(from > 0) || from === to) return rank;
+  return {
+    ...rank,
+    visible: scaleRankedPicks(rank.visible, from, to, attach),
+    rest: scaleRankedPicks(rank.rest, from, to, attach),
+  };
 }
 
 function attachNoSweatLockToPick(p, nextStake) {
@@ -2478,25 +2597,97 @@ export default function App() {
   // Drop thin PM legs from the scan pool ($500 profit walk, stake-independent
   // for 1-leg and multi-leg). rankPromoPicks also drops incomplete $500 walks.
   const dropThinPoolLegs = scanHideLowLiquidity;
-  const promoLegBuild = useMemo(() => {
-    if (waitForSoccerPm) return { legs: [], stages: null };
-    const promoLegsAll = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, {
-      underdogCash: true,
-      matchingBooks: promoMatchingPartial ? scanMatchingBookKeys : null,
+  // Book / sport / date / odds-bound rebuild walks every game. Run it after
+  // paint so a chip or select can highlight first. Market, legs, team, and
+  // liquidity only filter this list.
+  const promoLegsReq = useMemo(() => ({
+    odds: promoOddsForPromo,
+    book: scanPromoBook,
+    sports: promoSportFilter,
+    minLeg: parsedMinLeg,
+    maxLeg: parsedMaxLeg,
+    date: scanPromoDateRange,
+    matching: promoMatchingPartial ? scanMatchingBookKeys : null,
+    soccerWait: waitForSoccerPm,
+  }), [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, promoMatchingPartial, scanMatchingBookKeys, waitForSoccerPm]);
+  const [promoLegsBuilt, setPromoLegsBuilt] = useState({ req: null, legs: [] });
+  useEffect(() => {
+    if (promoLegsReq.soccerWait) return undefined;
+    let cancel = false;
+    const raf = requestAnimationFrame(() => {
+      (async () => {
+        const keys = ["moneylines", "run_lines", "totals", "team_totals", "playerTds"];
+        const marketSeen = {};
+        const legs = [];
+        const matchingBooks = promoMatchingPartial ? scanMatchingBookKeys : null;
+        const CHUNK = 20;
+        for (const key of keys) {
+          const rows = (promoOddsForPromo && promoOddsForPromo[key]) || [];
+          for (let start = 0; start < rows.length; start += CHUNK) {
+            if (cancel) return;
+            const part = buildAllLegsForBook(promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, {
+              underdogCash: true,
+              matchingBooks,
+              rowWindow: { key, start, end: Math.min(rows.length, start + CHUNK) },
+              marketSeen,
+            });
+            for (let i = 0; i < part.length; i++) legs.push(part[i]);
+            await yieldToMain();
+          }
+        }
+        if (!cancel) setPromoLegsBuilt({ req: promoLegsReq, legs });
+      })();
     });
+    return () => {
+      cancel = true;
+      cancelAnimationFrame(raf);
+    };
+    // promoLegsReq identity covers every build input. The walk is chunked
+    // after paint so a book or sport click is not one long task.
+  }, [promoLegsReq, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, promoMatchingPartial, scanMatchingBookKeys]);
+  const promoLegsFiltered = useMemo(() => {
+    if (promoLegsBuilt.req == null) return { legs: [], stages: null };
+    const promoLegsAll = promoLegsBuilt.legs;
     const promoLegsScoped = scopePromoLegs(promoLegsAll, scanMarketScope);
     const promoLegsKept = filterExcludedLegs(promoLegsScoped, excludedPromoLegs);
     const promoLegsNamed = filterLegsByTeamExclude(promoLegsKept, excludeTeamTokens);
     const promoLegsLiquidRaw = filterLegsByMinDepth(filterLowLiquidityLegs(promoLegsNamed, dropThinPoolLegs, { promoType, numLegs: scanNumLegs }), minLegDepth);
-    const promoLegsLiquid = repriceLegsForMinDepth(preBlendStoredLadderLegs(promoLegsLiquidRaw, { promoType, numLegs: scanNumLegs }), minLegDepth);
     const stages = promoLegStageCounts({ scoped: promoLegsScoped, afterHidden: promoLegsNamed, afterLiquidity: promoLegsLiquidRaw });
-    // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
-    // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
-    if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
-      return { legs: filterLegsByTeamInclude(promoLegsLiquid, includeTeamTokens), stages };
-    }
-    return { legs: promoLegsLiquid, stages };
-  }, [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, scanMarketScope, excludedPromoLegs, dropThinPoolLegs, promoType, scanNumLegs, waitForSoccerPm, includeTeamTokens, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, minLegDepth]);
+    return { legs: promoLegsLiquidRaw, stages };
+  }, [promoLegsBuilt, scanMarketScope, excludedPromoLegs, excludeTeamTokens, dropThinPoolLegs, promoType, scanNumLegs, minLegDepth]);
+  const [promoLegsPriced, setPromoLegsPriced] = useState({ src: null, legs: [], stages: null });
+  useEffect(() => {
+    let cancel = false;
+    const src = promoLegsFiltered;
+    (async () => {
+      const raw = src.legs || [];
+      const ctx = { promoType, numLegs: scanNumLegs };
+      const blended = [];
+      const CHUNK = 12;
+      for (let i = 0; i < raw.length; i += CHUNK) {
+        if (cancel) return;
+        const slice = preBlendStoredLadderLegs(raw.slice(i, i + CHUNK), ctx);
+        for (let j = 0; j < slice.length; j++) blended.push(slice[j]);
+        if (i + CHUNK < raw.length) await yieldToMain();
+      }
+      if (cancel) return;
+      let legs = repriceLegsForMinDepth(blended, minLegDepth);
+      // 1-leg include = that leg matches. Multi-leg keeps companions so a Lions
+      // token can sit next to non-Lions legs; the scan acceptCombo enforces OR.
+      if (Number(scanNumLegs) === 1 && includeTeamTokens.length) {
+        legs = filterLegsByTeamInclude(legs, includeTeamTokens);
+      }
+      if (!cancel) setPromoLegsPriced({ src, legs, stages: src.stages });
+    })();
+    return () => { cancel = true; };
+  }, [promoLegsFiltered, promoType, scanNumLegs, minLegDepth, includeTeamTokens]);
+  const promoLegsReady = promoLegsBuilt.req === promoLegsReq && promoLegsPriced.src === promoLegsFiltered;
+  // Name kept so existing scan tests can find the memo. The heavy blend
+  // already ran off the render path; this is the priced list.
+  const promoLegBuild = useMemo(() => ({
+    legs: promoLegsPriced.legs,
+    stages: promoLegsPriced.stages,
+  }), [promoLegsPriced]);
 
   const promoLegs = promoLegBuild.legs;
   const promoEmptyWhy = promoEmptyReasons(promoLegBuild.stages, {
@@ -2525,23 +2716,38 @@ export default function App() {
 
   // Player Props empty-state counts: legs removed by a partial Matching
   // books selection, and by Hide low liquidity. Only built on Player Props.
-  const playerPropHidden = useMemo(() => {
-    if (!scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) return null;
+  const [playerPropHiddenState, setPlayerPropHiddenState] = useState(null);
+  useEffect(() => {
+    if (!scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) {
+      setPlayerPropHiddenState(null);
+      return undefined;
+    }
     const tds = promoOddsForPromo && promoOddsForPromo.playerTds;
-    if (!tds || !tds.length) return null;
-    const onlyTds = { playerTds: tds };
-    const build = (matchingBooks) => filterLegsByTeamExclude(
-      filterExcludedLegs(
-        scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), ["props"]),
-        excludedPromoLegs,
-      ),
-      excludeTeamTokens,
-    );
-    const matched = build(promoMatchingPartial ? scanMatchingBookKeys : null);
-    const unfiltered = promoMatchingPartial ? build(null) : matched;
-    const liquid = filterLowLiquidityLegs(matched, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
-    return playerPropHiddenCounts({ unfiltered, matched, liquid });
+    if (!tds || !tds.length) {
+      setPlayerPropHiddenState(null);
+      return undefined;
+    }
+    let cancel = false;
+    // Second TD walk is only for the empty-state counts. After paint, so a
+    // Player Props click is not blocked on it.
+    const timer = setTimeout(() => {
+      if (cancel) return;
+      const onlyTds = { playerTds: tds };
+      const build = (matchingBooks) => filterLegsByTeamExclude(
+        filterExcludedLegs(
+          scopePromoLegs(buildAllLegsForBook(onlyTds, scanPromoBook, promoSportFilter, parsedMinLeg, scanPromoDateRange, parsedMaxLeg, { underdogCash: true, matchingBooks }), ["props"]),
+          excludedPromoLegs,
+        ),
+        excludeTeamTokens,
+      );
+      const matched = build(promoMatchingPartial ? scanMatchingBookKeys : null);
+      const unfiltered = promoMatchingPartial ? build(null) : matched;
+      const liquid = filterLowLiquidityLegs(matched, dropThinPoolLegs, { promoType, numLegs: scanNumLegs });
+      if (!cancel) setPlayerPropHiddenState(playerPropHiddenCounts({ unfiltered, matched, liquid }));
+    }, 0);
+    return () => { cancel = true; clearTimeout(timer); };
   }, [scanMarketScope, waitForSoccerPm, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, excludedPromoLegs, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, dropThinPoolLegs, promoType, scanNumLegs]);
+  const playerPropHidden = useMemo(() => playerPropHiddenState, [playerPropHiddenState]);
 
   const parlayLegPoolStored = useMemo(() => {
     if (!isParlayPromo) return promoLegs;
@@ -2609,12 +2815,13 @@ export default function App() {
       promoLoading,
       soccerBlocks: waitForSoccerPm,
     });
-    if (!slateReady || poolDepthPending) {
+    if (!slateReady || poolDepthPending || !promoLegsReady) {
       // Bump gen so a 1-leg scan that already resolved cannot commit into
       // this not-ready window (abort is only checked at yield / completion).
       // Pool ladders still loading: wait, so the scan ranks on live depth.
+      // Leg rebuild runs after paint; do not rank the previous book's pool.
       promoScanGen.current += 1;
-      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm || poolDepthPending));
+      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm || poolDepthPending || !promoLegsReady));
       return;
     }
     const gen = ++promoScanGen.current;
@@ -2667,7 +2874,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, promoLegsReady, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2679,83 +2886,106 @@ export default function App() {
     [scannedNoSweats, stake],
   );
 
-  const topNoSweatsWithLock = useMemo(() => {
-    return rankPromoPicks(
-      topNoSweats,
-      { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-      (p) => attachNoSweatLockToPick(p, stake),
-      overlayParlayMetrics,
-    );
-  }, [topNoSweats, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+  // Blend + opp-guard rank at the stake the scan used. Stake edits only scale.
+  const rankedNoSweats = useMemo(() => rankPromoPicks(
+    scannedNoSweats.parlays,
+    { promoType: "nosweat", numLegs, stake: scannedNoSweats.atStake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
+    (p) => attachNoSweatLockToPick(p, scannedNoSweats.atStake),
+    overlayParlayMetrics,
+  ), [scannedNoSweats, numLegs, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
 
-  const topParlaysWithHedge = useMemo(() => {
+  const topNoSweatsWithLock = useMemo(
+    () => scaleRankedPicks(rankedNoSweats, scannedNoSweats.atStake, stake, attachNoSweatLockToPick),
+    [rankedNoSweats, scannedNoSweats.atStake, stake],
+  );
+
+  const rankedBoost = useMemo(() => {
     // 1-leg and multi-leg: $500 payout blend (profit excluding stake).
     // Lock from quoted opp (Guaranteed Profit); multi-leg lock badge stays off.
     return rankPromoPicks(
-      topParlays,
-      { promoType: "boost", numLegs, stake, boostPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-      (p) => attachBoostLockToPick(p, stake),
+      scannedBoostParlays.parlays,
+      { promoType: "boost", numLegs, stake: scannedBoostParlays.atStake, boostPct: scanBoostPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
+      (p) => attachBoostLockToPick(p, scannedBoostParlays.atStake),
       overlayParlayMetrics,
     );
-  }, [topParlays, numLegs, stake, boostPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+  }, [scannedBoostParlays, numLegs, scanBoostPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+
+  const topParlaysWithHedge = useMemo(
+    () => scaleRankedPicks(rankedBoost, scannedBoostParlays.atStake, stake, attachBoostLockToPick),
+    [rankedBoost, scannedBoostParlays.atStake, stake],
+  );
 
   const topNoPromo = useMemo(
     () => rescaleParlaysForStake(scannedNoPromo.parlays, scannedNoPromo.atStake, stake),
     [scannedNoPromo, stake],
   );
 
-  const topNoPromoWithHedge = useMemo(() => {
-    return rankPromoPicks(
-      topNoPromo,
-      { promoType: "nopromo", numLegs, stake, boostPct: 0, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-      (p) => attachBoostLockToPick(p, stake),
-      overlayParlayMetrics,
-    );
-  }, [topNoPromo, numLegs, stake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+  const rankedNoPromo = useMemo(() => rankPromoPicks(
+    scannedNoPromo.parlays,
+    { promoType: "nopromo", numLegs, stake: scannedNoPromo.atStake, boostPct: 0, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
+    (p) => attachBoostLockToPick(p, scannedNoPromo.atStake),
+    overlayParlayMetrics,
+  ), [scannedNoPromo, numLegs, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+
+  const topNoPromoWithHedge = useMemo(
+    () => scaleRankedPicks(rankedNoPromo, scannedNoPromo.atStake, stake, attachBoostLockToPick),
+    [rankedNoPromo, scannedNoPromo.atStake, stake],
+  );
 
   const topFreeBets = useMemo(
     () => rescaleParlaysForStake(scannedFreeBets.parlays, scannedFreeBets.atStake, stake),
     [scannedFreeBets, stake],
   );
 
-  const topFreeBetsWithLock = useMemo(() => {
-    return rankPromoPicks(
-      topFreeBets,
-      { promoType: "freebet", numLegs, stake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-      (p) => attachFreeBetLock(p, stake),
-      overlayParlayMetrics,
-    );
-  }, [topFreeBets, numLegs, stake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+  const rankedFreeBets = useMemo(() => rankPromoPicks(
+    scannedFreeBets.parlays,
+    { promoType: "freebet", numLegs, stake: scannedFreeBets.atStake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
+    (p) => attachFreeBetLock(p, scannedFreeBets.atStake),
+    overlayParlayMetrics,
+  ), [scannedFreeBets, numLegs, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+
+  const topFreeBetsWithLock = useMemo(
+    () => scaleRankedPicks(rankedFreeBets, scannedFreeBets.atStake, stake, (p) => attachFreeBetLock(p, stake)),
+    [rankedFreeBets, scannedFreeBets.atStake, stake],
+  );
 
   // Top-of-book rank first, then the same $500 depth blend the cards show.
   // Only the visible page is walked (Show more grows the window). Until the
   // ladders arrive, order and EV stay on the top-of-book blend together.
+  const rankedActive = promoType === "nosweat" ? rankedNoSweats
+    : promoType === "freebet" ? rankedFreeBets
+      : promoType === "nopromo" ? rankedNoPromo
+        : rankedBoost;
+  const rankAtStake = promoType === "nosweat" ? scannedNoSweats.atStake
+    : promoType === "freebet" ? scannedFreeBets.atStake
+      : promoType === "nopromo" ? scannedNoPromo.atStake
+        : scannedBoostParlays.atStake;
   const activePromoBase = promoType === "nosweat" ? topNoSweatsWithLock
     : promoType === "freebet" ? topFreeBetsWithLock
       : promoType === "nopromo" ? topNoPromoWithHedge
         : topParlaysWithHedge;
   const lastDepthRankRef = useRef(null);
-  const promoBaseLen = Array.isArray(activePromoBase) ? activePromoBase.length : 0;
-  const depthFiltersKey = [promoType, scanPromoBook, numLegs, stake, refundPct, creditConversionPct, boostPct, hideLowLiquidity, minLegDepth, includeTeamTokens.join(","), excludeTeamTokens.join(",")].join("|");
+  const promoBaseLen = Array.isArray(rankedActive) ? rankedActive.length : 0;
+  const depthFiltersKey = [promoType, scanPromoBook, numLegs, rankAtStake, refundPct, creditConversionPct, scanBoostPct, hideLowLiquidity, minLegDepth, includeTeamTokens.join(","), excludeTeamTokens.join(",")].join("|");
   const [depthWindowState, setDepthWindowState] = useState({ key: "", size: 0 });
   // Depth-check every scanned candidate, not just the first page: the scan
   // ranks by top-of-book EV, so a combo whose live-depth EV is best can sit
   // below the page when a wider date window adds many thin-but-shiny combos.
   const depthWindow = Math.max(promoPage, Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX),
     depthWindowState.key === depthFiltersKey ? depthWindowState.size : 0);
-  const pageLadders = usePromoPageLadders(activePromoBase, depthWindow, minLegDepth, hideLowLiquidity);
-  const promoDepthRank = useMemo(() => {
+  const pageLadders = usePromoPageLadders(rankedActive, depthWindow, minLegDepth, hideLowLiquidity);
+  const promoDepthRankAtScan = useMemo(() => {
     const ctx = promoType === "nosweat"
-      ? { promoType: "nosweat", numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
+      ? { promoType: "nosweat", numLegs, stake: rankAtStake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
       : promoType === "freebet"
-        ? { promoType: "freebet", numLegs, stake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
-        : { promoType: isBoostLikePromo(promoType) ? promoType : "boost", numLegs, stake, boostPct: effectiveBoostPct(promoType, boostPct), hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens };
+        ? { promoType: "freebet", numLegs, stake: rankAtStake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
+        : { promoType: isBoostLikePromo(promoType) ? promoType : "boost", numLegs, stake: rankAtStake, boostPct: effectiveBoostPct(promoType, scanBoostPct), hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens };
     const attach = promoType === "nosweat"
-      ? (p) => attachNoSweatLockToPick(p, stake)
+      ? (p) => attachNoSweatLockToPick(p, rankAtStake)
       : promoType === "freebet"
-        ? (p) => attachFreeBetLock(p, stake)
-        : (p) => attachBoostLockToPick(p, stake);
-    const next = visiblePromoAfterDepth(activePromoBase, promoPage, pageLadders, (head, ladders) =>
+        ? (p) => attachFreeBetLock(p, rankAtStake)
+        : (p) => attachBoostLockToPick(p, rankAtStake);
+    const next = visiblePromoAfterDepth(rankedActive, promoPage, pageLadders, (head, ladders) =>
       rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders), depthWindow,
       { keysOfPick: (p) => collectPromoDepthLegs([p], minLegDepth, hideLowLiquidity).map(depthCacheKey) });
     // Window growth is not part of the key: a wider check keeps showing the
@@ -2764,7 +2994,13 @@ export default function App() {
     const held = holdDepthRankWhilePending(next, pageLadders, lastDepthRankRef.current, filtersKey);
     if (pageLadders != null) lastDepthRankRef.current = { filtersKey, result: next };
     return maskUncheckedWhileHidingThin(held, hideLowLiquidity);
-  }, [activePromoBase, promoPage, depthWindow, depthFiltersKey, pageLadders, promoType, numLegs, stake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens, boostPct]);
+  }, [rankedActive, promoPage, depthWindow, depthFiltersKey, pageLadders, promoType, numLegs, rankAtStake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens, scanBoostPct]);
+  const promoDepthRank = useMemo(() => {
+    const attach = promoType === "nosweat" ? attachNoSweatLockToPick
+      : promoType === "freebet" ? attachFreeBetLock
+        : attachBoostLockToPick;
+    return scaleDepthRank(promoDepthRankAtScan, rankAtStake, stake, attach);
+  }, [promoDepthRankAtScan, rankAtStake, stake, promoType]);
   useEffect(() => {
     if (!promoDepthRank.needsWiderWindow || promoDepthRank.pending) return;
     const size = nextPromoDepthWindow(depthWindow, promoPage, promoBaseLen);
@@ -3602,31 +3838,20 @@ export default function App() {
                   </>)}
                   {promoType === "boost" && controlBox(<>
                     <label style={labelStyle}>Boost %</label>
-                    <input type="number" value={boostPct} onChange={(e) => setBoostPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                    <PromoDebouncedInput type="number" value={boostPct} onCommit={(v) => setBoostPct(Number(v))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                   </>)}
                   {controlBox(<>
                     <label style={labelStyle}>{promoType === "freebet" ? "Free Bet $" : "Stake $"}</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={stakeDraft != null ? stakeDraft : stake}
-                      onChange={(e) => {
-                        const next = nextPromoStakeField(e.target.value);
-                        setStake(next.stake);
-                        setStakeDraft(next.draft);
-                      }}
-                      onBlur={() => setStakeDraft(null)}
-                      style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }}
-                    />
+                    <PromoStakeInput stake={stake} onCommit={(nextStake) => { setStake(nextStake); setStakeDraft(null); }} />
                   </>)}
                   {promoType === "nosweat" && controlBox(<>
                     <label style={labelStyle} title="Site credit counted as cash">Credit %</label>
-                    <input type="number" value={creditConversionPct} onChange={(e) => setCreditConversionPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                    <PromoDebouncedInput type="number" value={creditConversionPct} onCommit={(v) => setCreditConversionPct(Number(v))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                     <span style={{ fontSize: 11, color: "#6b7280" }}>site credit = {creditConversionPct}% cash</span>
                   </>)}
                   {promoType === "nosweat" && controlBox(<>
                     <label style={labelStyle}>Refund %</label>
-                    <input type="number" value={refundPct} onChange={(e) => setRefundPct(Number(e.target.value))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                    <PromoDebouncedInput type="number" value={refundPct} onCommit={(v) => setRefundPct(Number(v))} style={{ width: 60, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                   </>)}
                   {isParlayPromo && controlBox(<>
                     <label style={labelStyle}>Legs</label>
@@ -3762,8 +3987,9 @@ export default function App() {
                       {canSeeOwnerTools(user) && controlBox(<>
                         <InfoTip k="depth"><label style={labelStyle} title="Blends the best opposing prices across Kalshi / Polymarket / Novig / ProphetX (after each venue's fee), best first, until the opposing bets can win this much $ (depth = potential profit, not stake: $3,000 at −200 = $1,500), and prices the leg at that blended (depth-weighted) price. Legs that cannot fill it across all venues drop. Sportsbook opposing prices have no depth feed and drop out while set. Blank = off. Only you see this.">{MIN_LEG_DEPTH_LABEL}</label></InfoTip>
                         <span style={{ color: "#6b7280", fontSize: 12 }}>$</span>
-                        <input data-testid="promo-min-leg-depth" type="text" inputMode="numeric" placeholder="off" value={minLegDepthInput}
-                          onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ""); setMinLegDepthInput(v); saveMinLegDepth(user, v); }}
+                        <PromoDebouncedInput data-testid="promo-min-leg-depth" type="text" inputMode="numeric" placeholder="off" value={minLegDepthInput}
+                          sanitize={(v) => v.replace(/[^0-9]/g, "")}
+                          onCommit={(v) => { setMinLegDepthInput(v); saveMinLegDepth(user, v); }}
                           style={{ width: 80, padding: "5px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)", color: "#e5e7eb", fontSize: 12 }} />
                         {minLegDepth > 0 && <button type="button" onClick={() => { setMinLegDepthInput(""); saveMinLegDepth(user, ""); }} style={{ padding: "5px 10px", borderRadius: 6, border: "none", fontSize: 12, cursor: "pointer", background: "rgba(255,255,255,0.05)", color: "#6b7280" }}>Clear</button>}
                       </>)}
@@ -3777,27 +4003,27 @@ export default function App() {
                       </>)}
                       {isParlayPromo && controlBox(<>
                         <label style={labelStyle}>Min Final Odds</label>
-                        <input type="number" value={minFinalOdds} onChange={(e) => setMinFinalOdds(e.target.value)} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                        <PromoDebouncedInput type="number" value={minFinalOdds} onCommit={setMinFinalOdds} placeholder="e.g. 400" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
                       {isParlayPromo && controlBox(<>
                         <label style={labelStyle}>Max Final Odds</label>
-                        <input type="number" value={maxFinalOdds} onChange={(e) => setMaxFinalOdds(e.target.value)} placeholder="e.g. 800" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                        <PromoDebouncedInput type="number" value={maxFinalOdds} onCommit={setMaxFinalOdds} placeholder="e.g. 800" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
                       {isParlayPromo && numLegs >= 2 && controlBox(<>
                         <label style={labelStyle}>Min Leg Odds</label>
-                        <input type="number" value={minLegOdds} onChange={(e) => setMinLegOdds(e.target.value)} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                        <PromoDebouncedInput type="number" value={minLegOdds} onCommit={setMinLegOdds} placeholder="e.g. -200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
                       {isParlayPromo && numLegs >= 2 && controlBox(<>
                         <label style={labelStyle}>Max Leg Odds</label>
-                        <input type="number" value={maxLegOdds} onChange={(e) => setMaxLegOdds(e.target.value)} placeholder="e.g. 200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
+                        <PromoDebouncedInput type="number" value={maxLegOdds} onCommit={setMaxLegOdds} placeholder="e.g. 200" style={{ width: 80, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }} />
                       </>)}
                       {controlBox(<>
                         <label style={labelStyle}>Must include</label>
-                        <input type="text" value={promoTeamInclude} onChange={(e) => setPromoTeamInclude(e.target.value)} placeholder="e.g. Lions" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
+                        <PromoDebouncedInput type="text" value={promoTeamInclude} onCommit={setPromoTeamInclude} placeholder="e.g. Lions" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
                       </>)}
                       {controlBox(<>
                         <label style={labelStyle}>Must exclude</label>
-                        <input type="text" value={promoTeamExclude} onChange={(e) => setPromoTeamExclude(e.target.value)} placeholder="e.g. Commanders" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
+                        <PromoDebouncedInput type="text" value={promoTeamExclude} onCommit={setPromoTeamExclude} placeholder="e.g. Commanders" style={{ width: 140, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 13, fontWeight: 600 }} />
                       </>)}
                     </>
                   )}
@@ -3805,7 +4031,7 @@ export default function App() {
               </div>
               </div>
 
-              {(isParlayPromo && promoScanBusy && activePromoBase.length > 0
+              {(isParlayPromo && (promoScanBusy || !promoLegsReady) && activePromoBase.length > 0
                 || (promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0)
                 || (isParlayPromo && (oddsBoundsPending || teamFilterPending || promoFilterPending) && activePromoBase.length > 0)) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
