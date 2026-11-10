@@ -64,7 +64,7 @@ import { fetchAllRows } from "./comboPaging";
 import { archivedRowsNeedRefetch, archivedSubsPlan, nextArchivedSubsCache } from "./comboHistoryCache";
 import { americanFromNoPrice, etStamp, historyTotals, lockStatus, plainAttemptLabel, plainOutcomeText, quoteHistory, fmtAmerican as fmtAmOdds } from "./comboLockView";
 import { lockLegsError } from "./comboLegRules";
-import { COMBO_VIEW_CSS, ComboHistory, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, QuoteHistoryFold, SectionHead, SummaryStrip } from "./ComboLocksView";
+import { COMBO_VIEW_CSS, ComboHistory, ComboProfitChart, DetailBlock, HowItWorks, LegList, LockCard, QuoteHistory, QuoteHistoryFold, SectionHead, SummaryStrip } from "./ComboLocksView";
 import {
   buildMergePlan,
   findDuplicateGroups,
@@ -2027,6 +2027,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       </div>
 
       <SectionHead id="cl-history" title="History" count={archivedKind === "rows" ? historyStatement.lines.length : null} sub="Locks whose games are over, newest first. Tap a row for the details." />
+      {archivedKind !== "loading" && <ComboProfitChart lines={historyStatement.lines} />}
       <div className="card" aria-busy={deskLoading || !deskReady || undefined}>
         {archivedKind === "loading" ? <div className="empty loading"><span className="spin" aria-hidden="true" />Loading history…</div> : archivedKind === "empty" ? <div className="empty">{historyEmptyText}</div> : (
           <ComboHistory
