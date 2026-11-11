@@ -9,6 +9,7 @@ import { isAbsorbedParlay } from "./comboMerge.js";
 import { historyOutcome, settlementFromStored, settlementCopy } from "./comboSettlement.js";
 import { sportFromTicker, underlyingCopy } from "./comboLegResult.js";
 import { isLockCapFill } from "./comboTape.js";
+import { isPolyComboMakerFill, polyComboFillTime, polyComboMakerFeeDollars } from "./polyComboMakerFee.js";
 
 export const STATEMENT_TZ = "America/New_York";
 // History spans many days; Today is often empty. Default All.
@@ -405,7 +406,13 @@ export function lockFillReceipt(parlay, fills = [], filled = 0) {
     if (!(take > 0)) break;
     pricedN += take;
     received += take * y;
-    const fee = toNum(f.fee);
+    let fee = toNum(f.fee);
+    // Worker stores the exchange fee when it has one. A $0/missing fee on a
+    // Polymarket combo maker fill is the pre-cutoff schedule, or a row written
+    // before the worker knew the fee — recompute from the fill time.
+    if (!(fee > 0) && isPolyComboMakerFill(f)) {
+      fee = polyComboMakerFeeDollars(c, y, polyComboFillTime(f));
+    }
     if (fee != null && fee > 0) fees += fee * (take / c);
   }
   const rest = Math.max(0, n - pricedN);

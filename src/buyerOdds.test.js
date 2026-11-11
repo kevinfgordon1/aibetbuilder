@@ -36,7 +36,8 @@ assert.equal(quotedYesPrice(1188, { subcent: false, makerRate: 0.0175 }), 0.08);
   assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.10) * 100) / 100, 10.19);
   assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.50) * 100) / 100, 19.25);
   // +300 lock → YES 0.25 → 0.25 + 0.25·(0.0695·0.75 + 0.06·0.75^4) ≈ 0.2678 → +273
-  assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us" }).text, "+273");
+  // Pinned before the combo maker fee (2026-11-14 12:00 AM ET).
+  assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us", at: "2026-11-13T00:00:00Z" }).text, "+273");
 }
 // Favorites and junk.
 assert.ok(buyerSeesAfterFees(-150).american < -150);
