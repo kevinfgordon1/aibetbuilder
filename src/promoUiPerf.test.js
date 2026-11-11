@@ -119,6 +119,21 @@ assert.ok(PROMO_CARD_LAYER_STYLE.containIntrinsicSize);
   assert.match(board, /const deferredMarket = useDeferredValue\(market\)/);
 }
 
+// Boost / stake / focus must not re-walk venue ladders on the click.
+{
+  assert.match(app, /function promoBlendKey/);
+  const blendFn = app.slice(app.indexOf("function promoBlendKey"), app.indexOf("function usePromoDepthBlend"));
+  assert.doesNotMatch(blendFn, /boostPct/);
+  assert.doesNotMatch(blendFn, /\.stake/);
+  assert.match(app, /onFocus=\{\(\) => \{ focused\.current = true; \}\}/);
+  assert.match(app, /startTransition\(\(\) => commitRef\.current/);
+  assert.match(app, /PromoMemoRow/);
+  assert.match(app, /rankPromoPicksChunked\(/);
+  assert.match(app, /visiblePromoAfterDepthChunked\(/);
+  assert.doesNotMatch(app, /const rankedBoost = useMemo/);
+  assert.doesNotMatch(app, /const ctxKey = \[ctx\.promoType, ctx\.numLegs, ctx\.stake, ctx\.boostPct/);
+}
+
 // Scan yields before enumerating so a chip click can paint
 {
   assert.match(scanSrc, /await yieldFn\(\);/);

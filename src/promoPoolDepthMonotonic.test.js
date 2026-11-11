@@ -114,8 +114,8 @@ async function bestPick(scope, fixed) {
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /const poolLadders = usePromoPageLadders\(poolDepthList, poolDepthList\.length, minLegDepth, dropThinPoolLegs\)/);
-  assert.match(app, /depthPricePoolLegs\(parlayLegPoolStored, \{[^}]*minLegDepth \}, poolLadders\)/);
-  assert.match(app, /if \(!slateReady \|\| poolDepthPending \|\| !promoLegsReady\)/);
+  assert.match(app, /depthPricePoolLegsChunked\(parlayLegPoolStored, \{[^}]*minLegDepth \}, poolLadders/);
+  assert.match(app, /if \(!slateReady \|\| poolDepthPending \|\| poolPricePending \|\| !promoLegsReady\)/);
 }
 
 console.log("promoPoolDepthMonotonic.test.js ok");
