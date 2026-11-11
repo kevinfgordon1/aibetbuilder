@@ -35,12 +35,37 @@ function wrapText(ctx, text, x, y, maxW, lineH) {
   if (line) ctx.fillText(line, x, yy);
 }
 
-function drawChart(ctx, points, ox, oy, w, h) {
-  const layout = profitChartLayout(points, { width: w, height: h, padL: 84, padR: 24, padT: 20, padB: 40 });
+
+function rangeFromLabel(label) {
+  if (label === "Today") return "today";
+  if (label === "Last 7 days") return "7d";
+  if (label === "Last 30 days") return "30d";
+  return "all";
+}
+
+function strokePath(ctx, points, ox, oy) {
+  if (!points || !points.length) return;
+  ctx.beginPath();
+  ctx.moveTo(ox + points[0].x, oy + points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(ox + points[i].x, oy + points[i].y);
+}
+
+function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } = {}) {
+  const layout = profitChartLayout(points, { width: w, height: h, padL: 88, padR: 28, padT: 16, padB: 44, range });
   if (!layout) return;
   const X = (p) => ox + p.x;
   const Y = (p) => oy + p.y;
   const last = layout.line[layout.line.length - 1];
+
+  for (const tick of layout.yTicks || []) {
+    ctx.beginPath();
+    ctx.moveTo(ox + layout.padL, oy + tick.y);
+    ctx.lineTo(ox + layout.width - layout.padR, oy + tick.y);
+    ctx.strokeStyle = tick.zero ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.08)";
+    ctx.lineWidth = tick.zero ? 2 : 1;
+    ctx.stroke();
+  }
+
   ctx.beginPath();
   ctx.moveTo(X(layout.line[0]), Y(layout.line[0]));
   for (let i = 1; i < layout.line.length; i++) ctx.lineTo(X(layout.line[i]), Y(layout.line[i]));
@@ -49,44 +74,71 @@ function drawChart(ctx, points, ox, oy, w, h) {
   ctx.fillStyle = "rgba(212,175,55,0.18)";
   ctx.fill();
 
-  ctx.beginPath();
-  ctx.moveTo(ox + layout.padL, oy + layout.zeroY);
-  ctx.lineTo(ox + layout.width - layout.padR, oy + layout.zeroY);
-  ctx.strokeStyle = "rgba(255,255,255,0.16)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(X(layout.line[0]), Y(layout.line[0]));
-  for (let i = 1; i < layout.line.length; i++) ctx.lineTo(X(layout.line[i]), Y(layout.line[i]));
+  strokePath(ctx, layout.line, ox, oy);
   ctx.strokeStyle = "#f5d76e";
   ctx.lineWidth = 4;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+  if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
   ctx.stroke();
+
+  if (hasEv && layout.evLine && layout.evLine.length) {
+    strokePath(ctx, layout.evLine, ox, oy);
+    ctx.strokeStyle = "#9ca3af";
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash([7, 6]);
+    ctx.stroke();
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+  }
 
   ctx.beginPath();
   ctx.arc(X(layout.end), Y(layout.end), 7, 0, Math.PI * 2);
   ctx.fillStyle = "#f5d76e";
   ctx.fill();
 
-  ctx.font = "600 20px Inter, system-ui, sans-serif";
+  ctx.font = "600 18px Inter, system-ui, sans-serif";
   ctx.fillStyle = "#8a8f98";
   ctx.textBaseline = "middle";
-  for (const lb of layout.labels) {
-    ctx.textAlign = lb.anchor === "end" ? "right" : "left";
-    ctx.fillText(lb.text, ox + lb.x, oy + lb.y);
+  ctx.textAlign = "right";
+  for (const tick of layout.yTicks || []) {
+    ctx.fillText(tick.text, ox + layout.padL - 10, oy + tick.y);
   }
   ctx.textBaseline = "alphabetic";
-  ctx.font = "500 20px Inter, system-ui, sans-serif";
+  ctx.font = "500 18px Inter, system-ui, sans-serif";
   ctx.fillStyle = "#6b7280";
-  ctx.textAlign = "left";
-  if (layout.firstDate) ctx.fillText(layout.firstDate, ox + layout.padL, oy + layout.height - 10);
-  if (layout.lastDate && layout.lastDate !== layout.firstDate) {
-    ctx.textAlign = "right";
-    ctx.fillText(layout.lastDate, ox + layout.width - layout.padR, oy + layout.height - 10);
+  for (const tick of layout.xTicks || []) {
+    ctx.textAlign = tick.anchor === "end" ? "right" : tick.anchor === "start" ? "left" : "center";
+    ctx.fillText(tick.text, ox + tick.x, oy + layout.height - 8);
   }
   ctx.textAlign = "left";
+}
+
+function drawLegend(ctx, x, y, hasEv) {
+  if (!hasEv) return 0;
+  const items = [
+    { label: "Profit", color: "#f5d76e", dashed: false },
+    { label: "EV", color: "#9ca3af", dashed: true },
+  ];
+  ctx.font = "600 20px Inter, system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  let xx = x;
+  for (const item of items) {
+    ctx.strokeStyle = item.color;
+    ctx.lineWidth = 3;
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash(item.dashed ? [6, 5] : []);
+    ctx.beginPath();
+    ctx.moveTo(xx, y);
+    ctx.lineTo(xx + 22, y);
+    ctx.stroke();
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+    ctx.fillStyle = "#8a8f98";
+    ctx.fillText(item.label, xx + 28, y);
+    xx += 28 + ctx.measureText(item.label).width + 22;
+  }
+  return 28;
 }
 
 /** Draw the share card. Only reads the fields profitImageModel returns. */
@@ -128,11 +180,13 @@ export function paintProfitImage(ctx, model, width = W, height = H) {
   const meta = [m.countText, m.rangeLabel, m.spanText].filter(Boolean).join("   ·   ");
   ctx.fillText(meta, left, y + 216);
 
-  const chartTop = y + 250;
+  const legendY = y + 246;
+  const legendH = drawLegend(ctx, left, legendY, !!m.hasEv);
+  const chartTop = y + 250 + legendH;
   const chartW = w - 96;
-  const chartH = 340;
+  const chartH = legendH ? 312 : 340;
   if (m.points && m.points.length) {
-    drawChart(ctx, m.points, left, chartTop, chartW, chartH);
+    drawChart(ctx, m.points, left, chartTop, chartW, chartH, { range: rangeFromLabel(m.rangeLabel), hasEv: !!m.hasEv });
   } else {
     ctx.fillStyle = "#8a8f98";
     ctx.font = "500 26px Inter, system-ui, sans-serif";

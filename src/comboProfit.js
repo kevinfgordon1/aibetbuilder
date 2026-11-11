@@ -2,10 +2,11 @@
 // Input is the statement lines History already built for the signed-in user
 // (combo_parlays filtered to that user). No queries, no other users' rows.
 
-import { formatStatementDate, lineInDateWindow, statementDateWindow } from "./comboStatement.js";
+import { formatStatementDate, lineInDateWindow, normalizeStatementDateRange, statementDateWindow, STATEMENT_TZ } from "./comboStatement.js";
 import { signedDollars } from "./comboLockView.js";
 
 export const PROFIT_CHART_MAX_POINTS = 360;
+export const PROFIT_CHART_HEIGHT = 128;
 
 function r2(x) {
   return Math.round(Number(x) * 100) / 100;
@@ -28,6 +29,12 @@ function linePnl(line) {
   return Number.isFinite(n) ? n : null;
 }
 
+function lineExpectedPnl(line) {
+  if (!line || line.expectedPnl == null || line.expectedPnl === "") return null;
+  const n = typeof line.expectedPnl === "string" ? parseFloat(line.expectedPnl) : Number(line.expectedPnl);
+  return Number.isFinite(n) ? n : null;
+}
+
 function lineAt(line) {
   return (line && (line.sortAt || line.createdAt || line.at)) || null;
 }
@@ -36,6 +43,9 @@ function lineAt(line) {
  * Running realized P/L for settled locks, oldest settlement first.
  * Date windows match the History "When" filter. Open locks are left out.
  * `total` is the same cents-rounded sum History uses for net profit.
+ * When every visible settled lock has fair-odds expected P/L, `hasEv` is true
+ * and each point also carries `ev` / `cumulativeEv`. Missing fair odds means
+ * no EV line — we do not invent one.
  */
 export function cumulativeRealizedProfit(lines, { dateRange = "all", now } = {}) {
   const window = statementDateWindow(dateRange, now);
@@ -45,7 +55,7 @@ export function cumulativeRealizedProfit(lines, { dateRange = "all", now } = {})
     if (pnl == null) continue;
     if (!lineInDateWindow(line, window)) continue;
     const at = lineAt(line);
-    settled.push({ line, pnl, at, ms: tsMs(at) });
+    settled.push({ line, pnl, ev: lineExpectedPnl(line), at, ms: tsMs(at) });
   }
   settled.sort((a, b) => {
     const ta = a.ms == null ? 0 : a.ms;
@@ -56,18 +66,40 @@ export function cumulativeRealizedProfit(lines, { dateRange = "all", now } = {})
     return ia < ib ? -1 : ia > ib ? 1 : 0;
   });
   let sum = 0;
-  const points = settled.map(({ line, pnl, at }) => {
+  let evSum = 0;
+  let evKnown = 0;
+  const points = settled.map(({ line, pnl, ev, at }) => {
     sum += pnl;
-    return {
+    const point = {
       id: line.id,
       at,
       pnl: r2(pnl),
       cumulative: r2(sum),
+      ev: ev == null ? null : r2(ev),
+      cumulativeEv: null,
     };
+    if (ev != null) {
+      evSum += ev;
+      evKnown += 1;
+      point.cumulativeEv = r2(evSum);
+    }
+    return point;
   });
+  const hasEv = points.length > 0 && evKnown === points.length;
+  if (hasEv) {
+    let running = 0;
+    for (const point of points) {
+      running += point.ev;
+      point.cumulativeEv = r2(running);
+    }
+  } else {
+    for (const point of points) point.cumulativeEv = null;
+  }
   return {
     points,
     total: points.length ? r2(sum) : 0,
+    evTotal: hasEv ? r2(evSum) : null,
+    hasEv,
     count: points.length,
     range: window.preset,
   };
@@ -102,18 +134,263 @@ const RANGE_LABEL = {
 
 export const PROFIT_IMAGE_FILENAME = "combo-locks-running-profit.png";
 
-function axisDollars(v) {
+const ET_PARTS_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: STATEMENT_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+const ET_HOUR_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: STATEMENT_TZ,
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
+const ET_DATE_YEAR_FMT = new Intl.DateTimeFormat("en-US", {
+  timeZone: STATEMENT_TZ,
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+function etParts(ms) {
+  const parts = ET_PARTS_FMT.formatToParts(new Date(ms));
+  const get = (type) => {
+    const p = parts.find((x) => x.type === type);
+    return p ? p.value : "";
+  };
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+  };
+}
+
+/** UTC instant for an America/New_York wall-clock date and time. */
+export function etWallToUtc(year, month, day, hour = 0, minute = 0) {
+  let utc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  for (let i = 0; i < 4; i++) {
+    const w = etParts(utc);
+    const asIf = Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, 0);
+    const wanted = Date.UTC(year, month - 1, day, hour, minute, 0);
+    const diff = wanted - asIf;
+    if (diff === 0) return utc;
+    utc += diff;
+  }
+  return utc;
+}
+
+function startOfEtDay(ms) {
+  const w = etParts(ms);
+  return etWallToUtc(w.year, w.month, w.day, 0, 0);
+}
+
+function addEtDays(ms, days) {
+  const w = etParts(ms);
+  const rolled = new Date(Date.UTC(w.year, w.month - 1, w.day + days));
+  return etWallToUtc(rolled.getUTCFullYear(), rolled.getUTCMonth() + 1, rolled.getUTCDate(), 0, 0);
+}
+
+function addEtHours(ms, hours) {
+  const w = etParts(ms);
+  let h = w.hour + hours;
+  let dayDelta = 0;
+  while (h >= 24) { h -= 24; dayDelta += 1; }
+  while (h < 0) { h += 24; dayDelta -= 1; }
+  const rolled = new Date(Date.UTC(w.year, w.month - 1, w.day + dayDelta));
+  return etWallToUtc(rolled.getUTCFullYear(), rolled.getUTCMonth() + 1, rolled.getUTCDate(), h, 0);
+}
+
+function addEtMonths(ms, months) {
+  const w = etParts(ms);
+  const rolled = new Date(Date.UTC(w.year, w.month - 1 + months, 1));
+  return etWallToUtc(rolled.getUTCFullYear(), rolled.getUTCMonth() + 1, 1, 0, 0);
+}
+
+function formatEtHour(ms) {
+  const parts = ET_HOUR_FMT.formatToParts(new Date(ms));
+  const get = (type) => {
+    const p = parts.find((x) => x.type === type);
+    return p ? p.value : "";
+  };
+  const hour = get("hour");
+  const minute = get("minute");
+  const ap = (get("dayPeriod") || "").replace(/\./g, "").toUpperCase();
+  if (minute === "00") return `${hour} ${ap}`;
+  return `${hour}:${minute} ${ap}`;
+}
+
+function formatEtDate(ms, { year = false } = {}) {
+  if (year) return ET_DATE_YEAR_FMT.format(new Date(ms));
+  return formatStatementDate(ms);
+}
+
+function yearSpan(t0, t1) {
+  return etParts(t0).year !== etParts(t1).year;
+}
+
+function pickStep(span, candidates, target = 6) {
+  let best = candidates[0];
+  let bestScore = Infinity;
+  for (const step of candidates) {
+    if (!(step > 0)) continue;
+    const n = Math.floor(span / step) + 1;
+    const overflow = n < 5 ? (5 - n) : n > 8 ? (n - 8) : 0;
+    const score = overflow * 10 + Math.abs(n - target);
+    if (score < bestScore) {
+      bestScore = score;
+      best = step;
+    }
+  }
+  return best;
+}
+
+function buildHourTicks(t0, t1) {
+  const hours = Math.max(1, (t1 - t0) / 3600000);
+  const step = pickStep(hours, [1, 2, 3, 4, 6, 8, 12]);
+  const w = etParts(t0);
+  const snapped = Math.floor(w.hour / step) * step;
+  let t = etWallToUtc(w.year, w.month, w.day, snapped, 0);
+  if (t < t0 - 1000) t = addEtHours(t, step);
+  const ticks = [];
+  for (let i = 0; i < 48 && t <= t1 + 1000; i++) {
+    ticks.push({ ms: t, text: formatEtHour(t) });
+    t = addEtHours(t, step);
+  }
+  return ticks;
+}
+
+function buildDayTicks(t0, t1, stepDays, withYear) {
+  let t = startOfEtDay(t0);
+  if (t < t0 - 1000) t = addEtDays(t, 1);
+  const ticks = [];
+  for (let i = 0; i < 80 && t <= t1 + 12 * 3600000; i++) {
+    ticks.push({ ms: t, text: formatEtDate(t, { year: withYear }) });
+    t = addEtDays(t, stepDays);
+  }
+  return ticks;
+}
+
+function buildMonthTicks(t0, t1, stepMonths, withYear) {
+  const w = etParts(t0);
+  let t = etWallToUtc(w.year, w.month, 1, 0, 0);
+  if (t < t0 - 1000) t = addEtMonths(t, stepMonths);
+  const ticks = [];
+  for (let i = 0; i < 48 && t <= t1 + 12 * 3600000; i++) {
+    ticks.push({ ms: t, text: formatEtDate(t, { year: withYear }) });
+    t = addEtMonths(t, stepMonths);
+  }
+  return ticks;
+}
+
+export function profitChartXTicks(t0, t1, range = "all") {
+  if (t0 == null || t1 == null) return [];
+  if (!(t1 > t0)) {
+    const preset = normalizeStatementDateRange(range);
+    const text = preset === "today" ? formatEtHour(t0) : formatEtDate(t0);
+    return [{ ms: t0, text }];
+  }
+  const preset = normalizeStatementDateRange(range);
+  const spanHours = (t1 - t0) / 3600000;
+  const spanDays = (t1 - t0) / 86400000;
+  const withYear = yearSpan(t0, t1);
+  if (preset === "today" || spanHours <= 36) return buildHourTicks(t0, t1);
+  if (preset === "7d" || spanDays <= 10) return buildDayTicks(t0, t1, 1, withYear);
+  if (preset === "30d" || spanDays <= 45) return buildDayTicks(t0, t1, pickStep(spanDays, [2, 3, 4, 5, 7]), withYear);
+  if (spanDays <= 210) return buildDayTicks(t0, t1, pickStep(spanDays, [7, 10, 14, 15, 21, 30]), withYear);
+  return buildMonthTicks(t0, t1, pickStep(spanDays / 30.4, [1, 2, 3, 4, 6]), withYear);
+}
+
+export function profitChartTimeDomain(points, { range = "all", now } = {}) {
+  const times = (points || []).map((p) => tsMs(p && p.at)).filter((t) => t != null);
+  const data0 = times.length ? Math.min(...times) : null;
+  const data1 = times.length ? Math.max(...times) : null;
+  const at = now instanceof Date ? now : now != null ? new Date(now) : new Date();
+  const atMs = at.getTime();
+  const preset = normalizeStatementDateRange(range);
+  if (preset === "today") {
+    const start = startOfEtDay(atMs);
+    const end = Math.max(atMs, data1 || start);
+    return { t0: start, t1: end > start ? end : start + 1 };
+  }
+  if (preset === "7d" || preset === "30d") {
+    const days = preset === "7d" ? 7 : 30;
+    const start = atMs - days * 24 * 60 * 60 * 1000;
+    const end = Math.max(atMs, data1 || start);
+    return { t0: start, t1: end > start ? end : start + 1 };
+  }
+  if (data0 == null) return { t0: null, t1: null };
+  return { t0: data0, t1: data1 == null || data1 === data0 ? data0 : data1 };
+}
+
+/** Axis dollar labels: $0, $10k, $20k, -$10k. No leading + (the header already has the total). */
+export function axisDollars(v) {
   const n = Number(v);
   if (!Number.isFinite(n) || Math.abs(n) < 0.005) return "$0";
-  const sign = n < 0 ? "-" : "+";
+  const sign = n < 0 ? "-" : "";
   const abs = Math.abs(n);
   let body;
   if (abs >= 1000000) body = (abs / 1000000).toFixed(abs >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "M";
   else if (abs >= 10000) body = Math.round(abs / 1000) + "k";
-  else if (abs >= 1000) body = (abs / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  else if (abs >= 1000) body = (abs / 1000).toFixed(abs % 1000 === 0 ? 0 : 1).replace(/\.0$/, "") + "k";
   else if (abs >= 100) body = String(Math.round(abs));
+  else if (Math.abs(abs - Math.round(abs)) < 0.05) body = String(Math.round(abs));
   else body = abs.toFixed(abs < 10 ? 2 : 0);
   return sign + "$" + body;
+}
+
+function niceNum(span, round) {
+  const abs = Math.abs(span) || 1;
+  const exp = Math.floor(Math.log10(abs));
+  const f = abs / Math.pow(10, exp);
+  let nf;
+  if (round) {
+    if (f < 1.5) nf = 1;
+    else if (f < 3) nf = 2;
+    else if (f < 7) nf = 5;
+    else nf = 10;
+  } else {
+    if (f <= 1) nf = 1;
+    else if (f <= 2) nf = 2;
+    else if (f <= 5) nf = 5;
+    else nf = 10;
+  }
+  return nf * Math.pow(10, exp);
+}
+
+function roundToStep(v, step) {
+  return Math.round(v / step) * step;
+}
+
+/** Nice inclusive y-tick values, always including 0 when the range crosses or starts at 0. */
+export function profitChartYTicks(lo, hi, target = 6) {
+  let a = Number(lo);
+  let b = Number(hi);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return [0];
+  if (b < a) { const t = a; a = b; b = t; }
+  if (b - a < 0.01) { a -= 1; b += 1; }
+  if (a > 0) a = 0;
+  if (b < 0) b = 0;
+  const rawSpan = b - a || 1;
+  const step = niceNum(rawSpan / Math.max(2, target - 1), true);
+  const start = Math.floor(a / step) * step;
+  const end = Math.ceil(b / step) * step;
+  const ticks = [];
+  // Guard float dust so 0 is exactly 0.
+  for (let v = start, i = 0; v <= end + step / 2 && i < 16; v = start + (++i) * step) {
+    const n = Math.abs(v) < step * 1e-9 ? 0 : roundToStep(v, step);
+    if (!ticks.length || Math.abs(ticks[ticks.length - 1] - n) > step * 0.4) ticks.push(n);
+  }
+  if (!ticks.includes(0) && start <= 0 && end >= 0) ticks.push(0);
+  ticks.sort((x, y) => x - y);
+  return { ticks, lo: ticks[0], hi: ticks[ticks.length - 1] };
 }
 
 /**
@@ -122,63 +399,105 @@ function axisDollars(v) {
  */
 export function profitChartLayout(points, box = {}) {
   const width = box.width || 640;
-  const height = box.height || 176;
-  const padL = box.padL != null ? box.padL : 56;
-  const padR = box.padR != null ? box.padR : 16;
-  const padT = box.padT != null ? box.padT : 16;
-  const padB = box.padB != null ? box.padB : 28;
+  const height = box.height || PROFIT_CHART_HEIGHT;
+  const padL = box.padL != null ? box.padL : 48;
+  const padR = box.padR != null ? box.padR : 14;
+  const padT = box.padT != null ? box.padT : 10;
+  const padB = box.padB != null ? box.padB : 22;
+  const range = box.range || "all";
+  const now = box.now;
   const shown = sampleProfitPoints(points);
   if (!shown.length) return null;
+  const hasEv = shown.every((p) => p && p.cumulativeEv != null && Number.isFinite(Number(p.cumulativeEv)));
   const vals = shown.map((p) => Number(p.cumulative) || 0);
-  let lo = Math.min(0, ...vals);
-  let hi = Math.max(0, ...vals);
-  if (hi - lo < 0.01) { lo -= 1; hi += 1; }
+  if (hasEv) {
+    for (const p of shown) vals.push(Number(p.cumulativeEv) || 0);
+  }
+  let rawLo = Math.min(0, ...vals);
+  let rawHi = Math.max(0, ...vals);
+  if (rawHi - rawLo < 0.01) { rawLo -= 1; rawHi += 1; }
+  const yScale = profitChartYTicks(rawLo, rawHi, 6);
+  const lo = yScale.lo;
+  const hi = yScale.hi;
   const span = hi - lo || 1;
   const innerW = Math.max(1, width - padL - padR);
   const innerH = Math.max(1, height - padT - padB);
   const yAt = (v) => padT + (1 - (v - lo) / span) * innerH;
-  const times = shown.map((p) => tsMs(p && p.at));
-  const known = times.filter((t) => t != null);
-  const t0 = known.length ? Math.min(...known) : null;
-  const t1 = known.length ? Math.max(...known) : null;
+  const domain = profitChartTimeDomain(shown, { range, now });
+  const t0 = domain.t0;
+  const t1 = domain.t1;
   const tSpan = t0 != null && t1 != null ? t1 - t0 : 0;
   const xAt = (p, i) => {
     const ms = tsMs(p && p.at);
     if (!(tSpan > 0) || ms == null) {
       return padL + (shown.length === 1 ? innerW / 2 : (i / Math.max(1, shown.length - 1)) * innerW);
     }
-    return padL + ((ms - t0) / tSpan) * innerW;
+    const x = padL + ((ms - t0) / tSpan) * innerW;
+    return Math.min(padL + innerW, Math.max(padL, x));
   };
   const coords = shown.map((p, i) => ({ x: xAt(p, i), y: yAt(Number(p.cumulative) || 0) }));
+  const evCoords = hasEv ? shown.map((p, i) => ({ x: xAt(p, i), y: yAt(Number(p.cumulativeEv) || 0) })) : [];
   const zeroY = yAt(0);
-  const hiY = yAt(hi);
-  const loY = yAt(lo);
-  const near = (a, b) => Math.abs(a - b) < 16;
-  const labels = [{ text: axisDollars(hi), x: padL - 8, y: hiY, anchor: "end" }];
-  if (!near(zeroY, hiY) && !near(zeroY, loY)) labels.push({ text: "$0", x: padL - 8, y: zeroY, anchor: "end" });
-  if (Math.abs(lo) >= 0.005 && !near(loY, hiY) && !near(loY, zeroY)) {
-    labels.push({ text: axisDollars(lo), x: padL - 8, y: loY, anchor: "end" });
+  const startX = tSpan > 0 ? padL : coords[0].x;
+  const line = [{ x: startX, y: zeroY }, ...coords];
+  const evLine = hasEv ? [{ x: startX, y: zeroY }, ...evCoords] : [];
+  const yTicks = yScale.ticks.map((value) => ({
+    value,
+    text: axisDollars(value),
+    y: yAt(value),
+    zero: value === 0,
+  }));
+  const rawX = tSpan > 0 ? profitChartXTicks(t0, t1, range) : [];
+  const minXGap = 36;
+  const xTicks = [];
+  for (const tick of rawX) {
+    const x = padL + ((tick.ms - t0) / tSpan) * innerW;
+    if (x < padL - 8 || x > padL + innerW + 8) continue;
+    if (xTicks.length && Math.abs(x - xTicks[xTicks.length - 1].x) < minXGap) continue;
+    const nearLeft = x - padL < 8;
+    const nearRight = (padL + innerW) - x < 8;
+    xTicks.push({
+      text: tick.text,
+      x,
+      y: height - 6,
+      anchor: nearLeft ? "start" : nearRight ? "end" : "middle",
+    });
+  }
+  if (!xTicks.length) {
+    const firstDate = formatStatementDate(shown[0].at);
+    const lastDate = formatStatementDate(shown[shown.length - 1].at);
+    if (firstDate) xTicks.push({ text: firstDate, x: padL, y: height - 6, anchor: "start" });
+    if (lastDate && lastDate !== firstDate) xTicks.push({ text: lastDate, x: padL + innerW, y: height - 6, anchor: "end" });
   }
   return {
     width,
     height,
     padL,
     padR,
-    line: [{ x: coords[0].x, y: zeroY }, ...coords],
+    padT,
+    padB,
+    line,
+    evLine,
+    hasEv,
     zeroY,
-    labels,
+    yTicks,
+    xTicks,
+    // Kept for older callers / aria text.
+    labels: yTicks.map((t) => ({ text: t.text, x: padL - 8, y: t.y, anchor: "end" })),
     firstDate: formatStatementDate(shown[0].at),
     lastDate: formatStatementDate(shown[shown.length - 1].at),
     end: coords[coords.length - 1],
+    evEnd: hasEv ? evCoords[evCoords.length - 1] : null,
   };
 }
 
 /** Plain card for the share image. No account, name, or email fields. */
-export function profitImageModel({ total = 0, count = 0, range = "all", points = [], emptyText = "" } = {}) {
+export function profitImageModel({ total = 0, count = 0, range = "all", points = [], emptyText = "", evTotal = null, hasEv = false } = {}) {
   const n = Math.max(0, Number(count) || 0);
   const series = n ? (points || []) : [];
   const first = series.length ? formatStatementDate(series[0].at) : "";
   const last = series.length ? formatStatementDate(series[series.length - 1].at) : "";
+  const evOn = !!(hasEv && n && series.some((p) => p && p.cumulativeEv != null));
   return {
     kicker: "Combo Locks",
     title: "Running profit",
@@ -189,6 +508,8 @@ export function profitImageModel({ total = 0, count = 0, range = "all", points =
     spanText: first && last && first !== last ? `${first} – ${last}` : (first || ""),
     emptyText: n ? "" : (emptyText || "No settled locks yet."),
     points: series,
+    hasEv: evOn,
+    evTotalText: evOn && evTotal != null ? signedDollars(evTotal) : "",
     brand: "aibetbuilder.io",
   };
 }

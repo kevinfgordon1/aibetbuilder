@@ -4,8 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   PROFIT_IMAGE_FILENAME,
+  axisDollars,
   cumulativeRealizedProfit,
+  etWallToUtc,
   profitChartLayout,
+  profitChartTimeDomain,
+  profitChartXTicks,
+  profitChartYTicks,
   profitImageCanCopy,
   profitImageCanShareFiles,
   profitImageModel,
@@ -151,8 +156,10 @@ function line({ id, pnl, settled = true, at }) {
     ],
   });
   assert.deepEqual(Object.keys(model).sort(), [
-    "brand", "countText", "emptyText", "kicker", "points", "rangeLabel", "spanText", "title", "tone", "totalText",
+    "brand", "countText", "emptyText", "evTotalText", "hasEv", "kicker", "points", "rangeLabel", "spanText", "title", "tone", "totalText",
   ]);
+  assert.equal(model.hasEv, false);
+  assert.equal(model.evTotalText, "");
   assert.equal(model.totalText, "+$35.00");
   assert.equal(model.tone, "pos");
   assert.equal(model.rangeLabel, "All time");
@@ -184,6 +191,125 @@ function line({ id, pnl, settled = true, at }) {
   assert.equal(profitImageCanCopy({ clipboard: {} }, function ClipboardItem() {}), false);
   assert.equal(profitImageCanCopy(null, function ClipboardItem() {}), false);
 }
+
+
+{
+  const now = new Date("2026-09-12T16:00:00Z");
+  const stmt = buildComboStatement({
+    parlays: [
+      { id: "won", label: "Won", parlay_stake: 100, parlay_american: 650, fill_american: 610, fair_american: 400, max_contracts: 750, kalshi_result: "no", created_at: "2026-09-04T00:00:00Z", settled_at: "2026-09-05T00:00:00Z", archived_at: "2026-09-05T00:00:00Z" },
+      { id: "lost", label: "Lost", parlay_stake: 100, parlay_american: 650, fill_american: 610, fair_american: 400, max_contracts: 750, kalshi_result: "yes", created_at: "2026-09-10T00:00:00Z", settled_at: "2026-09-11T00:00:00Z", archived_at: "2026-09-11T00:00:00Z" },
+    ],
+  });
+  // Unhedged $100 at +650, fair +400: P(hit)=0.2, EV = 0.2*650 + 0.8*(-100) = $50 each.
+  assert.equal(stmt.lines[0].expectedPnl, 50);
+  assert.equal(stmt.lines[1].expectedPnl, 50);
+  const curve = cumulativeRealizedProfit(stmt.lines, { now });
+  assert.equal(curve.hasEv, true);
+  assert.equal(curve.evTotal, 100);
+  assert.deepEqual(curve.points.map((p) => p.cumulativeEv), [50, 100]);
+  assert.equal(cumulativeRealizedProfit(stmt.lines.map((l) => ({ ...l, expectedPnl: l.id === "lost" ? null : l.expectedPnl })), { now }).hasEv, false);
+}
+
+{
+  const emptyFair = buildComboStatement({
+    parlays: [
+      { id: "won", label: "Won", parlay_stake: 100, parlay_american: 650, fill_american: 610, max_contracts: 750, kalshi_result: "no", created_at: "2026-09-04T00:00:00Z", settled_at: "2026-09-05T00:00:00Z", archived_at: "2026-09-05T00:00:00Z" },
+    ],
+  });
+  assert.equal(emptyFair.lines[0].expectedPnl, null);
+  assert.equal(cumulativeRealizedProfit(emptyFair.lines).hasEv, false);
+}
+
+{
+  assert.equal(axisDollars(0), "$0");
+  assert.equal(axisDollars(10000), "$10k");
+  assert.equal(axisDollars(20000), "$20k");
+  assert.equal(axisDollars(-10000), "-$10k");
+  assert.equal(axisDollars(2500), "$2.5k");
+  assert.equal(axisDollars(62_000), "$62k");
+  const y = profitChartYTicks(0, 62000);
+  assert.ok(y.ticks.includes(0));
+  assert.ok(y.ticks.length >= 5 && y.ticks.length <= 8, "y ticks " + y.ticks);
+  assert.ok(y.ticks.every((t, i) => i === 0 || t > y.ticks[i - 1]));
+  const neg = profitChartYTicks(-25000, 10000);
+  assert.ok(neg.ticks.includes(0));
+  assert.ok(neg.ticks[0] < 0);
+  assert.ok(neg.ticks[neg.ticks.length - 1] > 0);
+}
+
+{
+  // 12:00 PM EDT on Sep 12, 2026 = 16:00Z; midnight ET is 04:00Z.
+  assert.equal(etWallToUtc(2026, 9, 12, 0, 0), Date.parse("2026-09-12T04:00:00Z"));
+  assert.equal(etWallToUtc(2026, 11, 11, 0, 0), Date.parse("2026-11-11T05:00:00Z"));
+  const now = new Date("2026-09-12T16:00:00Z");
+  const today = profitChartTimeDomain(
+    [{ at: "2026-09-12T15:00:00Z", cumulative: 25 }],
+    { range: "today", now },
+  );
+  assert.equal(today.t0, Date.parse("2026-09-12T04:00:00Z"));
+  assert.equal(today.t1, now.getTime());
+  const hours = profitChartXTicks(today.t0, today.t1, "today");
+  assert.ok(hours.length >= 5 && hours.length <= 8, "today ticks " + hours.map((t) => t.text).join(","));
+  assert.ok(hours.every((t) => /AM|PM/.test(t.text)));
+  const week = profitChartTimeDomain(
+    [{ at: "2026-09-08T15:00:00Z", cumulative: 10 }, { at: "2026-09-12T15:00:00Z", cumulative: 42 }],
+    { range: "7d", now },
+  );
+  const days = profitChartXTicks(week.t0, week.t1, "7d");
+  assert.ok(days.length >= 5 && days.length <= 8, "7d ticks " + days.map((t) => t.text).join(","));
+  assert.ok(days.every((t) => !/AM|PM/.test(t.text)));
+  const month = profitChartXTicks(
+    Date.parse("2026-08-13T16:00:00Z"),
+    Date.parse("2026-09-12T16:00:00Z"),
+    "30d",
+  );
+  assert.ok(month.length >= 5 && month.length <= 8, "30d ticks " + month.map((t) => t.text).join(","));
+}
+
+{
+  const now = new Date("2026-11-10T17:00:00Z");
+  const points = [];
+  for (let d = 1; d <= 20; d++) {
+    const day = String(d).padStart(2, "0");
+    points.push({
+      at: `2026-10-${day}T16:00:00Z`,
+      cumulative: d * 3000,
+      ev: 2000,
+      cumulativeEv: d * 2000,
+    });
+  }
+  const layout = profitChartLayout(points, { range: "all", now, height: 128 });
+  assert.ok(layout.yTicks.length >= 5, "y tick count " + layout.yTicks.length);
+  assert.ok(layout.yTicks.some((t) => t.zero && t.text === "$0"));
+  assert.ok(layout.yTicks.some((t) => /k/.test(t.text)));
+  assert.ok(layout.xTicks.length >= 5 && layout.xTicks.length <= 8, "x ticks " + layout.xTicks.map((t) => t.text).join(","));
+  assert.equal(layout.hasEv, true);
+  assert.ok(layout.evLine.length >= 2);
+  assert.equal(layout.height, 128);
+  assert.ok(!JSON.stringify(layout.labels).includes("+62") && !layout.yTicks.some((t) => t.text.startsWith("+$")), "no +$ overlay on the plot");
+  const evOff = profitChartLayout(points.map((p) => ({ ...p, cumulativeEv: null })), { range: "all" });
+  assert.equal(evOff.hasEv, false);
+  assert.deepEqual(evOff.evLine, []);
+}
+
+{
+  const model = profitImageModel({
+    total: 35000,
+    count: 4,
+    range: "all",
+    hasEv: true,
+    evTotal: 28000,
+    points: [
+      { cumulative: 10000, cumulativeEv: 8000, at: "2026-10-01T16:00:00Z" },
+      { cumulative: 35000, cumulativeEv: 28000, at: "2026-11-09T16:00:00Z" },
+    ],
+  });
+  assert.equal(model.hasEv, true);
+  assert.equal(model.evTotalText, "+$28,000.00");
+  assert.doesNotMatch(JSON.stringify(model), /@|Kevin|gmail/i);
+}
+
 
 {
   const profitSrc = fs.readFileSync(path.join(dir, "comboProfit.js"), "utf8");
