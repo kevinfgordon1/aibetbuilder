@@ -3,10 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  EV_DASH_PX,
+  EV_STROKE_PX,
+  PROFIT_DOT_PX,
   PROFIT_IMAGE_FILENAME,
+  PROFIT_STROKE_PX,
   axisDollars,
   cumulativeRealizedProfit,
   etWallToUtc,
+  nearestProfitIndex,
   profitChartLayout,
   profitChartTimeDomain,
   profitChartXTicks,
@@ -15,11 +20,13 @@ import {
   profitImageCanShareFiles,
   profitImageModel,
   profitShareDelivery,
+  profitTipBox,
+  profitTipDollars,
   sampleProfitPoints,
   stepLine,
 } from "./comboProfit.js";
 import { buildComboStatement, filterStatementLines } from "./comboStatement.js";
-import { historyTotals } from "./comboLockView.js";
+import { etStamp, historyTotals } from "./comboLockView.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -360,6 +367,12 @@ function line({ id, pnl, settled = true, at }) {
     const a = layout.line[i - 1], b = layout.line[i];
     assert.ok(a.x === b.x || a.y === b.y, "profit path is a step line");
   }
+  assert.equal(layout.samples.length, 1144);
+  assert.equal(layout.axisY, layout.height - layout.padB);
+  assert.ok(layout.xTick >= 3 && layout.xTick < layout.padB);
+  assert.equal(nearestProfitIndex(layout.samples, layout.samples[800].x), 800);
+  assert.equal(nearestProfitIndex(layout.samples, layout.samples[0].x - 20), 0);
+  assert.equal(nearestProfitIndex(layout.samples, layout.samples[1143].x + 20), 1143);
 }
 
 {
@@ -395,6 +408,21 @@ function line({ id, pnl, settled = true, at }) {
   assert.match(viewSrc, /export function ComboProfitChart/);
   assert.match(viewSrc, />Share image</);
   assert.match(viewSrc, />Copy image</);
+  const svgFn = viewSrc.slice(viewSrc.indexOf("function ProfitSvg"), viewSrc.indexOf("export function ComboProfitChart"));
+  assert.doesNotMatch(svgFn, /useState/, "hover updates the crosshair in place");
+  assert.match(svgFn, /nearestProfitIndex/);
+  assert.match(svgFn, /onPointerLeave/);
+  assert.match(svgFn, /pointerType === "touch"/);
+  assert.match(svgFn, /etStamp/);
+  assert.match(svgFn, /profitTipDollars/);
+  assert.match(svgFn, /profitTipBox/);
+  assert.match(svgFn, /vectorEffect="non-scaling-stroke"/);
+  assert.match(svgFn, /PROFIT_STROKE_PX/);
+  assert.match(svgFn, /EV_STROKE_PX/);
+  assert.doesNotMatch(svgFn, /strokeDasharray="4 3"/);
+  assert.doesNotMatch(svgFn, /strokeWidth="2"/);
+  assert.match(viewSrc, /fontSize="9"/);
+  assert.doesNotMatch(imageSrc, /tooltip|crosshair|pointermove|clientX|email|displayName/);
   assert.match(viewSrc, /import\("\.\/comboProfitImage\.js"\)/);
   assert.doesNotMatch(viewSrc, /import\s*\{[^}]*\}\s*from\s*"\.\/comboProfitImage\.js"/);
   assert.match(viewSrc, /new Clip\(\{ "image\/png": blobPromise \}\)/);
@@ -402,6 +430,52 @@ function line({ id, pnl, settled = true, at }) {
   const chartAt = locksSrc.indexOf("<ComboProfitChart");
   const histAt = locksSrc.indexOf("<ComboHistory");
   assert.ok(chartAt > 0 && histAt > chartAt, "chart sits above History");
+}
+
+{
+  assert.equal(profitTipDollars(54210), "+$54,210");
+  assert.equal(profitTipDollars(-1200), "-$1,200");
+  assert.equal(profitTipDollars(0), "+$0");
+  assert.equal(profitTipDollars(61827.16), "+$61,827.16");
+  assert.equal(profitTipDollars(-0.5), "-$0.50");
+  assert.equal(profitTipDollars("nope"), "—");
+  assert.equal(etStamp("2026-11-09T02:42:00Z"), "Nov 8, 9:42 PM ET");
+  assert.equal(PROFIT_STROKE_PX, 1.5);
+  assert.equal(EV_STROKE_PX, 1.25);
+  assert.deepEqual(EV_DASH_PX, [2, 2]);
+  assert.ok(PROFIT_DOT_PX <= 2.5);
+}
+
+{
+  const right = profitTipBox({ boxW: 400, boxH: 120, anchorX: 360, anchorY: 40, tipW: 120, tipH: 48 });
+  assert.ok(right.left + 120 <= 400 - 4, "tooltip stays inside the right edge");
+  assert.ok(right.left < 360, "tooltip flips left of a right-edge anchor");
+  const top = profitTipBox({ boxW: 400, boxH: 120, anchorX: 80, anchorY: 6, tipW: 100, tipH: 40 });
+  assert.ok(top.top >= 4, "tooltip stays inside the top edge");
+  const bottom = profitTipBox({ boxW: 400, boxH: 120, anchorX: 80, anchorY: 110, tipW: 100, tipH: 40 });
+  assert.ok(bottom.top + 40 <= 120 - 4, "tooltip stays inside the bottom edge");
+  const left = profitTipBox({ boxW: 400, boxH: 120, anchorX: 4, anchorY: 60, tipW: 100, tipH: 36 });
+  assert.ok(left.left >= 4);
+  assert.equal(nearestProfitIndex([], 10), -1);
+  assert.equal(nearestProfitIndex([{ x: 5 }], NaN), -1);
+}
+
+{
+  const samples = [];
+  for (let i = 0; i < 1144; i++) samples.push({ x: i * 0.5 });
+  let reads = 0;
+  const proxied = new Proxy(samples, {
+    get(target, prop) {
+      if (typeof prop === "string" && /^\d+$/.test(prop)) reads += 1;
+      return target[prop];
+    },
+  });
+  const idx = nearestProfitIndex(proxied, 400.2);
+  assert.equal(idx, 800);
+  assert.ok(reads < 40, "binary search reads " + reads);
+  const mid = (samples[10].x + samples[11].x) / 2;
+  const tied = nearestProfitIndex(samples, mid);
+  assert.equal(tied, 10, "an exact midpoint snaps to the earlier settlement");
 }
 
 console.log("comboProfit.test.js ok");

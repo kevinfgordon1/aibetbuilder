@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { paintProfitImage } from "./comboProfitImage.js";
-import { profitImageModel } from "./comboProfit.js";
+import { paintProfitImage, profitImageChartWidth } from "./comboProfitImage.js";
+import { EV_DASH_PX, EV_STROKE_PX, PROFIT_DOT_PX, PROFIT_STROKE_PX, profitImageModel } from "./comboProfit.js";
 
 function recorder() {
   const texts = [];
+  const fills = [];
+  const strokes = [];
+  const arcs = [];
   const ctx = {
     fillStyle: "",
     strokeStyle: "",
@@ -13,14 +16,22 @@ function recorder() {
     textBaseline: "alphabetic",
     lineJoin: "miter",
     lineCap: "butt",
-    fillText(text) { texts.push(String(text)); },
+    fillText(text) {
+      texts.push(String(text));
+      fills.push({ text: String(text), font: ctx.font, fill: String(ctx.fillStyle) });
+    },
     measureText(text) { return { width: String(text).length * 12 }; },
   };
-  ctx.setLineDash = () => {};
-  for (const name of ["clearRect", "fillRect", "fill", "stroke", "beginPath", "moveTo", "lineTo", "closePath", "arc", "arcTo", "rect", "save", "restore"]) {
+  ctx._dash = [];
+  ctx.setLineDash = (d) => { ctx._dash = d ? Array.from(d) : []; };
+  ctx.stroke = () => {
+    strokes.push({ width: ctx.lineWidth, style: String(ctx.strokeStyle), dash: ctx._dash.slice() });
+  };
+  ctx.arc = (x, y, r) => { arcs.push(r); };
+  for (const name of ["clearRect", "fillRect", "fill", "beginPath", "moveTo", "lineTo", "closePath", "arcTo", "rect", "save", "restore"]) {
     ctx[name] = () => {};
   }
-  return { ctx, texts };
+  return { ctx, texts, fills, strokes, arcs };
 }
 
 {
@@ -35,9 +46,19 @@ function recorder() {
     ],
     emptyText: "should not show",
   });
-  const { ctx, texts } = recorder();
+  const { ctx, texts, fills, strokes, arcs } = recorder();
   paintProfitImage(ctx, { ...model, user: "person@example.com", email: "person@example.com" }, 1080, 760);
   const painted = texts.join("\n");
+  const scale = profitImageChartWidth(1080) / 640;
+  const gold = strokes.filter((s) => s.style === "#f5d76e");
+  assert.ok(gold.length >= 1);
+  assert.ok(gold.every((s) => Math.abs(s.width - PROFIT_STROKE_PX * scale) < 0.001));
+  assert.ok(gold.every((s) => s.dash.length === 0));
+  assert.ok(arcs.length >= 1);
+  assert.ok(arcs.every((r) => Math.abs(r - PROFIT_DOT_PX * scale) < 0.001));
+  const zero = fills.find((f) => f.text === "$0");
+  assert.equal(zero.font, "500 16px Inter, system-ui, sans-serif");
+  assert.equal(zero.fill, "#9aa3af");
   assert.match(painted, /Combo Locks/);
   assert.match(painted, /RUNNING PROFIT/);
   assert.match(painted, /\+\$35\.00/);
@@ -76,9 +97,14 @@ function recorder() {
       { id: "e", cumulative: 35000, cumulativeEv: 28000, at: "2026-11-01T16:00:00Z" },
     ],
   });
-  const { ctx, texts } = recorder();
+  const { ctx, texts, strokes } = recorder();
   paintProfitImage(ctx, { ...model, email: "person@example.com", name: "Kevin Gordon" }, 1080, 760);
   const painted = texts.join("\n");
+  const scale = profitImageChartWidth(1080) / 640;
+  const ev = strokes.filter((s) => s.style === "#9ca3af" && s.dash.length);
+  assert.ok(ev.length >= 1);
+  assert.ok(ev.every((s) => Math.abs(s.width - EV_STROKE_PX * scale) < 0.001));
+  assert.ok(ev.every((s) => s.dash[0] === EV_DASH_PX[0] * scale && s.dash[0] < 4));
   assert.match(painted, /Profit/);
   assert.match(painted, /\bEV\b/);
   assert.match(painted, /\$0/);

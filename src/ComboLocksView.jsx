@@ -4,11 +4,15 @@
 import { buyerSeesAfterFees, sellerKeeps, BUYER_SEES_TITLE } from "./buyerOdds.js";
 import React from "react";
 import {
-  betSummary, countText, etDateTime, fmtAmerican, historyRow, historyTotals,
+  betSummary, countText, etDateTime, etStamp, fmtAmerican, historyRow, historyTotals,
   lockMetaLine, lockTitle, plainLeg, cardOutcomeTiles, QUOTE_ROWS_SHOWN, signedDollars,
 } from "./comboLockView";
 import { STATEMENT_DATE_FILTERS, STATEMENT_DEFAULT_DATE_RANGE } from "./comboStatement";
-import { PROFIT_CHART_HEIGHT, cumulativeRealizedProfit, profitChartLayout, profitImageCanCopy, profitImageModel } from "./comboProfit.js";
+import {
+  EV_DASH_PX, EV_DOT_PX, EV_STROKE_PX, PROFIT_CHART_HEIGHT, PROFIT_DOT_PX, PROFIT_STROKE_PX,
+  cumulativeRealizedProfit, nearestProfitIndex, profitChartLayout, profitImageCanCopy, profitImageModel,
+  profitTipBox, profitTipDollars,
+} from "./comboProfit.js";
 import { shouldToggleFromCard } from "./comboCardToggle.js";
 import { formatAmerican, formatDollars, sortOriginalBets } from "./comboMerge";
 import { allInFromExchange } from "./comboCredits";
@@ -264,8 +268,18 @@ export const COMBO_VIEW_CSS = `
   .cl .pnl-chart .pc-ranges{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
   .cl .pnl-chart .pc-legend{display:flex;align-items:center;gap:12px;margin-top:6px;font-size:11px;color:#8a8f98}
   .cl .pnl-chart .pc-swatch{display:inline-flex;align-items:center;gap:6px}
-  .cl .pnl-chart .pc-swatch i{width:16px;height:0;border-top:2px solid #f5d76e;display:inline-block}
-  .cl .pnl-chart .pc-swatch.ev i{border-top:2px dotted #9ca3af}
+  .cl .pnl-chart .pc-swatch i{width:18px;height:1.5px;display:inline-block;background:#f5d76e;border:0}
+  .cl .pnl-chart .pc-swatch.ev i{height:1.25px;background:repeating-linear-gradient(90deg,#9ca3af 0 2px,transparent 2px 4px)}
+  .cl .pnl-chart .pc-plot{position:relative;margin-top:2px}
+  .cl .pnl-chart .pc-plot svg{margin-top:0;cursor:crosshair;touch-action:pan-y;-webkit-user-select:none;user-select:none}
+  .cl .pnl-chart .pc-tip{position:absolute;z-index:3;pointer-events:none;padding:4px 7px 5px;border-radius:6px;background:rgba(10,10,12,.94);border:1px solid rgba(255,255,255,.12);box-shadow:0 6px 16px rgba(0,0,0,.4);font-size:11px;line-height:1.35;color:#e5e7eb;white-space:nowrap;max-width:calc(100% - 8px)}
+  .cl .pnl-chart .pc-tip[hidden]{display:none}
+  .cl .pnl-chart .pc-tip-when{color:#c4c9d1;font-size:10px;font-weight:600;margin-bottom:2px}
+  .cl .pnl-chart .pc-tip-row{display:flex;justify-content:space-between;gap:12px}
+  .cl .pnl-chart .pc-tip .k{color:#9aa3af}
+  .cl .pnl-chart .pc-tip .v{font-weight:700;font-variant-numeric:tabular-nums}
+  .cl .pnl-chart .pc-tip .v.pos{color:#34d399}
+  .cl .pnl-chart .pc-tip .v.neg{color:#f87171}
   .cl .pnl-chart .pc-share{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
   .cl .pnl-chart .pc-share button:disabled{opacity:.55;cursor:wait}
   .cl .pnl-chart .pc-status{font-size:12px;font-weight:700;color:#6ee7b7}
@@ -538,32 +552,254 @@ function pathFrom(points) {
   return (points || []).map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 }
 
+function tipTone(n) {
+  if (n > 0.004) return "pos";
+  if (n < -0.004) return "neg";
+  return "";
+}
+
 function ProfitSvg({ points, total, range, hasEv, evLegend, evNote }) {
-  const layout = profitChartLayout(points, { height: PROFIT_CHART_HEIGHT, range });
-  if (!layout) return null;
-  const d = pathFrom(layout.line);
-  const last = layout.line[layout.line.length - 1];
-  const area = `${d} L${last.x.toFixed(1)},${layout.zeroY.toFixed(1)} Z`;
-  const evD = hasEv && layout.evLine && layout.evLine.length ? pathFrom(layout.evLine) : "";
+  const layout = React.useMemo(
+    () => profitChartLayout(points, { height: PROFIT_CHART_HEIGHT, range }),
+    [points, range],
+  );
+  const plotRef = React.useRef(null);
+  const svgRef = React.useRef(null);
+  const guideRef = React.useRef(null);
+  const profitDotRef = React.useRef(null);
+  const evDotRef = React.useRef(null);
+  const endRef = React.useRef(null);
+  const tipRef = React.useRef(null);
+  const whenRef = React.useRef(null);
+  const profitValRef = React.useRef(null);
+  const evRowRef = React.useRef(null);
+  const evValRef = React.useRef(null);
+  const hoverRef = React.useRef(-1);
+  const layoutRef = React.useRef(layout);
+  const rangeRef = React.useRef(range);
+  const dataKeyRef = React.useRef("");
+  layoutRef.current = layout;
+  rangeRef.current = range;
+
+  const hideDom = () => {
+    if (guideRef.current) guideRef.current.setAttribute("visibility", "hidden");
+    if (profitDotRef.current) profitDotRef.current.setAttribute("visibility", "hidden");
+    if (evDotRef.current) evDotRef.current.setAttribute("visibility", "hidden");
+    if (tipRef.current) tipRef.current.hidden = true;
+  };
+
+  const clearHover = () => {
+    hoverRef.current = -1;
+    hideDom();
+  };
+
+  const paintHover = (layoutNow, idx, svgRect) => {
+    const sample = layoutNow.samples[idx];
+    const plot = plotRef.current;
+    const tip = tipRef.current;
+    if (!sample || !svgRect || !svgRect.width || !plot || !tip) return;
+    const upp = layoutNow.width / svgRect.width;
+    const guide = guideRef.current;
+    if (guide) {
+      guide.setAttribute("x1", String(sample.x));
+      guide.setAttribute("x2", String(sample.x));
+      guide.setAttribute("y1", String(layoutNow.padT));
+      guide.setAttribute("y2", String(layoutNow.axisY));
+      guide.setAttribute("visibility", "visible");
+    }
+    const profitDot = profitDotRef.current;
+    if (profitDot) {
+      profitDot.setAttribute("cx", String(sample.x));
+      profitDot.setAttribute("cy", String(sample.y));
+      profitDot.setAttribute("r", String(PROFIT_DOT_PX * upp));
+      profitDot.setAttribute("visibility", "visible");
+    }
+    const evDot = evDotRef.current;
+    if (evDot) {
+      if (sample.evY == null) evDot.setAttribute("visibility", "hidden");
+      else {
+        evDot.setAttribute("cx", String(sample.x));
+        evDot.setAttribute("cy", String(sample.evY));
+        evDot.setAttribute("r", String(EV_DOT_PX * upp));
+        evDot.setAttribute("visibility", "visible");
+      }
+    }
+    if (whenRef.current) whenRef.current.textContent = etStamp(sample.at);
+    if (profitValRef.current) {
+      profitValRef.current.textContent = profitTipDollars(sample.cumulative);
+      profitValRef.current.className = "v " + tipTone(sample.cumulative);
+    }
+    if (evRowRef.current) {
+      if (sample.cumulativeEv == null) evRowRef.current.hidden = true;
+      else {
+        evRowRef.current.hidden = false;
+        if (evValRef.current) {
+          evValRef.current.textContent = profitTipDollars(sample.cumulativeEv);
+          evValRef.current.className = "v " + tipTone(sample.cumulativeEv);
+        }
+      }
+    }
+    tip.hidden = false;
+    const plotRect = plot.getBoundingClientRect();
+    const anchorX = (sample.x / layoutNow.width) * svgRect.width;
+    const anchorY = (sample.y / layoutNow.height) * svgRect.height;
+    const box = profitTipBox({
+      boxW: svgRect.width,
+      boxH: svgRect.height,
+      anchorX,
+      anchorY,
+      tipW: tip.offsetWidth,
+      tipH: tip.offsetHeight,
+    });
+    tip.style.left = (svgRect.left - plotRect.left + box.left) + "px";
+    tip.style.top = (svgRect.top - plotRect.top + box.top) + "px";
+  };
+
+  const fitEndpoint = (svgRect) => {
+    const dot = endRef.current;
+    const layoutNow = layoutRef.current;
+    if (!dot || !layoutNow || !svgRect || !svgRect.width) return;
+    dot.setAttribute("r", String(PROFIT_DOT_PX * (layoutNow.width / svgRect.width)));
+  };
+
+  const syncOverlay = () => {
+    const layoutNow = layoutRef.current;
+    const last = layoutNow && layoutNow.samples.length ? layoutNow.samples[layoutNow.samples.length - 1] : null;
+    const key = layoutNow ? rangeRef.current + ":" + layoutNow.samples.length + ":" + (last ? last.cumulative + ":" + last.at : "") : "";
+    if (dataKeyRef.current !== key) {
+      dataKeyRef.current = key;
+      hoverRef.current = -1;
+      hideDom();
+    }
+    const svg = svgRef.current;
+    const rect = svg ? svg.getBoundingClientRect() : null;
+    fitEndpoint(rect);
+    const idx = hoverRef.current;
+    if (layoutNow && rect && idx >= 0 && idx < layoutNow.samples.length) paintHover(layoutNow, idx, rect);
+  };
+
+  React.useLayoutEffect(() => {
+    syncOverlay();
+  });
+
+  React.useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || typeof ResizeObserver !== "function") return undefined;
+    const ro = new ResizeObserver(() => {
+      const layoutNow = layoutRef.current;
+      const rect = svg.getBoundingClientRect();
+      fitEndpoint(rect);
+      const idx = hoverRef.current;
+      if (layoutNow && idx >= 0 && idx < layoutNow.samples.length) paintHover(layoutNow, idx, rect);
+    });
+    ro.observe(svg);
+    return () => ro.disconnect();
+  }, [layout]);
+
+  React.useEffect(() => {
+    const onDoc = (e) => {
+      const plot = plotRef.current;
+      if (!plot || plot.contains(e.target)) return;
+      clearHover();
+    };
+    document.addEventListener("pointerdown", onDoc, true);
+    return () => document.removeEventListener("pointerdown", onDoc, true);
+  }, []);
+
+  const moveTo = (e) => {
+    const svg = svgRef.current;
+    const layoutNow = layoutRef.current;
+    if (!svg || !layoutNow || !layoutNow.samples.length) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const x = ((e.clientX - rect.left) / rect.width) * layoutNow.width;
+    const idx = nearestProfitIndex(layoutNow.samples, x);
+    if (idx < 0 || idx === hoverRef.current) return;
+    hoverRef.current = idx;
+    paintHover(layoutNow, idx, rect);
+  };
+
+  const onPointerDown = (e) => {
+    if (e.pointerType === "touch" && e.currentTarget.setPointerCapture) {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
+    moveTo(e);
+  };
+
+  const onPointerUp = (e) => {
+    if (e.pointerType !== "touch" || !e.currentTarget.releasePointerCapture) return;
+    try {
+      if (e.currentTarget.hasPointerCapture && e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch { /* ignore */ }
+  };
+
+  const onPointerLeave = (e) => {
+    if (e.pointerType === "touch") return;
+    const plot = plotRef.current;
+    if (plot && e.relatedTarget instanceof Node && plot.contains(e.relatedTarget)) return;
+    clearHover();
+  };
+
+  const paths = React.useMemo(() => {
+    if (!layout) return null;
+    const d = pathFrom(layout.line);
+    const evD = hasEv && layout.evLine && layout.evLine.length ? pathFrom(layout.evLine) : "";
+    const last = layout.line[layout.line.length - 1];
+    const area = `${d} L${last.x.toFixed(1)},${layout.zeroY.toFixed(1)} Z`;
+    return { d, evD, area };
+  }, [layout, hasEv]);
+
+  if (!layout || !paths) return null;
   const evBit = hasEv ? `, dotted line is cumulative expected value${evLegend && evLegend !== "EV" ? " " + evLegend : ""}${evNote ? ". " + evNote : ""}` : "";
   const aria = `Running profit ${signedDollars(total)}` + (layout.firstDate && layout.lastDate ? `, ${layout.firstDate} to ${layout.lastDate}` : "") + evBit;
+  const dash = EV_DASH_PX.join(" ");
   return (
-    <svg viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={aria}>
-      <title>{aria}</title>
-      {(layout.yTicks || []).map((tick, i) => (
-        <line key={"g" + i} x1={layout.padL} x2={layout.width - layout.padR} y1={tick.y} y2={tick.y} stroke={tick.zero ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)"} strokeWidth={tick.zero ? 1 : 0.75} />
-      ))}
-      <path d={area} fill="rgba(212,175,55,0.14)" />
-      <path d={d} fill="none" stroke="#f5d76e" strokeWidth="2" strokeLinejoin="miter" strokeLinecap="butt" />
-      {evD ? <path d={evD} fill="none" stroke="#9ca3af" strokeWidth="1.75" strokeDasharray="4 3" strokeLinejoin="miter" strokeLinecap="butt" /> : null}
-      <circle cx={layout.end.x} cy={layout.end.y} r="3" fill="#f5d76e" />
-      {(layout.yTicks || []).map((tick, i) => (
-        <text key={"y" + i} x={layout.padL - 8} y={tick.y} textAnchor="end" dominantBaseline="middle" fill="#8a8f98" fontSize="10">{tick.text}</text>
-      ))}
-      {(layout.xTicks || []).map((tick, i) => (
-        <text key={"x" + i} x={tick.x} y={tick.y} textAnchor={tick.anchor || "middle"} fill="#6b7280" fontSize="10">{tick.text}</text>
-      ))}
-    </svg>
+    <div className="pc-plot" ref={plotRef}>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${layout.width} ${layout.height}`}
+        role="img"
+        aria-label={aria}
+        onPointerDown={onPointerDown}
+        onPointerMove={moveTo}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerLeave}
+        onPointerCancel={clearHover}
+      >
+        <title>{aria}</title>
+        {(layout.yTicks || []).map((tick, i) => (
+          Math.abs(tick.y - layout.axisY) < 0.75 ? null : (
+            <line key={"g" + i} x1={layout.padL} x2={layout.width - layout.padR} y1={tick.y} y2={tick.y} stroke={tick.zero ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.06)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          )
+        ))}
+        <path d={paths.area} fill="rgba(212,175,55,0.14)" />
+        <path d={paths.d} fill="none" stroke="#f5d76e" strokeWidth={PROFIT_STROKE_PX} strokeLinejoin="miter" strokeLinecap="butt" vectorEffect="non-scaling-stroke" />
+        {paths.evD ? <path d={paths.evD} fill="none" stroke="#9ca3af" strokeWidth={EV_STROKE_PX} strokeDasharray={dash} strokeLinejoin="miter" strokeLinecap="butt" vectorEffect="non-scaling-stroke" /> : null}
+        <circle ref={endRef} cx={layout.end.x} cy={layout.end.y} r={PROFIT_DOT_PX} fill="#f5d76e" />
+        <line x1={layout.padL} x2={layout.width - layout.padR} y1={layout.axisY} y2={layout.axisY} stroke="rgba(255,255,255,0.28)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        {(layout.xTicks || []).map((tick, i) => (
+          <line key={"xt" + i} x1={tick.x} x2={tick.x} y1={layout.axisY} y2={layout.axisY + layout.xTick} stroke="rgba(255,255,255,0.45)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+        ))}
+        {(layout.yTicks || []).map((tick, i) => (
+          <text key={"y" + i} x={layout.padL - 8} y={tick.y} textAnchor="end" dominantBaseline="middle" fill="#9aa3af" fontSize="9">{tick.text}</text>
+        ))}
+        {(layout.xTicks || []).map((tick, i) => (
+          <text key={"x" + i} x={tick.x} y={tick.y} textAnchor={tick.anchor || "middle"} fill="#6b7280" fontSize="10">{tick.text}</text>
+        ))}
+        <g aria-hidden="true">
+          <line ref={guideRef} x1="0" x2="0" y1={layout.padT} y2={layout.axisY} stroke="rgba(255,255,255,0.5)" strokeWidth="1" vectorEffect="non-scaling-stroke" visibility="hidden" pointerEvents="none" />
+          <circle ref={evDotRef} cx="0" cy="0" r={EV_DOT_PX} fill="#e5e7eb" stroke="#12110c" strokeWidth="1" vectorEffect="non-scaling-stroke" visibility="hidden" pointerEvents="none" />
+          <circle ref={profitDotRef} cx="0" cy="0" r={PROFIT_DOT_PX} fill="#f5d76e" stroke="#12110c" strokeWidth="1" vectorEffect="non-scaling-stroke" visibility="hidden" pointerEvents="none" />
+        </g>
+      </svg>
+      <div ref={tipRef} className="pc-tip" role="tooltip" hidden>
+        <div ref={whenRef} className="pc-tip-when" />
+        <div className="pc-tip-row"><span className="k">Profit</span><span ref={profitValRef} className="v" /></div>
+        <div ref={evRowRef} className="pc-tip-row" hidden><span className="k">EV</span><span ref={evValRef} className="v" /></div>
+      </div>
+    </div>
   );
 }
 
