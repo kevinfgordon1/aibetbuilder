@@ -77,8 +77,8 @@ function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } =
   strokePath(ctx, layout.line, ox, oy);
   ctx.strokeStyle = "#f5d76e";
   ctx.lineWidth = 4;
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
+  ctx.lineJoin = "miter";
+  ctx.lineCap = "butt";
   if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
   ctx.stroke();
 
@@ -86,8 +86,8 @@ function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } =
     strokePath(ctx, layout.evLine, ox, oy);
     ctx.strokeStyle = "#9ca3af";
     ctx.lineWidth = 3;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
+    ctx.lineJoin = "miter";
+    ctx.lineCap = "butt";
     if (typeof ctx.setLineDash === "function") ctx.setLineDash([7, 6]);
     ctx.stroke();
     if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
@@ -115,11 +115,11 @@ function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } =
   ctx.textAlign = "left";
 }
 
-function drawLegend(ctx, x, y, hasEv) {
+function drawLegend(ctx, x, y, hasEv, evLegend) {
   if (!hasEv) return 0;
   const items = [
     { label: "Profit", color: "#f5d76e", dashed: false },
-    { label: "EV", color: "#9ca3af", dashed: true },
+    { label: evLegend || "EV", color: "#9ca3af", dashed: true },
   ];
   ctx.font = "600 20px Inter, system-ui, sans-serif";
   ctx.textBaseline = "middle";
@@ -181,7 +181,7 @@ export function paintProfitImage(ctx, model, width = W, height = H) {
   ctx.fillText(meta, left, y + 216);
 
   const legendY = y + 246;
-  const legendH = drawLegend(ctx, left, legendY, !!m.hasEv);
+  const legendH = drawLegend(ctx, left, legendY, !!m.hasEv, m.evLegend);
   const chartTop = y + 250 + legendH;
   const chartW = w - 96;
   const chartH = legendH ? 312 : 340;

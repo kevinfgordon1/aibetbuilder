@@ -5,7 +5,7 @@
 import { formatStatementDate, lineInDateWindow, normalizeStatementDateRange, statementDateWindow, STATEMENT_TZ } from "./comboStatement.js";
 import { signedDollars } from "./comboLockView.js";
 
-export const PROFIT_CHART_MAX_POINTS = 360;
+export const PROFIT_CHART_MAX_POINTS = 2500;
 export const PROFIT_CHART_HEIGHT = 128;
 
 function r2(x) {
@@ -43,9 +43,10 @@ function lineAt(line) {
  * Running realized P/L for settled locks, oldest settlement first.
  * Date windows match the History "When" filter. Open locks are left out.
  * `total` is the same cents-rounded sum History uses for net profit.
- * When every visible settled lock has fair-odds expected P/L, `hasEv` is true
- * and each point also carries `ev` / `cumulativeEv`. Missing fair odds means
- * no EV line — we do not invent one.
+ * `hasEv` is true when at least one visible settled lock has fair-odds EV.
+ * Locks without fair odds still appear on the EV line, using their realized
+ * P/L as the contribution so both lines stay on the same settlements.
+ * `evKnown` is how many locks used real fair-odds EV.
  */
 export function cumulativeRealizedProfit(lines, { dateRange = "all", now } = {}) {
   const window = statementDateWindow(dateRange, now);
@@ -70,59 +71,89 @@ export function cumulativeRealizedProfit(lines, { dateRange = "all", now } = {})
   let evKnown = 0;
   const points = settled.map(({ line, pnl, ev, at }) => {
     sum += pnl;
-    const point = {
+    const evValue = ev == null ? null : r2(ev);
+    if (evValue != null) evKnown += 1;
+    // Missing fair odds: use realized P/L so the EV line stays aligned with profit.
+    evSum += evValue != null ? evValue : pnl;
+    return {
       id: line.id,
       at,
       pnl: r2(pnl),
       cumulative: r2(sum),
-      ev: ev == null ? null : r2(ev),
-      cumulativeEv: null,
+      ev: evValue,
+      evFromRealized: evValue == null,
+      cumulativeEv: r2(evSum),
     };
-    if (ev != null) {
-      evSum += ev;
-      evKnown += 1;
-      point.cumulativeEv = r2(evSum);
-    }
-    return point;
   });
-  const hasEv = points.length > 0 && evKnown === points.length;
-  if (hasEv) {
-    let running = 0;
-    for (const point of points) {
-      running += point.ev;
-      point.cumulativeEv = r2(running);
-    }
-  } else {
+  const hasEv = evKnown > 0;
+  if (!hasEv) {
     for (const point of points) point.cumulativeEv = null;
   }
+  const count = points.length;
+  const evLegend = !hasEv ? "" : (evKnown === count ? "EV" : `EV (${evKnown} of ${count} locks)`);
+  const evNote = hasEv && evKnown < count
+    ? "Locks without fair odds use their realized P/L so the lines stay comparable."
+    : "";
   return {
     points,
-    total: points.length ? r2(sum) : 0,
+    total: count ? r2(sum) : 0,
     evTotal: hasEv ? r2(evSum) : null,
     hasEv,
-    count: points.length,
+    evKnown,
+    evLegend,
+    evNote,
+    count,
     range: window.preset,
   };
 }
 
-/** Evenly thin a cumulative series for drawing. Keeps the ends and the high and low. */
+/**
+ * Keep every settlement unless the series is huge. When thinning, each bucket
+ * keeps its min and max (in time order) so spikes and drops stay visible.
+ * This is not a smoother — local extremes are preserved, not averaged.
+ */
 export function sampleProfitPoints(points, max = PROFIT_CHART_MAX_POINTS) {
   const list = points || [];
   const cap = Math.floor(Number(max));
   if (list.length <= cap || cap < 2) return list.slice();
-  let minI = 0;
-  let maxI = 0;
-  for (let i = 1; i < list.length; i++) {
-    if (list[i].cumulative < list[minI].cumulative) minI = i;
-    if (list[i].cumulative > list[maxI].cumulative) maxI = i;
-  }
-  const want = new Set([0, list.length - 1, minI, maxI]);
-  const room = cap - want.size;
-  if (room > 0) {
-    const step = (list.length - 1) / (room + 1);
-    for (let i = 1; i <= room; i++) want.add(Math.min(list.length - 1, Math.max(0, Math.round(i * step))));
+  const buckets = Math.max(1, Math.floor(cap / 2));
+  const want = new Set([0, list.length - 1]);
+  for (let b = 0; b < buckets; b++) {
+    const start = Math.floor((b * list.length) / buckets);
+    const end = Math.floor(((b + 1) * list.length) / buckets) - 1;
+    if (end < start) continue;
+    let minI = start;
+    let maxI = start;
+    for (let i = start + 1; i <= end; i++) {
+      if (list[i].cumulative < list[minI].cumulative) minI = i;
+      if (list[i].cumulative > list[maxI].cumulative) maxI = i;
+    }
+    want.add(minI);
+    want.add(maxI);
   }
   return [...want].sort((a, b) => a - b).map((i) => list[i]);
+}
+
+/** Axis-aligned step path: horizontal to the next x, then vertical to the new value. */
+export function stepLine(coords, start) {
+  const pts = coords || [];
+  if (!pts.length) return start ? [start] : [];
+  const out = [];
+  const first = pts[0];
+  if (start) {
+    out.push(start);
+    if (first.x !== start.x) out.push({ x: first.x, y: start.y });
+    if (first.y !== (out[out.length - 1] && out[out.length - 1].y)) out.push({ x: first.x, y: first.y });
+  } else {
+    out.push(first);
+  }
+  for (let i = 1; i < pts.length; i++) {
+    const prev = out[out.length - 1];
+    const p = pts[i];
+    if (p.x !== prev.x) out.push({ x: p.x, y: prev.y });
+    if (p.y !== out[out.length - 1].y) out.push({ x: p.x, y: p.y });
+  }
+  return out;
 }
 
 const RANGE_LABEL = {
@@ -439,8 +470,9 @@ export function profitChartLayout(points, box = {}) {
   const evCoords = hasEv ? shown.map((p, i) => ({ x: xAt(p, i), y: yAt(Number(p.cumulativeEv) || 0) })) : [];
   const zeroY = yAt(0);
   const startX = tSpan > 0 ? padL : coords[0].x;
-  const line = [{ x: startX, y: zeroY }, ...coords];
-  const evLine = hasEv ? [{ x: startX, y: zeroY }, ...evCoords] : [];
+  const origin = { x: startX, y: zeroY };
+  const line = stepLine(coords, origin);
+  const evLine = hasEv ? stepLine(evCoords, origin) : [];
   const yTicks = yScale.ticks.map((value) => ({
     value,
     text: axisDollars(value),
@@ -492,12 +524,14 @@ export function profitChartLayout(points, box = {}) {
 }
 
 /** Plain card for the share image. No account, name, or email fields. */
-export function profitImageModel({ total = 0, count = 0, range = "all", points = [], emptyText = "", evTotal = null, hasEv = false } = {}) {
+export function profitImageModel({ total = 0, count = 0, range = "all", points = [], emptyText = "", evTotal = null, hasEv = false, evKnown = 0, evLegend = "", evNote = "" } = {}) {
   const n = Math.max(0, Number(count) || 0);
   const series = n ? (points || []) : [];
   const first = series.length ? formatStatementDate(series[0].at) : "";
   const last = series.length ? formatStatementDate(series[series.length - 1].at) : "";
   const evOn = !!(hasEv && n && series.some((p) => p && p.cumulativeEv != null));
+  const known = Math.max(0, Number(evKnown) || 0);
+  const legend = evOn ? (evLegend || (known && known < n ? `EV (${known} of ${n} locks)` : "EV")) : "";
   return {
     kicker: "Combo Locks",
     title: "Running profit",
@@ -509,6 +543,8 @@ export function profitImageModel({ total = 0, count = 0, range = "all", points =
     emptyText: n ? "" : (emptyText || "No settled locks yet."),
     points: series,
     hasEv: evOn,
+    evLegend: legend,
+    evNote: evOn ? (evNote || "") : "",
     evTotalText: evOn && evTotal != null ? signedDollars(evTotal) : "",
     brand: "aibetbuilder.io",
   };

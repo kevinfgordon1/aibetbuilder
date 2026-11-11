@@ -16,6 +16,7 @@ import {
   profitImageModel,
   profitShareDelivery,
   sampleProfitPoints,
+  stepLine,
 } from "./comboProfit.js";
 import { buildComboStatement, filterStatementLines } from "./comboStatement.js";
 import { historyTotals } from "./comboLockView.js";
@@ -156,10 +157,12 @@ function line({ id, pnl, settled = true, at }) {
     ],
   });
   assert.deepEqual(Object.keys(model).sort(), [
-    "brand", "countText", "emptyText", "evTotalText", "hasEv", "kicker", "points", "rangeLabel", "spanText", "title", "tone", "totalText",
+    "brand", "countText", "emptyText", "evLegend", "evNote", "evTotalText", "hasEv", "kicker", "points", "rangeLabel", "spanText", "title", "tone", "totalText",
   ]);
   assert.equal(model.hasEv, false);
   assert.equal(model.evTotalText, "");
+  assert.equal(model.evLegend, "");
+  assert.equal(model.evNote, "");
   assert.equal(model.totalText, "+$35.00");
   assert.equal(model.tone, "pos");
   assert.equal(model.rangeLabel, "All time");
@@ -206,9 +209,22 @@ function line({ id, pnl, settled = true, at }) {
   assert.equal(stmt.lines[1].expectedPnl, 50);
   const curve = cumulativeRealizedProfit(stmt.lines, { now });
   assert.equal(curve.hasEv, true);
+  assert.equal(curve.evKnown, 2);
+  assert.equal(curve.evLegend, "EV");
+  assert.equal(curve.evNote, "");
   assert.equal(curve.evTotal, 100);
   assert.deepEqual(curve.points.map((p) => p.cumulativeEv), [50, 100]);
-  assert.equal(cumulativeRealizedProfit(stmt.lines.map((l) => ({ ...l, expectedPnl: l.id === "lost" ? null : l.expectedPnl })), { now }).hasEv, false);
+  const partial = cumulativeRealizedProfit(stmt.lines.map((l) => ({ ...l, expectedPnl: l.id === "lost" ? null : l.expectedPnl })), { now });
+  assert.equal(partial.hasEv, true);
+  assert.equal(partial.evKnown, 1);
+  assert.equal(partial.evLegend, "EV (1 of 2 locks)");
+  assert.match(partial.evNote, /realized/);
+  const lost = partial.points.find((p) => p.id === "lost");
+  const won = partial.points.find((p) => p.id === "won");
+  assert.equal(won.ev, 50);
+  assert.equal(lost.ev, null);
+  assert.equal(lost.evFromRealized, true);
+  assert.equal(lost.cumulativeEv, Math.round((won.ev + lost.pnl) * 100) / 100);
 }
 
 {
@@ -308,6 +324,62 @@ function line({ id, pnl, settled = true, at }) {
   assert.equal(model.hasEv, true);
   assert.equal(model.evTotalText, "+$28,000.00");
   assert.doesNotMatch(JSON.stringify(model), /@|Kevin|gmail/i);
+}
+
+
+
+{
+  const line = stepLine(
+    [{ x: 10, y: 80 }, { x: 40, y: 20 }, { x: 70, y: 40 }],
+    { x: 0, y: 100 },
+  );
+  // origin -> horizontal to first x -> vertical to first y -> horizontal -> vertical ...
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1], b = line[i];
+    assert.ok(a.x === b.x || a.y === b.y, "step segments are axis-aligned");
+  }
+  assert.deepEqual(line, [
+    { x: 0, y: 100 },
+    { x: 10, y: 100 },
+    { x: 10, y: 80 },
+    { x: 40, y: 80 },
+    { x: 40, y: 20 },
+    { x: 70, y: 20 },
+    { x: 70, y: 40 },
+  ]);
+}
+
+{
+  const many = [];
+  for (let i = 0; i < 1144; i++) {
+    many.push({ id: "p" + i, at: "2026-01-01T00:00:00Z", cumulative: i + 1, cumulativeEv: i });
+  }
+  assert.equal(sampleProfitPoints(many).length, 1144, "default cap keeps every settlement at Kevin's scale");
+  const layout = profitChartLayout(many, { range: "all" });
+  for (let i = 1; i < layout.line.length; i++) {
+    const a = layout.line[i - 1], b = layout.line[i];
+    assert.ok(a.x === b.x || a.y === b.y, "profit path is a step line");
+  }
+}
+
+{
+  const model = profitImageModel({
+    total: 35,
+    count: 2,
+    range: "all",
+    hasEv: true,
+    evKnown: 1,
+    evLegend: "EV (1 of 2 locks)",
+    evNote: "Locks without fair odds use their realized P/L so the lines stay comparable.",
+    evTotal: 40,
+    points: [
+      { cumulative: 50, cumulativeEv: 50, ev: 50, at: "2026-09-05T00:00:00Z" },
+      { cumulative: 35, cumulativeEv: 40, ev: null, evFromRealized: true, at: "2026-09-11T00:00:00Z" },
+    ],
+  });
+  assert.equal(model.hasEv, true);
+  assert.equal(model.evLegend, "EV (1 of 2 locks)");
+  assert.match(model.evNote, /realized/);
 }
 
 

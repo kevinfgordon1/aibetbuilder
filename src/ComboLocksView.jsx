@@ -538,14 +538,15 @@ function pathFrom(points) {
   return (points || []).map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 }
 
-function ProfitSvg({ points, total, range, hasEv }) {
+function ProfitSvg({ points, total, range, hasEv, evLegend, evNote }) {
   const layout = profitChartLayout(points, { height: PROFIT_CHART_HEIGHT, range });
   if (!layout) return null;
   const d = pathFrom(layout.line);
   const last = layout.line[layout.line.length - 1];
   const area = `${d} L${last.x.toFixed(1)},${layout.zeroY.toFixed(1)} Z`;
   const evD = hasEv && layout.evLine && layout.evLine.length ? pathFrom(layout.evLine) : "";
-  const aria = `Running profit ${signedDollars(total)}` + (layout.firstDate && layout.lastDate ? `, ${layout.firstDate} to ${layout.lastDate}` : "") + (hasEv ? ", dotted line is cumulative expected value" : "");
+  const evBit = hasEv ? `, dotted line is cumulative expected value${evLegend && evLegend !== "EV" ? " " + evLegend : ""}${evNote ? ". " + evNote : ""}` : "";
+  const aria = `Running profit ${signedDollars(total)}` + (layout.firstDate && layout.lastDate ? `, ${layout.firstDate} to ${layout.lastDate}` : "") + evBit;
   return (
     <svg viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={aria}>
       <title>{aria}</title>
@@ -553,8 +554,8 @@ function ProfitSvg({ points, total, range, hasEv }) {
         <line key={"g" + i} x1={layout.padL} x2={layout.width - layout.padR} y1={tick.y} y2={tick.y} stroke={tick.zero ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)"} strokeWidth={tick.zero ? 1 : 0.75} />
       ))}
       <path d={area} fill="rgba(212,175,55,0.14)" />
-      <path d={d} fill="none" stroke="#f5d76e" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      {evD ? <path d={evD} fill="none" stroke="#9ca3af" strokeWidth="1.75" strokeDasharray="4 3" strokeLinejoin="round" strokeLinecap="round" /> : null}
+      <path d={d} fill="none" stroke="#f5d76e" strokeWidth="2" strokeLinejoin="miter" strokeLinecap="butt" />
+      {evD ? <path d={evD} fill="none" stroke="#9ca3af" strokeWidth="1.75" strokeDasharray="4 3" strokeLinejoin="miter" strokeLinecap="butt" /> : null}
       <circle cx={layout.end.x} cy={layout.end.y} r="3" fill="#f5d76e" />
       {(layout.yTicks || []).map((tick, i) => (
         <text key={"y" + i} x={layout.padL - 8} y={tick.y} textAnchor="end" dominantBaseline="middle" fill="#8a8f98" fontSize="10">{tick.text}</text>
@@ -590,6 +591,9 @@ export function ComboProfitChart({ lines }) {
     points: curve.points,
     evTotal: curve.evTotal,
     hasEv: curve.hasEv,
+    evKnown: curve.evKnown,
+    evLegend: curve.evLegend,
+    evNote: curve.evNote,
     emptyText,
   }), [curve, emptyText]);
 
@@ -656,12 +660,12 @@ export function ComboProfitChart({ lines }) {
         </div>
       </div>
       {curve.count && curve.hasEv ? (
-        <div className="pc-legend" aria-hidden="true">
-          <span className="pc-swatch"><i />Profit</span>
-          <span className="pc-swatch ev"><i />EV</span>
+        <div className="pc-legend">
+          <span className="pc-swatch" aria-hidden="true"><i />Profit</span>
+          <span className="pc-swatch ev" title={curve.evNote || undefined}><i />{curve.evLegend || "EV"}</span>
         </div>
       ) : null}
-      {curve.count ? <ProfitSvg points={curve.points} total={curve.total} range={curve.range} hasEv={curve.hasEv} /> : <div className="pc-empty">{emptyText}</div>}
+      {curve.count ? <ProfitSvg points={curve.points} total={curve.total} range={curve.range} hasEv={curve.hasEv} evLegend={curve.evLegend} evNote={curve.evNote} /> : <div className="pc-empty">{emptyText}</div>}
       <div className="pc-share">
         <button type="button" className="btn mini" onClick={onShare} disabled={busy}>Share image</button>
         {canCopy ? <button type="button" className="btn mini" onClick={onCopy} disabled={busy}>Copy image</button> : null}

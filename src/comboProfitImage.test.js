@@ -86,4 +86,27 @@ function recorder() {
   assert.doesNotMatch(painted, /person@example\.com|Kevin Gordon|@/);
 }
 
+
+{
+  const model = profitImageModel({
+    total: 35,
+    count: 2,
+    range: "all",
+    hasEv: true,
+    evKnown: 1,
+    evLegend: "EV (1 of 2 locks)",
+    evNote: "Locks without fair odds use their realized P/L so the lines stay comparable.",
+    evTotal: 40,
+    points: [
+      { id: "a", cumulative: 50, cumulativeEv: 50, at: "2026-09-05T16:00:00Z" },
+      { id: "b", cumulative: 35, cumulativeEv: 40, at: "2026-09-11T16:00:00Z" },
+    ],
+  });
+  const { ctx, texts } = recorder();
+  paintProfitImage(ctx, { ...model, email: "person@example.com" }, 1080, 760);
+  const painted = texts.join("\n");
+  assert.match(painted, /EV \(1 of 2 locks\)/);
+  assert.doesNotMatch(painted, /person@example\.com|@/);
+}
+
 console.log("comboProfitImage.test.js ok");
