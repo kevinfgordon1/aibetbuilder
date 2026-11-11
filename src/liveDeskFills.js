@@ -1,3 +1,4 @@
+import { isPolyComboSlug } from "./polyComboMakerFee.js";
 // Filled orders for the private Live Trading Desk (Polymarket US).
 //
 // One row per individual fill (not aggregated positions), newest first.
@@ -74,7 +75,7 @@ function marketTypeLabel(market, slug) {
   if (/spread/.test(t)) return "Spread";
   if (/total|over|under/.test(t)) return "Total";
   if (/winner|moneyline/.test(t)) return "Moneyline";
-  if (/^caoc-/.test(slug)) return "Combo";
+  if (isPolyComboSlug(slug)) return "Combo";
   if (/^aec-/.test(slug)) return "Moneyline";
   if (/^asc-/.test(slug)) return "Spread";
   if (/^tsc-|^aoc-/.test(slug)) return "Total";
@@ -272,7 +273,7 @@ export function mapFilledOrders(payload, { protectRows, limit } = {}) {
         ? contractsLabel(orderCum) + " of " + contractsLabel(orderQty)
         : "",
       state,
-      source: row ? "desk" : (/^caoc-/.test(slug) ? "combo" : ""),
+      source: row ? "desk" : (isPolyComboSlug(slug) ? "combo" : ""),
       protectArmed: !!row,
       protect,
     });

@@ -605,8 +605,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const tickers = (parlays || []).map((p) => p && p.combo_ticker).filter(Boolean);
     if (!tickers.length) return;
     let live = true;
-    loadSeriesFees(tickers).then((changed) => { if (changed && live) setFeeTick((n) => n + 1); });
-    return () => { live = false; };
+    const refreshFees = () => loadSeriesFees(tickers).then((changed) => { if (changed && live) setFeeTick((n) => n + 1); });
+    refreshFees();
+    const feeTimer = setInterval(refreshFees, 60 * 1000);
+    return () => { live = false; clearInterval(feeTimer); };
   }, [parlays]);
   const [kill, setKill] = useState(false);
   // Per-user Combo Locks fees (combo_my_fee_status). null = fee-free (everyone but fee users).

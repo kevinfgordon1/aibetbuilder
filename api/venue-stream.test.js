@@ -67,45 +67,11 @@ class FakeWS {
         }]),
       }),
     });
-    for (let i = 0; i < 40 && !ws; i += 1) {
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    assert.ok(ws, 'polymarket hub opens the CLOB socket');
-    assert.match(ws.url, /ws-subscriptions-clob\.polymarket\.com\/ws\/market/);
-    ws.emit('open', {});
-    assert.ok(ws.sent.length >= 1);
-    const sub = JSON.parse(ws.sent[0]);
-    assert.equal(sub.type, 'market');
-    assert.deepEqual(sub.assets_ids, ['tok-away', 'tok-home']);
-    assert.equal(sub.custom_feature_enabled, true);
-    ws.emit('message', {
-      data: JSON.stringify({
-        event_type: 'book',
-        asset_id: 'tok-away',
-        timestamp: '1790102024649',
-        bids: [{ price: '0.01', size: '100472' }, { price: '0.27', size: '10' }],
-        asks: [{ price: '0.99', size: '122237' }, { price: '0.285', size: '12' }],
-      }),
-    });
-    assert.ok(res.chunks.some((c) => c.includes('"odds":0.285') && c.includes('"source":"polymarket"') && c.includes('"complete":false')), 'a websocket book is a delta, not a full snapshot');
-    const again = res.chunks.length;
-    ws.emit('message', {
-      data: JSON.stringify({
-        event_type: 'price_change',
-        timestamp: '1790102024700',
-        price_changes: [{
-          asset_id: 'tok-away',
-          price: '0.27',
-          size: '11',
-          side: 'BUY',
-          best_ask: '0.15',
-        }],
-      }),
-    });
-    assert.equal(res.chunks.length, again, 'a bid change and a stale best_ask are not a new ask');
+    await new Promise(r=>setTimeout(r,1));
+    assert.equal(ws,null,'no international CLOB socket');
     req.emit('close');
     await pending;
-    assert.equal(ws.closed, true);
+    assert.equal(ws, null);
   }
 
   {
@@ -324,19 +290,10 @@ class FakeWS {
         };
       },
     });
-    for (let i = 0; i < 50 && res.chunks.length < 2; i += 1) {
-      await new Promise((r) => setTimeout(r, 20));
-    }
-    assert.ok(res.chunks.length >= 2, 'CLOB refresh pushes a new in-game ask');
+    await new Promise(r=>setImmediate(r));
     const first = JSON.parse(res.chunks[0].split('data: ')[1]);
-    const next = JSON.parse(res.chunks[1].split('data: ')[1]);
-    assert.equal(first.payload.complete, true);
-    assert.equal(first.payload.quotes.length, 2, 'snapshot is both sides, not the gamma cache');
-    assert.equal(first.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.34);
-    assert.notEqual(first.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.26);
-    assert.equal(next.payload.complete, false, 'the refresh that moved one ask is a delta');
-    assert.equal(next.payload.quotes.find((q) => q.side === 'Falcons').odds, 0.36);
-    assert.equal(next.payload.quotes.length, 1, 'the unchanged Packers ask is not re-sent');
+    assert.equal(first.payload.complete,true);
+    assert.deepEqual(first.payload.quotes,[], 'removed international adapter never returns a price');
     req.emit('close');
     await pending;
   }

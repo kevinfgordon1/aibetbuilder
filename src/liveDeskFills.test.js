@@ -118,3 +118,8 @@ assert.deepEqual(mapFilledOrders(null), []);
 assert.equal(mapFilledOrders(payload, { protectRows, limit: 1 }).length, 1);
 
 console.log("liveDeskFills.test.js ok");
+
+for (const combo of ['caoc-check','crossd-check']) {
+ const comboPayload=JSON.parse(JSON.stringify(payload).split(market.slug).join(combo));
+ assert.deepEqual(mapFilledOrders(comboPayload).map(r=>r.source),['combo','combo'],'both US combo prefixes are attributed to combos, not the desk');
+}

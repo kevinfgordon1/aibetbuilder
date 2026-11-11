@@ -227,6 +227,7 @@ function venueStateFields(quote) {
 function marketsFromQuotes(games, quotes, fallbackLeague) {
   const markets = [];
   for (const quote of quotes || []) {
+    if (quote && (quote.book === 'polymarket' || Number(quote.book_id) === 193) && !/^polymarket-us(?:-|$)/.test(quote.feed || '')) continue;
     if (!quote || quote.odds == null) continue;
     const betType = String(quote.bet_type || "moneyline").toLowerCase();
     if (betType !== "moneyline" && betType !== "spread" && betType !== "total") continue;
@@ -255,6 +256,8 @@ function marketsFromQuotes(games, quotes, fallbackLeague) {
       side: betType === "total" ? sideType : quote.side,
       side_type: sideType,
       odds: quote.odds,
+      ticker: quote.ticker,
+      fee_multiplier: quote.fee_multiplier,
       size: quote.size,
       line,
       number: line,
@@ -426,6 +429,7 @@ export function gamesFromFreeFeeds({
       nowMs: seenAt,
     });
   }
+  polymarket = (polymarket || []).filter(q => q && /^polymarket-us(?:-|$)/.test(q.feed || ''));
   for (const quote of [...(polymarket || []), ...(kalshi || []), ...(novig || []), ...(fourcasters || [])]) {
     if (!quote) continue;
     const quoteLeague = String(quote.league || lg).toUpperCase();

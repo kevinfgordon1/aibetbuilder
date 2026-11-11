@@ -7,20 +7,11 @@ export const BALANCE_STALE_MS = 5 * 60 * 1000;
 export const KALSHI_COMBO_SHARD = 1;
 export const KALSHI_MAIN_SHARD = 0;
 
-const KFEE = 0.0175;
-const impliedProb = (a) => (a > 0 ? 100 / (a + 100) : Math.abs(a) / (Math.abs(a) + 100));
-const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
-function nominalProbFromEff(sEff) {
-  const b = 1 - KFEE;
-  return (-b + Math.sqrt(b * b + 4 * KFEE * sEff)) / (2 * KFEE);
-}
-
-/** Hedge cost per contract (NO price paid), same as the worker's fillView().noBid. */
-export function noBidFromFill(fillAmerican) {
-  const a = Number(fillAmerican);
-  if (!Number.isFinite(a) || a === 0 || (a > -100 && a < 100)) return null;
-  const v = floor2(1 - nominalProbFromEff(impliedProb(a)));
-  return v > 0 && v < 1 ? v : null;
+import { quotedYesPrice } from './buyerOdds.js';
+/** Same series-aware maker-net -> gross quote as Combo Locks. */
+export function noBidFromFill(fillAmerican, opts = {}) {
+ const yes = quotedYesPrice(fillAmerican, opts);
+ return yes == null ? null : Math.round((1-yes)*1000)/1000;
 }
 
 export function usd(n, { cents = true } = {}) {
@@ -103,7 +94,7 @@ export function cellNote(cell, now = new Date()) {
 export function lockNeedUsd(parlay, filledContracts = 0) {
   if (!parlay) return null;
   const max = Number(parlay.max_contracts);
-  const per = noBidFromFill(parlay.fill_american);
+  const per = noBidFromFill(parlay.fill_american, { ticker: parlay.combo_ticker || parlay.kalshi_combo_ticker });
   if (!Number.isFinite(max) || max <= 0 || per == null) return null;
   const remaining = Math.max(0, max - (Number(filledContracts) || 0));
   return Math.round(remaining * per * 100) / 100;

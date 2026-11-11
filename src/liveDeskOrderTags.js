@@ -1,7 +1,7 @@
 // Open-order tags on the Live Trading Desk (Polymarket US).
 // "Taker gets": what a taker receives by filling this order, after the
-// Polymarket US taker fee θ × P × (1 − P), θ = 0.0695 from the shared
-// lib/polymarket-us-fee.json (docs.polymarket.us/fees, gateway feeCoefficient).
+// Polymarket US taker fee θ × P × (1 − P), θ = 0.095 from the shared
+// lib/polymarket-us-fee.json (docs.polymarket.us/fees, Tier 1 account assumption).
 //   Buy X at p  → taker buys the other side at 1 − p.
 //   Sell X at p → taker buys X at p.
 // "Best"/"Behind": compare that taker price to the best taker price on the

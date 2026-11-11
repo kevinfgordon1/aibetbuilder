@@ -217,14 +217,16 @@ function markStartDates(out, mk) {
  *  Oct 27 2026: a slow odds relay (10 s per call) made every Kalshi book older than STALE_MS by pricing time, so 19 of
  *  Kevin's 20 locks silently dropped ("1 of 20"). Now: every relay call has its own timeout (RELAY_TIMEOUT_MS, 2.5 s)
  *  and they run in parallel; Kalshi orderbooks are fetched LAST, right before pricing (refreshBooks / freshBooks). */
+const rootSeriesFees = require('../lib/kalshi-series-fee').createSeriesFeeCache();
 const RELAY_TIMEOUT_MS = 2500;
 const BOOK_REFRESH_MS = 8000; // books older than this at pricing time are refetched once (STALE_MS is 15 s)
 async function fetchKalshiBooks(M, tickers, f, now) {
   const kalshiBooks = {};
+  await rootSeriesFees.prefetchTickers(tickers);
   const getJ = async (u) => { const r = await f(u, { headers: { accept: 'application/json' } }); if (!r.ok) throw new Error(`${r.status} ${u.slice(0, 80)}`); return r.json(); };
   await Promise.all(Array.from({ length: Math.ceil(tickers.length / 100) }, (_, i) => tickers.slice(i * 100, i * 100 + 100)).map(async (chunk) => {
     const j = await getJ(`${KALSHI}/markets/orderbooks?${chunk.map((t) => `tickers=${encodeURIComponent(t)}`).join('&')}`);
-    for (const ob of j.orderbooks || []) { const t = String(ob.ticker || ob.market_ticker || '').toUpperCase(); if (t) kalshiBooks[t] = M.kalshiAsks(ob); }
+    for (const ob of j.orderbooks || []) { const t = String(ob.ticker || ob.market_ticker || '').toUpperCase(); if (t) kalshiBooks[t] = { ...M.kalshiAsks(ob), ticker: t, takerRate: rootSeriesFees.takerRateForTicker(t) }; }
   }));
   return { kalshiBooks, kalshiAt: now() };
 }

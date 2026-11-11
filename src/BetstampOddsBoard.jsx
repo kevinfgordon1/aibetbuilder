@@ -1,3 +1,4 @@
+import {loadSeriesFees} from './buyerOdds.js';
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
@@ -1242,9 +1243,10 @@ export default function BetstampOddsBoard({ user = null, refreshKey = 0 } = {}) 
       Promise.all([
         loadJsonBoard(kalshiBoardUrl({ league }), kalshiQuotesFromBoardBody),
         loadJsonBoard(polymarketBoardUrl({ league }), polymarketQuotesFromBoardBody),
-      ]).then(([kalshiQuotes, polyQuotes]) => {
+      ]).then(async ([kalshiQuotes, polyQuotes]) => {
+        const refreshedFees = await loadSeriesFees((kalshiQuotes || []).map(q=>q.ticker));
         if (cancelled) return;
-        let changed = false;
+        let changed = refreshedFees;
         // A JSON poll is a snapshot. Apply each contract only when its
         // exchange time is newer than the websocket print already held.
         const applyBoard = (book, incoming) => {

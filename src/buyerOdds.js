@@ -1,3 +1,4 @@
+import { fallbackMakerRate, kalshiTakerRate } from './kalshiFees.js';
 // What the BUYER of a Combo Lock sees, after all fees, next to what the seller keeps.
 //
 // Mirrors the combo-worker quote math (combo-worker/engine.js fillView):
@@ -12,7 +13,7 @@
 //   4. buyer pays YES + 0.07·YES·(1−YES) per contract (Kalshi taker fee, venueTakerFee.js)
 // Polymarket US combos: no maker rebate. Maker fee is $0 before 2026-11-14T05:00:00Z and
 // 0.03×C×p×(1−p) after (polyComboMakerFee.js). The quoted YES is the gross price that still
-// nets sEff. The buyer pays the combo taker curve P·[0.0695(1−P) + 0.06(1−P)^4].
+// nets sEff. The buyer pays the combo taker curve P·[0.095(1−P) + 0.06(1−P)^4].
 // Single-market Polymarket maker fees stay $0. Per-contract estimate.
 import { VENUE_TAKER_FEE_RATE, effectiveTakerPrice, polyComboTakerFeePerContract } from "./venueTakerFee.js";
 import { allInFromExchange } from "./comboCredits.js";
@@ -40,27 +41,61 @@ export function seriesOfTicker(ticker) {
 }
 
 // Module cache filled by loadSeriesFees (one fetch per series per page load).
+export const SERIES_FEE_TTL_MS = 15 * 60 * 1000;
 const seriesRates = new Map();
-export function setSeriesFee(series, feeType, multiplier) {
-  if (series) seriesRates.set(String(series).toUpperCase(), makerRateFromSeries(feeType, multiplier));
+const fallbackWarnedAt = new Map();
+export function setSeriesFee(series, feeType, multiplier, observedAt = Date.now()) {
+  if (series) seriesRates.set(String(series).toUpperCase(), { rate: makerRateFromSeries(feeType, multiplier), takerRate:kalshiTakerRate(series,{fee_multiplier:multiplier}), at: Math.min(Date.now(), Number(observedAt) || Date.now()) });
 }
 export function makerRateForTicker(ticker) {
   // Not a Kalshi series. The Polymarket combo maker schedule is polyComboMakerRate, not this cache.
   if (isPolyComboTicker(ticker)) return 0;
   const s = seriesOfTicker(ticker);
-  return s && seriesRates.has(s) ? seriesRates.get(s) : FALLBACK_MAKER_RATE;
+  const hit = seriesRates.get(s);
+  if (hit && Date.now()-hit.at < SERIES_FEE_TTL_MS) return hit.rate;
+  const lastWarn=fallbackWarnedAt.get(s);
+  if (lastWarn == null || Date.now()-lastWarn >= SERIES_FEE_TTL_MS) {
+    console.warn(`Kalshi fee fallback ${s || ticker}: missing/expired series terms`);
+    fallbackWarnedAt.set(s,Date.now());
+  }
+  return fallbackMakerRate(s);
+}
+// Same terms for the live odds board, without borrowing a different series' multiplier.
+export function cachedSeriesTakerRate(ticker) {
+  const hit=seriesRates.get(seriesOfTicker(ticker));
+  return hit && Date.now()-hit.at < SERIES_FEE_TTL_MS ? hit.takerRate : null;
 }
 /** Fetch fee terms for every series behind these combo tickers (same-origin /api/kalshi-series-fee). */
+const seriesLoadInFlight = new Map();
+const seriesLastAttempt = new Map();
 export async function loadSeriesFees(tickers, fetchImpl = (typeof fetch === "function" ? fetch : null)) {
-  const want = [...new Set((tickers || []).map(seriesOfTicker).filter((s) => s && !seriesRates.has(s)))];
+  const want = [...new Set((tickers || []).map(seriesOfTicker).filter(s => s &&
+    (!seriesRates.has(s) || Date.now()-seriesRates.get(s).at >= SERIES_FEE_TTL_MS)))].sort();
   if (!want.length || !fetchImpl) return false;
-  try {
-    const r = await fetchImpl(`/api/kalshi-series-fee?series=${encodeURIComponent(want.join(","))}`);
-    if (!r.ok) return false;
-    const j = await r.json();
-    for (const [s, v] of Object.entries((j && j.series) || {})) setSeriesFee(s, v.fee_type, v.fee_multiplier);
-    return true;
-  } catch (_) { return false; }
+  const key=want.join(',');
+  if (seriesLoadInFlight.has(key)) return seriesLoadInFlight.get(key);
+  const due=want.filter(s=>!seriesLastAttempt.has(s) || Date.now()-seriesLastAttempt.get(s)>=60000);
+  if (!due.length) return false;
+  due.forEach(s=>seriesLastAttempt.set(s,Date.now()));
+  const request=(async()=>{
+    try {
+      const response=await fetchImpl(`/api/kalshi-series-fee?series=${encodeURIComponent(due.join(','))}`, {signal:AbortSignal.timeout(5000)});
+      if (!response.ok) throw Error(`HTTP ${response.status}`);
+      const json=await response.json();
+      let updated=false;
+      for (const [series,terms] of Object.entries((json && json.series) || {})) {
+        if (!['quadratic','quadratic_with_maker_fees','quadratic_with_combo_maker_fees'].includes(terms.fee_type)) continue;
+        setSeriesFee(series,terms.fee_type,terms.fee_multiplier,terms.fetched_at);
+        updated=true;
+      }
+      return updated;
+    } catch (error) {
+      console.warn(`Kalshi series fees refresh failed; using bounded fallback: ${error.message}`);
+      return false;
+    } finally { seriesLoadInFlight.delete(key); }
+  })();
+  seriesLoadInFlight.set(key,request);
+  return request;
 }
 function makerRateOf(opts) {
   if (opts && opts.makerRate != null && Number.isFinite(Number(opts.makerRate))) return Number(opts.makerRate);
@@ -159,4 +194,4 @@ export function sellerKeeps(fillAmerican, { feeRate = 0 } = {}) {
 export const youKeepLabel = (k) => (k ? `Your sale price ${k.text}` : "");
 export const buyerSeesLabel = (b) => (b ? `Buyer sees ${b.text} after fees` : "");
 export const BUYER_SEES_TITLE =
-  "The odds a bettor buying this parlay actually gets: our quoted price plus their taker fee (Kalshi 0.07 × price × (1 − price); Polymarket combos price × [0.0695(1 − price) + 0.06(1 − price)^4]). Lower than your sale price because the buyer pays a fee on top.";
+  "The odds a bettor buying this parlay actually gets: our quoted price plus their taker fee (Kalshi 0.07 × price × (1 − price); Polymarket combos price × [0.095(1 − price) + 0.06(1 − price)^4]). Lower than your sale price because the buyer pays a fee on top.";

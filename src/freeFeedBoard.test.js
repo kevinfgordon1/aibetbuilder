@@ -32,7 +32,7 @@ assert.deepEqual(
 assert.equal(freeFeedBooks(null).some((b) => b.key === "draftkings" || b.key === "fanduel" || b.key === "prophetx"), false);
 
 const poly = {
-  book: "polymarket",
+  book: "polymarket", feed: "polymarket-us",
   book_id: 193,
   league: "NFL",
   away: "Falcons",
@@ -98,7 +98,7 @@ assert.equal(games[0].home, "Green Bay Packers");
 assert.equal(games[0].is_live, false);
 assert.equal(games[0].bookOdds.polymarket.ml_away, feeAsk(0.285));
 assert.equal(games[0].bookOdds.polymarket.ml_home, feeAsk(0.72));
-assert.equal(games[0].bookOdds.kalshi.ml_home, feeAsk(0.72));
+assert.equal(games[0].bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.72, .07).american);
 assert.equal(games[0].bookOdds.kalshi.ml_away, null);
 
 const liveNow = Date.parse("2026-09-25T01:00:00Z");
@@ -125,13 +125,13 @@ assert.equal(liveRow[0].away, "Atlanta Falcons");
 assert.equal(liveRow[0].home, "Green Bay Packers");
 assert.equal(liveRow[0].commence_time, "2026-09-25T00:15:00Z", "the later Kalshi occurrence does not move kickoff");
 assert.equal(liveRow[0].is_live, true);
-assert.equal(liveRow[0].bookOdds.kalshi.ml_away, feeAsk(0.4));
+assert.equal(liveRow[0].bookOdds.kalshi.ml_away, feeInclusiveAmerican(0.4, .07).american);
 assert.equal(liveRow[0].bookOdds.polymarket.ml_away, feeAsk(0.4));
 
 const mlbRow = gamesFromFreeFeeds({
   league: "MLB",
   polymarket: [{
-    book: "polymarket",
+    book: "polymarket", feed: "polymarket-us",
     book_id: 193,
     league: "MLB",
     away: "Rays",
@@ -165,7 +165,7 @@ assert.equal(mlbRow[0].away, "Tampa Bay Rays");
 assert.equal(mlbRow[0].home, "New York Yankees");
 assert.equal(mlbRow[0].is_live, true);
 assert.equal(mlbRow[0].commence_time, "2026-09-24T23:05:00Z");
-assert.equal(mlbRow[0].bookOdds.kalshi.ml_away, feeAsk(0.39));
+assert.equal(mlbRow[0].bookOdds.kalshi.ml_away, feeInclusiveAmerican(0.39,.035).american);
 assert.equal(mlbRow[0].bookOdds.polymarket.ml_away, feeAsk(0.39));
 
 // Live Kalshi titles are city or truncated city ("Los Angeles C", "New York G"),
@@ -250,12 +250,12 @@ assert.equal(abbreviated.length, 3);
 const chargers = abbreviated.find((g) => g.awayAbbr === "LAC");
 const seahawks = abbreviated.find((g) => g.awayAbbr === "SEA");
 const titans = abbreviated.find((g) => g.awayAbbr === "TEN");
-assert.equal(chargers.bookOdds.kalshi.ml_away, feeAsk(0.25));
-assert.equal(chargers.bookOdds.kalshi.ml_home, feeAsk(0.76));
+assert.equal(chargers.bookOdds.kalshi.ml_away, feeInclusiveAmerican(0.25,.07).american);
+assert.equal(chargers.bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.76,.07).american);
 assert.equal(chargers.bookOdds.underdog_predict.ml_away, 300);
-assert.equal(seahawks.bookOdds.kalshi.ml_away, feeAsk(0.76));
+assert.equal(seahawks.bookOdds.kalshi.ml_away, feeInclusiveAmerican(0.76,.07).american);
 assert.equal(titans.home, "New York Giants");
-assert.equal(titans.bookOdds.kalshi.ml_home, feeAsk(0.57));
+assert.equal(titans.bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.57,.07).american);
 
 // Production SSE shape: book 194, city names, 0–1 yes-ask. Snapshot JSON
 // must paint American odds on the Underdog Falcons @ Packers row.
@@ -302,8 +302,8 @@ const fromPayload = gamesFromFreeFeeds({
 });
 assert.equal(fromPayload.length, 1);
 assert.equal(fromPayload[0].id, "ff:NFL:ATL:GB");
-assert.equal(fromPayload[0].bookOdds.kalshi.ml_home, feeAsk(0.69));
-assert.equal(fromPayload[0].bookOdds.kalshi.ml_away, feeAsk(0.32));
+assert.equal(fromPayload[0].bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.69,.07).american);
+assert.equal(fromPayload[0].bookOdds.kalshi.ml_away, feeInclusiveAmerican(0.32,.07).american);
 assert.equal(fromPayload[0].bookOdds.underdog_predict.ml_away, 245);
 
 const movedBoard = {
@@ -321,12 +321,12 @@ const movedGames = gamesFromFreeFeeds({
 const ticks = boardPriceTicks(fromPayload, movedGames);
 const atlTick = ticks.find((row) => row.bookKey === "kalshi" && row.label === "ATL ML");
 assert.ok(atlTick, "an in-game Kalshi move is a tick");
-assert.equal(atlTick.price, feeAsk(0.34));
+assert.equal(atlTick.price, feeInclusiveAmerican(0.34,.07).american);
 assert.equal(boardPriceTicks(movedGames, movedGames).length, 0, "the same print is not another tick");
 const polyBody = {
   ok: true,
   quotes: [
-    { book: "polymarket", book_id: 193, league: "NFL", away: "Falcons", home: "Packers", side: "Falcons", bet_type: "moneyline", odds: 0.34 },
+    { book: "polymarket", feed: "polymarket-us", book_id: 193, league: "NFL", away: "Falcons", home: "Packers", side: "Falcons", bet_type: "moneyline", odds: 0.34 },
     { book: "other", book_id: 1, odds: 0.5 },
   ],
 };
@@ -340,7 +340,7 @@ assert.equal(replaced.length, 2);
 assert.equal(replaced.some((q) => String(q.ticker).includes("LARPHI")), false);
 assert.equal(quotesAfterVenueEvent(replaced, { quotes: [] }), replaced);
 const falcons = (odds, iso) => ({
-  book: "polymarket",
+  book: "polymarket", feed: "polymarket-us",
   book_id: 193,
   token_id: "tok-away",
   side: "Falcons",
@@ -541,7 +541,7 @@ const live = gamesFromFreeFeeds({
 });
 assert.equal(live.length, 1);
 assert.equal(live[0].is_live, true);
-assert.equal(live[0].bookOdds.kalshi.ml_home, feeAsk(0.72), "Kalshi still paints after kickoff");
+assert.equal(live[0].bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.72,.07).american, "Kalshi still paints after kickoff");
 assert.equal(gameVisibleOnBoard(live[0], { liveOnly: true, now }), true);
 assert.equal(gameVisibleOnBoard(live[0], { liveOnly: false, now }), false);
 
@@ -575,7 +575,7 @@ assert.equal(otherLeague.length, 0);
 const ncaaf = gamesFromFreeFeeds({
   league: "NCAAF",
   polymarket: [{
-    book: "polymarket",
+    book: "polymarket", feed: "polymarket-us",
     book_id: 193,
     league: "NCAAF",
     away: "Rebels",
@@ -651,7 +651,7 @@ console.log("freeFeedBoard.test.js ok");
 // ── LIVE needs a passed kickoff AND an in-progress flag ──────────────────
 {
   const nowMs = Date.parse("2026-10-07T12:00:00Z");
-  const q = (away, home, side, extra) => ({ book: "polymarket", book_id: 193, league: "NFL", away, home, side, bet_type: "moneyline", odds: 0.5, updated_at: "2026-10-07T11:59:00.000Z", token_id: `${away}-${side}`, ...extra });
+  const q = (away, home, side, extra) => ({ book: "polymarket", feed: "polymarket-us", book_id: 193, league: "NFL", away, home, side, bet_type: "moneyline", odds: 0.5, updated_at: "2026-10-07T11:59:00.000Z", token_id: `${away}-${side}`, ...extra });
   const rows = gamesFromFreeFeeds({
     league: "NFL",
     polymarket: [

@@ -141,9 +141,10 @@ function normalizeLevels(levels) {
     const american = typeof raw?.american === "number" ? raw.american : Number(raw?.american);
     const size = typeof raw?.size === "number" ? raw.size : parseFloat(raw?.size);
     if (!isFinite(american) || american === 0 || !isFinite(size) || size <= 0) continue;
-    const p = americanToImpliedProb(american);
+    const exact = Number(raw?.effectivePrice);
+    const p = exact > 0 && exact < 1 ? exact : americanToImpliedProb(american);
     if (p == null || p <= 0 || p >= 1) continue;
-    clean.push({ american, size, p });
+    clean.push({ ...raw, american, size, p });
   }
   clean.sort((a, b) => b.american - a.american);
   return clean;
@@ -162,7 +163,7 @@ export function topBandCoversTarget(levels, targetPayout = TARGET_PAYOUT_USD) {
     if (lvl.american !== topAm) break;
     size += lvl.size;
   }
-  const profit = stakeToProfit(size, topAm);
+  const profit = ladder.filter(l => l.american === topAm).reduce((sum,l)=>sum+l.size*(1-l.p)/l.p,0);
   return profit != null && profit + COMPLETE_EPS >= target;
 }
 

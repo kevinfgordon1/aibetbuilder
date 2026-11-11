@@ -153,7 +153,7 @@ assert.equal(canSeeUnderdogPredict({ email: "tester@gmail.com" }), false);
     { key: "kalshi" },
     { key: "bookmaker" },
     { key: "underdog_predict" },
-    { key: "polymarket" },
+    { key: "polymarket", source:'polymarket-us' },
   ];
   assert.deepEqual(visiblePromoBooks(kevin, books).map((b) => b.key), ["kalshi", "bookmaker", "underdog_predict", "polymarket"]);
   assert.deepEqual(visiblePromoBooks(null, books).map((b) => b.key), ["kalshi", "bookmaker", "polymarket"]);

@@ -307,7 +307,7 @@ export default function ElectionBoard({ refreshKey = 0 } = {}) {
       <div data-politics-board="1" data-politics-layout="moneyline" data-race-count={counts.all} data-poll-ms={POLL_MS}>
         <div style={{ fontSize: 12, color: "var(--nob-text-2)", marginBottom: 8, lineHeight: 1.45 }}>
           Fee-adjusted American odds. Each cell is the best way to back that candidate at that venue: YES on them, or NO on the opponent in a two-candidate race.
-          {" "}Kalshi taker fee is 0.07×P×(1−P), rounded up to the next cent on a 1-contract take. Polymarket US is 0.0695×P×(1−P). ProphetX is 2% of net winnings.
+          {" "}Kalshi taker fee is 0.07×P×(1−P), rounded up to the next cent on a 1-contract take. Polymarket US Tier 1 is 0.095×P×(1−P). ProphetX is 2% of net winnings.
           {" "}Green is the best price for that candidate across venues.
         </div>
         <div data-politics-cadence="1" style={{ fontSize: 12, color: "var(--nob-muted)", marginBottom: 8, lineHeight: 1.45 }}>

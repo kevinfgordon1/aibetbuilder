@@ -1,3 +1,5 @@
+import polyFee from '../lib/polymarket-us-fee.json' with {type:'json'};
+import { kalshiTakerRate } from './kalshiFees.js';
 // Live inverse bet fairs per leg for "What to root for" (same method as Combo Sniper / noboost pm-live):
 //   leg fair = 1 − (fee-included VWAP to buy the OPPOSITE side until it can win $500), best venue wins.
 // Venues: Kalshi public orderbooks (every leg), Polymarket US + Novig from our odds-relay
@@ -10,8 +12,8 @@ export const FEES = {
   kalshi: (p) => 0.07 * p * (1 - p),
   // Straight-market taker fee for lifting an opponent ask. Not the combo maker
   // fee (polyComboMakerFee.js). Single-market Polymarket makers stay $0.
-  polymarket: (p) => 0.0695 * p * (1 - p),
-  // Pregame takes are $0. The walk does not add a live fee (15s / $500 rules unchanged).
+  polymarket: (p) => polyFee.takerFeeCoefficient * p * (1 - p),
+  // Pregame takes are $0. Live quotes are charged by walk using the market coefficient (default 0.06).
   novig: () => 0,
   // 2% of net winnings: a contract bought at p pays 1 − 0.02*(1−p) after commission,
   // so the fee-included cost of a $1 payout is p / (0.98 + 0.02*p).
@@ -30,8 +32,8 @@ export function american(p) {
 /** levels [[price, contracts]] → fee-included VWAP until the bet can win $usd of PROFIT, or { fail }.
  *  Depth = potential profit, not stake (Kevin): a contract bought at fee-included cost c wins 1 − c,
  *  so $3,000 at −200 (c ≈ 0.667) is $1,500 of depth. */
-export function walk(levels, venue, usd = DEPTH_USD) {
-  const fee = FEES[venue];
+export function walk(levels, venue, usd = DEPTH_USD, terms = {}) {
+  const fee = venue === 'novig' ? (p => terms.is_live === true ? (terms.fee_coefficient != null && terms.fee_coefficient !== "" && Number(terms.fee_coefficient)>=0 ? Number(terms.fee_coefficient) : 0.06)*p*(1-p) : 0) : venue === 'kalshi' ? (p => (terms.takerRate ?? kalshiTakerRate(terms.ticker, terms))*p*(1-p)) : FEES[venue];
   const lv = (levels || []).filter(([p, q]) => p > 0 && p < 1 && q > 0).sort((a, b) => a[0] - b[0]);
   if (!lv.length) return { fail: "no_ask" };
   let spent = 0, got = 0, profit = 0;
@@ -99,7 +101,7 @@ export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novi
       const levels = Array.isArray(q.depth) && q.depth.length ? q.depth.map((x) => [Number(x.odds), Number(x.size)]) : q.size > 0 ? [[odds, Number(q.size)]] : [];
       const changed = Date.parse(q.updated_at || "") || 0;
       const at = venue === "polymarket" ? Math.max(Date.parse(q.confirmed_at || "") || 0, changed) : novigLive ? polledAt : changed;
-      ((out[ev] = out[ev] || {})[code] = out[ev][code] || {})[venue] = { levels, at, changed };
+      ((out[ev] = out[ev] || {})[code] = out[ev][code] || {})[venue] = { levels, at, changed, is_live: q.is_live === true, fee_coefficient: q.fee_coefficient };
     }
   };
   put("polymarket", polymarket); put("novig", novig);
@@ -124,10 +126,10 @@ export function relayIndex({ kalshiBoard = [], polymarket = [], novig = [], novi
 export function legFair(leg, { kalshiBooks = {}, relay = {}, now = Date.now(), kalshiAt = now, usd = DEPTH_USD } = {}) {
   const r = legEvent(leg);
   const sources = [];
-  const tryV = (venue, levels, at, via) => {
+  const tryV = (venue, levels, at, via, terms = {}) => {
     if (!levels) return;
     const age = now - at;
-    const w = walk(levels, venue, usd);
+    const w = walk(levels, venue, usd, { ticker: leg.ticker, ...terms });
     const s = { venue, via, ageMs: Math.round(age), topAmerican: w.top != null ? american(w.top) : null };
     if (age > STALE_MS) sources.push({ ...s, used: false, reason: "stale" });
     else if (w.fail) sources.push({ ...s, used: false, reason: w.fail });
@@ -139,23 +141,23 @@ export function legFair(leg, { kalshiBooks = {}, relay = {}, now = Date.now(), k
     // Yes still loses if the match draws, so it is not the inverse.
     if (r.threeWay && team) {
       const own = kalshiBooks[`${r.event}-${team}`];
-      if (own) tryV("kalshi", own.no, kalshiAt, `No ${team}`);
+      if (own) tryV("kalshi", own.no, kalshiAt, `No ${team}`, own);
       const rv = (relay[r.event] || {})[team] || {};
-      for (const v of ["polymarket", "novig", "prophetx"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, `No ${team}`);
+      for (const v of ["polymarket", "novig", "prophetx"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, `No ${team}`, rv[v]);
     } else {
       const opp = team ? r.outcomes.find((t) => t !== team) : null;
       if (team && opp) {
         const own = kalshiBooks[`${r.event}-${team}`]; const oth = kalshiBooks[`${r.event}-${opp}`];
-        if (oth) tryV("kalshi", oth.yes, kalshiAt, `Yes ${opp}`);
-        if (own) tryV("kalshi", own.no, kalshiAt, `No ${team}`);
+        if (oth) tryV("kalshi", oth.yes, kalshiAt, `Yes ${opp}`, oth);
+        if (own) tryV("kalshi", own.no, kalshiAt, `No ${team}`, own);
         const rv = (relay[r.event] || {})[opp] || {};
-        for (const v of ["polymarket", "novig"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, opp);
+        for (const v of ["polymarket", "novig"]) if (rv[v]) tryV(v, rv[v].levels, rv[v].at, opp, rv[v]);
       }
     }
   } else {
     const bk = kalshiBooks[r.event];
     const side = r.allowed[0];
-    if (bk) tryV("kalshi", side === "yes" ? bk.no : bk.yes, kalshiAt, side === "yes" ? "No" : "Yes");
+    if (bk) tryV("kalshi", side === "yes" ? bk.no : bk.yes, kalshiAt, side === "yes" ? "No" : "Yes", bk);
   }
   const used = sources.filter((s) => s.used);
   if (!used.length) return { p: null, american: null, best: null, sources };

@@ -17,16 +17,17 @@ import {
   takerFeeRate,
 } from "./venueTakerFee.js";
 
-assert.equal(VENUE_TAKER_FEE_RATE.polymarket, 0.0695);
+assert.equal(VENUE_TAKER_FEE_RATE.polymarket, 0.095);
 assert.equal(VENUE_TAKER_FEE_RATE.kalshi, 0.07);
-assert.equal(takerFeeRate("polymarket"), 0.0695);
+assert.equal(takerFeeRate("polymarket"), 0.095);
 assert.equal(takerFeeRate("kalshi"), 0.07);
 assert.equal(takerFeeRate("underdog_predict"), null);
-// Novig has no static venue rate: only a live take is charged (0.03 default).
+// Novig has no static venue rate: only a live take is charged (0.06 default).
 assert.equal(takerFeeRate("novig"), null);
 assert.equal(takerFeeRate("novig", { live: false }), null);
-assert.equal(takerFeeRate("novig", { live: true }), 0.03);
+assert.equal(takerFeeRate("novig", { live: true }), 0.06);
 assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
+assert.equal(takerFeeRate("novig", { live: true, coefficient: 0 }), null);
 
 {
   const p = 0.355;
@@ -36,7 +37,7 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
   assert.ok(Math.abs(implied - 0.0695) < 0.0002, `fill implies ${implied}`);
   assert.equal(orderTakerFeeDollars(contracts, p, 0.0695), 3.98);
   const board = feeInclusiveAmerican(p, VENUE_TAKER_FEE_RATE.polymarket);
-  const eff = p + 0.0695 * p * (1 - p);
+  const eff = p + 0.095 * p * (1 - p);
   assert.equal(board.effectivePrice, eff);
   assert.equal(board.rawAmerican, impliedProbToAmerican(p));
   assert.equal(board.american, impliedProbToAmerican(eff));
@@ -94,7 +95,7 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
   const games = gamesFromFreeFeeds({
     league: "NFL",
     polymarket: [{
-      book: "polymarket",
+      book: "polymarket", feed: "polymarket-us",
       book_id: 193,
       league: "NFL",
       away: "Falcons",
@@ -153,7 +154,7 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
     receivedAt: Date.parse("2026-09-25T01:00:01.000Z"),
     nowMs: Date.parse("2026-09-24T18:00:00Z"),
   }).games;
-  const priced = feeInclusiveAmerican(0.69, 0.07);
+  const priced = feeInclusiveAmerican(0.69, 0.095);
   assert.equal(painted[0].bookOdds.polymarket.ml_away, priced.american);
   assert.equal(painted[0].bookOdds.polymarket.ml_away_raw, priced.rawAmerican);
 }
@@ -168,10 +169,10 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
 }
 
 // Novig live taker fee (0.03 × P × (1−P), added on top of the ask).
-// Verified against the Novig slip: $100 at ask 0.295 shows Payout $331.96 and
+// Historical market-coefficient override, verified against the old Novig slip: $100 at ask 0.295 shows Payout $331.96 and
 // Trading Fee $2.07; at 0.32 Payout $306.25; at 0.28 Payout $349.59.
 {
-  const live = (odds, extra = {}) => ({ book: "novig", league: "NFL", bet_type: "moneyline", is_live: true, odds, ...extra });
+  const live = (odds, extra = {}) => ({ book: "novig", league: "NFL", bet_type: "moneyline", is_live: true, fee_coefficient:0.03, odds, ...extra });
   const a = novigQuotePrice(live(0.295));
   assert.equal(a.rawAmerican, 239);
   assert.equal(a.american, 232, "+239 ask is +232 all-in");
@@ -192,14 +193,14 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
   assert.equal(novigLiveFeeRate(live(0.295, { is_live: "true" })), null, "only boolean true counts as live");
   // Coefficient comes from the market: 0.06 NCAAF live lines, default per type.
   assert.equal(novigLiveFeeRate(live(0.5, { fee_coefficient: 0.06 })), 0.06);
-  assert.equal(novigLiveFeeRate(live(0.5)), 0.03);
-  assert.equal(novigLiveFeeRate(live(0.5, { league: "NCAAF", bet_type: "spread" })), 0.06);
+  assert.equal(novigLiveFeeRate(live(0.5,{fee_coefficient:null})), 0.06);
+  assert.equal(novigLiveFeeRate(live(0.5, { league: "NCAAF", bet_type: "spread",fee_coefficient:null })), 0.06);
   assert.equal(novigLiveFeeRate(live(0.5, { league: "NCAAF", bet_type: "moneyline" })), 0.03);
   assert.equal(novigLiveFeeRate(live(0.5, { fee_coefficient: 0 })), null);
   assert.equal(novigQuotePrice(live(0.5, { fee_coefficient: 0.06 })).american, -106);
   assert.equal(novigQuotePrice(live(0.5)).american, -103);
   // Derive from american when odds is missing.
-  assert.equal(novigQuotePrice({ book: "novig", is_live: true, american: 239 }).american, 232);
+  assert.equal(novigQuotePrice({ book: "novig", is_live: true, fee_coefficient:0.03, american: 239 }).american, 232);
   assert.equal(novigQuotePrice({ book: "novig" }).american, null);
 }
 
@@ -209,7 +210,7 @@ assert.equal(takerFeeRate("novig", { live: true, coefficient: 0.06 }), 0.06);
     league: "NFL",
     novig: [{
       book: "novig", book_id: 195, league: "NFL", away: "Pittsburgh Steelers", home: "Cleveland Browns",
-      side: "Cleveland Browns", bet_type: "moneyline", odds: 0.295, is_live: isLive,
+      side: "Cleveland Browns", bet_type: "moneyline", odds: 0.295, fee_coefficient:0.03, is_live: isLive,
       start: "2026-10-02T00:15:00.000Z", token_id: "cle", updated_at: "2026-10-02T00:39:00.000Z",
     }],
     nowMs: Date.parse(nowMs),

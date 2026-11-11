@@ -62,7 +62,7 @@ export function topBandDepthUsd(leg, levels) {
   let size = 0;
   for (const lvl of ladder) {
     if (lvl.american !== topAm) break;
-    size += profitAtAmerican(lvl.size, lvl.american);
+    size += lvl.contracts > 0 && lvl.rawPrice > 0 && lvl.feePerContract != null ? lvl.contracts*(1-lvl.rawPrice-lvl.feePerContract) : profitAtAmerican(lvl.size, lvl.american);
   }
   return size;
 }

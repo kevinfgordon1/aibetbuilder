@@ -1,23 +1,16 @@
+import { kalshiTakerRate } from './kalshiFees.js';
 // Taker fee for the New Odds Board. One coefficient per venue.
 //
 // Fee per $1 contract is rate × P × (1−P). The number on the board is the
 // cost to take: P + rate·P·(1−P), converted to American odds.
 //
-// Kalshi's published taker fee uses this 0.07 rate and rounds the order
-// fee up to the next cent (orderTakerFeeDollars). The cell has no order
-// size, so it shows the per-contract rate.
-//
-// Polymarket US (docs.polymarket.us/fees, effective 2026-10-07): straight taker
-// fee 0.0695×C×P×(1−P), banker's-rounded to the cent (a 250-contract fill at
-// 0.355 was charged $3.98). Combos use a separate taker curve
-// C×P×[0.0695(1−P) + 0.06(1−P)^4] and pay NO maker rebate (polyComboTakerFeePerContract).
-//
-// Novig: live (in-game) straight trades only. Taker fee = c × P × (1−P) per
-// contract, added to the cost (help.novig: "added on top of the trade price").
-// c is the market's own fee.coefficient (0.03; 0.06 for NCAAF live spreads and
-// totals). Pregame Novig takes are fee-free, so pregame stays raw. Novig's
-// book shows pre-fee prices; the order slip's Payout uses P + fee. The rate is
-// per quote (novigLiveFeeRate), not a static venue rate, so it is not in the map.
+// Kalshi cells use 0.07 × the series multiplier; order-level rounding is separate.
+// Polymarket US Tier 1 (https://docs.polymarket.us/fees, checked 2026-11-11):
+// straight taker fee = 0.095×C×P×(1−P), banker's-rounded to cents.
+// Combos use C×P×[0.095(1−P) + 0.06(1−P)^4]; no maker rebate is credited.
+// Novig pregame is free. Live taker fee = c×P×(1−P), added on top of price;
+// c is the market coefficient, default 0.06. Raw books are pre-fee.
+// The live coefficient is per quote, not a static venue fee in the map.
 //
 // Underdog's phone price already includes its fee. It is not in this map.
 
@@ -34,7 +27,7 @@ export const VENUE_TAKER_FEE_RATE = Object.freeze({
 
 export const TAKER_FEE_LEGEND = "Poly/Kalshi prices include taker fee · Novig LIVE prices include live fee";
 
-export const NOVIG_LIVE_FEE_COEFFICIENT = 0.03;
+export const NOVIG_LIVE_FEE_COEFFICIENT = 0.06;
 export const NOVIG_LIVE_FEE_COEFFICIENT_NCAAF_LINES = 0.06;
 
 // Default when a Novig quote carries no fee_coefficient (older relay build).
@@ -61,8 +54,9 @@ export function takerFeeRate(bookKey, opts) {
   if (key === "novig") {
     if (!opts || opts.live !== true) return null;
     const c = Number(opts.coefficient);
-    return Number.isFinite(c) && c > 0 ? c : NOVIG_LIVE_FEE_COEFFICIENT;
+    return opts.coefficient != null && opts.coefficient !== "" && Number.isFinite(c) && c >= 0 ? (c || null) : NOVIG_LIVE_FEE_COEFFICIENT;
   }
+  if (key === "kalshi") return kalshiTakerRate(opts && (opts.ticker || opts.series), opts || {});
   const rate = VENUE_TAKER_FEE_RATE[key];
   return rate == null ? null : rate;
 }
@@ -87,7 +81,7 @@ export function polyComboTakerFeePerContract(price) {
   const p = Number(price);
   if (!(p > 0 && p < 1)) return 0;
   const q = 1 - p;
-  return p * (0.0695 * q + 0.06 * q ** 4);
+  return p * (POLYMARKET_US_TAKER_FEE * q + 0.06 * q ** 4);
 }
 
 export function effectiveTakerPrice(price, rate) {

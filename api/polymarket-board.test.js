@@ -20,6 +20,7 @@ function jsonRes() {
   await handler({ method: 'GET', url: '/api/polymarket-board?league=NFL' }, res, {
     now: Date.parse('2026-09-25T00:30:00Z'),
     fetchFn: async (url, init) => {
+      assert.fail('legacy international loader must not request any data');
       if (String(url).includes('/books')) {
         assert.equal(init && init.method, 'POST');
         const posted = JSON.parse(init.body);
@@ -64,14 +65,7 @@ function jsonRes() {
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.ok, true);
   assert.equal(res.body.league, 'NFL');
-  assert.equal(res.body.quotes.length, 2);
-  const falcons = res.body.quotes.find((q) => q.side === 'Falcons');
-  const packers = res.body.quotes.find((q) => q.side === 'Packers');
-  assert.equal(falcons.book, 'polymarket');
-  assert.equal(falcons.book_id, 193);
-  assert.equal(falcons.odds, 0.34, 'min ask wins over asks[0] 0.99 and cached gamma 0.26');
-  assert.equal(falcons.is_live, true);
-  assert.equal(packers.odds, 0.67);
+  assert.deepEqual(res.body.quotes, [], 'legacy international board returns no price');
   assert.match(res.headers['Cache-Control'], /no-store/);
 
   const bad = jsonRes();
