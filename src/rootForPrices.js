@@ -8,6 +8,8 @@ export const DEPTH_USD = 500;
 export const STALE_MS = 15000;
 export const FEES = {
   kalshi: (p) => 0.07 * p * (1 - p),
+  // Straight-market taker fee for lifting an opponent ask. Not the combo maker
+  // fee (polyComboMakerFee.js). Single-market Polymarket makers stay $0.
   polymarket: (p) => 0.0695 * p * (1 - p),
   // Pregame takes are $0. The walk does not add a live fee (15s / $500 rules unchanged).
   novig: () => 0,

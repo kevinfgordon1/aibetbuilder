@@ -518,7 +518,11 @@ export function quoteRow(row, { left = 0, filled = 0, liveQuotes = null, ended =
     tone = "lose";
     const venue = row.venueKey || s.venue || row.venue || "kalshi";
     const y = toNum(s.tape_yes_price);
-    const keep = y != null ? makerKeepsFromYes(y, { venue, ticker: s.market_ticker || ticker }) : null;
+    const keep = y != null ? makerKeepsFromYes(y, {
+      venue,
+      ticker: s.market_ticker || ticker,
+      at: s.created_at || s.updated_at || row.created_at,
+    }) : null;
     const win = y != null ? buyerSeesFromYes(y, venue) : null;
     if (keep && win) details.push(`another maker won it at ${keep.text} (buyer saw ${win.text} after fees)`);
     else if (keep) details.push(`another maker won it at ${keep.text}`);

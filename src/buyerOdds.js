@@ -10,11 +10,13 @@
 //   3. no_bid = floor to the 0.001 grid (KALSHI_SUBCENT=1 in production; penny grid otherwise),
 //      never past the target; YES quoted = 1 − no_bid
 //   4. buyer pays YES + 0.07·YES·(1−YES) per contract (Kalshi taker fee, venueTakerFee.js)
-// Polymarket US combos: maker fee 0 and no maker rebate, so the quoted YES is sEff; the buyer pays the
-// combo taker curve P·[0.0695(1−P) + 0.06(1−P)^4] (docs.polymarket.us/fees, effective 2026-10-07). Per-contract estimate, before Kalshi rounds the order fee
-// up to the cent, so a $1 order can land a few cents either way.
+// Polymarket US combos: no maker rebate. Maker fee is $0 before 2026-11-14T05:00:00Z and
+// 0.03×C×p×(1−p) after (polyComboMakerFee.js). The quoted YES is the gross price that still
+// nets sEff. The buyer pays the combo taker curve P·[0.0695(1−P) + 0.06(1−P)^4].
+// Single-market Polymarket maker fees stay $0. Per-contract estimate.
 import { VENUE_TAKER_FEE_RATE, effectiveTakerPrice, polyComboTakerFeePerContract } from "./venueTakerFee.js";
 import { allInFromExchange } from "./comboCredits.js";
+import { isPolyComboSlug, polyComboMakerRate, polyComboPriceForNet } from "./polyComboMakerFee.js";
 
 export const FALLBACK_MAKER_RATE = 0.035;
 
@@ -29,8 +31,8 @@ export function makerRateFromSeries(feeType, multiplier) {
   }
 }
 
-/** "KXMVECROSSCATEGORY0-S2026…-D44B…" → "KXMVECROSSCATEGORY0" */
-export const isPolyComboTicker = (ticker) => /^caoc-/i.test(String(ticker || "").trim());
+/** "KXMVECROSSCATEGORY0-S2026…-D44B…" → "KXMVECROSSCATEGORY0". caoc-/crossd- are Polymarket combos. */
+export const isPolyComboTicker = (ticker) => isPolyComboSlug(ticker);
 export function seriesOfTicker(ticker) {
   if (isPolyComboTicker(ticker)) return null;
   const t = String(ticker || "").trim().toUpperCase();
@@ -43,7 +45,8 @@ export function setSeriesFee(series, feeType, multiplier) {
   if (series) seriesRates.set(String(series).toUpperCase(), makerRateFromSeries(feeType, multiplier));
 }
 export function makerRateForTicker(ticker) {
-  if (isPolyComboTicker(ticker)) return 0; // Polymarket combo: no maker fee, no rebate
+  // Not a Kalshi series. The Polymarket combo maker schedule is polyComboMakerRate, not this cache.
+  if (isPolyComboTicker(ticker)) return 0;
   const s = seriesOfTicker(ticker);
   return s && seriesRates.has(s) ? seriesRates.get(s) : FALLBACK_MAKER_RATE;
 }
@@ -87,7 +90,17 @@ export function quotedYesPrice(fillAmerican, opts = {}) {
   const a = num(fillAmerican);
   if (!Number.isFinite(a) || a === 0 || (a > -100 && a < 100)) return null;
   const sEff = impliedProb(a);
-  if (venueKey(venue) === "polymarket") return sEff;
+  if (venueKey(venue) === "polymarket") {
+    // An explicit single-market ticker is not the combo maker schedule.
+    if (opts.ticker && !isPolyComboSlug(opts.ticker)) return sEff;
+    const rate = polyComboMakerRate(opts.at);
+    if (!(rate > 0)) return sEff;
+    const gross = polyComboPriceForNet(sEff, rate);
+    if (!(gross > 0 && gross < 1)) return null;
+    const tick = 0.0001;
+    const yes = Math.round(Math.ceil(gross / tick - 1e-12) * tick * 10000) / 10000;
+    return yes > 0 && yes < 1 ? yes : null;
+  }
   const target = 1 - nominalProbFromEff(sEff, makerRateOf(opts));
   let no = subcent ? floor3(target) : floor2(target);
   if (subcent && no > target + 1e-12) no = Math.round((no - 0.001) * 1000) / 1000;
@@ -114,7 +127,10 @@ export function buyerSeesFromYes(yes, venue = "kalshi") {
 export function makerKeepsFromYes(yes, opts = {}) {
   const y = Number(yes);
   if (!(y > 0 && y < 1)) return null;
-  const k = venueKey(opts.venue) === "polymarket" ? 0 : makerRateOf(opts);
+  const poly = venueKey(opts.venue) === "polymarket";
+  const k = poly
+    ? (opts.ticker && !isPolyComboSlug(opts.ticker) ? 0 : polyComboMakerRate(opts.at))
+    : makerRateOf(opts);
   const american = americanFromProb(y - k * y * (1 - y));
   return american == null ? null : { american, text: fmt(american) };
 }
