@@ -10,6 +10,7 @@ import { historyOutcome, settlementFromStored, settlementCopy } from "./comboSet
 import { sportFromTicker, underlyingCopy } from "./comboLegResult.js";
 import { isLockCapFill } from "./comboTape.js";
 import { isPolyComboMakerFill, polyComboFillTime, polyComboMakerFeeDollars } from "./polyComboMakerFee.js";
+import { fairOdds } from "./comboLockView.js";
 
 export const STATEMENT_TZ = "America/New_York";
 // History spans many days; Today is often empty. Default All.
@@ -508,6 +509,28 @@ function sideFromUnderlying(outcome) {
   return null;
 }
 
+
+function impliedProb(a) {
+  const n = toNum(a);
+  if (n == null || n === 0) return null;
+  const p = n > 0 ? 100 / (n + 100) : Math.abs(n) / (Math.abs(n) + 100);
+  return Number.isFinite(p) ? p : null;
+}
+
+// Ex-ante expected P/L: fair chance the parlay hits, times hit/miss payoffs.
+// Null when fair odds or payoffs are missing — never invented.
+export function expectedLockPnl(parlay, pay) {
+  if (!parlay || !pay) return null;
+  const hit = Number(pay.hit);
+  const miss = Number(pay.miss);
+  if (!Number.isFinite(hit) || !Number.isFinite(miss)) return null;
+  const fair = fairOdds(parlay);
+  if (!fair || fair.american == null) return null;
+  const p = impliedProb(fair.american);
+  if (p == null || p < 0 || p > 1) return null;
+  return r2(p * hit + (1 - p) * miss);
+}
+
 export function lockStatementLine({
   parlay,
   filled = 0,
@@ -585,6 +608,7 @@ export function lockStatementLine({
     bucket,
     settled,
     pnl,
+    expectedPnl: expectedLockPnl(parlay, realPay || pay),
     // Which way the parlay went: hit | miss | push | null (still open).
     side: settled ? side : null,
     resultKind,
