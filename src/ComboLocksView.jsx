@@ -755,14 +755,17 @@ function VenueTag({ venue, venueKey }) {
   return <span className={"venue " + key}>{venue || (key === "polymarket" ? "Polymarket" : "Kalshi")}</span>;
 }
 
-function QuoteSection({ title, rows, sub, ok, empty, total = null }) {
+function QuoteSection({ title, rows, sub, ok, empty, total = null, capped = false }) {
   const [all, setAll] = React.useState(false);
   const shown = all ? rows : rows.slice(0, QUOTE_ROWS_SHOWN);
   const extra = rows.length - shown.length;
+  const countLabel = capped
+    ? `${countText(rows.length)}+ (showing newest ${countText(rows.length)})`
+    : (total != null && total > rows.length ? `${countText(total)} (showing newest ${countText(rows.length)})` : rows.length);
   return (
     <div className="qh-sec" data-quotes={ok ? "filled" : "not-filled"}>
       <div className={"qh-h" + (ok ? " ok" : "")}>
-        <span>{title}</span><span className="cnt num">{total != null && total > rows.length ? `${countText(total)} (showing newest ${countText(rows.length)})` : rows.length}</span>
+        <span>{title}</span><span className="cnt num">{countLabel}</span>
         {sub ? <span className="qh-s">{sub}</span> : null}
       </div>
       {rows.length === 0 ? <div className="empty">{empty}</div> : (
@@ -815,6 +818,7 @@ export function QuoteHistory({ history, note }) {
         title="Not filled"
         rows={history.notFilled}
         total={history.notFilledTotal}
+        capped={history.capped}
         sub="outbid, too slow, not taken, expired or skipped"
         empty="Nothing here. Every request we answered filled."
       />
@@ -827,9 +831,10 @@ export function QuoteHistory({ history, note }) {
 export function QuoteHistoryFold({ history, note }) {
   if (!history) return null;
   const nf = history.notFilledTotal != null ? history.notFilledTotal : history.notFilled.length;
+  const nfText = history.capped ? `${countText(nf)}+` : countText(nf);
   return (
     <details className="dblock qh-fold">
-      <summary className="dt">Quote history · Filled {countText(history.filled.length)} · Not filled {countText(nf)}</summary>
+      <summary className="dt">Quote history · Filled {countText(history.filled.length)} · Not filled {nfText}</summary>
       <QuoteHistory history={history} note={note} />
     </details>
   );

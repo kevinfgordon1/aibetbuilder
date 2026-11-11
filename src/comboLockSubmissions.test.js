@@ -150,12 +150,11 @@ function mockClient() {
   assert.equal(m.notFilledTotal({ shown: 420, loadedUnfilledQuotes: 400, countedUnfilledQuotes: 668 }), 688);
   assert.equal(m.notFilledTotal({ shown: 10, loadedUnfilledQuotes: 10, countedUnfilledQuotes: 10 }), 10);
   assert.equal(m.notFilledTotal({ shown: 10, loadedUnfilledQuotes: 10, countedUnfilledQuotes: null }), 10);
-  const calls = [];
-  const q = new Proxy({}, { get: (_, k) => (...a) => { calls.push([k, a]); return q; } });
-  m.lockUnfilledCountQuery({ from: () => q }, { userId: "u", parlayId: "p" });
-  assert.deepEqual(calls[0], ["select", ["id", { count: "exact", head: true }]]);
   const view = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocksView.jsx"), "utf8");
   assert.match(view, /showing newest/);
+  const locks = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
+  assert.doesNotMatch(locks, /count:\s*"exact"/);
+  assert.doesNotMatch(locks, /lockUnfilledCountQuery/);
 }
 
 console.log("comboLockSubmissions.test.js ok");
@@ -198,6 +197,7 @@ console.log("comboLockSubmissions.test.js ok");
   ];
   assert.equal(lockQuoteFillLine(rows, { fills: 1 }), "3 quotes · 1 fill");
   assert.equal(lockQuoteFillLine(rows, { fills: 1, countedUnfilledQuotes: 30 }), "31 quotes · 1 fill");
+  assert.equal(lockQuoteFillLine(rows, { fills: 1, capped: true }), "3+ quotes · 1 fill");
   assert.equal(lockQuoteFillLine([rows[1]], { fills: 0 }), "1 quote · 0 fills");
   console.log("lockQuoteFillLine ok");
 }

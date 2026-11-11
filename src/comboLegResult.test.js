@@ -456,7 +456,7 @@ assert.equal(matchEspnSide("TXAM", espnSep5[5], "ncaaf"), "home");
   assert.doesNotMatch(locksSrc, /History \+ profile/);
   // One shared lock card (renderLock) for the Waiting and Filled sections.
   assert.equal((locksSrc.match(/const renderLock = /g) || []).length, 1);
-  assert.match(locksSrc, /<QuoteHistory history=\{quoteHistory\(attemptsByParlay\[a\.id\], \{ parlay: a \}\)\}/);
+  assert.match(locksSrc, /<QuoteHistory history=\{quoteHistoryFor\(a\)\}/);
   const tapeSrc = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboTape.jsx"), "utf8");
   assert.doesNotMatch(tapeSrc, /outcomeChrome|arch-head|hist-head/);
 }
