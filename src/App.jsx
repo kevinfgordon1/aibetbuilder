@@ -1,4 +1,4 @@
-import { Children, useState, useEffect, useMemo, useRef, useDeferredValue, lazy, Suspense } from "react";
+import { Children, memo, startTransition, useState, useEffect, useMemo, useRef, useDeferredValue, lazy, Suspense } from "react";
 import { getBrowserSupabase, userAfterAuthEvent } from "./supabaseBrowser.js";
 const ComboLocks = lazy(() => import("./ComboLocks")); // owner/tester tab: own chunk (audit Oct 24)
 const ComboTape = lazy(() => import("./ComboTape")); // owner/tester tab: own chunk (audit Oct 24)
@@ -138,7 +138,7 @@ const BetstampOddsBoard = lazy(() => import("./BetstampOddsBoard.jsx")); // New 
 import { holdDepthRankWhilePending, nextPromoDepthWindow, maskUncheckedWhileHidingThin, promoDepthNoticeKind, PROMO_DEPTH_WINDOW_MAX } from "./promoListRank.js";
 import { loadMinLegDepth, saveMinLegDepth, parseMinLegDepth, filterLegsByMinDepth, repriceLegsForMinDepth, MIN_LEG_DEPTH_LABEL } from "./promoMinDepth.js";
 import { depthCacheKey, fetchPromoBookDepth, venueHasDepthApi, applyBlendToLegs, unknownDepthKeys, DEPTH_UNKNOWN } from "./promoBookDepth.js";
-import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth, collectPromoDepthLegs, depthPricePoolLegs, poolDepthPicks } from "./promoListRank.js";
+import { overlayBlendedParlay, visiblePromoAfterDepth, visiblePromoAfterDepthChunked, collectPromoDepthLegs, depthPricePoolLegsChunked, poolDepthPicks, rankPromoPicksChunked, PROMO_RANK_YIELD_MS } from "./promoListRank.js";
 import { activePromoList, bestPromoCardId, promoPickCardId, resolveOptimizeFocusId } from "./promoOptimize.js";
 import { playerPropEmptyDetail, playerPropHiddenCounts } from "./promoPlayerPropHint.js";
 import {
@@ -1039,13 +1039,13 @@ function PromoDebouncedInput({ value, onCommit, delay = PROMO_INPUT_DEBOUNCE_MS,
       onBlur={() => {
         focused.current = false;
         clearTimeout(timer.current);
-        commitRef.current(text);
+        startTransition(() => commitRef.current(text));
       }}
       onChange={(e) => {
         const next = sanitize ? sanitize(e.target.value) : e.target.value;
         setText(next);
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => commitRef.current(next), delay);
+        timer.current = setTimeout(() => startTransition(() => commitRef.current(next)), delay);
       }}
     />
   );
@@ -1061,11 +1061,6 @@ function PromoStakeInput({ stake, onCommit }) {
     if (!focused.current) setText(String(stake));
   }, [stake]);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const commitText = (raw) => {
-    const next = nextPromoStakeField(raw);
-    commitRef.current(next.stake);
-    return next;
-  };
   return (
     <input
       type="number"
@@ -1075,14 +1070,15 @@ function PromoStakeInput({ stake, onCommit }) {
       onBlur={() => {
         focused.current = false;
         clearTimeout(timer.current);
-        const next = commitText(text);
+        const next = nextPromoStakeField(text);
         setText(next.draft != null ? String(next.stake) : text);
+        startTransition(() => commitRef.current(next.stake));
       }}
       onChange={(e) => {
         const next = nextPromoStakeField(e.target.value);
         setText(e.target.value);
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => commitRef.current(next.stake), PROMO_INPUT_DEBOUNCE_MS);
+        timer.current = setTimeout(() => startTransition(() => commitRef.current(next.stake)), PROMO_INPUT_DEBOUNCE_MS);
       }}
       style={{ width: 70, background: "#12131a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: "#e8eaed", padding: "6px 10px", fontSize: 14, fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, textAlign: "center" }}
     />
@@ -1645,11 +1641,19 @@ function usePromoPageLadders(picks, pageSize, minLegDepth, hideLowLiquidity) {
   return state.map;
 }
 
+// The $500 inverse walk ignores boost, stake, and refund. Those stay out of
+// the memo key so editing them does not re-walk every venue ladder.
+function promoBlendKey(ctx, fallbackLegs) {
+  const c = ctx || {};
+  const n = c.numLegs != null ? c.numLegs : (fallbackLegs || 0);
+  return [c.promoType, n, c.minLegDepth || "", c.hideLowLiquidity ? 1 : 0].join("|");
+}
+
 function usePromoDepthBlend(legs, live, ctx = {}, laddersOverride) {
   const [ladders, setLadders] = useState(null);
   const external = laddersOverride != null;
   const wantedKey = (legs || []).filter((l) => venueHasDepthApi(l && l.bestOppBook)).map(depthCacheKey).join("\n");
-  const ctxKey = [ctx.promoType, ctx.numLegs, ctx.stake, ctx.boostPct, ctx.refundPct, ctx.creditConversionPct, ctx.boostedProfit, ctx.winProfit, ctx.creditValue].join("|");
+  const blendKey = promoBlendKey(ctx, (legs || []).length);
   useEffect(() => {
     if (external) return;
     if (!live) {
@@ -1667,11 +1671,12 @@ function usePromoDepthBlend(legs, live, ctx = {}, laddersOverride) {
     });
     return () => { cancelled = true; };
   }, [live, wantedKey, external]);
-  return useMemo(() => {
+  const blended = useMemo(() => {
     const map = external ? (laddersOverride || {}) : (ladders || {});
     const { displayLegs, blends } = applyBlendToLegs(legs, map, ctx);
-    return { ladders: map, blends, displayLegs, ready: external || ladders != null, ctx };
-  }, [legs, ladders, ctxKey, external, laddersOverride]);
+    return { ladders: map, blends, displayLegs, ready: external || ladders != null };
+  }, [legs, ladders, blendKey, external, laddersOverride]);
+  return { ...blended, ctx };
 }
 
 function overlayParlayMetrics(p, displayLegs, ctx) {
@@ -1700,6 +1705,22 @@ function PromoPickView({ p, live, ladders, promoType, stake, boostPct, refundPct
     [p, overlay.displayLegs, promoType, stake, boostPct, refundPct, creditConversionPct],
   );
   return children(view, overlay);
+}
+
+// Skip the pick row when the parent re-renders for an unrelated reason
+// (clock, scan flag, focus). signature is the only compare key.
+const PromoMemoRow = memo(function PromoMemoRow({ signature, children }) {
+  return children;
+}, (a, b) => a.signature === b.signature);
+
+function promoPickRowSignature(p, extra) {
+  const legs = (p && p.legs) || [];
+  let legSig = "";
+  for (let i = 0; i < legs.length; i++) {
+    const l = legs[i];
+    legSig += (l && l.name) + "@" + (l && l.bestOpp) + "@" + (l && l.dk) + "@" + (l && l.bestOppBook) + ";";
+  }
+  return extra + "|" + (p && p.ev) + "|" + (p && p.boostedProfit) + "|" + (p && p.winProfit) + "|" + legSig;
 }
 
 function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, blendCtx }) {
@@ -1758,9 +1779,12 @@ function PromoTrueOddsSubline({ leg, style, live = false, levels: levelsProp, bl
 
 function PromoExpandedLegsTable({ legs, bookLabel, footer, edgeCaption, ladders, blendCtx }) {
   const overlay = usePromoDepthBlend(legs, ladders === undefined, blendCtx);
-  const resolved = ladders !== undefined
-    ? { ...applyBlendToLegs(legs, ladders, blendCtx || {}), ladders, ctx: blendCtx }
-    : overlay;
+  const passedKey = promoBlendKey(blendCtx, (legs || []).length);
+  const passed = useMemo(() => {
+    if (ladders === undefined) return null;
+    return { ...applyBlendToLegs(legs, ladders, blendCtx || {}), ladders, ctx: blendCtx };
+  }, [legs, ladders, passedKey]);
+  const resolved = ladders !== undefined ? passed : overlay;
   const rows = resolved.displayLegs || [];
   const ladderMap = resolved.ladders || {};
   return (
@@ -2773,12 +2797,37 @@ export default function App() {
   );
   const poolLadders = usePromoPageLadders(poolDepthList, poolDepthList.length, minLegDepth, dropThinPoolLegs);
   const poolDepthPending = isParlayPromo && poolDepthList.length > 0 && poolLadders == null;
-  const parlayLegPool = useMemo(
-    () => (isParlayPromo
-      ? depthPricePoolLegs(parlayLegPoolStored, { promoType, numLegs: scanNumLegs, hideLowLiquidity: dropThinPoolLegs, minLegDepth }, poolLadders)
-      : parlayLegPoolStored),
-    [parlayLegPoolStored, isParlayPromo, promoType, scanNumLegs, dropThinPoolLegs, minLegDepth, poolLadders],
-  );
+  const poolStoredId = useRef({ legs: null, n: 0 });
+  if (poolStoredId.current.legs !== parlayLegPoolStored) {
+    poolStoredId.current = { legs: parlayLegPoolStored, n: poolStoredId.current.n + 1 };
+  }
+  const poolLadderId = useRef({ map: null, n: 0 });
+  if (poolLadderId.current.map !== poolLadders) {
+    poolLadderId.current = { map: poolLadders, n: poolLadderId.current.n + 1 };
+  }
+  // Price the scan pool after paint, in short slices. The sync walk used to
+  // run inside render the moment ladders arrived and ate the click.
+  const poolPriceKey = !isParlayPromo || poolLadders == null
+    ? ""
+    : [promoType, scanNumLegs, dropThinPoolLegs ? 1 : 0, minLegDepth, poolStoredId.current.n, poolLadderId.current.n].join("|");
+  const [poolPriced, setPoolPriced] = useState({ key: "", legs: [] });
+  useEffect(() => {
+    if (!poolPriceKey) return undefined;
+    const ac = new AbortController();
+    depthPricePoolLegsChunked(parlayLegPoolStored, { promoType, numLegs: scanNumLegs, hideLowLiquidity: dropThinPoolLegs, minLegDepth }, poolLadders, { signal: ac.signal, yieldMs: PROMO_RANK_YIELD_MS })
+      .then((legs) => {
+        if (!ac.signal.aborted) setPoolPriced({ key: poolPriceKey, legs });
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError" || ac.signal.aborted) return;
+        console.error("[promo pool price]", err);
+      });
+    return () => ac.abort();
+  }, [poolPriceKey]);
+  const poolPricePending = !!poolPriceKey && poolPriced.key !== poolPriceKey;
+  const parlayLegPool = !isParlayPromo || poolLadders == null || poolPriced.key !== poolPriceKey
+    ? parlayLegPoolStored
+    : poolPriced.legs;
 
   const currentPromoScanKey = useMemo(
     () => promoScanInputKey({
@@ -2811,13 +2860,13 @@ export default function App() {
       promoLoading,
       soccerBlocks: waitForSoccerPm,
     });
-    if (!slateReady || poolDepthPending || !promoLegsReady) {
+    if (!slateReady || poolDepthPending || poolPricePending || !promoLegsReady) {
       // Bump gen so a 1-leg scan that already resolved cannot commit into
       // this not-ready window (abort is only checked at yield / completion).
       // Pool ladders still loading: wait, so the scan ranks on live depth.
       // Leg rebuild runs after paint; do not rank the previous book's pool.
       promoScanGen.current += 1;
-      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm || poolDepthPending || !promoLegsReady));
+      setPromoScanBusy(!!promoLoaded && (promoLoading || waitForSoccerPm || poolDepthPending || poolPricePending || !promoLegsReady));
       return;
     }
     const gen = ++promoScanGen.current;
@@ -2870,7 +2919,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, promoLegsReady, currentPromoScanKey]);
+  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, poolPricePending, promoLegsReady, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -2883,28 +2932,70 @@ export default function App() {
   );
 
   // Blend + opp-guard rank at the stake the scan used. Stake edits only scale.
-  const rankedNoSweats = useMemo(() => rankPromoPicks(
-    scannedNoSweats.parlays,
-    { promoType: "nosweat", numLegs, stake: scannedNoSweats.atStake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-    (p) => attachNoSweatLockToPick(p, scannedNoSweats.atStake),
-    overlayParlayMetrics,
-  ), [scannedNoSweats, numLegs, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
+  // Deferred inputs (scanNumLegs, scan boost, liquidity) so a click paints
+  // before the walk. Only the promo type on screen is ranked. The walk yields
+  // so it cannot sit on the main thread for the whole list.
+  const scannedRankSrc = promoType === "nosweat" ? scannedNoSweats
+    : promoType === "freebet" ? scannedFreeBets
+      : promoType === "nopromo" ? scannedNoPromo
+        : scannedBoostParlays;
+  const rankSrcId = useRef({ src: null, n: 0 });
+  if (rankSrcId.current.src !== scannedRankSrc) {
+    rankSrcId.current = { src: scannedRankSrc, n: rankSrcId.current.n + 1 };
+  }
+  const rankKey = [
+    promoType,
+    scanNumLegs,
+    scanBoostForKey,
+    refundPct,
+    creditConversionPct,
+    dropThinPoolLegs ? 1 : 0,
+    minLegDepth,
+    includeTeamTokens.join(","),
+    excludeTeamTokens.join(","),
+    rankSrcId.current.n,
+    scanCompletedForCurrent ? 1 : 0,
+  ].join("|");
+  const [rankedStore, setRankedStore] = useState({ key: "", boost: [], nopromo: [], nosweat: [], freebet: [] });
+  useEffect(() => {
+    if (!scanCompletedForCurrent) return undefined;
+    const ac = new AbortController();
+    const src = scannedRankSrc;
+    const atStake = src.atStake;
+    // 1-leg and multi-leg: $500 payout blend (profit excluding stake).
+    const ctx = promoType === "nosweat"
+      ? { promoType: "nosweat", numLegs: scanNumLegs, stake: atStake, refundPct, creditConversionPct, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens }
+      : promoType === "freebet"
+        ? { promoType: "freebet", numLegs: scanNumLegs, stake: atStake, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens }
+        : promoType === "nopromo"
+          ? { promoType: "nopromo", numLegs: scanNumLegs, stake: atStake, boostPct: 0, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens }
+          : { promoType: "boost", numLegs: scanNumLegs, stake: atStake, boostPct: scanBoostForKey, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens };
+    const attach = promoType === "nosweat"
+      ? (p) => attachNoSweatLockToPick(p, atStake)
+      : promoType === "freebet"
+        ? (p) => attachFreeBetLock(p, atStake)
+        : (p) => attachBoostLockToPick(p, atStake);
+    rankPromoPicksChunked(src.parlays, ctx, attach, overlayParlayMetrics, undefined, { signal: ac.signal, yieldMs: PROMO_RANK_YIELD_MS })
+      .then((ranked) => {
+        if (ac.signal.aborted) return;
+        setRankedStore((prev) => ({ ...prev, key: rankKey, [promoType]: ranked || [] }));
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError" || ac.signal.aborted) return;
+        console.error("[promo rank]", err);
+      });
+    return () => ac.abort();
+  }, [rankKey]);
+  const rankedNoSweats = rankedStore.nosweat;
+  const rankedBoost = rankedStore.boost;
+  const rankedNoPromo = rankedStore.nopromo;
+  const rankedFreeBets = rankedStore.freebet;
+  const rankPending = rankedStore.key !== rankKey;
 
   const topNoSweatsWithLock = useMemo(
     () => scaleRankedPicks(rankedNoSweats, scannedNoSweats.atStake, stake, attachNoSweatLockToPick),
     [rankedNoSweats, scannedNoSweats.atStake, stake],
   );
-
-  const rankedBoost = useMemo(() => {
-    // 1-leg and multi-leg: $500 payout blend (profit excluding stake).
-    // Lock from quoted opp (Guaranteed Profit); multi-leg lock badge stays off.
-    return rankPromoPicks(
-      scannedBoostParlays.parlays,
-      { promoType: "boost", numLegs, stake: scannedBoostParlays.atStake, boostPct: scanBoostPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-      (p) => attachBoostLockToPick(p, scannedBoostParlays.atStake),
-      overlayParlayMetrics,
-    );
-  }, [scannedBoostParlays, numLegs, scanBoostPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
 
   const topParlaysWithHedge = useMemo(
     () => scaleRankedPicks(rankedBoost, scannedBoostParlays.atStake, stake, attachBoostLockToPick),
@@ -2916,13 +3007,6 @@ export default function App() {
     [scannedNoPromo, stake],
   );
 
-  const rankedNoPromo = useMemo(() => rankPromoPicks(
-    scannedNoPromo.parlays,
-    { promoType: "nopromo", numLegs, stake: scannedNoPromo.atStake, boostPct: 0, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-    (p) => attachBoostLockToPick(p, scannedNoPromo.atStake),
-    overlayParlayMetrics,
-  ), [scannedNoPromo, numLegs, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
-
   const topNoPromoWithHedge = useMemo(
     () => scaleRankedPicks(rankedNoPromo, scannedNoPromo.atStake, stake, attachBoostLockToPick),
     [rankedNoPromo, scannedNoPromo.atStake, stake],
@@ -2932,13 +3016,6 @@ export default function App() {
     () => rescaleParlaysForStake(scannedFreeBets.parlays, scannedFreeBets.atStake, stake),
     [scannedFreeBets, stake],
   );
-
-  const rankedFreeBets = useMemo(() => rankPromoPicks(
-    scannedFreeBets.parlays,
-    { promoType: "freebet", numLegs, stake: scannedFreeBets.atStake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens },
-    (p) => attachFreeBetLock(p, scannedFreeBets.atStake),
-    overlayParlayMetrics,
-  ), [scannedFreeBets, numLegs, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens]);
 
   const topFreeBetsWithLock = useMemo(
     () => scaleRankedPicks(rankedFreeBets, scannedFreeBets.atStake, stake, (p) => attachFreeBetLock(p, stake)),
@@ -2962,35 +3039,65 @@ export default function App() {
         : topParlaysWithHedge;
   const lastDepthRankRef = useRef(null);
   const promoBaseLen = Array.isArray(rankedActive) ? rankedActive.length : 0;
-  const depthFiltersKey = [promoType, scanPromoBook, numLegs, rankAtStake, refundPct, creditConversionPct, scanBoostPct, hideLowLiquidity, minLegDepth, includeTeamTokens.join(","), excludeTeamTokens.join(",")].join("|");
+  const depthFiltersKey = [promoType, scanPromoBook, scanNumLegs, rankAtStake, refundPct, creditConversionPct, scanBoostPct, dropThinPoolLegs ? 1 : 0, minLegDepth, includeTeamTokens.join(","), excludeTeamTokens.join(",")].join("|");
   const [depthWindowState, setDepthWindowState] = useState({ key: "", size: 0 });
   // Depth-check every scanned candidate, not just the first page: the scan
   // ranks by top-of-book EV, so a combo whose live-depth EV is best can sit
   // below the page when a wider date window adds many thin-but-shiny combos.
   const depthWindow = Math.max(promoPage, Math.min(promoBaseLen, PROMO_DEPTH_WINDOW_MAX),
     depthWindowState.key === depthFiltersKey ? depthWindowState.size : 0);
-  const pageLadders = usePromoPageLadders(rankedActive, depthWindow, minLegDepth, hideLowLiquidity);
-  const promoDepthRankAtScan = useMemo(() => {
+  const pageLadders = usePromoPageLadders(rankedActive, depthWindow, minLegDepth, dropThinPoolLegs);
+  const rankedActiveId = useRef({ list: null, n: 0 });
+  if (rankedActiveId.current.list !== rankedActive) {
+    rankedActiveId.current = { list: rankedActive, n: rankedActiveId.current.n + 1 };
+  }
+  const pageLadderId = useRef({ map: null, n: 0 });
+  if (pageLadderId.current.map !== pageLadders) {
+    pageLadderId.current = { map: pageLadders, n: pageLadderId.current.n + 1 };
+  }
+  const depthRankKey = [depthFiltersKey, promoPage, depthWindow, rankedActiveId.current.n, pageLadderId.current.n].join("|");
+  const [depthRankStore, setDepthRankStore] = useState({ key: "", result: null });
+  useEffect(() => {
+    const ac = new AbortController();
     const ctx = promoType === "nosweat"
-      ? { promoType: "nosweat", numLegs, stake: rankAtStake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
+      ? { promoType: "nosweat", numLegs: scanNumLegs, stake: rankAtStake, refundPct, creditConversionPct, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens }
       : promoType === "freebet"
-        ? { promoType: "freebet", numLegs, stake: rankAtStake, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens }
-        : { promoType: isBoostLikePromo(promoType) ? promoType : "boost", numLegs, stake: rankAtStake, boostPct: effectiveBoostPct(promoType, scanBoostPct), hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens };
+        ? { promoType: "freebet", numLegs: scanNumLegs, stake: rankAtStake, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens }
+        : promoType === "nopromo"
+          ? { promoType: "nopromo", numLegs: scanNumLegs, stake: rankAtStake, boostPct: 0, hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens }
+          : { promoType: "boost", numLegs: scanNumLegs, stake: rankAtStake, boostPct: effectiveBoostPct(promoType, scanBoostPct), hideLowLiquidity: dropThinPoolLegs, minLegDepth, includeTeamTokens, excludeTeamTokens };
     const attach = promoType === "nosweat"
       ? (p) => attachNoSweatLockToPick(p, rankAtStake)
       : promoType === "freebet"
         ? (p) => attachFreeBetLock(p, rankAtStake)
         : (p) => attachBoostLockToPick(p, rankAtStake);
-    const next = visiblePromoAfterDepth(rankedActive, promoPage, pageLadders, (head, ladders) =>
-      rankPromoPicks(head, ctx, attach, overlayParlayMetrics, ladders), depthWindow,
-      { keysOfPick: (p) => collectPromoDepthLegs([p], minLegDepth, hideLowLiquidity).map(depthCacheKey) });
-    // Window growth is not part of the key: a wider check keeps showing the
-    // last good page until its ladders land.
     const filtersKey = depthFiltersKey + "|" + promoPage;
-    const held = holdDepthRankWhilePending(next, pageLadders, lastDepthRankRef.current, filtersKey);
-    if (pageLadders != null) lastDepthRankRef.current = { filtersKey, result: next };
-    return maskUncheckedWhileHidingThin(held, hideLowLiquidity);
-  }, [rankedActive, promoPage, depthWindow, depthFiltersKey, pageLadders, promoType, numLegs, rankAtStake, refundPct, creditConversionPct, hideLowLiquidity, minLegDepth, includeTeamTokens, excludeTeamTokens, scanBoostPct]);
+    visiblePromoAfterDepthChunked(rankedActive, promoPage, pageLadders, (head, ladders) =>
+      rankPromoPicksChunked(head, ctx, attach, overlayParlayMetrics, ladders, { signal: ac.signal, yieldMs: PROMO_RANK_YIELD_MS }), depthWindow,
+      { keysOfPick: (p) => collectPromoDepthLegs([p], minLegDepth, dropThinPoolLegs).map(depthCacheKey) })
+      .then((next) => {
+        if (ac.signal.aborted) return;
+        if (pageLadders != null) lastDepthRankRef.current = { filtersKey, result: next };
+        setDepthRankStore({ key: depthRankKey, result: next });
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError" || ac.signal.aborted) return;
+        console.error("[promo depth rank]", err);
+      });
+    return () => ac.abort();
+  }, [depthRankKey]);
+  const depthFiltersHeld = depthFiltersKey + "|" + promoPage;
+  const promoDepthRankAtScan = depthRankStore.key === depthRankKey && depthRankStore.result
+    ? maskUncheckedWhileHidingThin(depthRankStore.result, dropThinPoolLegs)
+    : maskUncheckedWhileHidingThin(
+      holdDepthRankWhilePending(
+        visiblePromoAfterDepth(rankedActive, promoPage, null, () => rankedActive, depthWindow),
+        null,
+        lastDepthRankRef.current,
+        depthFiltersHeld,
+      ),
+      dropThinPoolLegs,
+    );
   const promoDepthRank = useMemo(() => {
     const attach = promoType === "nosweat" ? attachNoSweatLockToPick
       : promoType === "freebet" ? attachFreeBetLock
@@ -3026,14 +3133,14 @@ export default function App() {
   const boostEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
-    scanBusy: promoScanBusy,
+    scanBusy: promoScanBusy || rankPending,
     scanCompletedForCurrent,
     resultCount: promoType === "boost" ? promoRankedCount : topParlaysWithHedge.length,
   });
   const noPromoEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
-    scanBusy: promoScanBusy,
+    scanBusy: promoScanBusy || rankPending,
     scanCompletedForCurrent,
     resultCount: promoType === "nopromo" ? promoRankedCount : topNoPromoWithHedge.length,
   });
@@ -3041,14 +3148,14 @@ export default function App() {
   const noSweatEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
-    scanBusy: promoScanBusy,
+    scanBusy: promoScanBusy || rankPending,
     scanCompletedForCurrent,
     resultCount: promoType === "nosweat" ? promoRankedCount : topNoSweatsWithLock.length,
   });
   const freeBetEmptyState = promoScanEmptyState({
     promoLoaded,
     promoLoading: promoBusyForEmpty,
-    scanBusy: promoScanBusy,
+    scanBusy: promoScanBusy || rankPending,
     scanCompletedForCurrent,
     resultCount: promoType === "freebet" ? promoRankedCount : topFreeBetsWithLock.length,
   });
@@ -4027,7 +4134,7 @@ export default function App() {
               </div>
               </div>
 
-              {(isParlayPromo && (promoScanBusy || !promoLegsReady) && activePromoBase.length > 0
+              {(isParlayPromo && (promoScanBusy || rankPending || poolPricePending || !promoLegsReady) && activePromoBase.length > 0
                 || (promoType === "boost" && boostPct !== scanBoostPct && topParlaysWithHedge.length > 0)
                 || (isParlayPromo && (oddsBoundsPending || teamFilterPending || promoFilterPending) && activePromoBase.length > 0)) && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: -12, marginBottom: 8 }}>recalculating…</div>
@@ -4063,9 +4170,11 @@ export default function App() {
                     const shownBoostPct = effectiveBoostPct(promoType, boostPct);
                     const promoId = encodePromoCardId({ promoType, book: promoBook, stake, legs: p.legs });
                     const isExpanded = expandedPromo === promoId;
+                    const rowSig = promoPickRowSignature(p, [promoId, shownBoostPct, stake, isExpanded ? 1 : 0, pageLadderId.current.n, promoBook, i, guestLocked ? 1 : 0, comboUnlocked ? 1 : 0].join("|"));
 
                     return (
-                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType={promoType} stake={stake} boostPct={shownBoostPct}>
+                      <PromoMemoRow key={promoId} signature={rowSig}>
+                      <PromoPickView p={p} ladders={pageLadders} live={false} promoType={promoType} stake={stake} boostPct={shownBoostPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const displayLeg = (overlay.displayLegs && overlay.displayLegs[0]) || p.legs[0];
@@ -4182,6 +4291,7 @@ export default function App() {
                     );
                       }}
                       </PromoPickView>
+                      </PromoMemoRow>
                     );
                   })}
                   </GuestPickGate>
@@ -4221,9 +4331,11 @@ export default function App() {
                     const isSingle = p.legs.length === 1;
                     const promoId = encodePromoCardId({ promoType: "nosweat", book: promoBook, stake, legs: p.legs });
                     const isExpanded = expandedPromo === promoId;
+                    const rowSig = promoPickRowSignature(p, [promoId, stake, refundPct, creditConversionPct, isExpanded ? 1 : 0, pageLadderId.current.n, promoBook, i, guestLocked ? 1 : 0, comboUnlocked ? 1 : 0].join("|"));
 
                     return (
-                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
+                      <PromoMemoRow key={promoId} signature={rowSig}>
+                      <PromoPickView p={p} ladders={pageLadders} live={false} promoType="nosweat" stake={stake} refundPct={refundPct} creditConversionPct={creditConversionPct}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
@@ -4348,6 +4460,7 @@ export default function App() {
                     );
                       }}
                       </PromoPickView>
+                      </PromoMemoRow>
                     );
                   })}
                   </GuestPickGate>
@@ -4389,9 +4502,11 @@ export default function App() {
                     const leg = p.legs?.[0];
                     const promoId = encodePromoCardId({ promoType: "freebet", book: promoBook, stake, legs: p.legs });
                     const isExpanded = expandedFreeBet === promoId;
+                    const rowSig = promoPickRowSignature(p, [promoId, stake, isExpanded ? 1 : 0, pageLadderId.current.n, promoBook, i, guestLocked ? 1 : 0, comboUnlocked ? 1 : 0].join("|"));
 
                     return (
-                      <PromoPickView key={promoId} p={p} ladders={pageLadders} live={false} promoType="freebet" stake={stake}>
+                      <PromoMemoRow key={promoId} signature={rowSig}>
+                      <PromoPickView p={p} ladders={pageLadders} live={false} promoType="freebet" stake={stake}>
                       {(view, overlay) => {
                     const trueParlayOdds = probToAmerican(view.combinedProb);
                     const evColor = view.ev > 0 ? "#10b981" : "#ef4444";
@@ -4569,6 +4684,7 @@ export default function App() {
                     );
                       }}
                       </PromoPickView>
+                      </PromoMemoRow>
                     );
                   })}
                   </GuestPickGate>

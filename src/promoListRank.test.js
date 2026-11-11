@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { calcFreeBetParlayEV } from "./promoFreeBet.js";
 import { calcNoSweatEV } from "./promoNoSweat.js";
 import { applyBlendToLegs, depthCacheKey } from "./promoBookDepth.js";
-import { overlayBlendedParlay, rankPromoPicks, visiblePromoAfterDepth } from "./promoListRank.js";
+import { overlayBlendedParlay, rankPromoPicks, rankPromoPicksChunked, depthPricePoolLegs, depthPricePoolLegsChunked, visiblePromoAfterDepth, visiblePromoAfterDepthChunked } from "./promoListRank.js";
 
 const require = createRequire(import.meta.url);
 const { calcParlayEV, ourTrueProb, dkDecimal, decimalToAmerican } = require("../lib/promo-ev.js");
@@ -155,6 +155,7 @@ assertPostBlendOrder("nosweat");
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /visiblePromoAfterDepth\(/);
+  assert.match(app, /visiblePromoAfterDepthChunked\(/);
   assert.match(app, /usePromoPageLadders\(/);
   assert.equal((app.match(/promoDepthRank\.visible\.map/g) || []).length, 3);
   assert.equal((app.match(/ladders=\{pageLadders\}/g) || []).length, 3);
@@ -163,7 +164,70 @@ assertPostBlendOrder("nosweat");
   assert.match(app, /i === 0 \? \(showLock \? "BEST CONVERSION" : "BEST PICK"\)/);
   assert.match(app, /i === 0 \? "★ Best Pick"/);
   assert.match(app, /i === 0 \? \(showLock \? "★ Best Conversion" : "★ Best Pick"\)/);
-  assert.match(app, /rankPromoPicks\([\s\S]*?overlayParlayMetrics/);
+  assert.match(app, /rankPromoPicksChunked\([\s\S]*?overlayParlayMetrics/);
+}
+
+{
+  const leg = (name, game, dk, opp) => ({
+    name, game, dk, bestOpp: opp, bestOppBook: "draftkings", sport: "basketball_nba", market: "ML",
+  });
+  const picks = [
+    { legs: [leg("A", "g1", 150, -130), leg("B", "g2", 120, -110)] },
+    { legs: [leg("C", "g3", 200, -140), leg("D", "g4", -105, 100)] },
+    { legs: [leg("E", "g5", 180, -125), leg("F", "g6", 110, -102)] },
+  ];
+  const ctx = { promoType: "boost", numLegs: 2, stake: 100, boostPct: 30, hideLowLiquidity: false };
+  const overlay = (p, displayLegs, c) => overlayBlendedParlay(p, displayLegs, c, calcs);
+  const sync = rankPromoPicks(picks, ctx, (p) => p, overlay);
+  const chunked = await rankPromoPicksChunked(picks, ctx, (p) => p, overlay, undefined, {
+    yieldMs: 0,
+    yieldFn: () => Promise.resolve(),
+  });
+  assert.deepEqual(chunked.map((p) => p.legs.map((l) => l.bestOpp)), sync.map((p) => p.legs.map((l) => l.bestOpp)));
+  assert.deepEqual(chunked.map((p) => p.ev), sync.map((p) => p.ev));
+  const page = visiblePromoAfterDepth(sync, 2, {}, (head) => rankPromoPicks(head, ctx, (p) => p, overlay, {}), 2);
+  const pageChunk = await visiblePromoAfterDepthChunked(sync, 2, {}, (head) => rankPromoPicksChunked(head, ctx, (p) => p, overlay, {}, { yieldMs: 0, yieldFn: () => Promise.resolve() }), 2);
+  assert.deepEqual(pageChunk.visible.map((p) => p.ev), page.visible.map((p) => p.ev));
+  assert.equal(pageChunk.rest.length, page.rest.length);
+}
+
+{
+  const pm = {
+    name: "Home",
+    game: "A @ B",
+    sport: "basketball_nba",
+    market: "ML",
+    dk: 130,
+    bestOpp: -120,
+    bestOppQuoted: -120,
+    bestOppBook: "kalshi",
+    bestOppName: "Away",
+    bestOppSize: 20,
+    bestOppVenues: [{ book: "polymarket", american: -125, size: 9000 }],
+  };
+  const ladders = {
+    [["kalshi", pm.sport, pm.game, pm.bestOppName, pm.market].join("|")]: [
+      { american: -120, size: 15 },
+      { american: -140, size: 8000 },
+    ],
+    [["polymarket", pm.sport, pm.game, pm.bestOppName, pm.market].join("|")]: [
+      { american: -125, size: 9000 },
+    ],
+  };
+  const overlay = (p, displayLegs, c) => overlayBlendedParlay(p, displayLegs, c, calcs);
+  const ctx = { promoType: "boost", numLegs: 1, stake: 100, boostPct: 30, hideLowLiquidity: false };
+  const at30 = rankPromoPicks([{ legs: [pm] }], ctx, (p) => p, overlay, ladders);
+  const at50 = rankPromoPicks([{ legs: [pm] }], { ...ctx, boostPct: 50 }, (p) => p, overlay, ladders);
+  assert.equal(at30[0].legs[0].bestOpp, at50[0].legs[0].bestOpp, "boost % does not change the inverse walk");
+  const walked = at30[0].legs[0].bestOpp;
+  at30[0].legs[0].bestOpp = 9999;
+  const again = rankPromoPicks([{ legs: [pm] }], ctx, (p) => p, overlay, ladders);
+  assert.equal(again[0].legs[0].bestOpp, walked, "a card mutation must not poison the next walk");
+  const priced = depthPricePoolLegs([pm], ctx, ladders);
+  const pricedChunk = await depthPricePoolLegsChunked([pm], ctx, ladders, { yieldMs: 0, yieldFn: () => Promise.resolve() });
+  assert.equal(pricedChunk[0].bestOpp, priced[0].bestOpp);
+  assert.equal(depthPricePoolLegs([pm], ctx, null).length, 1);
+  assert.equal((await depthPricePoolLegsChunked([pm], ctx, null)).length, 1);
 }
 
 console.log("promoListRank.test.js ok");

@@ -510,9 +510,73 @@ export function applyMinDepthOverlay(next, md) {
   };
 }
 
+// Same leg object is blended once per ladder snapshot. A 3-leg page reuses
+// each leg across hundreds of parlays; repeating the venue walk on every
+// parlay (and again when only boost % / stake change) blocks clicks.
+// The walk does not read boost, stake, or refund. Quote, book, and ladder
+// identity are part of the key, so a mutated leg recomputes.
+const pmBlendCache = new WeakMap();
+
+function copyBlendedLeg(leg) {
+  if (!leg || typeof leg !== "object") return leg;
+  const copy = { ...leg };
+  if (leg.pmBlend && typeof leg.pmBlend === "object") {
+    copy.pmBlend = { ...leg.pmBlend };
+    if (Array.isArray(leg.pmBlend.venues)) copy.pmBlend.venues = leg.pmBlend.venues.slice();
+    if (Array.isArray(leg.pmBlend.skippedVenues)) copy.pmBlend.skippedVenues = leg.pmBlend.skippedVenues.slice();
+  }
+  return copy;
+}
+
+function memoPmBlendLeg(leg, levels, laddersByKey, ctx, fallbackNumLegs) {
+  const numLegs = ctx.numLegs != null ? ctx.numLegs : fallbackNumLegs;
+  const minDepth = (leg && leg.minDepthBlend) || null;
+  const ladders = laddersByKey || (ctx && ctx.laddersByKey) || null;
+  const quote = leg && (leg.bestOppQuoted != null ? leg.bestOppQuoted : leg.bestOpp);
+  const cacheKey = leg && {
+    levels: levels || null,
+    ladders,
+    minDepth,
+    numLegs,
+    quote,
+    dk: leg.dk,
+    book: leg.bestOppBook,
+    size: leg.bestOppSize,
+    venues: leg.bestOppVenues || null,
+    stored: leg.bestOppLevels || null,
+  };
+  if (leg && cacheKey) {
+    const hit = pmBlendCache.get(leg);
+    if (hit
+      && hit.levels === cacheKey.levels
+      && hit.ladders === cacheKey.ladders
+      && hit.minDepth === cacheKey.minDepth
+      && hit.numLegs === cacheKey.numLegs
+      && hit.quote === cacheKey.quote
+      && hit.dk === cacheKey.dk
+      && hit.book === cacheKey.book
+      && hit.size === cacheKey.size
+      && hit.venues === cacheKey.venues
+      && hit.stored === cacheKey.stored) {
+      return copyBlendedLeg(hit.leg);
+    }
+  }
+  let next = applyPmBlendToLeg(leg, levels, {
+    ...ctx,
+    laddersByKey: ladders || undefined,
+    numLegs,
+  });
+  // Owner Min depth per leg: keep the cross-venue blended price when it is
+  // more conservative than the $500 walk (no-op when no minimum is set).
+  next = applyMinDepthOverlay(next, minDepth);
+  if (leg && cacheKey && next) pmBlendCache.set(leg, { ...cacheKey, leg: next });
+  return copyBlendedLeg(next);
+}
+
 export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
   const blends = {};
-  const displayLegs = (legs || []).map((leg) => {
+  const list = legs || [];
+  const displayLegs = list.map((leg) => {
     const key = [
       leg && leg.bestOppBook,
       leg && leg.sport,
@@ -521,15 +585,8 @@ export function applyPmBlendToLegs(legs, laddersByKey, ctx = {}) {
       leg && leg.market,
     ].join("|");
     const levels = laddersByKey && laddersByKey[key];
-    let next = applyPmBlendToLeg(leg, levels, {
-      ...ctx,
-      laddersByKey: laddersByKey || ctx.laddersByKey,
-      numLegs: ctx.numLegs != null ? ctx.numLegs : (legs || []).length,
-    });
-    // Owner Min depth per leg: keep the cross-venue blended price when it is
-    // more conservative than the $500 walk (no-op when no minimum is set).
-    next = applyMinDepthOverlay(next, leg && leg.minDepthBlend);
-    if (next.pmBlend) blends[key] = next.pmBlend;
+    const next = memoPmBlendLeg(leg, levels, laddersByKey, ctx, list.length);
+    if (next && next.pmBlend) blends[key] = next.pmBlend;
     return next;
   });
   return { displayLegs, blends };
