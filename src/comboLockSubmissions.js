@@ -21,6 +21,10 @@ export const DESK_POLL_MS = 20 * 1000;
 export const LIVING_SUBS_POLL_MS = 60 * 1000;
 export const IDLE_SUBS_POLL_MS = 5 * 60 * 1000;
 export const SUBMISSION_FETCH_CONCURRENCY = 6;
+// The desk effect was re-entering and issuing the same combo_submissions
+// read many times a second. One key cannot start again inside this gap,
+// and an in-flight key cannot start a second copy.
+export const SUBMISSION_READ_MIN_MS = 15 * 1000;
 
 // Columns the lock tape, quote history, open-quote cancel, and settlement ticker read.
 // select('*') was the History scan at ~2s and tens of millions of shared_blks_read.
@@ -164,6 +168,40 @@ export function lockSubmissionPollMs(parlay, opts = {}) {
   return lockQuotesLive(parlay, opts) ? quotingMs : idleMs;
 }
 
+export function submissionReadDue(lastAt, now = Date.now(), minMs = SUBMISSION_READ_MIN_MS) {
+  if (!lastAt) return true;
+  return now - lastAt >= minMs;
+}
+
+// Which combo_submissions reads this desk tick may start.
+// history = the offers log (label + worst_lock), only while that panel is open.
+// booked = filled / live rows used for the hedged count. Still the full set
+// (a later fill keeps its original created_at), just not on every tick.
+// locks = quote/skip rows for locks that are still quoting. Not every archived lock.
+// Exact not-filled counts are not a read. They are derived from rows already loaded.
+export function planDeskSubmissionReads({
+  now = Date.now(),
+  lastHistoryAt = 0,
+  lastBookedAt = 0,
+  lastLockAt = 0,
+  offersOpen = false,
+  minMs = SUBMISSION_READ_MIN_MS,
+} = {}) {
+  return {
+    history: !!offersOpen && submissionReadDue(lastHistoryAt, now, minMs),
+    booked: submissionReadDue(lastBookedAt, now, minMs),
+    locks: submissionReadDue(lastLockAt, now, minMs),
+  };
+}
+
+// A full archived plan is the first sight of History. Do not fan out one
+// pair of reads per settled lock. Only a lock that just moved to History
+// is fetched, and only a few of those on one tick.
+export function archivedIdsForDeskPoll(plan, cap = 4) {
+  if (!plan || plan.full) return [];
+  return (plan.fetchIds || []).filter(Boolean).slice(0, cap);
+}
+
 export function submissionPollDue({ lastAt = 0, now = Date.now(), force = false, intervalMs = LIVING_SUBS_POLL_MS } = {}) {
   if (force) return true;
   if (!lastAt) return true;
@@ -263,5 +301,6 @@ export function lockQuoteFillLine(rows, opts = {}) {
   const { quoted, fills: f } = lockQuoteFillCounts(rows, opts);
   if (!quoted) return "";
   const n = (x) => x.toLocaleString("en-US");
-  return `${n(quoted)} quote${quoted === 1 ? "" : "s"} · ${n(f)} fill${f === 1 ? "" : "s"}`;
+  const plus = opts.capped ? "+" : "";
+  return `${n(quoted)}${plus} quote${quoted === 1 ? "" : "s"} · ${n(f)} fill${f === 1 ? "" : "s"}`;
 }
