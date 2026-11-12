@@ -1,4 +1,4 @@
-import { useState, useDeferredValue, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useDeferredValue } from "react";
 import { depthFromStake } from "./depthProfit.js";
 import { formatAmericanOdds } from "./trueOddsLine.js";
 import { isSoccerSport, soccerGroupedLabel } from "./soccerPairing.js";
@@ -12,7 +12,10 @@ import {
   getBestForGame,
   pickBestFromPriceMap,
   bookHasPostedPrice,
+  boardVirtualSlice,
 } from "./oddsBoard.js";
+
+const BOARD_ROW_PX = { date: 34, game: 84 };
 
 function impliedProb(odds) {
   if (!odds) return 0.5;
@@ -126,7 +129,7 @@ function OddsSide({
   );
 }
 
-export default function OddsBoard({ oddsData, futuresData, books, sportChips, futures }) {
+function OddsBoard({ oddsData, futuresData, books, sportChips, futures }) {
   const [market, setMarket] = useState("ml");
   const [search, setSearch] = useState("");
   const [selectedBooks, setSelectedBooks] = useState(() => new Set((books || []).map((b) => b.key)));
@@ -158,12 +161,55 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
     });
   }, [games, deferredSearch]);
 
-  const grouped = {};
-  filteredGames.forEach((g) => {
-    const dateKey = formatDateGroup(g.commence_time);
-    if (!grouped[dateKey]) grouped[dateKey] = [];
-    grouped[dateKey].push(g);
-  });
+  const boardItems = useMemo(() => {
+    const items = [];
+    let current = null;
+    for (const g of filteredGames) {
+      const dateKey = formatDateGroup(g.commence_time);
+      if (dateKey !== current) {
+        items.push({ kind: "date", key: dateKey, label: dateKey });
+        current = dateKey;
+      }
+      items.push({
+        kind: "game",
+        key: `${g.sport}|${g.away}|${g.home}|${g.commence_time}`,
+        game: g,
+      });
+    }
+    return items;
+  }, [filteredGames]);
+  const scrollerRef = useRef(null);
+  const [scrollBox, setScrollBox] = useState({ top: 0, height: 680 });
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return undefined;
+    const read = () => {
+      const next = { top: el.scrollTop, height: el.clientHeight || 680 };
+      setScrollBox((prev) => (prev.top === next.top && prev.height === next.height ? prev : next));
+    };
+    read();
+    el.addEventListener("scroll", read, { passive: true });
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(read);
+      ro.observe(el);
+    }
+    return () => {
+      el.removeEventListener("scroll", read);
+      if (ro) ro.disconnect();
+    };
+  }, [deferredMarket]);
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (el && el.scrollTop) el.scrollTop = 0;
+  }, [deferredBoardSport, deferredMarket, deferredSearch]);
+  const windowed = boardVirtualSlice(
+    boardItems.map((item) => item.kind),
+    scrollBox.top,
+    Math.max(scrollBox.height, 640),
+    BOARD_ROW_PX,
+  );
+  const shownItems = boardItems.slice(windowed.start, windowed.end);
 
   const toggleBook = (bookKey) => {
     setSelectedBooks((prev) => {
@@ -335,28 +381,36 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
       </div>
       )}
       {deferredMarket !== "champ" && (
-      <div style={{ overflowX: "auto", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div ref={scrollerRef} style={{ overflow: "auto", height: boardItems.length > 18 ? "calc(100vh - 220px)" : "auto", maxHeight: "calc(100vh - 220px)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: teamColWidth + visibleBooks.length * oddsColWidth }}>
           <thead>
             <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, background: "#0d0e14", zIndex: 2 }}>Game</th>
+              <th style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 1, width: teamColWidth, position: "sticky", left: 0, top: 0, background: "#0d0e14", zIndex: 3 }}>Game</th>
               {visibleBooks.map((b) => (
-                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none" }}>
+                <th key={b.key} style={{ padding: "12px 8px", textAlign: "center", fontSize: 11, fontWeight: 600, color: b.key === "best" ? "#10b981" : "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, width: oddsColWidth, whiteSpace: "nowrap", borderLeft: b.key === "draftkings" ? "2px solid rgba(255,255,255,0.08)" : "none", position: "sticky", top: 0, background: "#0d0e14", zIndex: 2 }}>
                   {b.label}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {Object.keys(grouped).length === 0 && (
+            {boardItems.length === 0 && (
               <tr><td colSpan={visibleBooks.length + 1} style={{ padding: "40px", textAlign: "center", color: "#4b5563", fontSize: 14 }}>No games found{search ? ` for "${search}"` : ""}</td></tr>
             )}
-            {Object.entries(grouped).map(([dateKey, dateGames]) => (
-              <>
-                <tr key={dateKey + "_h"} style={{ background: "rgba(212,175,55,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#d4af37" }}>{dateKey}</td>
-                </tr>
-                {dateGames.map((game, gi) => {
+            {windowed.padTop > 0 && (
+              <tr aria-hidden="true"><td colSpan={visibleBooks.length + 1} style={{ height: windowed.padTop, padding: 0, border: 0 }} /></tr>
+            )}
+            {shownItems.map((item) => {
+              if (item.kind === "date") {
+                return (
+                  <tr key={item.key + "_h"} style={{ background: "rgba(212,175,55,0.06)", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <td colSpan={visibleBooks.length + 1} style={{ padding: "8px 16px", fontSize: 12, fontWeight: 700, color: "#d4af37" }}>{item.label}</td>
+                  </tr>
+                );
+              }
+              const game = item.game;
+              const gi = item.key;
+              return (() => {
                   const { bestAway, bestHome, bestDraw } = getBestForGame(game, deferredMarket, deferredSelectedBooks, allBooks);
                   const threeWay = !!(game.is_three_way || isSoccerSport(game.sport));
                   return (
@@ -425,9 +479,11 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
                       })}
                     </tr>
                   );
-                })}
-              </>
-            ))}
+              })();
+            })}
+            {windowed.padBottom > 0 && (
+              <tr aria-hidden="true"><td colSpan={visibleBooks.length + 1} style={{ height: windowed.padBottom, padding: 0, border: 0 }} /></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -445,3 +501,5 @@ export default function OddsBoard({ oddsData, futuresData, books, sportChips, fu
     </div>
   );
 }
+
+export default memo(OddsBoard);

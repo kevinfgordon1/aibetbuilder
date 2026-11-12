@@ -39,7 +39,7 @@ import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked, matchedRfqCounts } from "./comboLockHistory";
 import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
-import { lockSubmissionQueriesForParlays, mergeSubmissionRows, lockUnfilledCountQuery, cappedLockIds, isLockQuoteRow, notFilledTotal, lockQuoteFillLine, lockQuoteFillCounts, livingLocksDue, settleInBatches, DESK_POLL_MS } from "./comboLockSubmissions";
+import { lockSubmissionQueriesForParlays, livingLockSubmissionQueries, mergeSubmissionRows, cappedLockIds, lockQuoteFillLine, lockQuoteFillCounts, livingLocksDue, settleInBatches, planDeskSubmissionReads, archivedIdsForDeskPoll, DESK_POLL_MS, SUBMISSION_READ_MIN_MS } from "./comboLockSubmissions";
 import { outcomeChrome } from "./comboLegResult";
 import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
 import { OWNER_EMAIL, canSeeComboLocks, canSeeOwnerTools, comboLockHash } from "./comboAccess";
@@ -669,7 +669,10 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const [outcomes, setOutcomes] = useState([]);   // recent quote_outcomes rows (accepted/executed/lost)
   const [submissions, setSubmissions] = useState([]); // quoted / skipped / unfilled rows (combo ticker)
   const submissionsRef = useRef([]);
-  const [unfilledCounts, setUnfilledCounts] = useState({}); // parlay_id -> real not-filled quote count (only for capped locks)
+  const userRef = useRef(user);
+  userRef.current = user;
+  const offersOpenRef = useRef(false);
+  const submissionGateRef = useRef({ history: 0, booked: 0, locks: 0 });
   const [comboFills, setComboFills] = useState([]); // combo_fills rows — History ticker without a persist yet
   const [originalBets, setOriginalBets] = useState([]);
   const [mergePrompt, setMergePrompt] = useState(null);
@@ -766,9 +769,9 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     }
   }, []);
   const deskFailStreakRef = useRef(0);
-  // History's per-lock submission reads (one pair of .in() queries per 100 archived locks) are the
-  // slowest calls on the page (seconds each on a 1.4M-row table). Archived locks no longer change,
-  // so read them once and again only when the archived set changes or every ARCHIVED_SUBS_TTL_MS.
+  // History's per-lock submission reads used to fan out one pair per settled lock.
+  // A lock's quote/skip rows load when its row is opened, and a lock that just
+  // moved to History loads on the next poll (a few at a time).
   const archivedSubsRef = useRef({ ids: null, at: 0, rows: [] });
   const subsAtRef = useRef(new Map()); // parlay id -> last successful quote/skip read
   const subsForceRef = useRef(false); // user actions refresh quoting history on the next reload
@@ -780,7 +783,8 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
   const pageHintRef = useRef({ fills: 0, booked: 0 });
   const fillsCacheRef = useRef(null); // { userId, rows, maxRecorded, fullAt } for incremental combo_fills reads
   const loadDesk = useCallback(async () => {
-    if (!owner) return;
+    const user = userRef.current;
+    if (!owner || !user || !user.id) return;
     try {
       // CORE reads: the only ones the lists need to draw (Waiting / Filled need locks + fills,
       // History needs archived locks). All fast (p95 < 0.4s). The slow reads below run in parallel
@@ -810,14 +814,29 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
           return q.order("recorded_at", { ascending: true }).order("id", { ascending: true });
         }, { expectedRows: fillsPlanNow.full ? pageHintRef.current.fills : 0 }),
       ]);
-      // SECONDARY reads, started at the same time.
+      // SECONDARY reads. combo_submissions is gated: the same key cannot
+      // start again inside SUBMISSION_READ_MIN_MS, and the offers log (the
+      // slow label + worst_lock read) waits until that panel is opened.
+      const submissionPlan = planDeskSubmissionReads({
+        now: Date.now(),
+        lastHistoryAt: submissionGateRef.current.history,
+        lastBookedAt: submissionGateRef.current.booked,
+        lastLockAt: submissionGateRef.current.locks,
+        offersOpen: offersOpenRef.current,
+      });
+      if (submissionPlan.history) submissionGateRef.current.history = Date.now();
+      if (submissionPlan.booked) submissionGateRef.current.booked = Date.now();
       const extraP = Promise.allSettled([
-        supabase.from("combo_submissions").select("id,is_live,status,order_id,created_at,label,fill_american,venue,market_ticker,contracts,worst_lock").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80),
+        submissionPlan.history
+          ? supabase.from("combo_submissions").select("id,is_live,status,order_id,created_at,label,fill_american,venue,market_ticker,contracts,worst_lock").eq("user_id", user.id).neq("status", "shadow").or("quote_id.not.is.null,order_id.not.is.null,status.in.(filled,unfilled,quoted)").order("created_at", { ascending: false }).limit(80)
+          : Promise.resolve({ data: null, error: null }),
         // QUOTED contracts the worker recorded on post — for the quoted-vs-filled comparison.
         // Paged: PostgREST returns at most 1,000 rows, and Kevin has 1,268 filled/live rows. The cap
         // dropped the oldest confirmed fills, so 13 Aug/Sep locks lost contracts and History P/L
         // read $31,000.90 instead of $30,930.21.
-        fetchAllRows(() => supabase.from("combo_submissions").select("id,parlay_id,contracts,status,is_live,order_id,quote_id,venue,fill_american,cancel_requested_at,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }).order("id", { ascending: false }), { expectedRows: pageHintRef.current.booked }),
+        submissionPlan.booked
+          ? fetchAllRows(() => supabase.from("combo_submissions").select("id,parlay_id,contracts,status,is_live,order_id,quote_id,venue,fill_american,cancel_requested_at,created_at").eq("user_id", user.id).or("status.eq.filled,is_live.eq.true").order("created_at", { ascending: false }).order("id", { ascending: false }), { expectedRows: pageHintRef.current.booked })
+          : Promise.resolve({ data: null, error: null }),
         // How many RFQs matched each parlay (from the read-only watcher).
         supabase.from("combo_match_counts").select("*"),
         // quote_outcomes / combo_matches reads removed (audit Oct 24): both tables have RLS on and
@@ -964,23 +983,33 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       const archCache = archivedSubsRef.current;
       // Archived locks: read each lock's rows once (a newly archived lock reads only its own
       // pair), and re-read everything every ARCHIVED_SUBS_FULL_TTL_MS.
+      const pollNow = Date.now();
       const archPlan = archivedRows ? archivedSubsPlan(archCache, allArchivedIds) : { fetchIds: [], full: false };
-      const archivedIds = archPlan.fetchIds;
+      // First sight of History used to read every settled lock (one pair of
+      // quote queries each, ~2 per lock, several times when the effect
+      // re-entered). Mark them seen and load a lock only when its row is
+      // opened, or when it just moved to History.
+      const archivedIds = archivedIdsForDeskPoll(archPlan);
+      if (archPlan.full && archivedRows) {
+        archivedSubsRef.current = { ids: new Set(allArchivedIds), at: pollNow, rows: (archCache && archCache.rows) || [] };
+      }
       // Quoting locks (game not started, or a quote still live) refresh every
       // LIVING_SUBS_POLL_MS. Idle locks refresh every IDLE_SUBS_POLL_MS. A new
       // confirmed fill refreshes that lock on this poll. Each read is parlay_id
       // equality on the partial indexes, not a 100-id ANY() sort.
-      const pollNow = Date.now();
+      // The batch itself cannot start again inside the submission gate, so a
+      // re-fired effect does not launch another pair per lock.
       const forceSubs = subsForceRef.current;
       subsForceRef.current = false;
       const liveQuoteIds = new Set((submissionsRef.current || []).filter((r) => r && r.is_live === true && r.parlay_id).map((r) => r.parlay_id));
-      const livingForSubs = livingLocksDue(livingRows.slice(0, 200), {
+      const livingForSubs = submissionPlan.locks ? livingLocksDue(livingRows.slice(0, 200), {
         now: pollNow,
         force: forceSubs,
         lastAt: subsAtRef.current,
         liveIds: liveQuoteIds,
         alsoIds: fillTouchIds,
-      });
+      }) : [];
+      if (submissionPlan.locks) submissionGateRef.current.locks = pollNow;
       const subReqs = lockSubmissionQueriesForParlays(supabase, {
         userId: user.id,
         living: livingForSubs,
@@ -1006,7 +1035,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         if (!comboListQueryOk(subRes[qi]) || !comboListQueryOk(subRes[qi + 1])) {
           archFailed = true;
           failedIds.add(id);
-        }
+        } else subsAtRef.current.set(id, readAt);
         qi += 2;
       }
       if (archivedIds.length) {
@@ -1021,17 +1050,6 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       // Cached per-lock rows for archived locks not re-read this poll (or whose read failed).
       const archCachedRows = archivedSubsRef.current.rows || [];
       const livingSubRows = mergeSubmissionRows(freshSubRows, archCachedRows);
-      // Real Not filled totals for locks over the 400-row display window (head counts, no rows).
-      const capped = cappedLockIds(livingSubRows);
-      if (capped.length) {
-        Promise.allSettled(capped.map((id) => lockUnfilledCountQuery(supabase, { userId: user.id, parlayId: id })))
-          .then((res) => {
-            const next = {};
-            res.forEach((r, i) => { if (r.status === "fulfilled" && r.value && !r.value.error && r.value.count != null) next[capped[i]] = r.value.count; });
-            setUnfilledCounts((prev) => ({ ...prev, ...next }));
-          })
-          .catch(() => {});
-      }
       if (livingSubsOk || livingSubRows.length || failedIds.size) {
         // Keep rows for locks this poll did not re-read (quoting cadence / idle
         // game-started locks) and for locks whose read failed.
@@ -1067,7 +1085,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     } finally {
       setDeskLoading(false);
     }
-  }, [owner, user, refreshSettlements]);
+  }, [owner, user && user.id, refreshSettlements]);
   // Single-flight: the 20s poll, the pause toggle and every other action call reload(). Overlapping runs
   // each fire ~45 submission queries and race each other's results, so a call that lands while one is
   // running schedules ONE trailing run (which sees the write that triggered it).
@@ -1251,6 +1269,39 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     return { waiting: w, filledParlays: f };
   }, [parlays, realFills]);
   const toggleOpen = (id) => setOpenParlays((o) => ({ ...o, [id]: !o[id] }));
+  const lockQuoteInflightRef = useRef(new Set());
+  // One settled lock, one pair of quote/skip reads, and not again for
+  // SUBMISSION_READ_MIN_MS. Opening History must not prefetch every lock.
+  const loadLockQuotes = useCallback(async (parlayId) => {
+    const acct = userRef.current;
+    if (!parlayId || !acct || !acct.id) return;
+    if (lockQuoteInflightRef.current.has(parlayId)) return;
+    const last = subsAtRef.current.get(parlayId) || 0;
+    if (last && Date.now() - last < SUBMISSION_READ_MIN_MS) return;
+    lockQuoteInflightRef.current.add(parlayId);
+    try {
+      const reqs = livingLockSubmissionQueries(supabase, { userId: acct.id, parlayId });
+      const settled = await settleInBatches(reqs);
+      const rows = settled.flatMap((r) => {
+        const value = r && r.status === "fulfilled" ? r.value : null;
+        return value && Array.isArray(value.data) ? value.data : [];
+      });
+      subsAtRef.current.set(parlayId, Date.now());
+      const kept = (submissionsRef.current || []).filter((row) => !row || row.parlay_id !== parlayId);
+      const next = mergeSubmissionRows(kept, rows);
+      submissionsRef.current = next;
+      setSubmissions(next);
+      const cache = archivedSubsRef.current;
+      if (cache && cache.ids && typeof cache.ids.has === "function" && cache.ids.has(parlayId)) {
+        const cached = (cache.rows || []).filter((row) => !row || row.parlay_id !== parlayId);
+        archivedSubsRef.current = { ...cache, rows: mergeSubmissionRows(cached, rows) };
+      }
+    } catch (_) {
+      // The row stays on its last known tape. The next open retries.
+    } finally {
+      lockQuoteInflightRef.current.delete(parlayId);
+    }
+  }, [supabase]);
   // rfq_id -> the quote outcome we recorded for it (only exists for RFQs we actually quoted).
   const outcomeByRfq = useMemo(() => { const m = {}; (outcomes || []).forEach((o) => { if (o.rfq_id) m[o.rfq_id] = o; }); return m; }, [outcomes]);
   const submissionsByParlay = useMemo(() => {
@@ -1637,11 +1688,12 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     return `Matched ${n} request${n === 1 ? "" : "s"}${mc && mc.locks_n ? ` (${mc.locks_n} would lock profit)` : ""}`;
   };
   // The request watcher can be parked; fills still come from combo_fills.
+  const cappedQuoteIds = useMemo(() => new Set(cappedLockIds(submissions)), [submissions]);
+  // Past the 400-row window we show the loaded count with a "+".
+  // An exact count(*) per lock was a HEAD that averaged seconds and timed out.
   const withNotFilledTotal = (h, id) => {
-    if (!h || unfilledCounts[id] == null) return h;
-    const loaded = (submissionsByParlay[id] || []).filter((r) => isLockQuoteRow(r) && String(r.status || "").toLowerCase() !== "filled").length;
-    const total = notFilledTotal({ shown: h.notFilled.length, loadedUnfilledQuotes: loaded, countedUnfilledQuotes: unfilledCounts[id] });
-    return total > h.notFilled.length ? { ...h, notFilledTotal: total } : h;
+    if (!h || !cappedQuoteIds.has(id)) return h;
+    return { ...h, capped: true };
   };
   const watcherNote = (id) => (matchedRfqWatcherParked(matchesByParlay[id] || [], attemptsByParlay[id])
     ? "The request watcher is paused. Fills below still come straight from your account."
@@ -1655,7 +1707,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     const status = lockStatus({ parlay: p, filled: filledN, ceiling, kill: deskReady && !deskLoading ? kill : false });
     const out = outcomeChrome(lockOutcome(p, filledN), { filled: filledN > 0 });
     const matched = matchedCountText(p);
-    const qfOpts = { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, countedUnfilledQuotes: unfilledCounts[p.id] };
+    const qfOpts = { fills: matchedRfqCounts(attemptsByParlay[p.id]).filled, capped: cappedQuoteIds.has(p.id) };
     const quoteLine = lockQuoteFillLine(submissionsByParlay[p.id], qfOpts);
     const quoteCounts = lockQuoteFillCounts(submissionsByParlay[p.id], qfOpts);
     const showCheck = lockCheckOnCard({ parlay: p, user, filledSection, left: desk && desk.fill ? desk.fill.left : 0 });
@@ -2035,7 +2087,12 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
             view={historyView}
             archivedById={archivedById}
             isOpen={(id) => !!openParlays["arch-" + id]}
-            onToggle={(id) => toggleOpen("arch-" + id)}
+            onToggle={(id) => {
+              const key = "arch-" + id;
+              const opening = !openParlays[key];
+              toggleOpen(key);
+              if (opening) loadLockQuotes(id);
+            }}
             onExportCsv={() => downloadStatementCsv(historyView.filtered && historyView.filtered.lines)}
             emptyText={historyEmptyText}
             renderDetail={(line) => {
@@ -2063,7 +2120,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         )}
       </div>
 
-      {canSeeOwnerTools(user) && <details className="adv">
+      {canSeeOwnerTools(user) && <details className="adv" onToggle={(e) => { offersOpenRef.current = !!e.currentTarget.open; if (e.currentTarget.open) reload("action"); }}>
         <summary>Advanced logs: every offer the worker sent</summary>
         <div className="adv-body">
           <h3>Offers sent</h3>

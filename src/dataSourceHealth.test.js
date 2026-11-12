@@ -167,12 +167,14 @@ function timeoutErr(label = "odds_cache") {
 {
   const app = fs.readFileSync(path.join(dir, "App.jsx"), "utf8");
   assert.match(app, /from "\.\/DataSourceStatus\.jsx"/);
-  assert.match(app, /from "\.\/dataSourceHealth\.js"/);
-  assert.match(app, /OddsUpdatedStamp/);
-  assert.match(app, /DataSourceBanner/);
-  assert.match(app, /describeCacheFreshness/);
-  assert.match(app, /dataSourceStatus/);
-  assert.match(app, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30000\)/);
+  assert.doesNotMatch(app, /setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 30000\)/);
+  assert.match(app, /LiveOddsUpdatedStamp/);
+  assert.match(app, /LiveDataSourceBanner/);
+  assert.match(app, /showOddsHealthBanner/);
+  const chrome = fs.readFileSync(path.join(dir, "DataSourceStatus.jsx"), "utf8");
+  assert.match(chrome, /from "\.\/dataSourceHealth\.js"/);
+  assert.match(chrome, /setInterval\(\(\) => setNow\(Date\.now\(\)\), ms\)/);
+  assert.match(chrome, /useTickingNow\(30000\)/);
   assert.doesNotMatch(app, /\/api\/fetch-odds|\/api\/odds/);
   assert.match(app, /showOddsHealthBanner/);
 
