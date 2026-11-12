@@ -268,7 +268,10 @@ function fullPlan() {
   assert.equal(shouldFetchPromoOdds({ tab: "promo", forceRefresh: false, promoLoaded: true }), false);
   assert.equal(shouldFetchPromoOdds({ tab: "promo", forceRefresh: true, promoLoaded: true }), true);
   assert.equal(shouldFetchPromoOdds({ tab: "combo", forceRefresh: true, promoLoaded: true }), true);
+  assert.equal(shouldFetchPromoOdds({ tab: "combo", forceRefresh: false, promoLoaded: false }), false);
+  assert.equal(shouldFetchPromoOdds({ tab: "liveDesk", forceRefresh: false, promoLoaded: false }), false);
   assert.equal(shouldFetchPromoOdds({ tab: "missTape", forceRefresh: true, promoLoaded: true }), true);
+  assert.equal(shouldFetchPromoOdds({ tab: "missTape", forceRefresh: false, promoLoaded: false }), false);
   assert.equal(shouldFetchFullBoard({ tab: "combo", fullBoardLoaded: false, forceRefresh: true }), false);
 }
 
@@ -425,9 +428,9 @@ function fullPlan() {
   assert.match(app, />Retry</);
   assert.match(app, /showOddsLoadError && activeTab !== "liveDesk" && \(\s*<div data-guard-allow="true"/);
   assert.match(app, /events\.error \? \[\] : \(events\.data \|\| \[\]\)/);
-  assert.match(app, /shouldFetchFullBoard\(\{ tab: activeTab, fullBoardLoaded, forceRefresh: false \}\)/);
+  assert.match(app, /shouldFetchFullBoard\(\{ tab, fullBoardLoaded, forceRefresh: false \}\)/);
   assert.match(app, /fetchOdds\(\{ forceRefresh: true \}\)/);
-  assert.match(app, /setAllOddsData\(applyTransformed\(featuredRows, \[\]\)\)/);
+  assert.match(app, /applyTransformed\(featuredRows, \[\], \(\) => gen === fullFetchGen\.current\)/);
   assert.match(app, /if \(activeTab !== "ev"\) return null;/);
   assert.match(app, /setPromoBoardData/);
   assert.doesNotMatch(app, /in\("sport", SPORT_KEYS\)/);

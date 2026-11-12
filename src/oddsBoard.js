@@ -791,3 +791,31 @@ export function pickBestFromPriceMap(priceMap, sizeMap, selectedBookKeys, allBoo
     })),
   );
 }
+
+// Which rows of a tall odds table to paint. Date headers and game rows have
+// different heights so the spacer above and below the window stays aligned
+// with the rows the user has scrolled past.
+export function boardVirtualSlice(kinds, scrollTop, viewport, rowPx, overscan = 6) {
+  const list = kinds || [];
+  const n = list.length;
+  const px = rowPx || { date: 34, game: 84 };
+  const heightOf = (kind) => (kind === "date" ? px.date : px.game);
+  const offsets = new Array(n + 1);
+  offsets[0] = 0;
+  for (let i = 0; i < n; i++) offsets[i + 1] = offsets[i] + heightOf(list[i]);
+  const top = Math.max(0, Number(scrollTop) || 0);
+  const view = Math.max(px.game, Number(viewport) || px.game * 8);
+  let start = 0;
+  while (start < n && offsets[start + 1] < top) start += 1;
+  start = Math.max(0, start - overscan);
+  const bottom = top + view;
+  let end = start;
+  while (end < n && offsets[end] < bottom) end += 1;
+  end = Math.min(n, end + overscan);
+  return {
+    start,
+    end,
+    padTop: offsets[start] || 0,
+    padBottom: Math.max(0, offsets[n] - (offsets[end] || 0)),
+  };
+}

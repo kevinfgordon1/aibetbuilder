@@ -92,6 +92,10 @@ export function shouldFetchFullBoard({ tab, fullBoardLoaded, forceRefresh }) {
 
 export function shouldFetchPromoOdds({ tab, forceRefresh, promoLoaded }) {
   if (tab === "ev" || tab === "odds" || tab === "oddsBetstamp") return false;
+  // Refresh on Combo / Miss tape still rereads the promo cache (cheaper than
+  // the full board). Opening those tabs must not parse that cache or start
+  // the parlay scan — that work was freezing the page you were actually on.
+  if (tab !== "promo" && !forceRefresh) return false;
   if (forceRefresh) return true;
   return !promoLoaded;
 }

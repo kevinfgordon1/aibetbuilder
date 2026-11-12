@@ -43,6 +43,7 @@ import {
   obbTableWidth,
   padBestPointStacks,
   boardShowsPointLine,
+  boardVirtualSlice,
 } from "./oddsBoard.js";
 import { BETSTAMP_TRIAL_BOOKS } from "./betstampBooks.js";
 
@@ -1375,3 +1376,17 @@ const selected = new Set(ALL_BOOKS.map((b) => b.key));
 }
 
 console.log("oddsBoard.test.js ok");
+
+{
+  const kinds = ["date", "game", "game", "game", "date", "game", "game", "game", "game", "game"];
+  const px = { date: 34, game: 84 };
+  const top = boardVirtualSlice(kinds, 0, 200, px, 1);
+  assert.equal(top.start, 0);
+  assert.ok(top.end < kinds.length, "a short viewport does not paint every row");
+  assert.equal(top.padTop, 0);
+  assert.ok(top.padBottom > 0);
+  const mid = boardVirtualSlice(kinds, 34 + 84 * 4, 84, px, 0);
+  assert.ok(mid.start > 0);
+  assert.ok(mid.padTop > 0);
+  assert.ok(mid.end > mid.start);
+}

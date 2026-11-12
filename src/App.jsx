@@ -119,11 +119,10 @@ import {
   underdogOfferIsRankable,
   underdogPairIncomplete,
 } from "./promoUnderdogFreshness.js";
-import { describeCacheFreshness, dataSourceStatus } from "./dataSourceHealth.js";
 import { isWithinDateRange, upcomingInRange } from "./dateRange.js";
 import { capLegsMonotonic } from "./promoLegCap.js";
 import * as playerTd from "../lib/player-td.mjs";
-import { DataSourceBanner, OddsUpdatedStamp } from "./DataSourceStatus.jsx";
+import { LiveDataSourceBanner, LiveOddsUpdatedStamp } from "./DataSourceStatus.jsx";
 import { calcNoSweatEV, calcNoSweatLock, DEFAULT_CREDIT_CONVERSION, DEFAULT_REFUND_PCT } from "./promoNoSweat.js";
 import { calcFreeBetParlayEV, attachFreeBetLock } from "./promoFreeBet.js";
 import { describePromoLock } from "./promoLockExplainer.js";
@@ -1833,11 +1832,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(() => {
     if (typeof window === "undefined") return "promo";
     const hash = bootAppHash(window.location);
+    const parsed = parseAppHash(hash);
+    // Stay on the linked tab from the first render. initialAppTab() without
+    // a user rewrites #combo (and the desk) to Promo, then the hash writer
+    // erases the link and the promo fetch starts under the page you opened.
+    if (parsed.tab === "combo" || parsed.tab === "odds" || parsed.tab === "liveDesk" || parsed.tab === "profile" || parsed.tab === "ev") return parsed.tab;
     // Stay on the paused board from the first render. Starting on Promo
     // made the hash writer and the odds fetch treat this URL as Promo and
     // pull odds_cache plus /api/underdog-predict before the tab switched.
-    if (NEW_ODDS_BOARD_PAUSED && parseAppHash(hash).tab === "oddsBetstamp") return "oddsBetstamp";
-    return initialAppTab(bootAppHash(window.location));
+    if (NEW_ODDS_BOARD_PAUSED && parsed.tab === "oddsBetstamp") return "oddsBetstamp";
+    return initialAppTab(hash);
   });
   const [betstampRefreshKey, setBetstampRefreshKey] = useState(0);
   const [signInPrompt, setSignInPrompt] = useState(null);
@@ -1901,7 +1905,6 @@ export default function App() {
   const [promoLoading, setPromoLoading] = useState(true);
   const [oddsLoadError, setOddsLoadError] = useState(null);
   const [oddsLoadCause, setOddsLoadCause] = useState(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [promoLoaded, setPromoLoaded] = useState(false);
   const [promoLoadedSports, setPromoLoadedSports] = useState(null);
   const [promoBoardData, setPromoBoardData] = useState({ moneylines: [], run_lines: [], totals: [], team_totals: [] });
@@ -2214,10 +2217,29 @@ export default function App() {
     }
   }, [activeTab, user, focusLockId, focusCardId, authLoading]);
 
-  const applyTransformed = (featuredRows, eventRows) => {
-    const featured = featuredRows.map(row => transformOddsData(row.data, row.sport));
-    const eventTransformed = eventRows.map(row => transformEventOddsData(row.data, row.sport));
-    return mergeOddsData([...featured, ...eventTransformed]);
+  // One sport's full slate is a few hundred milliseconds of synchronous work.
+  // Slice it so a click during load can paint between chunks. Same rows, same
+  // transform, same merge — only the scheduling changes.
+  const applyTransformed = async (featuredRows, eventRows, stillCurrent) => {
+    const parts = [];
+    const GAME_SLICE = 8;
+    const EVENT_SLICE = 16;
+    for (const row of featuredRows || []) {
+      const games = Array.isArray(row && row.data) ? row.data : [];
+      for (let i = 0; i < games.length; i += GAME_SLICE) {
+        if (stillCurrent && !stillCurrent()) return null;
+        parts.push(transformOddsData(games.slice(i, i + GAME_SLICE), row.sport));
+        await yieldToMain();
+      }
+    }
+    const events = eventRows || [];
+    for (let i = 0; i < events.length; i += EVENT_SLICE) {
+      if (stillCurrent && !stillCurrent()) return null;
+      const chunk = events.slice(i, i + EVENT_SLICE);
+      for (const row of chunk) parts.push(transformEventOddsData(row.data, row.sport));
+      await yieldToMain();
+    }
+    return mergeOddsData(parts);
   };
 
   const loadPromoBoard = async ({ background = false } = {}) => {
@@ -2264,7 +2286,8 @@ export default function App() {
         { predictionOnly: true },
       );
       underdogOverlayAppliedRef.current = includeUnderdog;
-      const nextBoard = applyTransformed(featuredRows, eventRows);
+      const nextBoard = await applyTransformed(featuredRows, eventRows, () => gen === promoFetchGen.current);
+      if (!nextBoard || gen !== promoFetchGen.current) return;
       if (playerProps && !playerProps.error) {
         nextBoard.playerTds = playerTdsFromCacheRows(playerProps.data || []);
       }
@@ -2322,7 +2345,10 @@ export default function App() {
       underdogOverlayAppliedRef.current = includeUnderdog;
       // Skip event_odds_cache alt lines on Odds Board / +EV. Transforming that
       // payload freezes Chrome. Promo still loads events with a 30-min lookback.
-      setAllOddsData(applyTransformed(featuredRows, []));
+      // Featured rows are sliced too so the first paint is not one long task.
+      const nextBoard = await applyTransformed(featuredRows, [], () => gen === fullFetchGen.current);
+      if (!nextBoard || gen !== fullFetchGen.current) return;
+      setAllOddsData(nextBoard);
       setFuturesData((futures.error ? [] : (futures.data || [])).map(row => transformFuturesData(row.data, row.sport)));
       setFetchedAt(newestFetchedAt(featuredRows));
       setFullBoardLoaded(true);
@@ -2370,15 +2396,20 @@ export default function App() {
     // Read the tab from this render. #ev / #odds must not also start the Promo
     // board — that used to transform event odds and scan parlays on the same
     // tick as the +EV list. A paused New Odds Board must not start it either.
-    if (NEW_ODDS_BOARD_PAUSED && activeTab === "oddsBetstamp") return;
-    if (shouldFetchFullBoard({ tab: activeTab, fullBoardLoaded, forceRefresh: false })) {
+    // Auth resolves a moment after the first paint. A #combo / #live-trading-desk
+    // URL is still "promo" in state for that one commit, and the promo fetch
+    // would start, parse the slate, and scan parlays under the page you opened.
+    const resolved = resolveAppHash(parseAppHash(window.location.hash), user);
+    const tab = (resolved && resolved.tab) || activeTab;
+    if (NEW_ODDS_BOARD_PAUSED && tab === "oddsBetstamp") return;
+    if (shouldFetchFullBoard({ tab, fullBoardLoaded, forceRefresh: false })) {
       loadFullBoard();
       return;
     }
-    if (shouldFetchPromoOdds({ tab: activeTab, forceRefresh: false, promoLoaded })) {
+    if (shouldFetchPromoOdds({ tab, forceRefresh: false, promoLoaded })) {
       loadPromoBoard();
     }
-  }, [authLoading, activeTab, fullBoardLoaded, promoLoaded]);
+  }, [authLoading, activeTab, fullBoardLoaded, promoLoaded, user && user.id]);
 
   useEffect(() => {
     if (authLoading || !promoLoaded) return;
@@ -2386,11 +2417,6 @@ export default function App() {
     if (want === underdogOverlayAppliedRef.current) return;
     loadPromoBoard();
   }, [user, authLoading, promoLoaded]);
-
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 30000);
-    return () => clearInterval(id);
-  }, []);
 
   useEffect(() => {
     if (!promoSportsNeedNetworkReload(promoSports, promoLoadedSports, promoLoaded)) return;
@@ -2501,6 +2527,7 @@ export default function App() {
   const soccerSelected = soccerKeysSelected(promoSports);
 
   useEffect(() => {
+    if (activeTab !== "promo") return undefined;
     const games = (promoOddsData.moneylines || []).filter((g) => isSoccerSport(g.sport));
     if (!games.length || !soccerSelected) {
       setSoccerPmNoByGame(null);
@@ -2526,7 +2553,7 @@ export default function App() {
         setSoccerPmNoByGame(null);
         setSoccerPmNoStatus("error");
       });
-  }, [promoOddsData, scanMatchingBookKeys, soccerSelected]);
+  }, [activeTab, promoOddsData, scanMatchingBookKeys, soccerSelected]);
 
   const waitForSoccerPm = soccerBlocksPromoPool({
     soccerSelected,
@@ -2568,20 +2595,7 @@ export default function App() {
       ((activeTab === "ev" || activeTab === "odds") && !fullBoardLoaded)
     );
   const oddsHaveLastKnown = promoLoaded || fullBoardLoaded;
-  const cacheFreshness = describeCacheFreshness({
-    fetchedAt,
-    now: nowMs,
-    lastRefreshFailed: !!oddsLoadError,
-    lastRefreshError: oddsLoadCause,
-  });
-  const oddsHealth = dataSourceStatus({
-    error: oddsLoadCause,
-    fetchedAt,
-    now: nowMs,
-    lastKnown: oddsHaveLastKnown,
-    context: "odds",
-  });
-  const showOddsHealthBanner = oddsHealth.show && !showOddsLoadError;
+  const showOddsHealthBanner = !showOddsLoadError;
 
   // +EV Bets tab — single-book filter
   const evBooksAvailable = new Set(evBets.map(b => b.bookKey));
@@ -2632,6 +2646,9 @@ export default function App() {
   }), [promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, promoMatchingPartial, scanMatchingBookKeys, waitForSoccerPm]);
   const [promoLegsBuilt, setPromoLegsBuilt] = useState({ req: null, legs: [] });
   useEffect(() => {
+    // Combo, the desk, and the odds tabs share this App. Building the leg
+    // pool here re-renders whichever page is open, so only Promo does it.
+    if (activeTab !== "promo") return undefined;
     if (promoLegsReq.soccerWait) return undefined;
     let cancel = false;
     const raf = requestAnimationFrame(() => {
@@ -2664,7 +2681,7 @@ export default function App() {
     };
     // promoLegsReq identity covers every build input. The walk is chunked
     // after paint so a book or sport click is not one long task.
-  }, [promoLegsReq, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, promoMatchingPartial, scanMatchingBookKeys]);
+  }, [activeTab, promoLegsReq, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, promoMatchingPartial, scanMatchingBookKeys]);
   const promoLegsFiltered = useMemo(() => {
     if (promoLegsBuilt.req == null) return { legs: [], stages: null };
     const promoLegsAll = promoLegsBuilt.legs;
@@ -2738,7 +2755,7 @@ export default function App() {
   // books selection, and by Hide low liquidity. Only built on Player Props.
   const [playerPropHiddenState, setPlayerPropHiddenState] = useState(null);
   useEffect(() => {
-    if (!scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) {
+    if (activeTab !== "promo" || !scopeHasExplicitProps(scanMarketScope) || waitForSoccerPm) {
       setPlayerPropHiddenState(null);
       return undefined;
     }
@@ -2766,7 +2783,7 @@ export default function App() {
       if (!cancel) setPlayerPropHiddenState(playerPropHiddenCounts({ unfiltered, matched, liquid }));
     }, 0);
     return () => { cancel = true; clearTimeout(timer); };
-  }, [scanMarketScope, waitForSoccerPm, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, excludedPromoLegs, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, dropThinPoolLegs, promoType, scanNumLegs]);
+  }, [activeTab, scanMarketScope, waitForSoccerPm, promoOddsForPromo, scanPromoBook, promoSportFilter, parsedMinLeg, parsedMaxLeg, scanPromoDateRange, excludedPromoLegs, excludeTeamTokens, promoMatchingPartial, scanMatchingBookKeys, dropThinPoolLegs, promoType, scanNumLegs]);
   const playerPropHidden = useMemo(() => playerPropHiddenState, [playerPropHiddenState]);
 
   const parlayLegPoolStored = useMemo(() => {
@@ -2812,6 +2829,7 @@ export default function App() {
     : [promoType, scanNumLegs, dropThinPoolLegs ? 1 : 0, minLegDepth, poolStoredId.current.n, poolLadderId.current.n].join("|");
   const [poolPriced, setPoolPriced] = useState({ key: "", legs: [] });
   useEffect(() => {
+    if (activeTab !== "promo") return undefined;
     if (!poolPriceKey) return undefined;
     const ac = new AbortController();
     depthPricePoolLegsChunked(parlayLegPoolStored, { promoType, numLegs: scanNumLegs, hideLowLiquidity: dropThinPoolLegs, minLegDepth }, poolLadders, { signal: ac.signal, yieldMs: PROMO_RANK_YIELD_MS })
@@ -2823,7 +2841,7 @@ export default function App() {
         console.error("[promo pool price]", err);
       });
     return () => ac.abort();
-  }, [poolPriceKey]);
+  }, [activeTab, poolPriceKey]);
   const poolPricePending = !!poolPriceKey && poolPriced.key !== poolPriceKey;
   const parlayLegPool = !isParlayPromo || poolLadders == null || poolPriced.key !== poolPriceKey
     ? parlayLegPoolStored
@@ -2850,6 +2868,11 @@ export default function App() {
   // Do not scan (or mark done) before the slate is ready — an empty-pool []
   // from a mid-refetch / leftover-soccer gate must not look finished.
   useEffect(() => {
+    if (activeTab !== "promo") {
+      promoScanGen.current += 1;
+      setPromoScanBusy(false);
+      return undefined;
+    }
     if (!isParlayPromoType(promoType)) {
       promoScanGen.current += 1;
       setPromoScanBusy(false);
@@ -2919,7 +2942,7 @@ export default function App() {
     return () => {
       ac.abort();
     };
-  }, [promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, poolPricePending, promoLegsReady, currentPromoScanKey]);
+  }, [activeTab, promoType, parlayLegPool, scanNumLegs, scanBoostForKey, parsedMinFinal, parsedMaxFinal, refundPct, creditConversionPct, promoLoaded, promoLoading, waitForSoccerPm, poolDepthPending, poolPricePending, promoLegsReady, currentPromoScanKey]);
 
   const topParlays = useMemo(
     () => rescaleParlaysForStake(scannedBoostParlays.parlays, scannedBoostParlays.atStake, stake),
@@ -3470,7 +3493,7 @@ export default function App() {
         <div className="app-header-actions" style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {(fetchedAt || activeTab === "oddsBetstamp") && (
             <div className="app-freshness" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {fetchedAt && <OddsUpdatedStamp freshness={cacheFreshness} />}
+              <LiveOddsUpdatedStamp fetchedAt={fetchedAt} lastRefreshFailed={!!oddsLoadError} lastRefreshError={oddsLoadCause} />
               <button
                 onClick={() => {
                   if (activeTab === "oddsBetstamp") {
@@ -3578,7 +3601,7 @@ export default function App() {
       )}
 
       {showOddsHealthBanner && activeTab !== "oddsBetstamp" && (
-        <DataSourceBanner status={oddsHealth} style={{ margin: "12px 32px 0" }} />
+        <LiveDataSourceBanner error={oddsLoadCause} fetchedAt={fetchedAt} lastKnown={oddsHaveLastKnown} style={{ margin: "12px 32px 0" }} />
       )}
 
       {showFullPageSpinner && activeTab !== "liveDesk" && (
