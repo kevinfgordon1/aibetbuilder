@@ -2,10 +2,18 @@
 // Share image or Copy image. The picture is the title, total, date range,
 // chart, and aibetbuilder.io — nothing that identifies an account.
 
-import { PROFIT_IMAGE_FILENAME, profitChartLayout, profitImageCanShareFiles, profitShareDelivery } from "./comboProfit.js";
+import {
+  EV_DASH_PX, EV_STROKE_PX, PROFIT_DOT_PX, PROFIT_IMAGE_FILENAME, PROFIT_STROKE_PX,
+  profitChartLayout, profitImageCanShareFiles, profitShareDelivery,
+} from "./comboProfit.js";
 
 const W = 1080;
 const H = 760;
+
+/** Chart width inside the share card. 28px card margin + 48px inner inset, each side. */
+export function profitImageChartWidth(cardWidth = W) {
+  return cardWidth - 56 - 96;
+}
 
 function traceRoundRect(ctx, x, y, w, h, r) {
   const radius = Math.max(0, Math.min(r, w / 2, h / 2));
@@ -53,16 +61,20 @@ function strokePath(ctx, points, ox, oy) {
 function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } = {}) {
   const layout = profitChartLayout(points, { width: w, height: h, padL: 88, padR: 28, padT: 16, padB: 44, range });
   if (!layout) return;
+  const scale = w / 640;
   const X = (p) => ox + p.x;
   const Y = (p) => oy + p.y;
   const last = layout.line[layout.line.length - 1];
+  const hairline = Math.max(1, scale * 0.85);
 
   for (const tick of layout.yTicks || []) {
+    if (Math.abs(tick.y - layout.axisY) < 0.75) continue;
     ctx.beginPath();
     ctx.moveTo(ox + layout.padL, oy + tick.y);
     ctx.lineTo(ox + layout.width - layout.padR, oy + tick.y);
-    ctx.strokeStyle = tick.zero ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.08)";
-    ctx.lineWidth = tick.zero ? 2 : 1;
+    ctx.strokeStyle = tick.zero ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
     ctx.stroke();
   }
 
@@ -76,7 +88,7 @@ function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } =
 
   strokePath(ctx, layout.line, ox, oy);
   ctx.strokeStyle = "#f5d76e";
-  ctx.lineWidth = 4;
+  ctx.lineWidth = PROFIT_STROKE_PX * scale;
   ctx.lineJoin = "miter";
   ctx.lineCap = "butt";
   if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
@@ -85,21 +97,38 @@ function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } =
   if (hasEv && layout.evLine && layout.evLine.length) {
     strokePath(ctx, layout.evLine, ox, oy);
     ctx.strokeStyle = "#9ca3af";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = EV_STROKE_PX * scale;
     ctx.lineJoin = "miter";
     ctx.lineCap = "butt";
-    if (typeof ctx.setLineDash === "function") ctx.setLineDash([7, 6]);
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash(EV_DASH_PX.map((n) => n * scale));
     ctx.stroke();
     if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
   }
 
   ctx.beginPath();
-  ctx.arc(X(layout.end), Y(layout.end), 7, 0, Math.PI * 2);
+  ctx.arc(X(layout.end), Y(layout.end), PROFIT_DOT_PX * scale, 0, Math.PI * 2);
   ctx.fillStyle = "#f5d76e";
   ctx.fill();
 
-  ctx.font = "600 18px Inter, system-ui, sans-serif";
-  ctx.fillStyle = "#8a8f98";
+  const axisY = oy + layout.axisY;
+  ctx.beginPath();
+  ctx.moveTo(ox + layout.padL, axisY);
+  ctx.lineTo(ox + layout.width - layout.padR, axisY);
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = hairline;
+  if (typeof ctx.setLineDash === "function") ctx.setLineDash([]);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.45)";
+  ctx.lineWidth = hairline;
+  for (const tick of layout.xTicks || []) {
+    ctx.moveTo(ox + tick.x, axisY);
+    ctx.lineTo(ox + tick.x, axisY + layout.xTick);
+  }
+  ctx.stroke();
+
+  ctx.font = "500 16px Inter, system-ui, sans-serif";
+  ctx.fillStyle = "#9aa3af";
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
   for (const tick of layout.yTicks || []) {
@@ -115,8 +144,9 @@ function drawChart(ctx, points, ox, oy, w, h, { range = "all", hasEv = false } =
   ctx.textAlign = "left";
 }
 
-function drawLegend(ctx, x, y, hasEv, evLegend) {
+function drawLegend(ctx, x, y, hasEv, evLegend, scale) {
   if (!hasEv) return 0;
+  const s = scale > 0 ? scale : 1;
   const items = [
     { label: "Profit", color: "#f5d76e", dashed: false },
     { label: evLegend || "EV", color: "#9ca3af", dashed: true },
@@ -127,8 +157,8 @@ function drawLegend(ctx, x, y, hasEv, evLegend) {
   let xx = x;
   for (const item of items) {
     ctx.strokeStyle = item.color;
-    ctx.lineWidth = 3;
-    if (typeof ctx.setLineDash === "function") ctx.setLineDash(item.dashed ? [6, 5] : []);
+    ctx.lineWidth = (item.dashed ? EV_STROKE_PX : PROFIT_STROKE_PX) * s;
+    if (typeof ctx.setLineDash === "function") ctx.setLineDash(item.dashed ? EV_DASH_PX.map((n) => n * s) : []);
     ctx.beginPath();
     ctx.moveTo(xx, y);
     ctx.lineTo(xx + 22, y);
@@ -181,9 +211,9 @@ export function paintProfitImage(ctx, model, width = W, height = H) {
   ctx.fillText(meta, left, y + 216);
 
   const legendY = y + 246;
-  const legendH = drawLegend(ctx, left, legendY, !!m.hasEv, m.evLegend);
+  const chartW = profitImageChartWidth(width);
+  const legendH = drawLegend(ctx, left, legendY, !!m.hasEv, m.evLegend, chartW / 640);
   const chartTop = y + 250 + legendH;
-  const chartW = w - 96;
   const chartH = legendH ? 312 : 340;
   if (m.points && m.points.length) {
     drawChart(ctx, m.points, left, chartTop, chartW, chartH, { range: rangeFromLabel(m.rangeLabel), hasEv: !!m.hasEv });

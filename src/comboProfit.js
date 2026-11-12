@@ -8,6 +8,14 @@ import { signedDollars } from "./comboLockView.js";
 export const PROFIT_CHART_MAX_POINTS = 2500;
 export const PROFIT_CHART_HEIGHT = 128;
 
+// On-screen sizes in CSS pixels. The SVG uses non-scaling-stroke so a wide
+// chart (the Combo Locks page is often ~900px) stays this thin.
+export const PROFIT_STROKE_PX = 1.5;
+export const EV_STROKE_PX = 1.25;
+export const EV_DASH_PX = [2, 2];
+export const PROFIT_DOT_PX = 2.25;
+export const EV_DOT_PX = 2;
+
 function r2(x) {
   return Math.round(Number(x) * 100) / 100;
 }
@@ -132,6 +140,68 @@ export function sampleProfitPoints(points, max = PROFIT_CHART_MAX_POINTS) {
     want.add(maxI);
   }
   return [...want].sort((a, b) => a - b).map((i) => list[i]);
+}
+
+/**
+ * Index of the sample whose x is nearest to `x`. Samples must be sorted by
+ * non-decreasing x (the chart layout is). Binary search, so a 1,144-point
+ * series is a handful of comparisons per pointer move.
+ */
+export function nearestProfitIndex(samples, x) {
+  const n = samples ? samples.length : 0;
+  const target = Number(x);
+  if (!n || !Number.isFinite(target)) return -1;
+  let lo = 0;
+  let hi = n - 1;
+  if (target <= samples[lo].x) return lo;
+  if (target >= samples[hi].x) return hi;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (samples[mid].x <= target) lo = mid;
+    else hi = mid;
+  }
+  return (target - samples[lo].x) <= (samples[hi].x - target) ? lo : hi;
+}
+
+const TIP_WHOLE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const TIP_CENTS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Signed dollars for the hover tooltip. Whole amounts drop the cents: "+$54,210". */
+export function profitTipDollars(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs < 0.005) return "+$0";
+  const whole = Math.abs(abs - Math.round(abs)) < 0.005;
+  const body = whole ? TIP_WHOLE.format(Math.round(abs)) : TIP_CENTS.format(abs);
+  return (n < 0 ? "-$" : "+$") + body;
+}
+
+/**
+ * Tooltip top-left inside a chart box. Prefers just to the right of the
+ * anchor, flips to the left when that would clip, then clamps to the margin.
+ * All values are pixels in the same space.
+ */
+export function profitTipBox({ boxW, boxH, anchorX, anchorY, tipW, tipH, gap = 8, margin = 4 } = {}) {
+  const w = Math.max(0, Number(boxW) || 0);
+  const h = Math.max(0, Number(boxH) || 0);
+  const tw = Math.max(0, Number(tipW) || 0);
+  const th = Math.max(0, Number(tipH) || 0);
+  const m = Math.max(0, Number(margin) || 0);
+  const g = Number(gap) || 0;
+  const ax = Number(anchorX) || 0;
+  const ay = Number(anchorY) || 0;
+  let left = ax + g;
+  if (left + tw > w - m) left = ax - g - tw;
+  const maxL = Math.max(m, w - tw - m);
+  left = Math.min(Math.max(m, left), maxL);
+  let top = ay - th / 2;
+  const maxT = Math.max(m, h - th - m);
+  top = Math.min(Math.max(m, top), maxT);
+  return {
+    left: Math.round(left * 100) / 100,
+    top: Math.round(top * 100) / 100,
+  };
 }
 
 /** Axis-aligned step path: horizontal to the next x, then vertical to the new value. */
@@ -473,6 +543,14 @@ export function profitChartLayout(points, box = {}) {
   const origin = { x: startX, y: zeroY };
   const line = stepLine(coords, origin);
   const evLine = hasEv ? stepLine(evCoords, origin) : [];
+  const samples = shown.map((p, i) => ({
+    x: coords[i].x,
+    y: coords[i].y,
+    evY: hasEv ? evCoords[i].y : null,
+    at: p.at,
+    cumulative: Number(p.cumulative) || 0,
+    cumulativeEv: hasEv ? (Number(p.cumulativeEv) || 0) : null,
+  }));
   const yTicks = yScale.ticks.map((value) => ({
     value,
     text: axisDollars(value),
@@ -501,6 +579,8 @@ export function profitChartLayout(points, box = {}) {
     if (firstDate) xTicks.push({ text: firstDate, x: padL, y: height - 6, anchor: "start" });
     if (lastDate && lastDate !== firstDate) xTicks.push({ text: lastDate, x: padL + innerW, y: height - 6, anchor: "end" });
   }
+  const axisY = height - padB;
+  const xTick = Math.max(3, Math.min(14, padB * 0.2));
   return {
     width,
     height,
@@ -508,8 +588,11 @@ export function profitChartLayout(points, box = {}) {
     padR,
     padT,
     padB,
+    axisY,
+    xTick,
     line,
     evLine,
+    samples,
     hasEv,
     zeroY,
     yTicks,
