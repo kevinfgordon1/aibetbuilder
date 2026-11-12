@@ -1343,3 +1343,30 @@ console.log("comboPrefill PHI/ATL game-gap tests passed");
   assert.equal(gameStartFromLegs([], idx), "");
   console.log("comboPrefill game-start tests passed");
 }
+
+// Evening ET game, date-only keys, Saturday's rematch listed first. The key
+// date is the Eastern date. Midnight-UTC closeness must not pick Saturday.
+{
+  const side = (key, a, b, an, bn) => ({
+    key, sport: "nhl", title: `${an} vs ${bn}`,
+    startTime: "2026-11-12T00:00:00.000Z",
+    markets: {
+      side: [
+        { ticker: `KXNHLGAME-${key}-${a}`, side: "yes", label: an },
+        { ticker: `KXNHLGAME-${key}-${b}`, side: "yes", label: bn },
+      ],
+      spread: [], total: [],
+    },
+  });
+  const saturday = side("26NOV14NJWSH", "NJ", "WSH", "New Jersey", "Washington");
+  saturday.startTime = "2026-11-14T00:00:00.000Z";
+  const tonight = side("26NOV12WSHNJ", "WSH", "NJ", "Washington", "New Jersey");
+  const leg = {
+    name: "New Jersey Devils ML", market: "ML",
+    game: "Washington Capitals @ New Jersey Devils", sport: "icehockey_nhl",
+    commence_time: "2026-11-13T00:09:00Z",
+  };
+  const hit = mapPromoLegsToKalshi([leg], { nhl: [saturday, tonight] });
+  assert.equal(hit.rows[0].gameKey, "26NOV12WSHNJ");
+  assert.equal(hit.rows[0].marketVal, encVal("KXNHLGAME-26NOV12WSHNJ-NJ", "yes"));
+}

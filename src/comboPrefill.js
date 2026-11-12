@@ -547,13 +547,45 @@ function startGapMs(g, t) {
   return Number.isFinite(gt) && Number.isFinite(t) ? Math.abs(gt - t) : NaN;
 }
 
+function ymdAdd(ymd, days) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ""));
+  if (!m) return "";
+  const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + days));
+  return dt.toISOString().slice(0, 10);
+}
+
+// 0 = ticker date is the leg's Eastern date. 1 = NCAAF moneyline dated the
+// day before the ET kickoff (KXNCAAFGAME-26OCT16MIZZMISS = Sat Oct 17).
+// null = a different day. Date-only keys used to skip the time gate (gap NaN)
+// and then the first same-teams row won, so Saturday's rematch could land on
+// an evening ET game. The key date is the Eastern date, not midnight UTC.
+function kalshiKeyDateRank(g, promoLeg) {
+  const keyDate = keyEtDate(g.key);
+  const gameDate = etDateOfMs(new Date(promoLeg.commence_time).getTime());
+  if (!keyDate || !gameDate) return 0;
+  if (keyDate === gameDate) return 0;
+  const sport = g.sport || promoSportOf(promoLeg);
+  if (sport === "ncaaf" && keyDate === ymdAdd(gameDate, -1)) return 1;
+  return null;
+}
+
 function matchKalshiGame(promoLeg, games) {
   const all = sameTeamsCandidates(promoLeg, games);
   if (all.length === 0) return null;
   const t = new Date(promoLeg.commence_time).getTime();
   if (!Number.isFinite(t)) return all[0];
-  // Drop games whose start is known and far from the promo's commence time.
-  const candidates = all.filter((g) => {
+  const ranked = [];
+  for (const g of all) {
+    const rank = kalshiKeyDateRank(g, promoLeg);
+    if (rank == null) continue;
+    ranked.push({ g, rank });
+  }
+  if (!ranked.length) return null;
+  const bestRank = ranked.reduce((m, x) => Math.min(m, x.rank), Infinity);
+  const pool = ranked.filter((x) => x.rank === bestRank).map((x) => x.g);
+  // Same Eastern date only. A known start more than 6h away is a different
+  // game (doubleheader half). Date-only keys have no start to compare.
+  const candidates = pool.filter((g) => {
     const gap = startGapMs(g, t);
     return !Number.isFinite(gap) || gap <= SAME_GAME_MAX_GAP_MS;
   });

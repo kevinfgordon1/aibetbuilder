@@ -31,7 +31,7 @@
 // more than one price level (or VWAP ≠ top). A deep top that fills alone
 // is not a blend — omit the tag. Shortfall copy still always shows.
 
-import { oppQuoteLooksInverted, quoteLooksWrongSideOf, ladderTopLooksRogue } from "./promoOppGuard.js";
+import { oppQuoteLooksInverted, quoteLooksWrongSideOf, ladderTopLooksRogue, depthBookBeatsCachedQuote } from "./promoOppGuard.js";
 
 export const TARGET_PAYOUT_USD = 500;
 export const PM_BLEND_VENUES = new Set(["kalshi", "polymarket", "novig", "prophetx"]);
@@ -369,7 +369,7 @@ export function pmVenueLadders(leg, levels, ctx = {}) {
   // quote by 20+ pts: it belongs to another market, so none of it is real.
   const sane = (lvls, ref) => (ladderTopLooksRogue(ref, lvls) ? [] : lvls);
   const bestBook = String(leg.bestOppBook).toLowerCase();
-  const out = [{ book: bestBook, levels: sane(clean(resolvePmBookLevels(leg, levels)), quoted), best: true }];
+  const out = [{ book: bestBook, levels: sane(clean(resolvePmBookLevels(leg, levels)), quoted), best: true, quoted: Number(quoted) }];
   const seen = new Set([bestBook]);
   const ladders = ctx && ctx.laddersByKey;
   for (const v of Array.isArray(leg.bestOppVenues) ? leg.bestOppVenues : []) {
@@ -378,7 +378,7 @@ export function pmVenueLadders(leg, levels, ctx = {}) {
     seen.add(book);
     const live = ladders ? ladders[venueKey(leg, book)] : null;
     const lvls = Array.isArray(live) && live.length ? live : [{ american: v.american, size: v.size }];
-    out.push({ book, levels: sane(clean(lvls), Number(v.american)), best: false });
+    out.push({ book, levels: sane(clean(lvls), Number(v.american)), best: false, quoted: Number(v.american) });
   }
   return out;
 }
@@ -404,15 +404,49 @@ export function applyPmBlendToLeg(leg, levels, ctx = {}) {
     if (!v.levels.length) { tried.push({ book: v.book, covered: false, profitFilled: 0 }); continue; }
     const blend = blendAskLadderToPayout(v.levels);
     if (!blend || blend.american == null) { tried.push({ book: v.book, covered: false, profitFilled: 0 }); continue; }
+    const ref = Number.isFinite(Number(v.quoted)) ? Number(v.quoted) : Number(quoted);
+    const topAm = v.levels[0].american;
+    // Better than this venue's own cached quote by >3 cents of probability
+    // is a different market. Fall back to the quote instead of taking it.
+    const tooGood = depthBookBeatsCachedQuote(ref, blend.american, v.levels);
     const ok = blend.complete
       && !oppQuoteLooksInverted(leg.dk, blend.american)
-      && !quoteLooksWrongSideOf(quoted, blend.american);
-    tried.push({ book: v.book, covered: ok, top: v.levels[0].american, profitFilled: blend.payoutFilled, american: blend.american });
+      && !quoteLooksWrongSideOf(quoted, blend.american)
+      && !tooGood;
+    tried.push({
+      book: v.book,
+      covered: ok,
+      top: topAm,
+      profitFilled: blend.payoutFilled,
+      american: blend.american,
+      ...(tooGood ? { reason: "depth_beats_quote" } : {}),
+    });
     if (ok && (!chosen || blend.american > chosen.blend.american)) chosen = { venue: v, blend };
   }
   const skippedVenues = tried.filter((t) => !t.covered).map((t) => t.book);
 
   if (!chosen) {
+    const tossed = tried.some((t) => t.reason === "depth_beats_quote");
+    const q = Number(quoted);
+    if (tossed && Number.isFinite(q) && q !== 0) {
+      const size = Number(leg.bestOppSize);
+      const covered = topBandCoversTarget(Number.isFinite(size) && size > 0 ? [{ american: q, size }] : []);
+      return {
+        ...leg,
+        bestOppQuoted: q,
+        bestOpp: q,
+        lowLiquidity: !covered,
+        pmBlend: {
+          american: q,
+          impliedProb: americanToImpliedProb(q),
+          complete: covered,
+          rejectedDepth: true,
+          lowLiquidity: !covered,
+          venues: tried,
+          flag: "depth price discarded · different market",
+        },
+      };
+    }
     // No single venue covers $500 profit. Keep the quoted best on the card
     // and report the best venue's own shortfall.
     const best = venues[0];
