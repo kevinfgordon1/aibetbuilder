@@ -236,6 +236,15 @@ const { ALL_BOOKS, TRUSTED_BOOK_KEYS, buildAllLegsForBook } = require("../lib/pr
     "Best opp: +163 on Underdog Predict · $130 depth (to win) · Colorado Rockies ML",
   );
   assert.notEqual(sized, "+163 on Underdog Predict · $80 currently available");
+  const discarded = formatTrueOddsWithBlend({
+    odds: -155,
+    bookLabel: "Kalshi",
+    size: 4000,
+    blend: { american: -155, complete: true, rejectedDepth: true, flag: "depth price discarded · different market" },
+  });
+  assert.match(discarded.text, /^-155 on Kalshi/);
+  assert.match(discarded.text, /different market/);
+  assert.doesNotMatch(discarded.text, /-121/);
 }
 
 // ── American odds: +plus / −minus, never "+-105"

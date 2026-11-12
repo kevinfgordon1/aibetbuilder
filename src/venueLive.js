@@ -183,9 +183,21 @@ function teamHitsGame(game, name) {
     || namesHit(name, game.homeAbbr);
 }
 
+function easternYmd(ms) {
+  if (!Number.isFinite(ms)) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ms));
+}
+
 export function matchGameForQuote(games, quote) {
   if (!quote || !quote.side) return null;
   const league = String(quote.league || "").toUpperCase();
+  const quoteMs = Date.parse(quote.start || quote.commence_time || "");
+  const quoteDay = easternYmd(quoteMs);
   const hits = [];
   for (const game of games || []) {
     if (!game) continue;
@@ -193,6 +205,12 @@ export function matchGameForQuote(games, quote) {
     if (!teamHitsGame(game, quote.side)) continue;
     if (quote.away && quote.home) {
       if (!teamHitsGame(game, quote.away) || !teamHitsGame(game, quote.home)) continue;
+    }
+    // Same teams on two nights: the quote's Eastern date has to be the
+    // fixture's. A closer UTC timestamp is not a reason to use the rematch.
+    if (quoteDay) {
+      const gameDay = easternYmd(Date.parse(game.commence_time || game.start || ""));
+      if (gameDay && gameDay !== quoteDay) continue;
     }
     hits.push(game);
   }

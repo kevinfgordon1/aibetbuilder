@@ -152,4 +152,17 @@ const withKalshi = applyStreamMarkets(painted, kalshiMarkets, {
 assert.equal(withKalshi[0].bookOdds.kalshi.ml_home, feeInclusiveAmerican(0.72, VENUE_TAKER_FEE_RATE.kalshi).american);
 assert.equal(withKalshi[0].bookOdds.kalshi.ml_home_raw, toAmericanOdds(0.72));
 
+// Same teams, two nights. The quote's Eastern date picks tonight, not the
+// rematch that is closer if you treat dates as midnight UTC.
+{
+  const tonight = { ...games[0], id: "wsh-nj", away: "Washington Capitals", home: "New Jersey Devils", league: "NHL", commence_time: "2026-11-13T00:09:00Z" };
+  const saturday = { ...games[0], id: "nj-wsh", away: "New Jersey Devils", home: "Washington Capitals", league: "NHL", commence_time: "2026-11-15T00:09:00Z" };
+  const q = {
+    book: "kalshi", league: "NHL", away: "Washington Capitals", home: "New Jersey Devils",
+    side: "Devils", bet_type: "moneyline", odds: 0.6, start: "2026-11-13T00:09:00Z",
+  };
+  assert.equal(matchGameForQuote([saturday, tonight], q).id, "wsh-nj");
+  assert.equal(matchGameForQuote([saturday], q), null);
+}
+
 console.log("venueLive.test.js ok");

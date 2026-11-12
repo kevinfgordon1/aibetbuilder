@@ -99,7 +99,8 @@ export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: 
   const blend = blendIn !== undefined
     ? blendIn
     : (Array.isArray(levels) && levels.length ? blendAskLadderToPayout(levels) : null);
-  const shownOdds = blend?.american ?? odds;
+  const rejected = !!(blend && blend.rejectedDepth);
+  const shownOdds = rejected ? (odds ?? blend.american) : (blend?.american ?? odds);
   // Always show $ behind the best opp when any depth is known: fall back to
   // the top price band of the ladder when the venue sent no top size.
   if (!(Number(size) > 0) && Array.isArray(levels) && levels.length) {
@@ -109,10 +110,10 @@ export function formatTrueOddsWithBlend({ odds, bookLabel, size, levels, blend: 
     if (band > 0) size = band;
   }
   // Complete fill on the top level alone is not a blend — no flag, no "top …" subline.
-  const displayAsBlend = !!(blend && (!blend.complete || blendDidWalk(blend, odds)));
-  const flag = displayAsBlend
-    ? (blend.flag || formatBlendedPayoutFlag(blend, odds))
-    : "";
+  const displayAsBlend = !!(blend && !rejected && (!blend.complete || blendDidWalk(blend, odds)));
+  const flag = rejected
+    ? (blend.flag || "depth price discarded · different market")
+    : (displayAsBlend ? (blend.flag || formatBlendedPayoutFlag(blend, odds)) : "");
   const text = formatTrueOddsBookLine({
     odds: shownOdds,
     bookLabel,
