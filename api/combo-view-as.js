@@ -61,8 +61,8 @@ const NAMES = {
   'kmguido97@gmail.com': 'Kenny',
   'c.w.higgins1@gmail.com': 'Chris (Higgins)',
   'gmoneyvikes@gmail.com': 'gmoneyvikes',
-  'kev120909@gmail.com': 'Kevin (you)',
-  'kevin.f.gordon1@gmail.com': 'Kevin (2nd account)',
+  'kev120909@gmail.com': 'You',
+  'kevin.f.gordon1@gmail.com': 'Second account',
 };
 
 async function listUsers(client) {

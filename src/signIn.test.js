@@ -358,6 +358,8 @@ assert.equal(safeAppHash("https://evil.example/#ev"), "");
   assert.match(panel, /noValidate/);
   assert.match(panel, /\.sip-msg\.sip-error/);
   assert.match(panel, /\.sip-msg\.sip-rate/);
+  assert.match(panel, /SupportContact/);
+  assert.match(panel, /\.sip-support\.sip-support-line/);
   assert.match(panel, /gates\.x \?/);
   assert.match(panel, /gates\.facebook \?/);
   assert.match(app, /function LandingFull/);

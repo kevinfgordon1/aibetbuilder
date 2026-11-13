@@ -602,7 +602,7 @@ function AdminPanel({ supabase, selfId = null }) {
             nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
           <FundMoves supabase={supabase} userId={null} enabled title="Tester auto-funding (latest 20)" limit={20}
             nameFor={(id) => { const u = rows.find((x) => x.user_id === id); return u ? (u.email || id.slice(0, 8)) : String(id).slice(0, 8); }} />
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Keys are shown masked only. Balance = Kalshi combo / single-game and Polymarket US buying power, refreshed every minute. Testers trade on their own accounts. Kevin's desk uses the server keys. Pause engages the user's kill switch; Resume clears only your pause, and the user re-arms their own kill switch.</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Keys are shown masked only. Balance = Kalshi combo / single-game and Polymarket US buying power, refreshed every minute. Testers trade on their own accounts. The owner desk uses the server keys. Pause engages the user's kill switch; Resume clears only your pause, and the user re-arms their own kill switch.</div>
         </div>
       )}
     </div>

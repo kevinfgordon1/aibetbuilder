@@ -16,6 +16,7 @@ import GuestLock from "./GuestLock.jsx";
 import { GUEST_EXPLAINER_COPY, GUEST_FULL_PICKS, GUEST_PICKS_GATE_COPY, GUEST_SOFT_PROMPT_COPY, GUEST_SOFT_PROMPT_TITLE, GUEST_SOFT_PROMPT_OPTIMIZES, canShowGuestSoftPrompt, guestActionNeedsSignIn, promoControlSummary, shouldShowSoftPrompt, markSoftPromptShown } from "./guestAccess.js";
 import { evEmptyState } from "./evEmptyState.js";
 import SiteFooterLinks from "./SiteFooterLinks.jsx";
+import SupportContact from "./SupportContact.jsx";
 import PromoWizard from "./PromoWizard.jsx";
 import InfoTip from "./InfoTip.jsx";
 import { diagnoseEmptyPromo, initialWizardOpen, markWizardDone, wizardOpenForUser } from "./onboarding.js";
@@ -1273,6 +1274,7 @@ function LandingFull({ onBack }) {
           <div className="lf-qa"><h4>Which sports are covered?</h4><p>MLB, NFL, NBA, NHL, college football &amp; basketball, plus EPL, MLS, and UEFA Champions League soccer — with championship futures too.</p></div>
           <div className="lf-qa"><h4>Do I have to link my sportsbook accounts?</h4><p>No. It reads public odds; you place bets yourself at whichever book has the edge.</p></div>
           <div className="lf-qa"><h4>Where do the odds come from?</h4><p>Real-time feeds from 20+ sportsbooks and exchanges, including Kalshi and Polymarket, refreshed every 5 minutes.</p></div>
+          <div className="lf-qa"><h4>How do I reach you?</h4><p><SupportContact />.</p></div>
         </div>
       </div></section>
 
@@ -3593,7 +3595,7 @@ export default function App() {
 
       {routeNotice && (
         <div data-guard-allow="true" style={{ margin: "12px 32px 0", padding: "12px 16px", borderRadius: 10, background: "rgba(212,175,55,0.08)", border: "1px solid rgba(212,175,55,0.25)", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <span>{routeNotice === "signin" ? "Sign in to open this link." : "You don’t have access to this page."}</span>
+          <span>{routeNotice === "signin" ? "Sign in to open this link." : <>You don’t have access to this page. <SupportContact linkStyle={{ color: "#d1d5db", fontWeight: 700, textDecoration: "none" }} /></>}</span>
           {routeNotice === "signin" && !user && (
             <button type="button" onClick={() => askSignIn("Sign in to open this link.")} style={{ background: "#fff", color: "#333", border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Sign in</button>
           )}

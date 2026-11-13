@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RESPONSIBLE_GAMBLING_LINE, SITE_FOOTER_LINKS } from "./siteLinks.js";
+import { RESPONSIBLE_GAMBLING_LINE, SITE_FOOTER_LINKS, SUPPORT_EMAIL, SUPPORT_MAILTO } from "./siteLinks.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
@@ -14,7 +14,12 @@ for (const name of ["about", "privacy", "terms"]) {
   assert.match(html, /1-800-GAMBLER/, name);
   assert.match(html, /href="\/privacy"/, name);
   assert.match(html, /href="\/terms"/, name);
-  assert.match(html, /kev120909@gmail\.com/, name);
+  assert.match(html, new RegExp(SUPPORT_EMAIL.replace(/\./g, "\\."), "g"), name);
+  assert.match(html, new RegExp(`href="${SUPPORT_MAILTO}"`), name);
+  assert.match(html, /data-support-email/, name);
+  assert.match(html, /Questions\? Contact/, name);
+  assert.match(html, /fill-support-email\.js/, name);
+  assert.doesNotMatch(html, /kev120909@gmail\.com|kevin\.f\.gordon1@gmail\.com|\bKevin\b/, name);
   assert.ok(vercel.rewrites.some((r) => r.source === `/${name}` && r.destination === `/${name}.html`), name);
 }
 assert.ok(vercel.rewrites.some((r) => r.source === "/s/:path*"));
@@ -89,7 +94,26 @@ assert.ok(manifest.icons.some((i) => i.sizes === "512x512"));
 // Footer on landing + app.
 assert.deepEqual(SITE_FOOTER_LINKS.map((l) => l.href), ["/about", "/privacy", "/terms", "/about#contact"]);
 assert.equal(RESPONSIBLE_GAMBLING_LINE, "21+ only. Gambling problem? Call 1-800-GAMBLER.");
+assert.equal(SUPPORT_EMAIL, "support@aibetbuilder.io");
+assert.equal(SUPPORT_MAILTO, "mailto:support@aibetbuilder.io");
+const supportJson = JSON.parse(read("public/support-email.json"));
+assert.equal(supportJson.SUPPORT_EMAIL, SUPPORT_EMAIL);
+assert.match(read("src/SupportContact.jsx"), /SUPPORT_EMAIL/);
+assert.match(read("src/SupportContact.jsx"), /SUPPORT_MAILTO/);
+assert.match(read("src/SupportContact.jsx"), /Questions\? Contact/);
+assert.match(read("src/SiteFooterLinks.jsx"), /SupportContact/);
+assert.match(read("src/SignInOptions.jsx"), /SupportContact/);
+assert.match(read("src/SignInOptions.jsx"), /status\.kind === "error" \|\| status\.kind === "rate_limit"/);
 const app = read("src/App.jsx");
 assert.equal((app.match(/<SiteFooterLinks \/>/g) || []).length, 2);
+assert.match(app, /How do I reach you\?/);
+assert.match(app, /You don’t have access to this page\. <SupportContact/);
+assert.doesNotMatch(read("public/about.html") + read("public/privacy.html") + read("public/terms.html") + read("src/SiteFooterLinks.jsx") + read("src/SupportContact.jsx"), /gmail\.com/);
+const hook = read("api/telegram-webhook.js");
+assert.match(hook, /support-email\.json/);
+assert.match(hook, /Questions\? Email \$\{SUPPORT_EMAIL\}/);
+assert.doesNotMatch(hook, /Kevin will text|Reach out to Kevin/);
+assert.doesNotMatch(read("src/ComboLocks.jsx"), /Kevin \(you\)/);
+assert.doesNotMatch(read("src/ComboTesters.jsx"), /Kevin's desk/);
 
 console.log("sitePages.test.js ok");
