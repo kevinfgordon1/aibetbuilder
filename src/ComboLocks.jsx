@@ -577,7 +577,7 @@ export default function ComboLocks({ user, prefill = null, focusLockId = null, o
         <label htmlFor="cl-viewas-sel" style={{ fontSize: 13, fontWeight: 700, color: "#c3c6cc" }}>View as</label>
         <select id="cl-viewas-sel" data-testid="combo-view-as" value={viewing ? target.id : ""} onChange={(e) => setViewId(e.target.value)}
           style={{ background: "#1b1e25", color: "#e8eaed", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "6px 10px", fontSize: 14 }}>
-          <option value="">Kevin (you)</option>
+          <option value="">You</option>
           {viewUsers.filter((u) => !user || u.id !== user.id).filter((u) => !u.owner).map((u) => (
             <option key={u.id} value={u.id}>{u.label}{u.email && u.label !== u.email ? ` (${u.email})` : ""}</option>
           ))}

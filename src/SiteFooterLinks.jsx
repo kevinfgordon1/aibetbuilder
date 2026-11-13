@@ -1,7 +1,9 @@
 import { GAMBLER_TEL, SITE_FOOTER_LINKS } from "./siteLinks.js";
 import { FOOTER_DISCLAIMER } from "./onboarding.js";
+import SupportContact from "./SupportContact.jsx";
 
 const linkStyle = { color: "#9ca3af", textDecoration: "none", fontWeight: 600, padding: "4px 2px" };
+const supportLinkStyle = { color: "#d1d5db", fontWeight: 700, textDecoration: "none" };
 
 export default function SiteFooterLinks({ align = "center" }) {
   return (
@@ -11,6 +13,9 @@ export default function SiteFooterLinks({ align = "center" }) {
           <a key={l.href} href={l.href} style={linkStyle}>{l.label}</a>
         ))}
       </nav>
+      <div style={{ color: "#9ca3af", textAlign: align === "center" ? "center" : "left" }}>
+        <SupportContact linkStyle={supportLinkStyle} />
+      </div>
       <div data-footer-disclaimer="true" style={{ color: "#9ca3af", textAlign: "center" }}>{FOOTER_DISCLAIMER}</div>
       <div style={{ color: "#6b7280" }}>© Kaygosports, LLC</div>
       <div style={{ color: "#9ca3af" }}>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { copyText, currentPageUrl, detectInAppBrowser, externalBrowserHref, inAppSignInNotice } from "./inAppBrowser.js";
 import { X_LOGIN_ENABLED, X_OAUTH_PROVIDER, loadAuthSettings, normalizeOtpCode, oauthProviderEnabled, sendEmailCode, sendMagicLink, startOAuthSignIn, verifyEmailCode } from "./signIn.js";
+import SupportContact from "./SupportContact.jsx";
 
 function GoogleIcon() {
   return (
@@ -209,6 +210,12 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
           margin: 0; color: #1c1917; background: #fbbf24; border: 1px solid #fde68a;
           border-radius: 10px; padding: 12px 14px; font-size: 15px; line-height: 1.45; font-weight: 700;
         }
+        .sip-support.sip-support-line {
+          margin: 0; color: #e8eaed; background: transparent; border: none; padding: 0;
+          font-size: 13px; line-height: 1.45; font-weight: 600;
+        }
+        .sip-support.sip-support-line a { color: #93c5fd; font-weight: 700; text-decoration: none; }
+        .sip-support.sip-support-line a:hover { color: #bfdbfe; }
         .sip-sent {
           background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35);
           border-radius: 12px; padding: 14px 14px 12px; color: #d1fae5;
@@ -339,6 +346,9 @@ export default function SignInPanel({ id, supabaseClient, initialStatus = null }
         ) : null}
         {status && status.kind === "rate_limit" ? (
           <p className="sip-msg sip-rate" role="alert" data-signin-rate-limit="true">{status.message}</p>
+        ) : null}
+        {status && (status.kind === "error" || status.kind === "rate_limit") ? (
+          <p className="sip-support sip-support-line"><SupportContact /></p>
         ) : null}
       </div>
     </div>
