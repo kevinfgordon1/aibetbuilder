@@ -5,5 +5,6 @@ const email = support.SUPPORT_EMAIL;
 const mailto = "mailto:" + email;
 for (const el of document.querySelectorAll("[data-support-email]")) {
   el.textContent = email;
-  if (el.tagName === "A") el.href = mailto;
+  const link = el.closest("a");
+  if (link) link.href = mailto;
 }

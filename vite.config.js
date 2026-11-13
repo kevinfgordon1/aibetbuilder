@@ -74,6 +74,26 @@ function soccerClubsBrowserEsm() {
   }
 }
 
+function trustPageRewrites() {
+  const pages = new Set(['/about', '/privacy', '/terms', '/support'])
+  const rewrite = (req, _res, next) => {
+    const url = req.url || ''
+    const q = url.indexOf('?')
+    const path = q === -1 ? url : url.slice(0, q)
+    if (pages.has(path)) req.url = path + '.html' + (q === -1 ? '' : url.slice(q))
+    next()
+  }
+  return {
+    name: 'trust-page-rewrites',
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+  }
+}
+
 function betstampLocalApi() {
   return {
     name: 'betstamp-local-api',
@@ -92,6 +112,6 @@ export default defineConfig(({ mode }) => {
     if (process.env[k] == null) process.env[k] = v
   }
   return {
-    plugins: [react(), soccerClubsBrowserEsm(), betstampLocalApi()],
+    plugins: [react(), soccerClubsBrowserEsm(), trustPageRewrites(), betstampLocalApi()],
   }
 })

@@ -4,6 +4,7 @@ import supportContact from "../public/support-email.json" with { type: "json" };
 // app and the static /about, /privacy, /terms pages (public/*.html).
 export const SITE_FOOTER_LINKS = Object.freeze([
   { href: "/about", label: "About" },
+  { href: "/support", label: "Support" },
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
   { href: "/about#contact", label: "Contact" },
