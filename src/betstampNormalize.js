@@ -1,3 +1,4 @@
+import {cachedSeriesTakerRate} from './buyerOdds.js';
 // Betstamp market snapshot → Odds Board row model.
 // Isolated from The Odds API transform so the existing board stays untouched.
 
@@ -44,7 +45,7 @@ function venueBoardPrice(bookKey, odds, market) {
   const feeRate = Number(market && market.taker_fee_rate);
   const rate = bookKey === "novig"
     ? takerFeeRate(bookKey, { live: feeRate > 0, coefficient: feeRate })
-    : takerFeeRate(bookKey);
+    : takerFeeRate(bookKey, bookKey === 'kalshi' && cachedSeriesTakerRate(market.ticker) != null ? {...market,fee_multiplier:cachedSeriesTakerRate(market.ticker)/.07} : market);
   if (rate != null && n > 0 && n < 1) return feeInclusiveAmerican(n, rate);
   return { american: toAmericanOdds(odds), rawAmerican: null };
 }

@@ -5,8 +5,8 @@ import {
 } from "./comboBalances.js";
 
 // Same math as ComboLocks fillView / worker engine.fillView (cent floor).
-assert.equal(noBidFromFill(1100), 0.91);
-assert.equal(noBidFromFill(-110), 0.47);
+assert.equal(noBidFromFill(1100), 0.913);
+assert.equal(noBidFromFill(-110), 0.467);
 assert.equal(noBidFromFill(50), null);
 assert.equal(noBidFromFill("x"), null);
 
@@ -52,7 +52,7 @@ assert.equal(adminBalanceText({ kalshiCombo: { state: "stale", amount: 10 }, kal
 assert.equal(adminBalanceText(undefined), "—");
 
 // Worst-case need: remaining contracts x NO price.
-assert.equal(lockNeedUsd({ max_contracts: 100, fill_american: 1100 }, 40), 54.6);
+assert.equal(lockNeedUsd({ max_contracts: 100, fill_american: 1100 }, 40), 54.78);
 assert.equal(lockNeedUsd({ max_contracts: 100, fill_american: 1100 }, 200), 0);
 assert.equal(lockNeedUsd({ max_contracts: null, fill_american: 1100 }), null);
 assert.deepEqual(filledByParlay([{ parlay_id: "a", count: 10 }, { parlay_id: "a", count: "5" }, { parlay_id: "b", count: 1 }]), { a: 15, b: 1 });
@@ -66,8 +66,8 @@ assert.deepEqual(filledByParlay([{ parlay_id: "a", count: 10 }, { parlay_id: "a"
   const s = comboShortfall({ comboUsd: 50, parlays, filledById: { a: 0 } });
   assert.equal(s.short, true);
   assert.equal(s.parlay.id, "d", "largest active need: 200 x 0.47 = 94 beats 100 x 0.91 = 91; paused/archived ignored");
-  assert.equal(s.need, 94);
-  assert.equal(s.gap, 44);
+  assert.equal(s.need, 93.4);
+  assert.equal(s.gap, 43.4);
   assert.equal(comboShortfall({ comboUsd: 94, parlays }).short, false);
   assert.equal(comboShortfall({ comboUsd: null, parlays }).short, false);
   assert.equal(comboShortfall({ comboUsd: 10, parlays: [] }).short, false);

@@ -1,3 +1,4 @@
+import {usOnlyBooks} from './polymarketUsOnly.js';
 // Odds transforms for Promo Builder / Odds Board / +EV.
 // trustedBookKeys gates getBestOdds / opp-count helpers. Offer-side bookOdds
 // still iterate allBooks so an unchecked matching book can price the promo.
@@ -32,7 +33,7 @@ export function transformOddsData(gamesArray, sportKey, trustedBookKeys, allBook
     if (new Date(game.commence_time) <= now) return;
     const away = game.away_team;
     const home = game.home_team;
-    const bookmakers = game.bookmakers || [];
+    const bookmakers = usOnlyBooks(game.bookmakers);
     const commence_time = game.commence_time;
 
     const getOdds = (bookKey, marketKey, teamName, prop = "price") => {
@@ -330,7 +331,7 @@ export function transformEventOddsData(game, sportKey, trustedBookKeys, allBooks
   const away = game.away_team;
   const home = game.home_team;
   const commence_time = game.commence_time;
-  const bookmakers = game.bookmakers;
+  const bookmakers = usOnlyBooks(game.bookmakers);
   const isHalf = (p) => p != null && Math.abs(p % 1) === 0.5;
   const fmtPoint = (p) => (p > 0 ? `+${p}` : `${p}`);
 

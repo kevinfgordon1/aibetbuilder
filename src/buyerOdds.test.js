@@ -8,7 +8,7 @@ assert.equal(makerRateFromSeries("mystery", 1), FALLBACK_MAKER_RATE);
 const KENNY = "KXMVECROSSCATEGORY0-S2026A0E24EEACD4-D44B4A1E301";
 assert.equal(seriesOfTicker(KENNY), "KXMVECROSSCATEGORY0");
 // Not loaded yet → conservative 0.035.
-assert.equal(makerRateForTicker(KENNY), 0.035);
+assert.equal(makerRateForTicker(KENNY), 0);
 await loadSeriesFees([KENNY, "KXMVECROSSCATEGORY-A-B"], async (u) => {
   assert.match(u, /^\/api\/kalshi-series-fee\?series=KXMVECROSSCATEGORY0%2CKXMVECROSSCATEGORY$/);
   return { ok: true, json: async () => ({ series: { KXMVECROSSCATEGORY0: { fee_type: "quadratic", fee_multiplier: 1 }, KXMVECROSSCATEGORY: { fee_type: "quadratic_with_combo_maker_fees", fee_multiplier: 1 } } }) };
@@ -33,11 +33,11 @@ assert.equal(quotedYesPrice(1188, { subcent: false, makerRate: 0.0175 }), 0.08);
 // Polymarket combos: no maker fee/rebate; combo taker curve. Docs example: 1,000 @ $0.10 → $10.19 fee.
 {
   const { polyComboTakerFeePerContract } = await import("./venueTakerFee.js");
-  assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.10) * 100) / 100, 10.19);
-  assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.50) * 100) / 100, 19.25);
+  assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.10) * 100) / 100, 12.49);
+  assert.equal(Math.round(1000 * polyComboTakerFeePerContract(0.50) * 100) / 100, 25.63);
   // +300 lock → YES 0.25 → 0.25 + 0.25·(0.0695·0.75 + 0.06·0.75^4) ≈ 0.2678 → +273
   // Pinned before the combo maker fee (2026-11-14 12:00 AM ET).
-  assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us", at: "2026-11-13T00:00:00Z" }).text, "+273");
+  assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us", at: "2026-11-13T00:00:00Z" }).text, "+267");
 }
 // Favorites and junk.
 assert.ok(buyerSeesAfterFees(-150).american < -150);

@@ -249,7 +249,7 @@ export function betSummary(parlay) {
 /**
  * What the taker (buyer of the parlay YES) effectively gets after the venue's
  * estimated taker fee: YES price P = 1/(decimal of the Selling at odds), then
- * P + rate·P·(1−P) per contract. Kalshi and Polymarket US both use rate 0.07
+ * P + rate·P·(1−P) per contract. Kalshi uses its series multiplier and Polymarket US uses the Tier 1 constant
  * (venueTakerFee.js), so mixed-venue fills give the same estimate. Per-contract
  * rate, before Kalshi's round-up of the whole order fee to the cent.
  */

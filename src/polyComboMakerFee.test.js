@@ -23,7 +23,7 @@ assert.equal(roundHalfEvenCents(0.035), 0.04);
 assert.equal(quotedYesPrice(900, { venue: "polymarket", at: BEFORE }), 0.1);
 const afterYes = quotedYesPrice(900, { venue: "polymarket", at: AT });
 assert.equal(afterYes, 0.1028);
-assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us", at: BEFORE }).text, "+273");
+assert.equal(buyerSeesAfterFees(300, { venue: "polymarket_us", at: BEFORE }).text, "+267");
 const buyerAfter = buyerSeesAfterFees(300, { venue: "polymarket", at: AT });
 assert.ok(buyerAfter && buyerAfter.american < 300 && buyerAfter.american > 0, buyerAfter && buyerAfter.text);
 

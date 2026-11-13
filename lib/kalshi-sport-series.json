@@ -1,0 +1,75 @@
+{
+  "baseball_mlb": {
+    "ML": "KXMLBGAME",
+    "SPR": "KXMLBSPREAD",
+    "TOT": "KXMLBTOTAL"
+  },
+  "americanfootball_nfl": {
+    "ML": "KXNFLGAME",
+    "SPR": "KXNFLSPREAD",
+    "TOT": "KXNFLTOTAL"
+  },
+  "americanfootball_ncaaf": {
+    "ML": "KXNCAAFGAME",
+    "SPR": "KXNCAAFSPREAD",
+    "TOT": "KXNCAAFTOTAL"
+  },
+  "icehockey_nhl": {
+    "ML": "KXNHLGAME",
+    "SPR": "KXNHLSPREAD",
+    "TOT": "KXNHLTOTAL"
+  },
+  "basketball_nba": {
+    "ML": "KXNBAGAME",
+    "SPR": "KXNBASPREAD",
+    "TOT": "KXNBATOTAL"
+  },
+  "basketball_wnba": {
+    "ML": "KXWNBAGAME",
+    "SPR": "KXWNBASPREAD",
+    "TOT": "KXWNBATOTAL"
+  },
+  "basketball_ncaab": {
+    "ML": "KXNCAAMBGAME",
+    "SPR": "KXNCAAMBSPREAD",
+    "TOT": "KXNCAAMBTOTAL"
+  },
+  "soccer_epl": {
+    "ML": "KXEPLGAME",
+    "SPR": "KXEPLSPREAD",
+    "TOT": "KXEPLTOTAL"
+  },
+  "soccer_usa_mls": {
+    "ML": "KXMLSGAME",
+    "SPR": "KXMLSSPREAD",
+    "TOT": "KXMLSTOTAL"
+  },
+  "soccer_spain_la_liga": {
+    "ML": "KXLALIGAGAME",
+    "SPR": "KXLALIGASPREAD",
+    "TOT": "KXLALIGATOTAL"
+  },
+  "soccer_italy_serie_a": {
+    "ML": "KXSERIEAGAME",
+    "SPR": "KXSERIEASPREAD",
+    "TOT": "KXSERIEATOTAL"
+  },
+  "soccer_germany_bundesliga": {
+    "ML": "KXBUNDESLIGAGAME",
+    "SPR": "KXBUNDESLIGASPREAD",
+    "TOT": "KXBUNDESLIGATOTAL"
+  },
+  "soccer_france_ligue_one": {
+    "ML": "KXLIGUE1GAME",
+    "SPR": "KXLIGUE1SPREAD",
+    "TOT": "KXLIGUE1TOTAL"
+  },
+  "soccer_uefa_champs_league": {
+    "ML": "KXUCLGAME",
+    "SPR": "KXUCLSPREAD",
+    "TOT": "KXUCLTOTAL"
+  },
+  "mma_mixed_martial_arts": {
+    "ML": "KXUFCFIGHT"
+  }
+}

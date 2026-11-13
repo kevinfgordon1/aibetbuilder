@@ -1,3 +1,4 @@
+import polyFee from '../lib/polymarket-us-fee.json' with {type:'json'};
 // Combo Sniper "What to root for": leg fairs the same way the sniper prices them (combo-worker
 // sniper/fair.js + noboost/td-book.js legMulti). Inverse bet: leg fair = 1 − the cheapest fee-included
 // $1,000 VWAP to buy the OPPOSITE side, best of Kalshi, Polymarket US, Novig and ProphetX (each its own fee).
@@ -77,8 +78,8 @@ export function indexTdRows(rowsByVenue = {}, names = {}, polledAt = Date.now())
       if (c.length !== 1) { st[c.length ? "ambiguous" : "unmatched"] += 1; continue; }
       st.matched += 1;
       const startMs = Date.parse(r.start || "") || 0; const live = r.live === true || (startMs > 0 && polledAt >= startMs);
-      const coef = Number(r.fee_coefficient);
-      const feeFn = venue === "polymarket" ? ((p) => (coef > 0 ? coef : 0.0695) * p * (1 - p)) : venue === "novig" && live && coef > 0 ? ((p) => coef * p * (1 - p)) : () => 0;
+      const coef = r.fee_coefficient != null && r.fee_coefficient !== "" && Number.isFinite(Number(r.fee_coefficient)) ? Math.max(0,Number(r.fee_coefficient)) : 0.06;
+      const feeFn = venue === "polymarket" ? ((p) => polyFee.takerFeeCoefficient * p * (1 - p)) : venue === "novig" && live ? ((p) => coef * p * (1 - p)) : () => 0;
       const lv = (a) => (Array.isArray(a) ? a.map((x) => [Number(x.odds), Number(x.size)]) : []);
       const at = Math.min(polledAt, Math.max(Date.parse(r.confirmed_at || "") || 0, Date.parse(r.updated_at || "") || 0));
       (out[c[0].t] = out[c[0].t] || {})[venue] = { yes: lv(r.yes), no: lv(r.no), at, feeFn };
