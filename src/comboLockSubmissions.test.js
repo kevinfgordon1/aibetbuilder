@@ -19,6 +19,9 @@ import {
   livingLocksDue,
   lockQuotesLive,
   settleInBatches,
+  planDeskSubmissionReads,
+  archivedIdsForDeskPoll,
+  SUBMISSION_READ_MIN_MS,
 } from "./comboLockSubmissions.js";
 
 assert.equal(isNoisySkipReason("game_started"), true);
@@ -250,6 +253,10 @@ console.log("comboLockSubmissions.test.js ok");
   assert.match(sql, /where quote_id is not null/i);
   const locks = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "ComboLocks.jsx"), "utf8");
   assert.match(locks, /livingLocksDue/);
+  assert.match(locks, /planDeskSubmissionReads/);
+  assert.match(locks, /loadLockQuotes/);
+  assert.match(locks, /archivedIdsForDeskPoll/);
+  assert.doesNotMatch(locks, /lockUnfilledCountQuery\(/, "the desk must not HEAD-count each lock");
   assert.match(locks, /settleInBatches/);
   assert.match(locks, /reload\("poll"\)/);
   assert.match(locks, /visibilityState === "hidden"/);
@@ -257,4 +264,52 @@ console.log("comboLockSubmissions.test.js ok");
   assert.match(tape, /LOCK_SUBMISSION_COLUMNS/);
   assert.match(tape, /inflightRef/);
   assert.doesNotMatch(tape, /from\("combo_submissions"\)\.select\("\*"\)/);
+}
+
+// Opening Combo Locks and having the desk effect re-fire 8 times a second
+// for 2 minutes must not re-read combo_submissions on each tick.
+{
+  assert.equal(SUBMISSION_READ_MIN_MS, 15_000);
+  assert.deepEqual(archivedIdsForDeskPoll({ full: true, fetchIds: ["a", "b", "c"] }), []);
+  assert.deepEqual(archivedIdsForDeskPoll({ full: false, fetchIds: ["a", "b", "c", "d", "e"] }), ["a", "b", "c", "d"]);
+  const quoting = [{ id: "q", active: true, starts_at: "2026-11-12T18:00:00Z" }];
+  let now = Date.parse("2026-11-12T16:00:00Z");
+  const gate = { history: 0, booked: 0, locks: 0 };
+  const lockAt = new Map();
+  let historyN = 0;
+  let bookedN = 0;
+  let lockN = 0;
+  const ticks = 120 * 8;
+  for (let i = 0; i < ticks; i++) {
+    now += 125;
+    const plan = planDeskSubmissionReads({
+      now,
+      lastHistoryAt: gate.history,
+      lastBookedAt: gate.booked,
+      lastLockAt: gate.locks,
+      offersOpen: false,
+    });
+    if (plan.history) { historyN += 1; gate.history = now; }
+    if (plan.booked) { bookedN += 1; gate.booked = now; }
+    if (plan.locks) {
+      const due = livingLocksDue(quoting, { now, lastAt: lockAt });
+      if (due.length) {
+        lockN += due.length * 2;
+        for (const row of due) lockAt.set(row.id, now);
+      }
+      gate.locks = now;
+    }
+  }
+  assert.equal(historyN, 0, "closed offers log is not polled");
+  assert.ok(bookedN <= 10, `booked reads ${bookedN} over 2 minutes`);
+  assert.ok(lockN <= 8, `per-lock reads ${lockN} over 2 minutes`);
+  assert.ok(historyN + bookedN + lockN <= 16, "a handful of combo_submissions reads, not thousands");
+  let burst = 0;
+  let last = 0;
+  const burstAt = now + 1000;
+  for (let i = 0; i < 8; i++) {
+    const plan = planDeskSubmissionReads({ now: burstAt, lastBookedAt: last, lastHistoryAt: 1, lastLockAt: 1, offersOpen: true });
+    if (plan.booked) { burst += 1; last = burstAt; }
+  }
+  assert.equal(burst, 1, "eight re-entries in the same second share one read");
 }

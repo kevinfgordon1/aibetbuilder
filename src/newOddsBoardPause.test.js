@@ -16,8 +16,8 @@ assert.match(app, /activeTab === "oddsBetstamp" && canSeeNewOddsBoard\(user\)/);
 assert.match(app, /NEW_ODDS_BOARD_PAUSED \?/);
 assert.match(app, /<BetstampOddsBoard user=\{user\} refreshKey=\{betstampRefreshKey\}/);
 assert.match(app, /if \(NEW_ODDS_BOARD_PAUSED\) return;/);
-assert.match(app, /NEW_ODDS_BOARD_PAUSED && parseAppHash\(hash\)\.tab === "oddsBetstamp"/);
-assert.match(app, /NEW_ODDS_BOARD_PAUSED && activeTab === "oddsBetstamp"\) return;/);
+assert.match(app, /NEW_ODDS_BOARD_PAUSED && parsed\.tab === "oddsBetstamp"/);
+assert.match(app, /NEW_ODDS_BOARD_PAUSED && tab === "oddsBetstamp"\) return;/);
 assert.match(app, /initialAppTab\(bootAppHash\(window\.location\)\)/);
 
 const gate = app.indexOf('activeTab === "oddsBetstamp" && canSeeNewOddsBoard(user)');

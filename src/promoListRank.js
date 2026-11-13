@@ -38,15 +38,70 @@ function attachMinDepthToPick(p, ctx, overlayParlayMetrics, laddersByKey) {
   return { ...overlayParlayMetrics(p, next.legs, ctx), legs: next.legs };
 }
 
-export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, laddersByKey) {
-  const tagged = (picks || [])
-    .map((p) => attachMinDepthToPick(attachPmBlendToPick(p, ctx, overlayParlayMetrics, laddersByKey), ctx, overlayParlayMetrics, laddersByKey))
-    .filter(Boolean)
-    .map((p) => attachLock(p));
+function tagPromoPick(p, ctx, attachLock, overlayParlayMetrics, laddersByKey) {
+  const blended = attachMinDepthToPick(
+    attachPmBlendToPick(p, ctx, overlayParlayMetrics, laddersByKey),
+    ctx,
+    overlayParlayMetrics,
+    laddersByKey,
+  );
+  if (!blended) return null;
+  return attachLock(blended);
+}
+
+function finalizeRankedPromoPicks(tagged, ctx) {
   const guarded = rankPicksAfterOppGuard(tagged);
   const ranked = Number(ctx.numLegs) === 1 ? preferCompletePmHedge(guarded) : guarded;
   const liquidAll = filterLowLiquidityPicks(ranked, ctx.hideLowLiquidity);
   return filterPicksByTeamName(liquidAll, ctx.includeTeamTokens, ctx.excludeTeamTokens);
+}
+
+export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, laddersByKey) {
+  const tagged = [];
+  for (const p of picks || []) {
+    const next = tagPromoPick(p, ctx, attachLock, overlayParlayMetrics, laddersByKey);
+    if (next) tagged.push(next);
+  }
+  return finalizeRankedPromoPicks(tagged, ctx);
+}
+
+// Cap a synchronous rank slice so a click or keystroke can run between
+// chunks. Same picks, same order, same prices as rankPromoPicks.
+export const PROMO_RANK_YIELD_MS = 12;
+
+function rankNow() {
+  return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+}
+
+function rankAbort() {
+  const err = new Error("Aborted");
+  err.name = "AbortError";
+  throw err;
+}
+
+function yieldRankTick() {
+  if (typeof globalThis.scheduler?.yield === "function") return globalThis.scheduler.yield();
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+export async function rankPromoPicksChunked(picks, ctx, attachLock, overlayParlayMetrics, laddersByKey, opts = {}) {
+  const list = picks || [];
+  const yieldMs = opts.yieldMs == null ? PROMO_RANK_YIELD_MS : opts.yieldMs;
+  const yieldFn = opts.yieldFn || yieldRankTick;
+  const signal = opts.signal;
+  const tagged = [];
+  let last = rankNow();
+  for (let i = 0; i < list.length; i++) {
+    if (signal?.aborted) rankAbort();
+    const next = tagPromoPick(list[i], ctx, attachLock, overlayParlayMetrics, laddersByKey);
+    if (next) tagged.push(next);
+    if (i + 1 < list.length && rankNow() - last >= yieldMs) {
+      await yieldFn();
+      last = rankNow();
+      if (signal?.aborted) rankAbort();
+    }
+  }
+  return finalizeRankedPromoPicks(tagged, ctx);
 }
 
 // Scan pool at the live depth price (Kevin, 2026-10-28: Moneylines alone
@@ -61,25 +116,54 @@ export function rankPromoPicks(picks, ctx, attachLock, overlayParlayMetrics, lad
 // legs can never show a worse Best Pick. Returns the input unchanged while
 // ladders are still loading (null). A leg whose venue read failed
 // (unknownDepthKeys) keeps its stored price instead of being dropped as thin.
+function priceOnePoolLeg(leg, ctx, laddersByKey, unknown) {
+  if (!leg) return undefined;
+  const keys = collectPromoDepthLegs([{ legs: [leg] }], ctx.minLegDepth, ctx.hideLowLiquidity).map(depthCacheKey);
+  // Not fetched (over the pool budget) or the venue read failed: keep the
+  // stored price, exactly as before this change.
+  if (keys.some((k) => unknown.has(k) || !Object.prototype.hasOwnProperty.call(laddersByKey, k))) return leg;
+  const identity = (p, displayLegs) => ({ ...p, legs: displayLegs });
+  const one = { legs: [leg] };
+  const blended = attachPmBlendToPick(one, { ...ctx, numLegs: ctx.numLegs }, identity, laddersByKey);
+  const priced = attachMinDepthToPick(blended, ctx, identity, laddersByKey);
+  if (!priced) return null; // no single venue fills Min depth per leg
+  const next = priced.legs[0];
+  if (ctx.hideLowLiquidity && next.lowLiquidity) return null;
+  return next;
+}
+
 export function depthPricePoolLegs(legs, ctx, laddersByKey) {
   const list = Array.isArray(legs) ? legs : [];
   if (laddersByKey == null) return list;
   const unknown = unknownDepthKeys(laddersByKey);
-  const identity = (p, displayLegs) => ({ ...p, legs: displayLegs });
   const out = [];
   for (const leg of list) {
-    if (!leg) continue;
-    const keys = collectPromoDepthLegs([{ legs: [leg] }], ctx.minLegDepth, ctx.hideLowLiquidity).map(depthCacheKey);
-    // Not fetched (over the pool budget) or the venue read failed: keep the
-    // stored price, exactly as before this change.
-    if (keys.some((k) => unknown.has(k) || !Object.prototype.hasOwnProperty.call(laddersByKey, k))) { out.push(leg); continue; }
-    const one = { legs: [leg] };
-    const blended = attachPmBlendToPick(one, { ...ctx, numLegs: ctx.numLegs }, identity, laddersByKey);
-    const priced = attachMinDepthToPick(blended, ctx, identity, laddersByKey);
-    if (!priced) continue; // no single venue fills Min depth per leg
-    const next = priced.legs[0];
-    if (ctx.hideLowLiquidity && next.lowLiquidity) continue;
-    out.push(next);
+    const next = priceOnePoolLeg(leg, ctx, laddersByKey, unknown);
+    if (next) out.push(next);
+  }
+  return out;
+}
+
+// Same prices as depthPricePoolLegs. Yields so the walk is not one long task
+// on the render that receives the ladders.
+export async function depthPricePoolLegsChunked(legs, ctx, laddersByKey, opts = {}) {
+  const list = Array.isArray(legs) ? legs : [];
+  if (laddersByKey == null) return list;
+  const unknown = unknownDepthKeys(laddersByKey);
+  const yieldMs = opts.yieldMs == null ? PROMO_RANK_YIELD_MS : opts.yieldMs;
+  const yieldFn = opts.yieldFn || yieldRankTick;
+  const signal = opts.signal;
+  const out = [];
+  let last = rankNow();
+  for (let i = 0; i < list.length; i++) {
+    if (signal?.aborted) rankAbort();
+    const next = priceOnePoolLeg(list[i], ctx, laddersByKey, unknown);
+    if (next) out.push(next);
+    if (i + 1 < list.length && rankNow() - last >= yieldMs) {
+      await yieldFn();
+      last = rankNow();
+      if (signal?.aborted) rankAbort();
+    }
   }
   return out;
 }
@@ -137,21 +221,28 @@ export function collectPromoDepthLegs(picks, minLegDepth, hideLowLiquidity = fal
 // opts.keysOfPick(p) → depth keys the pick needs. Picks the depth walk drops
 // while one of their keys is in unknownDepthKeys(laddersByKey) (venue could
 // not be read) count as `unknown`, not `hidden`: we do not know they are thin.
-export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage, windowSize, opts = {}) {
-  const list = Array.isArray(ranked) ? ranked : [];
-  const size = Math.max(0, pageSize | 0);
-  const win = Math.min(list.length, Math.max(size, windowSize | 0));
-  if (laddersByKey == null) {
-    const n = Math.min(list.length, size);
-    return { visible: list.slice(0, n), rest: list.slice(n), hidden: 0, pending: true, needsWiderWindow: false };
-  }
-  const head = list.slice(0, win);
+function depthWindowPending(list, size) {
+  const n = Math.min(list.length, size);
+  return { visible: list.slice(0, n), rest: list.slice(n), hidden: 0, pending: true, needsWiderWindow: false };
+}
+
+function depthWindowFromPassed(list, size, win, ok, unknown) {
+  const passed = Array.isArray(ok) ? ok : [];
+  const visible = passed.slice(0, size);
   const unchecked = list.slice(win);
-  const passed = rankPage(head, laddersByKey);
-  const ok = Array.isArray(passed) ? passed : [];
-  const visible = ok.slice(0, size);
-  const rest = ok.slice(size).concat(unchecked);
-  const dropped = Math.max(0, head.length - ok.length);
+  const rest = passed.slice(size).concat(unchecked);
+  const dropped = Math.max(0, win - passed.length);
+  return {
+    visible,
+    rest,
+    hidden: dropped - unknown,
+    unknown,
+    pending: false,
+    needsWiderWindow: visible.length < size && unchecked.length > 0,
+  };
+}
+
+function depthWindowUnknown(head, dropped, laddersByKey, rankPage, opts) {
   let unknown = 0;
   const unknownKeys = unknownDepthKeys(laddersByKey);
   if (dropped > 0 && unknownKeys.size && typeof opts.keysOfPick === "function") {
@@ -161,14 +252,43 @@ export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage,
       unknown = Math.min(dropped, Math.max(0, touch.length - (Array.isArray(okTouch) ? okTouch.length : 0)));
     }
   }
-  return {
-    visible,
-    rest,
-    hidden: dropped - unknown,
-    unknown,
-    pending: false,
-    needsWiderWindow: visible.length < size && unchecked.length > 0,
-  };
+  return unknown;
+}
+
+export function visiblePromoAfterDepth(ranked, pageSize, laddersByKey, rankPage, windowSize, opts = {}) {
+  const list = Array.isArray(ranked) ? ranked : [];
+  const size = Math.max(0, pageSize | 0);
+  const win = Math.min(list.length, Math.max(size, windowSize | 0));
+  if (laddersByKey == null) return depthWindowPending(list, size);
+  const head = list.slice(0, win);
+  const passed = rankPage(head, laddersByKey);
+  const ok = Array.isArray(passed) ? passed : [];
+  const dropped = Math.max(0, head.length - ok.length);
+  const unknown = depthWindowUnknown(head, dropped, laddersByKey, rankPage, opts);
+  return depthWindowFromPassed(list, size, win, ok, unknown);
+}
+
+// Same window as visiblePromoAfterDepth. rankPage may return a promise so
+// the venue walk can yield between picks.
+export async function visiblePromoAfterDepthChunked(ranked, pageSize, laddersByKey, rankPage, windowSize, opts = {}) {
+  const list = Array.isArray(ranked) ? ranked : [];
+  const size = Math.max(0, pageSize | 0);
+  const win = Math.min(list.length, Math.max(size, windowSize | 0));
+  if (laddersByKey == null) return depthWindowPending(list, size);
+  const head = list.slice(0, win);
+  const passed = await rankPage(head, laddersByKey);
+  const ok = Array.isArray(passed) ? passed : [];
+  const dropped = Math.max(0, head.length - ok.length);
+  let unknown = 0;
+  const unknownKeys = unknownDepthKeys(laddersByKey);
+  if (dropped > 0 && unknownKeys.size && typeof opts.keysOfPick === "function") {
+    const touch = head.filter((p) => (opts.keysOfPick(p) || []).some((k) => unknownKeys.has(k)));
+    if (touch.length) {
+      const okTouch = await rankPage(touch, laddersByKey);
+      unknown = Math.min(dropped, Math.max(0, touch.length - (Array.isArray(okTouch) ? okTouch.length : 0)));
+    }
+  }
+  return depthWindowFromPassed(list, size, win, ok, unknown);
 }
 
 // Next depth window when the checked window could not fill the page.

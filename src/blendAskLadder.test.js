@@ -577,3 +577,33 @@ console.log("blendAskLadder.test.js ok");
   assert.equal(filterLowLiquidityLegs([none], true, {}).length, 0);
 }
 console.log("per-venue liquidity ok");
+
+// Capitals/Devils Nov 12 2026: cached Kalshi −155 must not be replaced by a
+// depth price from another game (−121/−126/−131). A 2-cent move still blends.
+{
+  const devils = {
+    dk: -140,
+    bestOpp: -155,
+    bestOppBook: "kalshi",
+    bestOppSize: 8000,
+    sport: "icehockey_nhl",
+    game: "Washington Capitals @ New Jersey Devils",
+    name: "Washington Capitals ML",
+    bestOppName: "New Jersey Devils ML",
+    market: "ML",
+  };
+  const wrongGame = [
+    { american: -121, size: 5000 },
+    { american: -126, size: 4000 },
+    { american: -131, size: 3000 },
+  ];
+  const rejected = applyPmBlendToLeg(devils, wrongGame, { numLegs: 1 });
+  assert.equal(rejected.bestOpp, -155);
+  assert.equal(rejected.lowLiquidity, false);
+  assert.equal(rejected.pmBlend.rejectedDepth, true);
+  assert.match(rejected.pmBlend.flag, /different market/);
+  assert.equal(trueOppAmerican(rejected), -155);
+  const moved = applyPmBlendToLeg(devils, [{ american: -150, size: 8000 }], { numLegs: 1 });
+  assert.equal(moved.bestOpp, -150);
+  assert.equal(moved.pmBlend.rejectedDepth, undefined);
+}

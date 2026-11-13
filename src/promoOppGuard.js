@@ -61,6 +61,34 @@ export function quoteLooksAbsurdVsReference(reference, candidate, edge = ABSURD_
 // levels being WORSE than the quote is normal; better by this much is not.
 export const LADDER_TOP_MAX_IMPROVE = 0.20;
 
+// Same-venue depth that is better than the cached quote by more than this
+// is a different market. Capitals ML Nov 12 2026: cached Kalshi Devils −155
+// was replaced by Saturday's rematch at −121 (~6 cents). A walk worse than
+// the quote is normal book depth. Sign flips stay on quoteLooksWrongSideOf.
+export const DEPTH_QUOTE_MAX_IMPROVE = 0.03;
+
+export function depthPriceBeatsCachedQuote(quoted, depthAmerican, max = DEPTH_QUOTE_MAX_IMPROVE) {
+  const pq = impliedFromAmerican(quoted);
+  const pd = impliedFromAmerican(depthAmerican);
+  if (pq == null || pd == null) return false;
+  return pq - pd > max;
+}
+
+// The whole fill is a different market when it prices better than this
+// venue's cached quote by more than 3 cents and no level comes back to that
+// quote. A thin better top that walks into the quoted price (or worse) is
+// the same book: +104 cached, live +200 / +100, VWAP +125.
+export function depthBookBeatsCachedQuote(quoted, depthAmerican, levels, max = DEPTH_QUOTE_MAX_IMPROVE) {
+  if (!depthPriceBeatsCachedQuote(quoted, depthAmerican, max)) return false;
+  const pq = impliedFromAmerican(quoted);
+  if (pq == null) return false;
+  for (const l of levels || []) {
+    const pd = impliedFromAmerican(l && l.american);
+    if (pd != null && pq - pd <= max) return false;
+  }
+  return true;
+}
+
 // Points of probability miss longshots: Texas A&M-CC ML (2026-11-02) feed Novig
 // +456 (≈18%) vs a wrong-game ladder topped at +9900 (1%) is only 17 points,
 // yet 22x the odds. A top whose odds (p/(1−p)) beat the quote's by 3x or more

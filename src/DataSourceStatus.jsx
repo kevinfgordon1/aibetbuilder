@@ -1,7 +1,38 @@
 // Small shared "data source unhealthy" chrome — banner, chip, Updated stamp.
 // Healthy path renders nothing extra so Promo / Odds / +EV look unchanged.
 
-import { describeCacheFreshness } from "./dataSourceHealth.js";
+import { useEffect, useState } from "react";
+import { dataSourceStatus, describeCacheFreshness } from "./dataSourceHealth.js";
+
+// The freshness stamp and the unhealthy banner are the only things that need
+// "now". Ticking here keeps a 30s clock from re-rendering Promo, Odds, or Combo.
+function useTickingNow(ms = 30000) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return now;
+}
+
+export function LiveOddsUpdatedStamp({ fetchedAt, lastRefreshFailed, lastRefreshError }) {
+  const now = useTickingNow(30000);
+  if (!fetchedAt) return null;
+  const freshness = describeCacheFreshness({
+    fetchedAt,
+    now,
+    lastRefreshFailed,
+    lastRefreshError,
+  });
+  return <OddsUpdatedStamp freshness={freshness} />;
+}
+
+export function LiveDataSourceBanner({ error, fetchedAt, lastKnown, context = "odds", style }) {
+  const now = useTickingNow(30000);
+  const status = dataSourceStatus({ error, fetchedAt, now, lastKnown, context });
+  if (!status.show) return null;
+  return <DataSourceBanner status={status} style={style} />;
+}
 
 const WARN_BG = "rgba(245,158,11,.12)";
 const WARN_BORDER = "rgba(245,158,11,.35)";
