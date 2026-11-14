@@ -502,6 +502,7 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
     submissions: [
       { parlay_id: "p-mixed-venue", rfq_id: "k1", venue: "kalshi", status: "declined", skip_reason: "oversized", contracts: 80, created_at: "2026-09-08T15:00:00Z" },
       { parlay_id: "p-mixed-venue", rfq_id: "p1", venue: "polymarket", status: "unfilled", quote_id: "qp1", is_live: false, contracts: 39, created_at: "2026-09-08T15:01:00Z" },
+      { parlay_id: "p-mixed-venue", rfq_id: "n1", venue: "novig", status: "unfilled", quote_id: "qn1", is_live: false, contracts: 39, created_at: "2026-09-08T15:02:00Z" },
     ],
     now: Date.parse("2026-09-08T16:00:00Z"),
   });
@@ -510,10 +511,19 @@ assert.equal(quotingEnded({ starts_at: "2026-09-13T17:00:00Z" }, Date.parse("202
   assert.equal(byRfq.k1.venue, "Kalshi");
   assert.equal(byRfq.p1.venueKey, "polymarket");
   assert.equal(byRfq.p1.venue, "Polymarket");
+  assert.equal(byRfq.n1.venueKey, "novig");
+  assert.equal(byRfq.n1.venue, "Novig");
   const histKalshi = mixedVenues.events.find((e) => e.row && e.row.rfqId === "k1");
   const histPoly = mixedVenues.events.find((e) => e.row && e.row.rfqId === "p1");
+  const histNovig = mixedVenues.events.find((e) => e.row && e.row.rfqId === "n1");
   assert.equal(histKalshi.venueKey, "kalshi");
   assert.equal(histPoly.venueKey, "polymarket");
+  assert.equal(histNovig.venue, "Novig");
+  assert.equal(histNovig.venueKey, "novig");
+  assert.equal(collapseAttempts([
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "novig", at: "2" },
+    { key: "unfilled", reason: "quoted · no take", label: "unfilled · quoted, no take", contracts: 39, venueKey: "kalshi", at: "1" },
+  ]).length, 2);
 }
 
 {

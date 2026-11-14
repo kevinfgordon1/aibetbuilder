@@ -8,6 +8,7 @@ import { sportFromTicker } from "./comboLegResult.js";
 import { isLockPaused } from "./comboLockPause.js";
 import { isFreeBetLock } from "./comboLockProfile.js";
 import { buyerSeesAfterFees, buyerSeesFromNoPrice, buyerSeesFromYes, makerKeepsFromYes } from "./buyerOdds.js";
+import { formatTapeVenue, tapeVenueKey } from "./comboTape.js";
 
 export const ET_ZONE = "America/New_York";
 
@@ -589,8 +590,8 @@ export function quoteRow(row, { left = 0, filled = 0, liveQuotes = null, ended =
     price: quotePrice(row, offered),
     buyerSees: quoteBuyerSees(row, offered, ticker),
     size: size == null ? "—" : countText(size),
-    venue: row.venue || "Kalshi",
-    venueKey: row.venueKey || null,
+    venue: formatTapeVenue(row.venueKey || row.venue) || row.venue || "Kalshi",
+    venueKey: tapeVenueKey(row.venueKey) || tapeVenueKey(row.venue) || row.venueKey || null,
     result,
     tone,
     detail: details.join(" · "),

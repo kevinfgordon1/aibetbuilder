@@ -24,7 +24,7 @@ export function SingleLegVenues({ parlayId, supabase }) {
   if (orders == null) return <div className="muted">Loading…</div>;
   const rows = venueRows(orders);
   if (!rows.length) {
-    return <div className="muted">{missing ? "Venue status unavailable." : "Waiting to rest on Kalshi and Polymarket. Once one side fills, the other shrinks to what's left."}</div>;
+    return <div className="muted">{missing ? "Venue status unavailable." : "Waiting to rest on Kalshi, Polymarket, and Novig. Once one side fills, the other shrinks to what's left."}</div>;
   }
   return (
     <ul className="single-leg-venues" style={{ margin: 0, paddingLeft: 18 }}>

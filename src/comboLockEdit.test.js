@@ -67,6 +67,10 @@ const opens = openQuotesForLock([
 assert.equal(opens.length, 1);
 assert.equal(opens[0].id, "s1");
 assert.match(openQuoteLabel(opens[0]), /Kalshi/);
+assert.match(openQuoteLabel({ ...opens[0], venue: "novig" }), /^Novig · /);
+assert.match(openQuoteLabel({ ...opens[0], venue: "polymarket" }), /^Polymarket · /);
+assert.match(openQuoteLabel({ ...opens[0], venue: "polymarket_us" }), /^Polymarket · /);
+assert.doesNotMatch(openQuoteLabel({ ...opens[0], venue: "novig" }), /Kalshi|International/);
 // is_live filled rows, stale quotes, and settled locks are not open.
 const T = Date.parse("2026-10-12T22:07:20Z");
 const live = [

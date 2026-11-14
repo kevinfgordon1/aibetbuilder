@@ -1,11 +1,12 @@
 // Per-venue status rows for a single-leg lock card (combo_single_orders).
-const LABEL = { kalshi: "Kalshi", polymarket: "Polymarket" };
+const LABEL = { kalshi: "Kalshi", polymarket: "Polymarket", novig: "Novig" };
+const VENUES = ["kalshi", "polymarket", "novig"];
 const n = (v) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 const fmt = (v) => String(Math.round(v * 100) / 100);
 
 export function venueRows(orders) {
   const out = [];
-  for (const venue of ["kalshi", "polymarket"]) {
+  for (const venue of VENUES) {
     const rows = (orders || []).filter((o) => o && o.venue === venue);
     if (!rows.length) continue;
     const filled = rows.reduce((s, o) => s + n(o.filled), 0);

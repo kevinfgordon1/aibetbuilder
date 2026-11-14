@@ -17,12 +17,14 @@ import {
   formatBeatTitle,
   formatParlayAmerican,
   formatSkipReason,
+  formatTapeVenue,
   hasQuotingParlays,
   isSameLocalDay,
   lockInScope,
   skipFillSummary,
   skipLockLine,
   sortLockTapes,
+  tapeVenueChipClass,
   tapeWatcherState,
 } from "./comboTape";
 import { settlementFromStored } from "./comboSettlement";
@@ -39,6 +41,7 @@ const VENUE_CHIPS = [
   { key: "all", label: "All" },
   { key: "kalshi", label: "Kalshi", cls: "venue-kalshi" },
   { key: "polymarket", label: "Polymarket", cls: "venue-poly" },
+  { key: "novig", label: "Novig", cls: "venue-novig" },
 ];
 // Same newest-first caps as ComboLocks.jsx — do not page the firehose.
 const MATCH_LIMIT = 400;
@@ -84,8 +87,7 @@ function Tile({ k, v, sub, tone, title }) {
 }
 
 function VenueChip({ venue, venueKey }) {
-  const cls = venueKey === "kalshi" ? "venue-kalshi" : venueKey === "polymarket" ? "venue-poly" : "";
-  return <span className={"chip " + cls}>{venue || "—"}</span>;
+  return <span className={"chip " + tapeVenueChipClass(venueKey)}>{venue || "—"}</span>;
 }
 
 function LockVenueChips({ rows }) {
@@ -95,7 +97,7 @@ function LockVenueChips({ rows }) {
   });
   if (!keys.length) return <VenueChip venue="Kalshi" venueKey="kalshi" />;
   return keys.map((k) => (
-    <VenueChip key={k} venue={k === "polymarket" ? "Polymarket" : "Kalshi"} venueKey={k} />
+    <VenueChip key={k} venue={formatTapeVenue(k) || "Kalshi"} venueKey={k} />
   ));
 }
 
@@ -338,10 +340,12 @@ export default function ComboTape({ user }) {
         .cl .chip.settle-wait{background:rgba(147,197,253,.18);color:#f5d76e}
         .cl .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
+        .cl .chip.venue-novig{background:rgba(168,85,247,.15);color:#e9d5ff}
         .cl .chip.btn{cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);font:inherit;font-size:12px;font-weight:600}
         .cl .chip.btn.on{background:rgba(212,175,55,.2);color:#f5d76e;border-color:rgba(212,175,55,.35)}
         .cl .chip.btn.venue-kalshi.on{background:rgba(6,182,212,.2);color:#67e8f9;border-color:rgba(6,182,212,.35)}
         .cl .chip.btn.venue-poly.on{background:rgba(91,110,245,.2);color:#a5b4fc;border-color:rgba(91,110,245,.35)}
+        .cl .chip.btn.venue-novig.on{background:rgba(168,85,247,.2);color:#e9d5ff;border-color:rgba(168,85,247,.4)}
         .cl .leg{display:inline-block;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:2px 7px;margin:2px 4px 2px 0;font-size:13px}
         .cl .leg .ty{font-size:10px;font-weight:700;text-transform:uppercase;color:#7ea2e0;margin-right:5px}
         .cl .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0}

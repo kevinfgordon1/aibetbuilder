@@ -9,6 +9,12 @@ const row = (o) => ({ id: "a" + (n++), user_id: "u1", venue: "kalshi", parlay_id
   assert.equal(t.body, "Some of your Combo Locks quotes on Guardians ML + Brewers ML were skipped because your combos cash is too low. You're about $42.50 short. Add money on Kalshi or raise your Amount to keep for combos.");
   assert.ok(!/short\./.test(lowCashText(normalizeUserAlert(row({}))).body), "no shortfall line when unknown");
   assert.match(lowCashText(normalizeUserAlert(row({ venue: "polymarket" }))).body, /Polymarket US/);
+  assert.match(lowCashText(normalizeUserAlert(row({ venue: "polymarket_us" }))).body, /Polymarket US/);
+  const novig = lowCashText(normalizeUserAlert(row({ venue: "novig", shortfall_usd: 12 })));
+  assert.match(novig.title, /Novig/);
+  assert.match(novig.body, /Novig cash/);
+  assert.doesNotMatch(novig.body, /Kalshi|International/);
+  assert.equal(normalizeUserAlert(row({ venue: "novig" })).venue, "novig");
 }
 {
   const rows = [row({ id: "1" }), row({ id: "2", created_at: "2026-10-09T21:00:00Z" }), row({ id: "3", resolved_at: "x" }), row({ id: "4", parlay_id: "p2", read_at: "x" })];
