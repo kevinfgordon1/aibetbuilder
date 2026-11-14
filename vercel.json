@@ -1,4 +1,79 @@
 {
+  "routes": [
+    {
+      "src": "^/(?:index\\.html)?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/index.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/app/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/app.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/learn(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/learn.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/(?:about(?:\\.html)?|contact)/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/about.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/privacy(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/privacy.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/terms(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/terms.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/support(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/support.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/promo-builder(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/promo-builder.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/combo-locks(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/combo-locks.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/odds-board(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/odds-board.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/ev-bets(?:\\.html)?/?$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "dest": "/md/ev-bets.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept", "Cache-Control": "public, max-age=0, must-revalidate" }
+    },
+    {
+      "src": "^/(?!api(?:/|$)|assets(?:/|$)|md(?:/|$)|s(?:/|$))(?!.*\\.).*$",
+      "has": [{ "type": "header", "key": "accept", "value": ".*text/markdown.*" }],
+      "status": 404,
+      "dest": "/api/agent-markdown-404",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept" }
+    }
+  ],
   "crons": [
     {
       "path": "/api/fetch-odds",
@@ -111,7 +186,23 @@
     },
     {
       "source": "/learn",
-      "destination": "/index.html"
+      "destination": "/learn.html"
+    },
+    {
+      "source": "/promo-builder",
+      "destination": "/promo-builder.html"
+    },
+    {
+      "source": "/combo-locks",
+      "destination": "/combo-locks.html"
+    },
+    {
+      "source": "/odds-board",
+      "destination": "/odds-board.html"
+    },
+    {
+      "source": "/ev-bets",
+      "destination": "/ev-bets.html"
     },
     {
       "source": "/s/:path*",
@@ -186,6 +277,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -195,6 +290,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -204,6 +303,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -213,6 +316,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -222,6 +329,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -231,6 +342,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -240,6 +355,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -249,6 +368,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -258,6 +381,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -267,6 +394,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -276,6 +407,10 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
       ]
     },
@@ -285,7 +420,96 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=0, must-revalidate"
+        },
+        {
+          "key": "Vary",
+          "value": "Accept"
         }
+      ]
+    },
+    {
+      "source": "/learn.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/promo-builder",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/promo-builder.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/combo-locks",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/combo-locks.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/odds-board",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/odds-board.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/ev-bets",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/ev-bets.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "Vary", "value": "Accept" }
+      ]
+    },
+    {
+      "source": "/md/(.*)",
+      "headers": [
+        { "key": "Content-Type", "value": "text/markdown; charset=utf-8" },
+        { "key": "Vary", "value": "Accept" },
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/llms.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/llms-full.txt",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
       ]
     }
   ]

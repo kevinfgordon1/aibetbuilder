@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/assert-no-cjs-in-dist.js",
+    "build": "node scripts/render-agent-pages.mjs && vite build && node scripts/assert-no-cjs-in-dist.js",
     "preview": "vite preview",
     "ev-alerts": "node worker/ev-parlay-alerts.js",
-    "test": "node scripts/run-tests.cjs",
+    "test": "node scripts/render-agent-pages.mjs && node scripts/run-tests.cjs",
     "build:player-td-cjs": "node scripts/build-player-td-cjs.js",
     "sync:ncaab-teams": "node scripts/sync-ncaab-teams.cjs"
   },
