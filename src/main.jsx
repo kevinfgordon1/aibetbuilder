@@ -12,6 +12,8 @@ const NewVersionBanner = lazy(() => import('./NewVersionBanner.jsx'))
 let page = 'app'
 try { page = pickTopLevelPage(window.location, window.localStorage) } catch { page = 'app' }
 
+// index.html ships a no-JS article inside #root so crawlers can read the page.
+// createRoot().render replaces those children. Do not switch this to hydrateRoot.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     {page === 'landing' ? <MarketingLanding /> : page === 'learn' ? <LearnPage /> : (

@@ -75,7 +75,7 @@ function soccerClubsBrowserEsm() {
 }
 
 function trustPageRewrites() {
-  const pages = new Set(['/about', '/privacy', '/terms', '/support'])
+  const pages = new Set(['/about', '/privacy', '/terms', '/support', '/learn', '/promo-builder', '/combo-locks', '/odds-board', '/ev-bets'])
   const rewrite = (req, _res, next) => {
     const url = req.url || ''
     const q = url.indexOf('?')

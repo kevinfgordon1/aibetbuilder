@@ -1,0 +1,363 @@
+# aibetbuilder
+
+Full public text for AI assistants. The short index is https://www.aibetbuilder.io/llms.txt.
+
+# Find where your boost is worth the most.
+
+aibetbuilder (AI Bet Builder) is a free tool that helps you get more out of sportsbook boosts, free bets, and no-sweat promos. Tell it which sportsbook you use and what you have, and it ranks bets by estimated value (EV) using live odds from 20+ sportsbooks and exchanges.
+
+aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+
+## How it works
+
+1. Tell us your promo. Pick your sportsbook and the boost, free bet, or no-sweat you got.
+2. We rank the bets. Live odds from 20+ books and exchanges are compared, and bets are ranked by expected value, the estimated average result of each bet.
+3. You place it yourself. Open your sportsbook and place the bet. aibetbuilder never touches your account or your money.
+
+
+## Tools
+
+
+### Promo Builder
+
+Start here. Enter a boost or free bet and see which bets make it worth the most. Promo Builder prices the other side of each leg with the inverse bet method. It walks Kalshi, Polymarket US, Novig, and ProphetX separately, on that venue's own book, after that venue's fee. In this pricing, Novig pregame quotes have no fee, the Polymarket US maker fee is $0, ProphetX is 2% of net winnings, and Kalshi uses its series fee. A 1-leg free bet can also show the hedge that locks cash, and the conversion rate.
+
+Read the [Promo Builder](/promo-builder) page, or open it in the app at [/app?wizard=1#promo](/app?wizard=1#promo).
+
+
+### Combo Locks
+
+Combo Locks is in beta. Submit a parlay you have already bet at your sportsbook, and it hedges that parlay on Kalshi and Polymarket US. You set your stake, your odds, and the odds you are willing to sell at. The same parlay is offered to traders at your price. As the hedge fills, more of it is hedged. You can pause a lock or stop everything with the master switch. Access is requested inside the app. Real prices and fills vary.
+
+Read [how Combo Locks works](/combo-locks). In the app it opens at [/app#combo](/app#combo).
+
+
+### Odds Board
+
+The Odds Board compares one game's prices across sportsbooks and exchanges, with the best price highlighted. It covers moneylines, spreads, and totals, plus championship futures with two-sided prices from Kalshi and Polymarket US.
+
+Read the [Odds Board](/odds-board) page, or open [/app#odds](/app#odds).
+
+
+### +EV Bets
+
++EV Bets lists bets where a book's price beats aibetbuilder's fair-odds estimate. True probability comes from the best opposing odds at matching lines among trusted books (DraftKings, FanDuel, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Pinnacle, Kalshi, Novig, ProphetX, Polymarket US). Kalshi, ProphetX, and Polymarket US prices are fee-adjusted.
+
+Read the [+EV Bets](/ev-bets) page, or open [/app#ev](/app#ev).
+
+
+## Leagues on the boards
+
+The boards cover NFL, college football, NBA, college basketball, NHL, UFC, and soccer (EPL, MLS, and UEFA Champions League), plus championship futures such as the Super Bowl, the College Football Playoff, the NBA Finals, the NCAAM champion, and the Stanley Cup.
+
+
+## Sign in and support
+
+You can sign in with Google, an email code or link, X, or Facebook. No credit card and no bank-account linking. New terms are on the [Learn](/learn) page. Questions go to [support@aibetbuilder.io](mailto:support@aibetbuilder.io). See also [About](/about), [Support](/support), [Privacy](/privacy), and [Terms](/terms).
+
+21+ only. If gambling stops being fun, call 1-800-GAMBLER.
+
+---
+
+# Promo Builder
+
+Promo Builder is the place to start on aibetbuilder. Pick your sportsbook and the promo you have — a profit boost, a free bet, or a no-sweat bet — and it searches leg combinations and ranks them by estimated value (EV). Boosted odds and fair odds are shown side by side. A boost is a sportsbook promo that raises your winnings. A free bet is site credit: if it wins you keep the profit, not the stake. A no-sweat bet is a cash bet that is refunded as site credit if it loses.
+
+
+## The inverse bet method
+
+Promo Builder prices the other side of each leg with the inverse bet method. It walks Kalshi, Polymarket US, Novig, and ProphetX separately, on that venue's own book, after that venue's fee. In this pricing, Novig pregame quotes have no fee, the Polymarket US maker fee is $0, ProphetX is 2% of net winnings, and Kalshi uses its series fee. Venues are never added together, because a hedge is placed in one account. A venue that cannot fill the other side on its own is dropped, and the leg is priced at the best venue that can.
+
+
+### Kalshi
+
+Kalshi prices in Promo Builder are net of Kalshi's series fee.
+
+
+### Polymarket US
+
+Only Polymarket US is used. In Promo Builder's pricing, the Polymarket US maker fee is $0.
+
+
+### Novig
+
+Novig pregame quotes are priced with no fee in Promo Builder.
+
+
+### ProphetX
+
+ProphetX is priced after a 2% commission on net winnings.
+
+
+## What you do with a result
+
+You place the sportsbook bet yourself. aibetbuilder does not log in to your book or send the bet. A 1-leg free bet can show the hedge that locks cash and the conversion rate. From a promo result you can open Combo Locks with that leg filled in; nothing is saved until you confirm. aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+Open Promo Builder at [/app?wizard=1#promo](/app?wizard=1#promo). Related: [Combo Locks](/combo-locks), [Odds Board](/odds-board), [+EV Bets](/ev-bets), [Learn](/learn).
+
+---
+
+# Combo Locks
+
+Combo Locks is in beta. Submit a parlay you have already bet at your sportsbook, and Combo Locks hedges it on Kalshi and Polymarket US. Hedge most or all of it to lock in a result whether the parlay wins or loses. Real prices and fills vary, and a lock is not a promise that the hedge will fill.
+
+
+## How a lock works
+
+1. Place a boosted or free-bet parlay at your sportsbook, such as DraftKings or FanDuel.
+2. Add the same parlay in Combo Locks with your stake, your odds, and the odds you are willing to sell it at.
+3. aibetbuilder offers that parlay to traders on Kalshi and Polymarket US at your price. The offer is priced off the best opposing price across prediction markets. You can pause any lock, or stop everything with the master switch.
+4. When a trader takes it, that much of the parlay is hedged. Quoting means it is looking for a buyer. Partly filled means some of it is hedged. Filled means the profit on that lock is locked. Paused or Stopped means nothing is being offered.
+5. After the games end, the lock moves to History with the profit or loss.
+
+
+## Access
+
+Signed-out visitors and accounts that have not been approved see a request screen. Sign in, then request access, and the page opens for that account if the request is approved. A declined request can be sent again. aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+Open Combo Locks at [/app#combo](/app#combo). Promo Builder can prefill a leg from [Promo Builder](/promo-builder). Also see the [Odds Board](/odds-board) and [home](/).
+
+---
+
+# Odds Board
+
+The Odds Board compares prices for the same game across 20+ sportsbooks and exchanges in one place, with the best price highlighted. It covers moneylines (who wins), spreads (win by more than a number), and totals, plus championship futures with two-sided Yes/No prices from Kalshi and Polymarket US.
+
+
+## What you can compare
+
+- One game at a time, across the books and exchanges that are quoting it.
+- Moneylines, spreads, and totals.
+- Championship futures, including the Super Bowl, the College Football Playoff, the NBA Finals, the NCAAM champion, and the Stanley Cup.
+- Leagues on the board: NFL, college football, NBA, college basketball, NHL, UFC, and soccer (EPL, MLS, and UEFA Champions League).
+
+
+## How to read a price
+
+The highlighted price is the best number the board currently has for that side. Exchange prices can include a fee adjustment, and a quote can be late or missing. The board reads public odds. It does not place a bet. aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+Open the Odds Board at [/app#odds](/app#odds). For a ranked promo, use [Promo Builder](/promo-builder). For prices that beat the fair-odds estimate, use [+EV Bets](/ev-bets).
+
+---
+
+# +EV Bets
+
++EV Bets is for comparing a sportsbook's price with a fair-odds estimate. Every available bet is ranked by expected value. True probability comes from the best opposing odds at matching lines among trusted books: DraftKings, FanDuel, Caesars, BetMGM, BetRivers, Fanatics, Hard Rock, theScore, Pinnacle, Kalshi, Novig, ProphetX, and Polymarket US. Kalshi, ProphetX, and Polymarket US prices are fee-adjusted. A filter narrows the list to a single sportsbook.
+
+
+## What EV means here
+
+Expected value is what a bet is worth on average if you made it many times. A positive number means the book's price is better than the fair-odds estimate. Any single bet can still lose. The figure is an estimate, not a promise, and it moves when the odds move.
+
+
+## Where the fair price comes from
+
+The fair price is the estimate of the real chance of winning after the sportsbook's margin is removed, using sharper books and exchanges. Promo Builder prices the other side of each leg with the inverse bet method. It walks Kalshi, Polymarket US, Novig, and ProphetX separately, on that venue's own book, after that venue's fee. In this pricing, Novig pregame quotes have no fee, the Polymarket US maker fee is $0, ProphetX is 2% of net winnings, and Kalshi uses its series fee.
+
+aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+Open +EV Bets at [/app#ev](/app#ev). To start from a promo instead, use [Promo Builder](/promo-builder). To look at one game, use the [Odds Board](/odds-board).
+
+---
+
+# Learn the basics
+
+New here? Start in [Promo Builder](/app?wizard=1#promo): pick your sportsbook and promo, and bets are ranked by estimated value. These are the terms you'll see.
+
+
+## Terms you'll see
+
+
+### EV (expected value)
+
+What a bet is worth on average if you made it many times. +$20 EV on a $100 bet means it averages about $20 profit over the long run — any single bet can still lose.
+
+
+### True Odds / fair odds
+
+Our estimate of the real chance of winning, with the sportsbook's built-in margin (vig) removed, using sharper books and exchanges.
+
+
+### Boost
+
+A sportsbook promo that raises your winnings (e.g. 30% more profit). Boosts add the most value on the right legs — that's what Promo Builder finds.
+
+
+### Free bet
+
+Site credit you can bet with. If it wins you keep the profit, not the stake.
+
+
+### No Sweat
+
+A cash bet that is refunded as site credit if it loses.
+
+
+### ML (moneyline)
+
+Bet on who wins the game.
+
+
+### SPR (spread)
+
+Bet on a team to win by more than (or lose by less than) a set number of points, e.g. Knicks -3.5.
+
+
+### TT (team total)
+
+Bet on how many points one team scores, over or under a number, e.g. Celtics TT u125.5.
+
+
+### Hedge / opposite side (opp)
+
+Betting the other outcome somewhere else to reduce risk. “Best Opp” is the best price we found on that other side.
+
+
+### Liquidity
+
+How much money is available at a price on an exchange. “Hide low liquidity” removes bets where only small amounts can be placed.
+
+
+### Depth
+
+How big a bet the market can take at that price, shown as potential profit.
+
+
+### American odds
+
+-150 means bet $150 to win $100; +200 means bet $100 to win $200.
+
+aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+More about the product is on [About](/about). Questions go to [support@aibetbuilder.io](mailto:support@aibetbuilder.io) or [Support](/support).
+
+---
+
+# The aibetbuilder app
+
+The app is where you run the tools. A new visitor can open Promo Builder with a short setup at /app?wizard=1#promo. Returning visitors land on the tools they were using. Sign in with Google, an email code or link, X, or Facebook. No credit card and no bank-account linking.
+
+
+## Tabs
+
+- Promo Builder ([what it does](/promo-builder)): [/app#promo](/app#promo). Ranks boosts, free bets, and no-sweat promos. Uses the inverse bet method on Kalshi, Polymarket US, Novig, and ProphetX, each with that venue's fee.
+- Combo Locks ([what it does](/combo-locks)): [/app#combo](/app#combo). Beta. Hedges a parlay you already bet, on Kalshi and Polymarket US. Access is requested in the app.
+- Odds Board ([what it does](/odds-board)): [/app#odds](/app#odds). Compares one game across books and exchanges.
+- +EV Bets ([what it does](/ev-bets)): [/app#ev](/app#ev). Bets where a book's price beats the fair-odds estimate.
+- Learn ([glossary](/learn)): the words used on the screen.
+
+aibetbuilder is not a sportsbook. It does not take bets, hold money, or connect to your sportsbook or bank account. You place every bet yourself. Odds are collected from public sources and refreshed about every 5 minutes. Prices can be late, missing, or different from the number at your sportsbook. Check the live price and the promo rules before you bet. Tools and estimates only, not betting advice. Results not guaranteed. 21+ only.
+
+Questions: [support@aibetbuilder.io](mailto:support@aibetbuilder.io) or [Support](/support).
+
+---
+
+# Make your sportsbook promos actually pay.
+
+AI Bet Builder is a free tool that helps you get the most out of your sportsbook promos. Tell it which sportsbook you use and what promo you have, like a profit boost or a free bet, and it shows you the bet where that promo is worth the most.
+
+
+## What it does
+
+- Promo Builder. Pick your sportsbook and promo. It checks thousands of bet combinations and ranks the ones where your boost or free bet is worth the most.
+- +EV Bets. A list of bets where a sportsbook's price is better than the fair price, based on what other books and exchanges are offering.
+- Odds Board. Compare prices for the same game across 20+ sportsbooks and exchanges in one place.
+
+
+## How it works
+
+We collect public odds from 20+ sportsbooks and exchanges, refreshed about every 5 minutes. We compare those prices to estimate each bet's fair chance of winning, then rank bets by how much value they offer.
+
+You place every bet yourself, at your own sportsbook. AI Bet Builder is not a sportsbook. It doesn't take bets, hold money, or connect to your sportsbook or bank accounts.
+
+
+## Who it's for
+
+Anyone 21 or older who bets on sports where it's legal, whether you bet once a week or work every promo. It's free to use, and signing in is free too.
+
+Odds change fast and no bet is a sure thing. Always check the price at your sportsbook before you bet, and only bet what you can afford to lose. If gambling stops being fun, call 1-800-GAMBLER.
+
+
+## Contact
+
+Questions, feedback, a bug, or a request to delete your account? Email [support@aibetbuilder.io](mailto:support@aibetbuilder.io). We usually reply within 1 business day. More answers are on the [Support](/support) page. See also the [Privacy Policy](/privacy) and [Terms of Use](/terms).
+
+---
+
+# Support
+
+We usually reply within 1 business day. Email [support@aibetbuilder.io](mailto:support@aibetbuilder.io).
+
+
+## Common questions
+
+
+### Account and sign-in
+
+You can sign in with Google, X, Facebook, or a code sent to your email. If a code or link does not work, request a new one on the sign-in screen and open the site in Safari or Chrome. For help getting into an account, or to ask for a copy of your data or to delete it, email us from the address on the account when you can. We don't promise that a sign-in will succeed.
+
+
+### Billing and subscriptions
+
+If you have a question about a charge, a receipt, or a subscription, email us from the address on the account and describe what you see. We'll look into it and reply. We don't quote prices here, and we don't promise a refund, a credit, or any other outcome.
+
+
+### A price or odds number looks wrong
+
+Email us the sport, the teams, the sportsbook, and about when you saw the number. Prices on the site can be late, missing, or different from the price at your sportsbook. We don't promise a correction, a result, or that a number will match your book. Check the live price at your sportsbook before you bet. Nothing on this page is betting advice.
+
+See also the [Privacy Policy](/privacy) and [Terms of Use](/terms). Home is [aibetbuilder.io](/).
+
+---
+
+# Your data, in plain English
+
+AI Bet Builder ("we", "us") runs aibetbuilder.io. This page explains what we collect, why, and how to get it deleted. The short version: we keep only what we need to sign you in and run the site, we never sell your data, and we never ask for bank or payment details. Last updated October 7, 2026. The HTML page is the full policy.
+
+
+## What we collect
+
+You can sign in with Google, X, Facebook, or a one-time link sent to your email. Sign-in is handled by Supabase. When you sign in we store your email address, your name and profile photo if the service you sign in with shares them, which service you used, and that service's account ID for you. We never see or store your Google, X, or Facebook password. If you use more than one of these with the same email, they are linked to one account.
+
+When you use the site we store settings such as favorite sports and your default sportsbook, and activity while signed in (tabs, filters, and bets you open) with your account ID and email. Anything you enter in an invite-only tool, if you have access to one, is stored with your account. We don't collect bank accounts, cards, or payment details on this policy's terms. We don't collect sportsbook logins. We don't post to X or Facebook for you.
+
+
+## How we use it and who we share with
+
+We use the data to sign you in, remember settings, understand how the site is used, and reply when you contact us. We don't sell your data, rent it, or use it for advertising. We share it only with the services that run the site: Supabase (sign-in and storage), Vercel (hosting), Google Analytics, and Microsoft Clarity. Google, X, or Facebook know you used them to sign in if you chose one of them. We may share information if the law requires it.
+
+
+## Analytics
+
+Cookies and local storage keep you signed in and remember preferences. Google Analytics records pages, buttons, device, browser, and approximate location. Microsoft Clarity records clicks, scrolling, and mouse movement. You can block cookies; you may need to sign in again.
+
+
+## Data deletion
+
+To delete your account and data, email [support@aibetbuilder.io](mailto:support@aibetbuilder.io) with the subject "Delete my account", from the email on the account if you can. We'll delete the account, saved settings, and activity history within 30 days and email you when it's done. You can also remove AI Bet Builder's access in Facebook, X, or Google settings. Removing access stops future sign-ins through that service but doesn't delete data we already have. You can ask for a copy of your data or a correction by email. The site is only for people 21 and older.
+
+---
+
+# The ground rules, kept simple
+
+By using aibetbuilder.io you agree to these terms. If you don't agree, please don't use the site. Last updated October 7, 2026. The HTML page is the full terms.
+
+
+## An information tool, not a sportsbook
+
+AI Bet Builder shows odds and calculations to help you compare bets and promos. It is not a sportsbook. We don't take bets, hold money, pay out winnings, or connect to your sportsbook account. Every bet you place is between you and your sportsbook.
+
+
+## No guarantees
+
+- Nothing on the site is a promise that a bet will win or make money. Expected value, edge, and similar numbers are estimates, and you can lose money on any bet.
+- Nothing on the site is financial, betting, tax, or legal advice.
+- You make your own decisions and you're responsible for the bets you place.
+
+
+## Odds, eligibility, and your account
+
+We collect odds from public sources about every 5 minutes. Prices can change between updates, may be delayed, and can sometimes be wrong or missing. Promo rules differ by sportsbook and state. Always check the price and the promo terms at your sportsbook before you bet. You must be 21 or older. You're responsible for making sure sports betting is legal where you are, and for following your sportsbook's rules.
+
+You can sign in with Google, X, Facebook, or email. Keep access to that account secure. We may suspend accounts that misuse the site. Please don't scrape or overload the site, try to get into areas you weren't given access to, resell the data, or use the site for anything illegal. Sportsbook and exchange names and logos belong to their owners. AI Bet Builder isn't affiliated with or endorsed by any sportsbook. The site is provided as is. Questions: [support@aibetbuilder.io](mailto:support@aibetbuilder.io). If gambling stops being fun, call 1-800-GAMBLER.

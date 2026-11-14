@@ -33,9 +33,9 @@ const STEPS = [
 ];
 
 const TOOLS = [
-  { img: "/landing/promo-builder.png", t: "Promo Builder", d: "Start here. Enter your boost or free bet and see which bets make it worth the most." },
-  { img: "/landing/odds-board.png", t: "Odds Board", d: "Compare one game's prices across every book, with the best price highlighted." },
-  { img: "/landing/ev-bets.png", t: "+EV Bets", d: "For experienced bettors: bets where a book's price beats our fair-odds estimate." },
+  { href: "/promo-builder", img: "/landing/promo-builder.png", t: "Promo Builder", d: "Start here. Enter your boost or free bet and see which bets make it worth the most." },
+  { href: "/odds-board", img: "/landing/odds-board.png", t: "Odds Board", d: "Compare one game's prices across every book, with the best price highlighted." },
+  { href: "/ev-bets", img: "/landing/ev-bets.png", t: "+EV Bets", d: "For experienced bettors: bets where a book's price beats our fair-odds estimate." },
 ];
 
 export default function MarketingLanding() {
@@ -114,12 +114,15 @@ export default function MarketingLanding() {
             <div key={t.t} style={{ ...S.card, padding: 0, overflow: "hidden" }}>
               <img src={t.img} alt={t.t + " screenshot"} loading="lazy" style={{ width: "100%", display: "block", borderBottom: "1px solid #2a2618" }} />
               <div style={{ padding: 20 }}>
-                <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6, color: "#f4efe2" }}>{t.t}</div>
+                <a href={t.href} style={{ fontSize: 17, fontWeight: 700, marginBottom: 6, color: "#f4efe2", textDecoration: "none", display: "inline-block" }}>{t.t}</a>
                 <div style={{ fontSize: 14, color: "#bdb6a4", lineHeight: 1.6 }}>{t.d}</div>
               </div>
             </div>
           ))}
         </div>
+        <p style={{ marginTop: 18, fontSize: 14, color: "#bdb6a4", lineHeight: 1.6 }}>
+          <a href="/combo-locks" style={{ color: GOLD }}>Combo Locks</a> is in beta. It hedges a parlay you already placed, on Kalshi and Polymarket US.
+        </p>
       </section>
 
 
