@@ -2,6 +2,7 @@
 // Pure: no fetch, no supabase. Used by the UI and api/combo-lock-orders.
 
 import { buyerSeesAfterFees } from "./buyerOdds.js";
+import { formatTapeVenue } from "./comboTape.js";
 import { COMBO_FEE_RATE, allInFromExchange, exchangeFromAllIn } from "./comboCredits.js";
 import { hedgeCap, lockKind } from "./comboLockProfile.js";
 import { etDateTime, fmtAmerican } from "./comboLockView.js";
@@ -80,7 +81,7 @@ export function openQuotesForLock(submissions, parlayId, { now = Date.now(), par
 
 export function openQuoteLabel(row, lockTicker = null) {
   if (!row) return "";
-  const venue = row.venue === "polymarket" || row.venue === "polymarket_us" ? "Polymarket" : "Kalshi";
+  const venue = formatTapeVenue(row.venue) || "Kalshi";
   const n = Number(row.contracts);
   const size = Number.isFinite(n) && n > 0 ? `${Math.round(n)} contracts` : "quote";
   const fill = Number(row.fill_american);

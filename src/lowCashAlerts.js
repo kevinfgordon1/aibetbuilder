@@ -20,13 +20,20 @@ function money(n) {
   return v.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function alertVenue(venue) {
+  const v = String(venue || "").trim().toLowerCase();
+  if (v === "polymarket" || v === "polymarket_us" || v === "poly" || v === "pm" || v.startsWith("polymarket")) return "polymarket";
+  if (v === "novig" || v.startsWith("novig")) return "novig";
+  return "kalshi";
+}
+
 export function normalizeUserAlert(raw) {
   if (!raw || typeof raw !== "object" || !raw.id) return null;
   return {
     id: String(raw.id),
     userId: raw.user_id || null,
     kind: String(raw.kind || "low_cash"),
-    venue: raw.venue === "polymarket" ? "polymarket" : "kalshi",
+    venue: alertVenue(raw.venue),
     parlayId: raw.parlay_id || null,
     title: raw.title ? String(raw.title) : "",
     body: raw.body ? String(raw.body) : "",
@@ -73,6 +80,14 @@ export function lowCashText(a, { owner = false } = {}) {
       body: `Some of ${your} Combo Locks quotes${lock} were skipped because ${your} Polymarket US buying power is too low.` +
         (short ? ` ${you} about ${short} short.` : "") +
         " Add money on Polymarket US to keep quoting.",
+    };
+  }
+  if (a.venue === "novig") {
+    return {
+      title: "Some Combo Locks quotes were skipped: not enough Novig cash",
+      body: `Some of ${your} Combo Locks quotes${lock} were skipped because ${your} Novig cash is too low.` +
+        (short ? ` ${you} about ${short} short.` : "") +
+        " Add money on Novig to keep quoting.",
     };
   }
   return {

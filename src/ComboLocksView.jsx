@@ -16,6 +16,7 @@ import {
 import { shouldToggleFromCard } from "./comboCardToggle.js";
 import { formatAmerican, formatDollars, sortOriginalBets } from "./comboMerge";
 import { allInFromExchange } from "./comboCredits";
+import { formatTapeVenue, tapeVenueKey } from "./comboTape.js";
 
 export const COMBO_VIEW_CSS = `
   .cl .cl-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
@@ -172,6 +173,7 @@ export const COMBO_VIEW_CSS = `
   .cl .venue{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:6px;background:rgba(255,255,255,0.06);color:#c3c6cc;white-space:nowrap}
   .cl .venue.kalshi{background:rgba(16,185,129,.12);color:#6ee7b7}
   .cl .venue.polymarket{background:rgba(201,162,39,.16);color:#a5b4fc}
+  .cl .venue.novig{background:rgba(168,85,247,.16);color:#e9d5ff}
   .cl .add-lock input,.cl .add-lock select,.cl .add-lock textarea{box-sizing:border-box;max-width:100%;min-width:0}
   .cl .add-lock .row>div,.cl .add-lock .legrow>div{min-width:0}
   @media (max-width:860px){
@@ -1012,8 +1014,9 @@ export function ComboHistory({ statement, view, archivedById, isOpen, onToggle, 
 }
 
 function VenueTag({ venue, venueKey }) {
-  const key = String(venueKey || venue || "").toLowerCase().includes("poly") ? "polymarket" : "kalshi";
-  return <span className={"venue " + key}>{venue || (key === "polymarket" ? "Polymarket" : "Kalshi")}</span>;
+  const key = tapeVenueKey(venueKey) || tapeVenueKey(venue) || "kalshi";
+  const label = formatTapeVenue(key) || venue || "Kalshi";
+  return <span className={"venue " + key}>{label}</span>;
 }
 
 function QuoteSection({ title, rows, sub, ok, empty, total = null }) {

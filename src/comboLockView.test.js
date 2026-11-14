@@ -169,6 +169,16 @@ assert.equal(historyRow({ id: "y" }, { fair_american: 760 }).fair, "+760");
   assert.equal(qh.notFilled[1].detail, "asked 3,000, room for 775");
   assert.equal(qh.notFilled[1].tone, "warn");
   assert.equal(qh.notFilled[2].venue, "Polymarket");
+  assert.equal(qh.notFilled[2].venueKey, "polymarket");
+  const novigQuote = quoteRow({
+    bucket: "filled",
+    contracts: 12,
+    venue: "Novig",
+    venueKey: "novig",
+    submission: { venue: "novig", fill_american: 1300, contracts: 12 },
+  });
+  assert.equal(novigQuote.venue, "Novig");
+  assert.equal(novigQuote.venueKey, "novig");
   assert.equal(qh.addedText, "Wed, Oct 7 · 4:15 PM ET");
   assert.ok(QUOTE_ROWS_SHOWN >= 3);
 }

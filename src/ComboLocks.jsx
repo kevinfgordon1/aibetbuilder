@@ -39,7 +39,7 @@ import { lockProfitWarning, lockProfile, signedMoney, moneyAbs, hedgeCap, decide
 import { buildComboStatement } from "./comboStatement";
 import { downloadStatementCsv, useStatementView } from "./StatementBoard";
 import { buildLockAttempts, matchedRfqMatchedCount, matchedRfqWatcherParked, matchedRfqCounts } from "./comboLockHistory";
-import { deskFillCounts, isConfirmedFillSubmission } from "./comboTape";
+import { deskFillCounts, formatTapeVenue, isConfirmedFillSubmission, tapeVenueChipClass } from "./comboTape";
 import { lockSubmissionQueriesForParlays, livingLockSubmissionQueries, mergeSubmissionRows, cappedLockIds, lockQuoteFillLine, lockQuoteFillCounts, livingLocksDue, settleInBatches, planDeskSubmissionReads, archivedIdsForDeskPoll, DESK_POLL_MS, SUBMISSION_READ_MIN_MS } from "./comboLockSubmissions";
 import { outcomeChrome } from "./comboLegResult";
 import { planSettlementPatches, browserGetJson } from "./comboAutoSettle";
@@ -1824,6 +1824,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
         .cl .chip.src{background:rgba(255,255,255,.05);color:#9aa3b2}
         .cl .chip.venue-kalshi{background:rgba(6,182,212,.15);color:#67e8f9}
         .cl .chip.venue-poly{background:rgba(91,110,245,.15);color:#a5b4fc}
+        .cl .chip.venue-novig{background:rgba(168,85,247,.15);color:#e9d5ff}
         .cl .outcome-pair{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
         .cl .arch-head{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;font:inherit;cursor:pointer;padding:0}
         .cl .arch-caret{color:#f5d76e;font-size:14px;width:12px}
@@ -2129,7 +2130,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
           <h3>Offers sent</h3>
           <div className="card">
             {history.length === 0 ? <div className="empty">No offers yet. Test requests you run show up here as Test; live offers show as Live with whether they were taken.</div> : (
-              <div className="tbl-wrap"><table><thead><tr><th>Type</th><th>When (ET)</th><th>Lock</th><th>Sold at</th><th>Contracts</th><th>Worst case</th><th>Status</th></tr></thead>
+              <div className="tbl-wrap"><table><thead><tr><th>Type</th><th>When (ET)</th><th>Lock</th><th>Where</th><th>Sold at</th><th>Contracts</th><th>Worst case</th><th>Status</th></tr></thead>
                 <tbody>{history.map((h) => {
                   const isReal = h.is_live || h.status === "filled" || h.status === "unfilled";
                   // A row logged 'filled' but with NO order_id is a posted quote that wasn't accepted —
@@ -2142,7 +2143,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
                     : h.status;
                   const stClass = h.status === "filled" && !executed ? "unfilled" : h.status;
                   return (
-                  <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "Live" : "Test"}</span></td><td>{etStamp(h.created_at)}</td><td>{h.label}</td><td>{fmtAm(h.fill_american)}{buyerSeesAfterFees(h.fill_american, { venue: h.venue, ticker: h.market_ticker }) ? <div className="muted" style={{ fontSize: 11 }}>{buyerSeesLabel(buyerSeesAfterFees(h.fill_american, { venue: h.venue, ticker: h.market_ticker }))}</div> : null}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
+                  <tr key={h.id}><td><span className={"st " + (isReal ? "real" : "test")}>{isReal ? "Live" : "Test"}</span></td><td>{etStamp(h.created_at)}</td><td>{h.label}</td><td><span className={"chip " + (tapeVenueChipClass(h.venue) || "venue-kalshi")}>{formatTapeVenue(h.venue) || "Kalshi"}</span></td><td>{fmtAm(h.fill_american)}{buyerSeesAfterFees(h.fill_american, { venue: h.venue, ticker: h.market_ticker }) ? <div className="muted" style={{ fontSize: 11 }}>{buyerSeesLabel(buyerSeesAfterFees(h.fill_american, { venue: h.venue, ticker: h.market_ticker }))}</div> : null}</td><td>{h.contracts}</td><td>{money(h.worst_lock)}</td>
                     <td><span className={"st " + stClass} title={h.status === "filled" && !executed ? "Offer sent but not taken. No position held." : ""}>{dispStatus}</span></td></tr>
                 ); })}</tbody></table></div>
             )}

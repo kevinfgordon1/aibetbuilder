@@ -17,10 +17,12 @@
 // submission). Those columns are not on main yet — missing tape is "unknown",
 // not "unfilled". tape_match=none is the only leftover no-print / unfilled.
 //
-// Venue is combo_submissions.venue when the worker writes it (kalshi |
-// polymarket). Same lock can take both. Else infer from ticker / raw /
-// kalshi_created_time. Unlabeled historical rows default to Kalshi — RFQ ids
-// are the same UUID shape on both venues.
+// Venue is combo_submissions.venue / combo_fills.raw.venue when the worker
+// writes it (kalshi | polymarket | novig). Same lock can take all three.
+// Else infer from ticker / raw / kalshi_created_time. Unlabeled historical
+// rows default to Kalshi — RFQ ids are the same UUID shape on these venues.
+// Polymarket on this blotter is Polymarket US. International Polymarket is
+// not a venue here.
 
 import {
   remainingFill,
@@ -182,8 +184,8 @@ export function fillRowId(fill) {
   return fill.fill_id || fill.id || null;
 }
 
-// Kalshi / Polymarket aliases only on this blotter.
-export const TAPE_VENUE_FILTERS = ["all", "kalshi", "polymarket"];
+// Kalshi, Polymarket US, and Novig on this blotter. No international Polymarket.
+export const TAPE_VENUE_FILTERS = ["all", "kalshi", "polymarket", "novig"];
 const VENUE_FIELD_KEYS = ["venue", "exchange", "source", "book"];
 const KALSHI_TICKER = /\bKX(?:MLB|NFL|NCAAF|NBA|NHL|MVE|ATP|PGA)?[A-Z0-9]*\b/i;
 const POLY_SLUG = /(?:^|[^a-z0-9])(?:aec[-_]|polymarket|poly[-_])|[a-z]+-[a-z0-9]+-\d{4}-\d{2}-\d{2}/i;
@@ -192,6 +194,8 @@ export function tapeVenueKey(value) {
   const s = String(value == null ? "" : value).trim().toLowerCase();
   if (!s) return "";
   if (s === "kalshi" || s === "kxi" || s.startsWith("kalshi")) return "kalshi";
+  if (s === "novig" || s.startsWith("novig")) return "novig";
+  // poly / pm / polymarket_us stay the existing Polymarket label (Polymarket US).
   if (s === "polymarket" || s === "poly" || s === "pm" || s.startsWith("polymarket") || s.startsWith("poly")) {
     return "polymarket";
   }
@@ -202,12 +206,21 @@ export function formatTapeVenue(value) {
   const key = tapeVenueKey(value);
   if (key === "kalshi") return "Kalshi";
   if (key === "polymarket") return "Polymarket";
+  if (key === "novig") return "Novig";
+  return "";
+}
+
+export function tapeVenueChipClass(value) {
+  const key = tapeVenueKey(value);
+  if (key === "kalshi") return "venue-kalshi";
+  if (key === "polymarket") return "venue-poly";
+  if (key === "novig") return "venue-novig";
   return "";
 }
 
 export function normalizeTapeVenueFilter(value) {
   const key = tapeVenueKey(value);
-  if (key === "kalshi" || key === "polymarket") return key;
+  if (key === "kalshi" || key === "polymarket" || key === "novig") return key;
   return "all";
 }
 
@@ -230,14 +243,15 @@ function tickerHint(value) {
 function sourceHint(value) {
   const s = String(value == null ? "" : value).trim().toLowerCase();
   if (!s) return "";
+  if (s.includes("novig")) return "novig";
   if (s.includes("polymarket") || s.includes("poly-rfq") || s === "poly" || s.startsWith("poly")) return "polymarket";
   if (s === "live-runner" || s.includes("kalshi")) return "kalshi";
   return "";
 }
 
-// Prefer a persisted venue column (combo-worker writes kalshi | polymarket).
+// Prefer a persisted venue column (combo-worker writes kalshi | polymarket | novig).
 // Else infer from ticker / raw / kalshi_created_time. Unlabeled historical
-// Combo Locks rows are Kalshi — Poly ids are the same UUID shape.
+// Combo Locks rows are Kalshi — venue ids are the same UUID shape.
 export function inferTapeVenue(row) {
   if (!row || typeof row !== "object") return "";
   const bags = [row, row.raw, row.raw && row.raw.msg, row.raw && row.raw.tape].filter((x) => x && typeof x === "object");
@@ -265,7 +279,7 @@ export function inferRfqVenue({ match, outcome, submission, fill, parlay } = {})
     const key = inferTapeVenue(src);
     if (key) return key;
   }
-  // Same lock can take Kalshi + Poly RFQs; missing persist is historical Kalshi tape.
+  // Same lock can take Kalshi, Polymarket US, and Novig. Missing persist is historical Kalshi tape.
   return "kalshi";
 }
 
@@ -629,7 +643,7 @@ export function quotedMissedCount(stats) {
   return Math.max(0, (stats.missed || 0) - (stats.skipped || 0));
 }
 
-// Skip chip + quoted-miss chip. Both venues (Kalshi / Polymarket) share these
+// Skip chip + quoted-miss chip. Kalshi, Polymarket US, and Novig share these
 // Miss-tape buckets — do not hide quoted-no-take when skips also exist.
 export function attemptLockParts(stats) {
   const skip = skipLockLine(stats);

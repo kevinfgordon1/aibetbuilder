@@ -26,6 +26,7 @@ const rows = venueRows([
 ]);
 assert.deepEqual(rows.map((r) => [r.venue, r.state, r.filled, r.resting]), [["Kalshi", "Filled 30", 30, 0], ["Polymarket", "Resting 70 @ 49¢", 0, 70]]);
 assert.deepEqual(venueRows([]), []);
+assert.equal(venueRows([{ venue: "novig", status: "resting", size: 20, filled: 5, open: 15, price: 0.4 }])[0].venue, "Novig");
 console.log("comboLegRules tests passed");
 
 // Single-leg heads-up popup (shown before save, owner + testers).

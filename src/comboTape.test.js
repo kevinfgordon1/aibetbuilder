@@ -56,11 +56,13 @@ import {
   settlementSummaryText,
   tapeVenueKey,
   formatTapeVenue,
+  tapeVenueChipClass,
   inferTapeVenue,
   inferRfqVenue,
   filterTapeRowsByVenue,
   filterLockTapeByVenue,
   normalizeTapeVenueFilter,
+  TAPE_VENUE_FILTERS,
 } from "./comboTape.js";
 import { settlementCopy, settlementFromStored } from "./comboSettlement.js";
 import { quotingState, remainingFill } from "./comboDesk.js";
@@ -1002,6 +1004,8 @@ assert.equal(isLiveRunnerTwin({ raw: { source: "live-runner" }, fill_id: "f1", o
   assert.match(tapeUi, /VenueChip/);
   assert.match(tapeUi, /venue-kalshi/);
   assert.match(tapeUi, /venue-poly/);
+  assert.match(tapeUi, /venue-novig/);
+  assert.match(tapeUi, /label: "Novig"/);
   assert.match(tapeUi, /venueFilter/);
   assert.match(tapeUi, /TAPE_VENUE_FILTERS/);
   assert.match(tapeUi, /filterLockTapeByVenue/);
@@ -1080,13 +1084,30 @@ assert.equal(tapeVenueKey("KXI"), "kalshi");
 assert.equal(tapeVenueKey("Polymarket"), "polymarket");
 assert.equal(tapeVenueKey("poly"), "polymarket");
 assert.equal(tapeVenueKey("pm"), "polymarket");
+assert.equal(tapeVenueKey("polymarket_us"), "polymarket");
+assert.equal(tapeVenueKey("novig"), "novig");
+assert.equal(tapeVenueKey("Novig"), "novig");
 assert.equal(formatTapeVenue("kalshi"), "Kalshi");
 assert.equal(formatTapeVenue("polymarket"), "Polymarket");
+assert.equal(formatTapeVenue("polymarket_us"), "Polymarket");
+assert.equal(formatTapeVenue("novig"), "Novig");
+assert.equal(formatTapeVenue("polymarket-intl"), "Polymarket");
+assert.equal(formatTapeVenue("international"), "");
+assert.doesNotMatch(formatTapeVenue("novig"), /International|Kalshi/);
+assert.equal(tapeVenueChipClass("novig"), "venue-novig");
+assert.equal(tapeVenueChipClass("kalshi"), "venue-kalshi");
+assert.equal(tapeVenueChipClass("polymarket"), "venue-poly");
+assert.deepEqual(TAPE_VENUE_FILTERS, ["all", "kalshi", "polymarket", "novig"]);
 assert.equal(normalizeTapeVenueFilter("poly"), "polymarket");
+assert.equal(normalizeTapeVenueFilter("novig"), "novig");
 assert.equal(normalizeTapeVenueFilter("all"), "all");
 assert.equal(inferTapeVenue({ venue: "polymarket" }), "polymarket");
 assert.equal(inferTapeVenue({ venue: "kalshi" }), "kalshi");
+assert.equal(inferTapeVenue({ venue: "novig" }), "novig");
 assert.equal(inferTapeVenue({ raw: { venue: "poly" } }), "polymarket");
+assert.equal(inferTapeVenue({ raw: { venue: "novig" } }), "novig");
+assert.equal(inferTapeVenue({ kalshi_created_time: "2026-09-03T22:00:00Z", raw: { venue: "novig" } }), "novig");
+assert.equal(inferTapeVenue({ raw: { source: "novig" } }), "novig");
 assert.equal(inferTapeVenue({ market_ticker: "KXMVECROSSCATEGORY-S2026ABC" }), "kalshi");
 assert.equal(inferTapeVenue({ ticker: "KXMLBGAME-26SEP032140ATHSEA-ATH" }), "kalshi");
 assert.equal(inferTapeVenue({ ticker: "mlb-ath-sea-2026-09-03-ath" }), "polymarket");
@@ -1095,6 +1116,8 @@ assert.equal(inferTapeVenue({ raw: { source: "live-runner" } }), "kalshi");
 assert.equal(inferTapeVenue({ raw: { source: "polymarket-rfq" } }), "polymarket");
 assert.equal(inferTapeVenue({}), "");
 assert.equal(inferRfqVenue({ submission: { venue: "polymarket" }, fill: { ticker: "KXMLBGAME-X" } }), "polymarket");
+assert.equal(inferRfqVenue({ submission: { venue: "novig" }, fill: { ticker: "KXMLBGAME-X" } }), "novig");
+assert.equal(inferRfqVenue({ fill: { raw: { venue: "novig" }, ticker: "KXMLBGAME-X" } }), "novig");
 assert.equal(inferRfqVenue({ fill: { ticker: "KXMLBGAME-26SEP03ATHSEA-ATH" } }), "kalshi");
 assert.equal(inferRfqVenue({}), "kalshi");
 {
@@ -1110,6 +1133,19 @@ assert.equal(inferRfqVenue({}), "kalshi");
   });
   assert.equal(polyOpen.venueKey, "polymarket");
   assert.equal(polyOpen.venue, "Polymarket");
+  const novigOpen = buildRfqRow({
+    submission: {
+      rfq_id: "nv-1",
+      venue: "novig",
+      status: "quoted",
+      is_live: true,
+      quote_id: "q-nv",
+      contracts: 15,
+    },
+    fill: { raw: { venue: "novig" }, ticker: "KXMLBGAME-X" },
+  });
+  assert.equal(novigOpen.venueKey, "novig");
+  assert.equal(novigOpen.venue, "Novig");
   const kalshiSkip = buildRfqRow({
     submission: { rfq_id: "k-1", status: "declined", contracts: 12, created_at: "2026-09-03T12:00:00Z" },
   });
@@ -1127,19 +1163,28 @@ assert.equal(inferRfqVenue({}), "kalshi");
     submissions: [
       { rfq_id: "k-open", parlay_id: "p-venue", venue: "kalshi", status: "quoted", is_live: true, quote_id: "qk", contracts: 10, created_at: "2026-09-03T16:00:00Z" },
       { rfq_id: "p-skip", parlay_id: "p-venue", venue: "polymarket", status: "declined", contracts: 8, created_at: "2026-09-03T16:01:00Z" },
+      { rfq_id: "n-fill", parlay_id: "p-venue", venue: "novig", status: "filled", order_id: "nv-ord", contracts: 4, created_at: "2026-09-03T16:02:00Z" },
     ],
+    fills: [{ parlay_id: "p-venue", order_id: "nv-ord", fill_id: "nv-f", count: 4, raw: { venue: "novig" }, kalshi_created_time: "2026-09-03T16:02:00Z" }],
   });
   assert.equal(tape.rows.find((r) => r.rfqId === "k-open").venueKey, "kalshi");
   assert.equal(tape.rows.find((r) => r.rfqId === "p-skip").venueKey, "polymarket");
+  assert.equal(tape.rows.find((r) => r.rfqId === "n-fill").venueKey, "novig");
+  assert.equal(tape.rows.find((r) => r.rfqId === "n-fill").venue, "Novig");
   assert.deepEqual(filterTapeRowsByVenue(tape.rows, "kalshi").map((r) => r.rfqId), ["k-open"]);
   assert.deepEqual(filterTapeRowsByVenue(tape.rows, "polymarket").map((r) => r.rfqId), ["p-skip"]);
+  assert.deepEqual(filterTapeRowsByVenue(tape.rows, "novig").map((r) => r.rfqId), ["n-fill"]);
   const onlyPoly = filterLockTapeByVenue(tape, "polymarket");
   assert.equal(onlyPoly.rows.length, 1);
   assert.equal(onlyPoly.rows[0].venueKey, "polymarket");
   assert.equal(onlyPoly.live.skipped, 1);
   assert.equal(onlyPoly.live.awaiting, 0);
+  const onlyNovig = filterLockTapeByVenue(tape, "novig");
+  assert.equal(onlyNovig.rows.length, 1);
+  assert.equal(onlyNovig.rows[0].venue, "Novig");
+  assert.equal(onlyNovig.live.filled, 1);
   const all = filterLockTapeByVenue(tape, "all");
-  assert.equal(all.rows.length, 2);
+  assert.equal(all.rows.length, 3);
 }
 
 {
