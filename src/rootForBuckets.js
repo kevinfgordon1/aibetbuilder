@@ -1,6 +1,7 @@
 // Safety net for a moneyline outcome ("DET") whose game's chances are split into spread buckets
 // ("DET>=4", "DET<4"): the plain team is the sum of its buckets. Unknown outcomes are left as-is.
-const BUCKET = (o) => new RegExp(`^${String(o).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(>=|<)\\d+$`);
+// "DET>=4", "DET<4", and a finer band "DET<3>=2" (margin 2, used when the bet line and the Kalshi line differ).
+const BUCKET = (o) => new RegExp(`^${String(o).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:>=\\d+|<\\d+(?:>=\\d+)?)$`);
 export function expandAllowed(allowed = [], dist) {
   if (!dist) return allowed;
   const out = [];

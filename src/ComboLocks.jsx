@@ -28,6 +28,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from "react";
 import { getBrowserSupabase } from "./supabaseBrowser.js";
 import { lockItNote, mapPromoLegsToKalshi, toDatetimeLocalValue, gameStartFromLegs, dateOnlyLegDays, etDateOf, flattenComboGames, formatGameOption, comboGameId, indexComboGames, COMBO_SPORT_ORDER, slateIncomplete } from "./comboPrefill";
+import { withBookLabels } from "./rootForBookLine";
 import { applyComboDeskPoll, buildParlayDesk, comboDeskCatchNote, comboDeskChrome, comboListQueryOk, comboSettingsQueryOk, comboSectionKind, comboSettledQuery, COMBO_DESK_RETRY_MS, shouldShowDeskFailure, overFillText, formatLoss, formatCents, tapeNoPrice } from "./comboDesk";
 import { dataSourceStatus, isSupabaseUnhealthy } from "./dataSourceHealth.js";
 import GameCombo, { gameSearchText } from "./GameCombo.jsx";
@@ -1507,7 +1508,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
     return payload;
   };
   const addParlay = async ({ separate = false, singleOk = false } = {}) => {
-    const legs = readLegs();
+    const legs = withBookLabels(readLegs(), form.label);
     const legErr = lockLegsError(legs);
     if (legErr) return alert(legErr);
     if (!(+form.stake > 0) || !+form.boost || !+form.fill) {
@@ -1551,7 +1552,7 @@ function ComboLocksPage({ user, prefill = null, focusLockId = null, supabase = r
       if (mergePrompt.kind === "group") {
         await postMerge({ action: "merge", survivorId: mergePrompt.target.id, absorbIds: mergePrompt.absorbIds });
       } else {
-        const legs = readLegs();
+        const legs = withBookLabels(readLegs(), form.label);
         await postMerge({
           action: "merge",
           survivorId: mergePrompt.target.id,

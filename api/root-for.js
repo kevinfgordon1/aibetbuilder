@@ -245,7 +245,7 @@ async function freshBooks(M, mk, f = deps.fetch, now = deps.now) {
 /** Price, and if any lock is unpriced only because its Kalshi books went stale, refetch the books once and re-price. */
 async function priceWithRetry(M, mk, args, f = deps.fetch, now = deps.now) {
   await freshBooks(M, mk, f, now);
-  const run = () => M.computeRootFor({ ...args, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, kalshiAt: mk.kalshiAt });
+  const run = () => M.computeRootFor({ ...args, kalshiBooks: mk.kalshiBooks, relay: mk.relay, starts: mk.starts, kalshiAt: mk.kalshiAt, ladders: mk.ladders || {} });
   let out = run();
   if (!mk.retried && (out.unpriced || []).some((u) => u.reason === 'stale')) {
     mk.retried = true;
@@ -255,8 +255,23 @@ async function priceWithRetry(M, mk, args, f = deps.fetch, now = deps.now) {
   return out;
 }
 async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
-  const tickers = M.tickersNeeded(parlays);
   const getJ = async (u) => { const r = await f(u, { headers: { accept: 'application/json' } }); if (!r.ok) throw new Error(`${r.status} ${u.slice(0, 80)}`); return r.json(); };
+  // Strikes around a sportsbook line Kalshi doesn't list (Wright St −1.5 stored as "by 3+").
+  const ladderNote = []; const ladders = {}; const ladderTickers = [];
+  const gapEvents = typeof M.lineGapEvents === 'function' ? M.lineGapEvents(parlays) : [];
+  await Promise.all(gapEvents.map(async (ev) => {
+    try {
+      const j = await getJ(`${KALSHI}/markets?event_ticker=${encodeURIComponent(ev)}&limit=200`);
+      const rows = [];
+      for (const m of (j && j.markets) || []) {
+        const p = M.parseLadderTicker && M.parseLadderTicker(m.ticker);
+        if (p) rows.push(p);
+      }
+      ladders[ev] = rows;
+      for (const r of rows) ladderTickers.push(r.ticker);
+    } catch (e) { ladderNote.push(`ladder ${ev}: ${String((e && e.message) || e).slice(0, 60)}`); }
+  }));
+  const tickers = [...new Set([...M.tickersNeeded(parlays), ...ladderTickers])];
   // relay calls: own timeout each (a hung relay costs at most RELAY_TIMEOUT_MS, not 10 s+ per call)
   const relayMs = Number(env.ROOTFOR_RELAY_TIMEOUT_MS) || RELAY_TIMEOUT_MS;
   const getRelay = (u) => new Promise((resolve, reject) => {
@@ -267,7 +282,7 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
       .then((j) => { clearTimeout(tm); resolve(j); }, (e) => { clearTimeout(tm); reject(e); });
   });
   const base = String(env.ODDS_RELAY_URL || env.VITE_ODDS_RELAY_URL || RELAY_FALLBACK).replace(/\/+$/, '');
-  const relayNote = []; const starts = {}; const lockStart = lockStarts(parlays);
+  const relayNote = [...ladderNote]; const starts = {}; const lockStart = lockStarts(parlays);
   const boards = { kalshi: [], polymarket: [], novig: [] };
   const leagueOf = new Map(); // quote -> league it was fetched under (matching rules differ for NFL / college)
   let h = null; let polledAt = now();
@@ -340,7 +355,7 @@ async function loadMarkets(M, parlays, env, f = deps.fetch, now = deps.now) {
       } catch (e) { relayNote.push(`ucl opposing: ${String(e && e.message || e).slice(0, 80)}`); }
     }
   } catch (e) { relayNote.push(`relay index: ${String(e.message).slice(0, 80)}`); }
-  return { kalshiBooks, kalshiAt, bookTickers: tickers, relay, relayNote, starts, startInfo, startDates, startWarnings, scheduleFrom: sched.from, tickers: tickers.length };
+  return { kalshiBooks, kalshiAt, bookTickers: tickers, ladders, relay, relayNote, starts, startInfo, startDates, startWarnings, scheduleFrom: sched.from, tickers: tickers.length };
 }
 
 /** Settled results of recently seen games (daily needle snapshots' snap.final, last 2 days; market facts, same for every
@@ -358,7 +373,7 @@ async function loadFinals(client, now) {
 
 // Kickoff backfill for a started plain moneyline game we never saved (saving was off): Kalshi 1-minute candles
 // ending at kickoff, inverse bet method on top of book: P(team) = max(team yes bid, 1 − other team's yes ask).
-// Both sides held → raw inverted numbers + "neither"; one side held → that side raw, the other 1 − it.
+// Both sides held → scale the two prices to 100%. One side held → that side raw, the other 1 − it.
 async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
   const NEITHER = '__neither';
   const teams = Object.keys(dist || {}).filter((o) => o !== NEITHER);
@@ -373,9 +388,12 @@ async function kickoffProbs(ev, dist, kickoffIso, positions, f = deps.fetch) {
   };
   const [A, B] = await Promise.all(teams.map(last)); if (!A || !B) return null;
   const raw = { [teams[0]]: Math.max(A.bid, 1 - B.ask), [teams[1]]: Math.max(B.bid, 1 - A.ask) };
-  { const z = raw[teams[0]] + raw[teams[1]]; if (z > 1) { raw[teams[0]] /= z; raw[teams[1]] /= z; } } // crossed books: scale to 100% (same as computeRootFor)
   const held = new Set(); for (const p of positions || []) for (const l of p.legs || []) if (l.event === ev && l.allowed && l.allowed.length === 1) held.add(l.allowed[0]);
-  if (NEITHER in dist || (held.has(teams[0]) && held.has(teams[1]))) { const n = Math.max(0, 1 - raw[teams[0]] - raw[teams[1]]); return { [teams[0]]: raw[teams[0]], [teams[1]]: raw[teams[1]], ...(n > 0 || NEITHER in dist ? { [NEITHER]: n } : {}) }; }
+  if (held.has(teams[0]) && held.has(teams[1])) {
+    const z = raw[teams[0]] + raw[teams[1]];
+    if (!(z > 0)) return null;
+    return { [teams[0]]: raw[teams[0]] / z, [teams[1]]: raw[teams[1]] / z };
+  }
   const h = held.has(teams[1]) && !held.has(teams[0]) ? teams[1] : teams[0]; const o = h === teams[0] ? teams[1] : teams[0];
   return { [h]: raw[h], [o]: 1 - raw[h] };
 }
@@ -401,8 +419,16 @@ async function loadStoredFairs(client, ids) {
 // Saved leg prices (combo_lock_leg_fairs, src/rootForStored.js) come first: a value saved ≤15 min before the first
 // kickoff IS the kickoff number (counted in st). An older saved value (e.g. at lock time) beats the generic
 // earlier-stored fallback but not the candles (still counted in fb). n = legs frozen for the lock.
+// Bump when kickoff math changes so a frozen baseline is rebuilt (two-way scaling, sportsbook line vs Kalshi proxy).
+const LOCK_PRE_V = 2;
 async function lockBaselines(snap, pos, liveP, preP, starts, rows, now, loadStored = null) {
-  const S = await import('../src/rootForSweat.js'); const ST = await import('../src/rootForStored.js');
+  const S = await import('../src/rootForSweat.js'); const ST = await import('../src/rootForStored.js'); const B = await import('../src/rootForBuckets.js');
+  const probsCover = (legs, probs) => (legs || []).every((l) => {
+    const dist = probs && probs[l.event];
+    if (!dist) return false;
+    const al = B.expandAllowed(l.allowed || [], dist);
+    return al.length > 0 && al.every((o) => Object.prototype.hasOwnProperty.call(dist, o));
+  });
   snap.lockPre = snap.lockPre || {};
   const memo = new Map(); const deadline = Date.now() + 5000; // locks not reached in time freeze on the next request
   const rf = async (u, o) => { for (let i = 0; ; i++) { const r = await deps.fetch(u, o); if (r.status !== 429 || i >= 3) return r; await new Promise((z) => setTimeout(z, 300 * (i + 1))); } }; // Kalshi rate limit
@@ -424,7 +450,7 @@ async function lockBaselines(snap, pos, liveP, preP, starts, rows, now, loadStor
     const ks = legs.map((l) => kick(l.event)).filter((x) => x != null); if (!ks.length) continue;
     const t0 = Math.min(...ks); if (now < t0) continue;
     const cur = snap.lockPre[id];
-    if (cur) { // contracts changed after the freeze: the difference joins at today's chances
+    if (cur && cur.v === LOCK_PRE_V) { // contracts changed after the freeze: the difference joins at today's chances
       if (Number(cur.pos.hit) !== Number(p.hit) || Number(cur.pos.miss) !== Number(p.miss)) {
         cur.adds = Number(cur.adds || 0) + S.expectedProfit([p], liveP) - S.expectedProfit([{ ...p, hit: cur.pos.hit, miss: cur.pos.miss }], liveP);
         cur.pos = { ...cur.pos, hit: p.hit, miss: p.miss };
@@ -460,7 +486,9 @@ async function lockBaselines(snap, pos, liveP, preP, starts, rows, now, loadStor
       probs[ev] = (before || earliest || {}).probs || (snap.frozen || {})[ev] || dist;
     }
     if (Date.now() > deadline + 2500) return; // too slow: try again next request rather than freeze half-fetched
-    snap.lockPre[id] = { t0: new Date(t0).toISOString(), pos: { id: p.id, legs, hit: p.hit, miss: p.miss }, probs, adds: 0, fb, st, n: Object.keys(probs).length };
+    const prev = snap.lockPre[id];
+    if (!probsCover(legs, probs)) { if (prev) snap.lockPre[id] = { ...prev, v: LOCK_PRE_V }; return; }
+    snap.lockPre[id] = { v: LOCK_PRE_V, t0: new Date(t0).toISOString(), pos: { id: p.id, legs, hit: p.hit, miss: p.miss }, probs, adds: 0, fb, st, n: Object.keys(probs).length };
   };
   for (let i = 0; i < todo.length; i += 3) await Promise.all(todo.slice(i, i + 3).map(freeze));
 }
@@ -560,14 +588,26 @@ async function rebuildSnapPositions(client, snap) {
       const r = L.lockPositions(p, fills, singles, by[p.id] || 0); if (r.skip) continue;
       // saved positions keep their engine legs (event/outcomes); only contract value changes, mirrored singles go
       const want = new Map(r.positions.map((x) => [String(x.id), x]));
+      const book = want.get(String(p.id));
+      const hedgeId = `${p.id}:line`;
+      const split = !!(snap.positions && (snap.positions[hedgeId] || Object.values(snap.positions).some((x) => x && (x.id === hedgeId || (x.lineHedge && String(x.id).startsWith(p.id))))));
       for (const k of Object.keys(snap.positions)) {
         const sp = snap.positions[k]; const id = String((sp || {}).id || k); if (id !== p.id && !id.startsWith(p.id + ':')) continue;
+        if (id === hedgeId || sp.lineHedge) {
+          if (!book) { delete snap.positions[k]; if (snap.lockPre) delete snap.lockPre[id]; continue; }
+          snap.positions[k] = { ...sp, hit: book.hedgeHit, miss: book.hedgeMiss, filled: book.filled, received: book.received };
+          const f = (snap.lockPre || {})[id]; if (f && f.pos) f.pos = { ...f.pos, hit: book.hedgeHit, miss: book.hedgeMiss };
+          continue;
+        }
         const np = want.get(id); if (!np) { delete snap.positions[k]; if (snap.lockPre) delete snap.lockPre[id]; continue; }
-        snap.positions[k] = { ...sp, hit: np.hit, miss: np.miss, filled: np.filled, received: np.received };
-        const f = (snap.lockPre || {})[id]; if (f && f.pos) f.pos = { ...f.pos, hit: np.hit, miss: np.miss };
+        const hit = id === String(p.id) && split && book && book.bookHit != null ? book.bookHit : np.hit;
+        const miss = id === String(p.id) && split && book && book.bookMiss != null ? book.bookMiss : np.miss;
+        snap.positions[k] = { ...sp, hit, miss, filled: np.filled, received: np.received };
+        const f = (snap.lockPre || {})[id]; if (f && f.pos) f.pos = { ...f.pos, hit, miss };
       }
       for (const k of Object.keys(snap.unpriced || {})) { // unpriced locks: same contract value refresh
         const id = String(k); if (id !== p.id && !id.startsWith(p.id + ':')) continue;
+        if (id === hedgeId) { if (book) snap.unpriced[k] = { ...snap.unpriced[k], hit: book.hedgeHit, miss: book.hedgeMiss }; continue; }
         const np = want.get(id); if (!np) { delete snap.unpriced[k]; continue; }
         snap.unpriced[k] = { ...snap.unpriced[k], hit: np.hit, miss: np.miss };
       }

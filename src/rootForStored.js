@@ -4,6 +4,7 @@
 // just before kickoff is the kickoff number itself instead of a candle / earlier-snapshot estimate.
 import { legFair } from "./rootForPrices.js";
 import { tickersNeeded } from "./rootForCompute.js";
+import { fineSpreadFromFairs } from "./rootForBookLine.js";
 
 const NEITHER = "__neither";
 /** A saved pregame value counts as the kickoff number when taken at most this long before the first kickoff. */
@@ -48,13 +49,16 @@ export function pickStored(rec, t0, maxAgeMs = KICKOFF_MAX_AGE_MS) {
 const pOf = (fairs, key) => { const x = fairs && fairs[key]; const p = x && Number(x.p); return p > 0 && p < 1 ? p : null; };
 
 /** Event chances from saved fairs, in the same shape as the live distribution `dist` for event `ev`
- *  (binary {yes,no}; game {A,B[,__neither]}; spread-nested game {S>=k, S<k, O[,__neither]}). `held` = outcomes
- *  any position holds alone on this event (same one-side / both-sides rule as computeRootFor). null if not priced. */
+ *  (binary {yes,no}; game {A,B}; spread-nested game {S>=k, S<k, O} or finer margin bands). `held` = outcomes
+ *  any position holds alone on this event (same one-side / both-sides rule as computeRootFor). null if not priced.
+ *  Two sides of a two-way market are scaled to 100%. A draw is left as its own outcome only on a 3-way market. */
 export function storedEventProbs(ev, dist, fairs, held = new Set()) {
   const keys = Object.keys(dist || {}); const outs = keys.filter((o) => o !== NEITHER);
   if (!outs.length || !fairs) return null;
+  if (outs.some((o) => /<\d+>=\d+/.test(o))) return fineSpreadFromFairs(ev, dist, fairs);
   if (outs.length === 2 && outs.includes("yes") && outs.includes("no")) {
     const py = pOf(fairs, `${ev}:yes`), pn = pOf(fairs, `${ev}:no`);
+    if (held.has("yes") && held.has("no") && py != null && pn != null) { const z = py + pn; return z > 0 ? { yes: py / z, no: pn / z } : null; }
     if (held.has("no") && !held.has("yes") && pn != null) return { yes: 1 - pn, no: pn };
     if (py != null) return { yes: py, no: 1 - py };
     if (pn != null) return { yes: 1 - pn, no: pn };
@@ -68,12 +72,12 @@ export function storedEventProbs(ev, dist, fairs, held = new Set()) {
   const teams = teamsOf(); if (!teams) return null;
   const [a, b] = teams; const ra = pOf(fairs, `${ev}-${a}:yes`), rb = pOf(fairs, `${ev}-${b}:yes`);
   let pa, pb, pn = 0;
-  if (held.has(a) && held.has(b) && ra != null && rb != null) { const z = ra + rb; if (z > 1) { pa = ra / z; pb = rb / z; } else { pa = ra; pb = rb; pn = 1 - z; } }
+  if (held.has(a) && held.has(b) && ra != null && rb != null) { const z = ra + rb; if (!(z > 0)) return null; pa = ra / z; pb = rb / z; }
   else if (held.has(b) && !held.has(a) && rb != null) { pb = rb; pa = 1 - rb; }
   else if (ra != null) { pa = ra; pb = 1 - ra; }
   else if (rb != null) { pb = rb; pa = 1 - rb; }
   else return null;
-  const withN = (o) => (pn > 0 || keys.includes(NEITHER) ? { ...o, [NEITHER]: pn } : o);
+  const withN = (o) => (pn > 0 ? { ...o, [NEITHER]: pn } : o);
   if (!bucket.length) return withN({ [a]: pa, [b]: pb });
   const S = a, O = b, k = bucket[0][3];
   const spreadTicker = `${ev.replace(/GAME-/, "SPREAD-")}-${S}${k}`;
