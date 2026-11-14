@@ -3,6 +3,7 @@
 import { bookPnL, lockKind } from "./comboLockProfile.js";
 import { lockFillReceipt } from "./comboStatement.js";
 import { isLockCapFill } from "./comboTape.js";
+import { bookLineForLeg } from "./rootForBookLine.js";
 
 const num = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const r2 = (x) => Math.round(x * 100) / 100;
@@ -16,11 +17,17 @@ export function lockPositions(parlay, fills = [], singles = [], filledCount = nu
   const filled = num(filledCount) != null ? num(filledCount) : mine.reduce((a, f) => a + (num(f.count) || 0), 0);
   const rec = filled > 0 ? lockFillReceipt(parlay, mine, filled) : { received: 0, fees: 0, ok: true };
   const received = rec.ok ? rec.received : 0;
-  const legs = (parlay.legs || []).map((l) => ({ ticker: l.ticker, side: l.side || "yes", label: l.label, game: l.game, type: l.type }));
+  const legs = (parlay.legs || []).map((l, i) => {
+    const bookLine = bookLineForLeg(parlay, l, i);
+    return { ticker: l.ticker, side: l.side || "yes", label: l.label, game: l.game, type: l.type, ...(l.bookLabel ? { bookLabel: l.bookLabel } : {}), ...(bookLine ? { bookLine } : {}) };
+  });
   const out = [{
     id: parlay.id, label: parlay.label, legs, kind: book.kind,
     stake: book.stake, american: book.american, filled: r2(filled), received: r2(received), fees: r2(rec.fees || 0),
     hit: r2(book.bookHit + received - filled), miss: r2(book.bookMiss + received),
+    // Book ticket and Kalshi hedge, kept apart so a proxy strike can be priced on its own contract.
+    bookHit: r2(book.bookHit), bookMiss: r2(book.bookMiss),
+    hedgeHit: r2(received - filled), hedgeMiss: r2(received),
   }];
   // Single-leg hedges (per-leg orders): their own position on that leg's market.
   let resting = 0;

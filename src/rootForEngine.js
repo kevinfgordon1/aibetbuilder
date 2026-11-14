@@ -15,7 +15,7 @@ import { splitUclCodes } from "../lib/soccer-clubs.js";
 
 export const DEFAULT_NODE_BUDGET = 4_000_000;
 export const MC_SAMPLES = 200_000;
-/** Residual outcome for a game held on both sides (raw inverse chances sum to under 100%). */
+/** Leftover key from older snapshots. Two-way prices are scaled to 100% now; a real third outcome is only a draw. */
 export const NEITHER = "__neither";
 
 /** Kalshi game leg → { event, outcomes, allowed }. Non-game tickers → binary yes/no event. */
@@ -62,15 +62,14 @@ export function eventProbs(events, legP) {
     if (e.kind === "game") {
       const [a, b] = e.outcomes;
       const pa = legP[`${e.event}-${a}:yes`]; const pb = legP[`${e.event}-${b}:yes`];
-      // Both sides held: raw inverse chances, no scaling. Whatever is left (1 − pa − pb, the gap the
-      // two opposite-side prices leave) becomes a third "neither" outcome on which both teams' legs
-      // lose, so A and B stay mutually exclusive and the shown chances are exactly the raw ones.
-      if (pa != null && pb != null) { out[e.event] = { [a]: pa, [b]: pb, [NEITHER]: Math.max(0, 1 - pa - pb) }; notes.push(e.event); }
+      // Both sides held: scale the two inverse prices so they add to 100%. A leftover "neither wins"
+      // slate made both locks lose on ordinary vig. A draw is a real third outcome only on a 3-way ticker.
+      if (pa != null && pb != null) { const z = pa + pb; out[e.event] = z > 0 ? { [a]: pa / z, [b]: pb / z } : { [a]: 0.5, [b]: 0.5 }; notes.push(e.event); }
       else if (pa != null) out[e.event] = { [a]: pa, [b]: 1 - pa };
       else if (pb != null) out[e.event] = { [a]: 1 - pb, [b]: pb };
     } else {
       const py = legP[`${e.event}:yes`]; const pn = legP[`${e.event}:no`];
-      if (py != null && pn != null) { out[e.event] = { yes: py, no: pn, [NEITHER]: Math.max(0, 1 - py - pn) }; notes.push(e.event); }
+      if (py != null && pn != null) { const z = py + pn; out[e.event] = z > 0 ? { yes: py / z, no: pn / z } : { yes: 0.5, no: 0.5 }; notes.push(e.event); }
       else if (py != null) out[e.event] = { yes: py, no: 1 - py };
       else if (pn != null) out[e.event] = { yes: 1 - pn, no: pn };
     }

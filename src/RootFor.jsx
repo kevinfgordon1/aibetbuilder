@@ -251,7 +251,8 @@ function todayView(base, nowMs) {
   const deco = (o) => { const m = meta[`${o.event}:${o.outcome}`] || {}; return { ...o, name: m.name || o.outcome, game: m.game, american: m.american, start: m.start, slot: m.slot }; };
   const perEvent = r.perEvent.filter((e) => evs.has(e.event)).map((e) => { const m = meta[e.event] || {}; return { ...e, game: m.game || e.event, rootForName: m.rootForName, american: m.american, start: m.start, slot: m.slot, outcomes: e.outcomes.map(deco) }; });
   const labels = base.lockLabels || {};
-  const locks = pos.map((p) => ({ id: p.id, label: labels[p.id], legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
+  const shown = pos.filter((p) => !p.lineHedge);
+  const locks = shown.map((p) => ({ id: p.id, label: labels[p.id] || p.label, legs: p.legs, todayLegs: p.legs.filter((l) => evs.has(l.event)).length }));
   // finished games of this sheet day (no longer priced, kept at last live chances) feed the leg chart's "Finished games" line
   const s0 = base.sweat || {}; const fin = new Set(((s0.tu && s0.tu.finished) || s0.finished || []).filter((ev) => (s0.finishedDay || {})[ev] === todayDay(nowMs)));
   const keptToday = (s0.kept || []).filter((p) => p.legs.some((l) => fin.has(l.event)));
@@ -264,8 +265,8 @@ function todayView(base, nowMs) {
     sweat = { ...sweat, lockPre: sn.lockPre, nowValue: Number(dr.live_ev), legsFrozen: sn.frozen || {}, legsFinal: sn.final || {} };
   }
   return {
-    d: { ...base, ...r, model: { ...base.model, positions: pos }, sweat, livePos, ...(dayStarts ? { starts: dayStarts } : {}), perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: pos.length },
-    info: { games: evs.size, locks, total: (base.model.positions || []).length, unpriced: unpricedText(base.unpricedCount, base.unpricedReasons), dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
+    d: { ...base, ...r, model: { ...base.model, positions: pos }, sweat, livePos, ...(dayStarts ? { starts: dayStarts } : {}), perEvent, top: (r.top || []).filter((t) => evs.has(t.event)).map(deco), method: r.method, locksPriced: shown.length },
+    info: { games: evs.size, locks, total: (base.model.positions || []).filter((p) => !p.lineHedge).length, unpriced: unpricedText(base.unpricedCount, base.unpricedReasons), dayLabel: todayDayLabel(nowMs) + (todayDayLabel(nowMs) !== todayDayLabel(nowMs + 2 * 3600 * 1000) ? ", until 2 AM ET" : "") },
   };
 }
 
@@ -524,10 +525,11 @@ export default function RootFor({ user, initialData = null, viewAs = "", apiUrl 
             </tbody>
           </table>
           <div className="note">
-            Chances come from the live inverse bet method: each leg is 1 minus the best opposing price with $500 of depth (fees included) across {Object.entries((d.legs || []).reduce((a, l) => { if (l.best) a[l.best] = (a[l.best] || 0) + 1; return a; }, {})).map(([v, n]) => `${VENUE[v] || v} (${n} legs)`).join(", ") || "—"}; ProphetX is off until its key is set. Chances are the raw inverted prices, not scaled. A team in many locks is one outcome, and both sides of a game can't both win. When locks hold both sides, the two raw chances add to a bit under 100%; the gap is treated as a slate where neither side's leg wins. Different games are independent. Where a game has a spread lock, its spread is nested inside the moneyline (covering implies winning), so spread and moneyline legs move together; totals stay independent of the winner (no live joint price to correlate them). Prices update in-game.
+            Chances come from the live inverse bet method: each leg is 1 minus the best opposing price with $500 of depth (fees included) across {Object.entries((d.legs || []).reduce((a, l) => { if (l.best) a[l.best] = (a[l.best] || 0) + 1; return a; }, {})).map(([v, n]) => `${VENUE[v] || v} (${n} legs)`).join(", ") || "—"}; ProphetX is off until its key is set. A team in many locks is one outcome, and both sides of a two-way game can't both win: when locks hold both sides, the two prices are scaled so they add to 100%. A draw is its own outcome only in a real 3-way market (soccer). A spread or total is priced on the sportsbook line you bet; a Kalshi hedge stays on its own contract. Where a game has a spread lock, the spread is nested inside the moneyline (covering implies winning). Prices update in-game.
             {" "}{d.method === "exact" ? "Exact enumeration." : d.note}
             {d.unpriced && d.unpriced.length ? d.fillTimeLocks ? ` ${d.fillTimeLocks} ${noun} counted at fill-time value (no live price with depth for ${d.unpriced.map((u) => u.leg).slice(0, 3).join(", ")}${d.unpriced.length > 3 ? "…" : ""}).` : ` ${d.unpriced.length} lock(s) left out: a leg had no live price with $500 depth (${d.unpriced.map((u) => u.leg).slice(0, 3).join(", ")}${d.unpriced.length > 3 ? "…" : ""}).` : ""}
             {d.resting ? ` Resting hedge orders (${Math.round(d.resting).toLocaleString()} contracts) count only once filled.` : ""}
+            {d.notes && d.notes.length ? ` ${d.notes.join(" ")}` : ""}
           </div>
         </>
       )}
